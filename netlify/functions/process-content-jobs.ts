@@ -4,12 +4,12 @@
 
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
-import { eq } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     contentGenerationJobs, aiBlueprints, aiAssistants,
     scheduledPosts, scheduledPostAssets, contentAssets, mediaGenerationJobs,
-    notifications, auditLogs, organisations,
+    notifications, auditLogs, organisations, systemConnections,
 } from '../../db/schema';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmark';
@@ -25,6 +25,24 @@ import { fireOrchestrations } from '../../src/utils/orchestration';
 const AI_IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
 
 const BACKOFF_SECS = [10, 30, 90];
+
+const SOCIAL_PLATFORMS = ['instagram', 'facebook', 'linkedin', 'x'];
+
+// Scheduled/conversion jobs (draft-horizon-fill.ts, schedule-conversion-posts.ts) never set
+// job.platform, so fall back to the org's actual connection instead of a hardcoded platform.
+async function resolveFallbackPlatform(db: ReturnType<typeof getDb>, organisationId: number): Promise<string> {
+    const [conn] = await db
+        .select({ serviceName: systemConnections.serviceName })
+        .from(systemConnections)
+        .where(and(
+            eq(systemConnections.organisationId, organisationId),
+            eq(systemConnections.isActive, true),
+            inArray(systemConnections.serviceName, SOCIAL_PLATFORMS),
+        ))
+        .orderBy(systemConnections.createdAt)
+        .limit(1);
+    return conn?.serviceName ?? 'instagram';
+}
 
 // Core queue drain: reset stuck jobs, claim up to 20 queued jobs, generate each. Returns the
 // number of jobs claimed this pass. Extracted from the handler so it can be driven both by the
@@ -123,7 +141,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         const orgDisclosureText    = (compliance['orgFooterText'] as string) ?? DISCLOSURE.workspaceFooterDefault;
         const disclosureText = orgDisclosureEnabled ? orgDisclosureText : perAssistantDisclosure;
 
-        const platform      = job.platform || 'instagram';
+        const platform      = job.platform || await resolveFallbackPlatform(db, job.organisation_id);
 
         const ctaLine         = answers['cta']          ? `Call to action: ${answers['cta']}` : '';
         const incentiveLine   = answers['incentive']    ? `Incentive/offer: ${answers['incentive']}` : '';
