@@ -755,7 +755,7 @@ window._submitTuning = async function() {
         document.getElementById('tuning-revise-btn').classList.toggle('hidden', !_tuningCtx.postId);
         document.getElementById('tuning-done-btn').classList.remove('hidden');
         window._renderRunbookDirectives();
-        window.showToast?.('Directive added to the Runbook.');
+        window.showToast?.('Directive added to the Notebook.');
     } catch (e) {
         errEl.textContent = e.message || 'Something went wrong.'; errEl.classList.remove('hidden');
     } finally {
