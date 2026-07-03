@@ -6883,7 +6883,13 @@ async function gpSubmitReject() {
     collapseStore.removeItem(COLLAPSE_KEY);
     setOpen(true);
     showFab(false);
-    if (lastData) render(lastData); else refresh();
+    // Render the cached snapshot immediately for a snappy open (no blank drawer while the
+    // fetch is in flight), then always refresh in the background — steps completed since the
+    // snapshot was taken (e.g. guardrails saved on another tab, then navigated back without an
+    // intervening SPA route change) would otherwise keep reading as incomplete until the next
+    // onNavigate() call happens to fire.
+    if (lastData) render(lastData);
+    refresh();
   }
 
   function collapse() {
