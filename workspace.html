@@ -3118,14 +3118,11 @@ function formatCurrency(amount, currency) {
         btn.classList.toggle('bg-gray-300', !on);
         if (knob) { knob.classList.toggle('translate-x-5', on); knob.classList.toggle('translate-x-0', !on); }
       };
-      let accepted = false;
-      try {
-        const r = await fetch('/.netlify/functions/accept-compliance');
-        if (r.ok) accepted = !!(await r.json()).acceptedAt;
-      } catch { /* non-fatal */ }
-      paint(accepted);
-      if (accepted && saved) saved.classList.remove('hidden');
 
+      // Wire the click handler up FRONT, before the hydration fetch below. A Netlify Function
+      // cold start can make that fetch take a second or more, and the button already looks
+      // interactive the moment the page renders — a click landing in that window was previously
+      // silently dropped (no listener attached yet), so it looked like clicking did nothing.
       btn.addEventListener('click', async () => {
         const next = btn.getAttribute('aria-checked') !== 'true';
         paint(next); // optimistic
@@ -3149,6 +3146,14 @@ function formatCurrency(amount, currency) {
       // so they stay reachable from My Account after onboarding is finished.
       document.getElementById('review-agreements-btn')
         ?.addEventListener('click', () => window.showComplianceModals?.(true));
+
+      let accepted = false;
+      try {
+        const r = await fetch('/.netlify/functions/accept-compliance');
+        if (r.ok) accepted = !!(await r.json()).acceptedAt;
+      } catch { /* non-fatal */ }
+      paint(accepted);
+      if (accepted && saved) saved.classList.remove('hidden');
     })();
 
     // ── My Agreements tab: render the consolidated acceptance/consent records ──
