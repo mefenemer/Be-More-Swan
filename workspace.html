@@ -3491,15 +3491,19 @@ function formatCurrency(amount, currency) {
 
   // Retry a gate-blocked assistant: re-fires provisioning (which re-evaluates every gate, then
   // advances to ready_for_work or re-blocks with whatever is still missing).
-  window.retryProvisioning = async function(assistantId, btn) {
+  // `onSuccess`, if passed, replaces the default "jump to the dashboard" behaviour — callers that
+  // render this button somewhere other than the dashboard (e.g. the assistant detail Runbook tab)
+  // should pass a callback that refreshes their own view in place instead.
+  window.retryProvisioning = async function(assistantId, btn, onSuccess) {
     if (!assistantId) return;
     if (btn) { btn.disabled = true; btn.textContent = 'Retrying…'; }
     try {
       const res = await fetch(`/.netlify/functions/retry-provision-assistant?id=${assistantId}`, { method: 'POST' });
       if (res.ok || res.status === 202) {
         window.showToast?.("Retrying setup — we'll let you know if anything else is needed.", { icon: '🔄' });
-        // Give the background fn a moment to re-evaluate, then refresh the dashboard view.
-        setTimeout(() => window.loadView?.('dashboard'), 1500);
+        // Give the background fn a moment to re-evaluate, then refresh.
+        if (typeof onSuccess === 'function') setTimeout(onSuccess, 1500);
+        else setTimeout(() => window.loadView?.('dashboard'), 1500);
       } else {
         const data = await res.json().catch(() => ({}));
         window.showToast?.(data.error || 'Could not retry setup. Please try again.');
