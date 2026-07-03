@@ -917,6 +917,12 @@ window.showComplianceModals = function showComplianceModals(force) {
   </div>
 
   <div class="flex items-center gap-3">
+    <!-- Issue #106: Notifications moved here from the side menu -->
+    <button id="nav-notifications" aria-label="Notifications" class="relative text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full p-2 transition-colors">
+      <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+      <span id="sidebar-nav-badge" class="absolute top-0.5 right-0.5 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full hidden">0</span>
+    </button>
+
     <div class="block text-right" data-no-i18n>
       <p id="header-user-name" class="text-sm font-bold text-gray-900 truncate max-w-[160px]"></p>
       <p id="header-user-email" class="hidden sm:block text-xs text-gray-500 truncate max-w-[160px]"></p>
@@ -1351,7 +1357,6 @@ function formatCurrency(amount, currency) {
       'orchestrations': document.getElementById('nav-orchestrations'),
       'catalog': document.getElementById('nav-catalog'),
       'assets': document.getElementById('nav-assets'),
-      'notifications': document.getElementById('nav-notifications'),
       'settings': document.getElementById('nav-settings'),
       'help': document.getElementById('nav-help'),
       'my-content': document.getElementById('nav-my-content'),
@@ -2228,6 +2233,16 @@ function formatCurrency(amount, currency) {
         });
       }
     });
+
+    // Issue #106: Notifications lives in the header bell now, not the side menu —
+    // wired separately since it's outside the sidebar's navLinks/active-state loop.
+    const headerNotificationsBtn = document.getElementById('nav-notifications');
+    if (headerNotificationsBtn) {
+      headerNotificationsBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await loadView('notifications');
+      });
+    }
 
     // Render locks ASAP on boot (non-blocking).
     refreshOnboardingLock();
