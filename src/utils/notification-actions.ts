@@ -87,6 +87,7 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     // celebratory
     setup_complete: 'celebratory', milestone_unlock: 'celebratory', referral_reward: 'celebratory',
     feature_released: 'celebratory', // Feature Requests US06 — a backed request shipped
+    roi_milestone: 'celebratory', // Issue #84 — ROI/break-even milestone (replaces persistent banner)
     // informational (explicit; unknown types also fall here)
     welcome: 'informational', invoice_ready: 'informational', ticket_created: 'informational',
     ticket_reply: 'informational', billing: 'informational', new_role_availability: 'informational',

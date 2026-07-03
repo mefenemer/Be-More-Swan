@@ -403,11 +403,13 @@ window._activateMainTab = function(name) {
 // fetches to window._currentAssistantId so only this assistant's content shows.
 
 const _DETAIL_RQ_COLUMNS = {
-    review:    { postStatus: 'pending_approval', ideaFilter: i => i.status === 'pending' || i.status === 'in_review' },
+    review:    { postStatus: 'pending_approval', ideaFilter: i => i.status === 'pending' },
     approved:  { postStatus: 'approved',         ideaFilter: () => false },
     scheduled: { postStatus: 'scheduled',        ideaFilter: () => false },
     posted:    { postStatus: 'published',        ideaFilter: () => false },
-    archived:  { postStatus: 'rejected',         ideaFilter: i => i.status === 'discarded' },
+    // Once an idea has been woven into a post (in_review/delivered), its own review happens on
+    // that post's card in the Posts group — it no longer needs a separate slot in Review.
+    archived:  { postStatus: 'rejected',         ideaFilter: i => i.status === 'discarded' || i.status === 'in_review' || i.status === 'delivered' },
 };
 
 let _detailRqCurrentStatus = 'review';
@@ -755,7 +757,7 @@ window._submitTuning = async function() {
         document.getElementById('tuning-revise-btn').classList.toggle('hidden', !_tuningCtx.postId);
         document.getElementById('tuning-done-btn').classList.remove('hidden');
         window._renderRunbookDirectives();
-        window.showToast?.('Directive added to the Runbook.');
+        window.showToast?.('Directive added to the Notebook.');
     } catch (e) {
         errEl.textContent = e.message || 'Something went wrong.'; errEl.classList.remove('hidden');
     } finally {
@@ -1730,6 +1732,7 @@ async function _fetchAndRenderAssistantMetrics(assistantId) {
         el('metrics-total-scheduled').textContent = d.totalScheduled.toLocaleString();
         el('metrics-total-published').textContent = d.totalPublished.toLocaleString();
         el('metrics-hours-saved').textContent = `~${d.hoursSaved}h`;
+        if (d.minutesPerPost != null) el('metrics-hours-note').textContent = `Based on ~${d.minutesPerPost} min per post`;
 
         if (d.gbpSaved !== null) {
             el('metrics-gbp-saved').textContent = `£${d.gbpSaved.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
