@@ -121,6 +121,12 @@ window.initNotifications = async function() {
         if (notif.type === 'media_ready') {
             return { label: 'View content', run: () => window.loadView?.('my-content', meta.assetId ? { assetId: meta.assetId } : null) };
         }
+        // Draft post ready to review (incl. the media-needed/out-of-credits variant of ai_review) —
+        // deep-link straight to that post's review modal instead of dropping the user on the
+        // queue list to hunt for it.
+        if ((notif.type === 'post_draft_ready' || notif.type === 'ai_review') && meta.postId) {
+            return { label: 'Review draft', run: () => window.loadView?.('review-queue', { postId: meta.postId }) };
+        }
         // Issue #87 — issue status updates need a link back to the reported issue itself,
         // not just a passive FYI. Opens the "Report an Issue" modal on the specific issue.
         if (notif.type === 'issue_update') {
