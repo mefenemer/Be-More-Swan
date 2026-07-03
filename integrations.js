@@ -288,6 +288,49 @@ async function _loadConnections() {
         const conn = _userConnections.find(c => _serviceMatchesPlatform(c.serviceName, platform.id));
         grid.insertAdjacentHTML('beforeend', _platformCard(platform, conn));
     });
+
+    _queueConnectPermissionPrompts(platforms);
+}
+
+// ── US-97: Proactively ask permission to connect platforms the user already ──
+// gave a handle for on Business Information, one at a time, "in turn". Only
+// BMS-supported platforms (PLATFORMS, further narrowed by _relevantPlatforms)
+// are ever prompted for. Each platform is asked at most once per browser
+// session so revisiting this tab doesn't re-nag after a "Not now".
+function _connectPromptKey(platform) {
+    return `bms-connect-asked:${_selectedAssistantId || 'org'}:${platform.id.toLowerCase()}`;
+}
+
+function _queueConnectPermissionPrompts(platforms) {
+    const queue = platforms.filter(platform => {
+        if (!_handleFor(platform)) return false;
+        const conn = _userConnections.find(c => _serviceMatchesPlatform(c.serviceName, platform.id));
+        if (conn && conn.status === 'active') return false;
+        try { if (sessionStorage.getItem(_connectPromptKey(platform))) return false; } catch { /* ignore */ }
+        return true;
+    });
+    if (!queue.length || typeof window.showConfirmModal !== 'function') return;
+
+    const askNext = () => {
+        const platform = queue.shift();
+        if (!platform) return;
+        try { sessionStorage.setItem(_connectPromptKey(platform), '1'); } catch { /* ignore */ }
+        window.showConfirmModal(
+            `You added a ${platform.label} handle in Business Information. Be More Swan needs your permission to connect to ${platform.label} so it can post on your behalf. Connect now?`,
+            async () => {
+                if (platform.oauthPlatform) window.location.href = _oauthUrl(platform);
+                else window._intOpenModal(platform.id);
+            },
+            {
+                title: `Connect ${platform.label}?`,
+                confirmLabel: `Connect ${platform.label}`,
+                cancelLabel: 'Not now',
+                confirmColor: '#059669',
+                onCancel: askNext,
+            }
+        );
+    };
+    askNext();
 }
 
 function _platformCard(platform, conn) {
