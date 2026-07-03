@@ -6947,9 +6947,18 @@ async function gpSubmitReject() {
   // Clicking anywhere outside the open drawer collapses it — otherwise it stays pinned over
   // the page underneath (e.g. Business Information fields) with no way to dismiss it short of
   // hunting for the small "x", which reads as a bug ("it stays there covering the fields").
+  //
+  // The drawer is a fixed right-hand strip, so the fields it covers sit *underneath* it —
+  // a click there lands on the drawer's own background/whitespace (drawer.contains(e.target)
+  // is true), not on the page behind it. Excluding every click inside the drawer therefore
+  // never collapsed it for exactly the case being reported. Only genuine interactive controls
+  // (the checklist rows, sub-task links, kick-off button, etc.) should keep it open; a click
+  // anywhere else inside the drawer's bounds is treated the same as clicking through to
+  // whatever it's covering.
   document.addEventListener('click', (e) => {
     if (!isOpen) return;
-    if (drawer.contains(e.target) || fab.contains(e.target)) return;
+    if (fab.contains(e.target)) return;
+    if (drawer.contains(e.target) && e.target.closest('button, a')) return;
     collapse();
   });
 
