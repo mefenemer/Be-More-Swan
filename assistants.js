@@ -425,6 +425,12 @@ window.detailRqOpenStatus = function(statusKey, btn) {
     _detailRqRenderGroups(statusKey);
 };
 
+// Re-render whichever column is currently open, e.g. after a new idea/post is added elsewhere
+// (the Create Post sheet) so the list reflects it without the user manually switching tabs.
+window.detailRqRefresh = function() {
+    if (document.getElementById('detail-rq-groups')) _detailRqRenderGroups(_detailRqCurrentStatus);
+};
+
 async function _detailRqRenderGroups(statusKey) {
     const col = _DETAIL_RQ_COLUMNS[statusKey] || _DETAIL_RQ_COLUMNS.review;
     const container = document.getElementById('detail-rq-groups');
