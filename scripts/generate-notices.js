@@ -32,7 +32,7 @@ const lines = [
     'THIRD-PARTY-NOTICES',
     '===================',
     '',
-    'Aura-Assist uses open-source software. The following packages are included',
+    'Be More Swan uses open-source software. The following packages are included',
     'in this product and their licenses are listed below.',
     '',
     `Generated: ${new Date().toISOString().slice(0, 10)}`,

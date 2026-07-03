@@ -39,6 +39,9 @@
 
             _render(_subscriptions, paymentHistory || [], invoicesData.invoices || [], _billingInfo, storage || null);
 
+            // Live AI-credit balance (non-blocking — never fails the billing render)
+            _loadAiCreditBalance();
+
             // If navigated here via notification deep-link
             if (window.location.hash === '#invoice-history') {
                 setTimeout(() => {
@@ -53,6 +56,44 @@
             _showState('error');
         }
     };
+
+    // ── Live AI-credit balance ────────────────────────────────────
+    async function _loadAiCreditBalance() {
+        const valueEl = document.getElementById('ai-credit-balance-value');
+        const heldEl  = document.getElementById('ai-credit-held-note');
+        if (!valueEl) return;
+        try {
+            const res = await fetch('/.netlify/functions/get-ai-credit-balance');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const { balance, held, monthlyCredits } = await res.json();
+            const bal = Number(balance) || 0;
+            valueEl.textContent = `${bal.toLocaleString()} credit${bal === 1 ? '' : 's'} available`;
+
+            const monthlyEl = document.getElementById('ai-credit-monthly-note');
+            const monthlyNum = Number(monthlyCredits) || 0;
+            if (monthlyEl) {
+                if (monthlyNum > 0) {
+                    monthlyEl.textContent = `Your plan includes ${monthlyNum.toLocaleString()} credit${monthlyNum === 1 ? '' : 's'} each month.`;
+                    monthlyEl.classList.remove('hidden');
+                } else {
+                    monthlyEl.classList.add('hidden');
+                }
+            }
+
+            const heldNum = Number(held) || 0;
+            if (heldEl) {
+                if (heldNum > 0) {
+                    heldEl.textContent = `${heldNum.toLocaleString()} credit${heldNum === 1 ? '' : 's'} reserved by in-progress generations.`;
+                    heldEl.classList.remove('hidden');
+                } else {
+                    heldEl.classList.add('hidden');
+                }
+            }
+        } catch (e) {
+            console.warn('[billing] Unable to load AI credit balance:', e);
+            valueEl.textContent = 'Balance unavailable';
+        }
+    }
 
     // ── Card Modal ────────────────────────────────────────────────
     window._billingOpenCardModal = async function () {
@@ -305,7 +346,7 @@
         // If no Stripe subscription ID, direct to support
         if (!stripeSubscriptionId) {
             if (errEl) {
-                errEl.textContent = 'Please contact support@aura-assist.com to cancel this subscription.';
+                errEl.textContent = 'Please contact support@bemoreswan.com to cancel this subscription.';
                 errEl.classList.remove('hidden');
             }
             if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = 'Yes, Cancel'; }
@@ -493,7 +534,7 @@
             const downloadBtn = `<a href="/.netlify/functions/invoice-pdf?id=${inv.id}" target="_blank" rel="noopener"
                 class="inline-flex items-center gap-1.5 px-3 py-1.5 border border-emerald-300 hover:border-emerald-400 text-emerald-700 hover:text-emerald-800 text-xs font-semibold rounded-lg transition bg-white cursor-pointer">
                 <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-                Download PDF
+                Invoice
             </a>`;
 
             return `

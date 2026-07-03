@@ -13,6 +13,10 @@ import { getDb } from '../../db/client';
 import { users, scheduledPosts, contentAssets, contentProvenance, userOrganisations } from '../../db/schema';
 import { createHmac, createHash, randomUUID } from 'crypto';
 import { propagateAssetStatuses } from './content-assets';
+import { resolveAssetDisplayUrl } from '../../src/utils/social-publish';
+import { requireOnboarding } from '../../src/utils/onboarding-guard';
+import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
+import { resolveAssistantRole } from '../../src/utils/assistant-role';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -30,6 +34,11 @@ export const handler: Handler = async (event) => {
     if (!userId) return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized.' }) };
 
     const db = getDb();
+
+    // US3 (AC3.1/AC3.2): the Content Calendar is gated until onboarding is complete.
+    const denied = await requireOnboarding(db, userId);
+    if (denied) return denied;
+
     const [user] = await db.select({ id: users.id, organisationId: userOrganisations.organisationId })
         .from(users).leftJoin(userOrganisations, eq(users.id, userOrganisations.userId)).where(eq(users.id, userId));
     if (!user) return { statusCode: 403, body: JSON.stringify({ error: 'User not found.' }) };
@@ -55,11 +64,18 @@ export const handler: Handler = async (event) => {
                         name: contentAssets.name,
                         assetType: contentAssets.assetType,
                         storageUrl: contentAssets.storageUrl,
+                        storageKey: contentAssets.storageKey,
                         externalUrl: contentAssets.externalUrl,
                         mimeType: contentAssets.mimeType,
                     }).from(contentAssets)
                       .where(eq(contentAssets.userId, userId));
                     assets = assets.filter(a => assetIds.includes(a.id));
+                    // Resolve a displayable URL for R2-stored assets (storageUrl is null
+                    // until presigned) — otherwise the calendar panel shows "Media placeholder".
+                    assets = await Promise.all(assets.map(async a => ({
+                        ...a,
+                        storageUrl: await resolveAssetDisplayUrl(a),
+                    })));
                 }
 
                 return { statusCode: 200, body: JSON.stringify({ post, assets }) };
@@ -90,6 +106,15 @@ export const handler: Handler = async (event) => {
 
             if (!platform || !postFormat || !publishDate) {
                 return { statusCode: 400, body: JSON.stringify({ error: 'platform, postFormat, and publishDate are required.' }) };
+            }
+
+            // Runtime connection sandboxing: an assistant may only publish to platforms
+            // relevant to its role (e.g. a non-social assistant cannot schedule posts).
+            if (assistantId) {
+                const assistant = await resolveAssistantRole(db, user.organisationId, parseInt(String(assistantId), 10));
+                if (assistant && !isServiceAllowedForAssistant(platform, assistant)) {
+                    return { statusCode: 403, body: JSON.stringify({ error: `This assistant is not permitted to publish to ${platform}.`, code: 'CONNECTION_NOT_RELEVANT' }) };
+                }
             }
 
             const finalStatus = status || 'draft';

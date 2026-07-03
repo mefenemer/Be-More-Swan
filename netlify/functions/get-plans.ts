@@ -31,6 +31,7 @@ export const handler: Handler = async (event) => {
                 monthlyTokenLimit: masterPlans.monthlyTokenLimit,
                 appConnectionLimit: masterPlans.appConnectionLimit,
                 seatLimit: masterPlans.seatLimit,
+                features: masterPlans.features, // AC2.1.2: dynamic feature checklist source
             })
             .from(masterPlans)
             .where(eq(masterPlans.isActive, true))

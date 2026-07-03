@@ -8,31 +8,19 @@
 // DELETE ?id=N  — hard delete
 
 import { Handler } from '@netlify/functions';
-import jwt from 'jsonwebtoken';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { contentRules, aiAssistants, scheduledPosts } from '../../db/schema';
-
-const jwtSecret = process.env.JWT_SECRET;
-
-function auth(event: any): { userId: number; orgId?: number } | null {
-    try {
-        const match = (event.headers.cookie || '').match(/aura_session=([^;]+)/);
-        if (!match) return null;
-        const decoded = jwt.verify(match[1], jwtSecret!) as { userId: number; organisationId?: number };
-        return { userId: decoded.userId, orgId: decoded.organisationId };
-    } catch {
-        return null;
-    }
-}
+import { requireTenant } from '../../src/utils/tenant';
 
 export const handler: Handler = async (event) => {
-    if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
-
-    const user = auth(event);
-    if (!user) return { statusCode: 401, body: JSON.stringify({ error: 'Not authenticated.' }) };
-
     const db = getDb();
+    const ctx = await requireTenant(event, db);
+    if ('error' in ctx) return ctx.error;
+
+    const orgId = ctx.organisationId;
+    const userId = ctx.userId;
+
     const method = event.httpMethod;
     const params = event.queryStringParameters || {};
 
@@ -48,7 +36,7 @@ export const handler: Handler = async (event) => {
             .from(aiAssistants)
             .where(eq(aiAssistants.id, assistantId))
             .limit(1);
-        if (!assistant || (user.orgId && assistant.orgId !== user.orgId)) {
+        if (!assistant || assistant.orgId !== orgId) {
             return { statusCode: 404, body: JSON.stringify({ error: 'Assistant not found.' }) };
         }
 
@@ -61,9 +49,9 @@ export const handler: Handler = async (event) => {
             ))
             .orderBy(contentRules.createdAt);
 
-        // Enrich rejection_feedback rules with originPost caption snippet
+        // Enrich rules that trace back to a post (rejection feedback + tuning) with its caption snippet.
         const enriched = await Promise.all(rows.map(async (rule) => {
-            if (rule.origin !== 'rejection_feedback' || !rule.originPostId) return rule;
+            if ((rule.origin !== 'rejection_feedback' && rule.origin !== 'tuning') || !rule.originPostId) return rule;
             const [originPost] = await db
                 .select({ id: scheduledPosts.id, caption: scheduledPosts.caption, platform: scheduledPosts.platform })
                 .from(scheduledPosts)
@@ -86,7 +74,7 @@ export const handler: Handler = async (event) => {
             return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON.' }) };
         }
 
-        const { assistantId, ruleText, platform, note } = body;
+        const { assistantId, ruleText, platform, note, category } = body;
         if (!assistantId || !ruleText?.trim()) {
             return { statusCode: 400, body: JSON.stringify({ error: 'assistantId and ruleText are required.' }) };
         }
@@ -99,16 +87,16 @@ export const handler: Handler = async (event) => {
             .from(aiAssistants)
             .where(eq(aiAssistants.id, Number(assistantId)))
             .limit(1);
-        if (!assistant) return { statusCode: 404, body: JSON.stringify({ error: 'Assistant not found.' }) };
-        if (!user.orgId) return { statusCode: 403, body: JSON.stringify({ error: 'No organisation context.' }) };
+        if (!assistant || assistant.orgId !== orgId) return { statusCode: 404, body: JSON.stringify({ error: 'Assistant not found.' }) };
 
         const [rule] = await db.insert(contentRules).values({
             assistantId:     Number(assistantId),
-            workspaceId:     user.orgId,
+            workspaceId:     orgId,
             ruleText:        ruleText.trim(),
+            category:        category?.trim() || null,
             platform:        platform || null,
             note:            note?.trim() || null,
-            createdByUserId: user.userId,
+            createdByUserId: userId,
             isActive:        true,
             origin:          'manual',
         }).returning();
@@ -127,14 +115,14 @@ export const handler: Handler = async (event) => {
             return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON.' }) };
         }
 
-        const { id, ruleText, platform, note, isActive } = body;
+        const { id, ruleText, platform, note, isActive, category } = body;
         if (!id) return { statusCode: 400, body: JSON.stringify({ error: 'id is required.' }) };
 
         const [existing] = await db.select().from(contentRules)
             .where(eq(contentRules.id, Number(id)))
             .limit(1);
         if (!existing) return { statusCode: 404, body: JSON.stringify({ error: 'Rule not found.' }) };
-        if (user.orgId && existing.workspaceId !== user.orgId) {
+        if (existing.workspaceId !== orgId) {
             return { statusCode: 403, body: JSON.stringify({ error: 'Access denied.' }) };
         }
 
@@ -142,12 +130,13 @@ export const handler: Handler = async (event) => {
             return { statusCode: 400, body: JSON.stringify({ error: 'ruleText must be 300 characters or fewer.' }) };
         }
 
-        const updates: Record<string, any> = { updatedAt: new Date(), updatedBy: user.userId };
+        const updates: Record<string, any> = { updatedAt: new Date(), updatedBy: userId };
         if (ruleText !== undefined) {
             updates.previousText = existing.ruleText;
             updates.ruleText = ruleText.trim();
         }
         if (platform !== undefined) updates.platform = platform || null;
+        if (category !== undefined) updates.category = category?.trim() || null;
         if (note !== undefined) updates.note = note?.trim() || null;
         if (isActive !== undefined) updates.isActive = Boolean(isActive);
 
@@ -173,7 +162,7 @@ export const handler: Handler = async (event) => {
             .where(eq(contentRules.id, id))
             .limit(1);
         if (!existing) return { statusCode: 404, body: JSON.stringify({ error: 'Rule not found.' }) };
-        if (user.orgId && existing.workspaceId !== user.orgId) {
+        if (existing.workspaceId !== orgId) {
             return { statusCode: 403, body: JSON.stringify({ error: 'Access denied.' }) };
         }
 

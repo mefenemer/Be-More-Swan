@@ -3,6 +3,8 @@ import { eq, and } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
 import { aiAssistants, auditLogs } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { resolveBaseUrl } from '../../src/utils/base-url';
+import { retryBlockedAssistants } from '../../src/utils/retry-provisioning';
 
 export const handler: Handler = async (event) => {
     if (event.httpMethod !== 'PUT') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -66,6 +68,16 @@ export const handler: Handler = async (event) => {
                 ipAddress: event.headers['x-nf-client-connection-ip'] || 'unknown',
             });
         });
+
+        // If the user just supplied AI disclosure text, re-trigger this assistant in case it was
+        // parked at provisioning_status='blocked' on the disclosure gate (best-effort; the
+        // background fn re-evaluates every gate, so it advances or re-blocks accordingly).
+        if (typeof disclosureText === 'string' && disclosureText.trim()) {
+            const baseUrl = resolveBaseUrl(event.headers);
+            if (baseUrl) {
+                await retryBlockedAssistants(db, { baseUrl, assistantId, organisationId: orgId }).catch(() => {});
+            }
+        }
 
         return { statusCode: 200, body: JSON.stringify({ success: true }) };
     } catch (error: any) {

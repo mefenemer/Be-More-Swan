@@ -33,9 +33,15 @@ const jwtSecret    = process.env.JWT_SECRET;
 const stripe       = process.env.STRIPE_SECRET_KEY
     ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' })
     : null;
-const BASE_URL     = process.env.BASE_URL || 'https://aura-assist.com';
+const BASE_URL     = process.env.BASE_URL || 'https://bemoreswan.com';
 
 export const handler: Handler = async (event) => {
+    // Epic: Superadmin Environment Management — live-only admin action. Reject sandbox
+    // requests so this can never run while the operator believes they are in sandbox
+    // (prevents production bleed). See docs/SANDBOX-ENVIRONMENT.md.
+    if (((event.headers['x-environment'] || event.headers['X-Environment'] || '') + '').trim().toLowerCase() === 'sandbox') {
+        return { statusCode: 400, body: JSON.stringify({ error: 'This action is not available in Sandbox mode.' }) };
+    }
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed.' }) };
     }
@@ -275,10 +281,10 @@ export const handler: Handler = async (event) => {
         // ── 13. Send confirmation email to original address ───────────────────
         await sendEmail({
             to:      originalEmail,
-            subject: 'Your Aura-Assist account data has been erased',
-            html:    `<p>This is to confirm that your personal data has been permanently erased from Aura-Assist as requested.</p>
+            subject: 'Your Be More Swan account data has been erased',
+            html:    `<p>This is to confirm that your personal data has been permanently erased from Be More Swan as requested.</p>
                       <p>Your account can no longer be accessed. Financial records required by law have been retained for the statutory period.</p>
-                      <p>If you have any questions, contact our Data Protection Officer at <a href="mailto:privacy@aura-assist.com">privacy@aura-assist.com</a>.</p>`,
+                      <p>If you have any questions, contact our Data Protection Officer at <a href="mailto:privacy@bemoreswan.com">privacy@bemoreswan.com</a>.</p>`,
         }).catch(err => console.warn('[admin-gdpr-erase] Confirmation email failed (non-blocking):', err));
 
         return {

@@ -9,7 +9,7 @@ import { getDb } from '../../db/client';
 import { users, plans, notificationLog, userOrganisations } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
 
-const BASE_URL = process.env.BASE_URL || 'https://aura-assist.com';
+const BASE_URL = process.env.BASE_URL || 'https://bemoreswan.com';
 
 export const handler: Handler = async () => {
     const db = getDb();
@@ -54,21 +54,21 @@ export const handler: Handler = async () => {
         </p>
         <p style="font-size:0.8rem;color:#9ca3af;margin-top:8px;">Or paste this link into your browser: ${ctaUrl}</p>
         <p style="font-size:0.85rem;color:#9ca3af;margin-top:16px;">Questions? Reply to this email — we're happy to help. Or visit our <a href="${BASE_URL}/help.html" style="color:#059669;text-decoration:none;">Help Center</a>.</p>
-        <p>The Aura Team</p>
+        <p>The Be More Swan Team</p>
     `;
 
-    const SUBJECT = 'Your Aura-Assist workspace is waiting — choose a plan to get started';
+    const SUBJECT = 'Your Be More Swan workspace is waiting — choose a plan to get started';
 
     for (const { candidates, type, bodyText } of [
         {
             candidates: candidates24h,
             type: '24h_reminder' as const,
-            bodyText: '<p>You signed up for Aura-Assist yesterday — your workspace is ready and waiting for you.</p><p>Choosing a plan takes less than a minute and unlocks your Digital Assistant straight away.</p>',
+            bodyText: '<p>You signed up for Be More Swan yesterday — your workspace is ready and waiting for you.</p><p>Choosing a plan takes less than a minute and unlocks your Digital Assistant straight away.</p>',
         },
         {
             candidates: candidates72h,
             type: '72h_reminder' as const,
-            bodyText: '<p>It\'s been a few days since you joined Aura-Assist. Your workspace is still here — all you need to do is choose a plan to get started.</p>',
+            bodyText: '<p>It\'s been a few days since you joined Be More Swan. Your workspace is still here — all you need to do is choose a plan to get started.</p>',
         },
     ]) {
         for (const user of candidates) {

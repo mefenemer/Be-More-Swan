@@ -13,6 +13,7 @@ import { getDb } from '../../db/client';
 import { users, plans, masterPlans, notifications, processedWebhookEvents, userOrganisations } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
+import { resolveActionNotifications, PLAN_UPGRADED_TYPES } from '../../src/utils/notification-actions';
 
 const jwtSecret      = process.env.JWT_SECRET!;
 const stripeSecret   = process.env.STRIPE_SECRET_KEY!;
@@ -257,6 +258,9 @@ export const handler: Handler = async (event) => {
             isRead: false,
         });
 
+        // The upgrade resolves the trial / capacity / downgrade prompts that nudged it.
+        await resolveActionNotifications(db, userId, PLAN_UPGRADED_TYPES);
+
         // SC4b: confirmation email (US-GAP-1.1.2 SC1/SC2/SC3)
         // Idempotency: keyed on upgrade-email:{subscriptionId}:{newPriceId} to prevent double-sends on retries
         const upgradeEmailKey = `upgrade-email:${currentPlan.stripeSubscriptionId}:${targetPriceId}`;
@@ -286,7 +290,7 @@ export const handler: Handler = async (event) => {
                            <p>Going forward, your monthly renewal will be <strong>£${targetMp.monthlyPriceGbp}/month</strong>.</p>
                            ${invoiceUrl ? `<p><a href="${invoiceUrl}">View your invoice →</a></p>` : ''}
                            <p><a href="${BASE_URL}/billing.html">View your billing page →</a></p>
-                           <p>The Aura Team</p>`,
+                           <p>The Be More Swan Team</p>`,
                 }).catch(() => { /* non-critical */ });
             }
         }

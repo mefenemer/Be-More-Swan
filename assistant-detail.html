@@ -1,3 +1,20 @@
+<style>
+  /* Be More Swan AI wand — shared across every "optimise with AI" / "generate" affordance.
+     Artwork: /images/BeMoreSwan_SwanAI.png (transparent pink swan + AI wand). */
+  .ai-wand-img { height: 22px; width: auto; display: inline-block; }
+  #btn-generate-name .ai-wand-img { height: 20px; }
+  /* Click feedback — the wand "casts" while an AI request is in flight, so the user sees activity. */
+  .ai-wand-img.is-casting { animation: aiWandCast 0.7s ease-in-out infinite; transform-origin: bottom center; }
+  @keyframes aiWandCast {
+    0%   { transform: rotate(-9deg) scale(1);    }
+    50%  { transform: rotate(9deg)  scale(1.12); }
+    100% { transform: rotate(-9deg) scale(1);    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ai-wand-img.is-casting { animation: aiWandPulse 0.9s ease-in-out infinite; }
+    @keyframes aiWandPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
+  }
+</style>
 <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full pb-20">
 
   <!-- US-LEGAL-3.1: EU AI Act Art.50 — persistent AI interaction disclosure (non-dismissable) -->
@@ -17,124 +34,361 @@
     </button>
   </nav>
 
-  <!-- Hero header -->
-  <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8 mb-6 relative overflow-hidden">
-    <div class="absolute -top-10 -right-10 w-32 h-32 bg-emerald-50 rounded-full blur-3xl opacity-60 pointer-events-none"></div>
-    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-6 z-10 relative">
-      <div class="flex items-center gap-5">
-        <div id="detail-avatar" class="w-16 h-16 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-xl shadow-sm shrink-0">A</div>
+  <!-- Hero header — condensed for maximum content real estate -->
+  <div class="bg-white rounded-2xl border border-gray-200 shadow-sm px-5 py-4 mb-6 relative">
+    <!-- Issue #65 follow-up: overflow-hidden used to live on the card itself, which clipped the
+         "More actions" dropdown when it extended past the card's bottom edge. Scope the clip to
+         just this decorative blur instead, so the card can host overflowing popovers. -->
+    <div class="absolute inset-0 rounded-2xl overflow-hidden pointer-events-none">
+      <div class="absolute -top-8 -right-8 w-24 h-24 bg-emerald-50 rounded-full blur-3xl opacity-60"></div>
+    </div>
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 z-10 relative">
+      <!-- Identity strip -->
+      <div class="flex items-center gap-4">
+        <div id="detail-avatar" class="w-11 h-11 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-base shadow-sm shrink-0">A</div>
         <div class="min-w-0">
           <div class="flex items-center gap-2 flex-wrap">
             <input id="detail-name-input" type="text" value="Loading…"
-              class="text-2xl font-extrabold text-gray-900 bg-transparent border-b-2 border-transparent hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-0 transition-colors min-w-0 w-auto"
-              style="width: 100%; max-width: 320px;"
+              class="text-lg font-extrabold text-gray-900 bg-transparent border-b-2 border-transparent hover:border-gray-300 focus:border-emerald-500 focus:outline-none focus:ring-0 transition-colors min-w-0 w-auto"
+              style="width: 100%; max-width: 280px;"
               placeholder="Assistant Name">
-            <button id="btn-generate-name" title="Generate a name" class="p-1.5 rounded-lg text-gray-400 hover:text-emerald-600 hover:bg-emerald-50 transition-colors cursor-pointer" type="button">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>
+            <button id="btn-generate-name" title="Generate a name" class="p-1 rounded-lg hover:bg-emerald-50 transition-colors cursor-pointer" type="button">
+              <img src="/images/BeMoreSwan_SwanAI.png" alt="Generate a name with Be More Swan AI" class="ai-wand-img">
             </button>
-            <span id="detail-status" class="inline-flex items-center gap-1.5 py-1 px-2.5 rounded-md text-xs font-bold bg-gray-100 text-gray-600 border border-gray-200">…</span>
+            <span id="detail-status" class="inline-flex items-center gap-1.5 py-0.5 px-2 rounded-md text-xs font-bold bg-gray-100 text-gray-600 border border-gray-200">…</span>
+            <!-- Brand Safety badge — shown when guardrails are configured -->
+            <span id="guardrails-protected-badge" class="hidden inline-flex items-center gap-1 py-0.5 px-2 rounded-md text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+              Brand Protected
+            </span>
           </div>
-          <p id="detail-role" class="text-gray-500 font-medium mt-1 text-sm">Reviewing tasks…</p>
+          <div class="flex items-center gap-3 mt-0.5">
+            <p id="detail-role" class="text-gray-500 font-medium text-xs">Reviewing tasks…</p>
+            <!-- AC2.1.2 — primary goal progress bar (populated by _fetchAndRenderGoals) -->
+            <div id="detail-primary-goal" class="hidden max-w-xs"></div>
+          </div>
         </div>
       </div>
-      <div class="flex items-center gap-3 w-full sm:w-auto shrink-0">
-        <span id="detail-save-status" class="text-sm font-semibold text-emerald-600 transition-all mr-2"></span>
-        <button id="btn-toggle-status" class="flex-1 sm:flex-none px-4 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-lg transition-colors shadow-sm cursor-pointer" type="button">
-          Pause Assistant
+      <!-- CTA group — Review Meeting is the hero action -->
+      <div class="flex items-center gap-2.5 w-full sm:w-auto shrink-0">
+        <span id="detail-save-status" class="text-sm font-semibold text-emerald-600 transition-all mr-1"></span>
+        <!-- Primary CTA: Review Progress — opens the progress page (update + recommendations),
+             which auto-logs a Review Meeting in the Meetings tab. -->
+        <button id="btn-review-progress" onclick="window._openReviewProgress()" type="button"
+          class="relative flex-1 sm:flex-none px-5 py-2.5 text-sm font-extrabold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-md cursor-pointer">
+          <span class="flex items-center gap-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+            Review Progress
+          </span>
         </button>
+        <!-- Epic 1: contextual persona config — opens the slide-over (no setup tab in the main nav) -->
+        <button id="btn-assistant-profile" onclick="window._openProfileDrawer()" type="button"
+          class="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-xl transition-colors shadow-sm cursor-pointer">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+          <span id="profile-btn-label">Assistant Profile</span>
+        </button>
+        <!-- Issue #65: Pause/Archive are state-changing (and Archive is irreversible), so they're
+             tucked behind a "More actions" menu rather than sitting flush against Review Progress /
+             Assistant Profile where they were too easy to click by mistake. -->
+        <div class="relative shrink-0 ml-1 pl-2 border-l border-gray-200">
+          <button id="btn-more-actions" type="button" aria-haspopup="true" aria-expanded="false" title="More actions"
+            class="p-2.5 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-xl transition-colors cursor-pointer">
+            <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z"/></svg>
+          </button>
+          <div id="more-actions-menu" class="hidden absolute right-0 top-full mt-2 w-52 bg-white rounded-xl border border-gray-200 shadow-lg py-1.5 z-20">
+            <button id="btn-toggle-status" class="w-full text-left px-4 py-2.5 text-sm font-bold text-gray-700 hover:bg-gray-50 cursor-pointer" type="button">
+              Pause Assistant
+            </button>
+            <div class="my-1 border-t border-gray-100"></div>
+            <!-- US6 AC5.1: Safe Archiving — permanent end-of-life action -->
+            <button id="btn-archive-assistant" class="w-full text-left px-4 py-2.5 text-sm font-bold text-red-600 hover:bg-red-50 cursor-pointer" type="button">
+              Archive
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
 
-  <!-- Recent Activity strip -->
+  <!-- ── Main tab bar ───────────────────────────────────────────────
+       Top-level sections. Configuration nests the existing child tab control. -->
+  <div class="mb-8 border-b border-gray-200 overflow-x-auto">
+    <nav class="-mb-px flex gap-x-8" aria-label="Assistant sections">
+      <button type="button" data-maintab="overview"      class="main-tab-btn active-tab">Overview</button>
+      <button type="button" data-maintab="review-queue" class="main-tab-btn">Review Queue
+        <span id="detail-rq-pending-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
+      </button>
+      <button type="button" data-maintab="goals"         class="main-tab-btn">Goals</button>
+      <button type="button" data-maintab="automation"    class="main-tab-btn">Automation</button>
+      <button type="button" data-maintab="meetings"      class="main-tab-btn" title="Runbook: the rules your assistant follows, what it's learned from your corrections, and your check-in history.">Runbook
+        <span id="meetings-kickoff-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-blue-100 text-blue-700 text-[10px] font-black rounded-full inline-flex items-center justify-center">!</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- ── MAIN TAB: Overview ─────────────────────────────────────────── -->
+  <div id="maintab-overview" class="main-tab-content">
+
+  <!-- Primary action bar (Epic 2.1) — the two most common intents, front and centre. -->
+  <div class="flex flex-col sm:flex-row gap-3 mb-6">
+    <button type="button" onclick="window.openGeneratePostSheet && window.openGeneratePostSheet()"
+      class="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-extrabold text-white bg-emerald-600 hover:bg-emerald-700 rounded-2xl shadow-md transition-colors cursor-pointer">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      Assign New Task
+    </button>
+    <button type="button" id="btn-review-pending" onclick="window._activateMainTab('review-queue')"
+      class="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-extrabold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-2xl shadow-sm transition-colors cursor-pointer">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      Review Pending Items
+      <span id="review-pending-count" class="hidden ml-0.5 min-w-[1.5rem] h-6 px-1.5 inline-flex items-center justify-center rounded-full text-xs font-black bg-amber-100 text-amber-700"></span>
+    </button>
+  </div>
+
+  <!-- Kick Off CTA — shown when assistant hasn't been kicked off yet -->
+  <div id="meetings-kickoff-cta" class="hidden bg-blue-50 border border-blue-200 rounded-2xl px-5 py-4 mb-6 flex items-center justify-between gap-4">
+    <div class="flex items-center gap-3 min-w-0">
+      <div class="w-9 h-9 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center shrink-0 text-lg">🚀</div>
+      <div>
+        <p class="text-sm font-bold text-blue-900">Complete Your Kick Off Meeting</p>
+        <p class="text-xs text-blue-700 mt-0.5">Confirm a few things to put your assistant to work.</p>
+      </div>
+    </div>
+    <button onclick="window._activateMainTab('meetings')" class="shrink-0 px-4 py-2 text-sm font-extrabold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition shadow-sm cursor-pointer">Go to Meetings</button>
+  </div>
+
+  <!-- Impact & ROI — elevated to top of Overview (most important executive metric) -->
+  <div id="assistant-metrics-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6 hidden">
+    <div class="flex items-center justify-between mb-5">
+      <div>
+        <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Impact &amp; ROI</h3>
+        <p class="text-xs text-gray-400 mt-1">All-time posts created by this assistant and the value delivered</p>
+      </div>
+    </div>
+    <!-- ROI hero row — Time Saved & Financial Saving first -->
+    <div class="grid grid-cols-2 gap-4 mb-5 pb-5 border-b border-gray-100">
+      <div class="flex flex-col gap-1 p-4 rounded-xl bg-emerald-50 border border-emerald-100">
+        <p class="text-xs font-bold text-emerald-600 uppercase tracking-wide">Time Saved</p>
+        <p class="text-3xl font-black text-emerald-700" id="metrics-hours-saved">—</p>
+        <p class="text-xs text-emerald-500" id="metrics-hours-note">Based on ~30 min per post</p>
+      </div>
+      <div class="flex flex-col gap-1 p-4 rounded-xl bg-emerald-50 border border-emerald-100" id="metrics-roi-col">
+        <p class="text-xs font-bold text-emerald-600 uppercase tracking-wide">Approx. Financial Saving</p>
+        <p class="text-3xl font-black text-emerald-700" id="metrics-gbp-saved">—</p>
+        <p class="text-xs text-emerald-500" id="metrics-roi-note"></p>
+      </div>
+    </div>
+    <!-- Totals row -->
+    <div class="grid grid-cols-3 gap-4 mb-5">
+      <div class="text-center p-3 rounded-xl bg-gray-50 border border-gray-100">
+        <p class="text-2xl font-black text-gray-900" id="metrics-total-created">—</p>
+        <p class="text-xs font-semibold text-gray-500 mt-1">Posts Created</p>
+      </div>
+      <div class="text-center p-3 rounded-xl bg-blue-50 border border-blue-100">
+        <p class="text-2xl font-black text-blue-700" id="metrics-total-scheduled">—</p>
+        <p class="text-xs font-semibold text-blue-500 mt-1">Scheduled</p>
+      </div>
+      <div class="text-center p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+        <p class="text-2xl font-black text-emerald-700" id="metrics-total-published">—</p>
+        <p class="text-xs font-semibold text-emerald-600 mt-1">Published</p>
+      </div>
+    </div>
+    <!-- Per-platform breakdown -->
+    <div id="metrics-by-platform" class="space-y-2"></div>
+  </div>
+
+  <!-- Active Workflows (Epic 4.2) — how this assistant hands off to / receives from others. Hidden when none. -->
+  <div id="active-workflows-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6 hidden">
+    <div class="flex items-center justify-between gap-3 mb-4">
+      <div>
+        <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Active Workflows</h3>
+        <p class="text-xs text-gray-400 mt-1">How this assistant connects to the rest of your team.</p>
+      </div>
+      <button type="button" onclick="window.loadView && window.loadView('orchestrations')" class="shrink-0 text-xs font-bold text-emerald-600 hover:text-emerald-800 transition cursor-pointer">Manage in Orchestrations →</button>
+    </div>
+    <div id="active-workflows-list" class="space-y-2"></div>
+  </div>
+
+  <!-- Unified Activity feed (Epic 2.2) — chronological, with Failed/Needs-Input pinned on top. -->
   <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-8">
-    <h3 class="text-sm font-bold text-gray-700 mb-4 uppercase tracking-wide">Recent Activity</h3>
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Activity</h3>
+      <div id="activity-timeframe-btns" class="flex gap-1">
+        <button data-tf="1d"  class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-indigo-500 bg-indigo-50 text-indigo-700 font-semibold">1d</button>
+        <button data-tf="7d"  class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">7d</button>
+        <button data-tf="30d" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">30d</button>
+        <button data-tf="90d" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">90d</button>
+        <button data-tf="all" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">All</button>
+      </div>
+    </div>
     <div id="recent-activity-list" class="space-y-3">
       <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading activity…</div>
     </div>
   </div>
 
-  <!-- Performance KPIs -->
-  <div class="mb-8">
-    <div class="flex items-center justify-between mb-4">
-      <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Performance Metrics</h3>
-      <span class="text-xs text-gray-400 font-medium">Live tracking coming soon</span>
+  <!-- Goals section is relocated here (directly under Recent Activity) by initAssistantDetail;
+       its markup lives in #tab-goals further down and is moved into this slot on load. -->
+
+  <!-- AC6: Daily Relationship-Building Checklist — hidden until loaded; only shown for social assistants. -->
+  <div id="relationship-checklist-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-8 hidden">
+    <div class="flex items-start justify-between gap-3 mb-4">
+      <div>
+        <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Today's Relationship-Building Checklist</h3>
+        <p class="text-xs text-gray-400 mt-1">Daily community actions to build genuine relationships. Tick them off as you go.</p>
+      </div>
+      <button type="button" id="rbc-regenerate-btn" onclick="window._rbcRegenerate()" class="text-xs font-bold text-emerald-600 hover:text-emerald-800 transition cursor-pointer shrink-0">Regenerate</button>
     </div>
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
-
-      <!-- The Thumb Stopper -->
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Engagement Rate by Reach</span>
-          <span class="w-2 h-2 rounded-full bg-gray-200"></span>
-        </div>
-        <div>
-          <p class="text-2xl font-extrabold text-gray-900">—</p>
-          <p class="text-base font-bold text-gray-700 mt-0.5">The Thumb Stopper</p>
-          <p class="text-xs text-gray-500 mt-1">Of everyone who saw your content, how many actually stopped to engage with it.</p>
-        </div>
-        <div class="mt-auto pt-3 border-t border-gray-100">
-          <p class="text-xs text-gray-400">Trending: <span class="font-semibold text-gray-500">—</span></p>
-        </div>
-      </div>
-
-      <!-- Escaping the Echo Chamber -->
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Organic Reach Growth</span>
-          <span class="w-2 h-2 rounded-full bg-gray-200"></span>
-        </div>
-        <div>
-          <p class="text-2xl font-extrabold text-gray-900">—</p>
-          <p class="text-base font-bold text-gray-700 mt-0.5">Escaping the Echo Chamber</p>
-          <p class="text-xs text-gray-500 mt-1">How far your content is spreading beyond your existing followers into new audiences.</p>
-        </div>
-        <div class="mt-auto pt-3 border-t border-gray-100">
-          <p class="text-xs text-gray-400">Trending: <span class="font-semibold text-gray-500">—</span></p>
-        </div>
-      </div>
-
-      <!-- The Pack Your Bags Metric -->
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
-        <div class="flex items-center justify-between">
-          <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Click-Through Rate</span>
-          <span class="w-2 h-2 rounded-full bg-gray-200"></span>
-        </div>
-        <div>
-          <p class="text-2xl font-extrabold text-gray-900">—</p>
-          <p class="text-base font-bold text-gray-700 mt-0.5">The "Pack Your Bags" Metric</p>
-          <p class="text-xs text-gray-500 mt-1">How many viewers clicked through and took the action your content asked for.</p>
-        </div>
-        <div class="mt-auto pt-3 border-t border-gray-100">
-          <p class="text-xs text-gray-400">Trending: <span class="font-semibold text-gray-500">—</span></p>
-        </div>
-      </div>
-
+    <div id="rbc-list" class="space-y-2">
+      <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading checklist…</div>
     </div>
+    <p id="rbc-progress" class="text-xs font-medium text-gray-400 mt-3"></p>
   </div>
 
-  <!-- Tab bar -->
-  <div class="border-b border-gray-200 mb-8 overflow-x-auto">
-    <nav class="-mb-px flex space-x-1 min-w-max" aria-label="Tabs">
-      <button data-tab="problem"      class="detail-tab-btn active-tab cursor-pointer whitespace-nowrap py-3.5 px-4 border-b-2 font-bold text-sm">The Problem</button>
-      <button data-tab="operation"    class="detail-tab-btn cursor-pointer whitespace-nowrap py-3.5 px-4 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">How it Works</button>
-      <button data-tab="strategy"     class="detail-tab-btn cursor-pointer whitespace-nowrap py-3.5 px-4 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">Creative Strategy</button>
-      <button data-tab="platforms"    class="detail-tab-btn cursor-pointer whitespace-nowrap py-3.5 px-4 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">Connections</button>
-      <button data-tab="guardrails"   class="detail-tab-btn cursor-pointer whitespace-nowrap py-3.5 px-4 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">Guardrails</button>
-    </nav>
+  </div><!-- /maintab-overview -->
+
+  <!-- ── MAIN TAB: Review Queue ──────────────────────────────────────── -->
+  <div id="maintab-review-queue" class="main-tab-content hidden">
+
+    <div class="flex flex-wrap items-start justify-between gap-4 mb-6">
+      <div>
+        <h2 class="text-lg font-extrabold text-gray-900">Review Queue</h2>
+        <p class="text-sm text-gray-500 mt-1">Posts for this assistant — follow each one from draft through to published.</p>
+      </div>
+      <button onclick="openGeneratePostSheet()" class="px-4 py-2 text-sm font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg transition cursor-pointer flex items-center gap-1.5">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        Create Post
+      </button>
+    </div>
+
+    <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+      <!-- Lifecycle columns -->
+      <div class="flex gap-1 px-4 pt-3 border-b border-gray-100 overflow-x-auto">
+        <button class="detail-rq-col px-4 py-2 text-sm font-semibold rounded-t border-b-2 border-emerald-600 text-emerald-700 whitespace-nowrap"
+          data-status="review" onclick="detailRqOpenStatus('review', this)">
+          Review
+          <span id="detail-rq-col-count-review" class="ml-1 bg-amber-100 text-amber-700 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
+        </button>
+        <button class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
+          data-status="approved" onclick="detailRqOpenStatus('approved', this)">Approved</button>
+        <button class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
+          data-status="scheduled" onclick="detailRqOpenStatus('scheduled', this)">Scheduled</button>
+        <button class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
+          data-status="posted" onclick="detailRqOpenStatus('posted', this)">Posted</button>
+        <button class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
+          data-status="archived" onclick="detailRqOpenStatus('archived', this)">Archived</button>
+      </div>
+      <!-- Content -->
+      <div id="detail-rq-groups" class="px-4 py-2 min-h-[200px]"></div>
+    </div>
+
+  </div><!-- /maintab-review-queue -->
+
+  <!-- ── Persona / config slide-over (Epic 1) ──────────────────────────
+       Opened from the header "Assistant Profile" button (#btn-assistant-profile),
+       no longer a main tab. The Operating File card index is the drawer "home";
+       clicking a card swaps to that section panel with a back arrow. -->
+  <div id="brief-drawer-backdrop" onclick="window._closeBriefDrawer()" style="display:none;opacity:0;position:fixed;inset:0;background:rgba(0,0,0,0.35);z-index:9000;transition:opacity .2s ease" aria-hidden="true"></div>
+  <aside id="brief-drawer" aria-label="Assistant Profile"
+    style="position:fixed;top:0;right:0;bottom:0;width:min(560px,100vw);z-index:9001;display:flex;flex-direction:column;background:#fff;box-shadow:-4px 0 32px rgba(0,0,0,0.12);transform:translateX(100%);transition:transform .25s cubic-bezier(.4,0,.2,1);overflow:hidden">
+    <!-- Drawer header -->
+    <div style="display:flex;align-items:center;gap:0.5rem;padding:1.25rem 1.5rem;border-bottom:1px solid #e5e7eb;flex-shrink:0">
+      <button type="button" id="brief-drawer-back" onclick="window._openProfileDrawer()" aria-label="Back to profile" hidden
+        style="width:2rem;height:2rem;display:flex;align-items:center;justify-content:center;border-radius:0.5rem;border:none;background:none;cursor:pointer;color:#6b7280;transition:background .12s ease;flex-shrink:0"
+        onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='none'">
+        <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+      </button>
+      <h2 id="brief-drawer-title" style="font-size:1.0625rem;font-weight:700;color:#111827;margin:0;flex:1;min-width:0">Assistant Profile</h2>
+      <span id="brief-drawer-save" style="font-size:0.75rem;font-weight:600;color:#059669;flex-shrink:0"></span>
+      <button type="button" onclick="window._closeBriefDrawer()" aria-label="Close"
+        style="width:2rem;height:2rem;display:flex;align-items:center;justify-content:center;border-radius:0.5rem;border:none;background:none;cursor:pointer;color:#6b7280;transition:background .12s ease;flex-shrink:0"
+        onmouseover="this.style.background='#f3f4f6'" onmouseout="this.style.background='none'">
+        <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <!-- Drawer scrollable content -->
+    <div id="brief-drawer-body" style="flex:1;overflow-y:auto;padding:1.5rem">
+
+    <!-- content panels live here (hidden until their tab is active) -->
+    <div style="display:contents">
+
+  <!-- ── HOME: onboarding answers + Operating File card index ─────── -->
+  <div id="tab-profile-home" class="detail-tab-content space-y-6">
+
+  <!-- Read-only summary of every answer captured during onboarding (populated by assistants.js) -->
+  <div id="onboarding-summary"></div>
+
+  <!-- Operating File card list -->
+  <div class="space-y-3">
+    <p class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-4">Operating File</p>
+
+    <button type="button" data-tab="problem" class="detail-tab-btn brief-card w-full text-left">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-bold text-gray-900">Mandate</p>
+          <p class="text-xs text-gray-500 mt-0.5">The bottleneck this assistant was hired to solve</p>
+        </div>
+        <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </div>
+    </button>
+
+    <button type="button" data-tab="operation" class="detail-tab-btn brief-card w-full text-left">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-bold text-gray-900">Operational Setup</p>
+          <p class="text-xs text-gray-500 mt-0.5">Trigger, content source and posting schedule</p>
+        </div>
+        <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </div>
+    </button>
+
+    <button type="button" data-tab="strategy" class="detail-tab-btn brief-card w-full text-left">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-bold text-gray-900">Creative Brief</p>
+          <p class="text-xs text-gray-500 mt-0.5">Objective, audience, voice and content pillars</p>
+        </div>
+        <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </div>
+    </button>
+
+    <button type="button" data-tab="platforms" class="detail-tab-btn brief-card w-full text-left">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-bold text-gray-900">Connections</p>
+          <p class="text-xs text-gray-500 mt-0.5">Social platforms and integrations</p>
+        </div>
+        <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </div>
+    </button>
+
+    <button type="button" data-tab="guardrails" class="detail-tab-btn brief-card w-full text-left">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-bold text-gray-900">Brand Safety &amp; Legal</p>
+          <p class="text-xs text-gray-500 mt-0.5">Strict rules, guardrails and AI disclosure</p>
+        </div>
+        <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </div>
+    </button>
   </div>
 
-  <!-- ── TAB: The Problem ───────────────────────────────────────── -->
+  </div><!-- /tab-profile-home -->
+
+  <!-- ── TAB: Mandate (was "The Problem") ──────────────────────── -->
   <div id="tab-problem" class="detail-tab-content space-y-6">
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="mb-6">
-        <h3 class="text-lg font-bold text-gray-900">Step 2 — The Problem</h3>
+        <h3 class="text-lg font-bold text-gray-900">Mandate</h3>
         <p class="text-sm text-gray-500 mt-1">What bottleneck or time-drain were you trying to solve? This shapes everything your assistant prioritises.</p>
       </div>
       <div>
-        <label class="block text-sm font-bold text-gray-700 mb-1">Your Bottleneck <span class="text-red-500">*</span></label>
-        <textarea id="edit_problem" rows="5"
-          class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm resize-y"
+        <div class="flex items-center justify-between mb-1">
+          <label class="block text-sm font-bold text-gray-700">Your Bottleneck <span class="text-red-500">*</span></label>
+          <button type="button" onclick="window._magicWand('problem_statement','edit_problem', this)" title="AI optimize for your goals" class="goal-wand-btn inline-flex items-center gap-1 text-xs font-bold text-emerald-600 hover:text-emerald-700 cursor-pointer">
+            <img src="/images/BeMoreSwan_SwanAI.png" alt="Optimise with Be More Swan AI" class="ai-wand-img shrink-0">
+          </button>
+        </div>
+        <textarea id="edit_problem" rows="3"
+          class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm resize-none overflow-hidden"
           placeholder="E.g., I spend hours every week researching topics, writing captions, and remembering to schedule posts…"></textarea>
         <p class="text-xs text-gray-400 mt-1">Be as specific as possible — the more detail, the smarter your assistant.</p>
       </div>
@@ -145,7 +399,7 @@
   <div id="tab-operation" class="detail-tab-content hidden space-y-6">
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="mb-6">
-        <h3 class="text-lg font-bold text-gray-900">Step 3 — How it Works</h3>
+        <h3 class="text-lg font-bold text-gray-900">Operational Setup</h3>
         <p class="text-sm text-gray-500 mt-1">When does your assistant run, and where does it get its content from?</p>
       </div>
       <div class="space-y-6">
@@ -183,9 +437,80 @@
             </label>
           </div>
         </div>
-        <div>
-          <label for="edit_frequency" class="block text-sm font-bold text-gray-700 mb-1">Posting Frequency</label>
-          <input type="text" id="edit_frequency" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm" placeholder="E.g., 3 times a week, Daily, On demand…">
+        <!-- ── Posting Schedule ───────────────────────────────────── -->
+        <div class="pt-2 border-t border-gray-100">
+          <h4 class="text-sm font-bold text-gray-900 mb-1">Posting Schedule</h4>
+          <p class="text-xs text-gray-500 mb-4">Set how often, on which days and at what times this assistant publishes — and how far ahead it should keep your Review Queue stocked with drafts.</p>
+
+          <div class="space-y-5">
+            <!-- Frequency -->
+            <div>
+              <label for="edit_frequency" class="block text-sm font-bold text-gray-700 mb-1" data-explain="posting-schedule">Posting Frequency</label>
+              <select id="edit_frequency" class="w-full border border-gray-300 rounded-lg p-3 text-sm bg-white focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
+                <option value="Daily">Daily</option>
+                <option value="5 times a week">5 times a week</option>
+                <option value="3 times a week">3 times a week</option>
+                <option value="2 times a week">2 times a week</option>
+                <option value="Weekly">Weekly</option>
+                <option value="On demand">On demand (no automatic scheduling)</option>
+              </select>
+              <p class="text-xs text-gray-400 mt-1">How many posts per week this assistant drafts automatically.</p>
+            </div>
+
+            <!-- Preferred days -->
+            <div>
+              <label class="block text-sm font-bold text-gray-700 mb-2">Preferred Days</label>
+              <div id="posting-days" style="display:flex;flex-wrap:wrap;gap:0.75rem">
+                <label style="display:inline-flex;align-items:center;gap:.4rem" class="text-sm text-gray-700"><input type="checkbox" id="edit_day_mon" class="rounded text-emerald-700 focus:ring-emerald-700"> Mon</label>
+                <label style="display:inline-flex;align-items:center;gap:.4rem" class="text-sm text-gray-700"><input type="checkbox" id="edit_day_tue" class="rounded text-emerald-700 focus:ring-emerald-700"> Tue</label>
+                <label style="display:inline-flex;align-items:center;gap:.4rem" class="text-sm text-gray-700"><input type="checkbox" id="edit_day_wed" class="rounded text-emerald-700 focus:ring-emerald-700"> Wed</label>
+                <label style="display:inline-flex;align-items:center;gap:.4rem" class="text-sm text-gray-700"><input type="checkbox" id="edit_day_thu" class="rounded text-emerald-700 focus:ring-emerald-700"> Thu</label>
+                <label style="display:inline-flex;align-items:center;gap:.4rem" class="text-sm text-gray-700"><input type="checkbox" id="edit_day_fri" class="rounded text-emerald-700 focus:ring-emerald-700"> Fri</label>
+                <label style="display:inline-flex;align-items:center;gap:.4rem" class="text-sm text-gray-700"><input type="checkbox" id="edit_day_sat" class="rounded text-emerald-700 focus:ring-emerald-700"> Sat</label>
+                <label style="display:inline-flex;align-items:center;gap:.4rem" class="text-sm text-gray-700"><input type="checkbox" id="edit_day_sun" class="rounded text-emerald-700 focus:ring-emerald-700"> Sun</label>
+              </div>
+              <p class="text-xs text-gray-400 mt-1">Posts are only scheduled on the days you select.</p>
+            </div>
+
+            <!-- Preferred times -->
+            <div>
+              <label class="block text-sm font-bold text-gray-700 mb-2">Preferred Times</label>
+              <div id="posting-times-list" class="space-y-2"></div>
+              <button type="button" id="btn-add-posting-time" class="mt-2 text-sm font-semibold text-emerald-700 hover:text-emerald-800 transition cursor-pointer">+ Add a time</button>
+              <p class="text-xs text-gray-400 mt-1">Times of day (your timezone) at which posts go out. When a day has more slots than posts, times are spread evenly.</p>
+            </div>
+
+            <!-- Timezone -->
+            <div>
+              <label for="edit_timezone" class="block text-sm font-bold text-gray-700 mb-1">Timezone</label>
+              <select id="edit_timezone" class="w-full border border-gray-300 rounded-lg p-3 text-sm bg-white focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
+                <option value="Europe/London">London (GMT/BST)</option>
+                <option value="Europe/Dublin">Dublin</option>
+                <option value="Europe/Paris">Paris</option>
+                <option value="Europe/Berlin">Berlin</option>
+                <option value="Europe/Madrid">Madrid</option>
+                <option value="America/New_York">New York (Eastern)</option>
+                <option value="America/Chicago">Chicago (Central)</option>
+                <option value="America/Denver">Denver (Mountain)</option>
+                <option value="America/Los_Angeles">Los Angeles (Pacific)</option>
+                <option value="Asia/Dubai">Dubai</option>
+                <option value="Asia/Singapore">Singapore</option>
+                <option value="Australia/Sydney">Sydney</option>
+              </select>
+              <p class="text-xs text-gray-400 mt-1">Preferred times are interpreted in this timezone.</p>
+            </div>
+
+            <!-- Draft horizon -->
+            <div>
+              <label for="posting-horizon-input" class="block text-sm font-bold text-gray-700 mb-1">Generate posts ahead</label>
+              <div style="display:flex;align-items:center;gap:0.6rem">
+                <input type="number" id="posting-horizon-input" min="1" max="30" step="1" class="w-24 border border-gray-300 rounded-lg p-3 text-sm bg-white focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
+                <span class="text-sm text-gray-600">days into the future</span>
+                <span id="posting-horizon-status" class="text-sm font-semibold"></span>
+              </div>
+              <p class="text-xs text-gray-400 mt-1">The assistant keeps your Review Queue filled this many days ahead, so you always have content to approve. Increasing this drafts the new days now; decreasing it archives unreviewed drafts beyond the window.</p>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -194,17 +519,14 @@
   <!-- ── TAB: Creative Strategy ────────────────────────────────── -->
   <div id="tab-strategy" class="detail-tab-content hidden space-y-6">
 
-    <!-- Global Brand Profile -->
+    <!-- Business Information & Brand Knowledge (always applied — strict, non-overridable) -->
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
-      <div class="flex items-start justify-between mb-5 gap-4">
-        <div>
-          <h3 class="text-lg font-bold text-gray-900">Brand Profile</h3>
-          <p class="text-sm text-gray-500 mt-1">Your global brand identity from <a href="#" onclick="window.loadView('assets')" class="text-emerald-600 hover:underline font-medium">Brand Profile settings</a>. Toggle to apply it to this assistant.</p>
-        </div>
-        <span id="brand-save-status" class="text-sm font-bold text-emerald-600 shrink-0 transition-all"></span>
+      <div class="mb-5">
+        <h3 class="text-lg font-bold text-gray-900">Business Information &amp; Brand Knowledge</h3>
+        <p class="text-sm text-gray-500 mt-1">Your business details and any documents or links added in <a href="#" onclick="window.loadView('assets')" class="text-emerald-600 hover:underline font-medium">Business Information</a> are automatically applied to this assistant.</p>
       </div>
-      <div id="global-brand-profile-content">
-        <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading brand profile…</div>
+      <div id="business-knowledge-content">
+        <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading brand knowledge…</div>
       </div>
     </div>
 
@@ -232,8 +554,13 @@
           </div>
         </div>
         <div>
-          <label for="edit_core_message" class="block text-sm font-bold text-gray-700 mb-1">Core Message</label>
-          <input type="text" id="edit_core_message" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm" placeholder="E.g., We help busy founders reclaim their time without sacrificing growth.">
+          <div class="flex items-center justify-between mb-1">
+            <label for="edit_core_message" class="block text-sm font-bold text-gray-700" data-explain="core-message">Core Message</label>
+            <button type="button" onclick="window._magicWand('core_message','edit_core_message', this)" title="AI optimize for your goals" class="goal-wand-btn inline-flex items-center gap-1 text-xs font-bold text-emerald-600 hover:text-emerald-700 cursor-pointer">
+              <img src="/images/BeMoreSwan_SwanAI.png" alt="Optimise with Be More Swan AI" class="ai-wand-img shrink-0">
+            </button>
+          </div>
+          <textarea id="edit_core_message" rows="2" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm resize-none overflow-hidden" placeholder="E.g., We help busy founders reclaim their time without sacrificing growth."></textarea>
         </div>
         <div>
           <label for="edit_cta" class="block text-sm font-bold text-gray-700 mb-1">Primary Call-to-Action (CTA)</label>
@@ -252,53 +579,205 @@
       </div>
       <div class="space-y-5">
         <div>
-          <label for="edit_audience" class="block text-sm font-bold text-gray-700 mb-1">Target Audience</label>
-          <input type="text" id="edit_audience" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm" placeholder="E.g., Tech founders aged 30–45 building B2B SaaS products…">
+          <div class="flex items-center justify-between mb-1">
+            <label for="edit_audience" class="block text-sm font-bold text-gray-700" data-explain="target-audience">Target Audience</label>
+            <button type="button" onclick="window._magicWand('target_audience','edit_audience', this)" title="AI optimize for your goals" class="goal-wand-btn inline-flex items-center gap-1 text-xs font-bold text-emerald-600 hover:text-emerald-700 cursor-pointer">
+              <img src="/images/BeMoreSwan_SwanAI.png" alt="Optimise with Be More Swan AI" class="ai-wand-img shrink-0">
+            </button>
+          </div>
+          <textarea id="edit_audience" rows="2" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm resize-none overflow-hidden" placeholder="E.g., Tech founders aged 30–45 building B2B SaaS products…"></textarea>
           <p class="text-xs text-gray-400 mt-1">Be specific — the more detail, the more targeted the content.</p>
         </div>
         <div>
-          <label for="edit_tone" class="block text-sm font-bold text-gray-700 mb-1">Brand Voice &amp; Tone</label>
-          <input type="text" id="edit_tone" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm" placeholder="E.g., Professional yet friendly, Witty, Authoritative…">
+          <div class="flex items-center justify-between mb-1">
+            <label for="edit_tone" class="block text-sm font-bold text-gray-700" data-explain="brand-voice">Brand Voice &amp; Tone</label>
+            <button type="button" onclick="window._magicWand('tone_of_voice','edit_tone', this)" title="AI optimize for your goals" class="goal-wand-btn inline-flex items-center gap-1 text-xs font-bold text-emerald-600 hover:text-emerald-700 cursor-pointer">
+              <img src="/images/BeMoreSwan_SwanAI.png" alt="Optimise with Be More Swan AI" class="ai-wand-img shrink-0">
+            </button>
+          </div>
+          <textarea id="edit_tone" rows="2" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm resize-none overflow-hidden" placeholder="E.g., Professional yet friendly, Witty, Authoritative…"></textarea>
         </div>
         <div>
-          <label for="edit_pillars" class="block text-sm font-bold text-gray-700 mb-1">Content Pillars / Core Topics</label>
-          <input type="text" id="edit_pillars" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm" placeholder="E.g., Growth hacking, Leadership, Behind the scenes…">
-          <p class="text-xs text-gray-400 mt-1">Separate topics with commas.</p>
+          <div class="flex items-center justify-between mb-1">
+            <label for="edit_pillars" class="block text-sm font-bold text-gray-700" data-explain="content-pillars">Content Pillars / Core Topics</label>
+            <button type="button" onclick="window._magicWand('content_pillars','edit_pillars', this)" title="AI optimize for your goals" class="goal-wand-btn inline-flex items-center gap-1 text-xs font-bold text-emerald-600 hover:text-emerald-700 cursor-pointer">
+              <img src="/images/BeMoreSwan_SwanAI.png" alt="Optimise with Be More Swan AI" class="ai-wand-img shrink-0">
+            </button>
+          </div>
+          <textarea id="edit_pillars" rows="2" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm resize-none overflow-hidden" placeholder="E.g., Growth hacking, Leadership, Behind the scenes…"></textarea>
+          <div id="pillars-chips" class="flex flex-wrap gap-1.5 mt-2"></div>
+          <p class="text-xs text-gray-400 mt-1">Separate topics with commas — up to 5. Each becomes a discrete pillar your posts are categorised under.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sales Context — feeds the auto-responder objection playbook + DM reply drafting -->
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+      <div class="mb-6">
+        <h3 class="text-lg font-bold text-gray-900">Sales Context</h3>
+        <p class="text-sm text-gray-500 mt-1">What you sell and how to handle common objections. Used to draft replies to sales enquiries in comments and DMs.</p>
+      </div>
+      <div class="space-y-5">
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label for="edit_offerings" class="block text-sm font-bold text-gray-700">Products &amp; Services</label>
+            <button type="button" onclick="window._magicWand('service_offerings','edit_offerings', this)" title="AI optimize for your goals" class="goal-wand-btn inline-flex items-center gap-1 text-xs font-bold text-emerald-600 hover:text-emerald-700 cursor-pointer">
+              <img src="/images/BeMoreSwan_SwanAI.png" alt="Optimise with Be More Swan AI" class="ai-wand-img shrink-0">
+            </button>
+          </div>
+          <textarea id="edit_offerings" rows="3" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm resize-none overflow-hidden" placeholder="E.g., 1:1 coaching (£200/mo), group programme (£75/mo), free starter guide…"></textarea>
+          <p class="text-xs text-gray-400 mt-1">List your offers and prices so replies can point to the right one.</p>
+        </div>
+        <div>
+          <label for="edit_objections" class="block text-sm font-bold text-gray-700 mb-1">Sales Objection Playbook</label>
+          <textarea id="edit_objections" rows="4" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm resize-none overflow-hidden" placeholder="One per line — objection, then your preferred response. E.g., &quot;Too expensive&quot; — Emphasise the time saved and the money-back guarantee."></textarea>
+          <p class="text-xs text-gray-400 mt-1">One objection per line with your preferred response. The assistant drafts replies from these — it never invents pricing or claims.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Reference / Visual Style — parity with onboarding "Link to Reference Style / Visual Assets" -->
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+      <div class="mb-5">
+        <h3 class="text-lg font-bold text-gray-900">Reference &amp; Visual Style</h3>
+        <p class="text-sm text-gray-500 mt-1">A link to a post you love or a folder of brand guidelines. Your assistant studies it to match your look and voice.</p>
+      </div>
+      <div>
+        <label for="edit_reference_url" class="block text-sm font-bold text-gray-700 mb-1">Reference Style / Visual Assets Link</label>
+        <input type="url" id="edit_reference_url" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm" placeholder="https://…">
+        <p class="text-xs text-gray-400 mt-1">A past post, a Drive folder of brand guidelines, or a moodboard.</p>
+      </div>
+    </div>
+
+    <!-- Hashtags & Platform Strategy — parity with onboarding "Platform Algorithm Helpers".
+         Blocks are shown per connected platform by _hydratePlatformStrategy(); values round-trip
+         through context.platform_strategy. -->
+    <div id="platform-strategy-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+      <div class="mb-5">
+        <h3 class="text-lg font-bold text-gray-900" data-explain="hashtags-keywords">Hashtags &amp; Platform Strategy</h3>
+        <p class="text-sm text-gray-500 mt-1">Fine-tune how your assistant formats posts and uses hashtags on each platform.</p>
+      </div>
+
+      <p id="platform-strategy-empty" class="hidden text-sm text-gray-400 italic">Connect a social platform first — strategy options appear here for each one you use.</p>
+
+      <div class="space-y-4">
+        <!-- Facebook -->
+        <div id="edit_algo_block_fb" class="hidden algo-block space-y-3 border border-gray-200 rounded-xl p-4">
+          <h4 class="font-bold text-gray-800 text-sm" data-explain="facebook-strategy">Facebook Strategy</h4>
+          <div>
+            <label for="edit_algo_strategy_fb" class="block text-xs font-semibold text-gray-600 mb-1">Hashtag approach</label>
+            <select id="edit_algo_strategy_fb" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-700 transition">
+              <option value="strict_custom">Only use my specific tags</option>
+              <option value="hybrid">Use mine, and add relevant ones</option>
+              <option value="ai_decide">Let the assistant decide</option>
+            </select>
+          </div>
+          <input type="text" id="edit_algo_tags_fb" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition" placeholder="e.g., #FacebookTips #Community">
+          <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700"><input type="checkbox" id="edit_fb_opt_groups" class="rounded text-emerald-700 focus:ring-emerald-700"> Draft versions for niche Facebook Groups</label>
+        </div>
+
+        <!-- Instagram -->
+        <div id="edit_algo_block_ig" class="hidden algo-block space-y-3 border border-gray-200 rounded-xl p-4">
+          <h4 class="font-bold text-gray-800 text-sm" data-explain="instagram-strategy">Instagram Strategy</h4>
+          <input type="text" id="edit_algo_tags_ig" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition" placeholder="e.g., #InstaGood">
+          <div>
+            <label for="edit_ig_opt_format" class="block text-xs font-semibold text-gray-600 mb-1" data-explain="content-formats">Content format</label>
+            <select id="edit_ig_opt_format" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-700 transition">
+              <option value="mix">Optimize for a Mix (Reels, Carousels, Static)</option>
+              <option value="reels">Prioritize Reels</option>
+            </select>
+          </div>
+          <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700"><input type="checkbox" id="edit_ig_opt_audio" class="rounded text-emerald-700 focus:ring-emerald-700"> <span data-explain="trending-audio">Suggest trending audio concepts</span></label>
+        </div>
+
+        <!-- LinkedIn -->
+        <div id="edit_algo_block_li" class="hidden algo-block space-y-3 border border-gray-200 rounded-xl p-4">
+          <h4 class="font-bold text-gray-800 text-sm" data-explain="linkedin-strategy">LinkedIn Strategy</h4>
+          <input type="text" id="edit_algo_tags_li" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition" placeholder="e.g., #Leadership #B2B">
+          <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700"><input type="checkbox" id="edit_li_opt_links" class="rounded text-emerald-700 focus:ring-emerald-700"> <span data-explain="link-first-comment">Anti-Penalty: URLs in first comment</span></label>
+          <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700"><input type="checkbox" id="edit_li_opt_sliders" class="rounded text-emerald-700 focus:ring-emerald-700"> <span data-explain="pdf-carousel">PDF Slider/Carousel outlines</span></label>
+        </div>
+
+        <!-- X -->
+        <div id="edit_algo_block_x" class="hidden algo-block space-y-3 border border-gray-200 rounded-xl p-4">
+          <h4 class="font-bold text-gray-800 text-sm" data-explain="x-strategy">X (Twitter) Strategy</h4>
+          <input type="text" id="edit_algo_tags_x" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition" placeholder="e.g., #BuildInPublic">
+          <div>
+            <label for="edit_x_opt_length" class="block text-xs font-semibold text-gray-600 mb-1">Post length</label>
+            <select id="edit_x_opt_length" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-700 transition">
+              <option value="mix">Mix of Threads and Single Posts</option>
+              <option value="single">Single Posts only</option>
+              <option value="threads">Prioritize Threads</option>
+            </select>
+          </div>
+          <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700"><input type="checkbox" id="edit_x_opt_media" class="rounded text-emerald-700 focus:ring-emerald-700"> <span data-explain="media-placeholders">Include placeholders for media</span></label>
         </div>
       </div>
     </div>
   </div>
 
-  <!-- ── TAB: Platforms ────────────────────────────────────────── -->
+  <!-- ── TAB: Connections (full connect/manage, scoped to this assistant) ── -->
   <div id="tab-platforms" class="detail-tab-content hidden space-y-6">
-    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
-      <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-        <div>
-          <h3 class="text-lg font-bold text-gray-900">Connections</h3>
-          <p class="text-sm text-gray-500 mt-1">Toggle which connected platforms this assistant should post to. Platforms not yet connected will prompt you to set them up first.</p>
-        </div>
-        <span id="platforms-save-status" class="text-sm font-bold text-emerald-600 shrink-0 transition-all"></span>
+    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+      <div>
+        <h3 class="text-lg font-bold text-gray-900">Connections</h3>
+        <p class="text-sm text-gray-500 mt-1">Connect the tools this assistant needs, then toggle which ones it should use. Connections are shared across your workspace — anything connected here (or for another assistant) can be reused. Credentials are encrypted and never visible to anyone.</p>
       </div>
-      <!-- Connected platforms with toggles -->
-      <div id="assistant-platforms-list" class="space-y-3">
-        <div class="h-12 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading connections…</div>
-      </div>
-      <!-- Platforms not yet connected -->
-      <div id="assistant-platforms-unconnected" class="hidden mt-6 space-y-3">
-        <p class="text-xs font-bold text-gray-400 uppercase tracking-widest">Not yet connected</p>
-        <div id="assistant-platforms-unconnected-list" class="space-y-2"></div>
-      </div>
+      <span id="platforms-save-status" class="text-sm font-bold text-emerald-600 shrink-0 transition-all"></span>
     </div>
+
+    <!-- AC2.1.3: Workspace chat panel — rendered by integrations.js after auto-responder generation -->
+    <div id="auto-responder-chat-panel" class="hidden bg-white border border-emerald-200 rounded-2xl shadow-sm overflow-hidden"></div>
+
+    <!-- AC1: Workspace panel — rendered by integrations.js after profile-bio generation -->
+    <div id="profile-bio-chat-panel" class="hidden bg-white border border-emerald-200 rounded-2xl shadow-sm overflow-hidden"></div>
+
+    <!-- Platform grid — populated by integrations.js (initAssistantConnections) -->
+    <div id="connections-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-5">
+      <div class="col-span-full flex items-center justify-center py-16 text-gray-400 text-sm">Loading platforms…</div>
+    </div>
+
+    <!-- US-AUD-4.2.1 SC4: Emergency Revocation — Revoke All Connections (workspace-wide) -->
+    <div class="bg-red-50 rounded-2xl border border-red-100 p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      <div>
+        <h3 class="text-base font-bold text-red-900">Emergency: Revoke All Connections</h3>
+        <p class="text-sm text-red-700 mt-1">Immediately deletes all stored credentials and revokes every connected platform for your entire workspace. Use if you suspect a security incident.</p>
+      </div>
+      <button onclick="window._revokeAllConnections()"
+        class="shrink-0 px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-xl shadow transition cursor-pointer">
+        Revoke All
+      </button>
+    </div>
+    <p id="revoke-all-feedback" class="hidden text-sm font-semibold text-red-700"></p>
   </div>
 
   <!-- ── TAB: Guardrails ───────────────────────────────────────── -->
   <div id="tab-guardrails" class="detail-tab-content hidden space-y-6">
 
+    <!-- Mandatory platform-wide safety layer applied to every post (full detail on Assistant Rules) -->
+    <div class="rounded-2xl border border-indigo-200 bg-indigo-50/60 shadow-sm px-6 py-5 flex items-start gap-4">
+      <div class="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+      </div>
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          <h4 class="text-base font-bold text-indigo-900">Be More Swan Safe Content Benchmark</h4>
+          <span class="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-700 bg-indigo-100 border border-indigo-300 px-2.5 py-0.5 rounded-full">Mandatory</span>
+        </div>
+        <p class="text-sm text-indigo-800 leading-relaxed mt-1">
+          A built-in safety layer is applied to <strong>every post</strong> this assistant creates. It runs at the highest priority in the system prompt and cannot be disabled, overridden, or bypassed by any setting below — keeping your brand shielded from content that violates platform policies or community standards.
+        </p>
+        <a href="#" onclick="window._openSafetyBenchmark(); return false;" class="inline-flex items-center gap-1 text-sm font-bold text-indigo-700 hover:text-indigo-900 mt-2">
+          View the full benchmark <span aria-hidden="true">&rarr;</span>
+        </a>
+      </div>
+    </div>
+
     <!-- Assistant-specific strict rules -->
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="mb-6">
-        <h3 class="text-lg font-bold text-gray-900">Guardrails &amp; Rules</h3>
-        <p class="text-sm text-gray-500 mt-1">Hard constraints specific to this assistant. These override any AI-generated suggestions.</p>
+        <h3 class="text-lg font-bold text-gray-900">Brand Safety &amp; Legal</h3>
+        <p class="text-sm text-gray-500 mt-1">Hard constraints specific to this assistant. These override any AI-generated suggestions and protect your brand from compliance risk.</p>
       </div>
       <div class="space-y-5">
         <div>
@@ -317,12 +796,26 @@
       </div>
     </div>
 
+    <!-- Per-assistant AI disclosure (EU AI Act transparency rules — Art. 50) -->
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+      <div class="mb-4">
+        <h3 class="text-lg font-bold text-gray-900">AI Disclosure</h3>
+        <p id="disclosure-desc" class="text-sm text-gray-500 mt-1">How this assistant discloses that its output is AI-generated, as required by the EU AI Act's transparency rules. This must be set before the assistant can be activated in the Kick Off Meeting.</p>
+      </div>
+      <!-- Role-aware examples — populated by _renderDisclosureHelp() once the assistant loads -->
+      <div id="disclosure-examples" class="mb-4"></div>
+      <textarea id="edit_ai_disclosure" rows="3" maxlength="500"
+        class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm resize-y"
+        placeholder="e.g. Some content on this account is created with the help of Be More Swan AI."></textarea>
+      <p class=”text-xs text-gray-400 mt-1”>Switch on the disclosures above to combine them (one per line), or write your own wording. Saved automatically. Once saved, the “AI disclosure text configured” item in the Kick Off checklist is ticked. It can't be cleared while the assistant is active.</p>
+    </div>
+
     <!-- Autonomous Content Fallback (US5) -->
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <h3 class="text-lg font-bold text-gray-900">Autonomous Posting Fallback</h3>
-          <p class="text-sm text-gray-500 mt-1">When <strong>My Content</strong> has no pending assets, should this assistant continue posting independently?</p>
+          <h3 class="text-lg font-bold text-gray-900">Empty-Library Draft Fallback</h3>
+          <p class="text-sm text-gray-500 mt-1">When <strong>My Content</strong> has no pending assets, should this assistant still create draft posts (using AI or stock media) for you to review? Nothing is ever published without your approval.</p>
         </div>
         <button id="toggle-autonomous" type="button" role="switch" aria-checked="false"
           onclick="window._toggleAutonomous()"
@@ -332,35 +825,865 @@
       </div>
       <div id="autonomous-on-msg" class="hidden mt-4 flex items-start gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-800">
         <svg class="w-4 h-4 shrink-0 mt-0.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-        <span>This assistant will generate autonomous posts (text-only or AI-assisted media) when your content hub is empty. Autonomous posts are visually flagged as <strong>"100% AI-Generated"</strong> in your upcoming posts dashboard.</span>
+        <span>When your content hub is empty, this assistant will still prepare <strong>draft posts</strong> (text-only or AI-assisted media) and send them to your <strong>Review Queue</strong> for approval — they are never published on their own. AI-media drafts are flagged <strong>"100% AI-Generated"</strong> so you can spot them at a glance.</span>
       </div>
       <div id="autonomous-off-msg" class="mt-4 flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
         <svg class="w-4 h-4 shrink-0 mt-0.5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-        <span>If My Content is empty, this assistant will <strong>pause</strong> for that scheduled slot and send you an in-app notification to upload new media.</span>
+        <span>If My Content is empty, this assistant will <strong>skip</strong> that scheduled slot instead of drafting a post, and send you an in-app notification to upload new media.</span>
       </div>
     </div>
 
-    <!-- Global Assistant Rules (from workspace defaults) -->
+    <!-- Per-assistant Assistant Rules (injected into this assistant's brief) -->
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
-      <div class="flex items-start justify-between mb-5 gap-4">
+      <div class="flex items-start justify-between mb-2 gap-4 flex-wrap">
         <div>
           <h3 class="text-lg font-bold text-gray-900">Assistant Rules</h3>
-          <p class="text-sm text-gray-500 mt-1">Global rules from your <a href="#" onclick="window.loadView('instructions')" class="text-emerald-600 hover:underline font-medium">Assistant Rules settings</a>. Toggle each one on or off for this assistant only.</p>
+          <p class="text-sm text-gray-500 mt-1">Custom rules for this assistant. Anything you add here is written directly into this assistant's brief and shapes every post it creates.</p>
         </div>
-        <span id="rules-save-status" class="text-sm font-bold text-emerald-600 shrink-0 transition-all"></span>
+        <div class="flex items-center gap-3 shrink-0">
+          <span id="assistant-rules-status" class="text-sm font-bold text-emerald-600 transition-all"></span>
+          <button type="button" id="btn-copy-rules" onclick="window._openCopyRules()" style="display:none"
+            class="inline-flex items-center gap-1.5 text-sm font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-lg transition cursor-pointer">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+            Copy from another assistant
+          </button>
+        </div>
       </div>
-      <div id="global-assistant-rules-list">
+      <div class="mb-5 flex items-start gap-2 text-xs text-emerald-700 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
+        <svg class="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <span>These rules are added to this assistant's brief. Changes apply to all future posts this assistant generates.</span>
+      </div>
+      <div id="assistant-rules-editor" class="space-y-6">
         <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading rules…</div>
       </div>
     </div>
 
   </div>
 
+    </div><!-- /display:contents -->
+    </div><!-- /brief-drawer-body -->
+  </aside><!-- /brief-drawer -->
+
+  <!-- ── MAIN TAB: Goals & Automation ───────────────────────────────── -->
+  <div id="maintab-goals" class="main-tab-content hidden">
+
+  <!-- ── Goals (SMART Goals — Feature 1) ───── -->
+  <div id="tab-goals" class="space-y-6 mb-8">
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+      <div class="flex items-start justify-between mb-2 gap-4 flex-wrap">
+        <div>
+          <h3 class="text-lg font-bold text-gray-900">Goals</h3>
+          <p class="text-sm text-gray-500 mt-1">Set measurable targets for this assistant. Progress is tracked automatically against the data from your connections.</p>
+        </div>
+        <button type="button" id="btn-add-goal" onclick="window._toggleGoalBuilder(true)"
+          class="inline-flex items-center gap-1.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-3.5 py-2 rounded-lg transition cursor-pointer shrink-0">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          Add New Goal
+        </button>
+      </div>
+
+      <!-- Add New Goal builder (AC1.1.1 / AC1.1.2) — hidden until "Add New Goal" -->
+      <div id="goal-builder" class="hidden mt-5 border border-emerald-100 bg-emerald-50/40 rounded-xl p-5">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div class="sm:col-span-3">
+            <label for="goal-objective" class="block text-sm font-bold text-gray-700 mb-1">Objective</label>
+            <select id="goal-objective" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+              <option value="">Select an objective…</option>
+              <option value="awareness">Grow my Audience (Awareness)</option>
+              <option value="engagement">Increase Interaction (Engagement)</option>
+              <option value="action">Drive Traffic (Action)</option>
+            </select>
+            <p class="text-xs text-gray-400 mt-1">Choose what this goal is for — we'll show the metrics that measure it.</p>
+          </div>
+          <div class="sm:col-span-3">
+            <label for="goal-metric" class="block text-sm font-bold text-gray-700 mb-1">Target Metric</label>
+            <select id="goal-metric" disabled class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition disabled:bg-gray-50 disabled:text-gray-400">
+              <option value="">Select an objective first…</option>
+            </select>
+            <p id="goal-metric-help" class="text-xs text-gray-400 mt-1"></p>
+          </div>
+          <div>
+            <label for="goal-target" class="block text-sm font-bold text-gray-700 mb-1">Target Value</label>
+            <input id="goal-target" type="number" min="1" step="any" placeholder="e.g. 20000"
+              class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+          </div>
+          <div>
+            <label for="goal-date" class="block text-sm font-bold text-gray-700 mb-1">Target Date</label>
+            <input id="goal-date" type="date"
+              class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+          </div>
+          <div class="flex items-end">
+            <label class="inline-flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
+              <input id="goal-primary" type="checkbox" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500">
+              Primary goal
+            </label>
+          </div>
+        </div>
+        <p id="goal-builder-error" class="hidden text-sm text-red-600 font-medium mt-3"></p>
+        <div class="flex items-center justify-end gap-3 mt-4">
+          <button type="button" onclick="window._toggleGoalBuilder(false)" class="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Cancel</button>
+          <button type="button" id="btn-save-goal" onclick="window._saveGoal()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer">Save Goal</button>
+        </div>
+      </div>
+
+      <!-- Goals list -->
+      <div id="goals-list" class="mt-6 space-y-3">
+        <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading goals…</div>
+      </div>
+    </div>
+
+    <!-- Performance KPIs -->
+    <div class="mb-8">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Performance Metrics</h3>
+        <span id="metrics-status-note" class="text-xs text-gray-400 font-medium">Last 30 days</span>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+
+        <!-- The Thumb Stopper -->
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Engagement Rate by Reach</span>
+            <span id="metric-engagement-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
+          </div>
+          <div>
+            <p id="metric-engagement-value" class="text-2xl font-extrabold text-gray-900">—</p>
+            <p class="text-base font-bold text-gray-700 mt-0.5">The Thumb Stopper</p>
+            <p class="text-xs text-gray-500 mt-1">Of everyone who saw your content, how many actually stopped to engage with it.</p>
+          </div>
+          <div class="mt-auto pt-3 border-t border-gray-100">
+            <p class="text-xs text-gray-400">Trending: <span id="metric-engagement-trend" class="font-semibold text-gray-500">—</span></p>
+          </div>
+        </div>
+
+        <!-- Escaping the Echo Chamber -->
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Organic Reach Growth</span>
+            <span id="metric-reach-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
+          </div>
+          <div>
+            <p id="metric-reach-value" class="text-2xl font-extrabold text-gray-900">—</p>
+            <p class="text-base font-bold text-gray-700 mt-0.5">Escaping the Echo Chamber</p>
+            <p class="text-xs text-gray-500 mt-1">How far your content is spreading beyond your existing followers into new audiences.</p>
+          </div>
+          <div class="mt-auto pt-3 border-t border-gray-100">
+            <p class="text-xs text-gray-400">Trending: <span id="metric-reach-trend" class="font-semibold text-gray-500">—</span></p>
+          </div>
+        </div>
+
+        <!-- The Pack Your Bags Metric -->
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Click-Through Rate</span>
+            <span id="metric-ctr-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
+          </div>
+          <div>
+            <p id="metric-ctr-value" class="text-2xl font-extrabold text-gray-900">—</p>
+            <p class="text-base font-bold text-gray-700 mt-0.5">The "Pack Your Bags" Metric</p>
+            <p class="text-xs text-gray-500 mt-1">How many viewers clicked through and took the action your content asked for.</p>
+          </div>
+          <div class="mt-auto pt-3 border-t border-gray-100">
+            <p class="text-xs text-gray-400">Trending: <span id="metric-ctr-trend" class="font-semibold text-gray-500">—</span></p>
+          </div>
+        </div>
+
+        <!-- Meaningful Engagement — value over vanity (AC8) -->
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Meaningful Engagement</span>
+            <span id="metric-value-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
+          </div>
+          <div>
+            <p id="metric-value-value" class="text-2xl font-extrabold text-gray-900">—</p>
+            <p class="text-base font-bold text-gray-700 mt-0.5">Saves, Shares &amp; DMs</p>
+            <p class="text-xs text-gray-500 mt-1">The signals that convert trust into business — weighed above likes and view count.</p>
+          </div>
+          <div class="mt-auto pt-3 border-t border-gray-100">
+            <p class="text-xs text-gray-400">Trending: <span id="metric-value-trend" class="font-semibold text-gray-500">—</span></p>
+          </div>
+        </div>
+
+      </div>
+      <!-- Value wins: posts that converted on saves/shares regardless of reach (AC8) -->
+      <p id="metric-value-wins" class="hidden text-xs text-emerald-700 font-medium mt-3"></p>
+    </div>
+  </div>
+
+  </div><!-- /maintab-goals -->
+
+  <!-- ── MAIN TAB: Automation ──────────────────────────────────────── -->
+  <div id="maintab-automation" class="main-tab-content hidden">
+  <div class="space-y-6 mb-8">
+
+    <!-- Autonomous Optimization Mode (US3.3) — highest-tier self-adjusting toggle -->
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h3 class="text-lg font-bold text-gray-900 flex items-center gap-2">Autonomous Goal Seeking <span id="autonomous-lock" class="hidden text-xs font-bold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">🔒 Premium</span></h3>
+          <p class="text-sm text-gray-500 mt-1">When a goal goes off track, let this assistant automatically fine-tune its own brief — brand voice, target audience, content strategy, or posting frequency — to recover, no manual edits needed. It adjusts one field at a time, and every change is logged and you're notified.</p>
+        </div>
+        <button id="toggle-autonomous-goals" type="button" role="switch" aria-checked="false"
+          onclick="window._toggleAutonomousGoals()"
+          class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none bg-gray-300 mt-1">
+          <span id="toggle-autonomous-goals-dot" class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Autonomous Content Suggestions (Epic 2 US5) -->
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h3 class="text-lg font-bold text-gray-900">Autonomous Content Suggestions</h3>
+          <p class="text-sm text-gray-500 mt-1">Let this assistant proactively draft posts — complete with AI-generated images — to fill empty slots in your schedule. Drafts always land in the <strong>AI review queue</strong> for your approval and are never published automatically.</p>
+        </div>
+        <button id="toggle-autonomous-media" type="button" role="switch" aria-checked="false"
+          onclick="window._toggleAutonomousMedia()"
+          class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none bg-gray-300 mt-1">
+          <span id="toggle-autonomous-media-dot" class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+        </button>
+      </div>
+      <div id="autonomous-media-cap-row" class="hidden mt-4 border-t border-gray-100 pt-4 space-y-3">
+        <p class="text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+          <strong class="text-blue-700">What are AI credits?</strong>
+          Credits are the tokens your plan includes each month for AI media generation — each AI-generated image costs <strong>1 credit</strong> and each AI-generated video costs <strong>5 credits</strong>. Unused credits roll over to the next month. Your monthly allowance is set by your subscription plan.
+        </p>
+        <div class="flex items-center gap-3">
+          <label for="autonomous-media-cap" class="text-sm font-bold text-gray-700">Monthly credit cap</label>
+          <input id="autonomous-media-cap" type="number" min="0" step="1" onchange="window._saveAutonomousMediaCap()"
+            class="w-24 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+          <span id="autonomous-media-cap-hint" class="text-xs text-gray-400">Max credits this assistant may spend on auto-suggestions per month.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Media Sources (Media Source Selection) -->
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+      <div>
+        <h3 class="text-lg font-bold text-gray-900">Media Sources</h3>
+        <p class="text-sm text-gray-500 mt-1">Choose where this assistant gets images and videos when it creates a post. Enabled sources are tried <strong>top to bottom</strong> — if one has nothing suitable, the next is tried automatically. Use the arrows to set the order.</p>
+      </div>
+      <div id="media-sources-list" class="mt-5 space-y-2.5">
+        <!-- Rows injected by _applyMediaSourcesUi() in assistants.js -->
+      </div>
+      <p id="media-sources-empty-warning" class="hidden mt-3 text-xs font-semibold text-amber-600">Enable at least one source so this assistant can attach media.</p>
+    </div>
+  </div>
+
+  </div><!-- /maintab-automation -->
+
+  <!-- ── MAIN TAB: Meetings ────────────────────────────────────────── -->
+  <div id="maintab-meetings" class="main-tab-content hidden space-y-6">
+
+    <!-- Explains the "Runbook" name for users unfamiliar with the term (issue #76) -->
+    <p class="text-sm text-gray-500 -mt-2">The <strong>Runbook</strong> is your assistant's operating manual: the rules it's learned from your corrections, plus a history of your check-ins with it.</p>
+
+    <!-- 1. Kick Off Meeting (moved from above the tabs) -->
+    <div id="kickoff-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 hidden">
+      <button id="kickoff-toggle" type="button" aria-expanded="true"
+        class="w-full flex items-start justify-between gap-3 text-left cursor-pointer">
+        <span class="min-w-0">
+          <span class="flex items-center gap-2 mb-1">
+            <span class="text-xl">🚀</span>
+            <span class="text-sm font-bold text-gray-700 uppercase tracking-wide">Kick Off Meeting</span>
+          </span>
+          <span id="kickoff-subtitle" class="block text-sm text-gray-500">Confirm everything is ready, then put your assistant to work.</span>
+        </span>
+        <svg id="kickoff-chevron" class="w-5 h-5 shrink-0 text-gray-400 mt-0.5" style="transition: transform .2s ease" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </button>
+      <div id="kickoff-body" class="mt-4">
+        <!-- US3 AC3.1: kick-off summary — primary directive + active connections to review -->
+        <div id="kickoff-summary" class="hidden mb-5 p-4 rounded-xl bg-gray-50 border border-gray-100"></div>
+        <ul id="kickoff-checklist" class="space-y-2.5 mb-5">
+          <li class="h-9 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading checklist…</li>
+        </ul>
+        <div class="flex items-center gap-3 flex-wrap">
+          <button id="btn-kick-off" type="button" disabled
+            class="px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg shadow-sm transition-colors cursor-pointer">
+            Confirm &amp; Start Working
+          </button>
+          <span id="kickoff-hint" class="text-xs text-gray-500"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Learned Directives changelog (Epic 3.2) — the assistant's evolving Runbook -->
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+      <div class="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Learned Directives</h3>
+          <p class="text-xs text-gray-400 mt-1">Rules your assistant has learned from your corrections. Toggle one off to pause it, or delete it for good.</p>
+        </div>
+        <button type="button" onclick="window._openTuningPicker && window._openTuningPicker()" class="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition cursor-pointer">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
+          Start Tuning Session
+        </button>
+      </div>
+      <div id="runbook-directives" class="space-y-2">
+        <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading directives…</div>
+      </div>
+    </div>
+
+    <!-- Governance review history — the former "Review Meetings" section, preserved & de-emphasised -->
+    <details class="bg-white rounded-2xl border border-gray-200 shadow-sm group">
+      <summary class="px-6 py-4 cursor-pointer text-sm font-bold text-gray-700 uppercase tracking-wide select-none flex items-center justify-between gap-4">
+        <span class="flex items-center gap-2">
+          <svg class="w-4 h-4 text-gray-400 transition-transform duration-200 group-open:rotate-180 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+          <span>Governance review history</span>
+        </span>
+        <button id="btn-log-review" type="button" onclick="event.preventDefault(); window._openReviewForm()" class="px-3.5 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition cursor-pointer">Log a Review</button>
+      </summary>
+      <div class="px-6 pb-6 pt-1">
+        <p class="text-xs text-gray-400 mb-4">Periodic check-ins to assess performance and refine your assistant's direction.</p>
+
+      <!-- Review entry form -->
+      <div id="review-form" class="hidden mb-6 border border-emerald-100 bg-emerald-50/40 rounded-xl p-5 space-y-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block text-xs font-bold text-gray-600 mb-1">Meeting Date</label>
+            <input id="review-date" type="date" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-gray-600 mb-1">Overall Rating</label>
+            <select id="review-rating" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+              <option value="5">⭐⭐⭐⭐⭐ Excellent</option>
+              <option value="4">⭐⭐⭐⭐ Good</option>
+              <option value="3" selected>⭐⭐⭐ Satisfactory</option>
+              <option value="2">⭐⭐ Needs improvement</option>
+              <option value="1">⭐ Poor</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-600 mb-1">Discussion &amp; Observations</label>
+          <textarea id="review-notes" rows="3" placeholder="What's working well? What needs adjusting? Key observations from this review period." class="w-full border border-gray-300 rounded-lg p-3 text-sm resize-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"></textarea>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-600 mb-1">Outcomes &amp; Actions</label>
+          <textarea id="review-outcomes" rows="3" placeholder="Decisions made, changes agreed, actions to take before the next review." class="w-full border border-gray-300 rounded-lg p-3 text-sm resize-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"></textarea>
+        </div>
+        <div id="review-goals-section" class="hidden">
+          <label class="block text-xs font-bold text-gray-600 mb-1">Goal Status at Review <span class="font-normal text-gray-400">(optional)</span></label>
+          <div id="review-goals-checks" class="space-y-1.5"></div>
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-600 mb-1">Next Review Date <span class="font-normal text-gray-400">(optional)</span></label>
+          <input id="review-next" type="date" class="w-full sm:w-52 border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+        </div>
+        <div class="flex items-center gap-3 pt-1">
+          <button onclick="window._saveReviewMeeting()" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition cursor-pointer">Save Review</button>
+          <button onclick="window._closeReviewForm()" class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 transition cursor-pointer">Cancel</button>
+        </div>
+      </div>
+
+      <!-- Review history -->
+      <div id="review-history">
+        <p class="text-sm text-gray-400 text-center py-8">No review meetings logged yet.<br>Log your first review to track your assistant's progress over time.</p>
+      </div>
+      </div>
+    </details>
+
+  </div><!-- /maintab-meetings -->
+
   <!-- tab-integrations removed — merged into tab-platforms as "Connections" -->
 
 </div>
 
+<!-- ── Modal: Copy rules from another assistant ─────────────────── -->
+<div id="modal-copy-rules" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
+    <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-emerald-50">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center shrink-0">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+        </div>
+        <div>
+          <h3 class="font-extrabold text-gray-900">Copy rules from another assistant</h3>
+          <p class="text-xs text-emerald-600 mt-0.5">Adds a copy of the source rules to this assistant — the source is unchanged</p>
+        </div>
+      </div>
+      <button onclick="document.getElementById('modal-copy-rules').classList.add('hidden')" type="button"
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="px-6 py-6 space-y-4">
+      <div>
+        <label for="copy-rules-source" class="block text-sm font-bold text-gray-700 mb-1">Source assistant</label>
+        <select id="copy-rules-source" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition bg-white">
+          <option value="">Loading assistants…</option>
+        </select>
+      </div>
+      <p id="copy-rules-preview" class="text-sm text-gray-500"></p>
+      <p id="copy-rules-error" class="hidden text-sm text-red-600 font-medium"></p>
+    </div>
+    <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-between bg-gray-50/50 rounded-b-2xl">
+      <button onclick="document.getElementById('modal-copy-rules').classList.add('hidden')" type="button"
+        class="px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Cancel</button>
+      <button id="btn-copy-rules-confirm" onclick="window._confirmCopyRules()" type="button"
+        class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+        Copy rules
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: Tuning Session (Epic 3.1) — correct an output → learned directive ─── -->
+<div id="modal-tuning" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full overflow-hidden flex flex-col max-h-[90vh]">
+    <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-indigo-50">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"/></svg>
+        </div>
+        <div>
+          <h3 class="font-extrabold text-gray-900">Tuning Session</h3>
+          <p class="text-xs text-indigo-600 mt-0.5">Correct this output — your assistant learns a rule for every future post</p>
+        </div>
+      </div>
+      <button onclick="window._closeTuningSession()" type="button"
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <!-- Split screen: output (left) | correction (right) -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-0 flex-1 overflow-hidden">
+      <div class="p-6 border-b md:border-b-0 md:border-r border-gray-100 overflow-y-auto bg-gray-50/40">
+        <p class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">The output</p>
+        <p id="tuning-output-meta" class="text-xs text-gray-500 mb-3"></p>
+        <div id="tuning-output" class="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">Loading…</div>
+      </div>
+      <div class="p-6 overflow-y-auto flex flex-col">
+        <p class="text-xs font-bold text-gray-400 uppercase tracking-widest mb-2">Your correction</p>
+        <textarea id="tuning-correction" rows="5" placeholder="What should be different? e.g. “Don’t open with a question — lead with the benefit.”"
+          class="w-full border border-gray-300 rounded-lg p-3 text-sm resize-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"></textarea>
+        <!-- Result: the learned directive + follow-up actions (hidden until submit) -->
+        <div id="tuning-result" class="hidden mt-4 p-4 rounded-xl bg-indigo-50 border border-indigo-100">
+          <p class="text-xs font-bold text-indigo-500 uppercase tracking-widest mb-1">Learned directive</p>
+          <p id="tuning-directive" class="text-sm font-semibold text-gray-800"></p>
+        </div>
+        <p id="tuning-error" class="hidden mt-3 text-sm text-red-600 font-medium"></p>
+      </div>
+    </div>
+    <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-3 bg-gray-50/50">
+      <button id="tuning-cancel-btn" onclick="window._closeTuningSession()" type="button"
+        class="px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Cancel</button>
+      <button id="tuning-submit-btn" onclick="window._submitTuning()" type="button"
+        class="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer">Submit correction</button>
+      <!-- Post-submit actions (hidden until a directive is created) -->
+      <button id="tuning-revise-btn" onclick="window._tuningRevisePost()" type="button"
+        class="hidden px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer">Revise this post now</button>
+      <button id="tuning-done-btn" onclick="window._closeTuningSession()" type="button"
+        class="hidden px-6 py-2.5 bg-gray-800 hover:bg-gray-900 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer">Just save the directive</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: Tuning post picker (Epic 3.1 — action-bar / Runbook entry) ─── -->
+<div id="modal-tuning-picker" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
+    <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-indigo-50">
+      <h3 class="font-extrabold text-gray-900">Choose a post to tune</h3>
+      <button onclick="document.getElementById('modal-tuning-picker').classList.add('hidden')" type="button"
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div id="tuning-picker-list" class="px-6 py-5 space-y-2 max-h-[60vh] overflow-y-auto">
+      <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading recent posts…</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: Review Progress (SMART Goals US2.2) ───────────────── -->
+<div id="modal-review-progress" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+    <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+      <div class="min-w-0">
+        <h3 class="font-extrabold text-gray-900 text-lg">Review Progress</h3>
+        <p class="text-xs text-gray-500 mt-0.5">Actual performance against the trajectory needed to hit your target.</p>
+      </div>
+      <button onclick="document.getElementById('modal-review-progress').classList.add('hidden')" type="button"
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="px-6 py-5 space-y-4">
+      <div>
+        <label for="review-goal-select" class="block text-xs font-bold text-gray-500 mb-1 uppercase tracking-wide">Goal</label>
+        <select id="review-goal-select" onchange="window._renderReviewChart(Number(this.value))"
+          class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition"></select>
+      </div>
+      <div id="review-status-banner"></div>
+      <!-- Trendline vs trajectory chart (dependency-free SVG) — AC2.2.2 -->
+      <div id="review-chart" style="min-height:220px" class="rounded-xl border border-gray-100 bg-gray-50/50 p-3 flex items-center justify-center text-sm text-gray-400">Loading chart…</div>
+      <div class="flex items-center gap-4 text-xs text-gray-500">
+        <span class="inline-flex items-center gap-1.5"><span class="w-4 h-0.5 bg-emerald-500 inline-block"></span>Actual</span>
+        <span class="inline-flex items-center gap-1.5"><span class="w-4 h-0.5 inline-block" style="background:repeating-linear-gradient(90deg,#9ca3af 0,#9ca3af 3px,transparent 3px,transparent 6px)"></span>Required trajectory</span>
+      </div>
+      <!-- AI recommendations output (AC3.1.3) -->
+      <div id="review-recommendations" class="hidden"></div>
+    </div>
+    <div id="review-footer" class="px-6 py-4 border-t border-gray-100 bg-gray-50/50 rounded-b-2xl flex items-center justify-end gap-3 flex-wrap"></div>
+  </div>
+</div>
+
+<!-- ── Modal: Magic Wand suggestion (US3.2 — goal-aware field rewrite) ─── -->
+<div id="modal-wand" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
+    <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-emerald-50">
+      <div>
+        <h3 class="font-extrabold text-gray-900">AI Suggestion</h3>
+        <p id="wand-field-label" class="text-xs text-emerald-600 mt-0.5"></p>
+      </div>
+      <button onclick="document.getElementById('modal-wand').classList.add('hidden')" type="button"
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="px-6 py-5">
+      <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-1">Optimized for your goals</p>
+      <div id="wand-suggestion" style="min-height:64px" class="text-sm text-gray-800 bg-gray-50 border border-gray-200 rounded-lg p-3"></div>
+    </div>
+    <div class="px-6 py-4 border-t border-gray-100 bg-gray-50/50 rounded-b-2xl flex items-center justify-end gap-3">
+      <button onclick="document.getElementById('modal-wand').classList.add('hidden')" type="button" class="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Dismiss</button>
+      <button id="wand-accept" type="button" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer">Accept Suggestion</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: One-Click Fix (SMART Goals US-03 — diagnosis + strategy diff + apply) ─── -->
+<div id="modal-strategy-fix" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+    <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-emerald-50">
+      <div class="min-w-0">
+        <h3 class="font-extrabold text-gray-900 text-lg">One-Click Fix</h3>
+        <p class="text-xs text-emerald-700 mt-0.5">Why this goal is slipping — and the strategy change to fix it.</p>
+      </div>
+      <button onclick="document.getElementById('modal-strategy-fix').classList.add('hidden')" type="button"
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div id="strategy-fix-body" class="px-6 py-5 space-y-5">
+      <div class="flex items-center justify-center py-10 text-sm text-gray-400">Analysing your strategy…</div>
+    </div>
+    <div id="strategy-fix-footer" class="px-6 py-4 border-t border-gray-100 bg-gray-50/50 rounded-b-2xl flex items-center justify-end gap-3 hidden">
+      <button onclick="document.getElementById('modal-strategy-fix').classList.add('hidden')" type="button" class="px-4 py-2 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Dismiss</button>
+      <button id="strategy-fix-accept" type="button" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer">Accept &amp; Update Strategy</button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: Be More Swan Safe Content Benchmark (read-only detail) ─── -->
+<div id="modal-safety-benchmark" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+    <div class="px-6 py-5 border-b border-indigo-100 bg-indigo-100/60 flex items-center justify-between gap-4 sticky top-0">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+        </div>
+        <div>
+          <h3 class="text-lg font-extrabold text-indigo-900">Be More Swan Safe Content Benchmark</h3>
+          <p class="text-sm text-indigo-600 mt-0.5">Active on every assistant — always</p>
+        </div>
+      </div>
+      <button onclick="document.getElementById('modal-safety-benchmark').classList.add('hidden')" type="button"
+        class="p-2 rounded-lg text-indigo-400 hover:bg-indigo-100 hover:text-indigo-700 transition cursor-pointer shrink-0">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="px-6 py-6 space-y-5">
+      <p class="text-sm text-indigo-800 leading-relaxed">
+        Every assistant you create is protected by the <strong>Be More Swan Safe Content Benchmark</strong> — a built-in safety layer that runs at the highest priority in every system prompt. It cannot be disabled, overridden, or bypassed by any workspace setting. This means your brand is always shielded from content that violates platform policies or community standards, no matter what.
+      </p>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div class="flex items-start gap-3 bg-indigo-50/50 rounded-xl border border-indigo-100 px-4 py-3"><div><p class="text-xs font-bold text-gray-800">No Sexually Explicit Content</p><p class="text-xs text-gray-500 mt-0.5">Adult material, nudity, or suggestive content is blocked across all platforms.</p></div></div>
+        <div class="flex items-start gap-3 bg-indigo-50/50 rounded-xl border border-indigo-100 px-4 py-3"><div><p class="text-xs font-bold text-gray-800">No Hate Speech or Discrimination</p><p class="text-xs text-gray-500 mt-0.5">Content that dehumanises individuals or groups based on protected characteristics is refused.</p></div></div>
+        <div class="flex items-start gap-3 bg-indigo-50/50 rounded-xl border border-indigo-100 px-4 py-3"><div><p class="text-xs font-bold text-gray-800">No Violence or Dangerous Content</p><p class="text-xs text-gray-500 mt-0.5">Graphic violence, gore, and instructions for harmful acts are always blocked.</p></div></div>
+        <div class="flex items-start gap-3 bg-indigo-50/50 rounded-xl border border-indigo-100 px-4 py-3"><div><p class="text-xs font-bold text-gray-800">No Self-Harm Promotion</p><p class="text-xs text-gray-500 mt-0.5">Content that promotes self-harm or endangers wellbeing is never produced.</p></div></div>
+        <div class="flex items-start gap-3 bg-indigo-50/50 rounded-xl border border-indigo-100 px-4 py-3"><div><p class="text-xs font-bold text-gray-800">No Illegal Acts or Facilitation</p><p class="text-xs text-gray-500 mt-0.5">Content that facilitates fraud, trafficking, or other criminal activity is refused.</p></div></div>
+        <div class="flex items-start gap-3 bg-indigo-50/50 rounded-xl border border-indigo-100 px-4 py-3"><div><p class="text-xs font-bold text-gray-800">No Harassment or Targeted Abuse</p><p class="text-xs text-gray-500 mt-0.5">Content designed to intimidate, dox, or coordinate attacks on individuals is blocked.</p></div></div>
+        <div class="flex items-start gap-3 bg-indigo-50/50 rounded-xl border border-indigo-100 px-4 py-3"><div><p class="text-xs font-bold text-gray-800">No Spam or Phishing</p><p class="text-xs text-gray-500 mt-0.5">Deceptive, manipulative, or credential-harvesting content is never produced.</p></div></div>
+        <div class="flex items-start gap-3 bg-indigo-50/50 rounded-xl border border-indigo-100 px-4 py-3"><div><p class="text-xs font-bold text-gray-800">No Unauthorised Copyright Use</p><p class="text-xs text-gray-500 mt-0.5">Reproducing protected material or private personal data without consent is refused.</p></div></div>
+        <div class="flex items-start gap-3 bg-indigo-50/50 rounded-xl border border-indigo-100 px-4 py-3"><div><p class="text-xs font-bold text-gray-800">No Identity-Based Bias or Stereotyping</p><p class="text-xs text-gray-500 mt-0.5">Evaluations, tone, and recommendations remain strictly equitable and will never alter based on a subject's gender, ethnicity, religion, or sexuality.</p></div></div>
+      </div>
+      <div class="flex items-center justify-between pt-2 border-t border-indigo-100 mt-2 flex-wrap gap-3">
+        <p class="text-xs text-indigo-500 italic">Covers Facebook, Instagram, LinkedIn, and X — strictest platform standard always applies.</p>
+        <button type="button" onclick="window._openSafetyFeedback()"
+          class="inline-flex items-center gap-2 text-sm font-bold text-indigo-600 hover:text-indigo-800 bg-white border border-indigo-200 hover:border-indigo-400 px-4 py-2 rounded-lg transition cursor-pointer shadow-sm">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
+          Suggest a Safety Rule
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Modal: Suggest a Safety Rule ─────────────────────────────── -->
+<div id="modal-safety-feedback" class="fixed inset-0 bg-gray-900/60 hidden z-[51] flex items-center justify-center p-4 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
+    <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100 bg-indigo-50">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shrink-0">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/></svg>
+        </div>
+        <div>
+          <h3 class="font-extrabold text-gray-900">Suggest a Safety Rule</h3>
+          <p class="text-xs text-indigo-600 mt-0.5">Reviewed by the Be More Swan team — doesn't apply automatically</p>
+        </div>
+      </div>
+      <button onclick="document.getElementById('modal-safety-feedback').classList.add('hidden')" type="button"
+        class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="px-6 py-6 space-y-4">
+      <p class="text-sm text-gray-600">Have an idea for a new safety constraint that should be added to the benchmark? Share it below. All suggestions are reviewed manually by the Be More Swan team before any changes are made.</p>
+      <div>
+        <label for="safety-suggestion" class="block text-sm font-bold text-gray-700 mb-1">Your suggestion <span class="text-red-500">*</span></label>
+        <textarea id="safety-suggestion" rows="3" placeholder="e.g., Block any content that promotes gambling or betting services targeting minors."
+          class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition resize-none"></textarea>
+      </div>
+      <div>
+        <label for="safety-context" class="block text-sm font-bold text-gray-700 mb-1">Additional context <span class="text-gray-400 font-normal">(optional)</span></label>
+        <textarea id="safety-context" rows="2" placeholder="Why is this important? Is there a specific platform policy or incident driving this?"
+          class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition resize-none"></textarea>
+      </div>
+      <p id="safety-feedback-error" class="hidden text-sm text-red-600 font-medium"></p>
+      <p id="safety-feedback-success" class="hidden text-sm text-emerald-600 font-medium flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        Thank you — your suggestion has been submitted for review.
+      </p>
+    </div>
+    <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-between bg-gray-50/50 rounded-b-2xl">
+      <button onclick="document.getElementById('modal-safety-feedback').classList.add('hidden')" type="button"
+        class="px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Cancel</button>
+      <button id="btn-safety-submit" onclick="window._submitSafetyFeedback()" type="button"
+        class="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+        Submit Suggestion
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Connect modal (moved from the standalone Connections page) ─────── -->
+<div id="modal-connect" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm">
+  <div class="bg-white w-full sm:rounded-2xl sm:max-w-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+    <div id="modal-platform-header" class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+      <div class="flex items-center gap-4">
+        <div id="modal-platform-icon" class="w-12 h-12 rounded-xl flex items-center justify-center text-xl font-bold shadow-sm shrink-0"></div>
+        <div>
+          <h2 id="modal-platform-name" class="text-xl font-extrabold text-gray-900"></h2>
+          <p id="modal-platform-desc" class="text-sm text-gray-500 mt-0.5"></p>
+        </div>
+      </div>
+      <button onclick="document.getElementById('modal-connect').classList.add('hidden')" class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" type="button">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="overflow-y-auto flex-1 px-6 py-6 space-y-6">
+      <div>
+        <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide mb-4">How to get your access token</h3>
+        <ol id="modal-steps" class="space-y-3"></ol>
+        <div id="modal-note" class="hidden mt-4 flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800"></div>
+      </div>
+      <hr class="border-gray-100">
+      <div>
+        <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide mb-4">Enter your credentials</h3>
+        <div class="flex items-center gap-2 mb-4 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-800">
+          <svg class="w-4 h-4 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+          <span>Your token is encrypted before storage. No one at Be More Swan can ever read it.</span>
+        </div>
+        <form id="connect-form" class="space-y-4" onsubmit="window._intSubmit(event)">
+          <input type="hidden" id="conn-service-name">
+          <input type="hidden" id="conn-type">
+          <div>
+            <label id="handle-label" for="conn-handle" class="block text-sm font-bold text-gray-700 mb-1"></label>
+            <p id="handle-help" class="text-xs text-gray-500 mb-2"></p>
+            <input type="text" id="conn-handle" autocomplete="off" spellcheck="false"
+              class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600 outline-none transition">
+          </div>
+          <div>
+            <label id="token-label" for="conn-token" class="block text-sm font-bold text-gray-700 mb-1"></label>
+            <p id="token-help" class="text-xs text-gray-500 mb-2"></p>
+            <div class="relative">
+              <input type="password" id="conn-token" required autocomplete="off" spellcheck="false"
+                class="w-full border border-gray-300 rounded-lg p-3 pr-12 text-sm font-mono focus:ring-2 focus:ring-emerald-600 focus:border-emerald-600 outline-none transition">
+              <button type="button" id="btn-toggle-token" onclick="window._intToggleToken()"
+                class="absolute right-3 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-gray-600 transition cursor-pointer" title="Show / hide token">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+              </button>
+            </div>
+          </div>
+          <p id="conn-error" class="hidden text-sm text-red-600 font-medium"></p>
+        </form>
+      </div>
+    </div>
+    <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-3 bg-gray-50/50 rounded-b-2xl">
+      <button onclick="document.getElementById('modal-connect').classList.add('hidden')" type="button"
+        class="px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Cancel</button>
+      <button id="btn-connect-submit" onclick="window._intSubmit(event)" type="button"
+        class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer flex items-center gap-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+        Encrypt &amp; Connect
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Disconnect confirmation modal ───────────────────────────────── -->
+<div id="modal-disconnect" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6" onclick="event.stopPropagation()">
+    <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center text-red-600 text-2xl mb-4">⚠️</div>
+    <h3 class="text-xl font-bold text-gray-900 mb-2">Disconnect this platform?</h3>
+    <p class="text-gray-600 text-sm mb-6">This will permanently delete the stored credentials and <strong>pause any assistants</strong> currently posting to this platform. You can reconnect at any time.</p>
+    <div class="flex gap-3 justify-end">
+      <button onclick="document.getElementById('modal-disconnect').classList.add('hidden')" class="px-4 py-2 font-bold text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer" type="button">Keep it</button>
+      <button id="btn-confirm-disconnect" class="px-4 py-2 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 cursor-pointer" type="button">Yes, Disconnect</button>
+    </div>
+  </div>
+</div>
+
+<!-- US-AUD-4.2.1: Revoke All confirmation modal (SC4) -->
+<div id="modal-revoke-all" class="fixed inset-0 bg-gray-900/70 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-6">
+    <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center text-red-600 text-2xl mb-4">🔒</div>
+    <h3 class="text-xl font-bold text-gray-900 mb-2">Revoke all connections?</h3>
+    <p class="text-gray-600 text-sm mb-6">This will <strong>permanently delete all stored credentials</strong> for every member of your workspace and pause all connected assistants. This cannot be undone.</p>
+    <div class="flex gap-3 justify-end">
+      <button onclick="document.getElementById('modal-revoke-all').classList.add('hidden')"
+        class="px-4 py-2 font-bold text-gray-600 hover:bg-gray-100 rounded-lg cursor-pointer" type="button">Cancel</button>
+      <button id="btn-confirm-revoke-all"
+        class="px-4 py-2 bg-red-600 text-white font-bold rounded-lg hover:bg-red-700 cursor-pointer" type="button">
+        Yes, Revoke All
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+// Issue #65: header "More actions" menu (Pause Assistant / Archive) — click to toggle,
+// close on outside click, Escape, or once a menu item is chosen.
+(function () {
+  const moreBtn = document.getElementById('btn-more-actions');
+  const menu = document.getElementById('more-actions-menu');
+  if (!moreBtn || !menu) return;
+  const closeMenu = () => { menu.classList.add('hidden'); moreBtn.setAttribute('aria-expanded', 'false'); };
+  moreBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = !menu.classList.contains('hidden');
+    if (isOpen) closeMenu();
+    else { menu.classList.remove('hidden'); moreBtn.setAttribute('aria-expanded', 'true'); }
+  });
+  menu.addEventListener('click', (e) => { if (e.target.closest('button')) closeMenu(); });
+  document.addEventListener('click', (e) => { if (!menu.contains(e.target) && e.target !== moreBtn) closeMenu(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+})();
+
+// US-AUD-4.2.1 SC4: Revoke all connections for the org
+window._revokeAllConnections = function () {
+  document.getElementById('modal-revoke-all').classList.remove('hidden');
+};
+
+document.getElementById('btn-confirm-revoke-all')?.addEventListener('click', async function () {
+  const btn = document.getElementById('btn-confirm-revoke-all');
+  btn.textContent = 'Revoking…';
+  btn.disabled = true;
+  try {
+    const res = await fetch('/.netlify/functions/revoke-connections', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope: 'org' }),
+    });
+    const data = await res.json();
+    document.getElementById('modal-revoke-all').classList.add('hidden');
+    const fb = document.getElementById('revoke-all-feedback');
+    if (res.ok) {
+      fb.textContent = `✓ All connections revoked (${data.revoked} total). All assistant integrations have been paused.`;
+      fb.classList.remove('hidden');
+      if (typeof window._intLoadConnections === 'function') window._intLoadConnections();
+    } else {
+      fb.textContent = data.error || 'Failed to revoke connections.';
+      fb.classList.remove('hidden');
+    }
+  } catch {
+    document.getElementById('modal-revoke-all').classList.add('hidden');
+    alert('Network error. Please try again.');
+  } finally {
+    btn.textContent = 'Yes, Revoke All';
+    btn.disabled = false;
+  }
+});
+
+// Show "Brand Protected" badge when strict_rules or knowledge is populated
+window._updateGuardrailsBadge = function () {
+  const rules = (document.getElementById('edit_strict_rules')?.value || '').trim();
+  const knowledge = (document.getElementById('edit_knowledge')?.value || '').trim();
+  const badge = document.getElementById('guardrails-protected-badge');
+  if (badge) badge.classList.toggle('hidden', !rules && !knowledge);
+};
+['edit_strict_rules', 'edit_knowledge'].forEach(id => {
+  document.getElementById(id)?.addEventListener('input', window._updateGuardrailsBadge);
+});
+
+// SC5: Single-connection revocation — called from the platform card's "Disconnect" button
+window._revokeConnection = async function (connectionId, onSuccess) {
+  try {
+    const res = await fetch('/.netlify/functions/revoke-connections', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope: 'single', connectionId }),
+    });
+    const data = await res.json();
+    if (!res.ok) { alert(data.error || 'Failed to disconnect.'); return; }
+    if (typeof onSuccess === 'function') onSuccess();
+  } catch { alert('Network error. Please try again.'); }
+};
+</script>
+
 <style>
-  .detail-tab-btn.active-tab { border-bottom-color: #059669; color: #059669; font-weight: 700; }
-  .detail-tab-btn:not(.active-tab) { border-bottom-color: transparent; }
+  /* Tab spacing — `gap-x-6` is not in the prebuilt style.css, so it no-ops.
+     Set the gap explicitly here (1.5rem === Tailwind gap-x-6) so the tabs don't
+     collapse together. See: Tailwind prebuilt-CSS gotcha. */
+  /* Main (top-level) tabs — `gap-x-8` isn't in the prebuilt style.css, so set it explicitly. */
+  nav[aria-label="Assistant sections"] { gap: 2rem; }
+  .main-tab-btn {
+    padding: 0.875rem 0.25rem;
+    border-bottom: 2px solid transparent;
+    font-size: 1rem;
+    font-weight: 700;
+    color: #6b7280;
+    white-space: nowrap;
+    cursor: pointer;
+    background: none;
+    transition: color .15s ease, border-color .15s ease;
+  }
+  .main-tab-btn:hover { color: #111827; border-bottom-color: #d1d5db; }
+  .main-tab-btn.active-tab { color: #059669; border-bottom-color: #10b981; }
+
+  /* Operating File card rows */
+  .brief-card {
+    display: block;
+    padding: 1rem 1.25rem;
+    background: #fff;
+    border: 1px solid #e5e7eb;
+    border-radius: 1rem;
+    cursor: pointer;
+    transition: border-color .15s ease, box-shadow .15s ease, background .15s ease;
+    box-shadow: 0 1px 3px rgba(0,0,0,.06);
+  }
+  .brief-card:hover {
+    border-color: #6ee7b7;
+    box-shadow: 0 2px 8px rgba(16,185,129,.1);
+    background: #f0fdf4;
+  }
+  /* hide detail-tab-content panels until drawer is open — they render inside the drawer */
+  .detail-tab-content { display: none !important; }
+  .brief-drawer-open .detail-tab-content.active-drawer-tab { display: block !important; }
 </style>

@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  launchd agent for the always-on "Pass to Developer" AI auto-fix watcher.
+
+  This is a TEMPLATE. To activate (you, not the assistant, turn on autostart):
+    cp scripts/com.aura.issue-fixer.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.aura.issue-fixer.plist
+
+  To stop / remove:
+    launchctl bootout gui/$(id -u)/com.aura.issue-fixer
+    rm ~/Library/LaunchAgents/com.aura.issue-fixer.plist
+
+  Logs: ~/Library/Logs/aura-issue-fixer.log
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.aura.issue-fixer</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/mefenemer/WebstormProjects/aura/scripts/dev-issue-fixer-service.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/mefenemer/WebstormProjects/aura</string>
+
+    <!-- Start at login and keep it alive; auto-restart if it crashes or exits. -->
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Back off between restarts so a misconfig (e.g. empty token) doesn't hot-loop. -->
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+
+    <key>StandardOutPath</key>
+    <string>/Users/mefenemer/Library/Logs/aura-issue-fixer.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/mefenemer/Library/Logs/aura-issue-fixer.log</string>
+</dict>
+</plist>

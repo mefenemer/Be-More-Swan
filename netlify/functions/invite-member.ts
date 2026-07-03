@@ -4,7 +4,7 @@
 // POST { email, role? }   → SC2/SC3/SC4: send invite or direct-add existing user
 // POST { resend: true, email } → SC6: invalidate old invite, generate new 7-day link
 //
-// SC2: If the invitee is already a registered Aura-Assist user → add directly to org + in-app notification
+// SC2: If the invitee is already a registered Be More Swan user → add directly to org + in-app notification
 //       If not registered → send magic-link invite email (creates account + joins org in one click)
 // SC3: Check seat limit from org owner's masterPlan.seatLimit (null=1 seat, 0=unlimited)
 // SC4: Invite email contains inviter name, org name, role, 7-day expiry link
@@ -26,7 +26,7 @@ import {
 import { sendEmail } from '../../src/utils/email';
 
 const jwtSecret  = process.env.JWT_SECRET;
-const BASE_URL   = process.env.BASE_URL || 'https://aura-assist.com';
+const BASE_URL   = process.env.BASE_URL || 'https://bemoreswan.com';
 
 function getAuth(event: any): number | null {
     if (!jwtSecret) return null;
@@ -150,7 +150,7 @@ export const handler: Handler = async (event) => {
     const orgName    = org?.name || 'your workspace';
     const inviterName = [callerUser.firstName, callerUser.lastName].filter(Boolean).join(' ') || callerUser.email?.split('@')[0] || 'A team member';
 
-    // SC2: Check if the invitee is already a registered Aura user
+    // SC2: Check if the invitee is already a registered Be More Swan user
     const [existingUser] = await db
         .select({ id: users.id, email: users.email, firstName: users.firstName })
         .from(users)
@@ -177,15 +177,15 @@ export const handler: Handler = async (event) => {
         // Also send a courtesy email
         sendEmail({
             to: existingUser.email,
-            subject: `You've been added to ${orgName} on Aura-Assist`,
+            subject: `You've been added to ${orgName} on Be More Swan`,
             html: `<p>Hi ${existingUser.firstName || 'there'},</p>
-                   <p><strong>${inviterName}</strong> has added you to <strong>${orgName}</strong> on Aura-Assist as a ${role}.</p>
+                   <p><strong>${inviterName}</strong> has added you to <strong>${orgName}</strong> on Be More Swan as a ${role}.</p>
                    <p style="margin-top:20px;">
                      <a href="${BASE_URL}/workspace.html" style="background:#10b981;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">
                        Open Workspace →
                      </a>
                    </p>
-                   <p>The Aura Team</p>`,
+                   <p>The Be More Swan Team</p>`,
         }).catch(() => {});
 
         return {
@@ -246,20 +246,20 @@ export const handler: Handler = async (event) => {
     // SC4: Send invite email with all required content
     sendEmail({
         to: email,
-        subject: `${inviterName} invited you to join ${orgName} on Aura-Assist`,
+        subject: `${inviterName} invited you to join ${orgName} on Be More Swan`,
         html: `
 <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:600px;margin:40px auto;background:#fff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden">
   <div style="background:#111827;padding:20px 28px">
-    <span style="color:#10b981;font-size:20px;font-weight:800">Aura</span><span style="color:#fff;font-size:20px;font-weight:800">-Assist</span>
+    <span style="color:#10b981;font-size:20px;font-weight:800">Be More Swan</span>
   </div>
   <div style="padding:32px">
     <h2 style="margin:0 0 8px;color:#111827;font-size:22px">You're invited! 🎉</h2>
     <p style="color:#374151;margin:0 0 6px;line-height:1.6">
-      <strong>${inviterName}</strong> has invited you to join <strong>${orgName}</strong> on Aura-Assist.
+      <strong>${inviterName}</strong> has invited you to join <strong>${orgName}</strong> on Be More Swan.
     </p>
     <p style="color:#6b7280;margin:0 0 24px;font-size:14px">You'll be joining as a <strong>${role}</strong>.</p>
     <a href="${acceptUrl}" style="display:inline-block;padding:14px 28px;background:#10b981;color:#fff;font-weight:700;text-decoration:none;border-radius:8px;font-size:15px">
-      Join ${orgName} on Aura-Assist →
+      Join ${orgName} on Be More Swan →
     </a>
     <p style="color:#9ca3af;font-size:12px;margin-top:20px">This invitation expires in 7 days. If you didn't expect this email, you can safely ignore it.</p>
   </div>

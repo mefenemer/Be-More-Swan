@@ -13,7 +13,7 @@ import { getDb } from '../../db/client';
 import { users } from '../../db/schema';
 import { insertAdminAuditLog } from '../../src/utils/admin-audit';
 
-const SITE_URL = process.env.BASE_URL || 'https://aura-assist.com';
+const SITE_URL = process.env.BASE_URL || 'https://bemoreswan.com';
 
 export const handler: Handler = async (event) => {
     if (event.httpMethod !== 'GET') {
@@ -104,7 +104,7 @@ export const handler: Handler = async (event) => {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Email address updated — Aura-Assist</title>
+  <title>Email address updated — Be More Swan</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
            display: flex; align-items: center; justify-content: center;
@@ -120,7 +120,7 @@ export const handler: Handler = async (event) => {
 <body>
   <div class="card">
     <h1>✅ Email address updated</h1>
-    <p>Your Aura-Assist account email address has been successfully changed to <strong>${escHtml(newEmail)}</strong>.</p>
+    <p>Your Be More Swan account email address has been successfully changed to <strong>${escHtml(newEmail)}</strong>.</p>
     <p>You can now sign in using your new email address.</p>
     <a href="${SITE_URL}/login.html">Go to login</a>
   </div>
@@ -138,7 +138,7 @@ function htmlError(message: string) {
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Error — Aura-Assist</title>
+  <title>Error — Be More Swan</title>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
            display: flex; align-items: center; justify-content: center;
@@ -154,7 +154,7 @@ function htmlError(message: string) {
   <div class="card">
     <h1>❌ Confirmation failed</h1>
     <p>${escHtml(message)}</p>
-    <p><a href="mailto:support@aura-assist.com">Contact support</a></p>
+    <p><a href="mailto:support@bemoreswan.com">Contact support</a></p>
   </div>
 </body>
 </html>`,

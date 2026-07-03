@@ -71,72 +71,77 @@ import { helpArticles } from './schema'; // Adjust path if necessary
         console.log("Starting Database Seeding...");
         const db = getDb();
 
-        // Your help articles dataset execution block
+        // Your help articles dataset execution block.
+        // NOTE: help_articles columns are (category, sortOrder, title, contentMd, isPublished);
+        // titles are unique so onConflictDoNothing makes re-seeding idempotent.
         await db.insert(helpArticles).values([
             {
+                category: "Getting Started",
+                sortOrder: 1,
                 title: "Understanding Your Workspace",
-                description: "A complete tour of the Aura-Assist dashboard, metrics, and how to interpret your digital team's time-saved analytics.",
-                category: "Getting Started",
-                icon: "layout",
-                readTime: "4 min read"
+                contentMd: "A complete tour of the Be More Swan dashboard, metrics, and how to interpret your digital team's time-saved analytics.",
             },
             {
-                title: "Aura-Assist Glossary of Terms",
-                description: "Definitions for commonly used terms including Compute Power, Automations, Workflows, and Active vs. Resting states.",
                 category: "Getting Started",
-                icon: "book",
-                readTime: "2 min read"
+                sortOrder: 2,
+                title: "Be More Swan Glossary of Terms",
+                contentMd: "Definitions for commonly used terms including Compute Power, Automations, Workflows, and Active vs. Resting states.",
             },
             {
+                category: "Getting Started",
+                sortOrder: 3,
                 title: "Navigating the Interface",
-                description: "How to effectively use the sidebar, mobile hamburger menu, and quick-action shortcuts to manage your team.",
-                category: "Getting Started",
-                icon: "compass",
-                readTime: "3 min read"
+                contentMd: "How to effectively use the sidebar, mobile hamburger menu, and quick-action shortcuts to manage your team.",
             },
             {
+                category: "Assistants",
+                sortOrder: 1,
                 title: "How to Hire & Provision Assistants",
-                description: "A step-by-step guide to browsing the catalog, requesting custom roles, and deploying new assistants to your workspace.",
-                category: "Assistants",
-                icon: "bot",
-                readTime: "5 min read"
+                contentMd: "A step-by-step guide to browsing the catalog, requesting custom roles, and deploying new assistants to your workspace.",
             },
             {
+                category: "Assistants",
+                sortOrder: 2,
                 title: "Updating Assistant Guidelines",
-                description: "Learn how to edit the operational rules, tone of voice, and boundary constraints for your active digital employees.",
-                category: "Assistants",
-                icon: "edit",
-                readTime: "4 min read"
+                contentMd: "Learn how to edit the operational rules, tone of voice, and boundary constraints for your active digital employees.",
             },
             {
+                category: "Account & Settings",
+                sortOrder: 1,
                 title: "Updating Account Settings",
-                description: "How to change your email, password, and global timezone so your assistants operate on your local schedule.",
-                category: "Account & Settings",
-                icon: "user",
-                readTime: "2 min read"
+                contentMd: "How to change your email, password, and global timezone so your assistants operate on your local schedule.",
             },
             {
+                category: "Account & Settings",
+                sortOrder: 2,
                 title: "Managing Notification Preferences",
-                description: "Control how often Aura-Assist interrupts you. Set up daily digests, billing alerts, and waitlist updates.",
-                category: "Account & Settings",
-                icon: "bell",
-                readTime: "3 min read"
+                contentMd: "Control how often Be More Swan interrupts you. Set up daily digests, billing alerts, and waitlist updates.",
             },
             {
+                category: "Account & Settings",
+                sortOrder: 3,
                 title: "Compute Budgets & Preferences",
-                description: "Understanding how AI processing power is billed at cost, and how to adjust your monthly safety caps to prevent surprise bills.",
-                category: "Account & Settings",
-                icon: "credit-card",
-                readTime: "4 min read"
+                contentMd: "Understanding how AI processing power is billed at cost, and how to adjust your monthly safety caps to prevent surprise bills.",
             },
             {
-                title: "Data Security & Compliance",
-                description: "Detailed information on our encryption standards, privacy policies, and how your data is sandboxed from public AI models.",
                 category: "Compliance",
-                icon: "shield",
-                readTime: "6 min read"
-            }
-        ]);
+                sortOrder: 1,
+                title: "Data Security & Compliance",
+                contentMd: "Detailed information on our encryption standards, privacy policies, and how your data is sandboxed from public AI models.",
+            },
+            {
+                category: "Compliance",
+                sortOrder: 2,
+                title: "The Safe Content Benchmark",
+                contentMd: [
+                    "Every assistant is governed by the Be More Swan Safe Content Benchmark — an immutable safety layer injected at the highest priority in every system prompt. It cannot be disabled, overridden, or bypassed by any workspace setting.",
+                    "",
+                    "It covers: no sexually explicit content, no hate speech or discrimination, no violence or dangerous content, no self-harm promotion, no illegal acts, no harassment, no spam or phishing, no unauthorised use of copyrighted or private material, and **No Identity-Based Bias or Stereotyping**.",
+                    "",
+                    "**No Identity-Based Bias or Stereotyping** — Evaluations, tone, and recommendations remain strictly equitable and will never alter based on a subject's gender, ethnicity, religion, or sexuality. Identical inputs that differ only by a demographic marker yield equivalent professional tone, assumed competence, and recommendations.",
+                ].join("\n"),
+            },
+        ]).onConflictDoNothing({ target: helpArticles.title });
 
         console.log("🌱 Database seeding completed successfully!");
         process.exit(0);

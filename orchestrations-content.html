@@ -1,0 +1,174 @@
+<!-- orchestrations-content.html — Multi-Agent Orchestration hub (Epic 4, Feature 4.1) -->
+<!-- Workspace view: define trigger→action links between assistants, toggle + delete them. -->
+<div class="max-w-4xl mx-auto py-8 px-4 sm:px-6 space-y-6">
+
+  <!-- Header -->
+  <div class="flex items-start justify-between flex-wrap gap-4">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Orchestrations</h1>
+      <p class="mt-1 text-gray-500">Link your assistants so they hand work off to each other. Define what triggers a hand-off and who picks it up.</p>
+    </div>
+  </div>
+
+  <!-- New workflow builder -->
+  <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+    <h2 class="text-sm font-bold text-gray-700 uppercase tracking-wide mb-4">New workflow</h2>
+    <div class="flex flex-col gap-3">
+      <div class="flex flex-wrap items-center gap-2 text-sm">
+        <span class="font-semibold text-gray-500">When</span>
+        <select id="orch-source" class="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+          <option value="">Select assistant…</option>
+        </select>
+        <select id="orch-event" class="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+          <option value="drafts_a_post">drafts a post</option>
+          <option value="publishes_a_post">publishes a post</option>
+          <option value="completes_a_task">completes a task</option>
+        </select>
+      </div>
+      <div class="flex flex-wrap items-center gap-2 text-sm">
+        <span class="font-semibold text-gray-500">send to</span>
+        <select id="orch-target" class="border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+          <option value="">Select assistant…</option>
+        </select>
+        <span class="font-semibold text-gray-500">to</span>
+        <input id="orch-action" type="text" maxlength="200" placeholder="e.g. design the visual"
+          class="flex-1 min-w-[12rem] border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+      </div>
+      <div class="flex items-center gap-3 pt-1">
+        <button id="orch-create-btn" type="button" onclick="window._createOrchestration()"
+          class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition cursor-pointer">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          Create workflow
+        </button>
+        <span id="orch-create-status" class="text-sm font-semibold"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Existing workflows -->
+  <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+    <h2 class="text-sm font-bold text-gray-700 uppercase tracking-wide mb-4">Your workflows</h2>
+    <div id="orch-list" class="space-y-2">
+      <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading workflows…</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  // ── Multi-Agent Orchestration hub (Epic 4.1) ─────────────────────────────────
+  // Wrapped in an IIFE: loadView re-executes injected <script> blocks on every navigation,
+  // so top-level const/let would throw a redeclaration error on the 2nd visit. Only window.*
+  // functions are exposed (referenced by the rendered onclick handlers + init hook).
+  const _ORCH_API = '/.netlify/functions/orchestrations';
+  const _ORCH_EVENT_LABEL = { drafts_a_post: 'drafts a post', publishes_a_post: 'publishes a post', completes_a_task: 'completes a task' };
+  let _orchAssistants = [];
+
+  function _orchEsc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+  // Compact "fired …" relative time for orchestration_runs.lastFiredAt.
+  window._orchRelTime = function (iso) {
+    if (!iso) return '';
+    const then = new Date(iso).getTime();
+    if (isNaN(then)) return '';
+    const s = Math.max(0, Math.floor((Date.now() - then) / 1000));
+    if (s < 60) return 'just now';
+    const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`;
+    const d = Math.floor(h / 24); return `${d}d ago`;
+  };
+
+  function _orchSetStatus(msg, isError) {
+    const el = document.getElementById('orch-create-status');
+    if (!el) return;
+    el.textContent = msg || '';
+    el.className = `text-sm font-semibold ${isError ? 'text-red-600' : 'text-emerald-600'}`;
+    if (msg && !isError) setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 2500);
+  }
+
+  async function _orchLoadAssistants() {
+    try {
+      const res = await fetch('/.netlify/functions/get-assistants');
+      if (res.ok) _orchAssistants = ((await res.json()).assistants || [])
+        .filter(a => a && a.lifecycleStatus !== 'archived' && a.status !== 'cancelled');
+    } catch { _orchAssistants = []; }
+    const opts = '<option value="">Select assistant…</option>' +
+      _orchAssistants.map(a => `<option value="${a.id}">${_orchEsc(a.name)}</option>`).join('');
+    const src = document.getElementById('orch-source');
+    const tgt = document.getElementById('orch-target');
+    if (src) src.innerHTML = opts;
+    if (tgt) tgt.innerHTML = opts;
+  }
+
+  window._renderOrchestrations = async function () {
+    const host = document.getElementById('orch-list');
+    if (!host) return;
+    let links = [];
+    try {
+      const res = await fetch(_ORCH_API);
+      if (res.ok) links = (await res.json()).links || [];
+    } catch { /* non-critical */ }
+    if (!links.length) {
+      host.innerHTML = '<p class="text-sm text-gray-400 text-center py-6">No workflows yet. Create one above to link two assistants.</p>';
+      return;
+    }
+    host.innerHTML = links.map(l => {
+      const active = l.isActive !== false;
+      const fired = l.lastFiredAt ? ` · fired ${window._orchRelTime(l.lastFiredAt)}` : '';
+      return `<div class="flex items-center gap-3 px-3 py-3 rounded-xl border border-gray-100 ${active ? '' : 'bg-gray-50'}">
+        <div class="flex-1 min-w-0 text-sm ${active ? 'text-gray-800' : 'text-gray-400'}">
+          <span class="font-bold">${_orchEsc(l.sourceAssistantName)}</span>
+          <span class="text-gray-400"> ${_orchEsc(_ORCH_EVENT_LABEL[l.sourceEvent] || l.sourceEvent)} →</span>
+          <span class="font-bold">${_orchEsc(l.targetAssistantName)}</span>
+          <span class="text-gray-500"> to ${_orchEsc(l.targetAction)}</span>
+          <span class="text-xs text-gray-400">${fired}</span>
+        </div>
+        <button type="button" aria-checked="${active}" onclick="window._toggleOrchestration(${l.id}, this)" class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${active ? 'bg-emerald-500' : 'bg-gray-300'}">
+          <span class="${active ? 'translate-x-5' : 'translate-x-0'} pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition"></span>
+        </button>
+        <button type="button" onclick="window._deleteOrchestration(${l.id})" class="text-gray-400 hover:text-red-500 transition" aria-label="Delete workflow">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+        </button>
+      </div>`;
+    }).join('');
+  };
+
+  window._createOrchestration = async function () {
+    const sourceAssistantId = Number(document.getElementById('orch-source').value);
+    const targetAssistantId = Number(document.getElementById('orch-target').value);
+    const sourceEvent = document.getElementById('orch-event').value;
+    const targetAction = document.getElementById('orch-action').value.trim();
+    if (!sourceAssistantId || !targetAssistantId || !targetAction) { _orchSetStatus('Pick both assistants and describe the hand-off.', true); return; }
+    if (sourceAssistantId === targetAssistantId) { _orchSetStatus('An assistant can’t hand off to itself.', true); return; }
+    const btn = document.getElementById('orch-create-btn');
+    btn.disabled = true;
+    try {
+      const res = await fetch(_ORCH_API, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sourceAssistantId, sourceEvent, targetAssistantId, targetAction }) });
+      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'Could not create the workflow.'); }
+      document.getElementById('orch-action').value = '';
+      _orchSetStatus('✓ Workflow created');
+      window._renderOrchestrations();
+    } catch (e) { _orchSetStatus(e.message || 'Something went wrong.', true); }
+    finally { btn.disabled = false; }
+  };
+
+  window._toggleOrchestration = async function (id, btn) {
+    const nowActive = btn.getAttribute('aria-checked') !== 'true';
+    try { await fetch(_ORCH_API, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id, isActive: nowActive }) }); } catch { /* non-critical */ }
+    window._renderOrchestrations();
+  };
+
+  window._deleteOrchestration = async function (id) {
+    if (!confirm('Delete this workflow?')) return;
+    try { await fetch(`${_ORCH_API}?id=${id}`, { method: 'DELETE' }); } catch { /* non-critical */ }
+    window._renderOrchestrations();
+  };
+
+  window.initOrchestrations = async function () {
+    await _orchLoadAssistants();
+    await window._renderOrchestrations();
+  };
+})();
+</script>

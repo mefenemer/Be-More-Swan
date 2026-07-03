@@ -4,20 +4,20 @@
 // Triggered post-OAuth (fire-and-forget) and via "Sync Profile" button on integrations page.
 
 import { Handler } from '@netlify/functions';
-import jwt from 'jsonwebtoken';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { systemConnections, organisations, aiAssistants, notifications, userOrganisations } from '../../db/schema';
 import { getSecret } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
-
-const jwtSecret = process.env.JWT_SECRET!;
+import { requireTenant } from '../../src/utils/tenant';
 
 export const handler: Handler = async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const baseUrl = resolveBaseUrl(event.headers);
     if (!baseUrl) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
+
+    const db = getDb();
 
     // Accept auth from either session cookie (user-triggered) or internal call (organisationId in body)
     const cookieHeader = event.headers.cookie || '';
@@ -27,11 +27,11 @@ export const handler: Handler = async (event) => {
     let callerUserId: number | undefined;
 
     if (sessionToken) {
-        try {
-            const p = jwt.verify(sessionToken, jwtSecret) as { userId: number; organisationId: number };
-            callerUserId = p.userId;
-            organisationId = p.organisationId;
-        } catch { return { statusCode: 401, body: JSON.stringify({ error: 'Invalid session' }) }; }
+        // Session carries `activeOrganisationId`, not `organisationId` — resolve via requireTenant.
+        const ctx = await requireTenant(event, db);
+        if ('error' in ctx) return ctx.error;
+        callerUserId = ctx.userId;
+        organisationId = ctx.organisationId;
     }
 
     const body = JSON.parse(event.body || '{}');
@@ -45,8 +45,6 @@ export const handler: Handler = async (event) => {
     }
 
     if (!organisationId) return { statusCode: 400, body: JSON.stringify({ error: 'organisationId required' }) };
-
-    const db = getDb();
 
     // Load organisation profile
     const [org] = await db.select({ id: organisations.id, name: organisations.name, slug: organisations.slug })
@@ -63,9 +61,13 @@ export const handler: Handler = async (event) => {
         .limit(1);
 
     const ctx = (assistant?.onboardingContext as Record<string, unknown>) ?? {};
+    // AC1: prefer platform-tailored bios from the bio generator when present.
+    const profileBios = (ctx.profile_bios as { facebook?: string; linkedin?: string } | undefined) ?? {};
     // AC: use stored business_bio field if set; fall back to derived value
     const businessBio: string = (ctx.business_bio as string)
-        || ((ctx.target_audience as string) ? `Serving ${ctx.target_audience}. ${ctx.tone_of_voice ?? ''}` : `${org.name} — managed via Aura-Assist.`);
+        || ((ctx.target_audience as string) ? `Serving ${ctx.target_audience}. ${ctx.tone_of_voice ?? ''}` : `${org.name} — managed via Be More Swan.`);
+    const metaBio: string = profileBios.facebook || businessBio;
+    const linkedinBio: string = profileBios.linkedin || businessBio;
     const websiteUrl  = baseUrl;
 
     // AC: business hours in Meta page-level format (day_of_week: { open, close })
@@ -90,7 +92,7 @@ export const handler: Handler = async (event) => {
             try {
                 const updatePayload: Record<string, unknown> = {
                     website: websiteUrl,
-                    description: businessBio.slice(0, 255),
+                    description: metaBio.slice(0, 255),
                     access_token: token,
                 };
                 if (businessCategory) updatePayload.category_list = JSON.stringify([businessCategory]);
@@ -142,7 +144,7 @@ export const handler: Handler = async (event) => {
                         method: 'POST',
                         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-Restli-Method': 'partial_update' },
                         body: JSON.stringify({
-                            patch: { $set: { websiteUrl, description: { localized: { en_US: businessBio.slice(0, 700) } } } },
+                            patch: { $set: { websiteUrl, description: { localized: { en_US: linkedinBio.slice(0, 700) } } } },
                         }),
                         signal: AbortSignal.timeout(5000),
                     });

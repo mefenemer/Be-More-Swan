@@ -1,3 +1,10 @@
+// Load swan-cursor on every page that includes this file
+(function () {
+  var s = document.createElement('script');
+  s.src = '/swan-cursor.js';
+  document.head.appendChild(s);
+})();
+
 function setupMobileMenu() {
     const menuButton = document.getElementById('mobile-menu-button');
     const mobileMenu = document.getElementById('mobile-menu');

@@ -13,6 +13,7 @@ import { eq, and, gte, count, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, userProfiles, plans, masterPlans, aiAssistants, taskRuns, scheduledPosts } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
+import { isEmailEnabled } from '../../src/utils/notification-prefs';
 
 const BASE_URL = process.env.BASE_URL || '';
 
@@ -44,9 +45,11 @@ async function runWeeklyDigest() {
     let skipped = 0;
 
     for (const row of eligibleRows) {
-        // SC4: opt-out check
+        // SC4: opt-out check. Honour the new "Assistant Tasks & Summaries" email category
+        // (account settings → Notification Preferences) and the legacy weekly_digest key, so
+        // a user who opted out under either mechanism stays opted out.
         const prefs = (row.emailPrefs || {}) as Record<string, boolean>;
-        if (prefs.weekly_digest === false) { skipped++; continue; }
+        if (prefs.weekly_digest === false || !isEmailEnabled(prefs, 'assistant_task')) { skipped++; continue; }
 
         // SC1: must have at least one provisioned assistant
         const activeAssistants = await db
@@ -100,9 +103,9 @@ async function runWeeklyDigest() {
 
         await sendEmail({
             to: row.email,
-            subject: `Your Aura weekly digest — ${weeklyTaskCount} task${weeklyTaskCount === 1 ? '' : 's'} completed`,
+            subject: `Your Be More Swan weekly digest — ${weeklyTaskCount} task${weeklyTaskCount === 1 ? '' : 's'} completed`,
             html: `<p>Hi ${name},</p>
-                   <p>Here's what your Aura assistants have been up to this week:</p>
+                   <p>Here's what your Be More Swan assistants have been up to this week:</p>
                    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:12px;padding:20px;margin:16px 0;">
                      <p>✅ <strong>Tasks completed (last 7 days):</strong> ${weeklyTaskCount}</p>
                      ${postsLine}
@@ -119,7 +122,7 @@ async function runWeeklyDigest() {
                      You're receiving this because you have weekly digests enabled.
                      <a href="${BASE_URL}/workspace.html#notifications" style="color:#9ca3af;">Manage preferences</a>
                    </p>
-                   <p>The Aura Team</p>`,
+                   <p>The Be More Swan Team</p>`,
         }).then(() => { sent++; }).catch(err => {
             console.warn(`[weekly-digest] Email failed for userId=${row.userId}:`, err);
             skipped++;

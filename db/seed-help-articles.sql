@@ -7,19 +7,19 @@ BEGIN;
 -- ── Getting Started ──────────────────────────────────────────────────────────
 
 INSERT INTO help_articles (category, sort_order, title, content_md, is_published) VALUES
-('Getting Started', 10, 'What is Aura-Assist?',
+('Getting Started', 10, 'What is Be More Swan?',
 $$
-# What is Aura-Assist?
+# What is Be More Swan?
 
-Aura-Assist is an AI-powered business automation platform that gives you a dedicated **Digital Assistant** trained to handle the repetitive tasks that slow down your day.
+Be More Swan is an AI-powered business automation platform that gives you a dedicated **Digital Assistant** trained to handle the repetitive tasks that slow down your day.
 
 ## How it works
 
-Your assistant lives in your Aura-Assist workspace. You describe what good work looks like in plain English — no coding required — and the assistant carries out tasks based on those instructions.
+Your assistant lives in your Be More Swan workspace. You describe what good work looks like in plain English — no coding required — and the assistant carries out tasks based on those instructions.
 
 ## Workspace tiers
 
-Aura-Assist is available on two tiers:
+Be More Swan is available on two tiers:
 
 | Tier | Assistants | Key Features |
 |------|-----------|--------------|
@@ -37,7 +37,7 @@ Each assistant has a specific role. The current roles available are:
 
 1. Choose a plan from the [pricing page](/pricing.html).
 2. Complete the onboarding flow to describe your business and ideal customer.
-3. Your assistant is configured by the Aura team within one business day.
+3. Your assistant is configured by the Be More Swan team within one business day.
 4. Log in to your workspace and watch it work.
 $$,
 TRUE)
@@ -53,7 +53,7 @@ INSERT INTO help_articles (category, sort_order, title, content_md, is_published
 $$
 # Your Dashboard Overview
 
-Your Aura-Assist dashboard is the control centre for your workspace. Here is what you will find on it.
+Your Be More Swan dashboard is the control centre for your workspace. Here is what you will find on it.
 
 ## Workspace summary
 
@@ -101,7 +101,7 @@ INSERT INTO help_articles (category, sort_order, title, content_md, is_published
 $$
 # Setting Up Your First Assistant
 
-This guide walks you through setting up your **Sales Assistant — Lead Generator**, the most common starting point for new Aura-Assist users.
+This guide walks you through setting up your **Sales Assistant — Lead Generator**, the most common starting point for new Be More Swan users.
 
 ## Step 1: Complete onboarding
 
@@ -113,7 +113,7 @@ When you first log in after choosing a plan, you will be guided through a short 
 
 ## Step 2: Choose your lead scoring mode
 
-Aura-Assist offers two ways to define your lead scoring rules:
+Be More Swan offers two ways to define your lead scoring rules:
 
 **Simple Mode (recommended for first-time users)**
 Write a plain-English description of your ideal customer. The assistant converts it into scoring rules automatically.
@@ -200,7 +200,7 @@ INSERT INTO help_articles (category, sort_order, title, content_md, is_published
 $$
 # Setting Up Lead Scoring: Simple Mode vs. Advanced Mode
 
-Aura-Assist gives you two ways to define your lead scoring rules. Both live in **Assistant Settings → Lead Scoring**.
+Be More Swan gives you two ways to define your lead scoring rules. Both live in **Assistant Settings → Lead Scoring**.
 
 ## Simple Mode
 
@@ -299,7 +299,7 @@ Every lead''s email address is automatically verified when it arrives in your wo
 
 ## Why email verification matters
 
-Sending emails to invalid or risky addresses damages your domain reputation — over time, this causes your legitimate emails to land in spam folders. Aura-Assist verifies email addresses before exporting them so you only contact addresses that are safe to use.
+Sending emails to invalid or risky addresses damages your domain reputation — over time, this causes your legitimate emails to land in spam folders. Be More Swan verifies email addresses before exporting them so you only contact addresses that are safe to use.
 
 The verification process checks whether the address exists and can receive mail (using an SMTP check), without actually sending anything.
 
@@ -386,7 +386,7 @@ INSERT INTO help_articles (category, sort_order, title, content_md, is_published
 $$
 # Exporting Leads: CRM Sync vs. CSV Download
 
-Aura-Assist gives you two ways to get leads out of your workspace and into your sales process.
+Be More Swan gives you two ways to get leads out of your workspace and into your sales process.
 
 ## Automatic CRM sync
 
@@ -438,11 +438,11 @@ INSERT INTO help_articles (category, sort_order, title, content_md, is_published
 $$
 # Connecting Apps & Integrations
 
-Go to **Integrations** in the sidebar to connect external apps to your Aura-Assist workspace.
+Go to **Integrations** in the sidebar to connect external apps to your Be More Swan workspace.
 
 ## How connections work
 
-Most integrations use **OAuth** — a secure, standardised authorisation flow that never exposes your password to Aura-Assist.
+Most integrations use **OAuth** — a secure, standardised authorisation flow that never exposes your password to Be More Swan.
 
 **How to connect an app:**
 
@@ -450,7 +450,7 @@ Most integrations use **OAuth** — a secure, standardised authorisation flow th
 2. Find the app you want to connect and click **Connect**.
 3. You will be redirected to that app''s login page.
 4. Log in and grant the requested permissions.
-5. You are redirected back to Aura-Assist and the connection is confirmed.
+5. You are redirected back to Be More Swan and the connection is confirmed.
 
 If the connection fails, you will see an error message with a suggested fix. Common causes are expired sessions or revoked permissions — simply disconnect and reconnect.
 
@@ -473,7 +473,7 @@ Each workspace tier has a limit on the number of active connections. If you reac
 2. Find the connected app.
 3. Click **Disconnect**.
 
-Disconnecting an integration does not delete your data in that external app — it only removes Aura-Assist''s access.
+Disconnecting an integration does not delete your data in that external app — it only removes Be More Swan''s access.
 $$,
 TRUE)
 ON CONFLICT (title) DO UPDATE SET
@@ -490,7 +490,7 @@ INSERT INTO help_articles (category, sort_order, title, content_md, is_published
 $$
 # Billing & Your Plan
 
-Aura-Assist uses a monthly subscription model. Your plan controls how many assistants you can run simultaneously and which integrations you can access.
+Be More Swan uses a monthly subscription model. Your plan controls how many assistants you can run simultaneously and which integrations you can access.
 
 ## Plan tiers
 
@@ -552,7 +552,7 @@ Use this table to diagnose common problems quickly. Find your symptom in the lef
 ---
 
 > **Still stuck?** Contact our support team with your **workspace ID** and the **lead ID** (both visible in the URL when viewing a lead) and we will investigate within one business day.
-> Email: [hello@aura-assist.com](mailto:hello@aura-assist.com)
+> Email: [hello@bemoreswan.com](mailto:hello@bemoreswan.com)
 $$,
 TRUE)
 ON CONFLICT (title) DO UPDATE SET

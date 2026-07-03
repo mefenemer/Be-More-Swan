@@ -1,8 +1,688 @@
 <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full pb-20 relative">
 
   <div class="mb-8">
-    <h1 class="text-3xl font-extrabold text-gray-900">Brand Assets</h1>
-    <p class="text-gray-500 mt-1">Upload brand guidelines, logos, and knowledge documents.</p>
+    <h1 class="text-3xl font-extrabold text-gray-900">Business Information</h1>
+    <p class="text-gray-500 mt-1">Tell us about your business and upload brand assets so your assistant works the way you do.</p>
+  </div>
+
+  <!-- ── Tabbed navigation (mirrors My Account / Account Settings) ─────────── -->
+  <style>
+    .bizinfo-tab {
+      padding: 0.75rem 0.25rem;
+      border-bottom: 2px solid transparent;
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: #6b7280;
+      white-space: nowrap;
+      cursor: pointer;
+      background: none;
+      transition: color .15s ease, border-color .15s ease;
+    }
+    .bizinfo-tab:hover { color: #374151; border-bottom-color: #d1d5db; }
+    .bizinfo-tab.active { color: #059669; border-bottom-color: #10b981; }
+  </style>
+  <div class="mb-8 border-b border-gray-200 overflow-x-auto">
+    <nav id="bizinfo-tabs" class="-mb-px flex gap-x-6" aria-label="Business information tabs">
+      <button type="button" class="bizinfo-tab active" data-tab="profile">Business Profile</button>
+      <button type="button" class="bizinfo-tab" data-tab="legal">Legal &amp; Billing</button>
+      <button type="button" class="bizinfo-tab" data-tab="team">Team Members</button>
+      <button type="button" class="bizinfo-tab" data-tab="assets">Brand Assets</button>
+    </nav>
+  </div>
+
+  <!-- ══ Business Profile ═══════════════════════════════════════════════════ -->
+  <div class="bizinfo-tab-panel" data-panel="profile">
+  <!-- ── Business profile (assistant-facing context) ──────────────────────── -->
+  <section class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-8">
+    <div class="mb-5">
+      <h2 class="text-lg font-extrabold text-gray-900">Business profile</h2>
+      <p class="text-sm text-gray-500 mt-0.5">Used by your assistant to match your brand, industry, and audience.</p>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div class="sm:col-span-2">
+        <label for="bp-input-name" class="block text-sm font-semibold text-gray-700 mb-1.5">Business name <span class="text-red-500">*</span></label>
+        <input type="text" id="bp-input-name" placeholder="Acme Ltd" autocomplete="off"
+          class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+      </div>
+      <div>
+        <label for="bp-input-industry" class="block text-sm font-semibold text-gray-700 mb-1.5">Industry / sector</label>
+        <!-- US4 AC3: searchable dropdown via datalist; US4 AC2: free typing still allowed. -->
+        <input type="text" id="bp-input-industry" list="bp-industry-options" autocomplete="off"
+          placeholder="Search or type your industry…"
+          class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+        <datalist id="bp-industry-options">
+          <option value="Accounting &amp; Finance"></option>
+          <option value="Agriculture"></option>
+          <option value="Architecture &amp; Design"></option>
+          <option value="Automotive"></option>
+          <option value="Beauty &amp; Wellness"></option>
+          <option value="Construction"></option>
+          <option value="Consulting"></option>
+          <option value="Creative &amp; Media"></option>
+          <option value="E-commerce"></option>
+          <option value="Education &amp; Training"></option>
+          <option value="Energy &amp; Utilities"></option>
+          <option value="Events"></option>
+          <option value="Fashion &amp; Apparel"></option>
+          <option value="Financial Services"></option>
+          <option value="Fitness &amp; Sport"></option>
+          <option value="Food &amp; Beverage"></option>
+          <option value="Government &amp; Public Sector"></option>
+          <option value="Healthcare"></option>
+          <option value="Hospitality"></option>
+          <option value="Insurance"></option>
+          <option value="Legal Services"></option>
+          <option value="Logistics &amp; Transport"></option>
+          <option value="Manufacturing"></option>
+          <option value="Marketing &amp; Advertising"></option>
+          <option value="Non-profit &amp; Charity"></option>
+          <option value="Property &amp; Real Estate"></option>
+          <option value="Recruitment &amp; HR"></option>
+          <option value="Retail"></option>
+          <option value="SaaS &amp; Software"></option>
+          <option value="Technology"></option>
+          <option value="Telecommunications"></option>
+          <option value="Travel &amp; Tourism"></option>
+          <option value="Other"></option>
+        </datalist>
+      </div>
+      <div>
+        <label for="bp-input-website" class="block text-sm font-semibold text-gray-700 mb-1.5">Website</label>
+        <input type="text" id="bp-input-website" placeholder="https://yourbusiness.com"
+          class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+      </div>
+      <div class="sm:col-span-2">
+        <label class="block text-sm font-semibold text-gray-700 mb-1.5">Social media accounts</label>
+        <p class="text-xs text-gray-400 mb-3">Add the handle or URL for each platform your assistant should manage. You'll be able to connect these accounts later, during your assistant's setup.</p>
+        <div id="bp-social-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label for="bp-social-instagram" class="block text-xs font-medium text-gray-500 mb-1">Instagram</label>
+            <input type="text" id="bp-social-instagram" data-platform="instagram" placeholder="@yourbrand"
+              class="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+          </div>
+          <div>
+            <label for="bp-social-facebook" class="block text-xs font-medium text-gray-500 mb-1">Facebook</label>
+            <input type="text" id="bp-social-facebook" data-platform="facebook" placeholder="https://facebook.com/yourpage"
+              class="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+          </div>
+          <div>
+            <label for="bp-social-linkedin" class="block text-xs font-medium text-gray-500 mb-1">LinkedIn</label>
+            <input type="text" id="bp-social-linkedin" data-platform="linkedin" placeholder="https://linkedin.com/company/yourbrand"
+              class="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+          </div>
+          <div>
+            <label for="bp-social-x" class="block text-xs font-medium text-gray-500 mb-1">X (Twitter)</label>
+            <input type="text" id="bp-social-x" data-platform="x" placeholder="@yourbrand"
+              class="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+          </div>
+          <div>
+            <label for="bp-social-tiktok" class="block text-xs font-medium text-gray-500 mb-1">TikTok</label>
+            <input type="text" id="bp-social-tiktok" data-platform="tiktok" placeholder="@yourbrand"
+              class="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+          </div>
+          <div>
+            <label for="bp-social-youtube" class="block text-xs font-medium text-gray-500 mb-1">YouTube</label>
+            <input type="text" id="bp-social-youtube" data-platform="youtube" placeholder="https://youtube.com/@yourbrand"
+              class="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+          </div>
+          <div>
+            <label for="bp-social-pinterest" class="block text-xs font-medium text-gray-500 mb-1">Pinterest</label>
+            <input type="text" id="bp-social-pinterest" data-platform="pinterest" placeholder="https://pinterest.com/yourbrand"
+              class="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+          </div>
+          <div>
+            <label for="bp-social-threads" class="block text-xs font-medium text-gray-500 mb-1">Threads</label>
+            <input type="text" id="bp-social-threads" data-platform="threads" placeholder="@yourbrand"
+              class="w-full px-3.5 py-2.5 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+          </div>
+        </div>
+      </div>
+      <div class="sm:col-span-2">
+        <label for="bp-input-social" class="block text-sm font-semibold text-gray-700 mb-1.5">Other links <span class="text-xs font-normal text-gray-400">(optional)</span></label>
+        <input type="text" id="bp-input-social" placeholder="Any other links your assistant should know — e.g. Linktree, review pages"
+          class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+      </div>
+      <div class="sm:col-span-2">
+        <label for="bp-input-description" class="block text-sm font-semibold text-gray-700 mb-1.5">What your business does</label>
+        <textarea id="bp-input-description" rows="3" placeholder="Briefly describe your products/services and what makes you different."
+          class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition resize-none"></textarea>
+      </div>
+      <div class="sm:col-span-2">
+        <label for="bp-input-audience" class="block text-sm font-semibold text-gray-700 mb-1.5">Target audience</label>
+        <textarea id="bp-input-audience" rows="2" placeholder="Who are your customers? e.g. independent cafés in the UK, busy parents, B2B founders."
+          class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition resize-none"></textarea>
+      </div>
+    </div>
+    <div id="bp-error" class="hidden mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3"></div>
+    <div class="flex items-center justify-end mt-3 h-5">
+      <span id="bp-status" class="text-xs font-medium text-gray-400 transition-opacity"></span>
+    </div>
+  </section>
+  </div><!-- /panel: profile -->
+
+  <!-- ══ Legal & Billing ════════════════════════════════════════════════════ -->
+  <div class="bizinfo-tab-panel hidden" data-panel="legal">
+  <!-- ── Legal & billing details (single source of truth for invoices) ─────── -->
+  <section id="billing-details-section" class="mb-8">
+    <div class="mb-4">
+      <h2 class="text-lg font-extrabold text-gray-900">Legal &amp; billing details</h2>
+      <p class="text-sm text-gray-500 mt-0.5">Your legal company name, registered address, and VAT/Tax ID. Used on your invoices.</p>
+    </div>
+
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div class="sm:col-span-2">
+          <label for="bd-input-name" class="block text-sm font-semibold text-gray-700 mb-1.5">Legal Name / Company Name <span class="text-red-500">*</span> <span class="text-xs font-normal text-gray-400">(defaults to your business name)</span></label>
+          <input type="text" id="bd-input-name" placeholder="Acme Ltd" autocomplete="off"
+            class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+        </div>
+        <div>
+          <label for="bd-input-email" class="block text-sm font-semibold text-gray-700 mb-1.5">Billing Email</label>
+          <input type="email" id="bd-input-email" placeholder="billing@yourcompany.com" autocomplete="email"
+            class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+        </div>
+        <div>
+          <label for="bd-input-vat" class="block text-sm font-semibold text-gray-700 mb-1.5">VAT / Tax ID <span class="text-xs font-normal text-gray-400">(optional)</span></label>
+          <input type="text" id="bd-input-vat" placeholder="GB123456789"
+            class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition uppercase">
+        </div>
+        <div class="sm:col-span-2">
+          <label for="bd-input-addr1" class="block text-sm font-semibold text-gray-700 mb-1.5">Address Line 1</label>
+          <input type="text" id="bd-input-addr1" placeholder="123 Business Street" autocomplete="address-line1"
+            class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+        </div>
+        <div class="sm:col-span-2">
+          <label for="bd-input-addr2" class="block text-sm font-semibold text-gray-700 mb-1.5">Address Line 2 <span class="text-xs font-normal text-gray-400">(optional)</span></label>
+          <input type="text" id="bd-input-addr2" placeholder="Suite 100" autocomplete="address-line2"
+            class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+        </div>
+        <div>
+          <label for="bd-input-city" class="block text-sm font-semibold text-gray-700 mb-1.5">City</label>
+          <input type="text" id="bd-input-city" placeholder="London" autocomplete="address-level2"
+            class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+        </div>
+        <div>
+          <label for="bd-input-postal" class="block text-sm font-semibold text-gray-700 mb-1.5">Postcode / ZIP</label>
+          <input type="text" id="bd-input-postal" placeholder="EC1A 1BB" autocomplete="postal-code"
+            class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+        </div>
+        <div>
+          <label for="bd-input-state" class="block text-sm font-semibold text-gray-700 mb-1.5">County / State <span class="text-xs font-normal text-gray-400">(optional)</span></label>
+          <input type="text" id="bd-input-state" placeholder="England" autocomplete="address-level1"
+            class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+        </div>
+        <div>
+          <label for="bd-input-country" class="block text-sm font-semibold text-gray-700 mb-1.5">Country</label>
+          <input type="text" id="bd-input-country" placeholder="United Kingdom" autocomplete="country-name"
+            class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+        </div>
+      </div>
+      <div id="bd-form-error" class="hidden mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3"></div>
+      <div class="flex items-center justify-end mt-3 h-5">
+        <span id="bd-status" class="text-xs font-medium text-gray-400 transition-opacity"></span>
+      </div>
+    </div>
+  </section>
+  </div><!-- /panel: legal -->
+
+  <!-- ══ Team Members ═══════════════════════════════════════════════════════ -->
+  <div class="bizinfo-tab-panel hidden" data-panel="team">
+  <!-- ── Team Members (moved here from the side menu) ─────────────────────── -->
+  <section id="team-management-root" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-8">
+    <div class="flex items-start justify-between mb-4 gap-4 flex-wrap">
+      <div>
+        <h2 class="text-lg font-extrabold text-gray-900">Team Members</h2>
+        <p class="text-sm text-gray-500 mt-0.5">Manage who has access to your Be More Swan workspace.</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <!-- SC1: Seat usage pill -->
+        <span id="seat-usage-pill" class="hidden text-xs font-semibold px-3 py-1.5 rounded-full border"></span>
+        <button id="invite-member-btn" onclick="window._openInviteModal()"
+                class="px-4 py-2 bg-emerald-700 text-white rounded-xl text-sm font-semibold hover:bg-emerald-800 transition">
+          + Invite Member
+        </button>
+      </div>
+    </div>
+
+    <!-- Seat limit upgrade callout — shown when plan doesn't support team members -->
+    <div id="seat-limit-callout" class="hidden mb-5 flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+      <span class="text-amber-500 text-lg mt-0.5">⚠️</span>
+      <div class="flex-1">
+        <p class="text-sm font-semibold text-amber-900">Team members not available on your current plan</p>
+        <p id="seat-limit-callout-msg" class="text-xs text-amber-700 mt-0.5">Upgrade your plan to invite colleagues and collaborate in your workspace.</p>
+      </div>
+      <a href="#" onclick="window.loadView && window.loadView('billing')" class="shrink-0 px-3 py-1.5 bg-amber-600 text-white text-xs font-bold rounded-lg hover:bg-amber-700 transition">
+        Upgrade Plan
+      </a>
+    </div>
+
+    <!-- Member table (SC2) -->
+    <div class="border border-gray-200 rounded-xl overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 border-b border-gray-200">
+          <tr>
+            <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Member</th>
+            <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Role</th>
+            <th class="px-4 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Joined</th>
+            <th class="px-4 py-3 text-right text-xs font-bold text-gray-500 uppercase tracking-wide">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="member-list-body" class="divide-y divide-gray-100">
+          <tr><td colspan="4" class="px-4 py-8 text-center text-gray-400 text-sm">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Error / empty state -->
+    <div id="team-error" class="hidden mt-4 text-sm text-red-600 font-medium"></div>
+
+    <!-- #2: business-domain auto-join (owner/admin only) -->
+    <div id="domain-join-row" class="hidden mt-5 pt-5 border-t border-gray-100 flex items-start justify-between gap-4">
+      <div class="min-w-0">
+        <p class="text-sm font-semibold text-gray-900">Let people with a company email join automatically</p>
+        <p id="domain-join-desc" class="text-xs text-gray-500 mt-0.5">Anyone who signs up with an email at your business domain joins this workspace instead of creating their own.</p>
+        <p id="domain-join-hint" class="hidden text-xs text-amber-600 mt-1"></p>
+      </div>
+      <button type="button" id="domain-join-toggle" role="switch" aria-checked="false"
+        class="bg-red-500 relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none">
+        <span aria-hidden="true" class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+      </button>
+    </div>
+  </section>
+  </div><!-- /panel: team -->
+
+  <!-- ── Invite Member Modal (SC1/SC4) ───────────────────────────────── -->
+  <div id="invite-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-md mx-4">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+        <h2 class="text-base font-bold text-gray-900">Invite Team Member</h2>
+        <button onclick="document.getElementById('invite-modal').classList.add('hidden')"
+                class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+      </div>
+      <div class="px-6 py-5 space-y-4">
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">Email address</label>
+          <input id="invite-email" type="email" placeholder="colleague@example.com"
+                 class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">Role</label>
+          <select id="invite-role"
+                  class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+            <option value="member">Member — can use assistants and manage content</option>
+            <option value="viewer">Viewer — read-only access</option>
+            <option value="admin">Admin — full workspace management</option>
+          </select>
+        </div>
+        <div id="invite-error" class="hidden text-xs text-red-600 font-medium"></div>
+      </div>
+      <div class="px-6 pb-5 flex justify-end gap-3">
+        <button onclick="document.getElementById('invite-modal').classList.add('hidden')"
+                class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800">Cancel</button>
+        <button id="invite-submit-btn" onclick="window._submitInvite()"
+                class="px-5 py-2 bg-emerald-700 text-white rounded-xl text-sm font-semibold hover:bg-emerald-800 transition disabled:opacity-50">
+          Send Invite
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Change Role Modal (SC3) ─────────────────────────────────────── -->
+  <div id="role-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
+    <div class="bg-white rounded-2xl shadow-xl w-full max-w-sm mx-4">
+      <div class="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+        <h2 class="text-base font-bold text-gray-900">Change Role</h2>
+        <button onclick="document.getElementById('role-modal').classList.add('hidden')"
+                class="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+      </div>
+      <div class="px-6 py-5 space-y-4">
+        <p id="role-modal-name" class="text-sm text-gray-700 font-medium"></p>
+        <div>
+          <label class="block text-xs font-semibold text-gray-600 mb-1">New role</label>
+          <select id="role-modal-select"
+                  class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
+            <option value="admin">Admin</option>
+            <option value="member">Member</option>
+            <option value="viewer">Viewer</option>
+          </select>
+        </div>
+        <div id="role-error" class="hidden text-xs text-red-600 font-medium"></div>
+      </div>
+      <div class="px-6 pb-5 flex justify-end gap-3">
+        <button onclick="document.getElementById('role-modal').classList.add('hidden')"
+                class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800">Cancel</button>
+        <button id="role-submit-btn" onclick="window._submitRoleChange()"
+                class="px-5 py-2 bg-emerald-700 text-white rounded-xl text-sm font-semibold hover:bg-emerald-800 transition">
+          Save
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function initTeamManagementUI() {
+
+    const ROLE_LABELS = { owner: 'Owner', admin: 'Admin', member: 'Member', viewer: 'Viewer', invited: 'Pending Invite' };
+    const ROLE_BADGE  = {
+      owner:   'bg-purple-100 text-purple-700',
+      admin:   'bg-emerald-100 text-emerald-700',
+      member:  'bg-blue-100 text-blue-700',
+      viewer:  'bg-gray-100 text-gray-600',
+      invited: 'bg-amber-100 text-amber-700',
+    };
+
+    let _members   = [];
+    let _seatLimit = null;
+    let _roleTarget = null;
+
+    // ── Load ────────────────────────────────────────────────────────────
+    async function load() {
+      // Capture the view root so we can bail if the user navigates away before the
+      // async response arrives (loadView swaps the DOM out from under us, otherwise
+      // the callbacks below hit removed elements and throw "textContent of null").
+      const root = document.getElementById('team-management-root');
+      try {
+        const res = await fetch('/.netlify/functions/manage-members');
+        if (!root || !root.isConnected) return; // view was navigated away
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        _members   = data.members || [];
+        _seatLimit = data.seatLimit;
+        render(data);
+      } catch (e) {
+        if (!root || !root.isConnected) return; // don't touch DOM that navigation removed
+        const el = document.getElementById('team-error');
+        if (el) {
+          el.textContent = 'Failed to load team data. ' + (e.message || '');
+          el.classList.remove('hidden');
+        }
+      }
+    }
+
+    // ── Render ──────────────────────────────────────────────────────────
+    function render(data) {
+      const pill      = document.getElementById('seat-usage-pill');
+      const inviteBtn = document.getElementById('invite-member-btn');
+      const callout   = document.getElementById('seat-limit-callout');
+      const calloutMsg = document.getElementById('seat-limit-callout-msg');
+      const seatCount = data.seatCount || 0;
+      const seatLimit = data.seatLimit; // null = solo plan (no teams), 0 = unlimited, N = max N
+
+      // Determine whether inviting is allowed
+      // seatLimit null means the plan is solo-only (1 seat, no team feature)
+      const isSoloPlan  = seatLimit === null || seatLimit === 1;
+      const isAtLimit   = seatLimit > 1 && seatCount >= seatLimit;
+      const canInvite   = !isSoloPlan && !isAtLimit;
+
+      // SC1: Seat usage pill
+      if (seatLimit != null && seatLimit > 1) {
+        const pct = Math.round((seatCount / seatLimit) * 100);
+        pill.textContent = `${seatCount} / ${seatLimit} seats used`;
+        pill.className = `text-xs font-semibold px-3 py-1.5 rounded-full border ${
+          pct >= 100 ? 'bg-red-50 border-red-200 text-red-700' :
+          pct >= 80  ? 'bg-amber-50 border-amber-200 text-amber-700' :
+                      'bg-gray-50 border-gray-200 text-gray-700'
+        }`;
+        pill.classList.remove('hidden');
+      } else if (seatLimit === 0) {
+        pill.textContent = `${seatCount} seat${seatCount === 1 ? '' : 's'}`;
+        pill.className = 'text-xs font-semibold px-3 py-1.5 rounded-full border bg-gray-50 border-gray-200 text-gray-700';
+        pill.classList.remove('hidden');
+      } else {
+        pill.classList.add('hidden');
+      }
+
+      // Disable Invite button and show upgrade callout when plan doesn't support teams
+      if (inviteBtn) {
+        if (!canInvite) {
+          inviteBtn.disabled = true;
+          inviteBtn.className = 'px-4 py-2 bg-gray-200 text-gray-400 rounded-xl text-sm font-semibold cursor-not-allowed transition';
+        } else {
+          inviteBtn.disabled = false;
+          inviteBtn.className = 'px-4 py-2 bg-emerald-700 text-white rounded-xl text-sm font-semibold hover:bg-emerald-800 transition';
+        }
+      }
+      if (callout) {
+        if (isSoloPlan) {
+          calloutMsg.textContent = 'Team collaboration is available on higher plans. Upgrade to invite colleagues to your workspace.';
+          callout.classList.remove('hidden');
+        } else if (isAtLimit) {
+          calloutMsg.textContent = `You've used all ${seatLimit} seats on your plan. Upgrade to add more team members.`;
+          callout.classList.remove('hidden');
+        } else {
+          callout.classList.add('hidden');
+        }
+      }
+
+      // SC2: Member list
+      const tbody = document.getElementById('member-list-body');
+      if (!data.members || data.members.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" class="px-4 py-8 text-center text-gray-400 text-sm">No members yet. Click "Invite Member" to get started.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = data.members.map(m => {
+        const role     = m.role || 'member';
+        const fullName = [m.firstName, m.lastName].filter(Boolean).join(' ');
+        const joined   = m.joinedAt
+          ? new Date(m.joinedAt).toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' })
+          : '—';
+        const isOwner   = role === 'owner';
+        const isInvited = role === 'invited';
+        const displayName = fullName || m.email || '—';
+        let actions = '';
+        if (!isOwner) {
+          actions = `<div class="flex items-center justify-end gap-2">`;
+          if (isInvited) {
+            // SC6: Resend invite
+            actions += `<button onclick="window._resendInvite('${m.email}')"
+                                 class="text-xs text-amber-600 hover:text-amber-800 font-medium underline">Resend</button>
+                        <span class="text-gray-300">·</span>`;
+          } else {
+            actions += `<button onclick="window._openRoleModal(${m.userId}, '${displayName.replace(/'/g,"\\'")}', '${role}')"
+                                 class="text-xs text-gray-500 hover:text-emerald-700 font-medium underline">Change Role</button>
+                        <span class="text-gray-300">·</span>`;
+          }
+          actions += `<button onclick="window._removeMember(${m.userId}, '${displayName.replace(/'/g,"\\'")}')"
+                               class="text-xs text-red-500 hover:text-red-700 font-medium underline">Remove</button>
+                      </div>`;
+        }
+        return `
+          <tr class="hover:bg-gray-50 transition">
+            <td class="px-4 py-3">
+              <p class="font-semibold text-gray-900">${fullName || (isInvited ? '<span class="text-gray-400 italic">Invite pending</span>' : '—')}</p>
+              <p class="text-gray-500 text-xs">${m.email || '—'}</p>
+            </td>
+            <td class="px-4 py-3">
+              <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-semibold ${ROLE_BADGE[role] || ROLE_BADGE.member}">
+                ${ROLE_LABELS[role] || role}
+              </span>
+            </td>
+            <td class="px-4 py-3 text-gray-500 text-xs">${joined}</td>
+            <td class="px-4 py-3">${actions}</td>
+          </tr>`;
+      }).join('');
+    }
+
+    // ── Invite Modal ────────────────────────────────────────────────────
+    window._openInviteModal = function () {
+      document.getElementById('invite-email').value  = '';
+      document.getElementById('invite-role').value   = 'member';
+      document.getElementById('invite-error').classList.add('hidden');
+      document.getElementById('invite-modal').classList.remove('hidden');
+      setTimeout(() => document.getElementById('invite-email').focus(), 50);
+    };
+
+    window._submitInvite = async function () {
+      const email = document.getElementById('invite-email').value.trim();
+      const role  = document.getElementById('invite-role').value;
+      const errEl = document.getElementById('invite-error');
+      const btn   = document.getElementById('invite-submit-btn');
+
+      errEl.classList.add('hidden');
+      if (!email) { errEl.textContent = 'Please enter an email address.'; errEl.classList.remove('hidden'); return; }
+
+      btn.disabled = true;
+      btn.textContent = 'Sending…';
+      try {
+        const res  = await fetch('/.netlify/functions/invite-member', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, role }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          errEl.textContent = data.error || 'Failed to send invite.';
+          errEl.classList.remove('hidden');
+          return;
+        }
+        document.getElementById('invite-modal').classList.add('hidden');
+        await load();
+      } catch {
+        errEl.textContent = 'Network error. Please try again.';
+        errEl.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Send Invite';
+      }
+    };
+
+    // ── SC6: Resend invite ──────────────────────────────────────────────
+    window._resendInvite = async function (email) {
+      try {
+        const res  = await fetch('/.netlify/functions/invite-member', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, resend: true }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) { window.showToast?.(data.error || 'Failed to resend invite.', { icon: '⚠️' }); return; }
+        window.showToast?.(`Invitation resent to ${email}.`, { icon: '✅' });
+      } catch { window.showToast?.('Network error. Please try again.', { icon: '⚠️' }); }
+    };
+
+    // ── SC3: Change Role Modal ──────────────────────────────────────────
+    window._openRoleModal = function (userId, name, currentRole) {
+      _roleTarget = { userId, name, currentRole };
+      document.getElementById('role-modal-name').textContent = `Changing role for: ${name}`;
+      document.getElementById('role-modal-select').value = currentRole;
+      document.getElementById('role-error').classList.add('hidden');
+      document.getElementById('role-modal').classList.remove('hidden');
+    };
+
+    window._submitRoleChange = async function () {
+      if (!_roleTarget) return;
+      const newRole = document.getElementById('role-modal-select').value;
+      const errEl   = document.getElementById('role-error');
+      const btn     = document.getElementById('role-submit-btn');
+      errEl.classList.add('hidden');
+
+      if (newRole === _roleTarget.currentRole) {
+        document.getElementById('role-modal').classList.add('hidden');
+        return;
+      }
+
+      btn.disabled = true;
+      try {
+        const res  = await fetch(`/.netlify/functions/manage-members?id=${_roleTarget.userId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: newRole }),
+        });
+        const data = await res.json();
+        if (!res.ok || data.error) {
+          errEl.textContent = data.error || 'Failed to change role.';
+          errEl.classList.remove('hidden');
+          return;
+        }
+        document.getElementById('role-modal').classList.add('hidden');
+        await load();
+      } catch {
+        errEl.textContent = 'Network error. Please try again.';
+        errEl.classList.remove('hidden');
+      } finally {
+        btn.disabled = false;
+      }
+    };
+
+    // ── SC4 (SC4a–SC4d): Remove Member ─────────────────────────────────
+    window._removeMember = async function (userId, name) {
+      if (!confirm(`Remove ${name} from this workspace?\n\nThey will be notified by email and lose access immediately.`)) return;
+      try {
+        const res  = await fetch(`/.netlify/functions/manage-members?id=${userId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (!res.ok || data.error) { alert(data.error || 'Failed to remove member.'); return; }
+        await load();
+      } catch { alert('Network error. Please try again.'); }
+    };
+
+    // Close modals on backdrop click
+    ['invite-modal', 'role-modal'].forEach(id => {
+      document.getElementById(id).addEventListener('click', function (e) {
+        if (e.target === this) this.classList.add('hidden');
+      });
+    });
+
+    // ── #2: business-domain auto-join toggle (owner/admin only) ──────────
+    async function initDomainJoin() {
+      const row = document.getElementById('domain-join-row');
+      const toggle = document.getElementById('domain-join-toggle');
+      const desc = document.getElementById('domain-join-desc');
+      const hint = document.getElementById('domain-join-hint');
+      if (!row || !toggle) return;
+      let profile;
+      try {
+        const res = await fetch('/.netlify/functions/organisation-profile');
+        if (!res.ok) return;
+        profile = (await res.json()).profile;
+      } catch { return; }
+      if (!profile || !profile.canManageDomainJoin) return; // owners/admins only
+
+      const setView = (on) => {
+        toggle.setAttribute('aria-checked', on ? 'true' : 'false');
+        toggle.classList.toggle('bg-green-500', on);
+        toggle.classList.toggle('bg-red-500', !on);
+        toggle.querySelector('span').classList.toggle('translate-x-5', on);
+        toggle.querySelector('span').classList.toggle('translate-x-0', !on);
+      };
+      const domain = profile.effectiveDomain;
+      if (domain) desc.textContent = `Anyone who signs up with an @${domain} email joins this workspace instead of creating their own.`;
+      else { hint.textContent = 'Add a business email (public providers like gmail/outlook are not eligible) to enable this.'; hint.classList.remove('hidden'); }
+      setView(!!profile.allowDomainJoin);
+      row.classList.remove('hidden');
+
+      toggle.addEventListener('click', async () => {
+        const next = toggle.getAttribute('aria-checked') !== 'true';
+        setView(next); // optimistic
+        try {
+          const res = await fetch('/.netlify/functions/organisation-profile', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ allowDomainJoin: next }),
+          });
+          const d = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            setView(!next); // revert
+            hint.textContent = d.error || 'Could not update this setting.';
+            hint.classList.remove('hidden');
+          } else if (d.businessDomain) {
+            desc.textContent = `Anyone who signs up with an @${d.businessDomain} email joins this workspace instead of creating their own.`;
+            hint.classList.add('hidden');
+          }
+        } catch { setView(!next); }
+      });
+    }
+
+    load();
+    initDomainJoin();
+  })();
+  </script>
+
+  <!-- ══ Brand Assets ═══════════════════════════════════════════════════════ -->
+  <div class="bizinfo-tab-panel hidden" data-panel="assets">
+  <!-- ── Brand assets ─────────────────────────────────────────────────────── -->
+  <div class="mb-4">
+    <h2 class="text-lg font-extrabold text-gray-900">Brand assets</h2>
+    <p class="text-sm text-gray-500 mt-0.5">Upload brand guidelines, logos, and knowledge documents.</p>
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -48,11 +728,10 @@
             <div id="zone-url" class="hidden">
               <label for="external-url" class="block text-sm font-bold text-gray-700 mb-1">External Resource URL</label>
               <input type="url" id="external-url" placeholder="https://yourcompany.com/about" class="w-full px-4 py-3 rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none transition-all">
+              <p class="text-xs text-gray-400 mt-1.5">Press Enter to add the URL.</p>
             </div>
 
-            <button type="submit" id="submit-asset-btn" class="w-full block text-center px-6 py-3 text-sm font-bold rounded-xl text-white bg-gray-900 hover:bg-black shadow-md transition-all">
-              Upload Asset
-            </button>
+            <p id="asset-upload-status" class="hidden text-xs font-semibold text-emerald-700 text-center"></p>
           </form>
         </div>
       </div>
@@ -61,8 +740,9 @@
     <!-- Workspace Library (Right Column) -->
     <div class="lg:col-span-2 space-y-6">
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col h-full">
-        <div class="px-6 py-5 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center">
+        <div class="px-6 py-5 border-b border-gray-100 bg-gray-50/50">
           <h3 class="text-lg font-bold text-gray-900">Workspace Library</h3>
+          <p class="text-xs text-gray-500 mt-1"><span class="font-semibold">Pending</span> means an upload didn't finish, so the file isn't available yet — remove it and try again.</p>
         </div>
         <div class="p-0 flex-1 overflow-y-auto">
           <ul id="asset-list" class="divide-y divide-gray-100"></ul>
@@ -71,4 +751,18 @@
     </div>
 
   </div>
+  </div><!-- /panel: assets -->
+
+  <!-- ── Tab switching (mirrors Account Settings) ─────────────────────────── -->
+  <script>
+  (function () {
+    const tabs = Array.from(document.querySelectorAll('#bizinfo-tabs .bizinfo-tab'));
+    const panels = Array.from(document.querySelectorAll('.bizinfo-tab-panel'));
+    function activate(name) {
+      tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+      panels.forEach(p => p.classList.toggle('hidden', p.dataset.panel !== name));
+    }
+    tabs.forEach(t => t.addEventListener('click', () => activate(t.dataset.tab)));
+  })();
+  </script>
 </div>

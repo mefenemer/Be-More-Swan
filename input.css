@@ -117,3 +117,13 @@ input[type="radio"]:checked + div .radio-indicator {
     cursor: not-allowed !important;
     filter: grayscale(100%);
 }
+
+/* Interactive elements get a pointer cursor.
+   Tailwind v4's Preflight no longer sets cursor:pointer on buttons, so without this
+   buttons (e.g. "Upload Asset", "Hire Role") show the default arrow on hover.
+   Scoped to :not(:disabled) so disabled buttons keep their not-allowed/default cursor. */
+button:not(:disabled),
+[role="button"]:not([aria-disabled="true"]),
+summary {
+    cursor: pointer;
+}

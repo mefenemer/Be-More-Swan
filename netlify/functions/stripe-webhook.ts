@@ -4,6 +4,8 @@ import { eq, and, inArray, desc, sql } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
 import { payments, plans, aiAssistants, onboardingDrafts, notifications, users, masterPlans, planPrices, invoices, processedWebhookEvents, userReferrals, platformConfig, stripeDisputes, userOrganisations, userProfiles } from '../../db/schema';
 import { sendEmail, buildAnnualRenewalEmail, buildDunningEmail } from '../../src/utils/email';
+import { resolveActionNotifications, PAYMENT_RESTORED_TYPES } from '../../src/utils/notification-actions';
+import { recordCardFingerprint } from '../../src/utils/billing-fingerprint';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' });
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
@@ -79,7 +81,7 @@ export const handler: Handler = async (event) => {
         const masterPlanIdInt  = masterPlanId ? parseInt(masterPlanId) : null;
         const stripeCustomerId = typeof session.customer === 'string' ? session.customer : session.customer?.id ?? null;
         const stripeSubscriptionId = typeof session.subscription === 'string' ? session.subscription : session.subscription?.id ?? null;
-        const planName = metaPlanName || 'Aura-Assist Subscription';
+        const planName = metaPlanName || 'Be More Swan Subscription';
 
         // Create the active plan record — unique-constraint guard mirrors the payment_intent path
         let newPlan: typeof plans.$inferSelect;
@@ -156,13 +158,15 @@ export const handler: Handler = async (event) => {
         await db.insert(notifications).values({
             userId: userIdInt,
             type: 'welcome',
-            title: 'Welcome to Aura-Assist!',
-            message: 'Your workspace is ready. Open your User Guide to get started.',
+            title: 'Welcome to Be More Swan!',
+            message: 'Your workspace is ready. Open the Setup Wizard to build your AI assistant and go live.',
             isRead: false,
-            metadata: { ctaLabel: 'Open User Guide', ctaUrl: '/help.html' },
+            metadata: { action: 'open_wizard', ctaLabel: 'Open Setup Wizard' },
         }).catch(() => {});
 
-        // US-GAP-8.2: referral qualification + £10 reward (keyed on the referred user, like the PI path)
+        // Referral Program Expansion: earn a referral TOKEN (not an instant £10 credit).
+        // The token matures after the 14-day refund window and is then spendable in the
+        // Reward Vault for £10 credit or a free assistant.
         try {
             const [pendingReferral] = await db
                 .select({ id: userReferrals.id, referrerId: userReferrals.referrerId })
@@ -171,36 +175,21 @@ export const handler: Handler = async (event) => {
                 .limit(1);
 
             if (pendingReferral) {
-                const [referrerPlan] = await db
-                    .select({ stripeCustomerId: plans.stripeCustomerId })
-                    .from(plans)
-                    .where(and(eq(plans.userId, pendingReferral.referrerId), eq(plans.status, 'active')))
-                    .limit(1);
-
-                let balanceTxId: string | null = null;
-                if (referrerPlan?.stripeCustomerId) {
-                    const balanceTx = await stripe.customers.createBalanceTransaction(
-                        referrerPlan.stripeCustomerId,
-                        { amount: -1000, currency: (session.currency || 'gbp').toLowerCase(), description: 'Referral reward — friend made their first payment' },
-                    );
-                    balanceTxId = balanceTx.id;
-                }
-
                 await db.update(userReferrals)
-                    .set({ status: 'rewarded', qualifiedAt: new Date(), rewardedAt: new Date(), stripeBalanceTxId: balanceTxId })
+                    .set({ status: 'qualified', qualifiedAt: new Date() })
                     .where(eq(userReferrals.id, pendingReferral.id));
 
                 await db.insert(notifications).values({
                     userId: pendingReferral.referrerId,
                     type: 'referral_reward',
-                    title: '🎉 Referral Reward Earned — £10 Credit Applied',
-                    message: 'A friend you referred has signed up and made their first payment. We\'ve added a £10 credit to your account — it will be applied to your next invoice.',
+                    title: '🎉 Referral Token Earned',
+                    message: 'A friend you referred just made their first payment — you\'ve earned a referral token! It unlocks after their 14-day refund window. Save up 5 for a free assistant, or redeem 1 for £10 credit.',
                     isRead: false,
-                    metadata: { referralId: pendingReferral.id, rewardGbp: 10 },
+                    metadata: { referralId: pendingReferral.id },
                 });
             }
         } catch (refErr) {
-            console.warn('[stripe-webhook] checkout.session referral reward failed (non-blocking):', refErr);
+            console.warn('[stripe-webhook] checkout.session referral token grant failed (non-blocking):', refErr);
         }
 
         return { statusCode: 200, body: JSON.stringify({ received: true, activated: true }) };
@@ -237,6 +226,9 @@ export const handler: Handler = async (event) => {
                     cardLast4      = pm.card.last4      || null;
                     cardExpMonth   = pm.card.exp_month  || null;
                     cardExpYear    = pm.card.exp_year   || null;
+                    // US3 AC3.1/AC3.2: record the card fingerprint for this workspace and flag
+                    // billing_review_required if the same physical card is on ≥2 workspaces.
+                    if (orgIdInt) await recordCardFingerprint(db, orgIdInt, pm.card.fingerprint);
                 }
                 // Billing address postal code stored at checkout
                 cardPostalCode = pm.billing_details?.address?.postal_code || null;
@@ -246,78 +238,19 @@ export const handler: Handler = async (event) => {
         }
 
         // Look up plan name + keep masterPlan record for subscription creation below
-        let planName = tier ? `Aura-Assist (${tier})` : 'Aura-Assist Subscription';
+        let planName = tier ? `Be More Swan (${tier})` : 'Be More Swan Subscription';
         let masterPlan: typeof masterPlans.$inferSelect | null = null;
         if (masterPlanIdInt) {
             const [mp] = await db.select().from(masterPlans).where(eq(masterPlans.id, masterPlanIdInt)).limit(1);
             if (mp) { planName = mp.name; masterPlan = mp; }
         }
 
-        // Create Stripe subscription with the saved payment method for recurring billing.
-        // For annual subscriptions use inline price_data (interval: year); monthly uses the fixed price ID.
-        // We capture the subscription ID to store on the plan record for future upgrade/downgrade.
-        let createdStripeSubscriptionId: string | null = null;
-        if (pi.payment_method) {
-            const isAnnual  = billingCycle === 'annual';
-            const subMeta   = { userId, organisationId, tier: tier || '', masterPlanId: masterPlanId || '', billingCycle: billingCycle || 'monthly' };
-
-            try {
-                let createdSub: Stripe.Subscription | null = null;
-                if (isAnnual && masterPlan) {
-                    // US-I18N-2.1 SC6: use pi.currency from Stripe event, not hardcoded 'gbp'
-                    const piCurrency = (pi.currency || 'gbp').toLowerCase();
-
-                    // BUG-P0-6: Look up the per-currency price from planPrices; fall back to GBP only
-                    // if no planPrices row exists for this currency (with a warning for ops visibility).
-                    let monthlyPriceMajor = Number(masterPlan.monthlyPriceGbp);
-                    if (piCurrency !== 'gbp') {
-                        const [priceRow] = await db
-                            .select({ monthlyPriceMajorUnit: planPrices.monthlyPriceMajorUnit })
-                            .from(planPrices)
-                            .where(and(
-                                eq(planPrices.masterPlanId, masterPlan.id),
-                                eq(planPrices.currency, piCurrency.toUpperCase()),
-                                eq(planPrices.isActive, true),
-                            ))
-                            .limit(1);
-                        if (priceRow) {
-                            monthlyPriceMajor = Number(priceRow.monthlyPriceMajorUnit);
-                        } else {
-                            console.warn(`[stripe-webhook] No planPrices row for masterPlanId=${masterPlan.id} currency=${piCurrency.toUpperCase()} — falling back to GBP price`);
-                        }
-                    }
-                    const annualAmount = Math.round(monthlyPriceMajor * 12 * 0.80 * 100);
-                    // dahlia API requires price_data.product (an ID); create the product
-                    // explicitly (older API auto-created one from product_data).
-                    const annualProduct = await stripe.products.create({ name: masterPlan.name });
-                    createdSub = await stripe.subscriptions.create({
-                        customer: stripeCustomerId,
-                        items: [{
-                            price_data: {
-                                currency: piCurrency,
-                                product: annualProduct.id,
-                                unit_amount: annualAmount,
-                                recurring: { interval: 'year' },
-                            },
-                        }],
-                        default_payment_method: pi.payment_method as string,
-                        proration_behavior: 'none',
-                        metadata: subMeta,
-                    });
-                } else if (stripePriceId) {
-                    createdSub = await stripe.subscriptions.create({
-                        customer: stripeCustomerId,
-                        items: [{ price: stripePriceId }],
-                        default_payment_method: pi.payment_method as string,
-                        proration_behavior: 'none',
-                        metadata: subMeta,
-                    });
-                }
-                if (createdSub) createdStripeSubscriptionId = createdSub.id;
-            } catch (err) {
-                console.error('[stripe-webhook] Subscription creation failed:', err);
-            }
-        }
+        // The Stripe subscription is now created up-front by create-subscription.ts using the
+        // `default_incomplete` pattern, and THIS PaymentIntent is that subscription's first
+        // invoice payment. We must NOT create another subscription here — doing so charged the
+        // customer a second time for the first period. Carry the existing subscription id
+        // (stamped onto the PI metadata at creation) onto the plan record below.
+        const createdStripeSubscriptionId: string | null = pi.metadata?.stripeSubscriptionId || null;
 
         // Create plan record — include Stripe references for future upgrade/downgrade/cancel.
         // BUG-P0-4: Wrap in try-catch to handle the plans_one_active_per_org_unique violation
@@ -416,15 +349,16 @@ export const handler: Handler = async (event) => {
         await db.insert(notifications).values({
             userId: userIdInt,
             type: 'welcome',
-            title: 'Welcome to Aura-Assist!',
-            message: 'Your workspace is ready. Open your User Guide to get started.',
+            title: 'Welcome to Be More Swan!',
+            message: 'Your workspace is ready. Open the Setup Wizard to build your AI assistant and go live.',
             isRead: false,
-            metadata: { ctaLabel: 'Open User Guide', ctaUrl: '/help.html' },
+            metadata: { action: 'open_wizard', ctaLabel: 'Open Setup Wizard' },
         }).catch(() => {});
 
-        // ── US-GAP-8.2: Referral qualification + £10 reward ──────────
-        // If this new paying user was referred, mark the referral 'qualified' and
-        // apply a £10 Stripe customer balance credit to the referrer.
+        // ── Referral Program Expansion: earn a referral TOKEN ────────
+        // The referred friend's first payment qualifies the referral. We no longer apply
+        // an instant £10 credit — the referrer gets a token (matures after the 14-day
+        // refund window) to spend in the Reward Vault for £10 credit or a free assistant.
         try {
             const [pendingReferral] = await db
                 .select({ id: userReferrals.id, referrerId: userReferrals.referrerId })
@@ -433,41 +367,21 @@ export const handler: Handler = async (event) => {
                 .limit(1);
 
             if (pendingReferral) {
-                // Look up referrer's Stripe customer id from their active plan
-                const [referrerPlan] = await db
-                    .select({ stripeCustomerId: plans.stripeCustomerId })
-                    .from(plans)
-                    .where(and(eq(plans.userId, pendingReferral.referrerId), eq(plans.status, 'active')))
-                    .limit(1);
-
-                let balanceTxId: string | null = null;
-
-                if (referrerPlan?.stripeCustomerId) {
-                    // Apply £10 credit (negative amount = credit in Stripe)
-                    const balanceTx = await stripe.customers.createBalanceTransaction(
-                        referrerPlan.stripeCustomerId,
-                        { amount: -1000, currency: (pi.currency || 'gbp').toLowerCase(), description: 'Referral reward — friend made their first payment' },
-                    );
-                    balanceTxId = balanceTx.id;
-                }
-
-                // Update referral row
                 await db.update(userReferrals)
-                    .set({ status: 'rewarded', qualifiedAt: new Date(), rewardedAt: new Date(), stripeBalanceTxId: balanceTxId })
+                    .set({ status: 'qualified', qualifiedAt: new Date() })
                     .where(eq(userReferrals.id, pendingReferral.id));
 
-                // Notify referrer
                 await db.insert(notifications).values({
                     userId: pendingReferral.referrerId,
                     type: 'referral_reward',
-                    title: '🎉 Referral Reward Earned — £10 Credit Applied',
-                    message: 'A friend you referred has signed up and made their first payment. We\'ve added a £10 credit to your account — it will be applied to your next invoice.',
+                    title: '🎉 Referral Token Earned',
+                    message: 'A friend you referred just made their first payment — you\'ve earned a referral token! It unlocks after their 14-day refund window. Save up 5 for a free assistant, or redeem 1 for £10 credit.',
                     isRead: false,
-                    metadata: { referralId: pendingReferral.id, rewardGbp: 10 },
+                    metadata: { referralId: pendingReferral.id },
                 });
             }
         } catch (refErr) {
-            console.warn('[stripe-webhook] Referral reward failed (non-blocking):', refErr);
+            console.warn('[stripe-webhook] Referral token grant failed (non-blocking):', refErr);
         }
     }
 
@@ -524,7 +438,7 @@ export const handler: Handler = async (event) => {
                     if (userRow?.email) {
                         await sendEmail({
                             to: userRow.email,
-                            subject: `Your Aura-Assist™ annual plan renews on ${renewalDay}`,
+                            subject: `Your Be More Swan annual plan renews on ${renewalDay}`,
                             html: buildAnnualRenewalEmail(userRow.firstName || 'there', renewalDay, amount),
                         // BUG-P1-1: Log at error level so this surfaces in alerts — compliance-critical email
                         }).catch(err => console.error('[stripe-webhook] Annual renewal compliance email failed:', { userId, err: (err as any)?.message }));
@@ -631,7 +545,7 @@ export const handler: Handler = async (event) => {
             const renewInv = await _createInvoice({
                 userId,
                 planId:               renewPlanRecord?.id ?? null,
-                planName:             renewPlanRecord?.planName ?? 'Aura-Assist Subscription',
+                planName:             renewPlanRecord?.planName ?? 'Be More Swan Subscription',
                 amountPence:          invoice.amount_paid || 0,
                 currency:             invoice.currency || 'gbp',
                 billingPeriodStart:   periodStart,
@@ -674,6 +588,10 @@ export const handler: Handler = async (event) => {
                         eq(aiAssistants.provisioningStatus, 'paused_payment'),
                     ));
             }
+
+            // Auto-resolve any open "your billing is broken" action items — the payment
+            // just succeeded, so the prompt to fix it is moot whether or not the plan was past_due.
+            await resolveActionNotifications(db, userId, PAYMENT_RESTORED_TYPES);
 
             // In-app notification: Subscription renewed
             if (billingReason === 'subscription_cycle') {

@@ -10,6 +10,7 @@
 import { getDb } from '../../db/client';
 import { adminAuditLog } from '../../db/schema';
 import { pseudonymiseIp } from './ip-pseudonymise';
+import { runWithEnvironment } from './env-context';
 
 export type AdminAction =
     | 'impersonate_start'
@@ -22,6 +23,7 @@ export type AdminAction =
     | 'comp_credit'
     | 'refund_issued'
     | 'kill_switch_toggle'
+    | 'gamification_config_update'
     | 'feature_flag_toggle'
     | 'gdpr_erasure'
     | 'admin_role_change'
@@ -34,7 +36,10 @@ export type AdminAction =
     | 'regulator_notification_submitted'
     | 'assistant_state_change'
     | 'record_delete'
-    | 'retry_failed_post';
+    | 'retry_failed_post'
+    | 'sandbox_purge'
+    | 'sandbox_seed'
+    | 'email_template_edit';
 
 export interface AdminAuditParams {
     adminId: number;
@@ -55,7 +60,11 @@ export interface AdminAuditParams {
  */
 export async function insertAdminAuditLog(params: AdminAuditParams): Promise<void> {
     try {
-        const db = getDb();
+        // Admin audit is a compliance record of what the admin DID — it must always
+        // land in the live database, even when the admin was operating in sandbox
+        // mode (env-context.ts). Force the live connection regardless of the active
+        // request environment.
+        const db = await runWithEnvironment('live', async () => getDb());
         await db.insert(adminAuditLog).values({
             adminId:       params.adminId,
             action:        params.action,

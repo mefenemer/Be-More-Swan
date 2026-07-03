@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Performance Marketer Setup | Aura-Assist</title>
+  <title>Performance Marketer Setup | Be More Swan</title>
   <link href="./style.css" rel="stylesheet">
+  <script src="./explainers.js?v=20260630-2" defer></script>
 </head>
 <body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
 
@@ -29,7 +30,7 @@
     <div class="flex justify-between h-16 items-center">
       <div class="flex items-center">
         <a href="index.html" class="flex items-center">
-          <span class="font-extrabold text-2xl text-emerald-700 tracking-tight">Aura-Assist&#8482;</span>
+          <span class="font-extrabold text-2xl text-emerald-700 tracking-tight">Be More Swan</span>
         </a>
         <span class="text-base font-medium text-gray-400 ml-2">| Performance Marketer Blueprint</span>
       </div>
@@ -280,7 +281,7 @@
               <input type="text" id="val_pillars" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm" placeholder="What specific pain points or hooks should these new ads test?">
             </div>
             <div>
-              <label class="block text-sm font-bold text-gray-700 mb-1">Ad Copy Style & Tone:</label>
+              <label class="block text-sm font-bold text-gray-700 mb-1" data-explain="tone-of-voice">Ad Copy Style & Tone:</label>
               <input type="text" id="val_tone" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm" placeholder="e.g., Direct response, founder story, listicle, urgency-driven.">
             </div>
             <div>
@@ -290,9 +291,9 @@
             <div>
               <label class="block text-sm font-bold text-gray-700 mb-1">Creative Asset Setup:</label>
               <select id="val_visuals" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm bg-white">
-                <option>I will provide ready-to-post assets in a linked folder</option>
-                <option>Generate AI Images (e.g., Midjourney / DALL-E)</option>
-                <option>Apply my branded templates (Requires Canva/Bannerbear setup)</option>
+                <option>I will provide my own ready-to-post assets</option>
+                <option>Generate AI Images &amp; Video (Flux + Hailuo)</option>
+                <option>Use Free Stock Photos &amp; Videos (Pexels)</option>
               </select>
             </div>
             <div>
@@ -321,7 +322,7 @@
             <span class="text-xl mr-1">+</span> Add Next Step
           </button>
 
-          <label class="block text-sm font-bold text-gray-700 mb-2">Strict Rules & Exceptions: *</label>
+          <label class="block text-sm font-bold text-gray-700 mb-2" data-explain="guardrails">Strict Rules & Exceptions: *</label>
           <div class="relative mb-6">
             <textarea id="acceptance_criteria_rules" rows="3" class="w-full border border-gray-300 rounded-lg p-4 focus:ring-2 focus:ring-emerald-700 transition shadow-sm resize-none" placeholder="e.g., Never bid over the Cost Cap."></textarea>
           </div>
@@ -355,11 +356,11 @@
           <div class="mt-4 space-y-4 text-left text-sm text-gray-600 border-t border-gray-100 pt-6">
             <label class="flex items-start gap-3 cursor-pointer">
               <input type="checkbox" name="legal_consent" class="mt-1 h-5 w-5 text-emerald-700" required>
-              <span>I grant Aura-Assist permission to process my business data for the sole purpose of executing my requested workflows.</span>
+              <span>I grant Be More Swan permission to process my business data for the sole purpose of executing my requested workflows.</span>
             </label>
             <label class="flex items-start gap-3 cursor-pointer">
               <input type="checkbox" name="no_training_consent" class="mt-1 h-5 w-5 text-emerald-700" required>
-              <span>I acknowledge that Aura-Assist does <strong>not</strong> use my proprietary business data to train public AI models.</span>
+              <span>I acknowledge that Be More Swan does <strong>not</strong> use my proprietary business data to train public AI models.</span>
             </label>
             <label class="flex items-start gap-3 cursor-pointer">
               <input type="checkbox" name="tos_consent" class="mt-1 h-5 w-5 text-emerald-700" required>

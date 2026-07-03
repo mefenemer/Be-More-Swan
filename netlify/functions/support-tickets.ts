@@ -9,8 +9,8 @@ import { checkRateLimit } from '../../src/utils/rate-limit';
 import { checkEarlySupportTicket } from '../../src/utils/churn';
 import { requireTenant } from '../../src/utils/tenant';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-const FROM_EMAIL = process.env.FROM_EMAIL || 'support@aura-assist.com';
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
+const FROM_EMAIL = process.env.FROM_EMAIL || 'support@bemoreswan.com';
 
 export const handler = async (event: HandlerEvent) => {
     const db = getDb();
@@ -44,7 +44,7 @@ export const handler = async (event: HandlerEvent) => {
                     statusCode: 429,
                     headers: { 'Retry-After': String(rlSupport.retryAfterSecs) },
                     body: JSON.stringify({
-                        error: 'Daily ticket limit reached. Please contact hello@aura-assist.com directly.',
+                        error: 'Daily ticket limit reached. Please contact hello@bemoreswan.com directly.',
                     }),
                 };
             }
@@ -101,7 +101,7 @@ export const handler = async (event: HandlerEvent) => {
 <body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
   <div style="max-width:560px;margin:40px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08)">
     <div style="background:#111827;padding:28px 32px;text-align:center">
-      <span style="color:#10b981;font-size:28px;font-weight:800;letter-spacing:-1px">Aura</span>
+      <span style="color:#10b981;font-size:28px;font-weight:800;letter-spacing:-1px">Be More Swan</span>
       <span style="color:#fff;font-size:28px;font-weight:800;letter-spacing:-1px">-Assist</span>
     </div>
     <div style="padding:32px">
@@ -132,7 +132,7 @@ export const handler = async (event: HandlerEvent) => {
     </div>
     <div style="background:#f9fafb;padding:20px 32px;text-align:center;border-top:1px solid #e5e7eb">
       <p style="margin:0;color:#9ca3af;font-size:13px">Please do not reply to this email.<br>
-        To add information to your ticket, log into your <a href="${process.env.BASE_URL || 'https://aura-assist.com'}/workspace.html" style="color:#10b981;text-decoration:none">Aura workspace</a>.
+        To add information to your ticket, log into your <a href="${process.env.BASE_URL || 'https://bemoreswan.com'}/workspace.html" style="color:#10b981;text-decoration:none">Be More Swan workspace</a>.
       </p>
     </div>
   </div>

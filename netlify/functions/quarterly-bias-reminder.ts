@@ -17,7 +17,7 @@ const CHECKLIST = [
 
 const handler = async () => {
     const db = getDb();
-    const BASE = process.env.BASE_URL || 'https://aura-assist.com';
+    const BASE = process.env.BASE_URL || 'https://bemoreswan.com';
 
     const superAdmins = await db.select({ id: users.id, email: users.email, firstName: users.firstName })
         .from(users)
@@ -37,7 +37,7 @@ const handler = async () => {
         if (admin.email) {
             await sendEmail({
                 to: admin.email,
-                subject: '[Aura-Assist] Quarterly Bias Prompt Review Due',
+                subject: '[Be More Swan] Quarterly Bias Prompt Review Due',
                 html: `<p>Hi ${admin.firstName || 'there'},</p>
 <p>It's time for the <strong>quarterly bias review</strong> of all masterAssistant system prompts.</p>
 <p>Please review the following checklist for each active assistant:</p>

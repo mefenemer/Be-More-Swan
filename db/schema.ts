@@ -14,6 +14,7 @@ import {
   index,
   check,
   uuid,
+  date,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -31,6 +32,42 @@ export const organisations = pgTable('organisations', {
   // US-LEGAL-3.1: EU AI Act Art.50 — outbound AI content footer
   aiDisclosureFooterEnabled: boolean('ai_disclosure_footer_enabled').notNull().default(false),
   aiDisclosureFooterText: text('ai_disclosure_footer_text'),
+  // US3 AC3.3: opt-in "Photo by … on Pexels" attribution line appended to drafts sourced from Pexels.
+  pexelsAttributionEnabled: boolean('pexels_attribution_enabled').notNull().default(false),
+  // Epic 3 US8: AI approvals email digest cadence — 'off' | 'daily' | 'weekly'. db/ai-digest.sql.
+  aiDigestFrequency: text('ai_digest_frequency').notNull().default('off'),
+  // Referral Program Expansion: extra assistant slots unlocked by redeeming referral tokens.
+  // Stacks ON TOP of the Stripe tier's assistantLimit, so plan syncing is never touched (AC2.2/AC4.2).
+  bonusAssistants: integer('bonus_assistants').notNull().default(0),
+  // Business profile — assistant-facing context captured on the Business Information page.
+  // (Legal/tax/registered-address details live in `billingInformation`, not here.)
+  industry: text('industry'),
+  businessDescription: text('business_description'),
+  // Business-domain org grouping (#2). business_domain = the org owner's non-public email
+  // host (null for public providers). allow_domain_join = owner opt-in: new signups with a
+  // matching domain join this org instead of creating their own. domain_verified is reserved
+  // for future DNS/email domain-ownership verification (owner opt-in is the gate for now).
+  businessDomain: text('business_domain'),
+  domainVerified: boolean('domain_verified').notNull().default(false),
+  allowDomainJoin: boolean('allow_domain_join').notNull().default(false),
+  websiteUrl: text('website_url'),
+  socialLinks: text('social_links'),
+  // Per-platform social handles/URLs captured on Business Information, keyed by
+  // lowercase platform slug ({ instagram, facebook, linkedin, x, tiktok, ... }).
+  // Single source of truth for handles; gates which Connections can be enabled.
+  socialHandles: jsonb('social_handles').$type<Record<string, string>>(),
+  targetAudience: text('target_audience'),
+  // Gamification & Engagement:
+  onboardingCompleted: boolean('onboarding_completed').notNull().default(false), // AC1.1.3 — 3-step widget done
+  // Onboarding Wizard Step 5 (Compliance) — stamped when the AI-usage / data-processing
+  // agreement is accepted (US6 AC2). NULL = not yet accepted. See get-wizard-state.ts.
+  complianceAcceptedAt: timestamp('compliance_accepted_at'),
+  betaAccess: boolean('beta_access').notNull().default(false),                    // AC3.1.2 — 50h-saved milestone
+  bonusReferralTokens: integer('bonus_referral_tokens').notNull().default(0),     // AC3.1.3 — milestone token drops into the vault
+  // Abuse Prevention US3: Stripe card fingerprint (hash of the physical card) for this workspace's
+  // payment method, + the flag raised when the same fingerprint is seen on ≥2 workspaces.
+  cardFingerprint: text('card_fingerprint'),
+  billingReviewRequired: boolean('billing_review_required').notNull().default(false),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
@@ -249,8 +286,37 @@ export const aiAssistants = pgTable("ai_assistants", {
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-  // provisioningStatus: 'pending' | 'complete' | 'failed' | 'cancelled' | 'paused_limit' | 'paused_payment'
+  // provisioningStatus: 'pending' | 'complete' | 'failed' | 'cancelled' | 'paused_limit' | 'paused_payment' | 'blocked'
+  // 'blocked' = a compliance/readiness gate stopped provisioning (see provisioningBlockedReason).
+  // It still derives lifecycle_status='provisioning', but is distinguishable + user-actionable +
+  // re-triggerable (retry-provision-assistant / retryBlockedAssistants). db/assistant-provisioning-blocked.sql.
   provisioningStatus: text("provisioning_status").default("pending"),
+  // When provisioningStatus='blocked', the machine reason code (ProvisioningBlockReason in
+  // src/utils/assistant-lifecycle.ts): disclosure_missing | tos_required | prohibited_use_ack
+  // | dpa_required | high_risk_eu. Cleared (null) once provisioning succeeds or is retried.
+  provisioningBlockedReason: text("provisioning_blocked_reason"),
+  // Canonical lifecycle state machine (assistant-lifecycle-epic):
+  //   provisioning | ready_for_work | working | paused | system_paused | archived
+  // Kept in sync with the legacy (provisioningStatus, isActive) pair by a DB trigger; the
+  // transitionAssistantStatus() helper writes forward-only states (e.g. ready_for_work).
+  // Schema + trigger live in db/assistant-lifecycle-status.sql (apply manually).
+  lifecycleStatus: text("lifecycle_status").notNull().default("provisioning"),
+  // SMART Goals US3.3 — Autonomous Goal Seeking: when on, the optimizer cron may rewrite allowed
+  // brief params (tone/frequency) if a goal goes off_track. Premium-tier gated. db/goal-autonomous.sql.
+  autonomousGoalSeeking: boolean("autonomous_goal_seeking").notNull().default(false),
+
+  // Epic 2 US5 — Autonomous AI media suggestions: when on, a daily cron drafts posts (copy +
+  // AI-generated media) into the AI review queue, never auto-published. The monthly cap limits
+  // autonomous credit spend. db/autonomous-media.sql.
+  autonomousMediaEnabled: boolean("autonomous_media_enabled").notNull().default(false),
+  autonomousMediaMonthlyCap: integer("autonomous_media_monthly_cap").notNull().default(20),
+
+  // Media Source Selection — an ORDERED array of the media sources this assistant may use,
+  // where position encodes priority and membership encodes enabled. Values: 'manual' | 'stock' | 'ai'
+  // (see src/utils/media-sources.ts). null/empty ⇒ default matrix ['manual','stock','ai']
+  // (Manual Library → AI Stock Search (Pexels) → AI Generation). The resolver (media-resolver.ts)
+  // walks this list with fallback. db/media-source-preferences.sql.
+  mediaSources: jsonb("media_sources"),
 }, (t) => [
   // US-DB-1.3.1: assistants are org-owned & member-shared — names are unique per organisation.
   // (userId is retained as creator/attribution only.)
@@ -281,7 +347,16 @@ export const userProfiles = pgTable("user_profiles", {
   // account_cancellation) are always true in the application layer
   // and cannot be opted out by the user.
   emailPreferences: jsonb("email_preferences"),
+  // In-app (notification bell) delivery preferences — one key per preference
+  // category (see src/utils/notification-prefs.ts). Shape: Record<string, boolean>.
+  // Missing key = category default. Locked categories (account_security,
+  // payment_confirmation) are forced true in the application layer regardless of
+  // stored value. Supersedes the legacy notify_wins/billing/availability columns.
+  inAppPreferences: jsonb("in_app_preferences"),
   language: text("language").default("en"),
+  // Onboarding Wizard Step 3 (User Profile). Shape: { preset?, start?, end?, days?[] }.
+  // A non-null value marks the working-hours step complete (see get-wizard-state.ts).
+  workingHours: jsonb("working_hours"),
   preferences: jsonb("preferences"),
   legalConsents: jsonb("legal_consents"),
   // US-ONB-2.2.1: tracks whether the first-login welcome modal has been shown
@@ -305,6 +380,25 @@ export const notifications = pgTable("notifications", {
   readAt: timestamp("read_at"),
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+  // Dynamic Communications Engine — Intelligent Notification Routing & Categorization.
+  // category/priority/is_dismissible are derived from `type` and stamped by a DB trigger
+  // (db/notifications-categorization.sql); the code map in src/utils/notification-actions.ts
+  // is the canonical reference. resolvedAt is the true "closed" signal — set only when an
+  // action item's completion criteria are met (distinct from isRead = "seen"). NOTE: these
+  // columns require db/notifications-categorization.sql applied to the DB before deploy.
+  category: text("category"),
+  priority: integer("priority"),
+  isDismissible: boolean("is_dismissible"),
+  resolvedAt: timestamp("resolved_at"),
+  // US3: user manually dismissed (swiped/closed) the notification. Distinct from resolvedAt
+  // (criteria met) and isRead (seen). Dismissed rows are hidden from the feed. The server
+  // refuses to dismiss non-dismissible (critical_action) items. Requires db/notifications-dismissal.sql.
+  dismissedAt: timestamp("dismissed_at"),
+  // US4 — Omni-channel routing. deliveredAt: when the notification was generated (AC4.1, set by
+  // DB default). fallbackEmailSentAt: guard so the email-fallback worker sends at most one email
+  // per notification. Requires db/notifications-email-fallback.sql.
+  deliveredAt: timestamp("delivered_at"),
+  fallbackEmailSentAt: timestamp("fallback_email_sent_at"),
 }, (t) => [
   // US-DB-1.1.1: Notification inbox query — userId + isRead + createdAt
   index("notifications_user_read_idx").on(t.userId, t.isRead, t.createdAt),
@@ -319,6 +413,45 @@ export const notificationLog = pgTable("notification_log", {
   sentAt: timestamp("sent_at").defaultNow().notNull(),
 }, (t) => [
   index("notification_log_user_type_idx").on(t.userId, t.type),
+]);
+
+// US-COMMS-1: Admin-editable transactional email templates.
+// Platform-global (NOT org-scoped) — one row per system trigger. The inner bodyHtml is
+// admin-edited via the WYSIWYG editor; the immutable brand shell lives in code
+// (renderMasterTemplate). triggerKey is hardcoded to a system event and never created or
+// deleted by admins (AC3.2.1) — they edit the payload only. Defaults & the in-code
+// fallback live in src/utils/email-templates-catalog.ts (TEMPLATE_DEFAULTS).
+export const emailTemplates = pgTable("email_templates", {
+  id: serial().primaryKey(),
+  triggerKey: text("trigger_key").notNull().unique(), // e.g. 'welcome' | 'payment_failed' | 'assistant_ready'
+  name: text("name").notNull(),                       // display name in the admin list
+  category: text("category").notNull().default("General"), // Onboarding | Billing | Security | …
+  subject: text("subject").notNull(),                 // supports {{merge}} tags
+  bodyHtml: text("body_html").notNull(),              // inner body only — wrapped at send time
+  preheader: text("preheader"),                       // inbox preview text
+  // Governance (full UI is Feature 3; columns ship now so the send path can respect them).
+  isActive: boolean("is_active").notNull().default(true),
+  locked: boolean("locked").notNull().default(false), // critical triggers can't be deactivated
+  transactional: boolean("transactional").notNull().default(false), // omit unsubscribe link
+  updatedByAdminId: integer("updated_by_admin_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ── UI translation cache (#1 runtime auto-translation) ──────────────────────
+// Shared, source-of-truth cache for machine-translated UI microcopy. Each unique
+// (lang, source_hash) is translated once via the AI gateway and reused for every user,
+// keeping cost + latency bounded. source_hash = sha256(source_text). Applied via
+// db/ui-translations.sql (no drizzle-kit push).
+export const uiTranslations = pgTable("ui_translations", {
+  id: serial().primaryKey(),
+  lang: text("lang").notNull(),                 // target language code, e.g. 'fr'
+  sourceHash: text("source_hash").notNull(),    // sha256 hex of source_text
+  sourceText: text("source_text").notNull(),    // original English string
+  translatedText: text("translated_text").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("ui_translations_lang_hash_unique").on(t.lang, t.sourceHash),
 ]);
 
 // ── Vault Secrets — US-AUD-4.2.1 SC1/SC2 ────────────────────────────────────
@@ -384,6 +517,45 @@ export const systemConnections = pgTable("system_connections", {
   index("system_connections_user_active_idx").on(t.userId, t.isActive),
 ]);
 
+// Abuse Prevention (US1/US2): a record of a rejected OAuth connection because the third-party
+// tenant was already live in another workspace. Lets the requester ask to join the existing
+// workspace WITHOUT us ever revealing that workspace's owner. Owner-db accessed (oauth callbacks
+// + request-workspace-access). Schema in db/connection-collision-attempts.sql (apply manually).
+export const connectionCollisionAttempts = pgTable("connection_collision_attempts", {
+  id: serial().primaryKey(),
+  requestingOrgId: integer("requesting_org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  existingOrgId: integer("existing_org_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  serviceName: text("service_name").notNull(),
+  externalUserId: text("external_user_id").notNull(),
+  // pending → (request access) → requested → (admin invites) → resolved
+  status: text("status").notNull().default("pending"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("cca_requesting_service_idx").on(t.requestingOrgId, t.serviceName, t.status),
+]);
+
+// ── Webhook intake — trigger-style connectors (Slack, Zendesk, …) ────────────
+// Inbound events land here verified + deduped (webhook-intake.ts), then a downstream
+// processor consumes status='received' rows. Org/connection are best-effort at intake;
+// dedupKey enforces idempotency against provider retries.
+export const webhookEvents = pgTable("webhook_events", {
+  id: serial().primaryKey(),
+  provider: text("provider").notNull(),                       // 'slack' | 'zendesk' | …
+  organisationId: integer("organisation_id").references(() => organisations.id, { onDelete: "cascade" }),
+  connectionId: integer("connection_id").references(() => systemConnections.id, { onDelete: "set null" }),
+  eventType: text("event_type"),
+  dedupKey: text("dedup_key").notNull().unique(),             // provider + external event id
+  payload: jsonb("payload").notNull(),
+  status: text("status").notNull().default("received"),       // received|processing|processed|failed|ignored
+  error: text("error"),
+  receivedAt: timestamp("received_at").defaultNow().notNull(),
+  processedAt: timestamp("processed_at"),
+}, (t) => [
+  index("webhook_events_status_idx").on(t.status, t.receivedAt),
+  index("webhook_events_org_idx").on(t.organisationId),
+]);
+
 // ── Integration API Call Audit Log — US-AUD-4.2.1 SC6 ───────────────────────
 // Records every API call made on behalf of a user using a stored credential.
 // Retained 90 days (enforced by a scheduled cleanup job).
@@ -421,6 +593,10 @@ export const masterPlans = pgTable("master_plans", {
   appConnectionLimit: integer("app_connection_limit"),  // max OAuth/API integrations per assistant; null = unlimited
   seatLimit: integer("seat_limit"),                     // max workspace members (users in the same org); null = solo only (1 seat)
   storageLimitBytes: integer("storage_limit_bytes"),    // US-STOR-1.1.2: max object storage per org; null = unlimited
+  // Dynamic Product Catalog: Stripe Product id (created when the admin saves a plan) +
+  // freeform feature flags beyond the numeric limits, e.g. { unlock_trending_audio: true }.
+  stripeProductId: text("stripe_product_id"),
+  features: jsonb("features").notNull().default({}),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -516,6 +692,23 @@ export const masterAssistants = pgTable("master_assistants", {
   check("master_assistants_lifecycle_check", sql`${t.lifecycleState} IN ('draft', 'review', 'beta', 'live', 'deprecated', 'archived')`),
 ]);
 
+// Per-assistant feature capabilities — admin-managed, keyed by assistant TYPE.
+// One row per (master_assistant, feature_key); absent row = disabled. Feature keys are the
+// canonical list in src/config/assistant-features.ts. Gates user-facing capabilities
+// (e.g. AI image/video generation) via src/utils/assistant-capabilities.ts.
+// DDL + SMM seed: db/assistant-features.sql (apply manually — no db:push).
+export const assistantFeatures = pgTable("assistant_features", {
+  id: serial().primaryKey(),
+  masterAssistantId: integer("master_assistant_id").notNull().references(() => masterAssistants.id, { onDelete: "cascade" }),
+  featureKey: text("feature_key").notNull(),
+  enabled: boolean("enabled").notNull().default(false),
+  updatedBy: integer("updated_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  unique("assistant_features_master_feature_key").on(t.masterAssistantId, t.featureKey),
+]);
+
 // US-ADM-4.1.1: Immutable version history for master assistant prompts/config
 export const assistantVersions = pgTable("assistant_versions", {
   id: serial().primaryKey(),
@@ -592,6 +785,139 @@ export const userReferrals = pgTable("user_referrals", {
 }, (t) => ({
   uniqueReferred: unique("user_referrals_referred_unique").on(t.referredUserId),
 }));
+
+// ── Referral Invites — sent-invite lifecycle tracking ────────────────────────
+// Records each referral link emailed to a friend so the sender can see "invited —
+// awaiting sign-up" in their Referral Activity BEFORE the friend registers (a
+// user_referrals row, which requires referred_user_id, can only exist post-signup).
+// On registration via the link, the matching invite is marked 'accepted' and linked.
+export const referralInvites = pgTable("referral_invites", {
+  id: serial().primaryKey(),
+  referrerId: integer("referrer_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  email: text("email").notNull(),                          // invited friend's email (stored lowercased)
+  referralCode: text("referral_code").notNull(),           // the code that was shared
+  status: text("status").notNull().default("invited"),     // 'invited' | 'accepted'
+  acceptedUserId: integer("accepted_user_id").references(() => users.id, { onDelete: "set null" }),
+  sentAt: timestamp("sent_at").defaultNow().notNull(),
+  acceptedAt: timestamp("accepted_at"),
+}, (t) => [
+  unique("referral_invites_referrer_email_unique").on(t.referrerId, t.email),
+  index("referral_invites_referrer_idx").on(t.referrerId),
+]);
+
+// ── Relationship-Building Checklist (AC6, SMM) ───────────────────────────────
+// Per-assistant daily engagement actions, generated from the blueprint and ticked
+// off by the user. Lazily generated on first view of a new day. See
+// db/relationship-building-tasks.sql and netlify/functions/relationship-checklist.ts.
+export const relationshipBuildingTasks = pgTable("relationship_building_tasks", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  assistantId: integer("assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  taskDate: date("task_date").notNull(),                 // the day this item belongs to (UTC)
+  title: text("title").notNull(),                        // short imperative action
+  description: text("description"),                      // one-line guidance / why it matters
+  category: text("category"),                            // 'engagement' | 'outreach' | 'community' | 'follow_up'
+  sortOrder: integer("sort_order").notNull().default(0),
+  completed: boolean("completed").notNull().default(false),
+  completedAt: timestamp("completed_at"),
+  completedBy: integer("completed_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("relationship_building_tasks_assistant_date_idx").on(t.assistantId, t.taskDate),
+  index("relationship_building_tasks_org_idx").on(t.organisationId),
+  uniqueIndex("relationship_building_tasks_unique").on(t.assistantId, t.taskDate, t.title),
+]);
+
+// ── Multi-Agent Orchestration (Epic 4) — cross-assistant workflow links ──
+// One directed hand-off rule: when source_assistant fires source_event, hand off to
+// target_assistant to do target_action. Definition + visualisation only for now (no runtime
+// consumer yet). Owner-path + manual org filter (no RLS) — same as content_rules. See db/orchestrations.sql.
+export const orchestrationLinks = pgTable("orchestration_links", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  sourceAssistantId: integer("source_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  sourceEvent: text("source_event").notNull(),           // 'drafts_a_post' | 'publishes_a_post' | 'completes_a_task'
+  targetAssistantId: integer("target_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  targetAction: text("target_action").notNull(),         // freeform, e.g. "design the visual"
+  isActive: boolean("is_active").notNull().default(true),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("orchestration_links_org_idx").on(t.organisationId),
+  index("orchestration_links_source_idx").on(t.sourceAssistantId),
+  index("orchestration_links_target_idx").on(t.targetAssistantId),
+  uniqueIndex("orchestration_links_unique").on(t.sourceAssistantId, t.sourceEvent, t.targetAssistantId, t.targetAction),
+]);
+
+// ── Orchestration runtime (Phase 5) — audit log of fired hand-offs ──
+// One row per firing. UNIQUE(link_id, source_post_id) makes hand-off firing idempotent.
+// See db/orchestration-runs.sql.
+export const orchestrationRuns = pgTable("orchestration_runs", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  linkId: integer("link_id").references(() => orchestrationLinks.id, { onDelete: "set null" }),
+  sourceAssistantId: integer("source_assistant_id"),
+  targetAssistantId: integer("target_assistant_id"),
+  sourceEvent: text("source_event").notNull(),
+  sourcePostId: integer("source_post_id"),               // the post whose draft/publish triggered the hand-off
+  targetJobId: text("target_job_id"),                    // content_generation_jobs.job_id enqueued for the target
+  status: text("status").notNull().default("handed_off"), // 'handed_off' | 'skipped'
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("orchestration_runs_org_idx").on(t.organisationId),
+  index("orchestration_runs_link_idx").on(t.linkId, t.createdAt),
+  uniqueIndex("orchestration_runs_unique").on(t.linkId, t.sourcePostId),
+]);
+
+// ── Reward Redemptions — Referral Program Expansion ──────────────────────────
+// Audit trail + double-spend guard for the referral token vault. Each row records
+// a redemption: 'credit_10' (1 token → £10 Stripe credit) or 'free_assistant'
+// (5 tokens → +1 bonus_assistants). availableTokens = matured qualified referrals
+// minus SUM(tokensSpent) here. Written only by owner-role backend functions, so it
+// stays out of the RLS crown-jewels set (like user_referrals).
+export const rewardRedemptions = pgTable("reward_redemptions", {
+  id: serial().primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").references(() => organisations.id, { onDelete: "cascade" }),
+  type: text("type").notNull(),                  // 'credit_10' | 'free_assistant'
+  tokensSpent: integer("tokens_spent").notNull(),
+  stripeBalanceTxId: text("stripe_balance_tx_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("reward_redemptions_user_idx").on(t.userId),
+]);
+
+// ── Reward Audits — Gamification & Engagement (AC4.2.1) ──────────────────────
+// Every milestone reward grant is logged here. The unique (organisation_id,
+// trigger_event) constraint doubles as the milestone dedup: a milestone fires
+// once per workspace, which also prevents double token/beta grants.
+export const rewardAudits = pgTable("reward_audits", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  rewardType: text("reward_type").notNull(),       // 'referral_token' | 'beta_access'
+  triggerEvent: text("trigger_event").notNull(),   // e.g. 'milestone:100_leads' | 'milestone:50_hours'
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  unique("reward_audits_org_trigger_unique").on(t.organisationId, t.triggerEvent),
+  index("reward_audits_created_idx").on(t.createdAt),
+]);
+
+// ── Security Audits — Explicit AI Refusal & Moderation (US2 AC2.3) ───────────
+// Records prompts hard-blocked by the OpenAI Moderation pre-check, so admins can
+// review accounts repeatedly attempting severe-violation content. Owner-role access
+// only (written by backend functions) → not in the RLS crown-jewels set.
+export const securityAudits = pgTable("security_audits", {
+  id: serial().primaryKey(),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  organisationId: integer("organisation_id").references(() => organisations.id, { onDelete: "set null" }),
+  source: text("source").notNull(),                      // entry point, e.g. 'quality-review' | 'generate-post'
+  flaggedCategories: jsonb("flagged_categories").notNull(), // string[] of moderation categories
+  promptExcerpt: text("prompt_excerpt"),                 // first ~200 chars for review context
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("security_audits_user_idx").on(t.userId),
+  index("security_audits_created_idx").on(t.createdAt),
+]);
 
 // US-HELP-1.3.1: Help articles for the public Help Center
 export const helpArticles = pgTable('help_articles', {
@@ -718,6 +1044,198 @@ export const ticketReplies = pgTable("ticket_replies", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Issue Reports Table — testing-phase "Report an Issue" submissions (db/issue-reports.sql).
+// Captures the user's description, WHERE they were when they reported (sourceLocation/
+// sourceUrl) and an optional screenshot stored inline as a base64 data URL. Stored against
+// the user so they can track progress; the admin owner is emailed on every new report.
+export const issueReports = pgTable("issue_reports", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id")
+      .references(() => organisations.id, { onDelete: "cascade" }),
+  userId: integer("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+
+  description: text("description").notNull(),
+  sourceLocation: text("source_location"),   // in-app view/route the user came from
+  sourceUrl: text("source_url"),             // full URL at time of report
+  userAgent: text("user_agent"),
+
+  // Optional screenshot — data URL (data:image/png;base64,…), no object-storage dependency.
+  imageData: text("image_data"),
+  imageMime: text("image_mime"),
+
+  // 'reported' | 'fix_in_progress' | 'fixed_ready_to_test' | 'more_info_required' | 'closed'
+  status: text("status").notNull().default("reported"),
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  resolvedAt: timestamp("resolved_at"),      // set when the user confirms the fix (status=closed)
+
+  // "Pass to Developer" AI auto-fix handoff (see db/issue-reports.sql).
+  // null | 'queued' | 'in_progress' | 'completed' | 'failed'
+  devHandoffStatus: text("dev_handoff_status"),
+  devHandoffAt: timestamp("dev_handoff_at"),
+  devBranch: text("dev_branch"),             // branch the runner pushed the fix to
+  devPrUrl: text("dev_pr_url"),              // PR opened by the runner
+  devResult: text("dev_result"),             // AI summary of the fix (or failure reason)
+
+  // Which runner currently holds this issue (fix or merge claim), and when it claimed it.
+  // Multiple runners drain the queue concurrently; these let the admin portal show who is
+  // working what, and flag a claim that's outlived a normal fix as a possibly-dead runner.
+  devRunnerId: text("dev_runner_id"),
+  devRunnerHeartbeat: timestamp("dev_runner_heartbeat"),
+
+  // DB migration the fix needs, run from the ticket against staging Neon (see SQL file).
+  devSql: text("dev_sql"),                   // idempotent SQL the AI proposed
+  devSqlStatus: text("dev_sql_status"),      // null | 'pending' | 'applied' | 'failed'
+  devSqlResult: text("dev_sql_result"),      // DB feedback from the run
+  devSqlRanAt: timestamp("dev_sql_ran_at"),
+
+  // Merge of the fix PR to staging — requested from the ticket (super-admin) and performed
+  // by the local watcher (gh pr merge). The issue only reaches 'fixed_ready_to_test' once
+  // merged (and any migration applied). null | 'ready' | 'queued' | 'merging' | 'merged' | 'failed'
+  devMergeStatus: text("dev_merge_status"),
+  devMergedAt: timestamp("dev_merged_at"),
+  devMergeResult: text("dev_merge_result"),  // gh output / error from the merge attempt
+}, (t) => [
+  index("issue_reports_user_idx").on(t.userId, t.createdAt),
+  index("issue_reports_org_idx").on(t.organisationId),
+  index("issue_reports_status_idx").on(t.status, t.createdAt),
+  index("issue_reports_handoff_idx").on(t.devHandoffStatus, t.devHandoffAt),
+  index("issue_reports_merge_idx").on(t.devMergeStatus, t.devHandoffAt),
+]);
+
+// Issue Report Messages Table — threaded admin status updates + user replies.
+export const issueReportMessages = pgTable("issue_report_messages", {
+  id: serial("id").primaryKey(),
+  issueId: integer("issue_id")
+      .notNull()
+      .references(() => issueReports.id, { onDelete: "cascade" }),
+  authorType: text("author_type").notNull(),   // 'admin' | 'user'
+  authorId: integer("author_id").references(() => users.id, { onDelete: "set null" }),
+  body: text("body").notNull(),
+  // The status the issue was moved to alongside this message (null = plain message/reply).
+  status: text("status"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("issue_report_messages_issue_idx").on(t.issueId, t.createdAt),
+]);
+
+// AI auto-fix runner health (see db/issue-reports.sql, scripts/dev-issue-fixer.mjs).
+// One row per runner. When a runner's Claude Code CLI hits its usage/session limit it can't
+// produce fixes, so it parks here as 'session_limited', re-queues the issue it was on, and
+// stops claiming. The admin portal shows a "log into a Claude account with credit on the
+// runner machine, then resume" prompt; pressing Resume sets resumeRequested, the runner
+// verifies the new login with a probe call and — only if it succeeds — flips back to 'ok'
+// and resumes. Nothing here can authenticate Claude; this row is coordination only.
+export const devRunnerStatus = pgTable("dev_runner_status", {
+  runnerId: text("runner_id").primaryKey(),
+  // 'ok' | 'session_limited'
+  state: text("state").notNull().default("ok"),
+  message: text("message"),                 // raw CLI error, e.g. "You've hit your session limit · resets 12:30pm"
+  resetHint: text("reset_hint"),            // parsed reset time for display, e.g. "12:30pm (Europe/London)"
+  blockedIssueId: integer("blocked_issue_id").references(() => issueReports.id, { onDelete: "set null" }),
+  resumeRequested: boolean("resume_requested").notNull().default(false),
+  lastProbeResult: text("last_probe_result"), // outcome of the last verification probe after a Resume
+  // Claude account currently logged into the CLI on the runner machine (e.g. "dev@x.com").
+  // Self-reported by the runner on block / resume-check / resume-ack; display only — lets the
+  // admin see whether the re-login actually took effect before pressing Resume.
+  activeAccount: text("active_account"),
+  // Admin pressed "Restart runner". Consumed by the runner's next resume-check poll: the row
+  // is deleted and the runner exits (launchd KeepAlive relaunches it) or re-spawns itself.
+  restartRequested: boolean("restart_requested").notNull().default(false),
+  blockedAt: timestamp("blocked_at"),
+  lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Feature Roadmap Table — admin-only delivery backlog (see db/feature-roadmap.sql).
+// Items are created when a feature-request issue is promoted (source='issue', issue_id set)
+// or added directly by an admin (source='manual'). Prioritised by `priority` + manual drag
+// `sortOrder` (lower = higher on the board).
+export const featureRoadmap = pgTable("feature_roadmap", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  description: text("description"),
+  // 'critical' | 'high' | 'medium' | 'low'
+  priority: text("priority").notNull().default("medium"),
+  // 'planned' | 'in_progress' | 'shipped' | 'declined'
+  status: text("status").notNull().default("planned"),
+  // Manual drag-rank within the board; lower sorts higher.
+  sortOrder: integer("sort_order").notNull().default(0),
+  // 'manual' | 'issue'
+  source: text("source").notNull().default("manual"),
+  issueId: integer("issue_id").references(() => issueReports.id, { onDelete: "set null" }),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("feature_roadmap_order_idx").on(t.status, t.sortOrder),
+  index("feature_roadmap_issue_idx").on(t.issueId),
+]);
+
+// Feature Requests & Roadmap — unified, user-facing feature voting + admin roadmap.
+// See db/feature-requests.sql. Supersedes feature_roadmap (which it migrates in): adds
+// public submission, a moderation queue, voting, LLM-enhanced admin workflow and a
+// Year/Quarter Gantt. Status/category/priority/source are mirrored by SQL CHECK constraints
+// and the SoT in src/utils/feature-requests.ts.
+export const featureRequests = pgTable("feature_requests", {
+  id: serial("id").primaryKey(),
+  // Who raised it. NULL for purely admin/issue-originated items.
+  submittedBy: integer("submitted_by").references(() => users.id, { onDelete: "set null" }),
+  // Submitter's org for context (the board is global/cross-tenant).
+  organisationId: integer("organisation_id").references(() => organisations.id, { onDelete: "set null" }),
+  // Live (admin-editable) text shown on the public board.
+  title: text("title").notNull(),
+  description: text("description"),
+  // The submitter's raw original text, preserved so "Enhance with AI" works from their words.
+  submitterDescription: text("submitter_description"),
+  // 'app_core' | 'existing_assistant' | 'new_assistant'
+  category: text("category").notNull().default("app_core"),
+  // CATALOGUE ROLE slug when category='existing_assistant' (not a tenant instance).
+  assistantRef: text("assistant_ref"),
+  // pending_review | under_review | open | planned | in_progress | released | declined | duplicate
+  status: text("status").notNull().default("pending_review"),
+  // 'critical' | 'high' | 'medium' | 'low'
+  priority: text("priority").notNull().default("medium"),
+  // Gantt placement, e.g. '2026-Q3'.
+  targetQuarter: text("target_quarter"),
+  // Manual drag-rank within the admin board; lower sorts higher.
+  sortOrder: integer("sort_order").notNull().default(0),
+  // Denormalised vote tally (feature_request_votes is the source of truth).
+  voteCount: integer("vote_count").notNull().default(0),
+  // 'user' (moderated) | 'manual' (admin) | 'issue' (promoted bug report)
+  source: text("source").notNull().default("user"),
+  issueId: integer("issue_id").references(() => issueReports.id, { onDelete: "set null" }),
+  // Duplicate handling: the request this one was merged into (status='duplicate').
+  mergedIntoId: integer("merged_into_id").references((): AnyPgColumn => featureRequests.id, { onDelete: "set null" }),
+  reviewedBy: integer("reviewed_by").references(() => users.id, { onDelete: "set null" }),
+  reviewedAt: timestamp("reviewed_at"),
+  // Set when status first becomes 'released'; powers the avg-wait metric.
+  releasedAt: timestamp("released_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("feature_requests_status_idx").on(t.status, t.voteCount),
+  index("feature_requests_board_idx").on(t.status, t.sortOrder),
+  index("feature_requests_submitter_idx").on(t.submittedBy, t.createdAt),
+  index("feature_requests_quarter_idx").on(t.targetQuarter),
+  index("feature_requests_issue_idx").on(t.issueId),
+]);
+
+// One row per (feature, user). UNIQUE enforces "one upvote per user"; toggling deletes the row.
+export const featureRequestVotes = pgTable("feature_request_votes", {
+  id: serial("id").primaryKey(),
+  featureId: integer("feature_id").notNull().references(() => featureRequests.id, { onDelete: "cascade" }),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  unique("feature_request_votes_unique").on(t.featureId, t.userId),
+  index("feature_request_votes_user_idx").on(t.userId),
+  index("feature_request_votes_feature_idx").on(t.featureId),
+]);
+
 // AI Model Config Table — runtime routing rules; admin-editable without deploys (US13)
 export const aiModelConfig = pgTable("ai_model_config", {
   id: serial("id").primaryKey(),
@@ -755,16 +1273,28 @@ export const userNotifications = pgTable("user_notifications", {
   // US-DB-1.1.1: Notification inbox query — userId + isRead + createdAt
   index("user_notifications_user_read_idx").on(t.userId, t.isRead, t.createdAt),
 ]);
-// Onboarding Drafts Table — Stores auto-save progress for incomplete setups
+// Onboarding Drafts Table — Stores auto-save progress for incomplete setups.
+// Multi-row: a user (and org) may have several in-progress assistant drafts at once,
+// each rendered as an "Onboarding" card. (Previously keyed by user_id = one draft/user.)
 export const onboardingDrafts = pgTable("onboarding_drafts", {
-  userId: integer("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  id: serial().primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  // Org that owns the draft — lets the My Team view list drafts org-wide. Nullable so legacy
+  // rows survive the migration; populated on create going forward.
+  organisationId: integer("organisation_id").references(() => organisations.id, { onDelete: "cascade" }),
   currentStep: integer("current_step").default(2).notNull(),
   onboardingPath: text("onboarding_path").notNull(),
+  // Card metadata: role icon key + chosen name (null → "Unnamed {Role}").
+  roleKey: text("role_key"),
+  displayName: text("display_name"),
   draftData: jsonb("draft_data").default({}).notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   // Tracks when the last abandoned-onboarding reminder was sent to avoid duplicate emails
   reminderSentAt: timestamp("reminder_sent_at"),
-});
+}, (t) => [
+  index("onboarding_drafts_user_idx").on(t.userId),
+  index("onboarding_drafts_org_idx").on(t.organisationId),
+]);
 
 // Content Assets Table — Media Hub (My Content)
 // Stores user-uploaded images, videos, and external links for assistant use
@@ -787,6 +1317,13 @@ export const contentAssets = pgTable("content_assets", {
   storageUrl: text("storage_url"),
   externalUrl: text("external_url"),
 
+  // Stock-provider sourcing (US3 AC3.2). null provider = user-uploaded asset.
+  // For Pexels: externalUrl holds the CDN URL (hotlinked, never permanently hosted — AC3.1).
+  provider: text("provider"),                 // 'pexels' | null
+  providerAssetId: text("provider_asset_id"), // unique stock-provider asset ID (string)
+  attributionName: text("attribution_name"),  // photographer name
+  attributionUrl: text("attribution_url"),    // photographer profile URL
+
   // Lifecycle status: pending → scheduled | rejected; scheduled → posted
   status: text("status").notNull().default("pending"), // pending|scheduled|posted|rejected
   rejectionReason: text("rejection_reason"),
@@ -801,12 +1338,50 @@ export const contentAssets = pgTable("content_assets", {
   retentionDeleteAfter: timestamp("retention_delete_after"),
   purgedAt: timestamp("purged_at"),
 
+  // Epic 1 (AI Media Generation): provider 'fal' rows are AI-generated. These columns power
+  // the "My AI Uploads" library (US3) — prompt memory + the originating generation job.
+  prompt: text("prompt"),                                   // original generation prompt (US3 AC: prompt memory)
+  aspectRatio: text("aspect_ratio"),                        // '1:1' | '16:9' | '9:16' | '4:5'
+  generationJobId: integer("generation_job_id"),            // FK to media_generation_jobs.id (nullable)
+
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
   // US-DB-1.1.1: Org-level and user-level content asset lookups
   index("content_assets_org_idx").on(t.organisationId),
   index("content_assets_user_idx").on(t.userId),
+]);
+
+// US2 (Image Deduplication): append-only ledger of every stock-provider asset ID that has
+// been committed (scheduled or published) to a post, scoped per workspace/organisation.
+// The unique (organisation, provider, providerAssetId) constraint enforces the HARD "never
+// reuse" rule and makes recordPostedAssets() idempotent across the schedule + publish hooks.
+export const postedAssets = pgTable("posted_assets", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+  userId: integer("user_id")
+      .references(() => users.id, { onDelete: "set null" }),   // audit: who used it
+  provider: text("provider").notNull().default("pexels"),
+  providerAssetId: text("provider_asset_id").notNull(),
+  scheduledPostId: integer("scheduled_post_id"),               // FK to scheduledPosts.id (set null on delete)
+  contentAssetId: integer("content_asset_id"),                 // FK to contentAssets.id (set null on delete)
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  unique("posted_assets_org_provider_asset_unique").on(t.organisationId, t.provider, t.providerAssetId),
+  index("posted_assets_org_idx").on(t.organisationId),
+]);
+
+// Transient cache of raw Pexels search responses, keyed by normalized "query|type|page".
+// Caching runs BEFORE per-org dedup (filterUnique), so it never breaks the never-reuse rule.
+// Short TTL (PEXELS_CACHE_TTL_MS in src/utils/pexels.ts). db/pexels-search-cache.sql.
+export const pexelsSearchCache = pgTable("pexels_search_cache", {
+  queryKey: text("query_key").primaryKey(),
+  candidates: jsonb("candidates").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (t) => [
+  index("pexels_search_cache_created_idx").on(t.createdAt),
 ]);
 
 // Invoices table — one row per generated invoice, created on every successful payment
@@ -872,7 +1447,8 @@ export const scheduledPosts = pgTable("scheduled_posts", {
   utmParams: text("utm_params"),
 
   // Workflow & governance
-  // Status: draft | in_review | approved | scheduled | published | rejected | cancelled | missed
+  // Status: draft | pending_approval | in_review | approved | scheduled | publishing | published | paused | failed | rejected | cancelled | missed | admin_test
+  // (see scheduled_posts_status_check below / db/scheduled-posts-status-check.sql)
   status: text("status").notNull().default("draft"),
   ownerId: integer("owner_id")
       .references(() => users.id, { onDelete: "set null" }),
@@ -907,13 +1483,24 @@ export const scheduledPosts = pgTable("scheduled_posts", {
   jobId: text("job_id"),                                   // FK to contentGenerationJobs.jobId
   blueprintId: integer("blueprint_id").references(() => aiBlueprints.id, { onDelete: "set null" }),
   suggestedMediaDescription: text("suggested_media_description"),
+  // Epic 3 US6: human-readable note explaining why an autonomous draft was created
+  // (e.g. "Drafted to fill a 3-day gap in your Instagram schedule").
+  generationReason: text("generation_reason"),
   conflictNotice: text("conflict_notice"),              // set when context prompt conflicted with a strict rule
+  // Issue #55: set when a content asset attached to this post was deleted from My Content
+  // (contentAssetIds is a plain jsonb array with no FK, so deletion can't cascade — this flags
+  // the Review Queue instead so the user/assistant can source replacement media).
+  mediaMissing: boolean("media_missing").notNull().default(false),
+  mediaMissingNote: text("media_missing_note"),
   generatedAt: timestamp("generated_at"),
   // US-SMM-3.4.1: On-demand generation trigger type
   triggerType: text("trigger_type"),                       // 'on_demand' | 'scheduled' | null
 
   // US-SMM-3.2.1: Instagram connection
   connectionId: integer("connection_id").references(() => systemConnections.id, { onDelete: "set null" }),
+
+  // US-CAL-5.1: AI content quality review result (cached)
+  qualityReview: jsonb("quality_review"),
 
   // US-SMM-3.3.1/3.3.2: Publishing pipeline
   // Status extensions: 'publishing' | 'paused' | 'failed' in addition to existing statuses
@@ -930,7 +1517,52 @@ export const scheduledPosts = pgTable("scheduled_posts", {
   index("scheduled_posts_user_idx").on(t.userId),
   // US-SMM-3.3.1: Partial index for publish queue polling
   index("scheduled_posts_publish_queue_idx").on(t.publishDate).where(sql`status = 'scheduled' AND platform = 'instagram'`),
-  check("scheduled_posts_status_check", sql`${t.status} IN ('draft', 'in_review', 'approved', 'scheduled', 'published', 'rejected', 'cancelled', 'missed')`),
+  check("scheduled_posts_status_check", sql`${t.status} IN ('draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'publishing', 'published', 'paused', 'failed', 'rejected', 'cancelled', 'missed', 'admin_test')`),
+]);
+
+// US-SMM-PERF: Per-post social performance snapshot.
+// One upserted row per published post, refreshed by ingest-instagram-insights.ts.
+// Source of truth for the assistant-detail "Performance Metrics" cards
+// (engagement rate, organic reach growth, click-through rate), aggregated by
+// get-assistant-metrics.ts. Platform-agnostic so LinkedIn/X ingesters can reuse it.
+export const postInsights = pgTable("post_insights", {
+  id: serial().primaryKey(),
+  scheduledPostId: integer("scheduled_post_id")
+      .notNull()
+      .references(() => scheduledPosts.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id")
+      .notNull()
+      .references(() => organisations.id, { onDelete: "cascade" }),
+  assistantId: integer("assistant_id")
+      .references(() => aiAssistants.id, { onDelete: "set null" }),
+  connectionId: integer("connection_id")
+      .references(() => systemConnections.id, { onDelete: "set null" }),
+  platform: text("platform").notNull(),              // instagram | facebook | linkedin | x
+  platformPostId: text("platform_post_id").notNull(), // external media/post id
+  publishedAt: timestamp("published_at"),
+
+  // Raw counters as returned by the platform (nulls where unsupported).
+  reach: integer("reach"),
+  impressions: integer("impressions"),               // deprecated on newer IG media — may be null
+  likes: integer("likes"),
+  comments: integer("comments"),
+  shares: integer("shares"),
+  saves: integer("saves"),
+  totalInteractions: integer("total_interactions"),  // engagement numerator
+  videoViews: integer("video_views"),
+  linkClicks: integer("link_clicks"),                // null for IG organic feed — reserved for platforms that expose it
+
+  raw: jsonb("raw"),                                 // full insights payload for debugging / future metrics
+  fetchedAt: timestamp("fetched_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  // One snapshot per post — ingester upserts on this key.
+  uniqueIndex("post_insights_post_uidx").on(t.scheduledPostId),
+  // Per-assistant aggregation over a time window (get-assistant-metrics.ts).
+  index("post_insights_assistant_published_idx").on(t.assistantId, t.publishedAt),
+  // Org-scoped + platform reporting.
+  index("post_insights_org_platform_idx").on(t.organisationId, t.platform),
 ]);
 
 // US-DB-1.2.1: Junction table replacing scheduledPosts.contentAssetIds JSONB array.
@@ -943,6 +1575,32 @@ export const scheduledPostAssets = pgTable("scheduled_post_assets", {
   position: integer("position").notNull().default(0),
 }, (t) => [
   unique("scheduled_post_assets_pk").on(t.scheduledPostId, t.contentAssetId),
+]);
+
+// "Create Post" → Suggest an idea mode. A user-submitted post idea that the assistant should fold
+// into a FUTURE scheduled/conversion draft (it is NOT drafted immediately). Consumed once, FIFO:
+// process-content-jobs.ts picks the oldest 'pending' idea for an assistant when a scheduled job
+// carries no context_prompt, uses it as the generation context, then marks the row 'used' with the
+// resulting post id. Canonical column definitions; apply db/post-idea-suggestions.sql by hand.
+export const postIdeaSuggestions = pgTable("post_idea_suggestions", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  assistantId: integer("assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  idea: text("idea").notNull(),
+  platform: text("platform"),                       // target platforms, comma-separated (facebook|instagram|linkedin|x); null === all
+  // Idea lifecycle: 'pending' (awaiting use) → 'in_review' (woven into a draft now awaiting human
+  // review) → 'delivered' (that draft was approved). 'discarded' = dropped by the user. 'used' is a
+  // legacy synonym for 'in_review' kept for older rows.
+  status: text("status").notNull().default("pending"),
+  usedPostId: integer("used_post_id").references(() => scheduledPosts.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  usedAt: timestamp("used_at"),
+  deliveredAt: timestamp("delivered_at"),           // set when usedPostId was approved
+}, (t) => [
+  index("post_idea_suggestions_assistant_status_idx").on(t.assistantId, t.status),
+  index("post_idea_suggestions_used_post_idx").on(t.usedPostId),
+  check("post_idea_suggestions_status_check", sql`${t.status} IN ('pending', 'in_review', 'delivered', 'used', 'discarded')`),
 ]);
 
 // ── DPA Requests — US-AUD-4.1.1 SC3 ──────────────────────────────────────────
@@ -1400,6 +2058,7 @@ export const contentRules = pgTable("content_rules", {
   assistantId: integer("assistant_id").references(() => aiAssistants.id, { onDelete: "cascade" }),
   workspaceId: integer("workspace_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
   ruleText: text("rule_text").notNull(),
+  category: text("category"),                              // null = uncategorised; UI groups: tone_of_voice | response_formatting | core_knowledge | target_audience
   platform: text("platform"),                              // null = all platforms
   createdByUserId: integer("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
   isActive: boolean("is_active").notNull().default(true),
@@ -1411,6 +2070,45 @@ export const contentRules = pgTable("content_rules", {
   previousText: text("previous_text"),                     // text before last edit
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// ── SMART Goals — Feature 1 (AI-Driven SMART Goals & Performance Optimization) ──
+// A measurable business goal tied to one assistant (US1.1). metric_key references the
+// catalog in src/config/goal-metrics.ts. Owner-path + manual org filter (no RLS) — same
+// pattern as content_rules / post_insights; see db/goals.sql.
+export const goals = pgTable("goals", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  assistantId: integer("assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  metricKey: text("metric_key").notNull(),                 // → goal-metrics.ts catalog (e.g. 'instagram_followers')
+  targetValue: numeric("target_value").notNull(),          // AC1.1.2 — desired value
+  startValue: numeric("start_value"),                      // baseline captured at creation, for run-rate math
+  targetDate: timestamp("target_date").notNull(),          // AC1.1.2 — deadline
+  // AC1.2.3 status enum (+ pending before first telemetry, data_disconnected on stale data AC4.3.2)
+  status: text("status").notNull().default("pending"),     // pending|on_track|at_risk|off_track|data_disconnected
+  statusUpdatedAt: timestamp("status_updated_at"),
+  latestValue: numeric("latest_value"),                    // most recent telemetry value (denormalised for fast UI)
+  isPrimary: boolean("is_primary").notNull().default(false),// AC2.1.2 — drives the detail-page progress bar
+  isActive: boolean("is_active").notNull().default(true),  // soft archive
+  createdByUserId: integer("created_by_user_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("goals_org_idx").on(t.organisationId),
+  index("goals_assistant_idx").on(t.assistantId),
+]);
+
+// Time-series telemetry for goal progress (AC4.2.1). One row per data pull; the Phase-2
+// poller writes here, get-goal-telemetry reads it for the Review Progress chart (AC4.2.3).
+export const goalTelemetry = pgTable("goal_telemetry", {
+  id: serial().primaryKey(),
+  goalId: integer("goal_id").notNull().references(() => goals.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  metricValue: numeric("metric_value").notNull(),
+  source: text("source").notNull().default("poll"),        // poll | webhook | rollup | internal
+  recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+}, (t) => [
+  index("goal_telemetry_goal_idx").on(t.goalId, t.recordedAt),
+]);
 
 // ── Stripe Disputes — US-ADM-2.2.1 ──────────────────────────────────────────
 export const stripeDisputes = pgTable("stripe_disputes", {
@@ -1509,7 +2207,7 @@ export const biasSamplingReports = pgTable("bias_sampling_reports", {
 export const contentProvenance = pgTable("content_provenance", {
   id: serial("id").primaryKey(),
   contentId: text("content_id").notNull().unique(),      // stable UUID assigned at generation time
-  creatorSystem: text("creator_system").notNull().default("Aura-Assist"),
+  creatorSystem: text("creator_system").notNull().default("Be More Swan"),
   assistantId: integer("assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
   organisationId: integer("organisation_id").references(() => organisations.id, { onDelete: "cascade" }),
   workspaceIdHash: text("workspace_id_hash").notNull(), // pseudonymised org identifier (HMAC)
@@ -1576,6 +2274,10 @@ export const contentGenerationJobs = pgTable("content_generation_jobs", {
   contextPrompt: text("context_prompt"),                   // optional user-supplied context (≤500 chars)
   triggerType: text("trigger_type").default("scheduled"),  // 'on_demand' | 'scheduled' | 'admin_test'
   platform: text("platform"),                              // overrides blueprint default platform
+  // Posting Schedule: the exact calendar slot this job should fill. When set, process-content-jobs
+  // stamps the resulting scheduled_post with this publish_date; null ⇒ legacy "now + 24h".
+  // Populated by the draft-horizon scheduler from the assistant's frequency/days/times. db/posting-schedule.sql.
+  targetPublishDate: timestamp("target_publish_date"),
   // US-ADM-4.3.3: Admin test generation fields
   adminId: integer("admin_id").references(() => users.id, { onDelete: "set null" }),
   tokensInput: integer("tokens_input"),                    // Anthropic input token count
@@ -1608,4 +2310,66 @@ export const rateLimitStates = pgTable("rate_limit_states", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
   unique("rate_limit_states_org_platform_unique").on(t.organisationId, t.platform),
+]);
+
+// ── AI Media Generation (Epic 1 & 2) ─────────────────────────────────────────
+// See db/ai-credits.sql and db/media-generation.sql for the canonical DDL (hand-written,
+// applied manually as owner). These declarations mirror those tables for type-safe queries.
+
+// Epic 2, US4: per-org AI generation credit balance (spendable + held by in-flight jobs).
+export const aiCreditBalance = pgTable("ai_credit_balance", {
+  organisationId: integer("organisation_id").primaryKey().references(() => organisations.id, { onDelete: "cascade" }),
+  balance: integer("balance").notNull().default(0),                // spendable credits
+  held: integer("held").notNull().default(0),                      // reserved by in-flight jobs
+  lastGrantedPeriod: date("last_granted_period"),                  // first-of-month (UTC) monthly grant last applied
+  autonomousPeriodStart: date("autonomous_period_start"),          // US5 autonomous-cap window
+  autonomousUsed: integer("autonomous_used").notNull().default(0),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Epic 2, US4: append-only audit of credit economic events (grants +, successful debits -).
+export const aiCreditLedger = pgTable("ai_credit_ledger", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  delta: integer("delta").notNull(),                               // +grant/+adjustment, -debit
+  reason: text("reason").notNull(),                                // monthly_grant|image_generation|video_generation|admin_adjustment
+  jobId: integer("job_id"),                                        // FK to mediaGenerationJobs.id (nullable)
+  balanceAfter: integer("balance_after"),
+  isAutonomous: boolean("is_autonomous").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("ai_credit_ledger_org_created_idx").on(t.organisationId, t.createdAt),
+]);
+
+// Epic 1, US1/US2: one row per media generation request (image or video). Images complete
+// quickly (synchronous poll); video is async (submit → background poll → download to R2).
+export const mediaGenerationJobs = pgTable("media_generation_jobs", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  assistantId: integer("assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),  // set for autonomous (US5)
+
+  mediaType: text("media_type").notNull(),                         // 'image' | 'video'
+  prompt: text("prompt").notNull(),
+  aspectRatio: text("aspect_ratio").notNull(),                     // '1:1' | '16:9' | '9:16' | '4:5'
+  durationSeconds: integer("duration_seconds"),                    // video only
+  model: text("model").notNull(),                                  // resolved Fal model id
+  creditCost: integer("credit_cost").notNull(),                    // credits held/charged for this job
+  isAutonomous: boolean("is_autonomous").notNull().default(false),
+
+  // Lifecycle: queued → processing → completed | failed | flagged (content policy)
+  status: text("status").notNull().default("queued"),
+  falRequestId: text("fal_request_id"),                            // Fal queue request id
+  falStatusUrl: text("fal_status_url"),
+  falResponseUrl: text("fal_response_url"),
+  candidates: jsonb("candidates").default([]),                     // ephemeral Fal result URLs (image grid) pending selection
+  resultAssetIds: jsonb("result_asset_ids").default([]),           // content_assets.id[] persisted to R2
+  errorMessage: text("error_message"),
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("media_generation_jobs_org_idx").on(t.organisationId),
+  index("media_generation_jobs_status_idx").on(t.status),
 ]);

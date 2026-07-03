@@ -16,7 +16,7 @@ import { getDb } from '../../db/client';
 import { waitlist, waitlistReferrals, users, userOrganisations } from '../../db/schema';
 
 const jwtSecret = process.env.JWT_SECRET;
-const BASE_URL = process.env.BASE_URL || 'https://aura-assist.com';
+const BASE_URL = process.env.BASE_URL || 'https://bemoreswan.com';
 
 const MILESTONES = [
     { count: 1, reward: 'Move 50 places up the queue' },

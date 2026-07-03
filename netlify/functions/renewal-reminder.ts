@@ -10,7 +10,7 @@ import type { Handler } from '@netlify/functions';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, plans, processedWebhookEvents } from '../../db/schema';
-import { sendEmail } from '../../src/utils/email';
+import { sendTemplatedEmail } from '../../src/utils/email';
 import Stripe from 'stripe';
 
 const stripe = process.env.STRIPE_SECRET_KEY
@@ -76,17 +76,18 @@ async function runRenewalReminder() {
                 : '';
             const interval = item?.price?.recurring?.interval === 'year' ? 'year' : 'month';
 
-            await sendEmail({
+            // US-COMMS-1: admin-editable template 'renewal_reminder'.
+            void renewalDate;
+            await sendTemplatedEmail({
+                triggerKey: 'renewal_reminder',
                 to: user.email,
-                subject: `Reminder: Your Aura-Assist™ subscription renews in 14 days`,
-                html: `
-                    <p>Hi ${[user.firstName, user.lastName].filter(Boolean).join(' ') || 'there'},</p>
-                    <p>This is a reminder that your Aura-Assist subscription will automatically renew on <strong>${renewalDate}</strong>${amount ? ` for <strong>${amount}/${interval}</strong>` : ''}.</p>
-                    <p>If you wish to cancel before this date, you can do so at any time from your <a href="${BASE_URL}/user-settings.html">Settings → Billing</a>. Cancellations take effect at the end of your current billing period — you keep access until ${renewalDate}.</p>
-                    <p>If you have any questions, reply to this email or contact our support team.</p>
-                    <p>Thank you for being an Aura-Assist customer.</p>
-                    <p>— The Aura-Assist Team</p>
-                `,
+                vars: {
+                    user: { first_name: user.firstName || '' },
+                    billing: {
+                        amount: amount ? `${amount}/${interval}` : '',
+                        portal_url: `${BASE_URL}/user-settings.html`,
+                    },
+                },
             }).catch(err => console.warn('[renewal-reminder] Email send failed:', err?.message));
 
             // Mark sent

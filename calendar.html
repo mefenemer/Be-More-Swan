@@ -20,21 +20,53 @@
       <h2 id="cal-title" class="text-base sm:text-lg font-extrabold text-gray-900 ml-1 min-w-[160px]"></h2>
     </div>
 
-    <!-- Right: view toggle -->
-    <div class="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
-      <button data-view="month" id="view-month"
-        class="cal-view-btn px-3 py-1.5 text-sm font-bold rounded-lg transition cursor-pointer bg-white shadow text-gray-900">
-        Month
-      </button>
-      <button data-view="week" id="view-week"
-        class="cal-view-btn px-3 py-1.5 text-sm font-bold rounded-lg transition cursor-pointer text-gray-500 hover:text-gray-700">
-        Week
-      </button>
-      <button data-view="list" id="view-list"
-        class="cal-view-btn px-3 py-1.5 text-sm font-bold rounded-lg transition cursor-pointer text-gray-500 hover:text-gray-700">
-        List
-      </button>
+    <!-- Right: assistant filter + view toggle -->
+    <div class="flex items-center gap-3 flex-wrap">
+      <!-- Platform filter -->
+      <select id="cal-platform-filter"
+        class="text-sm font-semibold text-gray-700 border border-gray-200 rounded-lg px-3 py-1.5 bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-500">
+        <option value="all">All platforms</option>
+        <option value="facebook">Facebook</option>
+        <option value="instagram">Instagram</option>
+        <option value="linkedin">LinkedIn</option>
+        <option value="x">X (Twitter)</option>
+      </select>
+      <!-- #4: filter calendar to a single assistant's activity -->
+      <select id="cal-assistant-filter"
+        class="text-sm font-semibold text-gray-700 border border-gray-200 rounded-lg px-3 py-1.5 bg-white cursor-pointer focus:outline-none focus:ring-2 focus:ring-emerald-500">
+        <option value="all">All assistants</option>
+      </select>
+      <div class="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
+        <button data-view="month" id="view-month"
+          class="cal-view-btn px-3 py-1.5 text-sm font-bold rounded-lg transition cursor-pointer bg-white shadow text-gray-900">
+          Month
+        </button>
+        <button data-view="week" id="view-week"
+          class="cal-view-btn px-3 py-1.5 text-sm font-bold rounded-lg transition cursor-pointer text-gray-500 hover:text-gray-700">
+          Week
+        </button>
+        <button data-view="list" id="view-list"
+          class="cal-view-btn px-3 py-1.5 text-sm font-bold rounded-lg transition cursor-pointer text-gray-500 hover:text-gray-700">
+          List
+        </button>
+      </div>
     </div>
+  </div>
+
+  <!-- #4: per-assistant colour legend -->
+  <div id="cal-legend" class="hidden bg-white border-b border-gray-100 px-4 sm:px-6 py-2 flex items-center gap-4 flex-wrap"></div>
+
+  <!-- Status legend: makes the posted / scheduled / overdue markers self-explanatory -->
+  <div class="bg-white border-b border-gray-100 px-4 sm:px-6 py-2 flex items-center gap-4 flex-wrap">
+    <span class="inline-flex items-center gap-1.5 text-xs text-gray-500">
+      <span class="text-emerald-600 font-extrabold">✓</span> Posted (live)
+    </span>
+    <span class="inline-flex items-center gap-1.5 text-xs text-gray-500">
+      <span class="w-2.5 h-2.5 rounded-full bg-yellow-500"></span> Scheduled
+    </span>
+    <span class="inline-flex items-center gap-1.5 text-xs text-gray-500">
+      <span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span> Overdue
+    </span>
   </div>
 
   <!-- ── Calendar body ────────────────────────────────────────────── -->
@@ -49,7 +81,7 @@
       </div>
     </div>
 
-    <!-- Aura Format slide-out panel (hidden by default) -->
+    <!-- Format slide-out panel (hidden by default) -->
     <div id="aura-panel" class="hidden absolute inset-y-0 right-0 w-full sm:w-[420px] bg-white border-l border-gray-200 shadow-2xl flex flex-col z-30 overflow-hidden">
 
       <!-- Panel header -->
@@ -144,7 +176,7 @@
             </div>
             <!-- SC4: Brand voice score badge -->
             <div id="panel-quality-score-wrap" class="hidden flex items-center justify-between bg-gray-50 border border-gray-100 rounded-xl px-4 py-3">
-              <span class="text-xs font-bold text-gray-500">Brand Voice Score</span>
+              <span class="text-xs font-bold text-gray-500" data-explain="brand-voice">Brand Voice Score</span>
               <span id="panel-quality-score" class="text-sm font-extrabold"></span>
             </div>
             <!-- SC5: Compliance warning chips -->
@@ -164,7 +196,7 @@
             <!-- Tier gate message -->
             <div id="panel-quality-tier-gate" class="hidden text-center py-4 text-xs text-gray-400">
               <svg class="w-5 h-5 mx-auto mb-1 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
-              AI Content Review is available on Pro &amp; Enterprise plans.
+              AI Content Review is available on Workflow Saver &amp; Digital Employee plans.
             </div>
           </div>
         </div>

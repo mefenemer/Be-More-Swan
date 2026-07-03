@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Register | Aura-Assist</title>
+  <title>Register | Be More Swan</title>
   <link href="./style.css" rel="stylesheet">
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/favicon/apple-icon.png">
@@ -72,6 +72,37 @@
 
     </form>
 
+    <!-- US4: Corporate Domain Consolidation prompt (hidden until the backend signals a match) -->
+    <div id="consolidationPanel" class="hidden">
+      <div class="text-center">
+        <div class="mx-auto mb-4 w-14 h-14 rounded-full bg-emerald-50 flex items-center justify-center">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-7 h-7 text-emerald-700" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M17 20h5v-1a4 4 0 00-3-3.87M9 20H4v-1a4 4 0 013-3.87m6-1.13a4 4 0 10-4-4 4 4 0 004 4z"/>
+          </svg>
+        </div>
+        <h2 class="text-2xl font-extrabold text-gray-900 mb-2">Your company already uses Be More Swan</h2>
+        <p class="text-gray-600 leading-relaxed">
+          It looks like <span id="consolidationDomain" class="font-semibold text-gray-800"></span> already has a workspace.
+          Would you like to request to join your team's workspace instead of creating a separate account?
+        </p>
+      </div>
+
+      <div id="consolidationDone" class="hidden bg-emerald-50 text-emerald-800 text-sm font-semibold p-4 rounded-lg border border-emerald-100 mt-6 text-center">
+        Request sent. We've let your workspace admin know — they'll send you an invite to join.
+      </div>
+
+      <div id="consolidationActions" class="space-y-3 mt-6">
+        <button type="button" id="requestJoinBtn"
+                class="w-full block text-center px-6 py-4 text-lg font-bold rounded-xl text-white bg-green-600 hover:bg-green-700 shadow-lg hover:shadow-xl transition-all cursor-pointer">
+          Request to Join
+        </button>
+        <button type="button" id="createOwnBtn"
+                class="w-full block text-center px-6 py-3 text-sm font-semibold rounded-xl text-gray-600 hover:text-gray-900 hover:bg-gray-50 transition-all cursor-pointer">
+          No thanks, create a separate workspace
+        </button>
+      </div>
+    </div>
+
     <p class="text-center text-sm text-gray-500 mt-8">
       Already have an account? <a href="/login.html" class="text-emerald-700 font-bold hover:underline">Sign in</a>
     </p>
@@ -139,9 +170,20 @@
 
       const data = await response.json();
 
-      if (response.ok) {
-        // MUST go to check-email so the backend can issue the secure cookie via the magic link
-        window.location.href = '/check-email.html';
+      // Mark this device as belonging to a registered user, so the public site's CTAs send them to
+      // login (not register) on their next visit. Survives logout; cleared only if they clear storage.
+      if (response.ok) { try { localStorage.setItem('bms_known_user', '1'); } catch (e) {} }
+
+      if (response.ok && data.consolidation) {
+        // US4: the email's domain already belongs to a paid workspace — pause and offer to join it
+        // instead of creating a duplicate account. Stash the entered details for the join request.
+        pendingSignup = { firstName, lastName, email, businessName };
+        showConsolidationPrompt(data.consolidation.domain);
+      } else if (response.ok) {
+        // MUST go to check-email so the backend can issue the secure cookie via the magic link.
+        // If the verification email couldn't be sent (emailSent === false), flag it so check-email
+        // prompts the user to resend rather than waiting for an email that never arrived.
+        window.location.href = data.emailSent === false ? '/check-email.html?send=failed' : '/check-email.html';
       } else {
         errorMessage.innerText = data.error || "An error occurred during registration.";
         errorMessage.classList.remove('hidden');
@@ -159,6 +201,73 @@
       submitBtn.classList.remove('opacity-75', 'cursor-not-allowed');
     }
   }
+
+  // ── US4: Corporate Domain Consolidation ──────────────────────────────
+  // Details entered on the form, stashed when the backend signals a domain match so the
+  // "Request to Join" / "create separate workspace" buttons can act without re-reading the DOM.
+  let pendingSignup = null;
+
+  function showConsolidationPrompt(domain) {
+    document.getElementById('registrationForm').classList.add('hidden');
+    document.getElementById('consolidationDomain').innerText = domain || 'your company';
+    document.getElementById('consolidationPanel').classList.remove('hidden');
+  }
+
+  async function requestWorkspaceJoin() {
+    if (!pendingSignup) return;
+    const btn = document.getElementById('requestJoinBtn');
+    btn.disabled = true;
+    btn.innerText = 'Sending request...';
+    try {
+      await fetch('/.netlify/functions/request-domain-join', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: pendingSignup.email, firstName: pendingSignup.firstName, lastName: pendingSignup.lastName }),
+      });
+    } catch (e) {
+      console.error('Network Error:', e);
+    }
+    // Generic confirmation regardless — the endpoint never reveals whether an owner was reached.
+    document.getElementById('consolidationActions').classList.add('hidden');
+    document.getElementById('consolidationDone').classList.remove('hidden');
+  }
+
+  async function createSeparateWorkspace() {
+    if (!pendingSignup) return;
+    const btn = document.getElementById('createOwnBtn');
+    btn.disabled = true;
+    btn.innerText = 'Setting up...';
+    try {
+      sessionStorage.setItem('aura_pending_email', pendingSignup.email);
+      const priceId = sessionStorage.getItem('pending_price_id');
+      const response = await fetch('/.netlify/functions/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...pendingSignup, priceId, forceNewWorkspace: true,
+          attributionRef: sessionStorage.getItem('attribution_ref') || undefined,
+          referralRef: sessionStorage.getItem('referral_ref') || undefined,
+        }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        window.location.href = data.emailSent === false ? '/check-email.html?send=failed' : '/check-email.html';
+        return;
+      }
+      btn.innerText = 'No thanks, create a separate workspace';
+      btn.disabled = false;
+      alert(data.error || 'An error occurred. Please try again.');
+    } catch (e) {
+      console.error('Network Error:', e);
+      btn.innerText = 'No thanks, create a separate workspace';
+      btn.disabled = false;
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('requestJoinBtn').addEventListener('click', requestWorkspaceJoin);
+    document.getElementById('createOwnBtn').addEventListener('click', createSeparateWorkspace);
+  });
 </script>
 </body>
 </html>

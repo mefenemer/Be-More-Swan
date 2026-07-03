@@ -62,6 +62,7 @@ const PERMISSION_MIN_RANK: Record<string, number> = {
     gdpr_erasure:           4,  // GDPR right-to-erasure
     manage_admin_roles:     4,  // promote / demote other admins
     impersonate:            4,  // impersonate any user
+    run_migration_sql:      4,  // execute AI-proposed migration SQL against the DB (issue tickets)
 };
 
 /**

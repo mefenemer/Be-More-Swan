@@ -76,7 +76,7 @@ export const handler: Handler = async (event) => {
                        <p>You have approximately <strong>${hoursLeft} hours</strong> before the publish window closes.</p>
                        <p>Posts not approved before the cut-off are never auto-published.</p>
                        <p><a href="${process.env.BASE_URL || ''}/workspace.html#review-queue">Open Review Queue →</a></p>
-                       <p>The Aura Team</p>`,
+                       <p>The Be More Swan Team</p>`,
             }).catch(() => {});
         }
 
@@ -133,7 +133,7 @@ export const handler: Handler = async (event) => {
                 html: `<p>Hi ${user.firstName || 'there'},</p>
                        <p>Your <strong>${post.platform}</strong> post scheduled for <strong>${publishLabel}</strong> via <em>${assistantName}</em> was not approved before the ${cutoffHours}-hour cut-off window and has <strong>not been published</strong>.</p>
                        <p>You can reschedule, publish immediately (still requires approval), or archive it from your <a href="${process.env.BASE_URL || ''}/workspace.html#review-queue-missed">Missed Posts tab</a>.</p>
-                       <p>The Aura Team</p>`,
+                       <p>The Be More Swan Team</p>`,
             }).catch(() => {});
         }
 

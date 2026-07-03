@@ -12,6 +12,8 @@ import jwt from 'jsonwebtoken';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, dpaAcceptances, userOrganisations } from '../../db/schema';
+import { resolveBaseUrl } from '../../src/utils/base-url';
+import { retryBlockedAssistants } from '../../src/utils/retry-provisioning';
 
 export const CURRENT_DPA_VERSION = '1.0';
 
@@ -62,6 +64,12 @@ export const handler: Handler = async (event) => {
         userAgent,
         email: user.email,
     });
+
+    // Re-trigger any assistants this org blocked on a DPA gate (best-effort; re-evaluates all gates).
+    const baseUrl = resolveBaseUrl(event.headers);
+    if (baseUrl) {
+        await retryBlockedAssistants(db, { baseUrl, organisationId: user.organisationId }).catch(() => {});
+    }
 
     return {
         statusCode: 200,

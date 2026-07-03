@@ -1,6 +1,11 @@
 # Local Netlify folder
 .netlify
 .env
+.env.handoff
 node_modules/
 .idea/
 .db/seed.ts
+
+# macOS finder metadata
+.DS_Store
+**/.DS_Store

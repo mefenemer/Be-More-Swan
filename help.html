@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Help Center | Aura-Assist</title>
+  <title>Help Center | Be More Swan</title>
   <link href="./style.css" rel="stylesheet">
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <!-- marked.js for Markdown rendering (AC12) -->
@@ -17,13 +17,13 @@
   <header class="bg-white border-b border-gray-200 sticky top-0 z-30">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
       <div class="flex items-center gap-4">
-        <a href="/" class="font-extrabold text-gray-900 text-lg tracking-tight">Aura-Assist™</a>
+        <a href="/" class="font-extrabold text-gray-900 text-lg tracking-tight">Be More Swan</a>
         <span class="text-gray-300">|</span>
         <span class="text-gray-500 text-sm font-medium">Help Center</span>
       </div>
       <div class="flex items-center gap-3">
         <a href="/workspace.html" class="hidden sm:inline text-sm font-medium text-emerald-700 hover:text-emerald-800">Go to Workspace →</a>
-        <a href="mailto:hello@aura-assist.com" class="text-sm text-gray-500 hover:text-gray-700">Contact Support</a>
+        <a href="mailto:hello@bemoreswan.com" class="text-sm text-gray-500 hover:text-gray-700">Contact Support</a>
       </div>
     </div>
   </header>
@@ -57,8 +57,11 @@
 
     <div class="flex gap-8">
 
-      <!-- Left sidebar nav (AC1, AC2) — hidden on mobile -->
-      <aside class="hidden sm:block w-52 shrink-0">
+      <!-- Left sidebar nav (AC1, AC2) — hidden on mobile.
+           width set inline: the prebuilt style.css doesn't include the w-52 utility, so without
+           this the sidebar's w-full buttons make the <aside> expand to ~975px and squash the
+           article grid into a narrow column. -->
+      <aside class="hidden sm:block w-52 shrink-0" style="width:13rem;flex-shrink:0">
         <nav id="help-cat-nav" class="space-y-1 sticky top-24">
           <p class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 px-2">Categories</p>
           <!-- Populated by JS -->
@@ -101,7 +104,7 @@
             <button onclick="showArticleList()" class="flex items-center gap-1.5 text-emerald-700 hover:text-emerald-800 font-medium">
               ← Back to Help Center
             </button>
-            <a href="mailto:hello@aura-assist.com?subject=Help%20Article%20Feedback"
+            <a href="mailto:hello@bemoreswan.com?subject=Help%20Article%20Feedback"
                class="hover:text-gray-700">Was this helpful? Contact us →</a>
           </div>
         </article>

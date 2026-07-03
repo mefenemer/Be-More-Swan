@@ -4,8 +4,15 @@
     {
       "name": "static-preview",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8889"],
-      "port": 8889,
+      "runtimeArgs": ["-m", "http.server", "8890"],
+      "port": 8890,
+      "autoPort": false
+    },
+    {
+      "name": "static-preview-alt",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "8891"],
+      "port": 8891,
       "autoPort": false
     }
   ]

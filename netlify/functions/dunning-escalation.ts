@@ -13,7 +13,7 @@ import type { Handler } from '@netlify/functions';
 import { eq, and, lte, gte, isNotNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, plans, processedWebhookEvents } from '../../db/schema';
-import { sendEmail } from '../../src/utils/email';
+import { sendTemplatedEmail } from '../../src/utils/email';
 import Stripe from 'stripe';
 
 const stripe = process.env.STRIPE_SECRET_KEY
@@ -101,69 +101,18 @@ async function runDunningEscalation() {
 
         const name = userRecord.firstName || 'there';
 
+        // US-COMMS-1: admin-editable billing templates. The escalation stage maps to a
+        // distinct trigger; the billing portal link is passed as a merge variable.
+        const billingVars = { user: { first_name: name }, billing: { portal_url: portalUrl } };
         if (isDay1) {
-            // Day 1 soft warning email
-            await sendEmail({
-                to: userRecord.email,
-                subject: `Payment failed — please update your details`,
-                html: `<p>Hi ${name},</p>
-                       <p>We were unable to process your Aura subscription payment. This can happen when a card expires or a bank declines an automated charge.</p>
-                       <p>Your assistants remain active for now, but <strong>please update your payment details as soon as possible</strong> to avoid any interruption to your service.</p>
-                       <p style="margin-top:24px;">
-                         <a href="${portalUrl}" style="background:#f59e0b;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">
-                           Update Payment Details →
-                         </a>
-                       </p>
-                       <p style="margin-top:16px;font-size:0.875rem;color:#6b7280;">
-                         Need help? <a href="mailto:hello@aura-assist.com">Contact our support team</a>.
-                       </p>
-                       <p>The Aura Team</p>`,
-            }).catch(err => console.warn('[dunning-escalation] Day 1 email failed:', err));
-
+            await sendTemplatedEmail({ triggerKey: 'payment_failed', to: userRecord.email, vars: billingVars })
+                .catch(err => console.warn('[dunning-escalation] Day 1 email failed:', err));
         } else if (isDay3) {
-            // SC1/SC2: Day 3 escalation email
-            await sendEmail({
-                to: userRecord.email,
-                subject: `Your assistants are paused — update payment to restore access`,
-                html: `<p>Hi ${name},</p>
-                       <p>We still haven't been able to process your subscription payment, and <strong>your Aura assistants are currently paused</strong>.</p>
-                       <p>⚠️ If payment isn't resolved within the next <strong>4 days</strong>, your account will be cancelled and access to your assistants will be permanently removed.</p>
-                       <p>Don't lose the work you've built — update your payment details now to restore access immediately.</p>
-                       <p style="margin-top:24px;">
-                         <a href="${portalUrl}" style="background:#dc2626;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">
-                           Restore Access Now →
-                         </a>
-                       </p>
-                       <p style="margin-top:16px;font-size:0.875rem;color:#6b7280;">
-                         Need help? <a href="mailto:hello@aura-assist.com">Contact our support team</a>.
-                       </p>
-                       <p>The Aura Team</p>`,
-            }).catch(err => console.warn('[dunning-escalation] Day 3 email failed:', err));
-
+            await sendTemplatedEmail({ triggerKey: 'subscription_paused', to: userRecord.email, vars: billingVars })
+                .catch(err => console.warn('[dunning-escalation] Day 3 email failed:', err));
         } else {
-            // SC3/SC4: Day 7 final notice email
-            await sendEmail({
-                to: userRecord.email,
-                subject: `Final notice — your account will be cancelled tomorrow`,
-                html: `<p>Hi ${name},</p>
-                       <p>This is your final notice. Your subscription payment has been outstanding for 7 days, and <strong>your account will be cancelled tomorrow</strong>.</p>
-                       <p>⛔ <strong>What happens when your account is cancelled:</strong></p>
-                       <ul>
-                         <li>All your AI assistants will be permanently deactivated</li>
-                         <li>Your scheduled content and automation will stop</li>
-                         <li>Your account data is retained for 30 days, after which it will be deleted</li>
-                       </ul>
-                       <p>Update your payment details right now to prevent cancellation and restore full access.</p>
-                       <p style="margin-top:24px;">
-                         <a href="${portalUrl}" style="background:#dc2626;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">
-                           Update Payment Details →
-                         </a>
-                       </p>
-                       <p style="margin-top:16px;font-size:0.875rem;color:#6b7280;">
-                         Would you like to discuss your situation? <a href="mailto:hello@aura-assist.com">Contact our support team</a> — we may be able to help.
-                       </p>
-                       <p>The Aura Team</p>`,
-            }).catch(err => console.warn('[dunning-escalation] Day 7 email failed:', err));
+            await sendTemplatedEmail({ triggerKey: 'final_notice', to: userRecord.email, vars: billingVars })
+                .catch(err => console.warn('[dunning-escalation] Day 7 email failed:', err));
         }
     }
 }

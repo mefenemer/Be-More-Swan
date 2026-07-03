@@ -1,4 +1,4 @@
-// safety-feedback.ts — Receives user suggestions for the Aura Safe Content Benchmark
+// safety-feedback.ts — Receives user suggestions for the Be More Swan Safe Content Benchmark
 // Inserts to support_tickets with category = 'Safety_Benchmark_Feedback'
 // Admin review only — suggestions do NOT auto-apply to the benchmark
 

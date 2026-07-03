@@ -3,22 +3,63 @@
 (function () {
 
 // ── Config ────────────────────────────────────────────────────────
-const PLATFORM_META = {
-    facebook:  { label: 'Facebook',   emoji: '📘', bg: 'bg-blue-600',   text: 'text-white' },
-    instagram: { label: 'Instagram',  emoji: '📸', bg: 'bg-gradient-to-br from-purple-600 via-pink-500 to-orange-400', text: 'text-white' },
-    linkedin:  { label: 'LinkedIn',   emoji: '💼', bg: 'bg-blue-700',   text: 'text-white' },
-    x:         { label: 'X (Twitter)', emoji: '✕', bg: 'bg-gray-950',   text: 'text-white' },
+// SVG brand logos for each platform, sized for chip use (16×16).
+const PLATFORM_LOGOS = {
+    facebook: `<svg viewBox="0 0 24 24" fill="currentColor" class="w-full h-full"><path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.41c0-3.025 1.792-4.697 4.533-4.697 1.312 0 2.686.236 2.686.236v2.97h-1.513c-1.491 0-1.956.93-1.956 1.874v2.25h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z"/></svg>`,
+    instagram: `<svg viewBox="0 0 24 24" fill="currentColor" class="w-full h-full"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zM12 0C8.741 0 8.333.014 7.053.072 2.695.272.273 2.69.073 7.052.014 8.333 0 8.741 0 12c0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98C8.333 23.986 8.741 24 12 24c3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98C15.668.014 15.259 0 12 0zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/></svg>`,
+    linkedin:  `<svg viewBox="0 0 24 24" fill="currentColor" class="w-full h-full"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>`,
+    x:         `<svg viewBox="0 0 24 24" fill="currentColor" class="w-full h-full"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.73-8.835L1.254 2.25H8.08l4.253 5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>`,
 };
 
-const STATUS_META = {
-    draft:      { label: 'Draft',       badge: 'bg-gray-100 text-gray-600 border-gray-300',   chipBorder: 'border-gray-400',    dot: 'bg-gray-400' },
-    in_review:  { label: 'In Review',   badge: 'bg-amber-100 text-amber-700 border-amber-300', chipBorder: 'border-amber-400',   dot: 'bg-amber-400' },
-    approved:   { label: 'Approved',    badge: 'bg-blue-100 text-blue-700 border-blue-300',   chipBorder: 'border-blue-500',    dot: 'bg-blue-500' },
-    scheduled:  { label: 'Scheduled',   badge: 'bg-yellow-100 text-yellow-700 border-yellow-300', chipBorder: 'border-yellow-500', dot: 'bg-yellow-500' },
-    published:  { label: 'Published',   badge: 'bg-emerald-100 text-emerald-700 border-emerald-300', chipBorder: 'border-emerald-500', dot: 'bg-emerald-500' },
-    rejected:   { label: 'Rejected',    badge: 'bg-red-100 text-red-700 border-red-300',      chipBorder: 'border-red-500',     dot: 'bg-red-500' },
-    cancelled:  { label: 'Cancelled',   badge: 'bg-gray-100 text-gray-400 border-gray-200',   chipBorder: 'border-gray-300',    dot: 'bg-gray-300' },
+const PLATFORM_META = {
+    facebook:  { label: 'Facebook',    bg: '#1877F2', text: 'text-white' },
+    instagram: { label: 'Instagram',   bg: 'linear-gradient(135deg,#833ab4,#fd1d1d,#fcb045)', text: 'text-white' },
+    linkedin:  { label: 'LinkedIn',    bg: '#0A66C2', text: 'text-white' },
+    x:         { label: 'X (Twitter)', bg: '#000000', text: 'text-white' },
 };
+
+// Returns a platform logo rendered in a sized container (inline SVG).
+function _platLogo(platform, size = 'sm') {
+    const svg = PLATFORM_LOGOS[platform];
+    const px = size === 'lg' ? '20px' : size === 'md' ? '16px' : '13px';
+    if (!svg) return `<span style="font-size:${px}">📣</span>`;
+    return `<span style="display:inline-flex;width:${px};height:${px};color:#fff;flex-shrink:0">${svg}</span>`;
+}
+
+// Returns a circular platform avatar (logo on brand bg) for list/panel use.
+function _platAvatar(platform, sizePx = 36) {
+    const meta = PLATFORM_META[platform];
+    const logo = PLATFORM_LOGOS[platform];
+    const bg = meta ? meta.bg : '#9ca3af';
+    const inner = logo
+        ? `<span style="display:flex;width:${Math.round(sizePx*0.5)}px;height:${Math.round(sizePx*0.5)}px;color:#fff">${logo}</span>`
+        : `<span style="font-size:${Math.round(sizePx*0.45)}px;color:#fff">📣</span>`;
+    return `<div style="width:${sizePx}px;height:${sizePx}px;border-radius:10px;background:${bg};display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 1px 3px rgba(0,0,0,.15)">${inner}</div>`;
+}
+
+const STATUS_META = {
+    draft:           { label: 'Draft',       badge: 'bg-gray-100 text-gray-600 border-gray-300',   chipBorder: 'border-gray-400',    dot: 'bg-gray-400' },
+    pending_approval:{ label: 'Pending',     badge: 'bg-amber-100 text-amber-700 border-amber-300', chipBorder: 'border-amber-400',   dot: 'bg-amber-400' },
+    in_review:       { label: 'In Review',   badge: 'bg-amber-100 text-amber-700 border-amber-300', chipBorder: 'border-amber-400',   dot: 'bg-amber-400' },
+    approved:        { label: 'Approved',    badge: 'bg-blue-100 text-blue-700 border-blue-300',   chipBorder: 'border-blue-500',    dot: 'bg-blue-500' },
+    scheduled:       { label: 'Scheduled',   badge: 'bg-yellow-100 text-yellow-700 border-yellow-300', chipBorder: 'border-yellow-500', dot: 'bg-yellow-500' },
+    publishing:      { label: 'Publishing',  badge: 'bg-blue-100 text-blue-700 border-blue-300',   chipBorder: 'border-blue-500',    dot: 'bg-blue-500' },
+    published:       { label: 'Published',   badge: 'bg-emerald-100 text-emerald-700 border-emerald-300', chipBorder: 'border-emerald-500', dot: 'bg-emerald-500' },
+    paused:          { label: 'Paused',      badge: 'bg-gray-100 text-gray-500 border-gray-300',   chipBorder: 'border-gray-400',    dot: 'bg-gray-400' },
+    failed:          { label: 'Failed',      badge: 'bg-red-100 text-red-700 border-red-300',      chipBorder: 'border-red-500',     dot: 'bg-red-500' },
+    missed:          { label: 'Missed',      badge: 'bg-orange-100 text-orange-700 border-orange-300', chipBorder: 'border-orange-300', dot: 'bg-amber-500' },
+    rejected:        { label: 'Rejected',    badge: 'bg-red-100 text-red-700 border-red-300',      chipBorder: 'border-red-500',     dot: 'bg-red-500' },
+    cancelled:       { label: 'Cancelled',   badge: 'bg-gray-100 text-gray-400 border-gray-200',   chipBorder: 'border-gray-300',    dot: 'bg-gray-300' },
+};
+
+// A post is "overdue" when its scheduled time has passed but the publisher hasn't
+// confirmed it live yet. This is the case the calendar must make visible — otherwise
+// it looks identical to a normal scheduled post sitting on a past date.
+function _isOverdue(post) {
+    if (!post?.publishDate) return false;
+    if (post.status !== 'scheduled') return false;
+    return new Date(post.publishDate) < new Date();
+}
 
 const DAY_NAMES_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTH_NAMES = ['January','February','March','April','May','June','July','August','September','October','November','December'];
@@ -35,6 +76,32 @@ let _dragTargetDate = null;      // drop target
 let _pendingReschedule = null;   // { postId, newDate }
 let _pendingApproveId = null;    // postId awaiting past-date modal decision
 let _listFilter = 'all';         // 'all' | 'pending' | 'approved' | 'published'
+// #3/#4: assistant activity + per-assistant colour-coding + filter
+let _activities = [];            // completed task runs (get-calendar-activity)
+let _assistants = [];            // org assistants for names + colour assignment
+let _assistantFilter = 'all';    // 'all' | <assistantId>
+let _platformFilter  = 'all';    // 'all' | 'facebook' | 'instagram' | 'linkedin' | 'x'
+
+// Stable colour palette assigned to assistants by load order (inline styles → no Tailwind
+// arbitrary-class compile issues). Null/unknown assistant → neutral grey.
+const ASSISTANT_PALETTE = ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#06b6d4', '#8b5cf6', '#ef4444', '#14b8a6', '#f97316', '#3b82f6'];
+function _assistantColor(id) {
+    if (id == null) return '#9ca3af';
+    const idx = _assistants.findIndex(a => a.id === id);
+    const i = idx >= 0 ? idx : (Math.abs(Number(id)) % ASSISTANT_PALETTE.length);
+    return ASSISTANT_PALETTE[i % ASSISTANT_PALETTE.length];
+}
+function _assistantName(id) {
+    if (id == null) return 'Unassigned';
+    const a = _assistants.find(a => a.id === id);
+    return a ? (a.name || `Assistant #${id}`) : `Assistant #${id}`;
+}
+function _matchesAssistantFilter(assistantId) {
+    return _assistantFilter === 'all' || String(assistantId) === String(_assistantFilter);
+}
+function _matchesPlatformFilter(platform) {
+    return _platformFilter === 'all' || platform === _platformFilter;
+}
 
 // ── Init ──────────────────────────────────────────────────────────
 window.initCalendar = async function () {
@@ -73,17 +140,65 @@ function _setView(v) {
     _render();
 }
 
-// ── Load posts from API ───────────────────────────────────────────
+// ── Load posts + assistant activity from API ──────────────────────
 async function _loadAndRender() {
     try {
         const { from, to } = _getDateRange();
-        const res = await fetch(`/.netlify/functions/scheduled-posts?from=${from.toISOString()}&to=${to.toISOString()}`);
-        if (res.ok) {
-            const data = await res.json();
-            _posts = data.posts || [];
+        // Posts, completed assistant activity, and the assistant list (for colours/filter) in parallel.
+        const [postsRes, actRes, asstRes] = await Promise.all([
+            fetch(`/.netlify/functions/scheduled-posts?from=${from.toISOString()}&to=${to.toISOString()}`),
+            fetch(`/.netlify/functions/get-calendar-activity?from=${from.toISOString()}&to=${to.toISOString()}`),
+            _assistants.length ? Promise.resolve(null) : fetch('/.netlify/functions/get-assistants'),
+        ]);
+
+        if (postsRes.ok) {
+            _posts = (await postsRes.json()).posts || [];
+        } else if (postsRes.status === 403) {
+            // US3 AC3.3: onboarding guard rejected this — surface it gracefully, don't crash.
+            const body = await postsRes.json().catch(() => ({}));
+            if (body.error === 'onboarding_incomplete') {
+                window.showToast?.(body.message || 'Please complete your onboarding checklist to unlock this feature.');
+            }
+            _posts = [];
         }
+
+        if (actRes && actRes.ok) _activities = (await actRes.json()).activities || [];
+        if (asstRes && asstRes.ok) _assistants = (await asstRes.json()).assistants || [];
     } catch (e) { console.warn('Calendar load error:', e); }
+    // Always (re)populate the toolbar controls — the calendar.html fragment (and its fresh
+    // <select>) is re-injected on every view entry, even though _assistants is cached here.
+    _renderAssistantControls();
     _render();
+}
+
+// Populate the assistant + platform filter dropdowns and colour legend.
+function _renderAssistantControls() {
+    const sel = document.getElementById('cal-assistant-filter');
+    if (sel) {
+        sel.innerHTML = `<option value="all">All assistants</option>` +
+            _assistants.map(a => `<option value="${a.id}">${_escHtml(a.name || ('Assistant #' + a.id))}</option>`).join('');
+        sel.value = String(_assistantFilter);
+        if (!sel.dataset.bound) {
+            sel.dataset.bound = '1';
+            sel.addEventListener('change', () => { _assistantFilter = sel.value; _render(); });
+        }
+    }
+
+    const psel = document.getElementById('cal-platform-filter');
+    if (psel && !psel.dataset.bound) {
+        psel.dataset.bound = '1';
+        psel.addEventListener('change', () => { _platformFilter = psel.value; _render(); });
+    }
+    if (psel) psel.value = _platformFilter;
+
+    const legend = document.getElementById('cal-legend');
+    if (legend) {
+        legend.innerHTML = _assistants.map(a =>
+            `<span class="inline-flex items-center gap-1.5 text-xs text-gray-500">
+                <span class="w-2.5 h-2.5 rounded-full" style="background:${_assistantColor(a.id)}"></span>${_escHtml(a.name || ('Assistant #' + a.id))}
+            </span>`).join('');
+        legend.classList.toggle('hidden', _assistants.length === 0);
+    }
 }
 
 function _getDateRange() {
@@ -100,6 +215,11 @@ function _getDateRange() {
 
 // ── Master render ─────────────────────────────────────────────────
 function _render() {
+    // Chips are about to be torn down and rebuilt — drop any open hover preview
+    // so it doesn't linger detached from its (now-removed) anchor chip.
+    if (_previewEl) { _previewEl.classList.remove('is-open'); }
+    _previewReqToken++;
+
     // Update title
     const titleEl = document.getElementById('cal-title');
     if (titleEl) {
@@ -156,7 +276,8 @@ function _renderMonth() {
         html += `<div class="flex items-center justify-end mb-1">
             <span class="${isToday ? 'w-6 h-6 bg-emerald-600 text-white rounded-full flex items-center justify-center text-xs font-extrabold' : 'text-xs font-bold text-gray-500 px-1'}">${day}</span>
         </div>`;
-        html += `<div class="space-y-1">${dayPosts.map(p => _postChip(p, 'month')).join('')}</div>`;
+        const dayActs = _activitiesOnDate(date);
+        html += `<div class="space-y-1">${dayPosts.map(p => _postChip(p, 'month')).join('')}${dayActs.map(a => _activityChip(a, 'month')).join('')}</div>`;
         html += `</div>`;
     }
 
@@ -190,7 +311,7 @@ function _renderWeek() {
             ondragover="window._calDragOver(event, '${dateKey}')"
             ondragleave="window._calDragLeave(event)"
             ondrop="window._calDrop(event, '${dateKey}')">
-            ${dayPosts.length > 0 ? dayPosts.map(p => _postChip(p, 'week')).join('') : ''}
+            ${dayPosts.map(p => _postChip(p, 'week')).join('')}${_activitiesOnDate(d).map(a => _activityChip(a, 'week')).join('')}
         </div>`;
     }
     html += `</div>`;
@@ -270,39 +391,223 @@ window._calSetListFilter = function (key) {
 
 // ── Post chip (month/week) ────────────────────────────────────────
 function _postChip(post, viewType) {
-    const plat = PLATFORM_META[post.platform] || { emoji: '📣', bg: 'bg-gray-500', text: 'text-white' };
+    const plat = PLATFORM_META[post.platform] || { label: post.platform, bg: '#9ca3af', text: 'text-white' };
     const sm = STATUS_META[post.status] || STATUS_META.draft;
-    const time = new Date(post.publishDate).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    const posted = post.status === 'published';
+    const publishing = post.status === 'publishing';
+    const overdue = _isOverdue(post);
+    // Posted posts show when they actually went live (publishedAt); everything else
+    // shows the scheduled time.
+    const stamp = posted && post.publishedAt ? new Date(post.publishedAt) : new Date(post.publishDate);
+    const time = stamp.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     const isDraggable = ['draft', 'in_review', 'approved', 'scheduled'].includes(post.status);
 
     const revisedBadge = post.isRevised ? `<span class="text-[9px] font-bold text-violet-600 bg-violet-50 border border-violet-200 px-1 rounded shrink-0">Revised</span>` : '';
+    // #4: left border = assistant colour; status stays glanceable via the right-hand marker.
+    const asstColor = _assistantColor(post.assistantId);
+    const asstName = _assistantName(post.assistantId);
+
+    // Right-hand status marker + chip tint give instant confirmation of *actual* state:
+    //  • posted     → emerald tint + ✓  ("this really went out")
+    //  • publishing → pulsing blue dot   ("going out right now")
+    //  • overdue    → amber tint + pulsing amber dot ("should have posted, hasn't")
+    //  • otherwise  → the normal status dot.
+    let chipBg = 'bg-white hover:bg-gray-50', timeColor = 'text-gray-700', marker, titleSuffix = '';
+    if (posted) {
+        chipBg = 'bg-emerald-50 hover:bg-emerald-100';
+        timeColor = 'text-emerald-700';
+        marker = `<span class="text-emerald-600 text-xs font-extrabold shrink-0" title="Posted ${time}">✓</span>`;
+        titleSuffix = ` · ✓ Posted ${time}`;
+    } else if (publishing) {
+        timeColor = 'text-blue-700';
+        marker = `<span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse shrink-0" title="Publishing now…"></span>`;
+        titleSuffix = ' · Publishing now…';
+    } else if (overdue) {
+        chipBg = 'bg-amber-50 hover:bg-amber-100';
+        timeColor = 'text-amber-700';
+        marker = `<span class="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse shrink-0" title="Overdue — not yet posted"></span>`;
+        titleSuffix = ' · ⚠ Overdue — not yet posted';
+    } else {
+        marker = `<span class="w-1.5 h-1.5 rounded-full ${sm.dot} shrink-0" title="${sm.label}"></span>`;
+    }
+
+    const summary = post.caption || plat.label || post.platform || '';
 
     return `<div
         onclick="window._calOpenPost(${post.id})"
+        onmouseenter="window._calShowPreview(event, ${post.id})"
+        onmouseleave="window._calHidePreview()"
         ${isDraggable ? `draggable="true" ondragstart="window._calDragStart(event, ${post.id})"` : ''}
         data-post-id="${post.id}"
-        class="group flex items-center gap-1.5 px-2 py-1 rounded-lg border-l-2 ${sm.chipBorder} bg-white hover:bg-gray-50 shadow-sm cursor-pointer transition select-none text-left w-full"
-        title="${_escHtml(post.caption || post.platform)}">
-        <span class="text-xs">${plat.emoji}</span>
+        class="group flex items-center gap-1.5 px-2 py-1 rounded-lg ${chipBg} shadow-sm cursor-pointer transition select-none text-left w-full"
+        style="border-left:3px solid ${asstColor}"
+        aria-label="${_escHtml(asstName)} · ${_escHtml(post.caption || post.platform)}${titleSuffix}">
+        ${_platLogo(post.platform, 'sm')}
         <div class="flex-1 min-w-0">
-            <p class="text-[11px] font-bold text-gray-700 truncate">${time}</p>
-            ${viewType === 'week' ? `<p class="text-[11px] text-gray-500 truncate leading-tight">${_escHtml((post.caption || '').substring(0, 40))}</p>` : ''}
+            <p class="text-[11px] font-bold ${timeColor} truncate">${overdue ? '⚠ ' : ''}${time}</p>
+            <p class="text-[11px] text-gray-500 truncate leading-tight">${_escHtml(summary.substring(0, 40))}</p>
         </div>
         ${revisedBadge}
-        <span class="w-1.5 h-1.5 rounded-full ${sm.dot} shrink-0"></span>
+        ${marker}
+    </div>`;
+}
+
+// ── Hover preview popover ────────────────────────────────────────
+// Calendar chips only have room for a time + short title, so hovering a chip
+// pops a small card with the full caption and (if attached) the post image —
+// "quicker to view" than opening the full side panel. Styles are injected at
+// runtime (not added to style.css) because style.css is prebuilt Tailwind output
+// and won't compile new arbitrary classes — same technique as explainers.js.
+const _previewCache = new Map(); // postId -> { post, assets }
+let _previewEl = null;
+let _previewShowTimer = null;
+let _previewHideTimer = null;
+let _previewReqToken = 0;
+
+function _injectPreviewStyles() {
+    if (document.getElementById('cal-preview-styles')) return;
+    const style = document.createElement('style');
+    style.id = 'cal-preview-styles';
+    style.textContent = [
+        '.cal-hover-preview{position:fixed;z-index:100000;width:260px;max-width:calc(100vw - 24px);',
+        '  background:#fff;border:1px solid #e5e7eb;border-radius:14px;box-shadow:0 18px 40px -12px rgba(31,30,27,.28);',
+        '  overflow:hidden;opacity:0;transform:translateY(4px);transition:opacity .12s ease,transform .12s ease;',
+        '  pointer-events:none;}',
+        '.cal-hover-preview.is-open{opacity:1;transform:translateY(0);pointer-events:auto;}',
+        '.cal-hover-preview-img{display:block;width:100%;height:140px;object-fit:cover;background:#f3f4f6;}',
+        '.cal-hover-preview-body{padding:10px 12px;}',
+        '.cal-hover-preview-head{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#374151;margin-bottom:4px;}',
+        '.cal-hover-preview-caption{font-size:12px;line-height:1.4;color:#4b5563;max-height:110px;overflow:hidden;white-space:pre-wrap;word-break:break-word;}',
+        '@media (prefers-reduced-motion:reduce){.cal-hover-preview{transition:none;}}',
+    ].join('');
+    (document.head || document.documentElement).appendChild(style);
+}
+
+function _ensurePreviewEl() {
+    if (_previewEl) return _previewEl;
+    _previewEl = document.createElement('div');
+    _previewEl.className = 'cal-hover-preview';
+    _previewEl.addEventListener('mouseenter', () => {
+        if (_previewHideTimer) { clearTimeout(_previewHideTimer); _previewHideTimer = null; }
+    });
+    _previewEl.addEventListener('mouseleave', () => window._calHidePreview());
+    document.body.appendChild(_previewEl);
+    return _previewEl;
+}
+
+function _positionPreview(anchorEl) {
+    const el = _previewEl;
+    const r = anchorEl.getBoundingClientRect();
+    const pr = el.getBoundingClientRect();
+    const gap = 8, margin = 8;
+    const vw = document.documentElement.clientWidth;
+    const vh = document.documentElement.clientHeight;
+    const below = (r.bottom + gap + pr.height) <= vh;
+    const top = below ? r.bottom + gap : Math.max(margin, r.top - gap - pr.height);
+    const left = Math.max(margin, Math.min(r.left, vw - pr.width - margin));
+    el.style.top = `${Math.round(top)}px`;
+    el.style.left = `${Math.round(left)}px`;
+}
+
+function _renderPreviewContent(post, assets) {
+    const plat = PLATFORM_META[post.platform] || { label: post.platform || '' };
+    const img = (assets || []).find(a => a.assetType === 'image' && a.storageUrl);
+    const caption = post.caption || '(No caption)';
+    return `
+        ${img ? `<img src="${img.storageUrl}" alt="" class="cal-hover-preview-img">` : ''}
+        <div class="cal-hover-preview-body">
+            <div class="cal-hover-preview-head">${_platAvatar(post.platform, 18)}<span>${_escHtml(plat.label)}</span></div>
+            <p class="cal-hover-preview-caption">${_escHtml(caption)}</p>
+        </div>`;
+}
+
+// Hover-intent delay avoids firing a fetch for every chip the cursor sweeps past.
+window._calShowPreview = function (event, postId) {
+    const anchorEl = event.currentTarget;
+    if (_previewShowTimer) clearTimeout(_previewShowTimer);
+    if (_previewHideTimer) { clearTimeout(_previewHideTimer); _previewHideTimer = null; }
+    _previewShowTimer = setTimeout(async () => {
+        _injectPreviewStyles();
+        const el = _ensurePreviewEl();
+        const token = ++_previewReqToken;
+        let cached = _previewCache.get(postId);
+        if (!cached) {
+            const localPost = _posts.find(p => p.id === postId) || {};
+            el.innerHTML = _renderPreviewContent(localPost, []);
+            el.classList.add('is-open');
+            _positionPreview(anchorEl);
+            try {
+                const res = await fetch(`/.netlify/functions/scheduled-posts?id=${postId}`);
+                if (res.ok) {
+                    const data = await res.json();
+                    cached = { post: data.post, assets: data.assets || [] };
+                    _previewCache.set(postId, cached);
+                }
+            } catch (e) { /* keep the local-data fallback already shown */ }
+        }
+        if (token !== _previewReqToken) return; // hovered away before the fetch resolved
+        if (cached) {
+            el.innerHTML = _renderPreviewContent(cached.post, cached.assets);
+            el.classList.add('is-open');
+            _positionPreview(anchorEl);
+        }
+    }, 180);
+};
+
+window._calHidePreview = function () {
+    if (_previewShowTimer) { clearTimeout(_previewShowTimer); _previewShowTimer = null; }
+    _previewReqToken++; // invalidate any in-flight fetch render
+    if (_previewHideTimer) clearTimeout(_previewHideTimer);
+    _previewHideTimer = setTimeout(() => {
+        if (_previewEl) _previewEl.classList.remove('is-open');
+    }, 100);
+};
+
+// #3: read-only chip for a completed assistant task, coloured by assistant.
+function _activityChip(act, viewType) {
+    const color = _assistantColor(act.assistantId);
+    const name = _assistantName(act.assistantId);
+    const time = new Date(act.at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    return `<div
+        class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-gray-50 text-left w-full select-none"
+        style="border-left:3px solid ${color}"
+        title="${_escHtml(name)} — task completed at ${time}">
+        <span class="w-1.5 h-1.5 rounded-full shrink-0" style="background:${color}"></span>
+        <div class="flex-1 min-w-0">
+            <p class="text-[11px] font-semibold text-gray-600 truncate">✓ ${_escHtml(name)}</p>
+            ${viewType === 'week' ? `<p class="text-[10px] text-gray-400 truncate leading-tight">${time} · task done</p>` : ''}
+        </div>
     </div>`;
 }
 
 // ── List row ──────────────────────────────────────────────────────
 function _listRow(post) {
-    const plat = PLATFORM_META[post.platform] || { emoji: '📣', label: post.platform, bg: 'bg-gray-500', text: 'text-white' };
+    const plat = PLATFORM_META[post.platform] || { label: post.platform, bg: '#9ca3af', text: 'text-white' };
     const sm = STATUS_META[post.status] || STATUS_META.draft;
+    const posted = post.status === 'published';
+    const overdue = _isOverdue(post);
     const dt = new Date(post.publishDate);
     const time = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    // The scheduled time is the headline; for posted/overdue we add a second line
+    // confirming what actually happened.
+    const postedAt = posted && post.publishedAt ? new Date(post.publishedAt) : null;
+    const statusLine = posted
+        ? `<p class="text-xs font-bold text-emerald-600 mt-1">✓ Posted${postedAt ? ' ' + postedAt.toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}</p>`
+        : overdue
+        ? `<p class="text-xs font-bold text-amber-700 mt-1">⚠ Overdue — scheduled time passed, not yet posted</p>`
+        : '';
+
+    // The right-hand badge: posted gets a check, overdue is recoloured so a past
+    // date never reads as a calm "Scheduled".
+    const badge = posted
+        ? `<span class="text-xs font-bold px-2.5 py-1 rounded-full border bg-emerald-100 text-emerald-700 border-emerald-300 shrink-0 mt-1">✓ Posted</span>`
+        : overdue
+        ? `<span class="text-xs font-bold px-2.5 py-1 rounded-full border bg-amber-100 text-amber-700 border-amber-300 shrink-0 mt-1">Overdue</span>`
+        : `<span class="text-xs font-bold px-2.5 py-1 rounded-full border ${sm.badge} shrink-0 mt-1">${sm.label}</span>`;
 
     return `<div onclick="window._calOpenPost(${post.id})"
         class="flex items-start gap-4 bg-white border border-gray-200 rounded-xl px-5 py-4 hover:border-emerald-300 hover:shadow-sm cursor-pointer transition">
-        <div class="w-9 h-9 rounded-xl ${plat.bg} ${plat.text} flex items-center justify-center text-base font-bold shrink-0 mt-0.5 shadow-sm">${plat.emoji}</div>
+        ${_platAvatar(post.platform, 36)}
         <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-1">
                 <span class="text-sm font-extrabold text-gray-900">${plat.label}</span>
@@ -311,15 +616,17 @@ function _listRow(post) {
             </div>
             <p class="text-sm text-gray-600 truncate">${_escHtml((post.caption || '').substring(0, 120) || '(No caption)')}</p>
             ${post.hashtags ? `<p class="text-xs text-blue-500 mt-1 truncate">${_escHtml(post.hashtags.substring(0, 80))}</p>` : ''}
+            ${statusLine}
         </div>
-        <span class="text-xs font-bold px-2.5 py-1 rounded-full border ${sm.badge} shrink-0 mt-1">${sm.label}</span>
+        ${badge}
     </div>`;
 }
 
-// ── Open Aura Format panel ────────────────────────────────────────
+// ── Open Format panel ────────────────────────────────────────
 window._calOpenPost = async function (postId) {
     _openPostId = postId;
     _editMode = false;
+    window._calHidePreview();
 
     const panel = document.getElementById('aura-panel');
     panel.classList.remove('hidden');
@@ -347,13 +654,31 @@ window._calOpenPost = async function (postId) {
 
     // ── Header ────────────────────────────────────────────────────
     const iconEl = document.getElementById('panel-platform-icon');
-    iconEl.className = `w-9 h-9 rounded-xl flex items-center justify-center text-base font-bold shadow-sm shrink-0 ${plat.bg} ${plat.text}`;
-    iconEl.textContent = plat.emoji;
+    iconEl.className = 'w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-sm overflow-hidden';
+    iconEl.style.background = plat.bg || '#9ca3af';
+    iconEl.innerHTML = `<span style="display:flex;width:20px;height:20px;color:#fff">${PLATFORM_LOGOS[post.platform] || '📣'}</span>`;
     document.getElementById('panel-platform-name').textContent = plat.label;
-    document.getElementById('panel-publish-date').textContent = dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+    const overdue = _isOverdue(post);
+    const subEl = document.getElementById('panel-publish-date');
+    if (post.status === 'published' && post.publishedAt) {
+        // Strongest possible confirmation: show when it actually went live, not when it was scheduled.
+        subEl.textContent = `✓ Posted ${new Date(post.publishedAt).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`;
+        subEl.className = 'text-xs font-bold text-emerald-600 mt-0.5';
+    } else if (overdue) {
+        subEl.textContent = `⚠ Overdue — was due ${dt.toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`;
+        subEl.className = 'text-xs font-bold text-amber-700 mt-0.5';
+    } else {
+        subEl.textContent = dt.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+        subEl.className = 'text-xs text-gray-500 mt-0.5';
+    }
     const badgeEl = document.getElementById('panel-status-badge');
-    badgeEl.textContent = sm.label;
-    badgeEl.className = `text-xs font-bold px-2.5 py-1 rounded-full border ${sm.badge}`;
+    if (overdue) {
+        badgeEl.textContent = 'Overdue';
+        badgeEl.className = 'text-xs font-bold px-2.5 py-1 rounded-full border bg-amber-100 text-amber-700 border-amber-300';
+    } else {
+        badgeEl.textContent = post.status === 'published' ? '✓ Published' : sm.label;
+        badgeEl.className = `text-xs font-bold px-2.5 py-1 rounded-full border ${sm.badge}`;
+    }
 
     // ── Section 1: Logistics ──────────────────────────────────────
     document.getElementById('panel-logistics-platform').textContent = plat.label;
@@ -464,7 +789,7 @@ window._calOpenPost = async function (postId) {
 
     // ── Section 3: Governance ─────────────────────────────────────
     document.getElementById('panel-gov-status').textContent = sm.label;
-    document.getElementById('panel-gov-owner').textContent = post.ownerLabel || 'Aura-Assist';
+    document.getElementById('panel-gov-owner').textContent = post.ownerLabel || 'Be More Swan';
     document.getElementById('panel-gov-campaign').textContent = post.campaign || '—';
     document.getElementById('panel-gov-pillar').textContent = post.pillar || '—';
 
@@ -508,18 +833,14 @@ window._calOpenPost = async function (postId) {
 
     // ── Platform post preview — US-SMM-2.1.1 ─────────────────────
     const previewContainer = document.getElementById('panel-platform-preview');
+    let approveCharGated = false; // any platform over its character limit?
     if (previewContainer && window.PlatformPostPreview) {
         const previewResult = window.PlatformPostPreview.render(previewContainer, {
             post,
             assets,
             platforms: post.crossPostPlatforms?.length ? post.crossPostPlatforms : undefined,
         });
-        // Gate Approve button if any platform is over its character limit
-        const approveGated = previewResult.approveBlocked;
-        if (approveGated) {
-            const btn = document.getElementById('btn-panel-approve');
-            if (btn) { btn.disabled = true; btn.title = 'Fix character limit issues before approving.'; btn.classList.add('opacity-50'); }
-        }
+        approveCharGated = !!previewResult.approveBlocked;
     }
 
     // ── Footer actions ────────────────────────────────────────────
@@ -547,11 +868,23 @@ window._calOpenPost = async function (postId) {
         if (saveBtn) saveBtn.classList.add('hidden');
     }
 
-    // Update Approve button label contextually
+    // Update Approve button label contextually. A post that's already been
+    // approved is either parked at 'approved' or (SMM flow) auto-scheduled into
+    // an optimal slot → 'scheduled'. Both mean "no longer awaiting approval", so
+    // the button must read as done and be disabled; the user's remaining actions
+    // (edit copy / reject) stay available via the other footer buttons.
     const approveBtn = document.getElementById('btn-panel-approve');
     if (approveBtn) {
-        if (post.status === 'approved') { approveBtn.textContent = '✓ Approved'; approveBtn.disabled = true; approveBtn.classList.add('opacity-50'); }
-        else { approveBtn.textContent = '✓ Approve'; approveBtn.disabled = false; approveBtn.classList.remove('opacity-50'); }
+        if (post.status === 'scheduled') { approveBtn.textContent = '✓ Scheduled'; approveBtn.disabled = true; approveBtn.classList.add('opacity-50'); approveBtn.title = ''; }
+        else if (post.status === 'approved') { approveBtn.textContent = '✓ Approved'; approveBtn.disabled = true; approveBtn.classList.add('opacity-50'); approveBtn.title = ''; }
+        else { approveBtn.textContent = '✓ Approve'; approveBtn.disabled = false; approveBtn.classList.remove('opacity-50'); approveBtn.title = ''; }
+        // Char-limit gate has the final say for still-approvable posts: an
+        // over-limit post must stay blocked even though it's in_review/draft.
+        if (approveCharGated && !approveBtn.disabled) {
+            approveBtn.disabled = true;
+            approveBtn.title = 'Fix character limit issues before approving.';
+            approveBtn.classList.add('opacity-50');
+        }
     }
 
     // ── Next Post navigator (Pending Review only) ─────────────────
@@ -1013,7 +1346,19 @@ function _postsOnDate(date) {
     const key = _dateKey(date);
     return _posts.filter(p => {
         if (!p.publishDate) return false;
+        if (!_matchesAssistantFilter(p.assistantId)) return false;
+        if (!_matchesPlatformFilter(p.platform)) return false;
         return _dateKey(new Date(p.publishDate)) === key;
+    });
+}
+
+// #3: completed assistant activity on a given day (respects the assistant filter).
+function _activitiesOnDate(date) {
+    const key = _dateKey(date);
+    return _activities.filter(a => {
+        if (!a.at) return false;
+        if (!_matchesAssistantFilter(a.assistantId)) return false;
+        return _dateKey(new Date(a.at)) === key;
     });
 }
 

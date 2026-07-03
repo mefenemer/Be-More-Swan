@@ -25,16 +25,16 @@ const DPA_HTML = `
 <h2>Data Processing Agreement (DPA) — Version ${CURRENT_DPA_VERSION}</h2>
 <p><strong>Effective date:</strong> ${DPA_EFFECTIVE_DATE}</p>
 <p>
-  This Data Processing Agreement ("Agreement") is entered into between <strong>Aura-Assist Ltd</strong>
+  This Data Processing Agreement ("Agreement") is entered into between <strong>Be More Swan Ltd</strong>
   ("Processor") and the organisation accepting this agreement ("Controller"). It supplements and forms
-  part of the Aura-Assist Terms of Service. Capitalised terms not defined here have the meanings given
+  part of the Be More Swan Terms of Service. Capitalised terms not defined here have the meanings given
   in the Terms of Service or in Regulation (EU) 2016/679 (GDPR).
 </p>
 
 <h3>1. Subject Matter and Duration</h3>
 <p>
   The Processor will process personal data on behalf of the Controller solely for the purpose of
-  providing the Aura-Assist platform services described in the Terms of Service. Processing will
+  providing the Be More Swan platform services described in the Terms of Service. Processing will
   continue for the duration of the subscription and cease on termination or expiry.
 </p>
 
@@ -51,7 +51,7 @@ const DPA_HTML = `
 <p>
   The Processor ensures that persons authorised to process personal data have committed themselves
   to confidentiality or are under an appropriate statutory obligation of confidentiality. This
-  obligation applies to all Aura-Assist Ltd employees, contractors, and sub-processors who have
+  obligation applies to all Be More Swan Ltd employees, contractors, and sub-processors who have
   access to Controller personal data.
 </p>
 
@@ -116,7 +116,7 @@ const DPA_HTML = `
 <h3>10. Special Category Data Prohibition</h3>
 <p>
   The Controller must not, and must ensure that its users do not, submit <strong>Special Category
-  personal data</strong> through the Aura-Assist platform. Special Category data means personal data
+  personal data</strong> through the Be More Swan platform. Special Category data means personal data
   revealing racial or ethnic origin, political opinions, religious or philosophical beliefs, trade
   union membership, genetic data, biometric data processed to uniquely identify a person, data
   concerning health, a person's sex life or sexual orientation, and data relating to criminal

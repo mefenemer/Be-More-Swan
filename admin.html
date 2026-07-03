@@ -16,9 +16,12 @@
   </script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Admin Workspace | Aura-Assist</title>
+  <title>Admin Workspace | Be More Swan</title>
   <link href="./style.css" rel="stylesheet">
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
+  <!-- US-COMMS-1.1: Quill WYSIWYG editor for the email template builder (loaded on demand) -->
+  <link href="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.snow.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/quill@2.0.3/dist/quill.js" defer></script>
 </head>
 <body class="font-sans text-gray-800 antialiased bg-gray-100 h-screen overflow-hidden">
 
@@ -75,6 +78,12 @@
         <span class="text-xl">📋</span>
         <span class="text-[10px] font-bold mt-0.5 hidden lg:block truncate text-gray-400 group-hover:text-white transition-colors">Comply</span>
       </button>
+      <button data-cat="testing" onclick="adminCatNav('testing')"
+        class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
+        aria-label="Testing" title="Testing">
+        <span class="text-xl">🐞</span>
+        <span class="text-[10px] font-bold mt-0.5 hidden lg:block truncate text-gray-400 group-hover:text-white transition-colors">Testing</span>
+      </button>
     </nav>
     <div class="pb-4 flex flex-col items-center gap-1">
       <a href="/workspace.html" title="Back to Workspace"
@@ -112,10 +121,19 @@
   <!-- Main content -->
   <main class="flex-1 overflow-auto min-w-0 min-h-0">
     <!-- Header bar -->
-    <header class="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between sticky top-0 z-10">
+    <header id="admin-topbar" class="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between sticky top-0 z-10">
       <h1 id="admin-page-title" class="text-xl font-extrabold text-gray-900">Dashboard</h1>
-      <span class="text-xs bg-red-100 text-red-700 font-bold px-3 py-1 rounded-full">Admin Mode</span>
+      <div class="flex items-center gap-4">
+        <!-- Epic: Superadmin Environment Management — US1: Live/Sandbox toggle (super_admin only) -->
+        <div id="env-toggle" class="env-toggle hidden" role="group" aria-label="Data environment">
+          <button type="button" id="env-toggle-live" class="env-toggle-btn" onclick="setAdminEnv('live')" aria-pressed="true">● Live</button>
+          <button type="button" id="env-toggle-sandbox" class="env-toggle-btn" onclick="setAdminEnv('sandbox')" aria-pressed="false">⚠ Sandbox</button>
+        </div>
+        <span id="admin-mode-badge" class="text-xs bg-red-100 text-red-700 font-bold px-3 py-1 rounded-full">Admin Mode</span>
+      </div>
     </header>
+    <!-- US1.2: constant visual warning while in Sandbox -->
+    <div id="sandbox-banner" class="sandbox-banner" role="status">⚠ SANDBOX MODE — you are viewing and modifying TEST data, not production.</div>
 
     <!-- Views -->
     <div class="p-8">
@@ -234,6 +252,14 @@
         </div>
       </section>
 
+      <!-- ── Assistant Features ─────────────────────────────────────── -->
+      <section id="view-assistant-features" class="admin-view hidden">
+        <p class="text-sm text-gray-500 mb-5">Choose which features each assistant type exposes to customers. Toggling a box takes effect immediately — customers see the feature only if one of their active assistants is a type with it enabled (some features also require a specific plan tier).</p>
+        <div id="assistant-features-grid" class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
+          <div class="px-5 py-8 text-center text-gray-400">Loading…</div>
+        </div>
+      </section>
+
       <!-- ── Analytics ──────────────────────────────────────────────── -->
       <section id="view-analytics" class="admin-view hidden">
         <!-- Date range filter (US9 Sc3) -->
@@ -294,6 +320,14 @@
               <button id="logs-next" onclick="logsPage(1)"  class="px-3 py-1.5 text-xs font-semibold border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed">Next →</button>
             </div>
           </div>
+        </div>
+      </section>
+
+      <!-- ── Security & Abuse (US3 AC3.3) ───────────────────────────── -->
+      <section id="view-security-abuse" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <p class="text-sm text-gray-500 mb-5">Workspaces flagged for manual billing review — the same physical credit card (Stripe fingerprint) is active on two or more separate workspaces, a signal of account-splitting. Each card below is shared by the grouped workspaces.</p>
+        <div id="security-abuse-list" class="space-y-6">
+          <div class="text-sm text-gray-400 animate-pulse">Loading…</div>
         </div>
       </section>
 
@@ -477,6 +511,45 @@
               </div>
               <div id="billing-override-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
               <button onclick="submitBillingOverride()" class="w-full py-2.5 text-sm font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700">Apply Override</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI Credits Modal — Epic 2 US4 -->
+        <div id="ai-credits-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
+          <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 relative max-h-[85vh] overflow-y-auto">
+            <button onclick="document.getElementById('ai-credits-modal').classList.add('hidden')" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 text-xl font-bold">✕</button>
+            <h3 class="text-base font-bold text-gray-900 mb-1">AI Generation Credits</h3>
+            <p id="ai-credits-target-label" class="text-sm text-gray-500 mb-4"></p>
+
+            <div class="flex items-center gap-4 mb-5 p-4 bg-pink-50 border border-pink-200 rounded-xl">
+              <div>
+                <p class="text-xs font-bold text-gray-500 uppercase">Balance</p>
+                <p id="ai-credits-balance" class="text-2xl font-extrabold text-gray-900">—</p>
+              </div>
+              <div>
+                <p class="text-xs font-bold text-gray-500 uppercase">Held</p>
+                <p id="ai-credits-held" class="text-2xl font-extrabold text-gray-400">—</p>
+              </div>
+            </div>
+
+            <div class="space-y-3">
+              <div>
+                <label class="text-xs font-bold text-gray-500 uppercase">Adjust (credits)</label>
+                <input id="ai-credits-delta" type="number" step="1" placeholder="e.g. 50 to grant, -10 to deduct"
+                  class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm">
+              </div>
+              <div>
+                <label class="text-xs font-bold text-gray-500 uppercase">Admin Note <span class="text-red-500">*</span></label>
+                <textarea id="ai-credits-reason" rows="2" placeholder="Mandatory reason / note…" class="mt-1 block w-full border border-gray-200 rounded-lg px-3 py-2 text-sm resize-none"></textarea>
+              </div>
+              <div id="ai-credits-error" class="hidden text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2"></div>
+              <button onclick="submitAiCredits()" class="w-full py-2.5 text-sm font-bold bg-pink-600 text-white rounded-lg hover:bg-pink-700">Apply Adjustment</button>
+            </div>
+
+            <div class="mt-5">
+              <p class="text-xs font-bold text-gray-400 uppercase mb-2">Recent activity</p>
+              <div id="ai-credits-ledger" class="text-sm text-gray-500">No activity yet.</div>
             </div>
           </div>
         </div>
@@ -854,6 +927,52 @@
         </div>
         <div id="kill-switch-list" class="space-y-4">
           <div class="text-gray-400 animate-pulse text-sm">Loading…</div>
+        </div>
+      </section>
+
+      <!-- ── US4.1: Gamification Settings ─────────────────────────────── -->
+      <section id="view-gamification" class="admin-view hidden">
+        <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-5 flex items-center gap-3">
+          <span class="text-2xl">🎮</span>
+          <p class="text-sm text-amber-800">Tune the Time-Saved multipliers and milestone thresholds. Changes apply across the platform within ~30 seconds — no deploy needed.</p>
+        </div>
+        <div id="gamification-form" class="bg-white border border-gray-200 rounded-xl p-6 max-w-xl space-y-4">
+          <div class="text-gray-400 animate-pulse text-sm">Loading…</div>
+        </div>
+      </section>
+
+      <!-- ── Epic: Superadmin Environment Management — US4/US5: Sandbox controls ── -->
+      <section id="view-sandbox" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div id="sandbox-panel" class="max-w-2xl space-y-5">
+          <div class="text-gray-400 animate-pulse text-sm">Loading…</div>
+        </div>
+      </section>
+
+      <!-- ── Systems & Connections — infra registry (super_admin) ────── -->
+      <section id="view-systems" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div class="mb-4 flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <p class="text-sm text-gray-600 max-w-2xl">The external systems that run Be More Swan. Secrets live in Netlify environment variables — they are never stored here. The live status below reflects <strong id="systems-env-label">this</strong> deployment; check the other environment from its own admin portal.</p>
+          </div>
+          <button onclick="loadSystemStatus()" class="shrink-0 text-sm font-semibold text-violet-600 hover:text-violet-700">↻ Refresh</button>
+        </div>
+        <div id="systems-panel" class="space-y-3">
+          <div class="text-gray-400 animate-pulse text-sm">Loading…</div>
+        </div>
+      </section>
+
+      <!-- ── US4.2: Reward Distribution Audit & Reporting ────────────── -->
+      <section id="view-reward-audits" class="admin-view hidden">
+        <div id="reward-audits-summary" class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6"></div>
+        <div class="bg-white border border-gray-200 rounded-xl p-6 mb-6">
+          <p class="text-sm font-bold text-gray-700 mb-3">Tokens via Milestones vs Paid Subscriptions</p>
+          <div id="reward-audits-graph" class="space-y-3"></div>
+        </div>
+        <div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <div class="px-6 py-4 border-b border-gray-100 font-semibold text-gray-800">Recent reward grants</div>
+          <div id="reward-audits-table" class="divide-y divide-gray-50">
+            <div class="px-6 py-8 text-center text-gray-400 text-sm animate-pulse">Loading…</div>
+          </div>
         </div>
       </section>
 
@@ -1284,6 +1403,274 @@
         <div id="workspaces-list" class="text-gray-500 text-sm">Loading…</div>
       </section>
 
+      <!-- ── US-COMMS-1: Manage Emails ─────────────────────────────────────── -->
+      <section id="view-email-templates" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <!-- List of triggers -->
+        <div id="et-list-pane">
+          <div class="mb-6">
+            <h2 class="text-lg font-extrabold text-gray-900">Manage Emails</h2>
+            <p class="text-sm text-gray-500 mt-0.5">Edit the copy for system-triggered emails. Every email is automatically wrapped in the Be More Swan brand template.</p>
+          </div>
+          <div id="et-list" class="text-gray-500 text-sm">Loading…</div>
+        </div>
+
+        <!-- Editor -->
+        <div id="et-editor-pane" class="hidden">
+          <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
+            <div class="flex items-center gap-3">
+              <button onclick="closeEmailEditor()" class="text-gray-400 hover:text-gray-700 text-sm font-semibold">← Back</button>
+              <div>
+                <h2 id="et-editor-title" class="text-lg font-extrabold text-gray-900">Edit Email</h2>
+                <p class="text-xs text-gray-400 mt-0.5"><span id="et-editor-category"></span> · trigger <code id="et-editor-key" class="text-gray-500"></code></p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="sendEmailTest()" id="et-test-btn" class="px-3 py-2 text-sm font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition">Send test to me</button>
+              <button onclick="saveEmailTemplate()" id="et-save-btn" class="px-4 py-2 text-sm font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition">Save</button>
+            </div>
+          </div>
+
+          <div id="et-status" class="hidden mb-4 text-sm rounded-lg px-3 py-2"></div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Left: editor controls -->
+            <div class="space-y-4">
+              <!-- Active toggle (hidden/locked for critical templates) -->
+              <div id="et-active-row" class="flex items-center justify-between bg-white border border-gray-200 rounded-xl px-4 py-3">
+                <div>
+                  <p class="text-sm font-bold text-gray-800">Active</p>
+                  <p class="text-xs text-gray-400" id="et-active-hint">When off, this email will not be sent.</p>
+                </div>
+                <label class="inline-flex items-center cursor-pointer">
+                  <input type="checkbox" id="et-active" class="sr-only peer">
+                  <div class="relative w-11 h-6 bg-gray-200 peer-checked:bg-emerald-600 rounded-full peer transition after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition peer-checked:after:translate-x-5"></div>
+                </label>
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Subject Line</label>
+                <input id="et-subject" type="text" class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Preheader <span class="text-gray-400 font-normal normal-case">(inbox preview text — optional)</span></label>
+                <input id="et-preheader" type="text" class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
+              </div>
+
+              <div>
+                <div class="flex items-center justify-between mb-1">
+                  <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide">Body</label>
+                  <select id="et-var-picker" onchange="insertEmailVariable(this.value); this.value='';"
+                          class="text-xs border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white">
+                    <option value="">Insert variable…</option>
+                  </select>
+                </div>
+                <div id="et-quill" style="min-height:240px;background:#fff;"></div>
+                <p class="text-xs text-gray-400 mt-1">Use fallbacks for optional fields, e.g. <code>{{user.first_name | "there"}}</code>.</p>
+              </div>
+            </div>
+
+            <!-- Right: live preview -->
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide">Live Preview</label>
+                <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs font-semibold">
+                  <button id="et-pv-desktop" onclick="setEmailPreviewMode('desktop')" class="px-3 py-1 bg-emerald-600 text-white">Desktop</button>
+                  <button id="et-pv-mobile" onclick="setEmailPreviewMode('mobile')" class="px-3 py-1 bg-white text-gray-600">Mobile</button>
+                </div>
+              </div>
+              <p class="text-xs text-gray-400 mb-2">Subject: <span id="et-pv-subject" class="font-semibold text-gray-600"></span></p>
+              <div class="bg-gray-100 rounded-xl p-4 flex justify-center">
+                <iframe id="et-pv-frame" title="Email preview" style="width:600px;max-width:100%;height:560px;border:0;background:#fff;border-radius:8px;transition:width .2s;"></iframe>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Issue Reports (Testing) ─────────────────────────────────────── -->
+      <section id="view-issue-reports" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
+          <div>
+            <h2 class="text-lg font-extrabold text-gray-900">Issue Reports</h2>
+            <p class="text-sm text-gray-500 mt-0.5">User-submitted issues from the testing phase. Update the status to notify the reporter.</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="passAllToDeveloper()" id="ir-pass-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🤖 Pass all to Developer</button>
+            <button onclick="requestMergeAll()" id="ir-merge-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🔀 Merge all to staging</button>
+            <button onclick="deployStaging()" id="ir-deploy-btn" class="hidden px-3 py-2 text-sm font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🚀 Commit to Staging</button>
+            <button onclick="openRunnerModal()" id="ir-runner-btn" class="px-3 py-2 text-sm font-semibold border border-violet-300 text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 transition flex items-center gap-1.5">🤖 <span id="ir-runner-btn-label">Runner</span></button>
+            <button onclick="loadIssueReports()" class="px-3 py-2 text-sm font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition">↻ Refresh</button>
+          </div>
+        </div>
+
+        <!-- Runner paused (Claude session limit) alert — populated by loadRunnerStatus() -->
+        <div id="ir-runner-alert" class="hidden mb-5 space-y-3"></div>
+
+        <!-- Runner modal -->
+        <div id="ir-runner-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+          <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-5" onclick="event.stopPropagation()">
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-base font-extrabold text-gray-900">AI Auto-Fix Runners</h3>
+                <p class="text-xs text-gray-500 mt-0.5">Each runner is a local process on a developer machine. Start several — they share the queue and never grab the same issue.</p>
+              </div>
+              <button onclick="closeRunnerModal()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+            </div>
+
+            <div id="ir-runner-queue-status" class="rounded-xl border p-3 text-sm"></div>
+
+            <!-- Paused runner (Claude session limit) — populated by loadRunnerStatus() -->
+            <div id="ir-runner-paused" class="hidden space-y-3"></div>
+
+            <div class="space-y-2">
+              <p class="text-xs font-bold uppercase text-gray-400">Start the runner — paste in your terminal</p>
+              <div class="relative">
+                <pre id="ir-runner-cmd" class="bg-gray-900 text-emerald-300 text-xs rounded-xl p-4 pr-20 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed"></pre>
+                <button onclick="copyRunnerCmd()" id="ir-runner-copy-btn" class="absolute top-2 right-2 px-2.5 py-1 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-lg transition">Copy</button>
+              </div>
+            </div>
+
+            <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 space-y-1">
+              <p class="font-bold">Required env vars (set in <code class="bg-amber-100 px-1 rounded">scripts/.env</code> or your shell)</p>
+              <p><code class="font-mono">AURA_BASE_URL</code> — staging URL, e.g. <code class="font-mono">https://staging--bemoreswan.netlify.app</code></p>
+              <p><code class="font-mono">DEV_HANDOFF_TOKEN</code> — must match the Netlify env var of the same name</p>
+              <p><code class="font-mono">RUNNER_ID</code> <span class="text-amber-700/70">(optional)</span> — a name for this runner shown against the issue it's fixing; defaults to <code class="font-mono">host:pid</code></p>
+            </div>
+
+            <button onclick="closeRunnerModal()" class="w-full py-2.5 text-sm font-bold bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition">Close</button>
+          </div>
+        </div>
+
+        <!-- Status filter chips -->
+        <div id="ir-filters" class="flex flex-wrap gap-2 mb-5 text-xs"></div>
+
+        <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide">
+              <tr>
+                <th class="px-5 py-3 text-left">#</th>
+                <th class="px-5 py-3 text-left">Description</th>
+                <th class="px-5 py-3 text-left">Reporter</th>
+                <th class="px-5 py-3 text-left">Location</th>
+                <th class="px-5 py-3 text-left">Status</th>
+                <th class="px-5 py-3 text-left">Reported</th>
+                <th class="px-5 py-3 text-left"></th>
+              </tr>
+            </thead>
+            <tbody id="ir-tbody">
+              <tr><td colspan="7" class="px-5 py-8 text-center text-gray-400">Loading…</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Issue detail slide-over -->
+        <div id="ir-detail-panel" class="hidden fixed inset-0 z-40">
+          <div class="absolute inset-0 bg-black/40" onclick="closeIssuePanel()"></div>
+          <div class="absolute right-0 top-0 bottom-0 w-full max-w-lg bg-white shadow-2xl overflow-y-auto">
+            <div class="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between">
+              <h2 id="ir-panel-title" class="font-bold text-gray-900">Issue</h2>
+              <button onclick="closeIssuePanel()" class="text-gray-400 hover:text-gray-700 text-2xl">&times;</button>
+            </div>
+            <div id="ir-detail-body" class="p-6 space-y-5"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── Feature Requests & Roadmap (Testing) — unified board ─────────── -->
+      <section id="view-feature-roadmap" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <div class="flex items-center justify-between flex-wrap gap-3 mb-4">
+          <div>
+            <h2 class="text-lg font-extrabold text-gray-900">Feature Requests</h2>
+            <p class="text-sm text-gray-500 mt-0.5">Moderate user submissions and plan the delivery roadmap. User ideas land as "Pending Review".</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="openRoadmapAdd()" class="px-3 py-2 text-sm font-semibold bg-gray-900 text-white rounded-lg hover:bg-black transition">+ Add request</button>
+            <button onclick="loadFeatureRoadmap()" class="px-3 py-2 text-sm font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition">↻ Refresh</button>
+          </div>
+        </div>
+
+        <!-- Sub-tabs -->
+        <div class="flex gap-1 mb-4 bg-gray-100 rounded-lg p-1 w-max">
+          <button id="fr-subtab-moderation" onclick="frSwitchPane('moderation')" class="px-4 py-1.5 text-sm font-semibold rounded-md bg-white text-gray-900 shadow-sm">Moderation</button>
+          <button id="fr-subtab-roadmap" onclick="frSwitchPane('roadmap')" class="px-4 py-1.5 text-sm font-semibold rounded-md text-gray-500">Roadmap (Gantt)</button>
+        </div>
+
+        <!-- Add / edit form (hidden until opened) -->
+        <div id="fr-form" class="hidden bg-white rounded-2xl border border-gray-200 p-5 mb-5 space-y-3">
+          <input type="hidden" id="fr-form-id">
+          <div class="flex items-center justify-between">
+            <h3 id="fr-form-title" class="text-sm font-extrabold text-gray-900">Add request</h3>
+            <button onclick="closeRoadmapForm()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+          </div>
+          <div>
+            <label class="block text-xs font-bold uppercase text-gray-400 mb-1">Title</label>
+            <input id="fr-form-title-input" type="text" maxlength="200" placeholder="e.g. Bulk-schedule posts from a CSV" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+          </div>
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-xs font-bold uppercase text-gray-400">Description</label>
+              <button id="fr-enhance-btn" onclick="frEnhanceDescription()" class="text-xs font-semibold text-violet-600 hover:text-violet-800 inline-flex items-center gap-1">✨ Enhance with AI</button>
+            </div>
+            <textarea id="fr-form-desc" rows="4" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 resize-y focus:ring-2 focus:ring-emerald-500 focus:outline-none"></textarea>
+            <!-- AI suggestion preview (accept / reject before saving) -->
+            <div id="fr-enhance-preview" class="hidden mt-2 bg-violet-50 border border-violet-200 rounded-lg p-3">
+              <p class="text-[11px] font-bold uppercase text-violet-500 mb-1">AI suggestion</p>
+              <p id="fr-enhance-text" class="text-sm text-gray-700 whitespace-pre-wrap"></p>
+              <div class="flex gap-2 mt-2">
+                <button onclick="frAcceptEnhance()" class="px-3 py-1 bg-violet-600 text-white text-xs font-bold rounded-md hover:bg-violet-700 transition">Use this</button>
+                <button onclick="frRejectEnhance()" class="px-3 py-1 border border-gray-300 text-gray-600 text-xs font-semibold rounded-md hover:bg-gray-50 transition">Keep mine</button>
+              </div>
+            </div>
+          </div>
+          <div class="grid grid-cols-3 gap-3">
+            <div>
+              <label class="block text-xs font-bold uppercase text-gray-400 mb-1">Category</label>
+              <select id="fr-form-category" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2"></select>
+            </div>
+            <div>
+              <label class="block text-xs font-bold uppercase text-gray-400 mb-1">Priority</label>
+              <select id="fr-form-priority" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2"></select>
+            </div>
+            <div id="fr-form-status-wrap" class="hidden">
+              <label class="block text-xs font-bold uppercase text-gray-400 mb-1">Status</label>
+              <select id="fr-form-status" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2"></select>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 pt-1">
+            <button onclick="submitRoadmapForm()" class="px-4 py-2 bg-emerald-600 text-white text-sm font-bold rounded-lg hover:bg-emerald-700 transition">Save</button>
+            <button onclick="closeRoadmapForm()" class="px-4 py-2 border border-gray-300 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-50 transition">Cancel</button>
+          </div>
+        </div>
+
+        <!-- Moderation pane -->
+        <div id="fr-pane-moderation">
+          <div class="flex items-center gap-2 mb-3">
+            <label class="text-xs font-bold uppercase text-gray-400">Filter</label>
+            <select id="fr-mod-filter" onchange="renderModerationList()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
+              <option value="">All</option>
+              <option value="pending_review">Pending Review</option>
+              <option value="under_review">Under Review</option>
+              <option value="open">Open</option>
+              <option value="planned">Planned</option>
+              <option value="in_progress">In Progress</option>
+              <option value="released">Released</option>
+              <option value="declined">Declined</option>
+              <option value="duplicate">Duplicate</option>
+            </select>
+          </div>
+          <div id="fr-board" class="space-y-2">
+            <div class="text-gray-400 text-sm py-8 text-center">Loading…</div>
+          </div>
+        </div>
+
+        <!-- Roadmap (Gantt) pane -->
+        <div id="fr-pane-roadmap" class="hidden">
+          <p class="text-xs text-gray-500 mb-3">Drag a request from the Backlog onto a quarter to plan it (sets status → Planned). Drag back to Backlog to unschedule.</p>
+          <div id="fr-gantt" class="flex gap-3 overflow-x-auto pb-3"></div>
+        </div>
+      </section>
+
     </div><!-- /p-8 -->
   </main>
 </div>
@@ -1551,6 +1938,28 @@
     }
     .bottom-sheet.open { display: block; }
   }
+
+  /* ── Epic: Superadmin Environment Management — US1: Live/Sandbox visual state ──
+     Plain CSS (not Tailwind utilities) so it ships without a style.css rebuild. */
+  .env-toggle { display: inline-flex; border: 1px solid #d1d5db; border-radius: 9999px; overflow: hidden; }
+  .env-toggle-btn { font-size: 0.75rem; font-weight: 700; padding: 0.25rem 0.85rem; background: #fff; color: #6b7280; cursor: pointer; border: none; line-height: 1.25rem; }
+  .env-toggle-btn:hover { background: #f3f4f6; }
+  .env-toggle-btn.active { color: #fff; }
+  .env-toggle-btn.active:hover { filter: brightness(0.95); }
+  #env-toggle-live.active { background: #059669; }   /* emerald — live */
+  #env-toggle-sandbox.active { background: #ea580c; } /* orange — sandbox */
+
+  /* Hazard banner — hidden in live, shown in sandbox (US1.2) */
+  .sandbox-banner { display: none; }
+  body[data-env="sandbox"] .sandbox-banner {
+    display: block; text-align: center; font-weight: 800; font-size: 0.78rem; letter-spacing: 0.02em;
+    color: #7c2d12; padding: 0.4rem 1rem; position: sticky; top: 0; z-index: 30;
+    background: repeating-linear-gradient(45deg, #fdba74, #fdba74 14px, #fcd9b6 14px, #fcd9b6 28px);
+  }
+  /* Topbar + primary nav take on a sandbox tint as a constant warning */
+  body[data-env="sandbox"] #admin-topbar { background: #fff7ed; border-bottom-color: #fb923c; }
+  body[data-env="sandbox"] #admin-page-title { color: #9a3412; }
+  body[data-env="sandbox"] #admin-primary-nav { background: #7c2d12; }
 </style>
 
 <script>
@@ -1568,14 +1977,17 @@ function debounce(fn, ms) {
 // ── Navigation — US-ADM-1.4.1 Two-tier nav ───────────────────────────────────
 const VIEW_LABELS = {
   dashboard: 'Dashboard', users: 'All Users', tickets: 'Support Tickets',
-  catalog: 'Assistant Catalog', analytics: 'Analytics', 'model-config': 'AI Model Config',
-  logs: 'System Logs', 'audit-log': 'Audit Log', cogs: 'COGS Dashboard',
+  catalog: 'Assistant Catalog', 'assistant-features': 'Assistant Features', analytics: 'Analytics', 'model-config': 'AI Model Config',
+  logs: 'System Logs', 'audit-log': 'Audit Log', 'security-abuse': 'Security & Abuse', cogs: 'COGS Dashboard',
   reconciliation: 'Stripe Reconciliation', dunning: 'Dunning Queue',
   'manage-admins': 'Admin Accounts', 'kill-switches': 'Emergency Controls',
+  gamification: 'Gamification Settings', 'reward-audits': 'Reward Audits',
   'feature-flags': 'Feature Flags', 'sales-pipeline': 'Sales Pipeline',
   'breach-response': 'Breach Response', 'master-data': 'Master Data',
   workspaces: 'Workspaces', 'workspace-detail': 'Workspace Detail',
-  'blueprint-inspector': 'Blueprint Inspector',
+  'blueprint-inspector': 'Blueprint Inspector', sandbox: 'Sandbox Environment',
+  'email-templates': 'Manage Emails', systems: 'Systems & Connections',
+  'issue-reports': 'Issue Reports', 'feature-roadmap': 'Feature Requests',
 };
 
 // Category → child items mapping
@@ -1596,6 +2008,7 @@ const ADMIN_CATS = {
   ]},
   assistants: { label: 'Assistants', roles: ['admin','super_admin','platform_admin'], children: [
     { view: 'catalog',              icon: '🤖', label: 'Assistant Catalog' },
+    { view: 'assistant-features',   icon: '🎚️', label: 'Assistant Features' },
     { view: 'model-config',         icon: '⚙️', label: 'AI Model Config' },
     { view: 'blueprint-inspector',  icon: '🔬', label: 'Blueprint Inspector' },
   ]},
@@ -1604,15 +2017,27 @@ const ADMIN_CATS = {
     { view: 'master-data',          icon: '🗂️', label: 'Master Data' },
     { view: 'feature-flags',        icon: '🚩', label: 'Feature Flags' },
     { view: 'kill-switches',        icon: '🚨', label: 'Emergency Controls' },
+    { view: 'gamification',         icon: '🎮', label: 'Gamification Settings' },
+    { view: 'reward-audits',        icon: '🏆', label: 'Reward Audits' },
     { view: 'publish-pipeline',     icon: '📡', label: 'Publishing Pipeline' },
+    { view: 'sandbox',              icon: '🧪', label: 'Sandbox Environment', superAdminOnly: true },
+    { view: 'systems',              icon: '🛠️', label: 'Systems & Connections', superAdminOnly: true },
   ]},
   security: { label: 'Security', roles: ['admin','super_admin'], children: [
-    { view: 'manage-admins', icon: '🛡️', label: 'Admin Accounts' },
-    { view: 'audit-log',     icon: '🔐', label: 'Audit Log' },
+    { view: 'manage-admins',  icon: '🛡️', label: 'Admin Accounts' },
+    { view: 'audit-log',      icon: '🔐', label: 'Audit Log' },
+    { view: 'security-abuse', icon: '🚩', label: 'Security & Abuse' },
+  ]},
+  communications: { label: 'Communications', roles: ['admin','super_admin','platform_admin'], children: [
+    { view: 'email-templates', icon: '✉️', label: 'Manage Emails' },
   ]},
   compliance: { label: 'Compliance', roles: ['admin','super_admin'], children: [
     { view: 'breach-response', icon: '🚨', label: 'Breach Response' },
     { view: 'logs',            icon: '📋', label: 'System Logs' },
+  ]},
+  testing: { label: 'Testing', roles: ['admin','super_admin','support_agent'], children: [
+    { view: 'issue-reports',   icon: '🐞', label: 'Issue Reports' },
+    { view: 'feature-roadmap', icon: '💡', label: 'Feature Requests' },
   ]},
   workspaces: { label: 'Workspaces', roles: ['admin','super_admin'], children: [
     { view: 'workspaces', icon: '🏢', label: 'All Workspaces' },
@@ -1633,6 +2058,68 @@ function _getAdminRole() {
 
 const _adminRole = _getAdminRole();
 
+// ── Epic: Superadmin Environment Management — US1/US2: Live/Sandbox environment ──
+const ENV_STORAGE_KEY = 'aura_admin_env';
+
+function getAdminEnv() {
+  // Only super_admins may ever be in sandbox; anyone else is always live.
+  if (_adminRole !== 'super_admin') return 'live';
+  return localStorage.getItem(ENV_STORAGE_KEY) === 'sandbox' ? 'sandbox' : 'live';
+}
+
+// AC 2.1: append X-Environment to every Admin Portal API request. A single global
+// fetch shim covers calls made via api() AND the many direct fetch() call sites.
+(function () {
+  const _origFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    try {
+      const url = typeof input === 'string' ? input : (input && input.url) || '';
+      if (url.includes('/.netlify/functions/')) {
+        init = init ? { ...init } : {};
+        const h = new Headers(init.headers || (typeof input !== 'string' && input ? input.headers : undefined) || {});
+        h.set('X-Environment', getAdminEnv());
+        init.headers = h;
+      }
+    } catch { /* never block a request over header injection */ }
+    return _origFetch(input, init);
+  };
+})();
+
+function _applyEnvTheme(env) {
+  document.body.setAttribute('data-env', env);
+  const liveBtn = document.getElementById('env-toggle-live');
+  const sbBtn   = document.getElementById('env-toggle-sandbox');
+  if (liveBtn && sbBtn) {
+    liveBtn.classList.toggle('active', env === 'live');
+    sbBtn.classList.toggle('active', env === 'sandbox');
+    liveBtn.setAttribute('aria-pressed', String(env === 'live'));
+    sbBtn.setAttribute('aria-pressed', String(env === 'sandbox'));
+  }
+}
+
+function setAdminEnv(env) {
+  if (_adminRole !== 'super_admin') return; // hard guard — only super_admins switch
+  env = env === 'sandbox' ? 'sandbox' : 'live';
+  const prev = getAdminEnv();
+  localStorage.setItem(ENV_STORAGE_KEY, env);
+  _applyEnvTheme(env);
+  // AC 2.2 / 2.3: re-run the active section loader so data swaps instantly. Because
+  // adminNav re-renders the section's primary (list) view, any open detail record is
+  // dropped — gracefully returning to the parent list in the target environment.
+  if (env !== prev && typeof adminNav === 'function') adminNav(_activeView || 'dashboard');
+}
+
+function initEnvToggle() {
+  const toggle = document.getElementById('env-toggle');
+  if (_adminRole === 'super_admin') {
+    toggle?.classList.remove('hidden');
+  } else {
+    // Non-super-admins are pinned to live; clear any stale preference.
+    localStorage.setItem(ENV_STORAGE_KEY, 'live');
+  }
+  _applyEnvTheme(getAdminEnv()); // AC 1.3: restore persisted environment on load
+}
+
 function _catAllowed(catKey) {
   const cat = ADMIN_CATS[catKey];
   if (!cat) return false;
@@ -1646,6 +2133,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.admin-cat-btn').forEach(btn => {
     if (!_catAllowed(btn.dataset.cat)) btn.style.display = 'none';
   });
+  initEnvToggle();
 });
 
 let _activeCategory = null;
@@ -1678,7 +2166,9 @@ function adminCatNav(cat) {
   if (!catDef) return;
 
   titleEl.textContent = catDef.label;
-  itemsEl.innerHTML = catDef.children.map(c =>
+  itemsEl.innerHTML = catDef.children
+    .filter(c => !c.superAdminOnly || _adminRole === 'super_admin')
+    .map(c =>
     `<button class="admin-child-btn${_activeView === c.view ? ' active' : ''}"
       data-view="${c.view}"
       onclick="adminNav('${c.view}')"
@@ -1735,10 +2225,12 @@ function adminNav(view) {
   if (view === 'users')        loadUsers();
   if (view === 'tickets')      loadTickets();
   if (view === 'catalog')      loadCatalog();
+  if (view === 'assistant-features') loadAssistantFeatures();
   if (view === 'analytics')    { loadAnalytics(); loadChurnSignals(); }
   if (view === 'model-config') loadModelConfig();
   if (view === 'logs')         loadLogs();
   if (view === 'audit-log')    loadAuditLog();
+  if (view === 'security-abuse') loadSecurityAbuse();
   if (view === 'cogs')            loadCogsDashboard();
   if (view === 'reconciliation')  loadReconciliation();
   if (view === 'dunning')         loadDunningQueue();
@@ -1746,13 +2238,245 @@ function adminNav(view) {
   if (view === 'manage-admins')   loadManageAdmins();
   if (view === 'sales-pipeline')  loadSalesPipeline();
   if (view === 'kill-switches')   loadKillSwitches();
+  if (view === 'gamification')    loadGamificationSettings();
+  if (view === 'reward-audits')   loadRewardAudits();
   if (view === 'feature-flags')   loadFeatureFlags();
   if (view === 'breach-response') loadBreachResponse();
   if (view === 'master-data')     { if (!_mdActiveTab) mdSwitchTab('plans'); else mdLoadTab(_mdActiveTab); }
   if (view === 'workspaces')          loadWorkspaces();
   if (view === 'blueprint-inspector') initBlueprintInspector();
   if (view === 'publish-pipeline')    loadPublishPipeline();
+  if (view === 'sandbox')             loadSandboxPanel();
+  if (view === 'systems')             loadSystemStatus();
+  if (view === 'email-templates')     loadEmailTemplates();
+  if (view === 'issue-reports')       loadIssueReports();
+  if (view === 'feature-roadmap')     loadFeatureRoadmap();
 }
+
+// ── US-COMMS-1: Manage Emails (template editor) ──────────────────────────────
+const ET_API = '/.netlify/functions/admin-email-templates';
+let _etQuill = null;
+let _etCurrent = null;       // { triggerKey, name, category, locked, transactional }
+let _etVariables = [];
+let _etPreviewMode = 'desktop';
+let _etPreviewTimer = null;
+
+async function loadEmailTemplates() {
+  closeEmailEditor();
+  const el = document.getElementById('et-list');
+  el.innerHTML = 'Loading…';
+  try {
+    const res = await fetch(`${ET_API}?resource=list`);
+    if (!res.ok) throw new Error('list failed');
+    const { templates, variables } = await res.json();
+    _etVariables = variables || [];
+
+    // Group by category for a scannable list.
+    const groups = {};
+    templates.forEach(t => { (groups[t.category] ||= []).push(t); });
+
+    el.innerHTML = Object.keys(groups).sort().map(cat => `
+      <div class="mb-6">
+        <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">${cat}</h3>
+        <div class="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
+          ${groups[cat].map(t => `
+            <button onclick="openEmailEditor('${t.triggerKey}')" class="w-full text-left px-4 py-3 hover:bg-gray-50 transition flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <p class="text-sm font-semibold text-gray-800 truncate">${escapeHtmlJs(t.name)}</p>
+                <p class="text-xs text-gray-400 truncate">${escapeHtmlJs(t.subject)}</p>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                ${t.edited ? '<span class="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">Edited</span>' : ''}
+                ${t.locked ? '<span class="text-[10px] font-bold text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full">Critical</span>' : ''}
+                ${!t.isActive ? '<span class="text-[10px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full">Inactive</span>' : ''}
+                <span class="text-gray-300">›</span>
+              </div>
+            </button>`).join('')}
+        </div>
+      </div>`).join('');
+  } catch {
+    el.innerHTML = '<p class="text-rose-600 text-sm">Failed to load email templates.</p>';
+  }
+}
+
+async function openEmailEditor(key) {
+  try {
+    const res = await fetch(`${ET_API}?resource=get&key=${encodeURIComponent(key)}`);
+    if (!res.ok) throw new Error('get failed');
+    const { template, variables } = await res.json();
+    _etCurrent = template;
+    _etVariables = variables || _etVariables;
+
+    document.getElementById('et-list-pane').classList.add('hidden');
+    document.getElementById('et-editor-pane').classList.remove('hidden');
+    document.getElementById('et-editor-title').textContent = template.name;
+    document.getElementById('et-editor-category').textContent = template.category;
+    document.getElementById('et-editor-key').textContent = template.triggerKey;
+    document.getElementById('et-subject').value = template.subject || '';
+    document.getElementById('et-preheader').value = template.preheader || '';
+    hideEtStatus();
+
+    // Active toggle — locked/critical templates can't be deactivated (AC3.2.2).
+    const activeRow = document.getElementById('et-active-row');
+    const activeBox = document.getElementById('et-active');
+    activeBox.checked = template.isActive;
+    if (template.locked) {
+      activeBox.checked = true; activeBox.disabled = true;
+      document.getElementById('et-active-hint').textContent = 'This is a critical email and is always active.';
+    } else {
+      activeBox.disabled = false;
+      document.getElementById('et-active-hint').textContent = 'When off, this email will not be sent.';
+    }
+
+    // Populate the variable picker.
+    const picker = document.getElementById('et-var-picker');
+    picker.innerHTML = '<option value="">Insert variable…</option>' +
+      _etVariables.map(v => `<option value="${v.key}">${v.group}: ${v.label}</option>`).join('');
+
+    initEtQuill(template.bodyHtml || '');
+
+    // Wire live preview on any input.
+    document.getElementById('et-subject').oninput = scheduleEtPreview;
+    document.getElementById('et-preheader').oninput = scheduleEtPreview;
+    setEmailPreviewMode(_etPreviewMode);
+    refreshEmailPreview();
+  } catch {
+    showEtStatus('error', 'Failed to open this template.');
+  }
+}
+
+function initEtQuill(html) {
+  const mount = document.getElementById('et-quill');
+  if (typeof Quill === 'undefined') {
+    // CDN not ready yet — retry shortly.
+    mount.innerHTML = '<p class="text-sm text-gray-400 p-3">Loading editor…</p>';
+    setTimeout(() => initEtQuill(html), 200);
+    return;
+  }
+  // Rebuild the editor each open so toolbar/listeners don't stack.
+  mount.innerHTML = '';
+  _etQuill = new Quill(mount, {
+    theme: 'snow',
+    modules: {
+      toolbar: [
+        ['bold', 'italic', 'underline'],
+        [{ list: 'ordered' }, { list: 'bullet' }],
+        ['link'],
+        ['clean'],
+      ],
+    },
+  });
+  _etQuill.clipboard.dangerouslyPasteHTML(html);
+  _etQuill.on('text-change', scheduleEtPreview);
+}
+
+function insertEmailVariable(key) {
+  if (!key || !_etQuill) return;
+  const range = _etQuill.getSelection(true);
+  _etQuill.insertText(range ? range.index : _etQuill.getLength(), `{{${key}}}`, 'user');
+  _etQuill.focus();
+  scheduleEtPreview();
+}
+
+function setEmailPreviewMode(mode) {
+  _etPreviewMode = mode;
+  document.getElementById('et-pv-frame').style.width = mode === 'mobile' ? '380px' : '600px';
+  const d = document.getElementById('et-pv-desktop'), m = document.getElementById('et-pv-mobile');
+  d.className = 'px-3 py-1 ' + (mode === 'desktop' ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600');
+  m.className = 'px-3 py-1 ' + (mode === 'mobile' ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600');
+}
+
+function scheduleEtPreview() {
+  clearTimeout(_etPreviewTimer);
+  _etPreviewTimer = setTimeout(refreshEmailPreview, 400);
+}
+
+async function refreshEmailPreview() {
+  if (!_etCurrent) return;
+  const payload = {
+    triggerKey: _etCurrent.triggerKey,
+    subject: document.getElementById('et-subject').value,
+    bodyHtml: _etQuill ? _etQuill.root.innerHTML : '',
+    preheader: document.getElementById('et-preheader').value,
+  };
+  try {
+    const res = await fetch(`${ET_API}?resource=preview`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (!res.ok) return;
+    const { subject, html } = await res.json();
+    document.getElementById('et-pv-subject').textContent = subject;
+    document.getElementById('et-pv-frame').srcdoc = html;
+  } catch { /* preview is best-effort */ }
+}
+
+async function saveEmailTemplate() {
+  if (!_etCurrent) return;
+  const btn = document.getElementById('et-save-btn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const res = await fetch(`${ET_API}?resource=save`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        triggerKey: _etCurrent.triggerKey,
+        subject: document.getElementById('et-subject').value,
+        bodyHtml: _etQuill ? _etQuill.root.innerHTML : '',
+        preheader: document.getElementById('et-preheader').value,
+        isActive: document.getElementById('et-active').checked,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'save failed');
+    showEtStatus('success', 'Saved. This copy is now live.');
+  } catch (e) {
+    showEtStatus('error', e.message || 'Failed to save.');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save';
+  }
+}
+
+async function sendEmailTest() {
+  if (!_etCurrent) return;
+  const btn = document.getElementById('et-test-btn');
+  btn.disabled = true; btn.textContent = 'Sending…';
+  try {
+    const res = await fetch(`${ET_API}?resource=test`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        triggerKey: _etCurrent.triggerKey,
+        subject: document.getElementById('et-subject').value,
+        bodyHtml: _etQuill ? _etQuill.root.innerHTML : '',
+        preheader: document.getElementById('et-preheader').value,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'send failed');
+    showEtStatus('success', `Test sent to ${data.sentTo}.`);
+  } catch (e) {
+    showEtStatus('error', e.message || 'Failed to send test.');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Send test to me';
+  }
+}
+
+function closeEmailEditor() {
+  _etCurrent = null;
+  if (_etQuill) { _etQuill = null; }
+  const ed = document.getElementById('et-editor-pane');
+  const list = document.getElementById('et-list-pane');
+  if (ed) ed.classList.add('hidden');
+  if (list) list.classList.remove('hidden');
+}
+
+function showEtStatus(kind, msg) {
+  const el = document.getElementById('et-status');
+  el.textContent = msg;
+  el.className = 'mb-4 text-sm rounded-lg px-3 py-2 ' +
+    (kind === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700');
+  el.classList.remove('hidden');
+}
+function hideEtStatus() { document.getElementById('et-status').classList.add('hidden'); }
+function escapeHtmlJs(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
 
 // ── US-ADM-4.3.1/4.3.2: Blueprint Inspector ─────────────────────────────────
 
@@ -2628,6 +3352,11 @@ function fmt(dateStr) {
   if (!dateStr) return '—';
   return new Date(dateStr).toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
 }
+// Date + time — used where the exact timestamp matters (e.g. System Logs)
+function fmtDateTime(dateStr) {
+  if (!dateStr) return '—';
+  return new Date(dateStr).toLocaleString('en-GB', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' });
+}
 function age(dateStr) {
   const ms = Date.now() - new Date(dateStr).getTime();
   const h = Math.floor(ms / 3600000);
@@ -2652,6 +3381,1272 @@ async function api(url, opts) {
   const r = await fetch(url, opts);
   if (!r.ok) { const d = await r.json().catch(()=>({})); throw new Error(d.error || r.statusText); }
   return r.json();
+}
+
+// ── Issue Reports (Testing) ──────────────────────────────────────────────────
+const IR_API = '/.netlify/functions/admin-issue-reports';
+const IR_STATUSES = ['reported','fix_in_progress','fixed_ready_to_test','more_info_required','closed','roadmap'];
+const IR_STATUS_LABEL = {
+  reported: 'Reported', fix_in_progress: 'Fix In Progress',
+  fixed_ready_to_test: 'Fixed & Ready to Test', more_info_required: 'More Info Required', closed: 'Closed',
+  roadmap: 'On Roadmap',
+};
+const IR_STATUS_CLS = {
+  reported: 'bg-gray-100 text-gray-700', fix_in_progress: 'bg-blue-100 text-blue-700',
+  fixed_ready_to_test: 'bg-emerald-100 text-emerald-700', more_info_required: 'bg-amber-100 text-amber-800',
+  closed: 'bg-gray-200 text-gray-500', roadmap: 'bg-violet-100 text-violet-700',
+};
+// Roadmap priority/status vocab — shared by the issue panel picker and the board.
+const IR_PRIORITIES = ['critical','high','medium','low'];
+const IR_PRIORITY_LABEL = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' };
+let _irFilter = '';
+function _irBadge(s) { return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${IR_STATUS_CLS[s] || 'bg-gray-100 text-gray-700'}">${IR_STATUS_LABEL[s] || s}</span>`; }
+// Small AI auto-fix ("Pass to Developer") badge for the list — empty unless handed off.
+const IR_HANDOFF_BADGE = {
+  queued:      { cls: 'bg-violet-100 text-violet-700', text: '🤖 Queued' },
+  in_progress: { cls: 'bg-violet-100 text-violet-700', text: '🤖 Fixing…' },
+  completed:   { cls: 'bg-violet-100 text-violet-700', text: '🤖 PR ready' },
+  failed:      { cls: 'bg-amber-100 text-amber-800',   text: '🤖 Failed' },
+};
+function _irHandoffBadge(i) {
+  // Most-actionable state wins: a pending DB migration first, then the merge gate.
+  if (i.devSqlStatus === 'pending') {
+    return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">🗄️ SQL to run</span>`;
+  }
+  if (i.devMergeStatus === 'ready') {
+    return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">🔀 To merge</span>`;
+  }
+  if (i.devMergeStatus === 'queued' || i.devMergeStatus === 'merging') {
+    return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">🔀 Merging…</span>`;
+  }
+  if (i.devMergeStatus === 'merged') {
+    return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">🔀 Merged</span>`;
+  }
+  const b = IR_HANDOFF_BADGE[i.devHandoffStatus];
+  if (!b) return '';
+  const inner = `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${b.cls}">${b.text}</span>`;
+  return i.devHandoffStatus === 'completed' && i.devPrUrl
+    ? `<a href="${_esc(i.devPrUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="View pull request">${inner}</a>`
+    : inner;
+}
+function _irFmt(d) { return d ? new Date(d).toLocaleString() : ''; }
+
+// ── Runner attribution ───────────────────────────────────────────────────────
+// Several runners can drain the AI auto-fix queue at once. When one has claimed an
+// issue (a fix or a merge), devRunnerId/devRunnerHeartbeat tell us who and since when.
+const IR_RUNNER_STALL_MS = 15 * 60 * 1000; // a fix normally finishes in minutes
+function _irRunnerActive(i) {
+  return !!i.devRunnerId && (i.devHandoffStatus === 'in_progress' || i.devMergeStatus === 'merging');
+}
+function _irRunnerElapsed(i) {
+  if (!i.devRunnerHeartbeat) return '';
+  const mins = Math.floor((Date.now() - new Date(i.devRunnerHeartbeat).getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m`;
+  return `${Math.floor(mins / 60)}h ${mins % 60}m`;
+}
+function _irRunnerStalled(i) {
+  return !!i.devRunnerHeartbeat && (Date.now() - new Date(i.devRunnerHeartbeat).getTime()) > IR_RUNNER_STALL_MS;
+}
+// Small chip for the list: which runner holds this issue, and for how long. Turns red
+// once the claim has outlived a normal fix — a hint the runner may have died.
+function _irRunnerChip(i) {
+  if (!_irRunnerActive(i)) return '';
+  const stalled = _irRunnerStalled(i);
+  const el = _irRunnerElapsed(i);
+  const cls = stalled ? 'bg-red-100 text-red-700' : 'bg-slate-100 text-slate-700';
+  const title = stalled
+    ? 'This runner has been working far longer than a normal fix — it may have stopped. Re-queue the issue with “Pass to Developer”.'
+    : 'Runner currently working this issue';
+  return `<span title="${title}" class="text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}">🖥 ${_esc(i.devRunnerId)}${el ? ` · ${el}` : ''}${stalled ? ' ⚠' : ''}</span>`;
+}
+
+async function loadIssueReports() {
+  const tbody = document.getElementById('ir-tbody');
+  if (tbody) tbody.innerHTML = '<tr><td colspan="7" class="px-5 py-8 text-center text-gray-400 animate-pulse">Loading…</td></tr>';
+  try {
+    const d = await api(IR_API + (_irFilter ? '?status=' + encodeURIComponent(_irFilter) : ''));
+    // Filter chips
+    const counts = d.counts || {};
+    const total = Object.values(counts).reduce((a, b) => a + b, 0);
+    const chip = (val, label, n) =>
+      `<button onclick="irSetFilter('${val}')" class="px-3 py-1.5 rounded-full font-semibold border ${_irFilter === val ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'}">${label}${n != null ? ` (${n})` : ''}</button>`;
+    const filters = document.getElementById('ir-filters');
+    if (filters) filters.innerHTML = chip('', 'All', total) + IR_STATUSES.map(s => chip(s, IR_STATUS_LABEL[s], counts[s] || 0)).join('');
+
+    const issues = d.issues || [];
+    _updateRunnerBtnBadge(issues);
+    _updatePassAllBtn(issues);
+    _updateMergeAllBtns(issues);
+    loadRunnerStatus();
+    if (tbody) tbody.innerHTML = issues.map(i => `
+      <tr class="border-t border-gray-50 hover:bg-gray-50 transition">
+        <td class="px-5 py-3 font-mono text-xs text-gray-500">#${i.id}</td>
+        <td class="px-5 py-3 max-w-xs truncate" title="${(i.description||'').replace(/"/g,'&quot;')}">${i.description || ''}${i.hasImage ? ' 📎' : ''}</td>
+        <td class="px-5 py-3 text-xs text-gray-500">${i.reporterEmail || i.reporterName || ''}</td>
+        <td class="px-5 py-3 text-xs text-gray-500">${i.sourceLocation || '—'}</td>
+        <td class="px-5 py-3"><div class="flex items-center gap-1.5 flex-wrap">${_irBadge(i.status)}${_irHandoffBadge(i)}${_irRunnerChip(i)}</div></td>
+        <td class="px-5 py-3 text-xs text-gray-400">${_irFmt(i.createdAt)}</td>
+        <td class="px-5 py-3"><button onclick="openIssuePanel(${i.id})" class="text-xs text-emerald-600 font-semibold hover:underline">Manage →</button></td>
+      </tr>`).join('') || '<tr><td colspan="7" class="px-5 py-8 text-center text-gray-400">No issues found.</td></tr>';
+  } catch (e) {
+    if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="px-5 py-5 text-red-500 text-sm">${e.message}</td></tr>`;
+  }
+}
+
+function irSetFilter(v) { _irFilter = v; loadIssueReports(); }
+
+async function openIssuePanel(id) {
+  document.getElementById('ir-detail-panel').classList.remove('hidden');
+  const body = document.getElementById('ir-detail-body');
+  body.innerHTML = '<div class="text-gray-400 animate-pulse">Loading…</div>';
+  try {
+    const d = await api(`${IR_API}?id=${id}`);
+    // Refresh runner-blocked state so the handoff buttons render disabled if a runner is
+    // paused (the panel covers the Resume banner, so re-queuing here would just re-fail).
+    await loadRunnerStatus();
+    const i = d.issue;
+    document.getElementById('ir-panel-title').textContent = `Issue #${i.id}`;
+    const messages = (d.messages || []).map(m => `
+      <div class="rounded-xl p-3 text-sm ${m.authorType === 'admin' ? 'bg-blue-50 border border-blue-100' : 'bg-gray-50 border border-gray-100'}">
+        <div class="flex items-center justify-between mb-1">
+          <span class="text-xs font-bold ${m.authorType === 'admin' ? 'text-blue-700' : 'text-gray-600'}">${m.authorType === 'admin' ? 'Admin' : 'Reporter'}${m.status ? ` · set to ${IR_STATUS_LABEL[m.status] || m.status}` : ''}</span>
+          <span class="text-xs text-gray-400">${_irFmt(m.createdAt)}</span>
+        </div>
+        <p class="text-gray-800 whitespace-pre-wrap">${m.body}</p>
+      </div>`).join('') || '<p class="text-xs text-gray-400">No messages yet.</p>';
+
+    body.innerHTML = `
+      <div class="grid grid-cols-2 gap-3 text-sm">
+        <div><span class="text-gray-400 text-xs font-bold uppercase">Reporter</span><br><span class="font-medium">${i.reporterName || ''}</span><br><span class="text-xs text-gray-500">${i.reporterEmail || ''}</span></div>
+        <div><span class="text-gray-400 text-xs font-bold uppercase">Reported</span><br><span class="text-xs">${_irFmt(i.createdAt)}</span></div>
+        <div class="col-span-2"><span class="text-gray-400 text-xs font-bold uppercase">Location</span><br>
+          <span class="font-medium">${i.sourceLocation || '—'}</span>${i.sourceUrl ? `<br><a href="${i.sourceUrl}" target="_blank" rel="noopener" class="text-xs text-blue-600 hover:underline break-all">${i.sourceUrl}</a>` : ''}
+        </div>
+        ${i.userAgent ? `<div class="col-span-2"><span class="text-gray-400 text-xs font-bold uppercase">User agent</span><br><span class="text-xs text-gray-500 break-all">${i.userAgent}</span></div>` : ''}
+      </div>
+
+      <div class="border border-gray-200 rounded-xl p-4 space-y-2">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold uppercase text-gray-400">Description</span>
+          <button onclick="submitIssueDescription(${i.id})" class="text-xs font-semibold text-emerald-600 hover:underline">Save description</button>
+        </div>
+        <textarea id="ir-description" rows="4" class="w-full text-sm text-gray-700 leading-relaxed border border-gray-200 rounded-lg px-3 py-2 resize-y focus:ring-2 focus:ring-emerald-500 focus:outline-none">${i.description || ''}</textarea>
+      </div>
+
+      ${i.imageData ? `<div><span class="text-gray-400 text-xs font-bold uppercase">Screenshot</span><br><a href="${i.imageData}" target="_blank" rel="noopener"><img src="${i.imageData}" alt="Screenshot" class="mt-2 max-h-72 rounded-lg border border-gray-200"></a></div>` : ''}
+
+      <!-- AI auto-fix handoff -->
+      ${_irHandoffCard(i)}
+
+      <!-- Database migration the fix needs -->
+      ${_irSqlCard(i)}
+
+      <!-- Merge the fix PR to staging -->
+      ${_irMergeCard(i)}
+
+      <!-- Status control -->
+      <div class="border border-gray-200 rounded-xl p-4 space-y-3">
+        <div class="flex items-center gap-3 flex-wrap">
+          <span class="text-xs font-bold uppercase text-gray-400">Current</span>${_irBadge(i.status)}${i.devMergeStatus === 'merged' ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">🔀 Merged to staging</span>' : ''}
+        </div>
+        <label class="block text-xs font-bold uppercase text-gray-400">Update status</label>
+        <select id="ir-new-status" onchange="irOnStatusChange()" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2">
+          ${IR_STATUSES.map(s => `<option value="${s}" ${i.status === s ? 'selected' : ''}>${IR_STATUS_LABEL[s]}</option>`).join('')}
+        </select>
+        <div id="ir-roadmap-priority-wrap" class="${i.status === 'roadmap' ? '' : 'hidden'} bg-violet-50 border border-violet-100 rounded-lg p-3">
+          <label class="block text-xs font-bold uppercase text-violet-700">Roadmap priority</label>
+          <p class="text-[11px] text-violet-600/80 mb-1.5">Closes the issue and adds it to the Feature Requests board (Planned) with this priority.</p>
+          <select id="ir-roadmap-priority" class="w-full text-sm border border-violet-200 rounded-lg px-3 py-2 bg-white">
+            ${IR_PRIORITIES.map(p => `<option value="${p}" ${p === 'medium' ? 'selected' : ''}>${IR_PRIORITY_LABEL[p]}</option>`).join('')}
+          </select>
+        </div>
+        <label class="block text-xs font-bold uppercase text-gray-400">Message to reporter <span class="text-gray-300 font-normal">(optional)</span></label>
+        <textarea id="ir-admin-message" rows="3" placeholder="Supporting message — sent to the reporter with the status update…" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 resize-none focus:ring-2 focus:ring-emerald-500 focus:outline-none"></textarea>
+        <button onclick="submitIssueUpdate(${i.id})" class="w-full px-4 py-2 bg-gray-900 text-white text-sm font-bold rounded-lg hover:bg-black transition">Save & notify reporter</button>
+      </div>
+
+      <div><span class="text-gray-400 text-xs font-bold uppercase">Conversation</span><div class="space-y-3 mt-2">${messages}</div></div>`;
+  } catch (e) {
+    body.innerHTML = `<p class="text-red-500">${e.message}</p>`;
+  }
+}
+
+function closeIssuePanel() { document.getElementById('ir-detail-panel').classList.add('hidden'); }
+
+// Reveal the roadmap priority picker only when "On Roadmap" is the chosen status.
+function irOnStatusChange() {
+  const status = document.getElementById('ir-new-status')?.value;
+  document.getElementById('ir-roadmap-priority-wrap')?.classList.toggle('hidden', status !== 'roadmap');
+}
+
+async function submitIssueUpdate(id) {
+  const status = document.getElementById('ir-new-status')?.value;
+  const message = document.getElementById('ir-admin-message')?.value?.trim() || '';
+  const payload = { status, message };
+  if (status === 'roadmap') payload.priority = document.getElementById('ir-roadmap-priority')?.value || 'medium';
+  try {
+    await api(`${IR_API}?id=${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    await openIssuePanel(id);
+    if (!document.getElementById('view-issue-reports').classList.contains('hidden')) loadIssueReports();
+  } catch (e) { alert(e.message); }
+}
+
+// Save an admin edit to the issue description. Independent of the status/message flow —
+// it doesn't notify the reporter or thread a message.
+async function submitIssueDescription(id) {
+  const description = document.getElementById('ir-description')?.value?.trim() || '';
+  if (!description) { alert('Description cannot be empty.'); return; }
+  try {
+    await api(`${IR_API}?id=${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description }),
+    });
+    await openIssuePanel(id);
+    if (!document.getElementById('view-issue-reports').classList.contains('hidden')) loadIssueReports();
+  } catch (e) { alert(e.message); }
+}
+
+// ── "Pass to Developer" AI auto-fix handoff ──────────────────────────────────
+// Renders the handoff state and, when actionable, the button that queues the
+// issue for the local Claude Code runner (scripts/dev-issue-fixer.mjs).
+function _esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function _irHandoffCard(i) {
+  const s = i.devHandoffStatus || null;
+  const passBtn = (label) => _irRunnerBlocked
+    ? `<div class="w-full px-4 py-2.5 bg-violet-100 text-violet-400 text-sm font-bold rounded-lg flex items-center justify-center gap-2 cursor-not-allowed select-none" aria-disabled="true">
+         <span>🤖</span> ${label}
+       </div>
+       <p class="text-xs text-amber-700 mt-1.5">⏸️ The AI developer runner is paused (Claude session limit). Close this panel and use the <b>“Resume runner”</b> banner at the top of the Issues list, then try again.</p>`
+    : `<button onclick="passToDeveloper(${i.id})" class="w-full px-4 py-2.5 bg-violet-600 text-white text-sm font-bold rounded-lg hover:bg-violet-700 transition flex items-center justify-center gap-2">
+       <span>🤖</span> ${label}
+     </button>`;
+  const resultBlock = i.devResult
+    ? `<div class="bg-white/70 border border-gray-200 rounded-lg p-3 text-xs text-gray-700 whitespace-pre-wrap max-h-48 overflow-auto">${_esc(i.devResult)}</div>` : '';
+  const prLink = i.devPrUrl
+    ? `<a href="${_esc(i.devPrUrl)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-sm font-bold text-violet-700 hover:underline">View pull request →</a>` : '';
+
+  let inner;
+  if (s === 'queued') {
+    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-violet-700"><span class="animate-pulse">●</span> Queued for AI auto-fix… a developer runner will pick this up.</div>`;
+  } else if (s === 'in_progress') {
+    const stalled = _irRunnerStalled(i);
+    const who = i.devRunnerId
+      ? `<div class="text-xs ${stalled ? 'text-red-700' : 'text-violet-600'}">🖥 Runner <b>${_esc(i.devRunnerId)}</b> · working for ${_irRunnerElapsed(i) || 'a moment'}</div>` : '';
+    const stall = stalled
+      ? `<div class="text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-2">⚠ This is far longer than a normal fix — the runner may have stopped. Re-queue with “Pass to Developer”.</div>${passBtn('Re-queue for another runner')}` : '';
+    inner = `<div class="space-y-2">
+        <div class="flex items-center gap-2 text-sm font-semibold text-violet-700"><span class="animate-pulse">●</span> The AI developer is working on a fix…</div>
+        ${who}${stall}
+      </div>`;
+  } else if (s === 'completed') {
+    inner = `<div class="space-y-2">
+        <div class="flex items-center gap-2 text-sm font-semibold text-emerald-700">✅ AI auto-fix completed.</div>
+        ${prLink}${resultBlock}
+        ${passBtn('Pass to Developer again')}
+      </div>`;
+  } else if (s === 'failed') {
+    inner = `<div class="space-y-2">
+        <div class="flex items-center gap-2 text-sm font-semibold text-amber-700">⚠️ The AI auto-fix could not complete.</div>
+        ${resultBlock}
+        ${passBtn('Try again')}
+      </div>`;
+  } else {
+    inner = `<div class="space-y-2">
+        <p class="text-xs text-gray-500">Hand this issue to an AI developer (Claude Code). It will fix it on a branch, open a pull request, and move the status to “Fixed &amp; Ready to Test”.</p>
+        ${passBtn('Pass to Developer')}
+      </div>`;
+  }
+  return `<div class="border border-violet-200 bg-violet-50 rounded-xl p-4 space-y-3">
+      <span class="text-xs font-bold uppercase text-violet-600">AI Auto-Fix</span>
+      ${inner}
+    </div>`;
+}
+
+// ── Runner modal ─────────────────────────────────────────────────────────────
+function openRunnerModal() {
+  const modal = document.getElementById('ir-runner-modal');
+  modal.classList.remove('hidden');
+
+  // Build the command
+  const origin = window.location.origin;
+  const baseUrl = origin.includes('localhost') ? origin : 'https://staging--bemoreswan.netlify.app';
+  const cmd = `AURA_BASE_URL="${baseUrl}" \\\nDEV_HANDOFF_TOKEN="<your-token>" \\\nnpm run dev:issue-fixer`;
+  document.getElementById('ir-runner-cmd').textContent = cmd;
+
+  // Queue status from already-loaded issue data (count queued devHandoffStatus)
+  _updateRunnerQueueStatus();
+  // Paused-runner state (Claude session limit) + Resume button, mirrored inside the modal
+  loadRunnerStatus();
+}
+
+function closeRunnerModal() {
+  document.getElementById('ir-runner-modal').classList.add('hidden');
+}
+
+function _updateRunnerQueueStatus() {
+  const el = document.getElementById('ir-runner-queue-status');
+  if (!el) return;
+  // Count rows in table with the violet "queued" badge
+  const rows = document.querySelectorAll('#ir-tbody tr');
+  // Re-fetch a fresh count from the API
+  fetch(IR_API)
+    .then(r => r.json())
+    .then(d => {
+      const issues = d.issues || [];
+      const queued = issues.filter(i => i.devHandoffStatus === 'queued').length;
+      const active = issues.filter(_irRunnerActive);
+      const inProg = active.length;
+      // One line per distinct runner that's currently holding an issue.
+      const byRunner = {};
+      active.forEach(i => { (byRunner[i.devRunnerId] = byRunner[i.devRunnerId] || []).push(i); });
+      const runnerLines = Object.keys(byRunner).sort().map(rid => {
+        const list = byRunner[rid];
+        const ids = list.map(i => `#${i.id}`).join(', ');
+        const stalled = list.some(_irRunnerStalled);
+        return `<div class="flex items-center gap-1.5 mt-1${stalled ? ' text-red-700' : ''}">🖥 <b>${_esc(rid)}</b> — ${ids}${stalled ? ' ⚠ possibly stalled' : ''}</div>`;
+      }).join('');
+      if (queued > 0) {
+        el.className = 'rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800';
+        el.innerHTML = `<span class="font-bold">⚠️ ${queued} issue${queued > 1 ? 's' : ''} queued</span> — waiting for a runner to pick ${queued > 1 ? 'them' : 'it'} up. Start a runner below to process ${queued > 1 ? 'them' : 'it'}.${runnerLines ? `<div class="mt-2 pt-2 border-t border-amber-200/60 text-xs">Currently working:${runnerLines}</div>` : ''}`;
+      } else if (inProg > 0) {
+        el.className = 'rounded-xl border border-violet-200 bg-violet-50 p-3 text-sm text-violet-800';
+        el.innerHTML = `<span class="animate-pulse font-bold">●</span> <span class="font-bold">${inProg} issue${inProg > 1 ? 's' : ''} in progress</span> across ${Object.keys(byRunner).length} runner${Object.keys(byRunner).length > 1 ? 's' : ''}.<div class="mt-1 text-xs">${runnerLines}</div>`;
+      } else {
+        el.className = 'rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800';
+        el.innerHTML = `<span class="font-bold">✓ No issues queued</span> — nothing waiting for the runner right now.`;
+      }
+    })
+    .catch(() => {
+      el.className = 'rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-500';
+      el.innerHTML = 'Could not load queue status.';
+    });
+}
+
+async function copyRunnerCmd() {
+  const cmd = document.getElementById('ir-runner-cmd').textContent;
+  try {
+    await navigator.clipboard.writeText(cmd);
+    const btn = document.getElementById('ir-runner-copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+  } catch { alert('Copy failed — select the text manually.'); }
+}
+
+// Update the Runner button label with a live queued count when the issue list loads
+function _updateRunnerBtnBadge(issues) {
+  const queued = (issues || []).filter(i => i.devHandoffStatus === 'queued').length;
+  const lbl = document.getElementById('ir-runner-btn-label');
+  const btn = document.getElementById('ir-runner-btn');
+  if (!lbl || !btn) return;
+  if (queued > 0) {
+    lbl.textContent = `Runner (${queued} queued)`;
+    btn.classList.add('border-amber-400', 'bg-amber-50', 'text-amber-800');
+    btn.classList.remove('border-violet-300', 'bg-violet-50', 'text-violet-700');
+  } else {
+    lbl.textContent = 'Runner';
+    btn.classList.remove('border-amber-400', 'bg-amber-50', 'text-amber-800');
+    btn.classList.add('border-violet-300', 'bg-violet-50', 'text-violet-700');
+  }
+}
+
+// ── Runner session-limit recovery ────────────────────────────────────────────
+// When a runner's Claude account hits its usage limit the runner pauses and reports it.
+// Show a prominent banner with the reset time and a Resume button: the admin logs into a
+// funded Claude account ON THE RUNNER MACHINE, presses Resume, and the runner verifies the
+// new login and continues. Re-queued issues are then picked up automatically.
+let _irRunnerStatusTimer = null;
+// True while any runner is paused (session limit). Consumed by _irHandoffCard so the
+// "Pass to Developer" / "Try again" buttons disable and point at the Resume banner —
+// the open detail panel covers the banner, so re-queuing from here would just re-fail.
+let _irRunnerBlocked = false;
+// One paused-runner card (reset hint + last probe result + Resume button). Rendered both in
+// the banner at the top of the Issues list and inside the 🤖 Runner modal.
+function _irRunnerPausedCard(r) {
+  const canResume = (typeof _adminRole !== 'undefined') && _adminRole === 'super_admin';
+  const reset = r.resetHint ? ` — resets <b>${_esc(r.resetHint)}</b>` : '';
+  // Refreshed by the runner on every resume-check poll (~10s) while paused, so this shows
+  // the login the admin just switched to — not the one that ran out.
+  const acct = r.activeAccount
+    ? `<div class="mt-2 text-xs text-amber-900/90">Active Claude session on the runner: <b class="font-mono">${_esc(r.activeAccount)}</b></div>`
+    : `<div class="mt-2 text-xs text-amber-900/60">Active Claude session on the runner: not reported yet</div>`;
+  const probe = r.lastProbeResult
+    ? `<div class="mt-2 text-xs text-amber-900/80 bg-amber-100/60 rounded-lg p-2">Last resume attempt: ${_esc(r.lastProbeResult)}</div>` : '';
+  let action;
+  if (r.restartRequested) {
+    action = `<span class="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700"><span class="animate-pulse">●</span> restart requested — waiting for the runner to pick it up and restart…</span>`;
+  } else if (r.resumeRequested) {
+    action = `<span class="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700"><span class="animate-pulse">●</span> verifying the new login on the runner…</span>`;
+  } else if (canResume) {
+    action = `<button onclick="resumeRunner('${_esc(r.runnerId)}', this)" class="px-3 py-1.5 bg-amber-600 text-white text-xs font-bold rounded-lg hover:bg-amber-700 transition">I've logged in — Resume runner</button>`;
+  } else {
+    action = `<span class="text-xs text-amber-700 font-semibold">A super-admin must resume the runner.</span>`;
+  }
+  // Escape hatch: restart the runner process remotely. Shown even while "verifying…" is
+  // stuck, but not once a restart is already pending. Only works while the process is
+  // alive and polling — a dead process can't be restarted from here.
+  const restartBtn = canResume && !r.restartRequested
+    ? `<button onclick="restartRunner('${_esc(r.runnerId)}', this)" class="px-3 py-1.5 border border-amber-600 text-amber-700 text-xs font-bold rounded-lg hover:bg-amber-100 transition">↻ Restart runner</button>` : '';
+  return `<div class="border border-amber-300 bg-amber-50 rounded-xl p-4">
+    <div class="flex items-start gap-3">
+      <span class="text-xl leading-none">⏸️</span>
+      <div class="flex-1 min-w-0">
+        <p class="text-sm font-bold text-amber-900">AI auto-fix runner paused — Claude session limit${reset}</p>
+        <p class="text-xs text-amber-800 mt-1">Runner <b class="font-mono">${_esc(r.runnerId)}</b> ran out of Claude usage. On the runner machine, log into a Claude account with credit (run <code class="font-mono bg-amber-100 px-1 rounded">claude</code> then <code class="font-mono bg-amber-100 px-1 rounded">/login</code>), then press Resume. Queued issues are retried automatically once it resumes — you don't need to re-submit them.</p>
+        ${acct}
+        ${probe}
+        <div class="mt-3 flex items-center gap-2 flex-wrap">${action}${restartBtn}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function _irRunnerLastSeen(r) {
+  if (!r.lastSeenAt) return '';
+  const mins = Math.floor((Date.now() - new Date(r.lastSeenAt).getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const h = Math.floor(mins / 60);
+  return h < 48 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`;
+}
+
+// The modal's runner-state section never hides: when nothing is paused it explains why
+// there's no Resume button (it only exists while a runner reports a Claude session limit),
+// so an admin looking for it isn't left staring at nothing.
+function _irRunnerModalStatus(runners, blocked) {
+  const cards = blocked.map(_irRunnerPausedCard).join('');
+  const others = runners.filter((r) => r.state !== 'session_limited');
+  const otherLines = others.map((r) => {
+    const seen = _irRunnerLastSeen(r);
+    return `<div class="flex items-center gap-1.5 text-xs text-gray-600">🖥 <b class="font-mono">${_esc(r.runnerId)}</b> — <span class="text-emerald-700 font-semibold">✓ ${_esc(r.state || 'ok')}</span>${seen ? ` · last seen ${seen}` : ''}</div>`;
+  }).join('');
+  const note = blocked.length ? '' : `<div class="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-500">
+      ${others.length ? otherLines + '<div class="mt-2 pt-2 border-t border-gray-200">' : ''}
+      No runner is paused right now — the <b>“Resume runner”</b> button only appears here (and as a banner above the Issues list) while a runner reports a Claude session limit. If your runner hit its limit but nothing shows, the runner process is no longer running: restart it with the command below.
+      ${others.length ? '</div>' : ''}
+    </div>`;
+  return cards + note;
+}
+
+async function loadRunnerStatus() {
+  const banner = document.getElementById('ir-runner-alert');
+  const modalEl = document.getElementById('ir-runner-paused');
+  if (!banner && !modalEl) return;
+  let runners = [], blocked = [];
+  try {
+    const d = await api(`${IR_API}?action=runner-status`);
+    runners = d.runners || [];
+    blocked = d.blocked || [];
+  } catch { runners = []; blocked = []; }
+  _irRunnerBlocked = blocked.length > 0;
+
+  // Banner above the Issues list: only while something is actually paused.
+  if (banner) {
+    banner.classList.toggle('hidden', !blocked.length);
+    banner.innerHTML = blocked.map(_irRunnerPausedCard).join('');
+  }
+  // Runner modal: always shows runner state, with an explanation when nothing is paused.
+  if (modalEl) {
+    modalEl.classList.remove('hidden');
+    modalEl.innerHTML = _irRunnerModalStatus(runners, blocked);
+  }
+
+  if (!blocked.length) {
+    if (_irRunnerStatusTimer) { clearInterval(_irRunnerStatusTimer); _irRunnerStatusTimer = null; }
+    return;
+  }
+
+  // While something is blocked, refresh so "verifying…" clears and the probe result appears
+  // without a manual reload. Cleared once nothing is blocked (above).
+  if (!_irRunnerStatusTimer) _irRunnerStatusTimer = setInterval(loadRunnerStatus, 5000);
+}
+
+async function resumeRunner(runnerId, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Requesting…'; }
+  try {
+    const d = await api(`${IR_API}?action=resume-runner`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runnerId }),
+    });
+    if (!d.resumed) alert(d.message || 'No paused runner to resume — check the runner process is running.');
+  } catch (e) {
+    alert(e.message);
+    if (btn) { btn.disabled = false; btn.textContent = "I've logged in — Resume runner"; }
+  } finally { await loadRunnerStatus(); }
+}
+
+async function restartRunner(runnerId, btn) {
+  if (!confirm('Restart this runner process on its machine? It exits and starts fresh (launchd relaunches it in ~30s; a terminal-run copy re-spawns itself). If the new process is still rate-limited it will report in again. Only works while the runner process is alive.')) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Requesting…'; }
+  try {
+    const d = await api(`${IR_API}?action=restart-runner`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runnerId }),
+    });
+    if (!d.requested) alert(d.message || 'No paused runner to restart — check the runner process is running.');
+  } catch (e) {
+    alert(e.message);
+    if (btn) { btn.disabled = false; btn.textContent = '↻ Restart runner'; }
+  } finally { await loadRunnerStatus(); }
+}
+
+// "Pass all to Developer" — shown on the Reported tab when there are issues that
+// haven't been handed off yet (not already queued or being fixed).
+function _updatePassAllBtn(issues) {
+  const btn = document.getElementById('ir-pass-all-btn');
+  if (!btn) return;
+  const eligible = (issues || []).filter(i =>
+    i.status === 'reported' && i.devHandoffStatus !== 'queued' && i.devHandoffStatus !== 'in_progress');
+  if (_irFilter === 'reported' && eligible.length > 0) {
+    btn.dataset.count = eligible.length;
+    btn.disabled = false;
+    btn.textContent = `🤖 Pass all ${eligible.length} to Developer`;
+    btn.classList.remove('hidden');
+  } else {
+    btn.classList.add('hidden');
+  }
+}
+
+async function passAllToDeveloper() {
+  const btn = document.getElementById('ir-pass-all-btn');
+  const n = Number(btn?.dataset.count || 0);
+  if (_irRunnerBlocked) {
+    alert('The AI developer runner is paused (Claude session limit). Use the "Resume runner" banner at the top of the Issues list, then try again.');
+    return;
+  }
+  if (!confirm(`Pass all ${n} reported issue${n === 1 ? '' : 's'} to the AI developer? Each will be fixed on its own branch with a pull request opened for review.`)) return;
+  if (btn) { btn.disabled = true; btn.textContent = '🤖 Queuing…'; }
+  try {
+    await api(`${IR_API}?action=handoff-all`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+  } catch (e) { alert(e.message); }
+  finally { loadIssueReports(); }
+}
+
+async function passToDeveloper(id) {
+  if (!confirm('Pass this issue to the AI developer? It will be fixed on a branch and a pull request opened for review.')) return;
+  try {
+    await api(`${IR_API}?id=${id}&action=handoff`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    await openIssuePanel(id);
+    if (!document.getElementById('view-issue-reports').classList.contains('hidden')) loadIssueReports();
+  } catch (e) { alert(e.message); }
+}
+
+// ── Run AI-proposed migration SQL against staging Neon, from inside the ticket ─
+// Only shown when the fix shipped a DB migration. The status only advances to
+// "Fixed & Ready to Test" on a successful run; failures show the DB's error inline.
+function _irSqlCard(i) {
+  if (!i.devSql) return '';
+  const st = i.devSqlStatus || 'pending';
+  const chip = {
+    pending: ['bg-amber-100 text-amber-800', 'Pending — not run yet'],
+    applied: ['bg-emerald-100 text-emerald-700', 'Applied ✓'],
+    failed:  ['bg-red-100 text-red-700', 'Last run failed'],
+  }[st] || ['bg-gray-100 text-gray-700', st];
+  const ranAt = i.devSqlRanAt ? ` · ${_irFmt(i.devSqlRanAt)}` : '';
+  const resultBlock = i.devSqlResult
+    ? `<div class="rounded-lg p-3 text-xs whitespace-pre-wrap font-mono max-h-56 overflow-auto ${st === 'applied' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-red-50 text-red-800 border border-red-200'}"><div class="font-sans font-bold mb-1">Staging database response${ranAt}:</div>${_esc(i.devSqlResult)}</div>`
+    : '';
+  const canRun = (typeof _adminRole !== 'undefined') && _adminRole === 'super_admin';
+  const runBtn = canRun
+    ? `<button onclick="runIssueSql(${i.id})" class="w-full px-4 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 transition flex items-center justify-center gap-2"><span>🗄️</span> ${st === 'applied' ? 'Re-run on staging Neon' : 'Run on staging Neon'}</button>`
+    : `<p class="text-xs text-amber-700 font-semibold">Only a super-admin can run this SQL.</p>`;
+  return `<div class="border border-blue-200 bg-blue-50 rounded-xl p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold uppercase text-blue-600">Database Migration</span>
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${chip[0]}">${chip[1]}</span>
+      </div>
+      <p class="text-xs text-gray-500">This fix needs a schema change. Review the SQL${canRun ? ' (edit if needed) ' : ' '}and run it against the staging database. The issue moves to “Fixed &amp; Ready to Test” only after a successful run.</p>
+      <textarea id="ir-sql" rows="8" ${canRun ? '' : 'readonly'} class="w-full text-xs font-mono border border-blue-200 rounded-lg px-3 py-2 bg-white resize-y focus:ring-2 focus:ring-indigo-500 focus:outline-none">${_esc(i.devSql)}</textarea>
+      ${runBtn}
+      ${resultBlock}
+    </div>`;
+}
+
+async function runIssueSql(id) {
+  const sql = document.getElementById('ir-sql')?.value || '';
+  if (!sql.trim()) { alert('There is no SQL to run.'); return; }
+  if (!confirm('Run this SQL against the STAGING database now? This executes immediately as the database owner.')) return;
+  const btn = event?.target?.closest('button');
+  if (btn) { btn.disabled = true; btn.textContent = 'Running…'; }
+  try {
+    const res = await api(`${IR_API}?id=${id}&action=run-sql`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql }),
+    });
+    await openIssuePanel(id);
+    if (!document.getElementById('view-issue-reports').classList.contains('hidden')) loadIssueReports();
+    if (!res.ok) alert('The SQL did not run cleanly — see the staging database response in the ticket.');
+  } catch (e) {
+    if (btn) { btn.disabled = false; }
+    alert(e.message);
+  }
+}
+
+// ── Merge the fix PR to staging, from inside the ticket (super-admin only) ─────
+// Shown once the AI fix has produced a PR (dev_merge_status set). The merge is queued
+// here and performed by the local watcher; the issue only reaches "Fixed & Ready to
+// Test" once the merge (and any DB migration) is done.
+function _irMergeCard(i) {
+  const ms = i.devMergeStatus;
+  if (!ms || !i.devPrUrl) return '';
+  const prLink = `<a href="${_esc(i.devPrUrl)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-sm font-bold text-indigo-700 hover:underline">View pull request →</a>`;
+  const resultBlock = i.devMergeResult
+    ? `<div class="rounded-lg p-3 text-xs font-mono whitespace-pre-wrap max-h-48 overflow-auto bg-white border border-gray-200 text-gray-700">${_esc(i.devMergeResult)}</div>` : '';
+  const isSuper = (typeof _adminRole !== 'undefined') && _adminRole === 'super_admin';
+  const sqlPending = i.devSqlStatus === 'pending';
+  const mergeBtn = isSuper
+    ? `<button onclick="requestMerge(${i.id})" ${sqlPending ? 'disabled' : ''} class="w-full px-4 py-2.5 ${sqlPending ? 'bg-gray-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'} text-white text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🔀</span> Merge to staging</button>`
+    : `<p class="text-xs text-amber-700 font-semibold">Only a super-admin can merge to staging.</p>`;
+
+  let chip, inner;
+  if (ms === 'ready' || ms === 'failed') {
+    const failed = ms === 'failed';
+    chip = failed ? ['bg-red-100 text-red-700', 'Last merge failed'] : ['bg-amber-100 text-amber-800', 'Ready to merge'];
+    inner = `<p class="text-xs text-gray-500">${failed
+        ? 'The merge attempt failed — see the runner output below, resolve it, and try again.'
+        : 'The fix is on a branch with an open pull request. Merge it to <b>staging</b> to make it live and move the issue to “Fixed &amp; Ready to Test”.'}${sqlPending ? ' <b class="text-amber-700">Run the database migration above first.</b>' : ''}</p>
+      ${prLink}${failed ? resultBlock : ''}${mergeBtn}`;
+  } else if (ms === 'queued') {
+    chip = ['bg-indigo-100 text-indigo-700', 'Queued'];
+    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Merge requested — the developer runner will merge this within ~15s…</div>${prLink}`;
+  } else if (ms === 'merging') {
+    chip = ['bg-indigo-100 text-indigo-700', 'Merging…'];
+    const who = i.devRunnerId ? `<div class="text-xs text-indigo-600">🖥 Runner <b>${_esc(i.devRunnerId)}</b> is merging${_irRunnerElapsed(i) ? ` · ${_irRunnerElapsed(i)}` : ''}</div>` : '';
+    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Merging to staging…</div>${who}${prLink}`;
+  } else if (ms === 'merged') {
+    chip = ['bg-emerald-100 text-emerald-700', 'Merged ✓'];
+    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-emerald-700">✅ Merged to staging${i.devMergedAt ? ` · ${_irFmt(i.devMergedAt)}` : ''}.</div>${prLink}${resultBlock}`;
+  } else { return ''; }
+
+  return `<div class="border border-indigo-200 bg-indigo-50 rounded-xl p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold uppercase text-indigo-600">Merge to Staging</span>
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${chip[0]}">${chip[1]}</span>
+      </div>
+      ${inner}
+    </div>`;
+}
+
+async function requestMerge(id) {
+  if (!confirm('Merge this fix to the staging branch now? The developer runner will merge the pull request and the issue will move to “Fixed & Ready to Test”.')) return;
+  const btn = event?.target?.closest('button');
+  if (btn) { btn.disabled = true; btn.textContent = 'Requesting…'; }
+  try {
+    await api(`${IR_API}?id=${id}&action=request-merge`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    await openIssuePanel(id);
+    if (!document.getElementById('view-issue-reports').classList.contains('hidden')) loadIssueReports();
+  } catch (e) {
+    if (btn) { btn.disabled = false; }
+    alert(e.message);
+  }
+}
+
+// ── "Merge all to staging" + one-press staging deploy (super-admin only) ──────
+// On the Fix In Progress tab, merge every ready fix PR in one go instead of opening
+// each ticket. While the runner drains the queued merges we poll; once nothing is
+// left in flight the "Commit to Staging" button appears, which triggers a single
+// fresh Netlify staging build with everything included.
+let _irMergeAllTracking = false; // a bulk merge was queued this session and is draining
+let _irDeployReady = false;      // the bulk merge drained → offer "Commit to Staging"
+let _irMergePollTimer = null;
+
+function _irMergeEligible(i) {
+  return !!i.devPrUrl && (i.devMergeStatus === 'ready' || i.devMergeStatus === 'failed')
+    && i.devSqlStatus !== 'pending';
+}
+
+function _updateMergeAllBtns(issues) {
+  const mergeBtn = document.getElementById('ir-merge-all-btn');
+  const deployBtn = document.getElementById('ir-deploy-btn');
+  if (!mergeBtn || !deployBtn) return;
+  const isSuper = (typeof _adminRole !== 'undefined') && _adminRole === 'super_admin';
+  const onTab = _irFilter === 'fix_in_progress';
+  const eligible = (issues || []).filter(_irMergeEligible);
+  const inFlight = (issues || []).filter(i => i.devMergeStatus === 'queued' || i.devMergeStatus === 'merging');
+
+  if (onTab && isSuper && eligible.length > 0) {
+    mergeBtn.dataset.count = eligible.length;
+    mergeBtn.disabled = false;
+    mergeBtn.textContent = `🔀 Merge all ${eligible.length} to staging`;
+    mergeBtn.classList.remove('hidden');
+  } else {
+    mergeBtn.classList.add('hidden');
+  }
+
+  // Track the drain only from views that actually show in-flight merges (they keep the
+  // fix_in_progress status until merged) — other filters would report a false "done".
+  if (_irMergeAllTracking && (_irFilter === '' || _irFilter === 'fix_in_progress')) {
+    if (inFlight.length > 0) {
+      if (!_irMergePollTimer) _irMergePollTimer = setInterval(loadIssueReports, 5000);
+    } else {
+      _irMergeAllTracking = false;
+      _irDeployReady = true;
+      if (_irMergePollTimer) { clearInterval(_irMergePollTimer); _irMergePollTimer = null; }
+      // Failed merges pop back into the eligible list above — flag them rather than
+      // silently offering a deploy that's missing fixes.
+      if (eligible.length > 0) {
+        alert(`${eligible.length} merge${eligible.length === 1 ? '' : 's'} failed — open the ticket${eligible.length === 1 ? '' : 's'} to see the runner output, or press “Merge all” to retry. You can still commit what did merge to Staging.`);
+      }
+    }
+  }
+
+  deployBtn.classList.toggle('hidden', !(onTab && isSuper && _irDeployReady));
+}
+
+async function requestMergeAll() {
+  const btn = document.getElementById('ir-merge-all-btn');
+  const n = Number(btn?.dataset.count || 0);
+  if (!confirm(`Merge all ${n} ready fix${n === 1 ? '' : 'es'} to the staging branch now? The developer runner will merge each pull request in turn; once every merge has finished, a “Commit to Staging” button will appear to trigger one staging deploy.`)) return;
+  if (btn) { btn.disabled = true; btn.textContent = '🔀 Queuing…'; }
+  try {
+    const d = await api(`${IR_API}?action=request-merge-all`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    if ((d.queued || 0) > 0) { _irMergeAllTracking = true; _irDeployReady = false; }
+    else alert('Nothing to merge — no fix PRs are ready (fixes awaiting a database migration must be run from their ticket first).');
+  } catch (e) { alert(e.message); }
+  finally { loadIssueReports(); }
+}
+
+async function deployStaging() {
+  if (!confirm('Commit the merged fixes to Staging now? This triggers one fresh Netlify build of the staging branch — nothing is deployed to production.')) return;
+  const btn = document.getElementById('ir-deploy-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '🚀 Deploying…'; }
+  try {
+    await api(`${IR_API}?action=deploy-staging`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    _irDeployReady = false;
+    alert('✓ Staging deploy triggered — Netlify is rebuilding the staging branch with all merged fixes. It will be live in a few minutes.');
+  } catch (e) {
+    alert(e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🚀 Commit to Staging'; }
+    loadIssueReports();
+  }
+}
+
+// ── Feature Requests & Roadmap (Testing) — unified ───────────────────────────
+const FR_API = '/.netlify/functions/admin-feature-requests';
+const FR_CATEGORIES = ['app_core','existing_assistant','new_assistant'];
+const FR_CATEGORY_LABEL = { app_core: 'App Core', existing_assistant: 'Existing Assistant', new_assistant: 'New Assistant' };
+const FR_PRIORITIES = ['critical','high','medium','low'];
+const FR_PRIORITY_LABEL = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' };
+const FR_PRIORITY_CLS = {
+  critical: 'bg-red-100 text-red-700', high: 'bg-orange-100 text-orange-700',
+  medium: 'bg-amber-100 text-amber-800', low: 'bg-gray-100 text-gray-600',
+};
+// Full lifecycle (KEEP IN SYNC with src/utils/feature-requests.ts).
+const FR_STATUSES = ['pending_review','under_review','open','planned','in_progress','released','declined','duplicate'];
+const FR_STATUS_LABEL = {
+  pending_review: 'Pending Review', under_review: 'Under Review', open: 'Open', planned: 'Planned',
+  in_progress: 'In Progress', released: 'Released', declined: 'Declined', duplicate: 'Duplicate',
+};
+const FR_STATUS_CLS = {
+  pending_review: 'bg-amber-100 text-amber-800', under_review: 'bg-amber-100 text-amber-700',
+  open: 'bg-gray-100 text-gray-600', planned: 'bg-blue-100 text-blue-700',
+  in_progress: 'bg-amber-100 text-amber-700', released: 'bg-emerald-100 text-emerald-700',
+  declined: 'bg-red-100 text-red-600', duplicate: 'bg-gray-200 text-gray-500',
+};
+let _frItems = [];
+let _frPane = 'moderation';
+
+async function loadFeatureRoadmap() {
+  const board = document.getElementById('fr-board');
+  if (board) board.innerHTML = '<div class="text-gray-400 text-sm py-8 text-center animate-pulse">Loading…</div>';
+  try {
+    const d = await api(FR_API);
+    _frItems = d.requests || [];
+    if (_frPane === 'roadmap') renderGantt(); else renderModerationList();
+  } catch (e) {
+    if (board) board.innerHTML = `<div class="text-red-500 text-sm py-5">${e.message}</div>`;
+  }
+}
+
+function frSwitchPane(name) {
+  _frPane = name;
+  document.getElementById('fr-pane-moderation').classList.toggle('hidden', name !== 'moderation');
+  document.getElementById('fr-pane-roadmap').classList.toggle('hidden', name !== 'roadmap');
+  [['moderation','fr-subtab-moderation'],['roadmap','fr-subtab-roadmap']].forEach(([n, id]) => {
+    const b = document.getElementById(id); if (!b) return;
+    const active = n === name;
+    b.classList.toggle('bg-white', active); b.classList.toggle('text-gray-900', active); b.classList.toggle('shadow-sm', active);
+    b.classList.toggle('text-gray-500', !active);
+  });
+  if (name === 'roadmap') renderGantt(); else renderModerationList();
+}
+
+// ── Moderation list (US04) ──────────────────────────────────────────────────
+function renderModerationList() {
+  const board = document.getElementById('fr-board');
+  if (!board) return;
+  const filter = document.getElementById('fr-mod-filter')?.value || '';
+  const items = filter ? _frItems.filter(x => x.status === filter) : _frItems;
+  if (!items.length) {
+    board.innerHTML = '<div class="text-gray-400 text-sm py-10 text-center border border-dashed border-gray-200 rounded-2xl">No requests in this view.</div>';
+    return;
+  }
+  board.innerHTML = items.map((it) => {
+    const pCls = FR_PRIORITY_CLS[it.priority] || 'bg-gray-100 text-gray-600';
+    const sCls = FR_STATUS_CLS[it.status] || 'bg-gray-100 text-gray-600';
+    const origin = it.source === 'issue' && it.issueId
+      ? `<button onclick="openIssuePanel(${it.issueId})" class="text-[11px] text-violet-600 font-semibold hover:underline">From issue #${it.issueId}</button>`
+      : it.source === 'manual'
+        ? '<span class="text-[11px] text-gray-400">Added by admin</span>'
+        : `<span class="text-[11px] text-gray-400">By ${it.submitterEmail ? _esc(it.submitterEmail) : 'a user'}</span>`;
+    const statusOptions = FR_STATUSES.map(s => `<option value="${s}" ${s === it.status ? 'selected' : ''}>${FR_STATUS_LABEL[s]}</option>`).join('');
+    return `
+      <div class="bg-white rounded-xl border border-gray-200 p-4 flex items-start gap-3 hover:border-gray-300 transition">
+        <div class="flex flex-col items-center pt-0.5 shrink-0 w-10">
+          <span class="text-emerald-600 text-sm font-bold">▲ ${it.voteCount}</span>
+          <span class="text-[10px] text-gray-400">votes</span>
+        </div>
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 flex-wrap mb-1">
+            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${sCls}">${FR_STATUS_LABEL[it.status] || it.status}</span>
+            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${pCls}">${FR_PRIORITY_LABEL[it.priority] || it.priority}</span>
+            <span class="text-[10px] text-gray-400">${FR_CATEGORY_LABEL[it.category] || it.category}${it.assistantRef ? ' · ' + _esc(it.assistantRef) : ''}</span>
+          </div>
+          <p class="text-sm font-semibold text-gray-900 break-words">${_esc(it.title)}</p>
+          ${it.description ? `<p class="text-xs text-gray-500 mt-1 whitespace-pre-wrap break-words">${_esc(it.description)}</p>` : ''}
+          <div class="mt-2 flex items-center gap-3 flex-wrap">${origin}
+            <select onchange="frSetStatus(${it.id}, this.value)" class="text-xs border border-gray-200 rounded-md px-2 py-1">${statusOptions}</select>
+            <button onclick="openRoadmapEdit(${it.id})" class="text-xs font-semibold text-emerald-600 hover:underline">Edit</button>
+            <button onclick="frMergeRequest(${it.id})" class="text-xs font-semibold text-gray-500 hover:underline">Merge</button>
+            <button onclick="deleteRoadmapItem(${it.id})" class="text-xs font-semibold text-red-500 hover:underline">Delete</button>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+async function frSetStatus(id, status) {
+  try {
+    await api(`${FR_API}?id=${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status }),
+    });
+    loadFeatureRoadmap();
+  } catch (e) { alert(e.message); loadFeatureRoadmap(); }
+}
+
+async function frMergeRequest(sourceId) {
+  const targetId = prompt('Merge this request INTO which request id? (votes will be combined)');
+  if (!targetId) return;
+  try {
+    await api(`${FR_API}?action=merge`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sourceId, targetId: Number(targetId) }),
+    });
+    loadFeatureRoadmap();
+  } catch (e) { alert(e.message); }
+}
+
+// ── Add / edit form + AI enhance (US04) ─────────────────────────────────────
+function _frFillSelect(el, opts, labels, val) {
+  if (!el) return;
+  el.innerHTML = opts.map(o => `<option value="${o}" ${o === val ? 'selected' : ''}>${labels[o]}</option>`).join('');
+}
+function _frResetEnhance() {
+  document.getElementById('fr-enhance-preview').classList.add('hidden');
+  document.getElementById('fr-enhance-text').textContent = '';
+}
+function openRoadmapAdd() {
+  document.getElementById('fr-form-id').value = '';
+  document.getElementById('fr-form-title').textContent = 'Add request';
+  document.getElementById('fr-form-title-input').value = '';
+  document.getElementById('fr-form-desc').value = '';
+  _frFillSelect(document.getElementById('fr-form-category'), FR_CATEGORIES, FR_CATEGORY_LABEL, 'app_core');
+  _frFillSelect(document.getElementById('fr-form-priority'), FR_PRIORITIES, FR_PRIORITY_LABEL, 'medium');
+  document.getElementById('fr-form-status-wrap').classList.add('hidden');
+  _frResetEnhance();
+  document.getElementById('fr-form').classList.remove('hidden');
+  document.getElementById('fr-form-title-input').focus();
+}
+function openRoadmapEdit(id) {
+  const it = _frItems.find(x => x.id === id);
+  if (!it) return;
+  document.getElementById('fr-form-id').value = String(id);
+  document.getElementById('fr-form-title').textContent = `Edit request #${id}`;
+  document.getElementById('fr-form-title-input').value = it.title || '';
+  document.getElementById('fr-form-desc').value = it.description || '';
+  _frFillSelect(document.getElementById('fr-form-category'), FR_CATEGORIES, FR_CATEGORY_LABEL, it.category);
+  _frFillSelect(document.getElementById('fr-form-priority'), FR_PRIORITIES, FR_PRIORITY_LABEL, it.priority);
+  _frFillSelect(document.getElementById('fr-form-status'), FR_STATUSES, FR_STATUS_LABEL, it.status);
+  document.getElementById('fr-form-status-wrap').classList.remove('hidden');
+  _frResetEnhance();
+  document.getElementById('fr-form').classList.remove('hidden');
+  document.getElementById('fr-form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+function closeRoadmapForm() { document.getElementById('fr-form').classList.add('hidden'); }
+
+async function frEnhanceDescription() {
+  const text = document.getElementById('fr-form-desc').value.trim();
+  if (!text) { alert('Add some description text first.'); return; }
+  const btn = document.getElementById('fr-enhance-btn');
+  const prev = btn.textContent; btn.textContent = '✨ Enhancing…'; btn.disabled = true;
+  try {
+    const d = await api(`${FR_API}?action=enhance`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    document.getElementById('fr-enhance-text').textContent = d.enhanced || '';
+    document.getElementById('fr-enhance-preview').classList.remove('hidden');
+  } catch (e) { alert(e.message); }
+  finally { btn.textContent = prev; btn.disabled = false; }
+}
+function frAcceptEnhance() {
+  const t = document.getElementById('fr-enhance-text').textContent;
+  if (t) document.getElementById('fr-form-desc').value = t;
+  _frResetEnhance();
+}
+function frRejectEnhance() { _frResetEnhance(); }
+
+async function submitRoadmapForm() {
+  const id = document.getElementById('fr-form-id').value;
+  const title = document.getElementById('fr-form-title-input').value.trim();
+  if (!title) { alert('Title is required.'); return; }
+  const description = document.getElementById('fr-form-desc').value.trim();
+  const category = document.getElementById('fr-form-category').value;
+  const priority = document.getElementById('fr-form-priority').value;
+  try {
+    if (id) {
+      const status = document.getElementById('fr-form-status').value;
+      await api(`${FR_API}?id=${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, description, category, priority, status }),
+      });
+    } else {
+      await api(FR_API, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, description, category, priority }),
+      });
+    }
+    closeRoadmapForm();
+    loadFeatureRoadmap();
+  } catch (e) { alert(e.message); }
+}
+
+async function deleteRoadmapItem(id) {
+  if (!confirm('Permanently delete this request?')) return;
+  try {
+    await api(`${FR_API}?id=${id}`, { method: 'DELETE' });
+    loadFeatureRoadmap();
+  } catch (e) { alert(e.message); }
+}
+
+// ── Roadmap Gantt (US05) — drag from Backlog onto a quarter ──────────────────
+let _frGanttDrag = null;
+function _frQuarterOf(date) {
+  const d = date || new Date();
+  return `${d.getFullYear()}-Q${Math.floor(d.getMonth() / 3) + 1}`;
+}
+function _frUpcomingQuarters(n) {
+  const out = [];
+  let y = new Date().getFullYear();
+  let q = Math.floor(new Date().getMonth() / 3) + 1;
+  for (let i = 0; i < n; i++) { out.push(`${y}-Q${q}`); q++; if (q > 4) { q = 1; y++; } }
+  return out;
+}
+function renderGantt() {
+  const root = document.getElementById('fr-gantt');
+  if (!root) return;
+  // Backlog = approved-but-unscheduled (open). Quarters = upcoming + any already populated.
+  const backlog = _frItems.filter(x => x.status === 'open' && !x.targetQuarter);
+  const quarters = Array.from(new Set([..._frUpcomingQuarters(4),
+    ..._frItems.filter(x => x.targetQuarter).map(x => x.targetQuarter)]))
+    .sort((a, b) => {
+      const pa = a.match(/^(\d{4})-Q([1-4])$/), pb = b.match(/^(\d{4})-Q([1-4])$/);
+      return (pa ? +pa[1]*10+ +pa[2] : 0) - (pb ? +pb[1]*10+ +pb[2] : 0);
+    });
+
+  const col = (label, key, items) => `
+    <div class="shrink-0 w-60 bg-gray-50 rounded-xl border border-gray-200 p-2"
+         ondragover="event.preventDefault()" ondrop="frGanttDrop(event, ${key === null ? 'null' : `'${key}'`})">
+      <p class="text-xs font-bold text-gray-600 px-1 py-1.5">${label} <span class="text-gray-400 font-normal">(${items.length})</span></p>
+      <div class="space-y-2" style="min-height:60px">
+        ${items.map(it => `
+          <div draggable="true" ondragstart="_frGanttDrag=${it.id}" ondragend="_frGanttDrag=null"
+               class="bg-white rounded-lg border border-gray-200 p-2.5 cursor-grab hover:border-emerald-300">
+            <div class="flex items-center gap-1.5 mb-1">
+              <span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full ${FR_STATUS_CLS[it.status] || 'bg-gray-100 text-gray-600'}">${FR_STATUS_LABEL[it.status] || it.status}</span>
+              <span class="text-[10px] text-emerald-600 font-bold">▲ ${it.voteCount}</span>
+            </div>
+            <p class="text-xs font-semibold text-gray-800 break-words">${_esc(it.title)}</p>
+          </div>`).join('') || '<p class="text-[11px] text-gray-300 px-1 py-3 text-center">Drop here</p>'}
+      </div>
+    </div>`;
+
+  root.innerHTML = col('Backlog', null, backlog) +
+    quarters.map(qk => {
+      const m = qk.match(/^(\d{4})-Q([1-4])$/);
+      const label = m ? `${m[1]} · Q${m[2]}` : qk;
+      return col(label, qk, _frItems.filter(x => x.targetQuarter === qk));
+    }).join('');
+}
+async function frGanttDrop(e, quarter) {
+  e.preventDefault();
+  const id = _frGanttDrag; _frGanttDrag = null;
+  if (id == null) return;
+  const it = _frItems.find(x => x.id === id);
+  if (!it) return;
+  // Onto a quarter → plan it; back to backlog → unschedule + reopen.
+  const body = quarter
+    ? { targetQuarter: quarter, status: 'planned' }
+    : { targetQuarter: null, status: 'open' };
+  // Skip a no-op drop.
+  if (it.targetQuarter === (quarter || null) && it.status === body.status) return;
+  try {
+    await api(`${FR_API}?id=${id}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    loadFeatureRoadmap();
+  } catch (err) { alert(err.message); loadFeatureRoadmap(); }
+}
+
+// ── Epic: Superadmin Environment Management — US4/US5: Sandbox panel ──────────
+async function loadSystemStatus() {
+  const panel = document.getElementById('systems-panel');
+  if (!panel) return;
+  panel.innerHTML = '<div class="text-gray-400 animate-pulse text-sm">Loading…</div>';
+
+  let data;
+  try {
+    const res = await fetch('/.netlify/functions/admin-system-status');
+    if (res.status === 403) { panel.innerHTML = '<div class="text-sm text-red-600">Super admin access required.</div>'; return; }
+    if (!res.ok) throw new Error('failed');
+    data = await res.json();
+  } catch {
+    panel.innerHTML = '<div class="text-sm text-red-600">Could not load system status. Please try again.</div>';
+    return;
+  }
+
+  const env = data.environment === 'production' ? 'production' : 'staging';
+  const other = env === 'production' ? 'staging' : 'production';
+  const envLabelEl = document.getElementById('systems-env-label');
+  if (envLabelEl) envLabelEl.textContent = `the ${env}`;
+
+  const NETLIFY_ENV_URL = 'https://app.netlify.com'; // → Site configuration → Environment variables
+
+  const healthBadge = (h) => {
+    if (h === 'ok')    return '<span class="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">● Reachable</span>';
+    if (h === 'error') return '<span class="inline-flex items-center gap-1 text-xs font-semibold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">● Unreachable</span>';
+    return '<span class="inline-flex items-center gap-1 text-xs font-semibold text-gray-400 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded-full">No check</span>';
+  };
+  const configBadge = (configured, maskedHint) => {
+    if (configured === null) return '<span class="text-xs text-gray-400">Console-managed</span>';
+    if (configured) return `<span class="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700">✓ Configured</span>${maskedHint ? ` <span class="text-xs text-gray-400 font-mono">${maskedHint}</span>` : ''}`;
+    return '<span class="inline-flex items-center gap-1 text-xs font-semibold text-amber-700">⚠ Not configured</span>';
+  };
+
+  // Two columns: the current deployment env shows live config/health; the other env links out.
+  const liveCol = (s) => `
+    <div class="flex-1 min-w-0 border border-gray-200 rounded-lg p-3 bg-white">
+      <p class="text-[10px] font-bold uppercase tracking-wide text-emerald-600 mb-1.5">${env} · this deployment</p>
+      <div class="space-y-1.5">
+        <div>${configBadge(s.configured, s.maskedHint)}</div>
+        <div>${healthBadge(s.health)}</div>
+      </div>
+    </div>`;
+  const otherCol = (s) => `
+    <div class="flex-1 min-w-0 border border-dashed border-gray-200 rounded-lg p-3 bg-gray-50/50">
+      <p class="text-[10px] font-bold uppercase tracking-wide text-gray-400 mb-1.5">${other}</p>
+      <p class="text-xs text-gray-400">Check from the ${other} admin portal.</p>
+    </div>`;
+
+  panel.innerHTML = data.services.map(s => `
+    <div class="bg-white border border-gray-200 rounded-xl p-4">
+      <div class="flex items-start justify-between gap-3 mb-3 flex-wrap">
+        <div class="min-w-0">
+          <p class="text-sm font-bold text-gray-900">${s.name} <span class="ml-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400">${s.category}</span></p>
+          <p class="text-sm text-gray-500 mt-0.5">${s.purpose}</p>
+          ${s.envVars && s.envVars.length ? `<p class="text-[11px] text-gray-400 mt-1 font-mono">${s.envVars.join(' · ')}</p>` : ''}
+        </div>
+        <div class="flex items-center gap-2 shrink-0">
+          <a href="${s.consoleUrl}" target="_blank" rel="noopener noreferrer" class="text-xs font-semibold text-violet-600 hover:text-violet-700 whitespace-nowrap">Open console ↗</a>
+          ${s.envVars && s.envVars.length ? `<a href="${NETLIFY_ENV_URL}" target="_blank" rel="noopener noreferrer" class="text-xs font-semibold text-gray-500 hover:text-gray-700 whitespace-nowrap">Edit env ↗</a>` : ''}
+        </div>
+      </div>
+      <div class="flex gap-3 flex-col sm:flex-row">
+        ${env === 'production' ? liveCol(s) + otherCol(s) : otherCol(s) + liveCol(s)}
+      </div>
+    </div>`).join('');
+}
+
+function loadSandboxPanel() {
+  const panel = document.getElementById('sandbox-panel');
+  if (!panel) return;
+  const sandbox = getAdminEnv() === 'sandbox';
+
+  // US4.1 / US5.1: the purge + seed controls are COMPLETELY hidden in Live mode.
+  if (!sandbox) {
+    panel.innerHTML = `
+      <div class="bg-amber-50 border border-amber-200 rounded-xl p-5 flex items-start gap-3">
+        <span class="text-2xl">🧪</span>
+        <div>
+          <p class="text-sm font-bold text-amber-900">You are in Live mode.</p>
+          <p class="text-sm text-amber-800 mt-1">Sandbox data management is only available in Sandbox mode. Flip the <strong>Live / Sandbox</strong> toggle in the top bar to manage test data.</p>
+          <button onclick="setAdminEnv('sandbox')" class="mt-3 px-4 py-2 bg-orange-600 text-white text-sm font-semibold rounded-lg hover:bg-orange-700 cursor-pointer">Switch to Sandbox</button>
+        </div>
+      </div>`;
+    return;
+  }
+
+  panel.innerHTML = `
+    <div class="bg-orange-50 border border-orange-200 rounded-xl p-4 flex items-center gap-3">
+      <span class="text-2xl">🧪</span>
+      <p class="text-sm text-orange-800">These actions affect the <strong>Sandbox</strong> database and Stripe <strong>test</strong> account only. Production is never touched.</p>
+    </div>
+
+    <!-- US5: Seed master data -->
+    <div class="bg-white border border-gray-200 rounded-xl p-6">
+      <h2 class="text-base font-bold text-gray-800">Seed Master Data</h2>
+      <p class="text-sm text-gray-500 mt-1">Populate the sandbox with production-equivalent plans, prices, assistants and benchmarks from the version-controlled JSON, and create matching Stripe test Products/Prices.</p>
+      <label class="flex items-center gap-2 mt-3 text-sm text-gray-700">
+        <input type="checkbox" id="sb-seed-stripe" class="w-4 h-4" checked> Sync Stripe test Products &amp; Prices
+      </label>
+      <div class="mt-4 flex items-center gap-3">
+        <button onclick="sandboxSeed(this)" class="px-5 py-2 bg-emerald-700 text-white text-sm font-semibold rounded-lg hover:bg-emerald-800 cursor-pointer">Seed Master Data</button>
+        <span id="sb-seed-status" class="text-sm"></span>
+      </div>
+    </div>
+
+    <!-- US4: Purge -->
+    <div class="bg-white border border-red-200 rounded-xl p-6">
+      <h2 class="text-base font-bold text-red-700">Purge Sandbox Data</h2>
+      <p class="text-sm text-gray-500 mt-1">Hard-deletes every row in the sandbox database and deactivates Stripe test Products/Prices. This cannot be undone.</p>
+      <div class="mt-4">
+        <button onclick="openPurgeModal()" class="px-5 py-2 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-700 cursor-pointer">Purge Sandbox Data…</button>
+      </div>
+    </div>`;
+}
+
+async function sandboxSeed(btn) {
+  const status = document.getElementById('sb-seed-status');
+  const syncStripe = document.getElementById('sb-seed-stripe')?.checked ?? true;
+  btn.disabled = true;
+  status.textContent = 'Seeding…'; status.className = 'text-sm text-gray-500';
+  try {
+    const d = await api('/.netlify/functions/sandbox-seed', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ syncStripe }),
+    });
+    const r = d.result || {};
+    status.textContent = `✓ ${r.plans||0} plans, ${r.prices||0} prices, ${r.assistants||0} assistants` + (r.stripeSynced ? `, Stripe +${r.stripeProducts||0}/+${r.stripePrices||0}` : '');
+    status.className = 'text-sm text-emerald-600';
+  } catch (e) {
+    status.textContent = '✗ ' + e.message; status.className = 'text-sm text-red-600';
+  } finally { btn.disabled = false; }
+}
+
+function openPurgeModal() {
+  const wrap = document.createElement('div');
+  wrap.id = 'purge-modal';
+  wrap.style.cssText = 'position:fixed;inset:0;z-index:10001;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;padding:1rem;';
+  wrap.innerHTML = `
+    <div style="background:#fff;border-radius:1rem;max-width:30rem;width:100%;padding:1.5rem;" role="dialog" aria-modal="true" aria-labelledby="purge-modal-title">
+      <h3 id="purge-modal-title" style="font-weight:800;color:#b91c1c;font-size:1.05rem;">Purge Sandbox Data</h3>
+      <p style="font-size:.85rem;color:#4b5563;margin-top:.5rem;">This permanently deletes <strong>all sandbox data</strong> and deactivates Stripe test Products/Prices. Type <code style="background:#fee2e2;padding:.1rem .35rem;border-radius:.25rem;font-weight:700;">PURGE SANDBOX</code> to confirm.</p>
+      <input id="purge-confirm-input" type="text" placeholder="PURGE SANDBOX" style="margin-top:.75rem;width:100%;border:1px solid #d1d5db;border-radius:.5rem;padding:.5rem .75rem;font-size:.85rem;">
+      <label style="display:flex;align-items:center;gap:.5rem;margin-top:.75rem;font-size:.85rem;color:#374151;">
+        <input type="checkbox" id="purge-reseed" style="width:1rem;height:1rem;" checked> Automatically reseed master data after purge
+      </label>
+      <div id="purge-status" style="font-size:.8rem;margin-top:.6rem;"></div>
+      <div style="display:flex;justify-content:flex-end;gap:.5rem;margin-top:1rem;">
+        <button onclick="closePurgeModal()" style="padding:.5rem 1rem;font-size:.85rem;font-weight:600;border-radius:.5rem;border:1px solid #d1d5db;background:#fff;cursor:pointer;">Cancel</button>
+        <button id="purge-confirm-btn" onclick="runPurge(this)" style="padding:.5rem 1rem;font-size:.85rem;font-weight:700;border-radius:.5rem;background:#dc2626;color:#fff;border:none;cursor:pointer;">Purge</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  setTimeout(() => document.getElementById('purge-confirm-input')?.focus(), 50);
+}
+
+function closePurgeModal() { document.getElementById('purge-modal')?.remove(); }
+
+async function runPurge(btn) {
+  const confirm = document.getElementById('purge-confirm-input')?.value || '';
+  const reseed = document.getElementById('purge-reseed')?.checked ?? false;
+  const status = document.getElementById('purge-status');
+  status.textContent = 'Purging…'; status.style.color = '#6b7280';
+  btn.disabled = true;
+  try {
+    const d = await api('/.netlify/functions/sandbox-purge', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ confirm, reseed }),
+    });
+    status.textContent = `✓ Purged ${d.truncatedTables} tables` + (d.reseed ? ` and reseeded.` : '.');
+    status.style.color = '#059669';
+    setTimeout(() => { closePurgeModal(); adminNav('sandbox'); }, 1200);
+  } catch (e) {
+    status.textContent = '✗ ' + e.message; status.style.color = '#dc2626';
+    btn.disabled = false;
+  }
+}
+
+// ── US4.1: Gamification Settings ────────────────────────────────────────────
+async function loadGamificationSettings() {
+  const form = document.getElementById('gamification-form');
+  form.innerHTML = '<div class="text-gray-400 animate-pulse text-sm">Loading…</div>';
+  try {
+    const d = await api('/.netlify/functions/admin-api?resource=gamification-config');
+    const m = d.timeMultipliers, ms = d.milestones;
+    const num = (id, val, label, hint) => `<label class="block"><span class="text-sm font-semibold text-gray-700">${label}</span>${hint ? `<span class="block text-xs text-gray-400">${hint}</span>` : ''}<input id="${id}" type="number" min="0" value="${val}" class="mt-1 w-32 border border-gray-300 rounded-lg px-3 py-2 text-sm"></label>`;
+    form.innerHTML = `
+      <p class="text-xs font-bold text-gray-400 uppercase tracking-wider">Time multipliers (minutes per action)</p>
+      ${num('gm-leads', m.leads_generated, 'Lead generated')}
+      ${num('gm-drafts', m.content_drafted, 'Content / email drafted')}
+      ${num('gm-tasks', m.tasks_completed, 'Task completed')}
+      <p class="text-xs font-bold text-gray-400 uppercase tracking-wider pt-3">Milestone thresholds</p>
+      ${num('gm-leads-token', ms.leads_for_token, 'Leads → bonus referral token')}
+      ${num('gm-hours-beta', ms.hours_for_beta, 'Hours saved → Beta access')}
+      <label class="flex items-center gap-2 pt-3"><input id="gm-paused" type="checkbox" ${d.rewardsPaused ? 'checked' : ''} class="w-4 h-4"><span class="text-sm font-semibold text-gray-700">⛔ Pause milestone rewards (emergency stop)</span></label>
+      <p class="text-xs text-gray-400">When paused, users still see Time Saved, but token drops and beta unlocks are suspended.</p>
+      <div class="pt-2"><button onclick="saveGamificationSettings(this)" class="px-5 py-2 bg-emerald-700 text-white text-sm font-semibold rounded-lg hover:bg-emerald-800 cursor-pointer">Save settings</button><span id="gm-save-status" class="ml-3 text-sm"></span></div>`;
+  } catch (e) { form.innerHTML = `<div class="text-red-500 text-sm">${e.message}</div>`; }
+}
+
+async function saveGamificationSettings(btn) {
+  const val = id => Number(document.getElementById(id).value);
+  const payload = {
+    timeMultipliers: { leads_generated: val('gm-leads'), content_drafted: val('gm-drafts'), tasks_completed: val('gm-tasks') },
+    milestones: { leads_for_token: val('gm-leads-token'), hours_for_beta: val('gm-hours-beta') },
+    rewardsPaused: document.getElementById('gm-paused').checked,
+  };
+  btn.disabled = true;
+  const status = document.getElementById('gm-save-status');
+  try {
+    await api('/.netlify/functions/admin-api?resource=gamification-config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    status.textContent = '✓ Saved'; status.className = 'ml-3 text-sm text-emerald-600';
+  } catch (e) { status.textContent = e.message; status.className = 'ml-3 text-sm text-red-600'; }
+  btn.disabled = false;
+}
+
+// ── US4.2: Reward Audits & Reporting ────────────────────────────────────────
+async function loadRewardAudits() {
+  const sEl = document.getElementById('reward-audits-summary');
+  const gEl = document.getElementById('reward-audits-graph');
+  const tEl = document.getElementById('reward-audits-table');
+  try {
+    const d = await api('/.netlify/functions/admin-api?resource=reward-audits');
+    const s = d.summary;
+    sEl.innerHTML = [['Milestone tokens', s.milestoneTokens, '🎟️'], ['Beta unlocks', s.betaUnlocks, '🚀'], ['Paid subscriptions', s.paidSubscriptions, '💳']]
+      .map(([l, v, i]) => `<div class="bg-white border border-gray-200 rounded-xl p-4"><div class="text-2xl">${i}</div><div class="text-2xl font-extrabold text-gray-900 mt-1">${v}</div><div class="text-xs text-gray-500">${l}</div></div>`).join('');
+    const max = Math.max(s.milestoneTokens, s.paidSubscriptions, 1);
+    const bar = (label, v, color) => `<div><div class="flex justify-between text-xs mb-0.5"><span>${label}</span><span class="font-semibold">${v}</span></div><div class="h-3 bg-gray-100 rounded-full overflow-hidden"><div class="h-3 rounded-full" style="width:${Math.round(v / max * 100)}%;background:${color}"></div></div></div>`;
+    gEl.innerHTML = bar('Milestone tokens', s.milestoneTokens, '#f59e0b') + bar('Paid subscriptions', s.paidSubscriptions, '#059669');
+    const audits = d.audits || [];
+    tEl.innerHTML = audits.length
+      ? audits.map(a => `<div class="px-6 py-3 flex justify-between text-sm"><span class="text-gray-700">Workspace #${a.organisationId} · <span class="font-semibold">${a.rewardType}</span></span><span class="text-gray-400">${a.triggerEvent} · ${new Date(a.createdAt).toLocaleDateString('en-GB')}</span></div>`).join('')
+      : '<div class="px-6 py-8 text-center text-gray-400 text-sm">No rewards distributed yet.</div>';
+  } catch (e) { tEl.innerHTML = `<div class="px-6 py-8 text-center text-red-500 text-sm">${e.message}</div>`; }
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -2807,6 +4802,7 @@ async function openUserPanel(uid) {
       </div>` : ''}
       <div class="space-y-2 pt-2">
         <button onclick="openBillingOverride(${u.id},'${(u.email||'').replace(/'/g,"&#39;")}')" class="w-full py-2 text-sm font-bold bg-violet-50 border border-violet-200 text-violet-700 rounded-lg hover:opacity-80">💳 Override Subscription</button>
+        <button onclick="openAiCredits(${u.id},'${(u.email||'').replace(/'/g,"&#39;")}')" class="w-full py-2 text-sm font-bold bg-pink-50 border border-pink-200 text-pink-700 rounded-lg hover:opacity-80">🎨 AI Credits</button>
         <button onclick="sendLoginLink(${u.id})" class="w-full py-2 text-sm font-bold bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg hover:opacity-80">📧 Send Login Link</button>
         <button onclick="startImpersonation(${u.id}, '${(u.email||'').replace(/'/g,"&#39;")}')" class="w-full py-2 text-sm font-bold bg-amber-50 border border-amber-200 text-amber-700 rounded-lg hover:opacity-80">🔍 Impersonate User</button>
         ${u.status === 'locked'
@@ -3044,6 +5040,59 @@ async function toggleCatalogStatus(id, currentlyComingSoon) {
   } catch(e) { alert(e.message); }
 }
 
+// ── Assistant Features — per-type capability matrix ────────────────────────────
+async function loadAssistantFeatures() {
+  const el = document.getElementById('assistant-features-grid');
+  el.innerHTML = '<div class="px-5 py-8 text-center text-gray-400 animate-pulse">Loading…</div>';
+  try {
+    const d = await api('/.netlify/functions/admin-api?resource=assistant-features');
+    const features = d.features || [];
+    const assistants = d.assistants || [];
+
+    const head = `<th class="px-5 py-3 text-left">Assistant Type</th>` +
+      features.map(f => `<th class="px-4 py-3 text-center" title="${escapeHtmlJs(f.description)}">${escapeHtmlJs(f.label)}</th>`).join('');
+
+    const rows = assistants.map(a => {
+      const cells = features.map(f => {
+        const on = !!(a.features && a.features[f.key]);
+        return `<td class="px-4 py-3 text-center">
+          <input type="checkbox" ${on ? 'checked' : ''}
+            onchange="toggleAssistantFeature(${a.id}, '${f.key}', this.checked, this)"
+            class="w-4 h-4 accent-emerald-600 cursor-pointer">
+        </td>`;
+      }).join('');
+      return `<tr class="border-t border-gray-50 hover:bg-gray-50 transition">
+        <td class="px-5 py-3">
+          <div class="font-medium">${escapeHtmlJs(a.name)}</div>
+          <div class="text-xs text-gray-400">${escapeHtmlJs(a.roleKey || '')}</div>
+        </td>${cells}
+      </tr>`;
+    }).join('');
+
+    el.innerHTML = `<table class="w-full text-sm">
+      <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase"><tr>${head}</tr></thead>
+      <tbody>${rows || `<tr><td class="px-5 py-8 text-center text-gray-400" colspan="${features.length + 1}">No assistant types found.</td></tr>`}</tbody>
+    </table>`;
+  } catch(e) {
+    el.innerHTML = `<div class="px-5 py-5 text-red-500 text-sm">${escapeHtmlJs(e.message)}</div>`;
+  }
+}
+
+async function toggleAssistantFeature(masterAssistantId, featureKey, enabled, input) {
+  if (input) input.disabled = true;
+  try {
+    await api(`/.netlify/functions/admin-api?resource=assistant-features&id=${masterAssistantId}`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ featureKey, enabled }),
+    });
+  } catch(e) {
+    alert(e.message);
+    if (input) input.checked = !enabled; // revert optimistic toggle on failure
+  } finally {
+    if (input) input.disabled = false;
+  }
+}
+
 // ── System Logs ───────────────────────────────────────────────────────────────
 let _logsPage = 0;
 async function loadLogs() {
@@ -3058,7 +5107,7 @@ async function loadLogs() {
       const admin = l.adminEmail ? `${l.adminFirstName||''} ${l.adminEmail}` : `#${l.adminId}`;
       const details = l.newState ? `<code class="text-xs bg-gray-100 px-1 rounded">${JSON.stringify(l.newState).slice(0,80)}</code>` : '—';
       return `<tr class="border-t border-gray-50 hover:bg-gray-50 transition">
-        <td class="px-5 py-3 text-xs text-gray-400 whitespace-nowrap">${fmt(l.createdAt)}</td>
+        <td class="px-5 py-3 text-xs text-gray-400 whitespace-nowrap">${fmtDateTime(l.createdAt)}</td>
         <td class="px-5 py-3 text-xs text-gray-600">${admin}</td>
         <td class="px-5 py-3"><span class="text-xs font-bold bg-gray-100 text-gray-700 px-2 py-0.5 rounded">${l.actionType}</span></td>
         <td class="px-5 py-3 text-xs text-gray-500">${l.resourceType}</td>
@@ -3073,6 +5122,47 @@ async function loadLogs() {
 function logsPage(delta) {
   _logsPage = Math.max(0, _logsPage + delta);
   loadLogs();
+}
+
+// ── Security & Abuse — workspaces sharing a Stripe card fingerprint (US3 AC3.3) ──
+async function loadSecurityAbuse() {
+  const wrap = document.getElementById('security-abuse-list');
+  wrap.innerHTML = '<div class="text-sm text-gray-400 animate-pulse">Loading…</div>';
+  try {
+    const d = await api('/.netlify/functions/admin-api?resource=security-abuse');
+    const groups = d.groups || [];
+    if (!groups.length) {
+      wrap.innerHTML = '<div class="bg-white rounded-2xl border border-gray-200 p-8 text-center text-gray-500 text-sm">✅ No flagged workspaces. No shared payment cards detected across accounts.</div>';
+      return;
+    }
+    wrap.innerHTML = groups.map(g => {
+      const fp = (g.fingerprint || 'unknown');
+      const rows = (g.workspaces || []).map(w => `
+        <tr class="border-t border-gray-50">
+          <td class="px-4 py-3 text-sm text-gray-700">${w.name || '—'} <span class="text-xs text-gray-400">/${w.slug || ''}</span></td>
+          <td class="px-4 py-3 text-xs text-gray-500">${w.ownerEmail || '—'}</td>
+          <td class="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">${w.createdAt ? fmt(w.createdAt) : '—'}</td>
+          <td class="px-4 py-3 text-xs"><a href="#" onclick="event.preventDefault(); adminNav('workspaces')" class="text-indigo-600 hover:underline font-semibold">Review</a></td>
+        </tr>`).join('');
+      return `
+        <div class="bg-white rounded-2xl border border-red-200 overflow-hidden">
+          <div class="px-5 py-3 bg-red-50/60 border-b border-red-100 flex items-center justify-between gap-3 flex-wrap">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold bg-red-100 text-red-700 px-2 py-0.5 rounded-full">🚩 ${(g.workspaces || []).length} workspaces share this card</span>
+            </div>
+            <code class="text-[11px] text-gray-500">fingerprint: ${fp}</code>
+          </div>
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide">
+              <tr><th class="px-4 py-2 text-left">Workspace</th><th class="px-4 py-2 text-left">Owner</th><th class="px-4 py-2 text-left">Created</th><th class="px-4 py-2 text-left"></th></tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>`;
+    }).join('');
+  } catch (e) {
+    wrap.innerHTML = `<div class="bg-white rounded-2xl border border-gray-200 p-5 text-red-500 text-sm">${e.message}</div>`;
+  }
 }
 
 // ── US-ADM-5.1.1: Admin Audit Log viewer ──────────────────────────────────────
@@ -4295,6 +6385,71 @@ async function submitBillingOverride() {
     }
 }
 
+// ── Epic 2 US4: AI Generation Credits ────────────────────────────────────────
+let _aiCreditsUserId = null;
+
+async function openAiCredits(userId, email) {
+    _aiCreditsUserId = userId;
+    document.getElementById('ai-credits-target-label').textContent = `User: ${email} (ID ${userId})`;
+    document.getElementById('ai-credits-delta').value = '';
+    document.getElementById('ai-credits-reason').value = '';
+    document.getElementById('ai-credits-error').classList.add('hidden');
+    document.getElementById('ai-credits-balance').textContent = '…';
+    document.getElementById('ai-credits-held').textContent = '…';
+    document.getElementById('ai-credits-ledger').textContent = 'Loading…';
+    document.getElementById('ai-credits-modal').classList.remove('hidden');
+    await refreshAiCredits();
+}
+
+async function refreshAiCredits() {
+    try {
+        const res = await fetch(`/.netlify/functions/admin-ai-credits?targetUserId=${_aiCreditsUserId}`);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || res.statusText);
+        document.getElementById('ai-credits-balance').textContent = data.balance;
+        document.getElementById('ai-credits-held').textContent = data.held;
+        const led = data.ledger || [];
+        document.getElementById('ai-credits-ledger').innerHTML = led.length
+            ? led.map(r => {
+                const sign = r.delta > 0 ? '+' : '';
+                const colour = r.delta > 0 ? 'text-emerald-600' : 'text-red-600';
+                const when = new Date(r.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
+                return `<div class="flex items-center justify-between py-1 border-b border-gray-50">
+                    <span class="text-gray-600">${r.reason.replace(/_/g, ' ')}${r.isAutonomous ? ' <span class="text-xs text-violet-600 font-bold">AUTO</span>' : ''}</span>
+                    <span class="${colour} font-bold">${sign}${r.delta}</span>
+                    <span class="text-xs text-gray-400">${when}</span>
+                  </div>`;
+              }).join('')
+            : 'No activity yet.';
+    } catch (e) {
+        document.getElementById('ai-credits-ledger').textContent = 'Could not load: ' + e.message;
+    }
+}
+
+async function submitAiCredits() {
+    const delta  = parseInt(document.getElementById('ai-credits-delta').value, 10);
+    const reason = document.getElementById('ai-credits-reason').value.trim();
+    const errEl  = document.getElementById('ai-credits-error');
+    errEl.classList.add('hidden');
+    if (!Number.isInteger(delta) || delta === 0) { errEl.textContent = 'Enter a non-zero number of credits.'; errEl.classList.remove('hidden'); return; }
+    if (!reason) { errEl.textContent = 'Admin note is required.'; errEl.classList.remove('hidden'); return; }
+    try {
+        const res = await fetch('/.netlify/functions/admin-ai-credits', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ targetUserId: _aiCreditsUserId, delta, reason }),
+        });
+        const data = await res.json();
+        if (!res.ok) { errEl.textContent = data.error || res.statusText; errEl.classList.remove('hidden'); return; }
+        document.getElementById('ai-credits-delta').value = '';
+        document.getElementById('ai-credits-reason').value = '';
+        await refreshAiCredits();
+    } catch (e) {
+        errEl.textContent = 'Request failed: ' + e.message;
+        errEl.classList.remove('hidden');
+    }
+}
+
 // ── US-ADM-1.1.1: Lock / Unlock account ──────────────────────────────────────
 async function lockAccount(userId, email, action) {
     const label = action === 'lock' ? 'Lock' : 'Unlock';
@@ -4665,7 +6820,9 @@ const MD_FIELDS = {
     { key: 'name',              label: 'Name',              type: 'text',   required: true },
     { key: 'description',       label: 'Description',       type: 'text' },
     { key: 'monthlyPriceGbp',   label: 'Monthly Price (GBP)', type: 'number', required: true },
+    { key: 'interval',          label: 'Billing Cycle (month/year)', type: 'text', placeholder: 'month' },
     { key: 'tierKey',           label: 'Tier Key',          type: 'text',   required: true },
+    { key: 'features',          label: 'Features (JSON)',   type: 'json',   placeholder: '{ "unlock_trending_audio": true, "bonus_assistants": 1 }' },
     { key: 'isActive',          label: 'Active',            type: 'checkbox' },
   ],
   'plan-prices': [
@@ -4862,6 +7019,7 @@ function mdRenderForm(tab, record) {
     const val = record[f.key] ?? '';
     if (f.type === 'checkbox') return `<label class="flex items-center gap-2 sm:col-span-2"><input type="checkbox" id="md-f-${f.key}" class="w-4 h-4 accent-indigo-600" ${val ? 'checked' : ''}><span class="text-sm text-gray-700">${f.label}</span></label>`;
     if (f.type === 'textarea') return `<div class="sm:col-span-2"><label class="block text-xs font-bold text-gray-500 mb-1">${f.label}${f.required?' <span class=\'text-red-500\'>*</span>':''}</label><textarea id="md-f-${f.key}" rows="4" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none font-mono text-xs">${val}</textarea></div>`;
+    if (f.type === 'json') { const jv = val && typeof val === 'object' ? JSON.stringify(val, null, 2) : (val || ''); return `<div class="sm:col-span-2"><label class="block text-xs font-bold text-gray-500 mb-1">${f.label}</label><textarea id="md-f-${f.key}" rows="4" placeholder="${(f.placeholder||'').replace(/"/g,'&quot;')}" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none font-mono text-xs">${jv}</textarea></div>`; }
     return `<div><label class="block text-xs font-bold text-gray-500 mb-1">${f.label}${f.required?' <span class="text-red-500">*</span>':''}</label><input id="md-f-${f.key}" type="${f.type}" value="${String(val).replace(/"/g,'&quot;')}" placeholder="${f.placeholder||''}" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none"></div>`;
   }).join('');
   document.getElementById('md-form-panel').classList.remove('hidden');
@@ -4877,6 +7035,10 @@ async function mdSaveRecord() {
     if (!el) continue;
     if (f.type === 'checkbox') body[f.key] = el.checked;
     else if (f.type === 'number') body[f.key] = el.value !== '' ? Number(el.value) : null;
+    else if (f.type === 'json') {
+      try { body[f.key] = el.value.trim() ? JSON.parse(el.value) : {}; }
+      catch { alert(f.label + ' must be valid JSON.'); el.focus(); return; }
+    }
     else body[f.key] = el.value;
     if (f.required && (body[f.key] === '' || body[f.key] === null)) {
       alert(f.label + ' is required.');

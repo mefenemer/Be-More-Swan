@@ -60,11 +60,16 @@ export const handler = async (event: HandlerEvent) => {
                     timezone: profile?.timezone || 'Europe/London',
                     hourlyRateGbp: prefs.hourlyRateGbp ?? '',
                     upgradeExperimentVariant: prefs.upgradeExperimentVariant ?? 'break_even',
+                    // Sound preferences (default-on when unset).
+                    soundOnLogin: prefs.soundOnLogin !== false,
+                    soundOnMilestone: prefs.soundOnMilestone !== false,
                     // US-UX-1.1 SC1: role fields for header badges and settings display
                     platformRole: user?.role || 'user',
                     organisationRole: orgMembership?.role || 'member',
                     language: profile?.language || 'en',
                     firstLoginWelcomeSeen: profile?.firstLoginWelcomeSeen ?? false,
+                    // Onboarding Wizard Step 3 — null until the user sets their hours.
+                    workingHours: profile?.workingHours ?? null,
                 })
             };
         } catch (error) {
@@ -150,6 +155,30 @@ export const handler = async (event: HandlerEvent) => {
 
                 await db.update(userProfiles)
                     .set({ preferences: { ...currentPrefs, hourlyRateGbp: rateVal }, updatedAt: new Date() })
+                    .where(eq(userProfiles.userId, userId));
+
+            } else if (fieldKey === 'workingHours') {
+                // Onboarding Wizard Step 3 (US5 AC2) — stored as a jsonb object on the profile.
+                // Shape: { preset, start, end, days[] }. A non-null value marks the step done.
+                targetTable = 'user_profiles';
+                oldState = { workingHours: currentProfile?.workingHours ?? null };
+                const whVal = value && typeof value === 'object' ? value : null;
+                newState = { workingHours: whVal };
+
+                await db.update(userProfiles)
+                    .set({ workingHours: whVal, updatedAt: new Date() })
+                    .where(eq(userProfiles.userId, userId));
+
+            } else if (fieldKey === 'soundOnLogin' || fieldKey === 'soundOnMilestone') {
+                // Sound preferences — stored in userProfiles.preferences (boolean, default-on).
+                targetTable = 'user_profiles';
+                const currentPrefs = (currentProfile?.preferences as Record<string, any>) || {};
+                const boolVal = value === true || value === 'true';
+                oldState = { [fieldKey]: currentPrefs[fieldKey] !== false };
+                newState = { [fieldKey]: boolVal };
+
+                await db.update(userProfiles)
+                    .set({ preferences: { ...currentPrefs, [fieldKey]: boolVal }, updatedAt: new Date() })
                     .where(eq(userProfiles.userId, userId));
 
             } else {

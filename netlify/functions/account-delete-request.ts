@@ -86,7 +86,7 @@ export const handler: Handler = async (event) => {
         to: user.email,
         subject: 'Account deletion requested — cancel within 24 hours',
         html: `<p>Hi ${user.firstName || 'there'},</p>
-               <p>We've received your request to permanently delete your Aura Assist account.</p>
+               <p>We've received your request to permanently delete your Be More Swan account.</p>
                ${subWarning}
                <p><strong>What will be deleted:</strong></p>
                <ul style="padding-left:1.2rem;line-height:1.8;font-size:0.9rem;color:#6b7280;">
@@ -102,7 +102,7 @@ export const handler: Handler = async (event) => {
                  </a>
                </p>
                <p style="font-size:0.75rem;color:#9ca3af;margin-top:16px;">This link is valid for 24 hours. After that, deletion is irreversible.</p>
-               <p>The Aura Team</p>`,
+               <p>The Be More Swan Team</p>`,
     }).catch(err => console.warn('[account-delete-request] Email failed:', err));
 
     return {

@@ -2,7 +2,8 @@
 window.initHelpCenter = async function() {
 
     // --- 1. TAB ROUTING LOGIC ---
-    const tabs = ['docs', 'tickets'];
+    const tabs = ['docs', 'tickets', 'features'];
+    let featureRequestsInitialized = false;
     tabs.forEach(tab => {
         const btn = document.getElementById(`tab-btn-${tab}`);
         const content = document.getElementById(`tab-content-${tab}`);
@@ -19,6 +20,10 @@ window.initHelpCenter = async function() {
             btn.className = 'tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-bold text-sm border-emerald-500 text-emerald-600';
 
             if(tab === 'tickets') fetchTicketHistory();
+            if(tab === 'features' && !featureRequestsInitialized && typeof window.initFeatureRequests === 'function') {
+                featureRequestsInitialized = true;
+                window.initFeatureRequests();
+            }
         });
     });
 
@@ -49,17 +54,53 @@ window.initHelpCenter = async function() {
                 return;
             }
             grid.innerHTML = articles.map(article => `
-                <a href="/help.html#${slugify(article.title)}" target="_blank" rel="noopener"
-                   class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 hover:shadow-md hover:border-emerald-300 transition flex flex-col h-full">
+                <button type="button" data-article-id="${article.id}"
+                   class="text-left bg-white rounded-2xl border border-gray-200 shadow-sm p-6 hover:shadow-md hover:border-emerald-300 transition flex flex-col h-full">
                     <div class="flex justify-between items-start mb-4">
                         <span class="text-xs font-bold text-gray-400 uppercase tracking-wider">${article.category}</span>
                     </div>
                     <h3 class="text-lg font-bold text-gray-900 mb-2">${article.title}</h3>
                     <p class="text-sm text-gray-500 mb-6 flex-grow line-clamp-3">${excerpt(article.contentMd)}</p>
                     <span class="text-xs font-semibold text-emerald-700">Read article →</span>
-                </a>
+                </button>
             `).join('');
+
+            grid.querySelectorAll('[data-article-id]').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const article = allArticles.find(a => String(a.id) === btn.dataset.articleId);
+                    if (article) showArticleInline(article);
+                });
+            });
         }
+
+        // --- Inline article reader (merged from help.html so articles open in-workspace) ---
+        const listMode    = document.getElementById('help-list-mode');
+        const articleView = document.getElementById('help-article-view');
+        const backBtn     = document.getElementById('help-article-back');
+
+        function showArticleInline(article) {
+            document.getElementById('help-article-category').textContent = article.category || '';
+            document.getElementById('help-article-title').textContent = article.title;
+
+            // Render Markdown safely (marked + DOMPurify loaded in workspace.html <head>)
+            let html = article.contentMd;
+            if (window.marked && window.DOMPurify) {
+                marked.setOptions({ breaks: false, gfm: true });
+                html = DOMPurify.sanitize(marked.parse(article.contentMd));
+            }
+            document.getElementById('help-article-body').innerHTML = html;
+
+            if (listMode) listMode.classList.add('hidden');
+            if (articleView) articleView.classList.remove('hidden');
+            window.scrollTo(0, 0);
+        }
+
+        function showArticleList() {
+            if (articleView) articleView.classList.add('hidden');
+            if (listMode) listMode.classList.remove('hidden');
+        }
+
+        if (backBtn) backBtn.addEventListener('click', showArticleList);
 
         let currentCategory = 'All';
         let currentSearch = '';

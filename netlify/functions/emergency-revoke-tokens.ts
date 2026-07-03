@@ -85,8 +85,8 @@ export const handler: Handler = async (event) => {
                    <p>We have detected a security incident that may have affected your connected app credentials (e.g. Gmail, Slack, or other integrations).</p>
                    <p>As a precautionary measure, we have <strong>revoked all your connected app tokens</strong>. Your account and data remain secure.</p>
                    <p>To continue using your integrations, please reconnect your apps from your workspace settings.</p>
-                   <p>We sincerely apologise for any inconvenience. If you have questions, please contact <a href="mailto:privacy@aura-assist.com">privacy@aura-assist.com</a>.</p>
-                   <p>The Aura-Assist Security Team</p>`,
+                   <p>We sincerely apologise for any inconvenience. If you have questions, please contact <a href="mailto:privacy@bemoreswan.com">privacy@bemoreswan.com</a>.</p>
+                   <p>The Be More Swan Security Team</p>`,
         }).catch(() => {});
     }
 

@@ -22,7 +22,7 @@
     "privacy_policy": "Datenschutzrichtlinie",
     "terms_of_service": "Nutzungsbedingungen",
     "trust_security": "Vertrauen & Sicherheit",
-    "copyright": "© 2026 Aura-Assist. Alle Rechte vorbehalten.",
+    "copyright": "© 2026 Be More Swan. Alle Rechte vorbehalten.",
     "language": "Sprache"
   },
   "common": {
@@ -115,11 +115,11 @@
   "workspace": {
     "nav": {
       "dashboard": "Dashboard",
-      "my_team": "Mein Team",
+      "my_assistants": "Meine Assistenten",
       "my_content": "Meine Inhalte",
       "calendar": "Kalender",
       "defaults_group": "Einstellungen",
-      "brand_profile": "Markenprofil",
+      "brand_profile": "Unternehmensinformationen",
       "connections": "Verbindungen",
       "team_members": "Teammitglieder",
       "assistant_rules": "Assistent-Regeln",

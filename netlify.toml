@@ -1,3 +1,18 @@
+# Brand transition (US5.2 / AC5.2): permanent 301 from the legacy domain to Be More Swan.
+# Effective once both aura-assist.com and bemoreswan.com are attached to the Netlify site
+# and DNS (AC5.1, external) points at Netlify.
+[[redirects]]
+  from = "https://aura-assist.com/*"
+  to = "https://bemoreswan.com/:splat"
+  status = 301
+  force = true
+
+[[redirects]]
+  from = "https://www.aura-assist.com/*"
+  to = "https://bemoreswan.com/:splat"
+  status = 301
+  force = true
+
 # US-HELP-1.1.1 AC14: canonical URL aliases for the help centre
 [[redirects]]
   from = "/help"
@@ -15,11 +30,30 @@
   status = 301
 
 [build]
+  # Rebuild the Tailwind stylesheet from input.css on every deploy so style.css can never
+  # drift from the markup (a stale committed style.css silently drops classes and breaks layouts).
+  command = "npm run build:css:prod && npm run build:version"
   functions = "netlify/functions"
 [dev]
   functions = "netlify/functions"
 [functions]
 node_bundler = "esbuild"
+
+# HTML must always be revalidated, never served stale from the browser/CDN cache.
+# Our pages carry their JS inline (admin.html, workspace.html, …), so a cached HTML
+# document = stale JS = old behaviour after a deploy (the "stale-cache trap").
+# `no-cache` still lets the browser store the file but forces a revalidation (cheap
+# ETag/304) before reuse, so every load picks up the latest deploy. Static assets
+# (style.css, *.js fetched separately) keep their own cache-busting (?v=).
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/"
+  [headers.values]
+    Cache-Control = "no-cache"
 
 [[edge_functions]]
   function = "auth-guard"
@@ -73,8 +107,27 @@ node_bundler = "esbuild"
 [functions.draft-horizon-fill]
   schedule = "0 6 * * *"
 
+# US-SMM (AC7): Periodic conversion-post scheduler — daily 07:00 UTC; enqueues at most one
+# conversion post per eligible assistant per 7 days (see schedule-conversion-posts.ts).
+[functions.schedule-conversion-posts]
+  schedule = "0 7 * * *"
+
+# Epic 2 US5: Autonomous AI media suggestions — daily 07:00 UTC; drafts copy + AI media into the
+# AI review queue for assistants that opted in, within their monthly autonomous credit cap.
+[functions.autonomous-media-suggestions]
+  schedule = "0 7 * * *"
+
+# Epic 3 US8: AI approvals email digest — daily 08:00 UTC; emails opted-in workspaces a summary of
+# pending AI drafts (daily, or weekly on Mondays). Sends nothing when the queue is empty.
+[functions.ai-approvals-digest]
+  schedule = "0 8 * * *"
+
 # US-SMM-2.4.2: Review urgency check (red-zone alerts + missed post detection) — every 15 minutes
 [functions.check-review-urgency]
+  schedule = "*/15 * * * *"
+
+# US4 — Offline email fallback for unseen urgent notifications — every 15 minutes
+[functions.notification-email-fallback]
   schedule = "*/15 * * * *"
 
 # US-SMM-3.1.1: Process queued content generation jobs — every minute
@@ -82,16 +135,42 @@ node_bundler = "esbuild"
   schedule = "* * * * *"
   timeout = 26
 
+# Epic 1, US1: synchronous AI image generation submits to Fal and polls until the images
+# are ready. Raise the timeout to Netlify's synchronous max so a slow Flux-2 run completes
+# instead of being killed mid-poll (raw 502). The poll budget in fal-gateway stays under this.
+[functions.generate-ai-image]
+  timeout = 26
+
 # US-SMM-3.2.2: Nightly Meta/Instagram token refresh — 02:00 UTC every day
 [functions.refresh-meta-tokens]
   schedule = "0 2 * * *"
+
+# Task 4: Silent X (Twitter) + LinkedIn token refresh — every 30 min (X tokens last ~2h)
+[functions.refresh-social-tokens]
+  schedule = "*/30 * * * *"
 
 # US-STOR-1.1.2 AC7: Nightly orphaned file cleanup — 03:00 UTC every day
 [functions.storage-lifecycle-cleanup]
   schedule = "0 3 * * *"
 
+# Review Queue Archive lifecycle: hard-delete rejected posts past their 30-day window — 04:00 UTC daily
+[functions.archive-cleanup]
+  schedule = "0 4 * * *"
+
 # US-SMM-3.3.1/3.3.2: Publish due Instagram posts — every minute
 [functions.publish-instagram]
+  schedule = "* * * * *"
+
+# Publish due LinkedIn & X posts — every minute (non-Instagram social publisher)
+[functions.publish-social-posts]
+  schedule = "* * * * *"
+
+# Publish due Facebook Page posts — every minute (piggybacks on the Meta connection)
+[functions.publish-facebook]
+  schedule = "* * * * *"
+
+# Drain inbound webhook events (intake → sandbox → connector handlers) — every minute
+[functions.process-webhook-events]
   schedule = "* * * * *"
 
 # US-LEGAL-1.5: 14-day pre-renewal email reminder — 07:00 UTC every day
@@ -101,3 +180,26 @@ node_bundler = "esbuild"
 # US-ONB-2.1.2: Hourly onboarding reminder emails (24h + 72h after signup, no plan)
 [functions.send-onboarding-reminders]
   schedule = "0 * * * *"
+
+# Abandoned assistant-draft cleanup — daily 00:00 UTC. Sends the 23-day re-engagement
+# nudge and deletes drafts inactive for 30+ days.
+[functions.cleanup-abandoned-drafts]
+  schedule = "0 0 * * *"
+
+# US-SMM-PERF: Pull Instagram media insights for recently-published posts — every 6 hours.
+# Insights keep changing for days after publish, so we re-fetch a rolling 30-day window.
+[functions.ingest-instagram-insights]
+  schedule = "0 */6 * * *"
+
+# SMART Goals AC4.1.1: poll current metric values for active goals — hourly. Each goal is
+# throttled to its tier cadence (premium hourly, others daily) inside the worker.
+[functions.poll-goal-telemetry]
+  schedule = "0 * * * *"
+
+# SMART Goals AC4.2.2: collapse the previous day's goal telemetry to one close-of-day point — 00:00 UTC.
+[functions.rollup-goal-telemetry]
+  schedule = "0 0 * * *"
+
+# SMART Goals US3.3: autonomous optimizer — rewrite allowed brief params for off-track goals — 04:00 UTC daily.
+[functions.autonomous-goal-optimizer]
+  schedule = "0 4 * * *"

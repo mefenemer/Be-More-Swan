@@ -14,7 +14,7 @@ export interface AssetPurgeResult {
 }
 
 // Delete a file from object storage given its storageUrl.
-// Aura-Assist currently uses Netlify Blobs (or a compatible S3-style endpoint).
+// Be More Swan currently uses Netlify Blobs (or a compatible S3-style endpoint).
 // The storageUrl is an internal path, not a public URL — we call the storage API directly.
 // Returns the number of bytes freed (0 if unknown or API unavailable).
 async function deleteStorageFile(storageUrl: string): Promise<number> {

@@ -10,6 +10,7 @@ import jwt from 'jsonwebtoken';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { masterAssistants, notifications, riskAssessments, users, userOrganisations } from '../../db/schema';
+import { suggestsHighRisk } from '../../src/config/compliance';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -66,9 +67,8 @@ export const handler: Handler = async (event) => {
             statusCode: 200,
             body: JSON.stringify({
                 riskClassification: master.riskClassification,
-                suggestedHighRisk: ['Lead Screener', 'HR Assistant', 'Recruitment', 'Credit Scoring'].some(k =>
-                    master.name.includes(k) || master.category.includes(k)
-                ),
+                // High-risk keyword heuristic lives in src/config/compliance.ts (AC4.1).
+                suggestedHighRisk: suggestsHighRisk(master.name, master.category),
                 assessment: assessment ?? null,
             }),
         };

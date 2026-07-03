@@ -33,15 +33,18 @@ import {
     billingOverrides, payments, assistantVersions,
     agentAnomalies, agentAnomalyThresholds, taskRuns,
     legalHolds, jwtBlocklist, stripeDisputes, storageUsage, helpArticles,
+    rewardAudits, userOrganisations, assistantFeatures,
 } from '../../db/schema';
+import { ASSISTANT_FEATURES, isAssistantFeatureKey } from '../../src/config/assistant-features';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
+import { resolveEnvironment, runWithEnvironment } from '../../src/utils/env-context';
 import { sendMagicLinkEmail } from '../../src/utils/email';
 import { isAdminRole, hasPermission, requirePermission } from '../../src/utils/rbac';
 import { checkImpersonationBlock } from '../../src/utils/impersonation-guard';
 import { SPECIAL_CATEGORY_CLAUSE } from './get-dpa-content';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-const FROM_EMAIL = process.env.FROM_EMAIL || 'hello@aura-assist.com';
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
+const FROM_EMAIL = process.env.FROM_EMAIL || 'hello@bemoreswan.com';
 
 const jwtSecret = process.env.JWT_SECRET;
 const PAGE_SIZE = 25;
@@ -98,11 +101,21 @@ export const handler: Handler = async (event) => {
 
     const qs = event.queryStringParameters || {};
     const resource = qs.resource || '';
-    const db = getDb();
+    const authDb = getDb(); // live — auth/role resolution always reads production
 
     // Resolve admin role once for permission checks throughout this request
-    const [_adminRoleRow] = await db.select({ role: users.role }).from(users).where(eq(users.id, adminId)).limit(1);
+    const [_adminRoleRow] = await authDb.select({ role: users.role }).from(users).where(eq(users.id, adminId)).limit(1);
     const adminRole = _adminRoleRow?.role ?? null;
+
+    // Epic: Superadmin Environment Management — US2/US3.
+    // Resolve Live vs Sandbox for this request. Only super_admins may operate in
+    // sandbox; a missing/malformed X-Environment header, a non-super-admin, or an
+    // unprovisioned sandbox all fall back to live (AC 3.3). Every data query below
+    // runs on the env-routed connection (db/client.ts).
+    const env = resolveEnvironment(event.headers, { allowSandbox: adminRole === 'super_admin' });
+
+    return runWithEnvironment(env, async () => {
+    const db = getDb();
 
     try {
         // ── GET: dashboard KPIs (US6 Sc4) ────────────────────────────────────
@@ -305,14 +318,14 @@ export const handler: Handler = async (event) => {
                 // SC1b: Confirmation email to the deleted user
                 await sendMagicLinkEmail({
                     to: targetUser.email,
-                    subject: 'Your Aura-Assist account has been removed',
+                    subject: 'Your Be More Swan account has been removed',
                     html: `
                         <div style="font-family:sans-serif;padding:24px;max-width:500px">
                             <h2>Account Removed</h2>
                             <p>Hi ${[targetUser.firstName, targetUser.lastName].filter(Boolean).join(' ') || 'there'},</p>
-                            <p>Your Aura-Assist account has been permanently removed by a platform administrator.</p>
-                            <p>All your data has been deleted in accordance with our <a href="https://aura-assist.com/privacy.html">Privacy Policy</a>.</p>
-                            <p>If you believe this was a mistake, please contact us at <a href="mailto:hello@aura-assist.com">hello@aura-assist.com</a>.</p>
+                            <p>Your Be More Swan account has been permanently removed by a platform administrator.</p>
+                            <p>All your data has been deleted in accordance with our <a href="https://bemoreswan.com/privacy.html">Privacy Policy</a>.</p>
+                            <p>If you believe this was a mistake, please contact us at <a href="mailto:hello@bemoreswan.com">hello@bemoreswan.com</a>.</p>
                         </div>
                     `,
                 }).catch(err => console.warn('[admin-api] Delete notification email failed (non-blocking):', err));
@@ -405,6 +418,84 @@ export const handler: Handler = async (event) => {
             };
         }
 
+        // ── Assistant feature capabilities (per assistant TYPE) ───────────────
+        // The matrix behind the admin "Assistant Features" page. Feature keys are the SoT in
+        // src/config/assistant-features.ts; enabled state is stored per (type, key).
+        if (resource === 'assistant-features') {
+            const permErr = requirePermission(adminRole, 'feature_flags');
+            if (permErr) return permErr;
+
+            if (event.httpMethod === 'GET') {
+                const assistants = await db
+                    .select({
+                        id: masterAssistants.id,
+                        name: masterAssistants.name,
+                        roleKey: masterAssistants.roleKey,
+                        lifecycleState: masterAssistants.lifecycleState,
+                    })
+                    .from(masterAssistants)
+                    .orderBy(masterAssistants.name);
+
+                const rows = await db
+                    .select({
+                        masterAssistantId: assistantFeatures.masterAssistantId,
+                        featureKey: assistantFeatures.featureKey,
+                        enabled: assistantFeatures.enabled,
+                    })
+                    .from(assistantFeatures);
+
+                const byAssistant = new Map<number, Record<string, boolean>>();
+                for (const r of rows) {
+                    const m = byAssistant.get(r.masterAssistantId) || {};
+                    m[r.featureKey] = r.enabled;
+                    byAssistant.set(r.masterAssistantId, m);
+                }
+
+                // Absent row = disabled — backfill every known feature key so the UI renders a
+                // full grid without guessing.
+                const result = assistants.map(a => ({
+                    ...a,
+                    features: Object.fromEntries(
+                        ASSISTANT_FEATURES.map(f => [f.key, byAssistant.get(a.id)?.[f.key] ?? false]),
+                    ),
+                }));
+
+                return {
+                    statusCode: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ features: ASSISTANT_FEATURES, assistants: result }),
+                };
+            }
+
+            if (event.httpMethod === 'PATCH') {
+                const id = parseInt(qs.id || '');
+                if (!id) return { statusCode: 400, body: JSON.stringify({ error: 'id required.' }) };
+
+                const body = JSON.parse(event.body || '{}');
+                const { featureKey, enabled } = body;
+                if (!isAssistantFeatureKey(featureKey)) {
+                    return { statusCode: 400, body: JSON.stringify({ error: 'Unknown featureKey.' }) };
+                }
+                if (typeof enabled !== 'boolean') {
+                    return { statusCode: 400, body: JSON.stringify({ error: 'enabled (boolean) required.' }) };
+                }
+
+                await db.insert(assistantFeatures)
+                    .values({ masterAssistantId: id, featureKey, enabled, updatedBy: adminId })
+                    .onConflictDoUpdate({
+                        target: [assistantFeatures.masterAssistantId, assistantFeatures.featureKey],
+                        set: { enabled, updatedBy: adminId, updatedAt: new Date() },
+                    });
+                await audit(db, adminId, 'UPDATE', 'assistant_features', `${id}:${featureKey}`, { enabled });
+
+                return {
+                    statusCode: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ success: true }),
+                };
+            }
+        }
+
         // ── POST: send passwordless login link to user (US6 Sc2) ─────────────
         if (event.httpMethod === 'POST' && resource === 'send-login-link') {
             const uid = parseInt(qs.id || '');
@@ -424,24 +515,24 @@ export const handler: Handler = async (event) => {
                 .set({ verificationToken: token, tokenExpiresAt: expiresAt, updatedAt: new Date() })
                 .where(eq(users.id, uid));
 
-            const loginUrl = `${process.env.BASE_URL || 'https://aura-assist.com'}/verify.html?token=${token}`;
+            const loginUrl = `${process.env.BASE_URL || 'https://bemoreswan.com'}/verify.html?token=${token}`;
 
             if (process.env.RESEND_API_KEY) {
                 await resend.emails.send({
                     from: FROM_EMAIL,
                     to: targetUser.email,
-                    subject: 'Your Aura Assist Login Link',
+                    subject: 'Your Be More Swan Login Link',
                     html: `
 <div style="font-family:-apple-system,sans-serif;max-width:560px;margin:40px auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb">
   <div style="background:#111827;padding:24px 32px">
-    <span style="color:#10b981;font-size:22px;font-weight:800">Aura</span><span style="color:#fff;font-size:22px;font-weight:800">-Assist</span>
+    <span style="color:#10b981;font-size:22px;font-weight:800">Be More Swan</span>
   </div>
   <div style="padding:32px">
     <h2 style="margin:0 0 12px;color:#111827">Admin-sent login link</h2>
     <p style="color:#6b7280;font-size:15px;line-height:1.6">Hi ${targetUser.firstName || 'there'},<br><br>
-      An Aura Assist admin has sent you a one-click login link. Click below to access your account — this link expires in 24 hours.</p>
+      An Be More Swan admin has sent you a one-click login link. Click below to access your account — this link expires in 24 hours.</p>
     <div style="text-align:center;margin:28px 0">
-      <a href="${loginUrl}" style="display:inline-block;background:#10b981;color:#fff;font-weight:700;font-size:16px;padding:14px 32px;border-radius:8px;text-decoration:none">Log in to Aura Assist</a>
+      <a href="${loginUrl}" style="display:inline-block;background:#10b981;color:#fff;font-weight:700;font-size:16px;padding:14px 32px;border-radius:8px;text-decoration:none">Log in to Be More Swan</a>
     </div>
     <p style="margin:0;color:#9ca3af;font-size:13px">If you did not expect this email, you can safely ignore it.</p>
   </div>
@@ -516,9 +607,9 @@ export const handler: Handler = async (event) => {
                 await resend.emails.send({
                     from: FROM_EMAIL,
                     to: targetUser.email,
-                    subject: 'Your Aura-Assist account has been temporarily locked',
+                    subject: 'Your Be More Swan account has been temporarily locked',
                     html: `<p>Hi ${targetUser.firstName || 'there'},</p>
-                           <p>Your account has been temporarily locked. Please contact support at <a href="mailto:support@aura-assist.com">support@aura-assist.com</a> for assistance.</p>`,
+                           <p>Your account has been temporarily locked. Please contact support at <a href="mailto:support@bemoreswan.com">support@bemoreswan.com</a> for assistance.</p>`,
                 }).catch(() => {});
             }
 
@@ -568,7 +659,7 @@ export const handler: Handler = async (event) => {
                 })
                 .where(eq(users.id, uid));
 
-            const SITE_URL = process.env.BASE_URL || 'https://aura-assist.com';
+            const SITE_URL = process.env.BASE_URL || 'https://bemoreswan.com';
             const confirmUrl = `${SITE_URL}/.netlify/functions/confirm-email-change?token=${confirmToken}&uid=${uid}`;
 
             if (resend) {
@@ -576,8 +667,8 @@ export const handler: Handler = async (event) => {
                 await resend.emails.send({
                     from: FROM_EMAIL,
                     to: newEmail,
-                    subject: 'Confirm your new Aura-Assist email address',
-                    html: `<p>An admin has requested your Aura-Assist account (${targetUser.email}) be updated to this address.</p>
+                    subject: 'Confirm your new Be More Swan email address',
+                    html: `<p>An admin has requested your Be More Swan account (${targetUser.email}) be updated to this address.</p>
                            <p><a href="${confirmUrl}">Click here to confirm this change</a> (expires in 24 hours).</p>
                            <p>If you did not expect this, ignore this email.</p>`,
                 }).catch(() => {});
@@ -586,7 +677,7 @@ export const handler: Handler = async (event) => {
                 await resend.emails.send({
                     from: FROM_EMAIL,
                     to: targetUser.email,
-                    subject: 'Email address change requested on your Aura-Assist account',
+                    subject: 'Email address change requested on your Be More Swan account',
                     html: `<p>Hi ${targetUser.firstName || 'there'},</p>
                            <p>An administrator has requested your account email be changed to <strong>${newEmail}</strong>.</p>
                            <p>This change will take effect once confirmed from the new address. If you did not authorise this, contact support immediately.</p>`,
@@ -654,6 +745,40 @@ export const handler: Handler = async (event) => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ logs: rows, total, page, pageSize: PAGE_SIZE }),
             };
+        }
+
+        // ── GET: security-abuse — workspaces flagged for billing review (US3 AC3.3) ──
+        // Same Stripe card fingerprint active on ≥2 workspaces ⇒ possible account-splitting.
+        // Superadmin-only (this exposes cross-workspace billing linkage).
+        if (event.httpMethod === 'GET' && resource === 'security-abuse') {
+            if (adminRole !== 'super_admin') {
+                return { statusCode: 403, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Superadmin access required.' }) };
+            }
+            const rows = await db
+                .select({
+                    id: organisations.id,
+                    name: organisations.name,
+                    slug: organisations.slug,
+                    cardFingerprint: organisations.cardFingerprint,
+                    createdAt: organisations.createdAt,
+                    ownerEmail: users.email,
+                })
+                .from(organisations)
+                .leftJoin(userOrganisations, and(eq(userOrganisations.organisationId, organisations.id), eq(userOrganisations.role, 'owner')))
+                .leftJoin(users, eq(users.id, userOrganisations.userId))
+                .where(eq(organisations.billingReviewRequired, true))
+                .orderBy(desc(organisations.cardFingerprint), desc(organisations.createdAt));
+
+            // Group by fingerprint so the UI can show each shared-card cluster together.
+            const groupsMap = new Map();
+            for (const r of rows) {
+                const key = r.cardFingerprint || 'unknown';
+                if (!groupsMap.has(key)) groupsMap.set(key, []);
+                groupsMap.get(key).push(r);
+            }
+            const groups = Array.from(groupsMap.entries()).map(([fingerprint, workspaces]) => ({ fingerprint, workspaces }));
+
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ groups, total: rows.length }) };
         }
 
         // ── GET: analytics — sign-up counts per role (US9, with date filter US9 Sc3) ──
@@ -898,6 +1023,53 @@ export const handler: Handler = async (event) => {
 
                 return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
             }
+        }
+
+        // ── Gamification settings (US4.1) + reward audit/reporting (US4.2) ──────
+        if (resource === 'gamification-config') {
+            const permErr = requirePermission(adminRole, 'platform_config');
+            if (permErr) return permErr;
+
+            const KEYS = { mult: 'gamification.time_multipliers', miles: 'gamification.milestones', paused: 'gamification.rewards_paused' };
+
+            if (event.httpMethod === 'GET') {
+                const rows = await db.select().from(platformConfig).where(inArray(platformConfig.key, [KEYS.mult, KEYS.miles, KEYS.paused]));
+                const map: Record<string, any> = Object.fromEntries(rows.map(r => [r.key, r.value]));
+                return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+                    timeMultipliers: map[KEYS.mult] ?? { leads_generated: 3, content_drafted: 5, tasks_completed: 2 },
+                    milestones:      map[KEYS.miles] ?? { leads_for_token: 100, hours_for_beta: 50 },
+                    rewardsPaused:   map[KEYS.paused] === true,
+                }) };
+            }
+
+            if (event.httpMethod === 'POST') {
+                const body = JSON.parse(event.body || '{}');
+                const upsert = async (key: string, value: unknown) => {
+                    const [prev] = await db.select({ value: platformConfig.value }).from(platformConfig).where(eq(platformConfig.key, key)).limit(1);
+                    await db.insert(platformConfig)
+                        .values({ key, value, updatedBy: adminId, updatedAt: new Date() })
+                        .onConflictDoUpdate({ target: platformConfig.key, set: { value, updatedBy: adminId, updatedAt: new Date() } });
+                    await insertAdminAuditLog({ adminId, action: 'gamification_config_update', targetType: 'platform_config', targetId: key,
+                        previousState: { value: prev?.value ?? null }, newState: { value }, ipAddress: getAdminIp(event.headers) });
+                };
+                if (body.timeMultipliers) await upsert(KEYS.mult, body.timeMultipliers);
+                if (body.milestones)      await upsert(KEYS.miles, body.milestones);
+                if (typeof body.rewardsPaused === 'boolean') await upsert(KEYS.paused, body.rewardsPaused); // AC4.2.3 emergency stop
+                return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
+            }
+        }
+
+        if (resource === 'reward-audits' && event.httpMethod === 'GET') {
+            const permErr = requirePermission(adminRole, 'platform_config');
+            if (permErr) return permErr;
+            const audits = await db.select().from(rewardAudits).orderBy(desc(rewardAudits.createdAt)).limit(200);
+            const [tokenGrants] = await db.select({ c: count() }).from(rewardAudits).where(eq(rewardAudits.rewardType, 'referral_token'));
+            const [betaGrants]  = await db.select({ c: count() }).from(rewardAudits).where(eq(rewardAudits.rewardType, 'beta_access'));
+            const [paidSubs]    = await db.select({ c: count() }).from(plans).where(eq(plans.status, 'active'));
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+                audits,
+                summary: { milestoneTokens: Number(tokenGrants.c), betaUnlocks: Number(betaGrants.c), paidSubscriptions: Number(paidSubs.c) },
+            }) };
         }
 
         // ── GET / POST: Billing Reconciliation — US-ADM-2.3.1 ───────────────────
@@ -2159,7 +2331,7 @@ export const handler: Handler = async (event) => {
         // ── US-HELP-1.3.1: Help Articles (AC14–AC17) ─────────────────────────
         if (resource === 'help-articles-seed') {
             const SEED_ARTICLES = [
-                { category: 'Getting Started', sortOrder: 10, title: 'What is Aura-Assist?' },
+                { category: 'Getting Started', sortOrder: 10, title: 'What is Be More Swan?' },
                 { category: 'Getting Started', sortOrder: 20, title: 'Your Dashboard Overview' },
                 { category: 'Getting Started', sortOrder: 30, title: 'Setting Up Your First Assistant' },
                 { category: 'Your Assistants', sortOrder: 10, title: 'How Lead Scoring Works (And How to Trust It)' },
@@ -2225,4 +2397,5 @@ export const handler: Handler = async (event) => {
         console.error('[admin-api] Error:', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal Server Error' }) };
     }
+    });
 };

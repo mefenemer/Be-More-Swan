@@ -1,6 +1,6 @@
 <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full pb-20 relative">
 
-    <div class="mb-10">
+    <div class="mb-8">
         <h1 class="text-3xl font-extrabold text-gray-900">Account Settings</h1>
         <p class="text-gray-500 mt-1">Changes save automatically in the background as you update your workspace.</p>
     </div>
@@ -9,7 +9,35 @@
         <span>Failed to auto-save change. Please verify your connection.</span>
     </div>
 
-    <div class="space-y-8">
+    <!-- ── Tabbed navigation ─────────────────────────────────────── -->
+    <style>
+        .settings-tab {
+            padding: 0.75rem 0.25rem;
+            border-bottom: 2px solid transparent;
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: #6b7280;
+            white-space: nowrap;
+            cursor: pointer;
+            background: none;
+            transition: color .15s ease, border-color .15s ease;
+        }
+        .settings-tab:hover { color: #374151; border-bottom-color: #d1d5db; }
+        .settings-tab.active { color: #059669; border-bottom-color: #10b981; }
+    </style>
+    <div class="mb-8 border-b border-gray-200">
+        <nav id="settings-tabs" class="-mb-px flex flex-wrap gap-x-6 gap-y-3" aria-label="Account settings tabs">
+            <button type="button" class="settings-tab active" data-tab="profile">Profile Information</button>
+            <button type="button" class="settings-tab" data-tab="notifications">Notification Preferences</button>
+            <button type="button" class="settings-tab" data-tab="sounds">Sounds</button>
+            <button type="button" class="settings-tab" data-tab="agreements">My Agreements</button>
+            <button type="button" class="settings-tab" data-tab="agency">Branding &amp; AI Notices</button>
+            <button type="button" class="settings-tab" data-tab="billing">Billing &amp; Subscription</button>
+        </nav>
+    </div>
+
+    <!-- ══ Profile Information ════════════════════════════════════ -->
+    <div class="settings-tab-panel" data-panel="profile">
         <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div class="px-6 py-5 border-b border-gray-100 bg-gray-50/50">
                 <h3 class="text-lg font-bold text-gray-900">Profile Information</h3>
@@ -41,7 +69,7 @@
                         <option value="es">Español</option>
                         <option value="pt">Português</option>
                     </select>
-                    <p class="text-xs text-gray-500 mt-2">Changes the language across your workspace immediately.</p>
+                    <p class="text-xs text-gray-500 mt-2">Translates your workspace into the selected language. The first switch may take a few seconds while pages are translated.</p>
                 </div>
 
                 <div>
@@ -53,6 +81,33 @@
                         <option value="America/New_York">Eastern Time (US & Canada)</option>
                     </select>
                     <p class="text-xs text-gray-500 mt-2">This ensures your assistants schedule tasks and deliver reports at the correct local time.</p>
+                </div>
+
+                <!-- Onboarding Wizard Step 3 — Working Hours (US5 AC2) -->
+                <div id="working-hours-card">
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Working hours</label>
+                    <p class="text-xs text-gray-500 mb-3">When should your assistant focus on your work? Pick a preset or set your own.</p>
+                    <div class="flex flex-wrap gap-2 mb-3">
+                        <button type="button" class="wh-preset px-3 py-1.5 text-sm font-semibold rounded-full border border-gray-200 text-gray-600 hover:border-emerald-300 transition cursor-pointer" data-preset="standard_9_5" data-start="09:00" data-end="17:00">Standard 9–5</button>
+                        <button type="button" class="wh-preset px-3 py-1.5 text-sm font-semibold rounded-full border border-gray-200 text-gray-600 hover:border-emerald-300 transition cursor-pointer" data-preset="extended" data-start="08:00" data-end="18:00">Extended 8–6</button>
+                        <button type="button" class="wh-preset px-3 py-1.5 text-sm font-semibold rounded-full border border-gray-200 text-gray-600 hover:border-emerald-300 transition cursor-pointer" data-preset="always_on">Always on</button>
+                        <button type="button" class="wh-preset px-3 py-1.5 text-sm font-semibold rounded-full border border-gray-200 text-gray-600 hover:border-emerald-300 transition cursor-pointer" data-preset="custom">Custom</button>
+                    </div>
+                    <div id="wh-custom-row" class="hidden items-center gap-2 mb-3">
+                        <input type="time" id="wh-start" class="px-3 py-1.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none">
+                        <span class="text-sm text-gray-500">to</span>
+                        <input type="time" id="wh-end" class="px-3 py-1.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none">
+                    </div>
+                    <div id="wh-days" class="flex flex-wrap gap-1.5">
+                        <button type="button" class="wh-day w-9 h-9 text-xs font-bold rounded-lg border border-gray-200 text-gray-600 hover:border-emerald-300 transition cursor-pointer" data-day="1">Mon</button>
+                        <button type="button" class="wh-day w-9 h-9 text-xs font-bold rounded-lg border border-gray-200 text-gray-600 hover:border-emerald-300 transition cursor-pointer" data-day="2">Tue</button>
+                        <button type="button" class="wh-day w-9 h-9 text-xs font-bold rounded-lg border border-gray-200 text-gray-600 hover:border-emerald-300 transition cursor-pointer" data-day="3">Wed</button>
+                        <button type="button" class="wh-day w-9 h-9 text-xs font-bold rounded-lg border border-gray-200 text-gray-600 hover:border-emerald-300 transition cursor-pointer" data-day="4">Thu</button>
+                        <button type="button" class="wh-day w-9 h-9 text-xs font-bold rounded-lg border border-gray-200 text-gray-600 hover:border-emerald-300 transition cursor-pointer" data-day="5">Fri</button>
+                        <button type="button" class="wh-day w-9 h-9 text-xs font-bold rounded-lg border border-gray-200 text-gray-600 hover:border-emerald-300 transition cursor-pointer" data-day="6">Sat</button>
+                        <button type="button" class="wh-day w-9 h-9 text-xs font-bold rounded-lg border border-gray-200 text-gray-600 hover:border-emerald-300 transition cursor-pointer" data-day="0">Sun</button>
+                    </div>
+                    <p id="wh-saved" class="hidden text-xs text-emerald-600 font-semibold mt-2">✓ Saved</p>
                 </div>
 
                 <!-- US-AUD-1.1.2: Hourly Rate for ROI Calculation -->
@@ -72,99 +127,166 @@
                         Leave blank to show savings in hours instead.
                     </p>
                 </div>
-            </div>
-        </div>
 
-        <!-- ── US-UX-1.1 SC4: Your Roles (read-only) ───────────────── -->
-        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-            <div class="px-6 py-5 border-b border-gray-100 bg-gray-50/50 flex items-center justify-between">
-                <div>
-                    <h3 class="text-lg font-bold text-gray-900">Your Roles</h3>
-                    <p class="text-sm text-gray-500">Roles are assigned by your organisation owner or a platform admin.</p>
+                <!-- Compliance acceptance moved → "My Agreements" tab (data-panel="agreements"). -->
+
+                <!-- US8 AC2 — re-open the setup wizard after completion -->
+                <div id="resume-wizard-card" class="pt-2">
+                    <button type="button" id="resume-wizard-btn"
+                        class="inline-flex items-center gap-2 text-sm font-semibold text-emerald-700 hover:underline cursor-pointer">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                        Resume setup guide
+                    </button>
                 </div>
             </div>
-            <div class="p-6">
-                <div id="settings-role-list" class="flex flex-wrap gap-2">
-                    <span class="text-sm text-gray-400">Loading…</span>
-                </div>
-                <p class="text-xs text-gray-400 mt-3">To request a role change, contact your organisation owner or reach out to support.</p>
-            </div>
         </div>
+    </div>
 
-        <!-- ── In-app Notification Preferences ──────────────────── -->
+    <!-- ══ Notification Preferences (unified matrix) ══════════════ -->
+    <div class="settings-tab-panel hidden" data-panel="notifications">
         <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div class="px-6 py-5 border-b border-gray-100 bg-gray-50/50">
-                <h3 class="text-lg font-bold text-gray-900">In-App Notification Preferences</h3>
-                <p class="text-sm text-gray-500">Control which activity types appear in your notification bell.</p>
+                <h3 class="text-lg font-bold text-gray-900">Notification Preferences</h3>
+                <p class="text-sm text-gray-500">Choose how you're notified for each type of activity. Some essential account &amp; billing alerts are always on and can't be turned off.</p>
             </div>
-            <div class="p-6 space-y-4">
-
-                <div class="flex items-center justify-between">
-                    <div>
-                        <p class="text-sm font-semibold text-gray-900">Assistant Wins &amp; Summaries</p>
-                        <p class="text-xs text-gray-400 mt-0.5">Daily recap of completed tasks and wins.</p>
-                    </div>
-                    <button type="button" id="toggle-notify-wins" data-pref-key="notifyWins" class="bg-red-500 relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none" role="switch" aria-checked="false">
-                        <span aria-hidden="true" class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
-                    </button>
-                </div>
-
-                <div class="border-t border-gray-100"></div>
-
-                <div class="flex items-center justify-between">
-                    <div>
-                        <p class="text-sm font-semibold text-gray-900">Billing &amp; Subscription</p>
-                        <p class="text-xs text-gray-400 mt-0.5">Payment receipts and plan change alerts.</p>
-                    </div>
-                    <button type="button" id="toggle-notify-billing" data-pref-key="notifyBilling" class="bg-red-500 relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none" role="switch" aria-checked="false">
-                        <span aria-hidden="true" class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
-                    </button>
-                </div>
-
-                <div class="border-t border-gray-100"></div>
-
-                <div class="flex items-center justify-between">
-                    <div>
-                        <p class="text-sm font-semibold text-gray-900">New Role Availability</p>
-                        <p class="text-xs text-gray-400 mt-0.5">Alerts when waitlisted roles become available.</p>
-                    </div>
-                    <button type="button" id="toggle-notify-availability" data-pref-key="notifyAvailability" class="bg-red-500 relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none" role="switch" aria-checked="false">
-                        <span aria-hidden="true" class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
-                    </button>
-                </div>
-
+            <div id="notif-prefs-loading" class="p-6 text-sm text-gray-400">Loading preferences…</div>
+            <div id="notif-prefs-wrap" class="hidden overflow-x-auto">
+                <table class="w-full text-left border-collapse" style="min-width:640px">
+                    <thead>
+                        <tr class="text-[11px] font-bold uppercase tracking-wide text-gray-400 border-b border-gray-100">
+                            <th class="px-6 py-3 font-bold">Notification</th>
+                            <th class="px-3 py-3 text-center font-bold">In&nbsp;App</th>
+                            <th class="px-3 py-3 text-center font-bold">Email</th>
+                            <th class="px-3 py-3 text-center font-bold">
+                                <span class="block">SMS</span>
+                                <span class="inline-block mt-0.5 text-[9px] font-bold bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded-full border border-gray-200 normal-case" style="letter-spacing:normal">Higher plans</span>
+                            </th>
+                            <th class="px-3 py-3 text-center font-bold">
+                                <span class="block">WhatsApp</span>
+                                <span class="inline-block mt-0.5 text-[9px] font-bold bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded-full border border-gray-200 normal-case" style="letter-spacing:normal">Higher plans</span>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="notif-prefs-body" class="divide-y divide-gray-100">
+                        <!-- Rows injected by workspace.js -->
+                    </tbody>
+                </table>
             </div>
-        </div>
-
-        <!-- ── Email Notification Preferences ────────────────────── -->
-        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-            <div class="px-6 py-5 border-b border-gray-100 bg-gray-50/50">
-                <h3 class="text-lg font-bold text-gray-900">Email Notification Preferences</h3>
-                <p class="text-sm text-gray-500">Choose which categories of alerts are delivered to your inbox. Transactional emails cannot be disabled.</p>
+            <div id="notif-prefs-legend" class="hidden px-6 py-3 text-xs text-gray-400 border-t border-gray-100 flex flex-wrap items-center gap-2">
+                <span class="inline-flex items-center text-[10px] font-bold bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full border border-gray-200">Required</span>
+                <span>Essential account &amp; billing alerts can't be turned off. SMS and WhatsApp delivery is coming to higher plans.</span>
             </div>
-            <div id="email-prefs-loading" class="p-6 text-sm text-gray-400">Loading preferences…</div>
-            <div id="email-prefs-body" class="hidden divide-y divide-gray-100">
-                <!-- Rows injected by workspace.js -->
-            </div>
-            <div id="email-prefs-save-banner" class="hidden px-6 py-3 bg-emerald-50 border-t border-emerald-100 flex items-center gap-2 text-sm text-emerald-700 font-semibold">
+            <div id="notif-prefs-save-banner" class="hidden px-6 py-3 bg-emerald-50 border-t border-emerald-100 flex items-center gap-2 text-sm text-emerald-700 font-semibold">
                 <svg class="w-4 h-4 text-emerald-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
                 Preference saved.
             </div>
         </div>
+    </div>
 
+    <!-- ══ Sounds ════════════════════════════════════════════════ -->
+    <div class="settings-tab-panel hidden" data-panel="sounds">
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            <div class="px-6 py-5 border-b border-gray-100 bg-gray-50/50">
+                <h3 class="text-lg font-bold text-gray-900">Sounds</h3>
+                <p class="text-sm text-gray-500">Control the Be More Swan Aurora sound. These settings apply on this and future logins.</p>
+            </div>
+            <div class="p-6 space-y-5">
+                <div class="flex items-start justify-between gap-6">
+                    <div class="flex-1">
+                        <p class="text-sm font-semibold text-gray-900 mb-1">Play the Aurora sound on login</p>
+                        <p class="text-sm text-gray-500">Plays the welcome chime each time your workspace loads.</p>
+                    </div>
+                    <button type="button" id="toggle-sound-login" data-sound-key="soundOnLogin"
+                        class="bg-gray-300 relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                        role="switch" aria-checked="true">
+                        <span aria-hidden="true" class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+                    </button>
+                </div>
+                <div class="flex items-start justify-between gap-6 border-t border-gray-100 pt-5">
+                    <div class="flex-1">
+                        <p class="text-sm font-semibold text-gray-900 mb-1">Play a sound when a milestone is completed</p>
+                        <p class="text-sm text-gray-500">Plays a celebratory chime alongside the milestone animation.</p>
+                    </div>
+                    <button type="button" id="toggle-sound-milestone" data-sound-key="soundOnMilestone"
+                        class="bg-gray-300 relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                        role="switch" aria-checked="true">
+                        <span aria-hidden="true" class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+                    </button>
+                </div>
+                <p id="sound-save-feedback" class="hidden mt-1 text-xs text-emerald-600 font-semibold">✓ Saved</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ══ Agency Attribution & AI Disclosure ════════════════════ -->
+    <!-- ── My Agreements ─────────────────────────────────────────────
+         Consolidated home for every agreement the user/org has accepted (ToS, Privacy, DPA,
+         the plain-language AI/data agreement, AI content acknowledgement). Doubles as a GDPR /
+         EU AI Act consent record. Outward-facing disclosure SETTINGS deliberately live in the
+         Agency tab + per-assistant Guardrails, not here. -->
+    <div class="settings-tab-panel hidden space-y-6" data-panel="agreements">
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            <div class="px-6 py-5 border-b border-gray-100 bg-gray-50/50">
+                <h3 class="text-lg font-bold text-gray-900">My Agreements</h3>
+                <p class="text-sm text-gray-500">The agreements you've accepted with Be More Swan, with the version and date on record. Review any of them at any time; we'll flag anything that needs re-accepting.</p>
+            </div>
+
+            <!-- Acceptance rows are rendered here by initMyAgreements() in workspace.html. -->
+            <div id="agreements-list" class="divide-y divide-gray-100">
+                <div id="agreements-loading" class="px-6 py-8 text-sm text-gray-400 text-center">Loading your agreements…</div>
+                <div id="agreements-error" class="hidden px-6 py-8 text-sm text-red-500 text-center">Couldn't load your agreements. Please refresh.</div>
+            </div>
+        </div>
+
+        <!-- Plain-language Responsible AI Use Agreement (org-scoped acceptance toggle).
+             Moved here from the Profile tab; keeps its original element IDs so the existing
+             initComplianceToggle() wiring in workspace.html works unchanged. -->
+        <div id="compliance-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+            <div class="px-6 py-5 border-b border-gray-100 bg-gray-50/50">
+                <h3 class="text-lg font-bold text-gray-900">Responsible AI Use Agreement</h3>
+                <p class="text-sm text-gray-500">Your acceptance of how Be More Swan uses AI and processes your business data to run your assistants.</p>
+            </div>
+            <div class="p-6">
+                <div class="flex items-start gap-3">
+                    <button type="button" id="compliance-toggle" role="switch" aria-checked="false"
+                        class="bg-gray-300 relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none mt-0.5">
+                        <span aria-hidden="true" class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+                    </button>
+                    <div class="flex-1">
+                        <p class="text-sm font-semibold text-gray-900">I accept the Responsible AI Use Agreement</p>
+                        <p class="text-xs text-gray-500 mt-1">
+                            I understand my assistant is powered by AI and I agree to how Be More Swan processes my
+                            business data to deliver this service. This keeps your company's data safe and your
+                            assistant compliant. Read our
+                            <a href="/privacy.html" target="_blank" rel="noopener noreferrer" class="text-emerald-700 font-semibold hover:underline">Privacy Policy</a> and
+                            <a href="/terms_of_service.html" target="_blank" rel="noopener noreferrer" class="text-emerald-700 font-semibold hover:underline">Terms</a>.
+                        </p>
+                        <p id="compliance-saved" class="hidden text-xs text-emerald-600 font-semibold mt-2">✓ Accepted — thank you!</p>
+                        <button type="button" id="review-agreements-btn"
+                            class="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 hover:underline cursor-pointer">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                            Review agreements
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="settings-tab-panel hidden space-y-8" data-panel="agency">
         <!-- ── US-AUD-5.3.1: Agency Attribution ─────────────────── -->
         <div id="agency-attribution-section" class="hidden bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div class="px-6 py-5 border-b border-gray-100 bg-gray-50/50">
                 <h3 class="text-lg font-bold text-gray-900">Agency Attribution</h3>
-                <p class="text-sm text-gray-500">Automatically append an "Aura-Assist Powered" badge to your exported deliverables to showcase your workflow.</p>
+                <p class="text-sm text-gray-500">Automatically append an "Be More Swan Powered" badge to your exported deliverables to showcase your workflow.</p>
             </div>
             <div class="p-6">
                 <div class="flex items-start justify-between gap-6">
                     <div class="flex-1">
-                        <p class="text-sm font-semibold text-gray-900 mb-1">Add Aura-Assist badge to exported deliverables</p>
+                        <p class="text-sm font-semibold text-gray-900 mb-1">Add Be More Swan badge to exported deliverables</p>
                         <p class="text-sm text-gray-500">
                             Helps your clients see how you work. When enabled, a short branded footer is appended to content briefs, reports, and other exports:
-                            <span class="italic text-gray-400">"Produced with Aura-Assist | aura-assist.com/powered-by/your-slug"</span>
+                            <span class="italic text-gray-400">"Produced with Be More Swan | bemoreswan.com/powered-by/your-slug"</span>
                         </p>
                         <p id="agency-badge-url" class="hidden text-xs text-emerald-600 mt-2 font-mono"></p>
                     </div>
@@ -285,8 +407,10 @@
             });
         })();
         </script>
+    </div>
 
-        <!-- ── Billing & Subscription ──────────────────────────── -->
+    <!-- ══ Billing & Subscription ════════════════════════════════ -->
+    <div class="settings-tab-panel hidden" data-panel="billing">
         <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
             <div class="px-6 py-5 border-b border-gray-100 bg-gray-50/50">
                 <h3 class="text-lg font-bold text-gray-900">Billing &amp; Subscription</h3>
@@ -309,6 +433,24 @@
                 </button>
             </div>
         </div>
-
     </div>
+
+    <!-- ── Tab switching ─────────────────────────────────────────── -->
+    <script>
+    (function () {
+        const tabs = Array.from(document.querySelectorAll('#settings-tabs .settings-tab'));
+        const panels = Array.from(document.querySelectorAll('.settings-tab-panel'));
+        function activate(name) {
+            if (!name || !panels.some(p => p.dataset.panel === name)) return;
+            tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === name));
+            panels.forEach(p => p.classList.toggle('hidden', p.dataset.panel !== name));
+        }
+        tabs.forEach(t => t.addEventListener('click', () => activate(t.dataset.tab)));
+        // Exposed so other parts of the workspace can deep-link to a specific tab — notably
+        // the Setup Wizard's "Compliance & data use" step, which routes here and opens the
+        // "My Agreements" panel (not the default Profile Information one).
+        window.activateSettingsTab = activate;
+    })();
+    </script>
+
 </div>

@@ -4,6 +4,9 @@ import { eq, and, or, isNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { systemConnections, scheduledPosts, notifications, users, userOrganisations, auditLogs } from '../../db/schema';
 import { storeSecret, deleteSecret, buildRefKey } from '../../src/utils/vault';
+import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant } from '../../src/utils/connection-map';
+import { resolveAssistantRole } from '../../src/utils/assistant-role';
+import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -66,16 +69,47 @@ export const handler: Handler = async (event) => {
                 }
             });
 
+            // Server-side connection sandboxing: when scoped to an assistant, return
+            // only the connectors relevant to its role (defence in depth — the UI also
+            // filters, but the server is authoritative). Invalid assistant → 400.
+            const assistantIdParam = event.queryStringParameters?.assistantId;
+            if (assistantIdParam) {
+                const assistant = await resolveAssistantRole(db, currentOrgId, parseInt(assistantIdParam, 10));
+                if (!assistant) return { statusCode: 400, body: JSON.stringify({ error: 'Unknown assistant.' }) };
+                const visible = merged.filter(m => isServiceAllowedForAssistant(m.serviceName, assistant));
+                // Relevance is policy-driven, not row-driven: social connectors only become
+                // DB rows after a user connects via OAuth, so deriving the allow-list from
+                // `merged` alone would hide every connector for a fresh assistant. Union the
+                // role's relevant connectors with any already-existing allowed services.
+                const allowedServices = Array.from(new Set([
+                    ...relevantConnectorsForAssistant(assistant),
+                    ...allowedServiceNames(assistant, merged.map(m => m.serviceName)),
+                ]));
+                return { statusCode: 200, body: JSON.stringify({ connections: visible, allowedServices }) };
+            }
+
             return { statusCode: 200, body: JSON.stringify({ connections: merged }) };
         }
 
         // --- POST: SECURE CONNECTION CREATION ---
         if (event.httpMethod === 'POST') {
             const body = JSON.parse(event.body || '{}');
-            const { serviceName, connectionType, apiKey, handle, pageUrl, scopes } = body;
+            const { serviceName, connectionType, apiKey, handle, pageUrl, scopes, assistantId } = body;
 
             if (!serviceName || !apiKey) {
                 return { statusCode: 400, body: JSON.stringify({ error: 'Service name and access token are required.' }) };
+            }
+
+            // Server-side connection sandboxing: if this connection is being made in the
+            // context of an assistant, the service must be relevant to that assistant's
+            // role (e.g. a Social Media Manager cannot connect an HR/CRM service).
+            if (assistantId !== undefined && assistantId !== null) {
+                const assistant = await resolveAssistantRole(db, currentOrgId, parseInt(String(assistantId), 10));
+                if (!assistant) return { statusCode: 400, body: JSON.stringify({ error: 'Unknown assistant.' }) };
+                if (!isServiceAllowedForAssistant(serviceName, assistant)) {
+                    console.warn(`[integrations] Sandbox violation blocked: ${serviceName} not allowed for assistant ${assistantId} (${assistant.roleKey ?? assistant.role})`);
+                    return { statusCode: 403, body: JSON.stringify({ error: `${serviceName} is not a relevant connection for this assistant.`, code: 'CONNECTION_NOT_RELEVANT' }) };
+                }
             }
 
             // ── Scope Creep guard: whitelist permitted scopes per service ────
@@ -123,6 +157,18 @@ export const handler: Handler = async (event) => {
                     ...(currentOrgId ? [eq(systemConnections.organisationId, currentOrgId)] : []),
                 ))
                 .limit(1);
+
+            // US1 AC1.3: block if this account/handle is already live in another workspace.
+            if (handle && currentOrgId) {
+                const collision = await findTenantCollision(db, { serviceName, externalUserId: handle, organisationId: currentOrgId });
+                if (collision) {
+                    await recordCollisionAttempt(db, { requestingOrgId: currentOrgId, existingOrgId: collision.organisationId, serviceName, externalUserId: handle });
+                    return { statusCode: 409, body: JSON.stringify({
+                        error: `This ${serviceName} account is already connected to another Be More Swan workspace. To use it, you must join the existing workspace or disconnect it from the other account.`,
+                        code: 'TENANT_COLLISION',
+                    }) };
+                }
+            }
 
             const scopeString = Array.isArray(scopes) && scopes.length ? scopes.join(' ') : null;
             const refKey = buildRefKey(currentUserId, serviceName, 'apikey');

@@ -17,6 +17,7 @@ import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, userOrganisations, workspaceAssets, storageUsage, plans, masterPlans } from '../../db/schema';
 import { buildTenantKey } from '../../src/utils/storage-keys';
+import { requireTenant } from '../../src/utils/tenant';
 
 const JWT_SECRET  = process.env.JWT_SECRET;
 const R2_ENDPOINT = process.env.R2_ENDPOINT;           // https://<accountId>.r2.cloudflarestorage.com
@@ -39,6 +40,13 @@ function getR2Client(): S3Client {
         region: 'auto',
         endpoint: R2_ENDPOINT,
         credentials: { accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY! },
+        // AWS SDK v3 (≥3.729) defaults requestChecksumCalculation to WHEN_SUPPORTED, which
+        // bakes a CRC32 checksum (x-amz-checksum-crc32 / x-amz-sdk-checksum-algorithm) into
+        // the presigned URL. The browser PUT can't reproduce that checksum over the real
+        // bytes, so R2 rejects the upload. WHEN_REQUIRED drops it for PutObject (R2 requires
+        // no checksum), keeping the presigned PUT a plain SigV4 request.
+        requestChecksumCalculation: 'WHEN_REQUIRED',
+        responseChecksumValidation: 'WHEN_REQUIRED',
     });
 }
 
@@ -46,31 +54,22 @@ export const handler: Handler = async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
     if (!JWT_SECRET) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
 
-    const cookie = (event.headers.cookie || '').match(/aura_session=([^;]+)/)?.[1];
-    if (!cookie) return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized.' }) };
+    const db = getDb();
 
-    let userId: number;
-    try { userId = (jwt.verify(cookie, JWT_SECRET) as { userId: number }).userId; }
-    catch { return { statusCode: 401, body: JSON.stringify({ error: 'Invalid session.' }) }; }
+    // AC2: resolve the active org from the session and verify membership server-side
+    // (the client never supplies orgId — never trust a client-supplied tenant prefix).
+    const ctx = await requireTenant(event, db);
+    if ('error' in ctx) return ctx.error;
+    const { userId, organisationId: orgId } = ctx;
 
-    let body: { orgId?: number; assetType?: string; filename?: string; mimeType?: string; fileSizeBytes?: number };
+    let body: { assetType?: string; filename?: string; mimeType?: string; fileSizeBytes?: number; category?: string };
     try { body = JSON.parse(event.body || '{}'); }
     catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON.' }) }; }
 
-    const { orgId, assetType, filename, mimeType, fileSizeBytes } = body;
-    if (!orgId || !assetType || !filename || !mimeType || !fileSizeBytes) {
-        return { statusCode: 400, body: JSON.stringify({ error: 'orgId, assetType, filename, mimeType, fileSizeBytes required.' }) };
+    const { assetType, filename, mimeType, fileSizeBytes, category } = body;
+    if (!assetType || !filename || !mimeType || !fileSizeBytes) {
+        return { statusCode: 400, body: JSON.stringify({ error: 'assetType, filename, mimeType, fileSizeBytes required.' }) };
     }
-
-    const db = getDb();
-
-    // AC2: caller must be a member of orgId
-    const [membership] = await db
-        .select({ id: userOrganisations.id })
-        .from(userOrganisations)
-        .where(and(eq(userOrganisations.userId, userId), eq(userOrganisations.organisationId, orgId)))
-        .limit(1);
-    if (!membership) return { statusCode: 403, body: JSON.stringify({ error: 'Forbidden.' }) };
 
     // AC3/AC14: MIME allowlist check — SVG blocked for social_image and generated_content (AC15)
     const allowed = MIME_ALLOWLIST[assetType];
@@ -107,7 +106,7 @@ export const handler: Handler = async (event) => {
         uploaderId: userId,
         name: filename,
         assetType,
-        category: assetType,
+        category: category || assetType,
         r2Key,
         mimeType,
         fileSizeBytes,

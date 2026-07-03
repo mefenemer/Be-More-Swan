@@ -51,15 +51,35 @@ let _assetToDetach = null;
 let _orgId = null;
 let _pollTimer = null;         // auto-refresh timer for pending-asset transitions
 let _scanningAssetId = null;   // ID of asset currently being scanned (shown with indicator)
+let _deepLinkAssetId = null;   // one-shot: asset to scroll-to/highlight/open after first render
 
 // ── Init ──────────────────────────────────────────────────────────
-window.initMyContent = async function () {
+window.initMyContent = async function (param) {
     document.getElementById('btn-open-upload')?.addEventListener('click', _openUploadModal);
     document.getElementById('btn-confirm-delete')?.addEventListener('click', _doDelete);
     document.getElementById('btn-confirm-detach')?.addEventListener('click', _doDetach);
+    // Deep-link target (e.g. from a "Your AI video is ready" notification carrying
+    // metadata.assetId). Accepts { assetId } or a raw id. Focused after the first render.
+    _deepLinkAssetId = param && typeof param === 'object' ? param.assetId : param;
     await _loadAssets();
     _startPollingIfNeeded();
+    _mcRefreshHeaderCredits();
 };
+
+// Show the persistent AI-credit balance pill in the page header.
+async function _mcRefreshHeaderCredits() {
+    const pill = document.getElementById('mc-credit-pill');
+    const count = document.getElementById('mc-credit-count');
+    if (!pill || !count) return;
+    try {
+        const res = await fetch('/.netlify/functions/get-ai-credit-balance');
+        if (!res.ok) return;
+        const { balance } = await res.json();
+        count.textContent = balance;
+        pill.classList.remove('hidden');
+        pill.classList.add('flex');
+    } catch { /* leave hidden */ }
+}
 
 // ── Load & render ─────────────────────────────────────────────────
 async function _loadAssets() {
@@ -105,6 +125,40 @@ function _renderSections() {
     const container = document.getElementById('content-sections');
     if (!container) return;
     container.innerHTML = SECTIONS.map(sec => _sectionHTML(sec)).join('');
+    // One-shot deep-link focus (consumed so subsequent poll re-renders don't re-trigger).
+    if (_deepLinkAssetId != null) {
+        const target = _deepLinkAssetId;
+        _deepLinkAssetId = null;
+        _focusDeepLinkAsset(target);
+    }
+}
+
+// Scroll to, highlight, and (for visual assets) open the deep-linked asset. Expands
+// the asset's collapsed section first so the row is actually visible.
+function _focusDeepLinkAsset(assetId) {
+    const id = Number(assetId);
+    // Which section holds it? Expand that section if collapsed.
+    const sectionKey = Object.keys(_assets).find(k => (_assets[k] || []).some(a => a.id === id));
+    const asset = sectionKey ? _assets[sectionKey].find(a => a.id === id) : null;
+    if (!asset) return;
+
+    const body = document.getElementById(`section-body-${sectionKey}`);
+    if (body && body.classList.contains('hidden')) window._mcToggleSection(sectionKey);
+
+    // Defer to next frame so layout reflects the expanded section before scrolling.
+    requestAnimationFrame(() => {
+        const row = document.querySelector(`[data-asset-id="${id}"]`);
+        if (row) {
+            row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            row.style.transition = 'background-color 0.6s ease';
+            row.style.backgroundColor = 'rgba(16,185,129,0.14)'; // emerald tint
+            setTimeout(() => { row.style.backgroundColor = ''; }, 2600);
+        }
+        // For a video/image, open the viewer straight away — that's the whole point of the link.
+        if (asset.assetType === 'video' || asset.assetType === 'image') {
+            window._mcViewAsset(id);
+        }
+    });
 }
 
 function _sectionHTML(sec) {
@@ -145,6 +199,7 @@ function _assetRow(asset, sec) {
     const icon = _typeIcon(asset.assetType, asset.mimeType);
     const date = new Date(asset.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
     const fileSize = asset.fileSize ? _formatBytes(asset.fileSize) : '';
+    const source = _sourceInfo(asset);
 
     // Actions depend on status
     let actions = '';
@@ -181,26 +236,100 @@ function _assetRow(asset, sec) {
         ? `<span class="text-[10px] text-blue-600 font-bold bg-blue-50 border border-blue-200 px-1.5 py-0.5 rounded-full">Post #${asset.scheduledPostId}</span>`
         : '';
 
-    const previewThumb = (asset.assetType === 'image' && asset.storageUrl && !asset.purgedAt)
-        ? `<img src="${asset.storageUrl}" alt="" class="w-full h-full object-cover rounded-lg">`
-        : `<div class="w-full h-full flex items-center justify-center text-gray-400">${icon}</div>`;
+    // A visual asset (image/video) with a resolved URL can be opened in the viewer
+    // lightbox. The backend (content-assets.ts GET) presigns storageUrl for both images
+    // and videos, or falls back to externalUrl — so AI-generated videos are viewable here.
+    const viewUrl = (asset.assetType === 'image' || asset.assetType === 'video') && !asset.purgedAt
+        ? (asset.storageUrl || asset.externalUrl || '')
+        : '';
+    const canView = !!viewUrl;
+
+    // Play-triangle overlay so video tiles read as playable.
+    const playOverlay = asset.assetType === 'video'
+        ? `<span class="absolute inset-0 flex items-center justify-center pointer-events-none">
+             <span class="w-6 h-6 rounded-full bg-black/50 flex items-center justify-center">
+               <svg class="w-3 h-3 text-white" style="margin-left:2px" fill="currentColor" viewBox="0 0 20 20"><path d="M6.3 4.5v11l9-5.5-9-5.5z"/></svg>
+             </span>
+           </span>`
+        : '';
+    // Corner chip on the thumbnail so ownership/source reads at a glance, without
+    // having to read the row text (the ask in issue #54).
+    const sourceChip = source
+        ? `<span title="${source.label}" class="absolute bottom-0 right-1 w-4 h-4 rounded-full ${source.chipClass} shadow flex items-center justify-center pointer-events-none">${source.icon}</span>`
+        : '';
+    const thumbInner = (asset.assetType === 'image' && asset.storageUrl)
+        ? `<img src="${asset.storageUrl}" alt="" class="w-full h-full object-cover rounded-lg">${playOverlay}${sourceChip}`
+        : (asset.assetType === 'video' && asset.storageUrl)
+            ? `<video src="${asset.storageUrl}" class="w-full h-full object-cover rounded-lg" preload="metadata" muted playsinline></video>${playOverlay}${sourceChip}`
+            : `<div class="w-full h-full flex items-center justify-center text-gray-400">${icon}</div>${playOverlay}${sourceChip}`;
+    const tile = canView
+        ? `<button type="button" onclick="window._mcViewAsset(${asset.id})" title="View"
+             class="relative w-14 h-14 rounded-xl bg-gray-100 overflow-hidden shrink-0 border border-gray-200 cursor-pointer hover:ring-2 hover:ring-emerald-400 transition">${thumbInner}</button>`
+        : `<div class="relative w-14 h-14 rounded-xl bg-gray-100 overflow-hidden shrink-0 border border-gray-200">${thumbInner}</div>`;
+
+    // A "View" action for visual assets, shown alongside the status-specific actions.
+    const viewBtn = canView
+        ? `<button type="button" onclick="window._mcViewAsset(${asset.id})" title="View"
+             class="p-1.5 text-gray-400 hover:text-emerald-600 transition cursor-pointer rounded-lg hover:bg-emerald-50">
+             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+           </button>`
+        : '';
 
     return `
     <div class="flex items-center gap-4 px-5 py-4 group hover:bg-gray-50 transition" data-asset-id="${asset.id}">
-      <div class="w-14 h-14 rounded-xl bg-gray-100 overflow-hidden shrink-0 border border-gray-200">
-        ${previewThumb}
-      </div>
+      ${tile}
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 flex-wrap">
           <p class="text-sm font-bold text-gray-900 truncate">${_escHtml(asset.name)}</p>
+          ${source ? `<span class="inline-flex items-center gap-1 text-[10px] font-bold px-1.5 py-0.5 rounded-full border ${source.badgeClass}">${source.label}</span>` : ''}
           ${scheduledBadge}
         </div>
         <p class="text-xs text-gray-400 mt-0.5">${_typeLabel(asset.assetType)}${fileSize ? ' · ' + fileSize : ''} · ${date}</p>
         ${rejectionBadge}
       </div>
-      <div class="shrink-0 flex items-center gap-2">${actions}</div>
+      <div class="shrink-0 flex items-center gap-2">${viewBtn}${actions}</div>
     </div>`;
 }
+
+// ── Asset viewer (lightbox) ───────────────────────────────────────
+// Opens an image/video asset in the #modal-view-asset lightbox. Looks the asset up
+// across all status groups so it works from any section.
+window._mcViewAsset = function (id) {
+    const asset = Object.values(_assets).flat().find(a => a.id === id);
+    if (!asset) return;
+    const url = asset.storageUrl || asset.externalUrl || '';
+    const modal = document.getElementById('modal-view-asset');
+    const vid = document.getElementById('view-asset-video');
+    const img = document.getElementById('view-asset-image');
+    const empty = document.getElementById('view-asset-empty');
+    const dl = document.getElementById('view-asset-download');
+    const nameEl = document.getElementById('view-asset-name');
+    if (!modal) return;
+
+    nameEl.textContent = asset.name || 'Preview';
+    vid.classList.add('hidden'); img.classList.add('hidden'); empty.classList.add('hidden');
+    vid.pause?.(); vid.removeAttribute('src'); img.removeAttribute('src');
+
+    if (url && asset.assetType === 'video') {
+        vid.src = url; vid.classList.remove('hidden');
+    } else if (url && asset.assetType === 'image') {
+        img.src = url; img.classList.remove('hidden');
+    } else {
+        empty.classList.remove('hidden');
+    }
+
+    if (url) { dl.href = url; dl.classList.remove('hidden'); }
+    else { dl.classList.add('hidden'); }
+
+    modal.classList.remove('hidden');
+};
+
+window._mcCloseViewer = function () {
+    const modal = document.getElementById('modal-view-asset');
+    const vid = document.getElementById('view-asset-video');
+    if (vid) { vid.pause?.(); vid.removeAttribute('src'); }
+    modal?.classList.add('hidden');
+};
 
 // ── Section toggle ────────────────────────────────────────────────
 window._mcToggleSection = function (key) {
@@ -220,27 +349,380 @@ function _openUploadModal() {
     document.getElementById('upload-error')?.classList.add('hidden');
     document.getElementById('link-url') && (document.getElementById('link-url').value = '');
     document.getElementById('link-name') && (document.getElementById('link-name').value = '');
+    // Reset the Generate AI panel
+    _mcAiJobId = null;
+    const aiPrompt = document.getElementById('ai-prompt');
+    if (aiPrompt) aiPrompt.value = '';
+    document.getElementById('ai-prompt-count') && (document.getElementById('ai-prompt-count').textContent = '0 / 1000');
+    document.getElementById('ai-results')?.classList.add('hidden');
+    document.getElementById('ai-results-hint')?.classList.add('hidden');
+    document.getElementById('ai-loading')?.classList.add('hidden');
+    document.getElementById('ai-error')?.classList.add('hidden');
+    document.getElementById('ai-insufficient')?.classList.add('hidden');
+    // Resolve which AI tabs this org may see (admin-managed per-assistant capabilities).
+    // Reset to "none" first so a stale capability never flashes a forbidden tab.
+    _mcCaps = { canImage: false, assistantCanVideo: false, tierCanVideo: false };
+    _mcApplyTabVisibility();
+    _mcLoadCapabilities();
+    // Reset the Generate AI Video panel
+    if (typeof _mcVidStopPolling === 'function') _mcVidStopPolling();
+    _mcVidJobId = null;
+    const vidPrompt = document.getElementById('vid-prompt');
+    if (vidPrompt) vidPrompt.value = '';
+    document.getElementById('vid-prompt-count') && (document.getElementById('vid-prompt-count').textContent = '0 / 1000');
+    document.getElementById('vid-generating')?.classList.add('hidden');
+    document.getElementById('vid-result')?.classList.add('hidden');
+    document.getElementById('vid-error')?.classList.add('hidden');
+    document.getElementById('vid-insufficient')?.classList.add('hidden');
+    document.getElementById('vid-form')?.classList.remove('hidden');
+    if (typeof _mcVidSetDuration === 'function') _mcVidSetDuration(6);
     document.getElementById('modal-upload')?.classList.remove('hidden');
 }
 
 window._mcSwitchTab = function (tab) {
     _activeTab = tab;
-    const fileBtn = document.getElementById('tab-file');
-    const linkBtn = document.getElementById('tab-link');
-    const filePanel = document.getElementById('panel-file');
-    const linkPanel = document.getElementById('panel-link');
+    const ACTIVE = 'flex-1 py-2 text-sm font-bold rounded-lg transition bg-white shadow text-gray-900 cursor-pointer';
+    const IDLE   = 'flex-1 py-2 text-sm font-bold rounded-lg transition text-gray-500 hover:text-gray-700 cursor-pointer';
+    const AI_EXTRA = ' flex items-center justify-center gap-1';
 
-    if (tab === 'file') {
-        fileBtn.className = 'flex-1 py-2 text-sm font-bold rounded-lg transition bg-white shadow text-gray-900 cursor-pointer';
-        linkBtn.className = 'flex-1 py-2 text-sm font-bold rounded-lg transition text-gray-500 hover:text-gray-700 cursor-pointer';
-        filePanel.classList.remove('hidden');
-        linkPanel.classList.add('hidden');
-    } else {
-        linkBtn.className = 'flex-1 py-2 text-sm font-bold rounded-lg transition bg-white shadow text-gray-900 cursor-pointer';
-        fileBtn.className = 'flex-1 py-2 text-sm font-bold rounded-lg transition text-gray-500 hover:text-gray-700 cursor-pointer';
-        linkPanel.classList.remove('hidden');
-        filePanel.classList.add('hidden');
+    const tabs = {
+        file:  { btn: 'tab-file',  panel: 'panel-file' },
+        link:  { btn: 'tab-link',  panel: 'panel-link' },
+        ai:    { btn: 'tab-ai',    panel: 'panel-ai' },
+        video: { btn: 'tab-video', panel: 'panel-video' },
+    };
+    const ICON_TABS = ['ai', 'video'];
+    for (const [key, ids] of Object.entries(tabs)) {
+        const btn = document.getElementById(ids.btn);
+        const panel = document.getElementById(ids.panel);
+        if (btn) btn.className = (key === tab ? ACTIVE : IDLE) + (ICON_TABS.includes(key) ? AI_EXTRA : '');
+        if (panel) panel.classList.toggle('hidden', key !== tab);
     }
+
+    // The AI/video panels have their own buttons, so hide the standard footer there.
+    document.getElementById('upload-footer')?.classList.toggle('hidden', tab === 'ai' || tab === 'video');
+    // switchTab rewrites every tab's className above (dropping `hidden`) — re-apply capability
+    // visibility so forbidden tabs stay hidden.
+    _mcApplyTabVisibility();
+    if (tab === 'ai') _mcRefreshAiBalance();
+    if (tab === 'video') _mcVidOnOpen();
+};
+
+// ── AI media capabilities (admin-managed, per assistant type) ──────
+// Which AI tabs this org may use. Resolved on each modal-open from get-ai-credit-balance:
+//   canImage          — an active assistant's type has AI image generation enabled
+//   assistantCanVideo — an active assistant's type has AI video generation enabled
+//   tierCanVideo      — the plan tier permits video (video needs BOTH this and assistantCanVideo)
+let _mcCaps = { canImage: false, assistantCanVideo: false, tierCanVideo: false };
+
+async function _mcLoadCapabilities() {
+    try {
+        const res = await fetch('/.netlify/functions/get-ai-credit-balance');
+        if (!res.ok) return;
+        const d = await res.json();
+        _mcCaps = {
+            canImage: !!d.canImage,
+            assistantCanVideo: !!d.assistantCanVideo,
+            tierCanVideo: !!d.tierCanVideo,
+        };
+    } catch { /* leave tabs hidden on failure — server-side gate is the source of truth */ }
+    _mcApplyTabVisibility();
+}
+
+// Show the AI Image / AI Video tabs only when the org's assistants grant the capability.
+function _mcApplyTabVisibility() {
+    document.getElementById('tab-ai')?.classList.toggle('hidden', !_mcCaps.canImage);
+    document.getElementById('tab-video')?.classList.toggle('hidden', !_mcCaps.assistantCanVideo);
+}
+
+function _mcDisableBtn(id, disabled) {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.disabled = disabled;
+    // disabled: variants aren't in the prebuilt CSS — toggle present utilities directly.
+    btn.classList.toggle('opacity-50', disabled);
+    btn.classList.toggle('cursor-not-allowed', disabled);
+}
+
+// ── Generate AI Image ─────────────────────────────────────────────
+let _mcAiJobId = null;
+
+window._mcAiPromptInput = function () {
+    const el = document.getElementById('ai-prompt');
+    const counter = document.getElementById('ai-prompt-count');
+    if (el && counter) counter.textContent = `${el.value.length} / 1000`;
+};
+
+async function _mcRefreshAiBalance() {
+    const el = document.getElementById('ai-balance');
+    if (!el) return;
+    try {
+        const res = await fetch('/.netlify/functions/get-ai-credit-balance');
+        if (!res.ok) return;
+        const { balance } = await res.json();
+        el.textContent = `${balance} credit${balance === 1 ? '' : 's'}`;
+        _mcSetAiAffordable(balance >= 1);
+    } catch { /* leave placeholder */ }
+}
+
+function _mcSetAiAffordable(canAfford) {
+    const btn = document.getElementById('ai-generate-btn');
+    const warn = document.getElementById('ai-insufficient');
+    if (btn) {
+        btn.disabled = !canAfford;
+        // disabled: variants aren't in the prebuilt CSS — toggle present utilities directly.
+        btn.classList.toggle('opacity-50', !canAfford);
+        btn.classList.toggle('cursor-not-allowed', !canAfford);
+    }
+    warn?.classList.toggle('hidden', canAfford);
+}
+
+window._mcGenerateAI = async function () {
+    const promptEl = document.getElementById('ai-prompt');
+    const aspectEl = document.getElementById('ai-aspect');
+    const errorEl  = document.getElementById('ai-error');
+    const loadingEl = document.getElementById('ai-loading');
+    const resultsEl = document.getElementById('ai-results');
+    const hintEl    = document.getElementById('ai-results-hint');
+    const btn       = document.getElementById('ai-generate-btn');
+
+    const prompt = (promptEl?.value || '').trim();
+    errorEl.classList.add('hidden');
+    if (!prompt) { errorEl.textContent = 'Please describe the image you want.'; errorEl.classList.remove('hidden'); return; }
+
+    // Loading state — disable the button to prevent duplicate calls (AC).
+    btn.disabled = true;
+    loadingEl.classList.remove('hidden');
+    resultsEl.classList.add('hidden');
+    hintEl.classList.add('hidden');
+    resultsEl.innerHTML = '';
+
+    try {
+        const res = await fetch('/.netlify/functions/generate-ai-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, aspectRatio: aspectEl.value }),
+        });
+
+        if (res.status === 403) {
+            // Capability was revoked since the modal opened — drop the tab and bail out.
+            _mcCaps.canImage = false;
+            _mcApplyTabVisibility();
+            _mcSwitchTab('file');
+            return;
+        }
+        if (res.status === 402) {
+            const { balance } = await res.json().catch(() => ({ balance: 0 }));
+            document.getElementById('ai-balance').textContent = `${balance} credit${balance === 1 ? '' : 's'}`;
+            _mcSetAiAffordable(false);
+            return;
+        }
+        if (res.status === 422) {
+            const { error } = await res.json().catch(() => ({}));
+            errorEl.textContent = error || 'Prompt flagged for policy violation. Please adjust your text and try again.';
+            errorEl.classList.remove('hidden');
+            return;
+        }
+        if (!res.ok) {
+            errorEl.textContent = 'Image generation failed. Please try again.';
+            errorEl.classList.remove('hidden');
+            return;
+        }
+
+        const { jobId, images, balance } = await res.json();
+        _mcAiJobId = jobId;
+        if (typeof balance === 'number') {
+            document.getElementById('ai-balance').textContent = `${balance} credit${balance === 1 ? '' : 's'}`;
+            _mcSetAiAffordable(balance >= 1);
+        }
+        resultsEl.innerHTML = (images || []).map(img => `
+            <button type="button" onclick="window._mcSelectAI(${img.index})"
+              class="relative group rounded-xl overflow-hidden border border-gray-200 hover:border-emerald-500 hover:ring-2 hover:ring-emerald-400 transition cursor-pointer aspect-square">
+              <img src="${img.url}" alt="" class="w-full h-full object-cover">
+              <span class="absolute inset-0 flex items-center justify-center">
+                <span class="opacity-0 group-hover:opacity-100 bg-white text-emerald-700 text-xs font-bold px-3 py-1 rounded-full shadow transition">Use this</span>
+              </span>
+            </button>`).join('');
+        resultsEl.classList.remove('hidden');
+        hintEl.classList.remove('hidden');
+    } catch (e) {
+        errorEl.textContent = 'Image generation failed. Please try again.';
+        errorEl.classList.remove('hidden');
+    } finally {
+        loadingEl.classList.add('hidden');
+        btn.disabled = false;
+    }
+};
+
+window._mcSelectAI = async function (index) {
+    const errorEl = document.getElementById('ai-error');
+    errorEl.classList.add('hidden');
+    if (_mcAiJobId == null) return;
+    try {
+        const res = await fetch('/.netlify/functions/generate-ai-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'select', jobId: _mcAiJobId, index }),
+        });
+        if (!res.ok) {
+            errorEl.textContent = 'Could not save that image. Please try again.';
+            errorEl.classList.remove('hidden');
+            return;
+        }
+        document.getElementById('modal-upload')?.classList.add('hidden');
+        await _loadAssets();
+        _mcRefreshHeaderCredits();
+    } catch {
+        errorEl.textContent = 'Could not save that image. Please try again.';
+        errorEl.classList.remove('hidden');
+    }
+};
+
+// ── Generate AI Video ─────────────────────────────────────────────
+let _mcVidJobId = null;
+let _mcVidDuration = 6;
+let _mcVidPollTimer = null;
+
+window._mcVidPromptInput = function () {
+    const el = document.getElementById('vid-prompt');
+    const counter = document.getElementById('vid-prompt-count');
+    if (el && counter) counter.textContent = `${el.value.length} / 1000`;
+};
+
+window._mcVidSetDuration = function (n) {
+    _mcVidDuration = n;
+    const on  = 'flex-1 py-1.5 text-sm font-bold rounded-md transition bg-white shadow text-gray-900 cursor-pointer';
+    const off = 'flex-1 py-1.5 text-sm font-bold rounded-md transition text-gray-500 hover:text-gray-700 cursor-pointer';
+    document.getElementById('vid-dur-6').className  = n === 6  ? on : off;
+    document.getElementById('vid-dur-10').className = n === 10 ? on : off;
+};
+
+async function _mcVidOnOpen() {
+    const locked = document.getElementById('vid-locked');
+    const form = document.getElementById('vid-form');
+    try {
+        const res = await fetch('/.netlify/functions/get-ai-credit-balance');
+        if (!res.ok) return;
+        const { balance, tierCanVideo } = await res.json();
+        document.getElementById('vid-balance').textContent = `${balance} credit${balance === 1 ? '' : 's'}`;
+        // The tab is only shown when the assistant grants video, so here we only resolve the
+        // remaining plan-tier gate: tier-locked → upgrade CTA; otherwise the credit check.
+        locked.classList.toggle('hidden', !!tierCanVideo);
+        form.classList.toggle('hidden', !tierCanVideo);
+        if (tierCanVideo) {
+            const warn = document.getElementById('vid-insufficient');
+            const canAfford = balance >= 5;
+            _mcDisableBtn('vid-generate-btn', !canAfford);
+            warn.classList.toggle('hidden', canAfford);
+        }
+    } catch { /* leave default */ }
+}
+
+window._mcGenerateVideo = async function () {
+    const prompt = (document.getElementById('vid-prompt')?.value || '').trim();
+    const errEl  = document.getElementById('vid-error');
+    errEl.classList.add('hidden');
+    if (!prompt) { errEl.textContent = 'Please describe the video you want.'; errEl.classList.remove('hidden'); return; }
+
+    document.getElementById('vid-form').classList.add('hidden');
+    document.getElementById('vid-result').classList.add('hidden');
+    document.getElementById('vid-generating').classList.remove('hidden');
+
+    try {
+        const res = await fetch('/.netlify/functions/generate-ai-video', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, durationSeconds: _mcVidDuration }),
+        });
+
+        if (res.status === 403) {
+            const { code } = await res.json().catch(() => ({}));
+            document.getElementById('vid-generating').classList.add('hidden');
+            if (code === 'feature_unavailable') {
+                // Assistant no longer grants video — drop the tab and bail to file upload.
+                _mcCaps.assistantCanVideo = false;
+                _mcApplyTabVisibility();
+                _mcSwitchTab('file');
+            } else {
+                // Tier-locked → show the upgrade CTA.
+                document.getElementById('vid-locked').classList.remove('hidden');
+            }
+            return;
+        }
+        if (res.status === 402) {
+            document.getElementById('vid-generating').classList.add('hidden');
+            document.getElementById('vid-form').classList.remove('hidden');
+            document.getElementById('vid-insufficient').classList.remove('hidden');
+            return;
+        }
+        if (res.status === 422) {
+            const { error } = await res.json().catch(() => ({}));
+            document.getElementById('vid-generating').classList.add('hidden');
+            document.getElementById('vid-form').classList.remove('hidden');
+            errEl.textContent = error || 'Prompt flagged for policy violation. Please adjust your text and try again.';
+            errEl.classList.remove('hidden');
+            return;
+        }
+        if (!res.ok) {
+            document.getElementById('vid-generating').classList.add('hidden');
+            document.getElementById('vid-form').classList.remove('hidden');
+            errEl.textContent = 'Could not start video generation. Please try again.';
+            errEl.classList.remove('hidden');
+            return;
+        }
+
+        const { jobId } = await res.json();
+        _mcVidJobId = jobId;
+        _mcRefreshHeaderCredits();   // credits were held
+        _mcVidStartPolling();
+    } catch (e) {
+        document.getElementById('vid-generating').classList.add('hidden');
+        document.getElementById('vid-form').classList.remove('hidden');
+        errEl.textContent = 'Could not start video generation. Please try again.';
+        errEl.classList.remove('hidden');
+    }
+};
+
+function _mcVidStartPolling() {
+    _mcVidStopPolling();
+    _mcVidPollTimer = setInterval(async () => {
+        if (_mcVidJobId == null) return;
+        try {
+            const res = await fetch(`/.netlify/functions/generate-ai-video?jobId=${_mcVidJobId}`);
+            if (!res.ok) return;
+            const { status, videoUrl, errorMessage } = await res.json();
+            if (status === 'completed') {
+                _mcVidStopPolling();
+                document.getElementById('vid-generating').classList.add('hidden');
+                if (videoUrl) document.getElementById('vid-player').src = videoUrl;
+                document.getElementById('vid-result').classList.remove('hidden');
+                _loadAssets();
+                _mcRefreshHeaderCredits();
+            } else if (status === 'failed' || status === 'flagged') {
+                _mcVidStopPolling();
+                document.getElementById('vid-generating').classList.add('hidden');
+                document.getElementById('vid-form').classList.remove('hidden');
+                const errEl = document.getElementById('vid-error');
+                errEl.textContent = status === 'flagged'
+                    ? 'Prompt flagged for policy violation. Please adjust your text and try again.'
+                    : (errorMessage || 'Video generation failed. Your credits were refunded.');
+                errEl.classList.remove('hidden');
+                _mcRefreshHeaderCredits();   // refund restored balance
+            }
+        } catch { /* keep polling */ }
+    }, 5000);
+}
+
+function _mcVidStopPolling() {
+    if (_mcVidPollTimer) { clearInterval(_mcVidPollTimer); _mcVidPollTimer = null; }
+}
+
+window._mcVideoDone = function () {
+    _mcVidStopPolling();
+    _mcVidJobId = null;
+    document.getElementById('modal-upload')?.classList.add('hidden');
+    _loadAssets();
+    _mcRefreshHeaderCredits();
 };
 
 // ── File selection ────────────────────────────────────────────────
@@ -437,8 +919,22 @@ window._mcSubmitUpload = async function () {
 };
 
 // ── Delete ────────────────────────────────────────────────────────
+// Issue #55: an asset can be attached to a draft/scheduled post (via attach-draft-media /
+// regenerate-post-media) without its own status ever flipping to 'scheduled' — so it can still
+// show the plain Delete button here. Warn before deleting if any active post uses it.
 window._mcPromptDelete = function (assetId) {
     _assetToDelete = assetId;
+    const all = [...(_assets.pending || []), ...(_assets.scheduled || []), ...(_assets.posted || []), ...(_assets.rejected || [])];
+    const asset = all.find(a => a.id === assetId);
+    const warningEl = document.getElementById('delete-warning');
+    const usedIn = asset?.usedInPosts || [];
+    if (usedIn.length > 0) {
+        const postWord = usedIn.length === 1 ? 'post' : 'posts';
+        warningEl.textContent = `This is used in ${usedIn.length} draft/scheduled ${postWord}. Deleting it will flag ${usedIn.length === 1 ? 'that post' : 'those posts'} in the Review Queue so the assistant can source new media.`;
+        warningEl.classList.remove('hidden');
+    } else {
+        warningEl.classList.add('hidden');
+    }
     document.getElementById('modal-delete-asset').classList.remove('hidden');
 };
 
@@ -447,9 +943,15 @@ async function _doDelete() {
     try {
         const res = await fetch(`/.netlify/functions/content-assets?id=${_assetToDelete}`, { method: 'DELETE' });
         if (res.ok) {
+            const d = await res.json().catch(() => ({}));
             document.getElementById('modal-delete-asset').classList.add('hidden');
             _assetToDelete = null;
             await _loadAssets();
+            const affected = d.affectedPosts?.length || 0;
+            if (affected > 0) {
+                const msg = `Deleted. ${affected} ${affected === 1 ? 'post has' : 'posts have'} been flagged in the Review Queue for new media.`;
+                window.showToast ? window.showToast(msg, { icon: '⚠️', duration: 6000 }) : alert(msg);
+            }
         }
     } catch { alert('Could not delete. Please try again.'); }
 }
@@ -501,6 +1003,36 @@ function _formatBytes(bytes) {
 
 function _typeLabel(type) {
     return { image: 'Image', video: 'Video', link: 'Link' }[type] || type;
+}
+
+// Which of {your upload, AI-sourced, AI-generated} an asset is, for the badges in
+// _assetRow. Driven by contentAssets.provider (US3 AC3.2 / Epic 1 AI Media Generation):
+// 'fal' = generated, 'pexels' (or any other stock provider) = sourced, null = user upload.
+// Only shown for visual assets — link assets are always user-provided, so no badge adds value.
+function _sourceInfo(asset) {
+    if (asset.assetType !== 'image' && asset.assetType !== 'video') return null;
+    if (asset.provider === 'fal') {
+        return {
+            label: 'AI Generated',
+            badgeClass: 'bg-pink-50 text-pink-700 border-pink-200',
+            chipClass: 'bg-pink-500',
+            icon: `<svg class="w-2.5 h-2.5 text-white" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2l1.6 4.8L16 8.4l-4.4 1.6L10 15l-1.6-5-4.4-1.6 4.4-1.6L10 2z"/></svg>`,
+        };
+    }
+    if (asset.provider) {
+        return {
+            label: 'Sourced by Assistant',
+            badgeClass: 'bg-blue-50 text-blue-700 border-blue-200',
+            chipClass: 'bg-blue-500',
+            icon: `<svg class="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M19 11a8 8 0 11-16 0 8 8 0 0116 0z"/></svg>`,
+        };
+    }
+    return {
+        label: 'Your Upload',
+        badgeClass: 'bg-gray-50 text-gray-600 border-gray-200',
+        chipClass: 'bg-gray-500',
+        icon: `<svg class="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/></svg>`,
+    };
 }
 
 function _typeIcon(type) {

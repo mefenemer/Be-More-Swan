@@ -26,11 +26,17 @@ import {
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 
 const jwtSecret = process.env.JWT_SECRET;
-const BASE_URL  = process.env.BASE_URL || 'https://aura-assist.com';
+const BASE_URL  = process.env.BASE_URL || 'https://bemoreswan.com';
 
 const ALLOWED_ROLES = ['billing_admin', 'platform_admin', 'super_admin'];
 
 export const handler: Handler = async (event) => {
+    // Epic: Superadmin Environment Management — live-only admin action. Reject sandbox
+    // requests so this can never run while the operator believes they are in sandbox
+    // (prevents production bleed). See docs/SANDBOX-ENVIRONMENT.md.
+    if (((event.headers['x-environment'] || event.headers['X-Environment'] || '') + '').trim().toLowerCase() === 'sandbox') {
+        return { statusCode: 400, body: JSON.stringify({ error: 'This action is not available in Sandbox mode.' }) };
+    }
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed.' }) };
     }

@@ -23,6 +23,13 @@ export const CONFIG_KEYS = {
     WORKSPACE_RATE_LIMITS:  'workspace_rate_limits',
     // Per-workspace suspension: { [workspaceId: string]: { reason: string, suspendedAt: string } }
     SUSPENDED_WORKSPACES:   'suspended_workspaces',
+    // ── Gamification & Engagement (admin-editable; AC4.1.1 / AC4.2.3) ──
+    GAMIFICATION_TIME_MULTIPLIERS: 'gamification.time_multipliers', // { leads_generated, content_drafted, tasks_completed } minutes
+    GAMIFICATION_MILESTONES:       'gamification.milestones',       // { leads_for_token, hours_for_beta }
+    GAMIFICATION_REWARDS_PAUSED:   'gamification.rewards_paused',   // boolean — emergency stop
+    // ── AI-regulatory compliance overrides (AC4.1; defaults in src/config/compliance.ts) ──
+    COMPLIANCE_EU_EXTRA_COUNTRIES:  'compliance.eu_extra_countries',    // string[] — extra ISO codes added to the EU jurisdiction set
+    COMPLIANCE_SYSTEMIC_RISK_FLOPS: 'compliance.systemic_risk_flops',   // number — GPAI systemic-risk compute trigger (FLOPs)
 } as const;
 
 export type ConfigKey = typeof CONFIG_KEYS[keyof typeof CONFIG_KEYS];
@@ -97,4 +104,34 @@ export async function isMaintenanceMode(): Promise<boolean> {
 export async function isRegistrationLocked(): Promise<boolean> {
     const val = await getPlatformConfig(CONFIG_KEYS.NEW_REGISTRATION_LOCK);
     return val === true;
+}
+
+/** Upsert a config value (admin writes) and invalidate its cache so it applies immediately. */
+export async function setPlatformConfig(key: string, value: unknown, updatedBy?: number, reason?: string): Promise<void> {
+    const db = getDb();
+    await db.insert(platformConfig)
+        .values({ key, value, updatedBy: updatedBy ?? null, reason: reason ?? null, updatedAt: new Date() })
+        .onConflictDoUpdate({ target: platformConfig.key, set: { value, updatedBy: updatedBy ?? null, reason: reason ?? null, updatedAt: new Date() } });
+    invalidatePlatformConfig(key);
+}
+
+// ── Gamification config accessors (with safe defaults if the row is missing) ──
+export interface TimeMultipliers { leads_generated: number; content_drafted: number; tasks_completed: number; }
+export interface Milestones { leads_for_token: number; hours_for_beta: number; }
+
+export const DEFAULT_TIME_MULTIPLIERS: TimeMultipliers = { leads_generated: 3, content_drafted: 5, tasks_completed: 2 };
+export const DEFAULT_MILESTONES: Milestones = { leads_for_token: 100, hours_for_beta: 50 };
+
+export async function getTimeMultipliers(): Promise<TimeMultipliers> {
+    const val = await getPlatformConfig(CONFIG_KEYS.GAMIFICATION_TIME_MULTIPLIERS) as Partial<TimeMultipliers> | null;
+    return { ...DEFAULT_TIME_MULTIPLIERS, ...(val || {}) };
+}
+
+export async function getMilestones(): Promise<Milestones> {
+    const val = await getPlatformConfig(CONFIG_KEYS.GAMIFICATION_MILESTONES) as Partial<Milestones> | null;
+    return { ...DEFAULT_MILESTONES, ...(val || {}) };
+}
+
+export async function areRewardsPaused(): Promise<boolean> {
+    return (await getPlatformConfig(CONFIG_KEYS.GAMIFICATION_REWARDS_PAUSED)) === true;
 }

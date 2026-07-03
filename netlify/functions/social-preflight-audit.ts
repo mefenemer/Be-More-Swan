@@ -6,11 +6,11 @@
 
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
-import jwt from 'jsonwebtoken';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { systemConnections } from '../../db/schema';
 import { getSecret } from '../../src/utils/vault';
+import { requireTenant } from '../../src/utils/tenant';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const HAIKU = 'claude-haiku-4-5-20251001';
@@ -50,8 +50,6 @@ const PLATFORM_CONSTRAINTS: Record<string, Record<string, unknown>> = {
         restrictions: ['Rules of the Road apply', 'No duplicate content'],
     },
 };
-
-const jwtSecret = process.env.JWT_SECRET!;
 
 interface PreflightCheck {
     id: 'CHK-01' | 'CHK-02' | 'CHK-03' | 'CHK-04' | 'CHK-05';
@@ -207,18 +205,13 @@ async function runXChecks(token: string): Promise<PreflightCheck[]> {
 export const handler: Handler = async (event) => {
     // ── GET: return last results ──────────────────────────────────────────────
     if (event.httpMethod === 'GET') {
-        const cookieHeader = event.headers.cookie || '';
-        const sessionToken = cookieHeader.match(/aura_session=([^;]+)/)?.[1];
-        if (!sessionToken) return { statusCode: 401, body: 'Unauthorized' };
-
-        let organisationId: number;
-        try {
-            const p = jwt.verify(sessionToken, jwtSecret) as { organisationId: number };
-            organisationId = p.organisationId;
-        } catch { return { statusCode: 401, body: 'Invalid session' }; }
+        const db = getDb();
+        // Session carries `activeOrganisationId`, not `organisationId` — resolve via requireTenant.
+        const ctx = await requireTenant(event, db);
+        if ('error' in ctx) return ctx.error;
+        const { organisationId } = ctx;
 
         const platform = event.queryStringParameters?.platform ?? 'instagram';
-        const db = getDb();
         const [conn] = await db.select({ metadata: systemConnections.metadata })
             .from(systemConnections)
             .where(and(eq(systemConnections.organisationId, organisationId), eq(systemConnections.serviceName, platform), eq(systemConnections.isActive, true)))
@@ -232,15 +225,16 @@ export const handler: Handler = async (event) => {
         const body = JSON.parse(event.body || '{}');
         let { organisationId, platform } = body as { organisationId: number | undefined; platform: string };
 
-        // Resolve orgId from session if not provided (user-triggered)
+        // Resolve orgId from session if not provided (user-triggered). Internal callers
+        // (post-OAuth fire-and-forget, nightly schedule) pass organisationId in the body.
         if (!organisationId) {
             const cookieHeader = event.headers.cookie || '';
             const sessionToken = cookieHeader.match(/aura_session=([^;]+)/)?.[1];
             if (sessionToken) {
-                try {
-                    const p = jwt.verify(sessionToken, jwtSecret) as { organisationId: number };
-                    organisationId = p.organisationId;
-                } catch { return { statusCode: 401, body: 'Invalid session' }; }
+                // Session carries `activeOrganisationId`, not `organisationId` — resolve via requireTenant.
+                const ctx = await requireTenant(event, getDb());
+                if ('error' in ctx) return ctx.error;
+                organisationId = ctx.organisationId;
             }
         }
 

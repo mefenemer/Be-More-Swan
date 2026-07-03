@@ -4,8 +4,9 @@
   <script src="./auth-check.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Assistant Setup | Aura-Assist</title>
+  <title>Assistant Setup | Be More Swan</title>
   <link href="./style.css" rel="stylesheet">
+  <script src="./explainers.js?v=20260630-2" defer></script>
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/favicon/apple-icon.png">
   <link rel="manifest" href="/favicon/manifest.json">
@@ -27,12 +28,29 @@
   </div>
 </div>
 
+<!-- US3: In-app feature-unlock modal (prorated upgrade, no page change) -->
+<div id="unlock-feature-modal" class="fixed inset-0 bg-gray-900 bg-opacity-60 hidden z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8">
+    <div class="flex justify-between items-center mb-2">
+      <div class="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center text-2xl">🔒</div>
+      <button onclick="closeUnlockModal()" class="text-gray-400 hover:text-gray-800 text-3xl leading-none transition">&times;</button>
+    </div>
+    <h3 class="text-2xl font-extrabold text-gray-900 mt-4 mb-1">Unlock <span id="unlock-feature-name">this feature</span></h3>
+    <p id="unlock-feature-desc" class="text-gray-600 mb-4 leading-relaxed"></p>
+    <div id="unlock-cost" class="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 mb-6 text-sm text-emerald-900">Calculating your upgrade cost…</div>
+    <div class="flex flex-col sm:flex-row gap-3">
+      <button onclick="closeUnlockModal()" class="px-5 py-3 text-gray-600 font-bold hover:bg-gray-100 rounded-lg transition w-full sm:w-auto">Maybe later</button>
+      <button id="unlock-upgrade-btn" onclick="doUnlockUpgrade()" class="px-5 py-3 bg-emerald-600 text-white text-center font-bold rounded-lg shadow hover:bg-emerald-700 transition w-full disabled:opacity-50">Upgrade Now</button>
+    </div>
+  </div>
+</div>
+
 <nav class="bg-white shadow-sm sticky top-0 z-40">
   <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
     <div class="flex justify-between h-16 items-center">
       <div class="flex items-center">
         <a href="index.html" class="flex items-center">
-          <span class="font-extrabold text-2xl text-emerald-700 tracking-tight">Aura-Assist&#8482;</span>
+          <span class="font-extrabold text-2xl text-emerald-700 tracking-tight">Be More Swan</span>
         </a>
         <span id="nav-subtitle" class="text-base font-medium text-gray-400 ml-2">| Set Up Your Assistant</span>
       </div>
@@ -83,14 +101,16 @@
   <div class="bg-white rounded-2xl shadow-lg border border-gray-100 w-full max-w-2xl overflow-hidden mt-4">
 
     <div class="bg-gray-100 h-2 w-full">
-      <div id="progress-bar" class="bg-emerald-700 h-2 transition-all duration-500 ease-out" style="width: 11%;"></div>
+      <div id="progress-bar" class="bg-emerald-700 h-2 transition-all duration-500 ease-out" style="width: 14%;"></div>
     </div>
 
     <div class="p-8 sm:p-12">
       <form id="intake-form" onsubmit="event.preventDefault();">
 
-        <!-- STEP 1: Choose your assistant -->
-        <div id="step-1" class="step-active">
+        <!-- STEP 1: Choose your assistant — SKIPPED. The role is already chosen in the
+             catalogue before this wizard opens, so this picker is redundant. Kept hidden
+             (the radio stays pre-checked = Social Media Manager) and the flow starts at step 2. -->
+        <div id="step-1" class="step-hidden">
           <span class="text-emerald-700 font-bold text-sm tracking-wider uppercase mb-2 block">Step 1 of 8</span>
           <h2 class="text-3xl font-extrabold text-gray-900 mb-2">Choose your Digital Assistant</h2>
           <p class="text-gray-500 mb-6">Select the assistant you'd like to set up. More specialist assistants are coming soon.</p>
@@ -196,7 +216,7 @@
           </div>
         </div>
 
-        <div id="step-2" class="step-hidden">
+        <div id="step-2" class="step-active">
           <span class="text-emerald-700 font-bold text-sm tracking-wider uppercase mb-2 block">Step 2 of 8</span>
           <h2 class="text-3xl font-extrabold text-gray-900 mb-4">Let's get this off your plate.</h2>
           <p class="text-gray-500 mb-6">Before we build your assistant, we need to understand the strategic goal driving your social presence.</p>
@@ -388,16 +408,16 @@
               </div>
             </div>
             <div>
-              <label class="block text-sm font-bold text-gray-700 mb-1">Target Audience: *</label>
+              <label class="block text-sm font-bold text-gray-700 mb-1" data-explain="target-audience">Target Audience: *</label>
               <label for="val_audience"></label><input type="text" id="val_audience" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm bg-white" placeholder="e.g., Women founders looking to optimize their business operations.">
             </div>
             <div>
-              <label class="block text-sm font-bold text-gray-700 mb-1">Brand Voice & Tone: *</label>
+              <label class="block text-sm font-bold text-gray-700 mb-1" data-explain="brand-voice">Brand Voice & Tone: *</label>
               <p class="text-xs text-gray-500 mb-2">Describe the personality. (e.g., Nurturing, honest, professional, casual, supportive).</p>
               <label for="val_tone"></label><input type="text" id="val_tone" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm bg-white" placeholder="e.g., Friendly and supportive, avoiding overly salesy language.">
             </div>
             <div>
-              <label class="block text-sm font-bold text-gray-700 mb-1">Content Pillars / Core Topics: *</label>
+              <label class="block text-sm font-bold text-gray-700 mb-1" data-explain="content-pillars">Content Pillars / Core Topics: *</label>
               <p class="text-xs text-gray-500 mb-2">What are the core topics, themes, or keywords the assistant should focus on?</p>
               <label for="val_pillars"></label><input type="text" id="val_pillars" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm bg-white" placeholder="e.g., Wellness tips, stress relief, product spotlights.">
             </div>
@@ -407,27 +427,37 @@
               <p class="text-sm text-gray-500 mb-5">The single most important thing you want your audience to think, feel, or do after seeing your content.</p>
               <div class="space-y-4">
                 <div>
-                  <label class="block text-sm font-bold text-gray-700 mb-1">Core Message: *</label>
+                  <label class="block text-sm font-bold text-gray-700 mb-1" data-explain="core-message">Core Message: *</label>
                   <p class="text-xs text-gray-500 mb-2">The one idea you want every piece of content to reinforce. Your assistant will anchor all content around this.</p>
                   <input type="text" id="val_core_message" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm bg-white" placeholder="e.g., We help busy founders reclaim their time without sacrificing growth.">
                   <span id="error-core-message" class="error-msg hidden text-red-500 text-xs font-bold mt-1 block">Please enter your core message.</span>
                 </div>
                 <div>
-                  <label class="block text-sm font-bold text-gray-700 mb-1">Primary Call-to-Action (CTA): *</label>
+                  <label class="block text-sm font-bold text-gray-700 mb-1" data-explain="cta">Primary Call-to-Action (CTA): *</label>
                   <p class="text-xs text-gray-500 mb-2">What specific action do you want the audience to take? (e.g., Book a call, Download the guide, Shop now)</p>
                   <input type="text" id="val_cta" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm bg-white" placeholder="e.g., Book a free 15-minute discovery call.">
                   <span id="error-cta" class="error-msg hidden text-red-500 text-xs font-bold mt-1 block">Please enter your primary CTA.</span>
                 </div>
                 <div>
-                  <label class="block text-sm font-bold text-gray-700 mb-1">The Incentive (Optional):</label>
+                  <label class="block text-sm font-bold text-gray-700 mb-1" data-explain="incentive">The Incentive (Optional):</label>
                   <p class="text-xs text-gray-500 mb-2">Why should they take that action right now? What do they get?</p>
                   <input type="text" id="val_incentive" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm bg-white" placeholder="e.g., Get the first month free, No obligation, Instant access to the toolkit.">
+                </div>
+                <div>
+                  <label for="val_offerings" class="block text-sm font-bold text-gray-700 mb-1" data-explain="service-offerings">Your Service Offerings (Optional):</label>
+                  <p class="text-xs text-gray-500 mb-2">List the specific things people can buy or book — courses, discovery calls, packages. Your assistant weaves these naturally into the schedule and writes occasional direct "work with me" posts around them.</p>
+                  <textarea id="val_offerings" class="auto-expand-textarea w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm bg-white" placeholder="e.g., 1:1 coaching (£500/mo), Free 15-min discovery call, Self-paced course (£199)."></textarea>
+                </div>
+                <div>
+                  <label for="val_objections" class="block text-sm font-bold text-gray-700 mb-1" data-explain="sales-objections">Sales Objections Playbook (Optional):</label>
+                  <p class="text-xs text-gray-500 mb-2">The objections you hear most, and how you answer them. Your assistant uses this to draft replies to sales enquiries in DMs and comments for your review. One per line: <em>objection — your response</em>.</p>
+                  <textarea id="val_objections" class="auto-expand-textarea w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm bg-white" placeholder="e.g., It's too expensive — Break it down to cost-per-day vs. the time it saves.&#10;I don't have time — The onboarding takes 20 minutes and we handle the rest."></textarea>
                 </div>
               </div>
             </div>
 
             <div class="mt-6 border-t border-gray-100 pt-6">
-              <h3 class="block text-sm font-bold text-gray-700 mb-1">Knowledge Base & Brain Trust (Optional)</h3>
+              <h3 class="block text-sm font-bold text-gray-700 mb-1" data-explain="knowledge-base">Knowledge Base & Brain Trust (Optional)</h3>
               <p class="text-xs text-gray-500 mb-4">Train your AI with your unique voice. Share personal anecdotes, life experiences, or brand stories.</p>
 
               <label for="val_braintrust_text" class="sr-only">Share your personal anecdotes</label>
@@ -459,14 +489,13 @@
 
           <div class="space-y-6 mb-8 border-b border-gray-200 pb-8">
             <div>
-              <label class="block text-sm font-bold text-gray-700 mb-1">Visual Strategy: *</label>
+              <label class="block text-sm font-bold text-gray-700 mb-1" data-explain="visual-strategy">Visual Strategy: *</label>
               <p class="text-xs text-gray-500 mb-2">How should the assistant handle images or video?</p>
               <select id="val_visuals" class="w-full border border-gray-300 rounded-lg p-3 focus:ring-2 focus:ring-emerald-700 transition shadow-sm bg-white">
                 <option>Text Only (No visuals needed)</option>
-                <option>Generate AI Images (e.g., Midjourney / DALL-E)</option>
-                <option>Use Free Stock Photos (e.g., Unsplash - Static Only)</option>
-                <option>Apply my branded templates (Requires Canva/Bannerbear setup)</option>
-                <option>I will provide ready-to-post assets in a linked folder</option>
+                <option>Generate AI Images &amp; Video (Flux + Hailuo)</option>
+                <option>Use Free Stock Photos &amp; Videos (Pexels)</option>
+                <option>I will provide my own ready-to-post assets</option>
               </select>
             </div>
             <div>
@@ -536,7 +565,7 @@
           </div>
 
           <div id="algorithm_helpers_container" class="hidden mt-8 border-t border-gray-200 pt-6">
-            <label class="block text-sm font-bold text-gray-900 mb-2">Platform Algorithm Helpers (Hashtags/Keywords): *</label>
+            <label class="block text-sm font-bold text-gray-900 mb-2" data-explain="hashtags-keywords">Platform Algorithm Helpers (Hashtags/Keywords): *</label>
             <p class="text-sm text-gray-500 mb-4">Define the visibility and formatting strategy for each of your selected platforms.</p>
 
             <div id="algo_block_fb" class="hidden algo-block space-y-3 mb-4 bg-white border border-gray-200 p-4 rounded-lg shadow-sm">
@@ -548,35 +577,35 @@
               </div>
               <input type="text" id="algo_custom_tags_fb" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 transition" placeholder="e.g., #FacebookTips #Community">
               <hr class="border-gray-100">
-              <label class="flex items-center cursor-pointer hover:text-emerald-800 transition gated-feature" onclick="return checkTier('saver', 'Facebook Group Optimization')">
-                <input type="checkbox" id="fb_opt_groups" class="h-4 w-4 text-emerald-700 rounded border-gray-300"><span class="ml-2 text-sm font-bold text-emerald-900">Draft version for niche Facebook Groups (Saver+)</span>
+              <label class="flex items-center cursor-pointer hover:text-emerald-800 transition gated-feature" data-feature="fb_opt_groups">
+                <input type="checkbox" id="fb_opt_groups" class="h-4 w-4 text-emerald-700 rounded border-gray-300"><span class="ml-2 text-sm font-bold text-emerald-900">Draft versions for niche Facebook Groups</span>
               </label>
             </div>
 
             <div id="algo_block_ig" class="hidden algo-block space-y-3 mb-4 bg-white border border-gray-200 p-4 rounded-lg shadow-sm">
-              <h4 class="font-bold text-gray-800 text-sm mb-2">Instagram Strategy</h4>
+              <h4 class="font-bold text-gray-800 text-sm mb-2" data-explain="instagram-strategy">Instagram Strategy</h4>
               <input type="text" id="algo_custom_tags_ig" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 transition" placeholder="e.g., #InstaGood">
-              <select id="ig_opt_format" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 transition">
+              <div class="flex items-center"><select id="ig_opt_format" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 transition">
                 <option value="mix">Optimize for a Mix (Reels, Carousels, Static)</option>
                 <option value="reels">Prioritize Reels</option>
-              </select>
-              <label class="flex items-center cursor-pointer hover:text-emerald-800 transition gated-feature" onclick="return checkTier('saver', 'Trending Audio Monitoring')">
-                <input type="checkbox" id="ig_opt_audio" class="h-4 w-4 text-emerald-700 rounded border-gray-300"><span class="ml-2 text-sm text-gray-700">Suggest trending audio concepts (Saver+)</span>
+              </select><span data-explain="content-formats" class="inline-flex"></span></div>
+              <label class="flex items-center cursor-pointer hover:text-emerald-800 transition gated-feature" data-feature="ig_opt_audio">
+                <input type="checkbox" id="ig_opt_audio" class="h-4 w-4 text-emerald-700 rounded border-gray-300"><span class="ml-2 text-sm text-gray-700" data-explain="trending-audio">Suggest trending audio concepts</span>
               </label>
             </div>
 
             <div id="algo_block_li" class="hidden algo-block space-y-3 mb-4 bg-white border border-gray-200 p-4 rounded-lg shadow-sm">
-              <h4 class="font-bold text-gray-800 text-sm mb-2">LinkedIn Strategy</h4>
-              <label class="flex items-center cursor-pointer hover:text-emerald-800 transition"><input type="checkbox" id="li_opt_links" class="h-4 w-4 text-emerald-700 rounded"><span class="ml-2 text-sm text-gray-700">Anti-Penalty: URLs in first comment</span></label>
-              <label class="flex items-center cursor-pointer hover:text-emerald-800 transition gated-feature" onclick="return checkTier('saver', 'PDF Slider Generation')"><input type="checkbox" id="li_opt_sliders" class="h-4 w-4 text-emerald-700 rounded"><span class="ml-2 text-sm text-gray-700">PDF Slider/Carousel outlines (Saver+)</span></label>
+              <h4 class="font-bold text-gray-800 text-sm mb-2" data-explain="linkedin-strategy">LinkedIn Strategy</h4>
+              <label class="flex items-center cursor-pointer hover:text-emerald-800 transition"><input type="checkbox" id="li_opt_links" class="h-4 w-4 text-emerald-700 rounded"><span class="ml-2 text-sm text-gray-700" data-explain="link-first-comment">Anti-Penalty: URLs in first comment</span></label>
+              <label class="flex items-center cursor-pointer hover:text-emerald-800 transition gated-feature" data-feature="li_opt_sliders"><input type="checkbox" id="li_opt_sliders" class="h-4 w-4 text-emerald-700 rounded"><span class="ml-2 text-sm text-gray-700" data-explain="pdf-carousel">PDF Slider/Carousel outlines</span></label>
             </div>
 
             <div id="algo_block_x" class="hidden algo-block space-y-3 mb-4 bg-white border border-gray-200 p-4 rounded-lg shadow-sm">
-              <h4 class="font-bold text-gray-800 text-sm mb-2">X (Twitter) Strategy</h4>
+              <h4 class="font-bold text-gray-800 text-sm mb-2" data-explain="x-strategy">X (Twitter) Strategy</h4>
               <select id="x_opt_length" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 transition">
                 <option value="mix">Mix of Threads and Single Posts</option>
               </select>
-              <label class="flex items-center cursor-pointer hover:text-emerald-800 transition gated-feature" onclick="return checkTier('saver', 'Automated Media Sourcing')"><input type="checkbox" id="x_opt_media" class="h-4 w-4 text-emerald-700 rounded"><span class="ml-2 text-sm text-gray-700">Include placeholders for media (Saver+)</span></label>
+              <label class="flex items-center cursor-pointer hover:text-emerald-800 transition gated-feature" data-feature="x_opt_media"><input type="checkbox" id="x_opt_media" class="h-4 w-4 text-emerald-700 rounded"><span class="ml-2 text-sm text-gray-700" data-explain="media-placeholders">Include placeholders for media</span></label>
             </div>
           </div>
         </div>
@@ -589,7 +618,7 @@
           <!-- Hidden workflow container — auto-populated silently, never displayed -->
           <div id="workflow-steps-container" class="hidden"></div>
 
-          <label class="block text-sm font-bold text-gray-700 mb-2">Strict Rules & Exceptions: *</label>
+          <label class="block text-sm font-bold text-gray-700 mb-2" data-explain="guardrails">Strict Rules & Exceptions: *</label>
           <textarea id="acceptance_criteria_rules"
                     class="auto-expand-textarea w-full border border-gray-300 rounded-lg p-4 focus:ring-2 focus:ring-emerald-700 transition shadow-sm resize-none"
                     placeholder="e.g., Never use more than 3 hashtags per post."></textarea>
@@ -597,9 +626,33 @@
           <div class="mt-6 p-4 bg-emerald-50 border border-emerald-200 rounded-lg">
             <p class="text-sm font-bold text-emerald-800 mb-1">Approval Protocol:</p>
             <p class="text-sm text-emerald-900">
-              All requests requiring approval will be stored in your <strong>Aura-Assist Workspace</strong>.
+              All requests requiring approval will be stored in your <strong>Be More Swan Workspace</strong>.
               You will be notified by email the moment a new request is ready for your review.
             </p>
+          </div>
+
+          <!-- AI Disclosure (EU AI Act Art. 50) — captured here so the assistant ships with a
+               disclosure already set, removing the Kick Off Meeting blocker. Editable later in the
+               Assistant Profile → Brand Safety & Legal. -->
+          <div class="mt-8 border-t border-gray-200 pt-6">
+            <label class="block text-sm font-bold text-gray-700 mb-1" for="onboarding_ai_disclosure" data-explain="ai-disclosure">AI Disclosure</label>
+            <p class="text-xs text-gray-500 mb-3">How your assistant labels its output as AI-generated, as required by the EU AI Act's transparency rules. You can fine-tune this any time in your Assistant Profile.</p>
+
+            <div class="mb-3 flex flex-col gap-2">
+              <button type="button" onclick="applyDisclosureSuggestion('Some content on this account is created with the help of Be More Swan AI.')" class="text-left text-sm bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg p-3 hover:bg-emerald-100 hover:border-emerald-300 transition shadow-sm cursor-pointer">
+                <span class="font-bold block mb-0.5">General (recommended)</span>
+                "Some content on this account is created with the help of Be More Swan AI."
+              </button>
+              <button type="button" onclick="applyDisclosureSuggestion('Some images and videos on this account are AI-generated using Be More Swan AI.')" class="text-left text-sm bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg p-3 hover:bg-emerald-100 hover:border-emerald-300 transition shadow-sm cursor-pointer">
+                <span class="font-bold block mb-0.5">For AI images &amp; video</span>
+                "Some images and videos on this account are AI-generated using Be More Swan AI."
+              </button>
+            </div>
+
+            <textarea id="onboarding_ai_disclosure" maxlength="500"
+                      class="auto-expand-textarea w-full border border-gray-300 rounded-lg p-4 focus:ring-2 focus:ring-emerald-700 transition shadow-sm resize-none"
+                      placeholder="Click a suggestion above, or write your own — e.g. Some content on this account is created with the help of Be More Swan AI."></textarea>
+            <p class="text-xs text-gray-400 mt-1">Leave blank to set it later — you'll be prompted before your assistant can be activated.</p>
           </div>
         </div>
 
@@ -614,7 +667,7 @@
             <label class="block text-sm font-bold text-gray-900 mb-1" for="val_hourly_rate">
               What is your hourly rate? <span class="text-gray-400 font-normal">(Optional)</span>
             </label>
-            <p class="text-xs text-gray-500 mb-3">Aura uses this to calculate how much time — and money — your assistants save you each month.</p>
+            <p class="text-xs text-gray-500 mb-3">Be More Swan uses this to calculate how much time — and money — your assistants save you each month.</p>
             <div class="flex items-center gap-2 max-w-xs">
               <span class="text-gray-500 font-bold text-sm">£</span>
               <input type="number" id="val_hourly_rate" min="1" max="9999" step="1"
@@ -628,13 +681,13 @@
         <div id="step-8" class="step-hidden text-center py-4">
           <div id="setup-initial-view">
             <div class="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center text-emerald-700 font-bold mx-auto mb-6 text-4xl">📋</div>
-            <h2 class="text-3xl font-extrabold text-gray-900 mb-8">Perfect. Let's start the build.</h2>
+            <h2 class="text-3xl font-extrabold text-gray-900 mb-8">Perfect. Let's get your assistant ready.</h2>
           </div>
 
           <div id="setup-loading-view" class="hidden py-12">
             <div class="w-16 h-16 border-4 border-emerald-100 border-t-emerald-600 rounded-full animate-spin mx-auto mb-6"></div>
-            <h3 class="text-xl font-bold text-gray-900">Provisioning your workspace...</h3>
-            <p class="text-gray-500 mt-2">Connecting your accounts and building your assistant.</p>
+            <h3 class="text-xl font-bold text-gray-900">Getting your assistant settled in...</h3>
+            <p class="text-gray-500 mt-2">Setting up your accounts and getting your assistant ready to start.</p>
           </div>
         </div>
 
@@ -725,8 +778,19 @@
 
   // window.validateCurrentStep is defined below after all helpers are in scope
   // --- 1. CONFIG & STATE ---
-  let currentStep = 1;
+  // Step 1 (the in-wizard assistant picker) is skipped — the role is already chosen in the
+  // catalogue before this wizard opens. The flow begins at FIRST_STEP and the remaining
+  // labels/progress are renumbered so it reads as a clean 1-of-N to the user.
+  const FIRST_STEP = 2;
+  let currentStep = FIRST_STEP;
   const totalSteps = 8;
+
+  // Multi-draft support: this wizard edits one specific draft, identified by ?draftId.
+  // A fresh hire arrives with no id and creates one on first autosave; resuming arrives
+  // with ?draftId (and optionally ?step from the Setup Checklist deep-link).
+  const _draftParams = new URLSearchParams(window.location.search);
+  let draftId = _draftParams.get('draftId') ? Number(_draftParams.get('draftId')) : null;
+  const _resumeStep = _draftParams.get('step') ? Number(_draftParams.get('step')) : null;
   let workflowStepCount = 1;
   const missingFallback = "⚠️ [MISSING - PLEASE UPDATE]";
 
@@ -752,6 +816,13 @@
     // Resume existing draft
     await hydrateDraft();
 
+    // Single source of truth: prefill social handles from connected accounts
+    // (only platforms the draft didn't already set).
+    await prefillSocialsFromConnections();
+
+    // US1–US3: gate premium feature toggles by the user's real subscription tier.
+    initFeatureGating();
+
     // Show cancel-recovery banner when returning from Stripe checkout cancellation
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('cancelled') === 'true') {
@@ -761,6 +832,20 @@
       updateUI();
       window.history.replaceState({}, '', window.location.pathname + '?tier=' + currentTierKey);
     }
+
+    // Renumber the visible step counters now that step 1 is skipped (step 2 → "Step 1 of N",
+    // counting the final build screen in the total) and label the wizard with the chosen role.
+    const displayTotal = totalSteps - FIRST_STEP + 1;
+    for (let i = FIRST_STEP; i <= 7; i++) {
+      const lbl = document.querySelector(`#step-${i} > span`);
+      if (lbl) lbl.textContent = `Step ${i - FIRST_STEP + 1} of ${displayTotal}`;
+    }
+    const subtitle = document.getElementById('nav-subtitle');
+    if (subtitle) subtitle.textContent = '| Social Media Manager';
+
+    // Render the real first step (guards against a resumed draft landing on the skipped step 1).
+    if (currentStep < FIRST_STEP) currentStep = FIRST_STEP;
+    updateUI();
 
     autoExpandTextareas();
 
@@ -841,15 +926,39 @@
   async function saveDraftToBackend() {
     updateDraftStatus('saving');
     try {
-      const res = await fetch('/.netlify/functions/onboarding-draft', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          currentStep: currentStep,
-          onboardingPath: 'social_media',
-          draftData: getFormData()
-        })
-      });
+      const payload = {
+        currentStep: currentStep,
+        onboardingPath: 'social_media',
+        roleKey: 'social_media',
+        displayName: sessionStorage.getItem('aura_assistant_name') || document.getElementById('val_assistant_name')?.value || null,
+        draftData: getFormData()
+      };
+
+      let res;
+      if (draftId) {
+        // Resume / continue: patch the existing draft.
+        res = await fetch(`/.netlify/functions/onboarding-draft?id=${draftId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      } else {
+        // First save of a fresh hire: create the draft and remember its id.
+        res = await fetch('/.netlify/functions/onboarding-draft', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        if (res.ok) {
+          const created = await res.json();
+          draftId = created.id;
+          // Reflect the id in the URL so a refresh keeps editing the same draft.
+          const u = new URL(window.location.href);
+          u.searchParams.set('draftId', String(draftId));
+          window.history.replaceState({}, '', u);
+        }
+      }
+
       if (res.ok) updateDraftStatus('saved');
     } catch (e) { console.error("Draft save failed", e); }
   }
@@ -864,8 +973,9 @@
   }
 
   async function hydrateDraft() {
+    if (!draftId) return; // Fresh hire — nothing to resume.
     try {
-      const res = await fetch('/.netlify/functions/onboarding-draft');
+      const res = await fetch(`/.netlify/functions/onboarding-draft?id=${draftId}`);
       if (res.ok) {
         const resData = await res.json();
         if (resData.draft && resData.draft.onboardingPath === 'social_media') {
@@ -938,8 +1048,9 @@
             if(chk) toggleHandleInput(`${p}_handle_container`, chk.checked);
           });
 
-          // 5. Resume User Location
-          currentStep = resData.draft.currentStep || 1;
+          // 5. Resume User Location — a ?step deep-link from the Setup Checklist wins.
+          // Clamp to FIRST_STEP so an old draft saved on the now-skipped step 1 still resumes correctly.
+          currentStep = Math.max(FIRST_STEP, _resumeStep || resData.draft.currentStep || FIRST_STEP);
           updateUI();
           if (currentStep >= 7) generateSummary();
         }
@@ -1124,6 +1235,39 @@
     document.getElementById('algorithm_helpers_container').classList.toggle('hidden', !hasPlatform);
   }
 
+  // Single source of truth for social handles = Connections. Prefill the platform
+  // handles from already-connected accounts so we never ask for them twice. Only
+  // fills platforms the draft hasn't already set — never overrides the user.
+  async function prefillSocialsFromConnections() {
+    const MAP = {
+      instagram: { p: 'ig', base: 'https://instagram.com/' },
+      facebook:  { p: 'fb', base: 'https://facebook.com/' },
+      linkedin:  { p: 'li', base: 'https://linkedin.com/in/' },
+      x:         { p: 'x',  base: 'https://x.com/' },
+      twitter:   { p: 'x',  base: 'https://x.com/' },
+    };
+    try {
+      const res = await fetch('/.netlify/functions/integrations');
+      if (!res.ok) return;
+      const { connections } = await res.json();
+      (connections || []).forEach(c => {
+        if (!c.connected) return;
+        const m = MAP[(c.serviceName || '').toLowerCase()];
+        if (!m) return;
+        const chk = document.getElementById(`chk_${m.p}`);
+        const input = document.getElementById(`${m.p}_handle`);
+        if (!chk || !input || chk.checked || input.value.trim()) return; // draft wins
+        let url = (c.externalUserId || '').trim();
+        if (!url) return;
+        if (!/^https?:\/\//i.test(url)) url = m.base + url.replace(/^@/, '');
+        chk.checked = true;
+        toggleHandleInput(`${m.p}_handle_container`, true);
+        input.value = url;
+        input.dispatchEvent(new Event('input', { bubbles: true })); // validate + autosave
+      });
+    } catch { /* non-fatal */ }
+  }
+
   function addWorkflowStep() {
     workflowStepCount++;
     const stepHtml = `
@@ -1199,16 +1343,11 @@
     if (hasValue(document.getElementById('val_pillars')?.value)) generalPreferences.push(`- Core Topics: ${document.getElementById('val_pillars').value}`);
     if (hasValue(document.getElementById('val_tone')?.value)) generalPreferences.push(`- Preferred Tone: ${document.getElementById('val_tone').value}`);
 
-    ['fb', 'ig', 'li', 'x'].forEach(p => {
-      if (document.getElementById(`chk_${p}`)?.checked) {
-        const customTags = document.getElementById(`algo_custom_tags_${p}`)?.value;
-        if (document.querySelector(`input[name="algo_strategy_${p}"]:checked`)?.value === 'strict_custom' && hasValue(customTags)) {
-          strictRules.push(`- MUST DO (${document.getElementById(`chk_${p}`).value}): ONLY use exactly these tags: ${customTags}.`);
-        }
-        if (p === 'fb' && document.getElementById('fb_opt_groups')?.checked) strictRules.push(`- MUST DO (Facebook): Draft version optimized for Facebook Groups.`);
-        if (p === 'li' && document.getElementById('li_opt_links')?.checked) strictRules.push(`- NEVER DO (LinkedIn): External URLs in first comment only.`);
-      }
-    });
+    // Per-platform hashtag/algorithm choices are no longer flattened into strict rules here — they
+    // flow through as the structured rawInputs.platform_strategy object below and the server renders
+    // them as a dedicated PLATFORM ALGORITHM STRATEGY brief section (formatPlatformStrategyBrief).
+    const extractedPlatformCodes = ['fb', 'ig', 'li', 'x'].filter(p => document.getElementById(`chk_${p}`)?.checked);
+    const platformStrategy = collectOnboardingPlatformStrategy(extractedPlatformCodes);
 
     const userRules = document.getElementById('acceptance_criteria_rules')?.value;
     if (hasValue(userRules)) {
@@ -1246,6 +1385,7 @@
       triggerText,
       sourceText,
       platforms,
+      platform_strategy: platformStrategy,
       generalPreferences,
       workflowText,
       strictRules
@@ -1316,13 +1456,14 @@
   }
 
   function prevStep() {
-    if (currentStep > 1) {
+    if (currentStep > FIRST_STEP) {
       currentStep--;
       updateUI();
       saveDraftToBackend(); // Save progress even if they step backward
     } else {
-      // Returning to step 1 (onboarding.html). Append ?restart=true to bypass auto-redirect loop
-      window.location.href = `onboarding.html?tier=${currentTierKey}&restart=true`;
+      // At the first real step — go back to the catalogue, where the role was chosen
+      // (the old in-wizard picker / onboarding.html role-picker is no longer part of this flow).
+      window.location.href = 'workspace.html?view=catalog';
     }
   }
 
@@ -1333,7 +1474,7 @@
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
     autoExpandTextareas();
-    document.getElementById('progress-bar').style.width = `${(currentStep / totalSteps) * 100}%`;
+    document.getElementById('progress-bar').style.width = `${((currentStep - FIRST_STEP + 1) / (totalSteps - FIRST_STEP + 1)) * 100}%`;
 
     // Hide "Save & Continue Later" on the final submit step
     const saveExitBtn = document.getElementById('btn-save-exit');
@@ -1363,24 +1504,53 @@
       incentive: document.getElementById('val_incentive')?.value || null,
       target_audience: document.getElementById('val_audience')?.value || null,
       content_pillars: document.getElementById('val_pillars')?.value || null,
+      service_offerings: document.getElementById('val_offerings')?.value || null,
+      sales_objections: document.getElementById('val_objections')?.value || null,
       tone_of_voice: document.getElementById('val_tone')?.value || null,
       posting_frequency: document.getElementById('schedule_frequency')?.value || 'On Demand',
       primary_platforms: extractedPlatforms,
-      problem_statement: document.getElementById('user_story_problem')?.value || null
+      problem_statement: document.getElementById('user_story_problem')?.value || null,
+      // Reference style link + per-platform hashtag/algorithm strategy — stored structurally so
+      // they surface (and stay editable) in the Assistant Profile, not just compiled into rules.
+      reference_style_url: document.getElementById('val_reference')?.value || null,
+      platform_strategy: collectOnboardingPlatformStrategy(extractedPlatforms)
     };
 
     // 2. Safe Consent Handling: Use optional chaining or fallback to false
     const getConsent = (id) => document.getElementById(id)?.checked || false;
 
+    // Map the chosen Visual Strategy onto the per-assistant Media Source priority list
+    // (Manual/Stock/AI — see src/utils/media-sources.ts). Order = priority, with graceful
+    // fallback for the auto-sourcing choices. NOTE: the resolver treats an empty list as
+    // "use the default matrix" (which includes AI), so Text Only maps to manual-only — no
+    // auto AI/stock sourcing; posts stay text-only unless the org has its own library assets.
+    const mediaSources = (() => {
+      const v = document.getElementById('val_visuals')?.value || '';
+      if (v.includes('Text Only')) return ['manual'];               // no auto-sourcing
+      if (v.includes('Generate AI')) return ['ai', 'stock', 'manual']; // AI first, fall back
+      if (v.includes('Free Stock')) return ['stock', 'manual'];     // Pexels, then own library
+      if (v.includes('provide my own')) return ['manual'];          // own library only
+      return ['manual', 'stock', 'ai'];                             // safe default matrix
+    })();
+
     const hourlyRateRaw = parseFloat(document.getElementById('val_hourly_rate')?.value);
     const payload = {
       clientName: sessionStorage.getItem('aura_client_name') || 'User',
-      businessName: sessionStorage.getItem('aura_business_name') || 'Business',
+      // Business Name is optional on the previous step — leave it blank (not a fabricated
+      // literal) when unset, so the backend's `businessName?.trim()` guard correctly skips
+      // overwriting the organisation's real name (set at registration) with a placeholder.
+      businessName: sessionStorage.getItem('aura_business_name') || '',
       assistantName: sessionStorage.getItem('aura_assistant_name') || 'Social Media Manager',
       customAssistantName: document.getElementById('val_assistant_name')?.value || 'Digital Assistant',
       tier: currentTierKey,
+      ...(draftId ? { draftId } : {}),
       rawInputs: window.globalRawInputs,
+      mediaSources,
       onboardingContext: structuredContext,
+      // EU AI Act Art. 50 disclosure — persisted on the assistant so it's pre-set at Kick Off.
+      ...(document.getElementById('onboarding_ai_disclosure')?.value?.trim()
+        ? { aiDisclosure: document.getElementById('onboarding_ai_disclosure').value.trim() }
+        : {}),
       ...(hourlyRateRaw > 0 ? { hourlyRateGbp: hourlyRateRaw } : {}),
       consents: {
         legal: getConsent('legal_consent'),
@@ -1444,6 +1614,23 @@
   // --- 8. UI HELPERS ---
   function loadComponent(id, file) { fetch(file).then(r => r.ok && r.text().then(t => document.getElementById(id).innerHTML = t)); }
   function populateProblem(t) { const el = document.getElementById('user_story_problem'); el.value = t; autoExpandTextareas(); triggerAutoSave(); }
+  function applyDisclosureSuggestion(t) { const el = document.getElementById('onboarding_ai_disclosure'); if (!el) return; el.value = t; autoExpandTextareas(); triggerAutoSave(); }
+
+  // Snapshot the Platform Algorithm Helper toggles into a structured object (keyed by platform
+  // code) for the selected platforms only. Mirrors the shape read back in the Assistant Profile
+  // (_hydratePlatformStrategy in assistants.js), so hashtags/format prefs stay editable post-setup.
+  function collectOnboardingPlatformStrategy(selected) {
+    const val = (id) => document.getElementById(id)?.value || '';
+    const on  = (id) => !!document.getElementById(id)?.checked;
+    const ps = {};
+    (selected || []).forEach(p => {
+      if (p === 'fb') ps.fb = { tags: val('algo_custom_tags_fb'), strategy: document.querySelector('input[name="algo_strategy_fb"]:checked')?.value || 'strict_custom', groups: on('fb_opt_groups') };
+      if (p === 'ig') ps.ig = { tags: val('algo_custom_tags_ig'), format: val('ig_opt_format') || 'mix', audio: on('ig_opt_audio') };
+      if (p === 'li') ps.li = { tags: '', links_first_comment: on('li_opt_links'), sliders: on('li_opt_sliders') };
+      if (p === 'x')  ps.x  = { tags: '', length: val('x_opt_length') || 'mix', media: on('x_opt_media') };
+    });
+    return ps;
+  }
 
   function showUpsellModal(m) { document.getElementById('upsell-message').innerHTML = m; document.getElementById('upsell-modal').classList.remove('hidden', 'opacity-0'); }
   function closeUpsellModal() { document.getElementById('upsell-modal').classList.add('hidden', 'opacity-0'); }
@@ -1456,6 +1643,123 @@
     }
     return true;
   }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  Assistant Onboarding & Feature Gating (US1–US3)
+  // ══════════════════════════════════════════════════════════════════════════
+  const TIER_RANK = { buster: 0, saver: 1, employee: 2 };
+  const GATED_FEATURE_META = {
+    fb_opt_groups:  { tier: 'saver', name: 'Facebook Group drafts',      desc: 'Drafts tailored versions of your post for niche Facebook Groups to maximise reach in targeted communities.' },
+    ig_opt_audio:   { tier: 'saver', name: 'Trending audio suggestions', desc: 'AI analyses TikTok/Instagram trends to recommend viral audio tracks for your reels.' },
+    li_opt_sliders: { tier: 'saver', name: 'PDF carousel outlines',      desc: 'Generates multi-slide PDF carousel outlines that boost LinkedIn dwell time and engagement.' },
+    x_opt_media:    { tier: 'saver', name: 'Media placeholders',         desc: 'Inserts smart media placeholders so every post ships with eye-catching visuals.' },
+  };
+  let _gatingTier = currentTierKey;   // AC1.1 — refined from check-capacity on load
+  let _pendingUnlock = null;          // { featureKey, tier }
+
+  function _tierMeets(userTier, requiredTier) {
+    const u = TIER_RANK[userTier] ?? 99;   // unknown/higher tiers count as owned
+    const r = TIER_RANK[requiredTier] ?? 0;
+    return u >= r;
+  }
+
+  async function initFeatureGating() {
+    // AC1.1: read the real subscription tier from the workspace context.
+    try {
+      const res = await fetch('/.netlify/functions/check-capacity');
+      if (res.ok) { const cap = await res.json(); if (cap.tierKey) _gatingTier = cap.tierKey; }
+    } catch { /* fall back to the sessionStorage tier */ }
+    applyFeatureGating();
+  }
+
+  function applyFeatureGating() {
+    Object.entries(GATED_FEATURE_META).forEach(([key, meta]) => {
+      const input = document.getElementById(key);
+      const label = input?.closest('label');
+      if (!input || !label) return;
+      const owned = _tierMeets(_gatingTier, meta.tier);
+
+      label.querySelector('.gate-pill')?.remove();
+      label.onclick = null;            // neutralise the legacy inline checkTier handler
+      label.title = owned ? '' : meta.desc;   // AC2.3: hover tooltip describing the value
+
+      if (owned) {
+        // AC1.2: clean, active checkbox — no badge, no lock.
+        input.disabled = false;
+        label.style.opacity = '';
+      } else {
+        // AC2.1/2.2: disabled + greyed + "Upgrade to Unlock" pill.
+        input.disabled = true;
+        input.checked = false;
+        label.style.opacity = '0.6';
+        const pill = document.createElement('span');
+        pill.className = 'gate-pill';
+        pill.style.cssText = 'margin-left:8px;display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:700;color:#b45309;background:#fef3c7;border:1px solid #fcd34d;border-radius:9999px;padding:2px 8px;white-space:nowrap;';
+        pill.textContent = '🔒 Upgrade to Unlock';
+        label.appendChild(pill);
+        // AC3.1: clicking the locked row opens the unlock modal instead of toggling.
+        label.onclick = (e) => { e.preventDefault(); openUnlockModal(key); };
+      }
+    });
+  }
+
+  async function openUnlockModal(featureKey) {
+    const meta = GATED_FEATURE_META[featureKey];
+    if (!meta) return;
+    _pendingUnlock = { featureKey, tier: meta.tier };
+    document.getElementById('unlock-feature-name').textContent = meta.name;
+    document.getElementById('unlock-feature-desc').textContent = meta.desc;
+    const costEl = document.getElementById('unlock-cost');
+    costEl.textContent = 'Calculating your upgrade cost…';
+    document.getElementById('unlock-feature-modal').classList.remove('hidden');
+    // AC3.2: prorated cost from the existing billing-upgrade preview.
+    try {
+      const res = await fetch(`/.netlify/functions/billing-upgrade?preview=1&targetTierKey=${encodeURIComponent(meta.tier)}`);
+      const data = await res.json();
+      if (res.ok && data.preview) {
+        const p = data.preview;
+        costEl.innerHTML = `Upgrade to <strong>${p.targetPlanName}</strong> — <strong>£${p.proratedAmountGbp} due today</strong> <span class="text-emerald-700">(${p.proratedNote})</span>, then £${p.newMonthlyAmount}/mo.`;
+      } else {
+        costEl.textContent = data.error || 'Upgrading unlocks this feature instantly.';
+      }
+    } catch {
+      costEl.textContent = 'Upgrading unlocks this feature instantly.';
+    }
+  }
+
+  function closeUnlockModal() {
+    document.getElementById('unlock-feature-modal').classList.add('hidden');
+    _pendingUnlock = null;
+  }
+
+  async function doUnlockUpgrade() {
+    if (!_pendingUnlock) return;
+    const btn = document.getElementById('unlock-upgrade-btn');
+    btn.disabled = true; btn.textContent = 'Upgrading…';
+    const wantedKey = _pendingUnlock.featureKey;
+    try {
+      // AC3.3: Stripe billing update (in-place, prorated — no redirect, form state preserved).
+      const res = await fetch('/.netlify/functions/billing-upgrade', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetTierKey: _pendingUnlock.tier }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Upgrade failed.');
+      // AC3.4: re-read the tier and re-apply gating immediately — no page refresh.
+      await initFeatureGating();
+      sessionStorage.setItem('aura_tier', _gatingTier);
+      closeUnlockModal();
+      btn.disabled = false; btn.textContent = 'Upgrade Now';
+      const cb = document.getElementById(wantedKey);
+      if (cb && !cb.disabled) cb.checked = true; // pre-tick the feature they tried to use
+    } catch (e) {
+      btn.disabled = false; btn.textContent = 'Upgrade Now';
+      document.getElementById('unlock-cost').textContent = (e.message || 'Upgrade failed.') + ' Please try again.';
+    }
+  }
+  window.openUnlockModal = openUnlockModal;
+  window.closeUnlockModal = closeUnlockModal;
+  window.doUnlockUpgrade = doUnlockUpgrade;
 
   function toggleScheduleDetails() {
     const triggerEl = document.querySelector('input[name="trigger_type"][value="scheduled"]');
@@ -1477,7 +1781,7 @@
   // --- RANDOM NAME GENERATOR LOGIC ---
   const assistantNames = [
     "Gracie", "Charlie", "Mabel", "Nova", "Atlas",
-    "Echo", "Chloe", "Orion", "Sage", "Aura-Bot"
+    "Echo", "Chloe", "Orion", "Sage", "Swan-Bot"
   ];
   let currentNameIndex = -1;
 
@@ -1624,7 +1928,7 @@
   async function clearDraftAndRestart() {
     if (confirm("Are you sure? This will delete your current progress and restart onboarding.")) {
       try {
-        await fetch('/.netlify/functions/onboarding-draft', { method: 'DELETE' }); // You may need to add a DELETE case to onboarding-draft.ts
+        if (draftId) await fetch(`/.netlify/functions/onboarding-draft?id=${draftId}`, { method: 'DELETE' });
         window.location.href = 'onboarding.html?restart=true';
       } catch (e) { alert("Could not clear draft."); }
     }
@@ -1754,9 +2058,9 @@
     </div>
     <div class="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-5 max-h-48 overflow-y-auto text-sm text-gray-700 leading-relaxed">
       <p class="font-bold mb-2">Data Processing Agreement — Summary</p>
-      <p class="mb-2">By accepting this agreement, your organisation (the Data Controller) authorises Aura-Assist (the Data Processor) to process personal data on your behalf solely to provide the Aura-Assist platform services, in accordance with your instructions.</p>
-      <p class="mb-2">Aura-Assist commits to: (1) process data only on documented instructions; (2) ensure confidentiality; (3) implement appropriate technical and organisational security measures; (4) assist with data subject rights requests; (5) delete or return all personal data at contract end; (6) provide audit assistance.</p>
-      <p>Sub-processors are listed in our Privacy Policy. Full agreement available at <a href="/privacy.html" target="_blank" class="text-emerald-700 underline">aura-assist.com/privacy</a>.</p>
+      <p class="mb-2">By accepting this agreement, your organisation (the Data Controller) authorises Be More Swan (the Data Processor) to process personal data on your behalf solely to provide the Be More Swan platform services, in accordance with your instructions.</p>
+      <p class="mb-2">Be More Swan commits to: (1) process data only on documented instructions; (2) ensure confidentiality; (3) implement appropriate technical and organisational security measures; (4) assist with data subject rights requests; (5) delete or return all personal data at contract end; (6) provide audit assistance.</p>
+      <p>Sub-processors are listed in our Privacy Policy. Full agreement available at <a href="/privacy.html" target="_blank" class="text-emerald-700 underline">bemoreswan.com/privacy</a>.</p>
     </div>
     <label class="flex items-start gap-3 mb-6 cursor-pointer">
       <input type="checkbox" id="dpa-onboarding-checkbox" class="mt-0.5 h-4 w-4 rounded border-gray-300 text-emerald-600 focus:ring-emerald-500" onchange="document.getElementById('btn-dpa-onboarding-accept').disabled=!this.checked">

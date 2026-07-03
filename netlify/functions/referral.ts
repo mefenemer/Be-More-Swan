@@ -9,10 +9,11 @@
 
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
-import { eq, desc, and } from 'drizzle-orm';
+import { eq, desc, and, count } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
-import { users, userReferrals, plans } from '../../db/schema';
+import { users, userReferrals, plans, organisations, masterPlans, aiAssistants, userOrganisations, referralInvites } from '../../db/schema';
 import { resolveBaseUrl } from '../../src/utils/base-url';
+import { getReferralTokenState, FREE_ASSISTANT_THRESHOLD, CREDIT_GBP } from '../../src/utils/referral-tokens';
 
 const jwtSecret = process.env.JWT_SECRET;
 const REWARD_GBP = 10;
@@ -85,6 +86,14 @@ export const handler: Handler = async (event) => {
             .where(eq(userReferrals.referrerId, callerId))
             .orderBy(desc(userReferrals.createdAt));
 
+        // Sent-but-not-yet-accepted invites — these show as "Invited — awaiting sign-up"
+        // in the activity list, the stage before a friend registers (user_referrals).
+        const invites = await db
+            .select({ email: referralInvites.email, sentAt: referralInvites.sentAt })
+            .from(referralInvites)
+            .where(and(eq(referralInvites.referrerId, callerId), eq(referralInvites.status, 'invited')))
+            .orderBy(desc(referralInvites.sentAt));
+
         const totalRewarded = referrals.filter(r => r.status === 'rewarded').length;
         const shareLink = user.referralCode
             ? `${BASE_URL}/register.html?ref=${user.referralCode}`
@@ -106,7 +115,7 @@ export const handler: Handler = async (event) => {
                 .limit(1);
             // AC3/AC15: hide referrer if their account has been soft-deleted
             if (referrer && !referrer.pendingDeletion) {
-                const name = [referrer.firstName, referrer.lastName].filter(Boolean).join(' ') || 'An Aura-Assist member';
+                const name = [referrer.firstName, referrer.lastName].filter(Boolean).join(' ') || 'An Be More Swan member';
                 referredBy = {
                     displayName: name,
                     joinedAt: (user.createdAt as Date).toISOString(), // AC10: current user's join date
@@ -114,6 +123,41 @@ export const handler: Handler = async (event) => {
                 };
             }
         }
+
+        // ── Reward vault: token balance + assistant capacity (for the milestone UI) ──
+        const tokenState = await getReferralTokenState(db, callerId);
+
+        const [orgRow] = await db
+            .select({ organisationId: userOrganisations.organisationId })
+            .from(userOrganisations)
+            .where(eq(userOrganisations.userId, callerId))
+            .limit(1);
+        const orgId = orgRow?.organisationId ?? null;
+
+        let bonusAssistants = 0;
+        let tierLimit: number | null = null;
+        let assistantCount = 0;
+        if (orgId) {
+            const [org] = await db.select({ bonusAssistants: organisations.bonusAssistants })
+                .from(organisations).where(eq(organisations.id, orgId)).limit(1);
+            bonusAssistants = org?.bonusAssistants ?? 0;
+
+            const [tierRow] = await db
+                .select({ assistantLimit: masterPlans.assistantLimit })
+                .from(plans)
+                .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
+                .where(and(eq(plans.organisationId, orgId), eq(plans.status, 'active')))
+                .limit(1);
+            tierLimit = tierRow?.assistantLimit ?? null;
+
+            const [{ value: cnt }] = await db
+                .select({ value: count() })
+                .from(aiAssistants)
+                .where(eq(aiAssistants.organisationId, orgId));
+            assistantCount = Number(cnt);
+        }
+        // bonus stacks on the tier limit; null tier = unlimited (bonus moot)
+        const assistantLimit = tierLimit === null ? null : tierLimit + bonusAssistants;
 
         return {
             statusCode: 200,
@@ -125,7 +169,17 @@ export const handler: Handler = async (event) => {
                 totalRewarded,
                 totalPending: referrals.filter(r => r.status === 'pending').length,
                 totalQualified: referrals.filter(r => r.status === 'qualified').length,
+                // Reward vault (Referral Program Expansion)
+                availableTokens: tokenState.availableTokens,
+                maturingTokens: tokenState.maturingTokens,
+                freeAssistantThreshold: FREE_ASSISTANT_THRESHOLD,
+                creditGbp: CREDIT_GBP,
+                bonusAssistants,
+                assistantLimit,
+                assistantCount,
                 referredBy,
+                totalInvited: invites.length,
+                invites: invites.map(i => ({ email: i.email, sentAt: i.sentAt })),
                 referrals: referrals.map(r => ({
                     id: r.id,
                     status: r.status,

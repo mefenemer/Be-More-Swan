@@ -34,7 +34,7 @@ export const handler: Handler = async (event) => {
             headers: { 'Content-Type': 'text/html' },
             body: `<!DOCTYPE html><html><body style="font-family:sans-serif;text-align:center;padding:60px 20px;">
                    <h2>Invalid or expired link</h2>
-                   <p>This cancellation link is no longer valid. If your account was already deleted, please contact <a href="mailto:hello@aura-assist.com">support</a>.</p>
+                   <p>This cancellation link is no longer valid. If your account was already deleted, please contact <a href="mailto:hello@bemoreswan.com">support</a>.</p>
                    </body></html>`,
         };
     }
@@ -51,7 +51,7 @@ export const handler: Handler = async (event) => {
             headers: { 'Content-Type': 'text/html' },
             body: `<!DOCTYPE html><html><body style="font-family:sans-serif;text-align:center;padding:60px 20px;">
                    <h2>Cancellation window expired</h2>
-                   <p>The 24-hour cancellation window has passed. Please <a href="mailto:hello@aura-assist.com">contact support</a> if you believe this is an error.</p>
+                   <p>The 24-hour cancellation window has passed. Please <a href="mailto:hello@bemoreswan.com">contact support</a> if you believe this is an error.</p>
                    </body></html>`,
         };
     }
@@ -71,7 +71,7 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'text/html' },
         body: `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><title>Deletion Cancelled — Aura</title>
+<head><meta charset="UTF-8"><title>Deletion Cancelled — Be More Swan</title>
 <style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f9fafb}
 .card{background:#fff;border-radius:1rem;padding:2.5rem;max-width:420px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.08)}
 h1{font-size:1.25rem;margin-bottom:.5rem}p{color:#6b7280;font-size:.9rem}a{color:#059669;font-weight:bold}</style></head>

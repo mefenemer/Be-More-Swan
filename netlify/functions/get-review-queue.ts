@@ -12,6 +12,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants, scheduledPosts } from '../../db/schema';
 import { getSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
+import { requireOnboarding } from '../../src/utils/onboarding-guard';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 
@@ -56,6 +57,10 @@ export const handler: Handler = async (event) => {
     }
 
     const db = getDb();
+
+    // US3 (AC3.1/AC3.2): block the Review Queue until onboarding is complete.
+    const denied = await requireOnboarding(db, userId);
+    if (denied) return denied;
 
     // Resolve the active organisation (member-shared assistant ownership; membership verified).
     const org = await resolveActiveOrg(db, userId, getSession(event)?.activeOrganisationId);

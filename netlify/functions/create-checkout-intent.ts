@@ -21,6 +21,7 @@ import {
   planPrices,
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { formatPlatformStrategyBrief } from '../../src/utils/platform-strategy-brief';
 
 const connectionString = process.env.NETLIFY_DATABASE_URL;
 if (!connectionString) throw new Error('CRITICAL: NETLIFY_DATABASE_URL is missing.');
@@ -44,7 +45,7 @@ function compileServerSideBrief(clientName: string, businessName: string, assist
     return valid.length === 0 ? fallback : valid.map(i => `- ${i}`).join('\n');
   };
   return `
-AURA-ASSIST ENGINEERING BRIEF: SOCIAL MEDIA MANAGER BLUEPRINT
+BE MORE SWAN ENGINEERING BRIEF: SOCIAL MEDIA MANAGER BLUEPRINT
 
 CLIENT DETAILS
 Name: ${clientName || missing}
@@ -62,6 +63,9 @@ PUBLISHING DESTINATIONS
 Platforms:
 ${fmt(inputs.platforms, missing)}
 
+PLATFORM ALGORITHM STRATEGY
+${formatPlatformStrategyBrief(inputs.platform_strategy) || missing}
+
 GENERAL PREFERENCES & STRATEGY
 ${fmt(inputs.generalPreferences, missing)}
 
@@ -72,7 +76,7 @@ NON-NEGOTIABLE STRICT RULES
 ${fmt(inputs.strictRules, missing)}
 
 APPROVAL PROTOCOL
-All requests requiring your sign-off are managed exclusively through your Aura-Assist Workspace. You will be notified by email immediately upon the creation of any new request.
+All requests requiring your sign-off are managed exclusively through your Be More Swan Workspace. You will be notified by email immediately upon the creation of any new request.
 `.trim();
 }
 
@@ -184,7 +188,7 @@ export const handler: Handler = async (event) => {
         amount: String(priceAmount),
         currency: priceCurrency,
         status: 'pending',
-        description: `Aura ${masterPlan.name} Setup`,
+        description: `Be More Swan ${masterPlan.name} Setup`,
       }).returning();
 
       // Create Stripe Customer
@@ -207,7 +211,7 @@ export const handler: Handler = async (event) => {
           // dahlia API requires price_data.product (an ID) rather than inline
           // product_data; create the product explicitly to carry name + metadata.
           const product = await stripe.products.create({
-              name: `Aura-Assist: ${targetName}`,
+              name: `Be More Swan: ${targetName}`,
               metadata: { assistantType: assistantName || 'Digital Assistant' },
           });
           subscriptionItem = {

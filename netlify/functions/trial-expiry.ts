@@ -96,14 +96,14 @@ async function runTrialExpiry() {
                         to: user.email,
                         subject: 'Your trial ends in 7 days',
                         html: `<p>Hi ${user.firstName || 'there'},</p>
-                               <p>Your Aura Assist free trial ends in <strong>7 days</strong>. After that, your assistants will be paused until you choose a plan.</p>
+                               <p>Your Be More Swan free trial ends in <strong>7 days</strong>. After that, your assistants will be paused until you choose a plan.</p>
                                <p>Upgrade now to keep everything running smoothly — your setup, brand voice, and integrations all carry over.</p>
                                <p style="margin-top:20px;">
                                  <a href="${BASE_URL}/pricing.html" style="background:#2563eb;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">
                                    Choose a Plan →
                                  </a>
                                </p>
-                               <p>The Aura Team</p>`,
+                               <p>The Be More Swan Team</p>`,
                     }).catch(() => {});
                 }
             }
@@ -130,14 +130,14 @@ async function runTrialExpiry() {
                         to: user.email,
                         subject: `Your trial expires tomorrow — don't lose your assistant`,
                         html: `<p>Hi ${user.firstName || 'there'},</p>
-                               <p>⚠️ Your Aura Assist free trial expires <strong>tomorrow</strong>.</p>
+                               <p>⚠️ Your Be More Swan free trial expires <strong>tomorrow</strong>.</p>
                                <p>After expiry, your assistants will be automatically paused. To keep them running, choose a plan today — it takes less than 2 minutes.</p>
                                <p style="margin-top:20px;">
                                  <a href="${BASE_URL}/pricing.html" style="background:#dc2626;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:bold;">
                                    Upgrade Before It's Too Late →
                                  </a>
                                </p>
-                               <p>The Aura Team</p>`,
+                               <p>The Be More Swan Team</p>`,
                     }).catch(() => {});
                 }
             }

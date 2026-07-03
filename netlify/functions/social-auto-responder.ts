@@ -5,35 +5,27 @@
 
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
-import jwt from 'jsonwebtoken';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, systemConnections, organisations, userOrganisations } from '../../db/schema';
 import { getSecret } from '../../src/utils/vault';
+import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
+import { requireTenant } from '../../src/utils/tenant';
 
-const jwtSecret  = process.env.JWT_SECRET!;
 const anthropic  = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL      = 'claude-haiku-4-5-20251001';
 
 export const handler: Handler = async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
-    const cookieHeader = event.headers.cookie || '';
-    const sessionToken = cookieHeader.match(/aura_session=([^;]+)/)?.[1];
-    if (!sessionToken) return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized' }) };
-
-    let userId: number;
-    let organisationId: number;
-    try {
-        const p = jwt.verify(sessionToken, jwtSecret) as { userId: number; organisationId: number };
-        userId = p.userId;
-        organisationId = p.organisationId;
-    } catch { return { statusCode: 401, body: JSON.stringify({ error: 'Invalid session' }) }; }
+    const db = getDb();
+    // Session carries `activeOrganisationId`, not `organisationId` — resolve via requireTenant.
+    const tenant = await requireTenant(event, db);
+    if ('error' in tenant) return tenant.error;
+    const { organisationId } = tenant;
 
     const body = JSON.parse(event.body || '{}');
     const { assistantId } = body as { assistantId?: number };
-
-    const db = getDb();
 
     // Load assistant blueprint / onboarding context
     const [assistant] = await db.select({ id: aiAssistants.id, name: aiAssistants.name, onboardingContext: aiAssistants.onboardingContext, systemPrompt: aiAssistants.systemPrompt, configuration: aiAssistants.configuration })
@@ -43,6 +35,11 @@ export const handler: Handler = async (event) => {
 
     if (!assistant) return { statusCode: 404, body: JSON.stringify({ error: 'No active assistant found' }) };
 
+    // Runtime connection sandboxing: this assistant may only drive social connections.
+    if (!isServiceAllowedForAssistant('instagram', { roleKey: (assistant.configuration as { type?: string } | null)?.type, role: assistant.name })) {
+        return { statusCode: 403, body: JSON.stringify({ error: 'This assistant is not permitted to use social connections.', code: 'CONNECTION_NOT_RELEVANT' }) };
+    }
+
     const [org] = await db.select({ name: organisations.name }).from(organisations).where(eq(organisations.id, organisationId)).limit(1);
     const businessName = org?.name ?? 'your business';
     const ctx = assistant.onboardingContext as Record<string, unknown> ?? {};
@@ -50,21 +47,29 @@ export const handler: Handler = async (event) => {
     const targetAudience = (ctx.target_audience as string) ?? 'customers';
     const contentPillars = Array.isArray(ctx.content_pillars) ? (ctx.content_pillars as string[]).join(', ') : (ctx.content_pillars as string) ?? '';
 
+    // US-SMM (AC7): the objection playbook + offerings let the assistant draft replies to sales
+    // enquiries in DMs. These are staged for the user to review, not auto-sent.
+    const serviceOfferings = (ctx.service_offerings as string) ?? '';
+    const salesObjections  = (ctx.sales_objections  as string) ?? '';
+
     // Include blueprint sections in the prompt (AC: full context)
     const blueprintContext = [
         assistant.systemPrompt ? `## System Prompt\n${assistant.systemPrompt}` : '',
         contentPillars ? `## Content Pillars\n${contentPillars}` : '',
+        serviceOfferings ? `## Service Offerings\n${serviceOfferings}` : '',
+        salesObjections ? `## Sales Objection Playbook (objection — preferred response)\n${salesObjections}` : '',
         (ctx.strict_rules as string) ? `## Strict Rules\n${ctx.strict_rules}` : '',
         (ctx.brand_guidelines as string) ? `## Brand Guidelines\n${ctx.brand_guidelines}` : '',
     ].filter(Boolean).join('\n\n');
 
     const prompt = `You are a social media assistant for ${businessName}. Tone: ${toneOfVoice}. Target audience: ${targetAudience}.
 
-${blueprintContext ? `## Assistant Blueprint Context\n${blueprintContext}\n\n` : ''}Generate three auto-responder messages that reflect the brand voice above. Return ONLY valid JSON with these exact keys:
+${blueprintContext ? `## Assistant Blueprint Context\n${blueprintContext}\n\n` : ''}Generate auto-responder messages that reflect the brand voice above. Return ONLY valid JSON with these exact keys:
 {
   "messengerGreeting": "string, max 160 chars — the welcome message shown when someone opens Messenger for the first time",
   "messengerAutoReply": "string, max 500 chars — the auto-reply sent when someone messages the Facebook Page",
-  "instagramDmAutoReply": "string, max 500 chars — the auto-reply sent when someone DMs on Instagram (stored as a draft — Instagram DM automation must be enabled separately in Meta Business Suite)"
+  "instagramDmAutoReply": "string, max 500 chars — the auto-reply sent when someone DMs on Instagram (stored as a draft — Instagram DM automation must be enabled separately in Meta Business Suite)"${salesObjections ? `,
+  "objectionResponses": "array of { \\"objection\\": string, \\"reply\\": string (max 500 chars) } — for EACH objection in the Sales Objection Playbook above, a ready-to-send DM/comment reply that handles it in the brand voice and points to the relevant service offering. These are staged for the user to review, not sent automatically."` : ''}
 }
 
 Rules:
@@ -72,9 +77,12 @@ Rules:
 - Keep a warm, ${toneOfVoice} tone consistent with the blueprint
 - Do not make promises you cannot keep
 - Do not include placeholders like [NAME] or [DATE]
-- Ensure the Messenger greeting is ≤160 characters exactly`;
+- Ensure the Messenger greeting is ≤160 characters exactly${salesObjections ? `\n- Base objection replies on the playbook's preferred responses; never invent pricing or claims not present in the context` : ''}`;
 
-    let draft: { messengerGreeting: string; messengerAutoReply: string; instagramDmAutoReply: string } | null = null;
+    let draft: {
+        messengerGreeting: string; messengerAutoReply: string; instagramDmAutoReply: string;
+        objectionResponses?: { objection: string; reply: string }[];
+    } | null = null;
     const MAX_RETRIES = 3;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
@@ -108,6 +116,14 @@ Rules:
     draft.messengerGreeting    = draft.messengerGreeting.slice(0, 160);
     draft.messengerAutoReply   = draft.messengerAutoReply.slice(0, 500);
     draft.instagramDmAutoReply = draft.instagramDmAutoReply.slice(0, 500);
+    // AC7: staged objection replies — clamp to the same DM length budget; tolerate a malformed shape.
+    if (Array.isArray(draft.objectionResponses)) {
+        draft.objectionResponses = draft.objectionResponses
+            .filter(r => r && typeof r.objection === 'string' && typeof r.reply === 'string')
+            .map(r => ({ objection: r.objection.slice(0, 200), reply: r.reply.slice(0, 500) }));
+    } else {
+        delete draft.objectionResponses;
+    }
 
     // Store draft in assistant configuration
     const existingConfig = (assistant.configuration as Record<string, unknown>) ?? {};

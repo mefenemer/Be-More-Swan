@@ -11,12 +11,12 @@ import { users, invoices, billingInformation, organisations, userOrganisations }
 
 const jwtSecret = process.env.JWT_SECRET;
 
-// Aura-Assist corporate details (kept in one place for easy updating)
+// Be More Swan corporate details (kept in one place for easy updating)
 const AURA_COMPANY = {
-    name:    'Aura-Assist Ltd',
+    name:    'Be More Swan Ltd',
     address: '85 Great Portland Street, London, W1W 7LT, United Kingdom',
-    email:   'billing@aura-assist.com',
-    website: 'aura-assist.com',
+    email:   'billing@bemoreswan.com',
+    website: 'bemoreswan.com',
 };
 
 export const handler: Handler = async (event) => {
@@ -113,7 +113,7 @@ export const handler: Handler = async (event) => {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Invoice ${_esc(invoice.invoiceNumber)} — Aura-Assist</title>
+<title>Invoice ${_esc(invoice.invoiceNumber)} — Be More Swan</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f3f4f6; color: #111827; font-size: 14px; line-height: 1.5; }
@@ -186,7 +186,7 @@ export const handler: Handler = async (event) => {
   <!-- Header -->
   <div class="header">
     <div>
-      <div class="logo">Aura<span>-Assist</span></div>
+      <div class="logo">Be More Swan</div>
       <div class="logo-sub">${_esc(AURA_COMPANY.address)}</div>
       <div class="logo-sub">${_esc(AURA_COMPANY.email)}</div>
     </div>

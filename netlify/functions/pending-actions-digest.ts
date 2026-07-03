@@ -8,9 +8,9 @@ import { getDb } from '../../db/client';
 import { pendingActions, users } from '../../db/schema';
 import { Resend } from 'resend';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-const FROM   = process.env.EMAIL_FROM || 'noreply@aura-assist.com';
-const BASE   = process.env.BASE_URL   || 'https://aura-assist.com';
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
+const FROM   = process.env.EMAIL_FROM || 'noreply@bemoreswan.com';
+const BASE   = process.env.BASE_URL   || 'https://bemoreswan.com';
 
 const handler = async () => {
     const db = getDb();
@@ -38,13 +38,13 @@ const handler = async () => {
         await resend.emails.send({
             from: FROM,
             to:   row.email,
-            subject: `[Aura-Assist] ${row.count} action${row.count > 1 ? 's' : ''} waiting for your review`,
+            subject: `[Be More Swan] ${row.count} action${row.count > 1 ? 's' : ''} waiting for your review`,
             html: `
 <p>Hi ${name},</p>
-<p>You have <strong>${row.count} pending action${row.count > 1 ? 's' : ''}</strong> in your Aura-Assist Review Queue that ${row.count > 1 ? 'have' : 'has'} been waiting for more than 24 hours.</p>
+<p>You have <strong>${row.count} pending action${row.count > 1 ? 's' : ''}</strong> in your Be More Swan Review Queue that ${row.count > 1 ? 'have' : 'has'} been waiting for more than 24 hours.</p>
 <p>Unapproved actions will expire automatically. Please review them before they expire.</p>
 <p><a href="${BASE}/workspace.html" style="display:inline-block;padding:10px 20px;background:#059669;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold;">Open Review Queue</a></p>
-<p style="color:#6b7280;font-size:12px;">You are receiving this because you have pending actions awaiting human approval in your Aura-Assist workspace.</p>
+<p style="color:#6b7280;font-size:12px;">You are receiving this because you have pending actions awaiting human approval in your Be More Swan workspace.</p>
             `.trim(),
         });
         sent++;

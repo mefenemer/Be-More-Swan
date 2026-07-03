@@ -1,6 +1,6 @@
 // verify.ts
 import { Handler, HandlerResponse } from '@netlify/functions';
-import { eq, and, gt } from 'drizzle-orm';
+import { eq, and, gt, inArray, isNull } from 'drizzle-orm';
 import * as crypto from 'crypto';
 import { getDb } from '../../db/client';
 import { users, plans, aiAssistants, onboardingDrafts, notifications, userProfiles } from '../../db/schema';
@@ -79,7 +79,7 @@ export const handler: Handler = async (event) => {
             return {
                 statusCode: 403,
                 headers: getHeaders(),
-                body: JSON.stringify({ error: 'Your account has been locked. Please contact support@aura-assist.com for assistance.' })
+                body: JSON.stringify({ error: 'Your account has been locked. Please contact support@bemoreswan.com for assistance.' })
             };
         }
 
@@ -97,14 +97,15 @@ export const handler: Handler = async (event) => {
                     {
                         userId: user.id,
                         type: 'welcome',
-                        title: 'Welcome to Aura Assist!',
-                        message: 'Thanks for registering and welcome to Aura Assist. Your workspace is ready.',
+                        title: 'Welcome to Be More Swan!',
+                        message: 'Thanks for registering and welcome to Be More Swan. Your workspace is ready.',
                     },
                     {
                         userId: user.id,
                         type: 'onboarding_prompt',
-                        title: 'Onboard your digital assistant',
-                        message: "You're one step away from having your own AI team member. Complete onboarding to get started.",
+                        title: 'Finish setting up your workspace',
+                        message: "Open the Setup Wizard to build your AI assistant — it walks you through every step, from your business details to going live.",
+                        metadata: { action: 'open_wizard', ctaLabel: 'Open Setup Wizard' },
                     },
                 ]);
             } catch (notifErr) {
@@ -113,7 +114,7 @@ export const handler: Handler = async (event) => {
 
             // US-GAP-6.1.1 SC1/SC2: Welcome email — sent exactly once (SC3: gated by isFirstLogin)
             // SC4: arrives before the 24h onboarding reminder (onboarding-reminder.ts fires at 24h)
-            const emailBaseUrl  = resolveBaseUrl(event.headers) || 'https://aura-assist.com';
+            const emailBaseUrl  = resolveBaseUrl(event.headers) || 'https://bemoreswan.com';
             const onboardingUrl = `${emailBaseUrl}/onboarding.html`;
             const helpUrl       = `${emailBaseUrl}/help.html`;
             const [verifyProfile] = await getDb().select({ language: userProfiles.language })
@@ -123,10 +124,10 @@ export const handler: Handler = async (event) => {
                 to: user.email,
                 subject: emailStr.welcome_subject(user.firstName || 'there'),
                 html: `<p>Hi ${user.firstName || 'there'},</p>
-                       <p>Your email is verified — welcome to Aura Assist! You're moments away from having your own AI team member handling the work you don't have time for.</p>
+                       <p>Your email is verified — welcome to Be More Swan! You're moments away from having your own AI team member handling the work you don't have time for.</p>
                        <h3 style="margin-top:24px;">Here's how to get started in 3 steps:</h3>
                        <ol style="padding-left:1.2rem;line-height:2">
-                         <li><strong>Complete your profile</strong> — tell us about your business so your assistant understands your brand</li>
+                         <li><strong>Complete your business profile</strong> — tell us about your business so your assistant understands your brand</li>
                          <li><strong>Choose your assistant</strong> — pick the role that matches the work you want automated</li>
                          <li><strong>Connect your tools</strong> — link your social accounts, calendar, or CRM to let your assistant get to work</li>
                        </ol>
@@ -138,7 +139,7 @@ export const handler: Handler = async (event) => {
                        <p style="margin-top:16px;font-size:0.875rem;color:#6b7280;">
                          Need help? Visit our <a href="${helpUrl}">Help Centre</a> or reply to this email.
                        </p>
-                       <p>The Aura Team</p>`,
+                       <p>The Be More Swan Team</p>`,
             }).catch(err => console.warn('[verify] Welcome email failed (non-blocking):', err));
         }
 
@@ -235,14 +236,26 @@ export const handler: Handler = async (event) => {
             // Case 1: Has active plan — check onboarding completeness
             if (hasActivePlan) {
                 if (!hasAnyAssistant) {
-                    // Incomplete onboarding — US2 Sc2: fire reminder notification (best-effort)
+                    // Incomplete onboarding — US2 Sc2: fire reminder notification (best-effort).
+                    // Dedup: this runs on EVERY login, so only insert if there isn't already an
+                    // open (unresolved) setup reminder — otherwise they pile up (the "3 reminders" bug).
                     try {
-                        await db.insert(notifications).values({
-                            userId: user.id,
-                            type: 'onboarding_incomplete',
-                            title: 'Complete your assistant setup',
-                            message: 'You have not yet completed the onboarding of your digital assistant. Pick up where you left off.',
-                        });
+                        const [existingReminder] = await db.select({ id: notifications.id })
+                            .from(notifications)
+                            .where(and(
+                                eq(notifications.userId, user.id),
+                                inArray(notifications.type, ['onboarding_incomplete', 'onboarding_prompt']),
+                                isNull(notifications.resolvedAt),
+                            ))
+                            .limit(1);
+                        if (!existingReminder) {
+                            await db.insert(notifications).values({
+                                userId: user.id,
+                                type: 'onboarding_incomplete',
+                                title: 'Complete your assistant setup',
+                                message: 'You have not yet completed the onboarding of your digital assistant. Pick up where you left off.',
+                            });
+                        }
                     } catch { /* non-blocking */ }
 
                     // Route back to the exact step they left off

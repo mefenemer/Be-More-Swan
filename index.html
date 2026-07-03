@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Aura-Assist™ | Delegate the Work You Hate</title>
+    <title>Be More Swan | Delegate the Work You Hate</title>
     <!--    <script src="https://cdn.tailwindcss.com"></script>-->
     <link id="stylesheet" href="./style.css" rel="stylesheet">
     <link rel="icon" href="/favicon/favicon.ico" sizes="any">
@@ -19,21 +19,21 @@
     <div class="max-w-7xl mx-auto px-4 flex flex-col md:flex-row items-center gap-12">
         <div class="md:w-1/2 text-left">
             <div class="inline-block px-4 py-1.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold text-sm mb-6 border border-emerald-100">
-                ✨ Human-built & Managed Automation
+                ✨ Your Instant, Autonomous Digital Workforce
             </div>
             <h1 class="text-5xl md:text-6xl font-extrabold text-gray-900 tracking-tight leading-tight mb-6">
                 Stop managing software.<br>
-                <span class="text-emerald-700">Start delegating tasks.</span>
+                <span class="text-emerald-700">Start delegating outcomes.</span>
             </h1>
             <p class="text-2xl text-emerald-700 font-medium mb-8">
-                Your invisible digital team. Constantly working in the background to turn your daily chaos into complete calm.
+                Your invisible digital team. Constantly working in the background to turn your daily operational chaos into predictable, measurable growth.
             </p>
             <p class="text-xl text-gray-500 mb-10">
-                You know technology could save you time, but you don't have the hours to learn it. Tell us what repetitive task is draining your day, and our engineering team will build and manage a digital assistant for you.
+                You don't need to learn new tech, write code, or build complex workflows. Simply hire a pre-trained digital assistant, connect your everyday business tools in two clicks, and set their targets. Your new team member handles the rest.
             </p>
             <!-- Converted from bg-emerald-700 (Pink) to bg-green-600 (Neon Green) -->
-            <a href="register.html" class="px-8 py-4 text-lg font-bold rounded-lg text-white bg-green-600 hover:bg-green-700 shadow-lg hover:shadow-xl transition">
-                Describe Your Task (5-min form)
+            <a href="register.html" onclick="bmsStart(event)" class="px-8 py-4 text-lg font-bold rounded-lg text-white bg-green-600 hover:bg-green-700 shadow-lg hover:shadow-xl transition">
+                Hire Your First Assistant (5-Min Setup)
             </a>
         </div>
         <div class="md:w-1/2">
@@ -55,25 +55,74 @@
                 </h2>
                 <!-- New Sub-heading: Set to a clean, smaller font -->
                 <p class="text-xl text-gray-500 font-medium">
-                    How we make this work for you
+                    How we put your business on autopilot
                 </p>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div class="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm flex flex-col items-center">
-                    <img src="https://images.unsplash.com/photo-1499750310107-5fef28a66643?auto=format&fit=crop&w=300&q=80" alt="Problem Solving" class="w-20 h-20 rounded-full mb-6 object-cover">
-                    <h3 class="text-xl font-bold mb-3">1. Tell Us the Problem</h3>
-                    <p class="text-gray-600">Fill out our 5-minute intake form. No tech specs—just explain the headache in plain English.</p>
+                    <img src="https://images.unsplash.com/photo-1499750310107-5fef28a66643?auto=format&fit=crop&w=300&q=80" alt="Select Your Assistant" class="w-20 h-20 rounded-full mb-6 object-cover">
+                    <h3 class="text-xl font-bold mb-3">1. Select Your Assistant</h3>
+                    <p class="text-gray-600">Choose from our library of specialized digital roles—from Lead Generators to Media Buyers. They come pre-trained, fully equipped, and ready to be provisioned to your workspace instantly.</p>
                 </div>
                 <div class="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm flex flex-col items-center">
-                    <img src="https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=300&q=80" alt="Engineering" class="w-20 h-20 rounded-full mb-6 object-cover">
-                    <h3 class="text-xl font-bold mb-3">2. We Build It</h3>
-                    <p class="text-gray-600">Our team of engineers maps out your workflow and builds your assistant behind the scenes.</p>
+                    <img src="https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=300&q=80" alt="Connect Tools & Set SMART Goals" class="w-20 h-20 rounded-full mb-6 object-cover">
+                    <h3 class="text-xl font-bold mb-3">2. Connect Tools &amp; Set SMART Goals</h3>
+                    <p class="text-gray-600">Securely plug your assistant into the apps you already use (HubSpot, Shopify, Meta, and more). Tell them exactly what to achieve—like &ldquo;Increase qualified leads by 50% this month&rdquo;—using our built-in milestone tracker.</p>
                 </div>
                 <div class="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm flex flex-col items-center">
-                    <img src="https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=300&q=80" alt="Time Back" class="w-20 h-20 rounded-full mb-6 object-cover">
-                    <h3 class="text-xl font-bold mb-3">3. You Get Time Back</h3>
-                    <p class="text-gray-600">The assistant runs 24/7. You only step in when it needs a final "Approve" click.</p>
+                    <img src="https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=300&q=80" alt="Kick Off & Track Progress" class="w-20 h-20 rounded-full mb-6 object-cover">
+                    <h3 class="text-xl font-bold mb-3">3. Kick Off &amp; Track Progress</h3>
+                    <p class="text-gray-600">Review your assistant's game plan and click &ldquo;Confirm &amp; Start Working.&rdquo; They run 24/7 in the background, autonomously optimizing their own tactics to make sure you hit your targets. You only step in when they need a final approval or a creative sign-off.</p>
                 </div>
+            </div>
+
+            <!-- Stop Buying Software. Start Hiring Solutions. (Pink Feature Panel) -->
+            <div class="mt-20 bg-pink-600 text-white rounded-3xl px-6 py-14 sm:px-12 shadow-lg">
+                <div class="max-w-2xl mx-auto text-center">
+                    <h2 class="text-4xl font-extrabold mb-5 tracking-tight">Stop Buying Software. Start Hiring Solutions.</h2>
+                    <p class="opacity-90 leading-relaxed mb-4">
+                        You no longer need to pay for a dozen disconnected apps or wait for an engineering team to build custom workflows.
+                    </p>
+                    <p class="opacity-90 leading-relaxed">
+                        Be More Swan gives you the power of a modern, AI-driven workforce with zero tech stress. Connect your tools, set your SMART goals, and let your assistants run the day-to-day. If an integration breaks or a target is missed, our autonomous platform alerts you and pivots the strategy instantly.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Why Be More Swan Beats Standard Software -->
+            <div class="mt-20 max-w-3xl mx-auto mb-12">
+                <h2 class="text-4xl font-extrabold text-emerald-700 tracking-tight">
+                    Why Be More Swan Beats Standard Software
+                </h2>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 text-left">
+                <div class="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
+                    <h3 class="text-xl font-bold mb-3">Zero Learning Curve</h3>
+                    <p class="text-gray-600">You talk to your assistants and give them directives in plain English. No complicated automation builders required.</p>
+                </div>
+                <div class="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
+                    <h3 class="text-xl font-bold mb-3">Outcome-Obsessed AI</h3>
+                    <p class="text-gray-600">Unlike basic bots that just push data around, our assistants actively track real-time metrics. If they fall off track from your goal, they rewrite their own briefs to fix the problem.</p>
+                </div>
+                <div class="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
+                    <h3 class="text-xl font-bold mb-3">Enterprise-Grade Security</h3>
+                    <p class="text-gray-600">Separate test sandboxes and secure data isolation mean your production databases and live customer data are always protected.</p>
+                </div>
+                <div class="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
+                    <span class="inline-block px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 font-semibold text-xs mb-3 border border-emerald-100">🛡️ Mandatory</span>
+                    <h3 class="text-xl font-bold mb-3">Safe Content Benchmark</h3>
+                    <p class="text-gray-600">A built-in safety layer is applied to every post your assistants create. It runs at the highest priority in the system prompt and cannot be disabled, overridden, or bypassed by any other setting—keeping your brand shielded from content that violates platform policies or community standards.</p>
+                </div>
+            </div>
+
+            <!-- Closing CTA -->
+            <div class="mt-16 text-center">
+                <h2 class="text-3xl font-extrabold text-gray-900 tracking-tight mb-6">
+                    Ready to get your time back?
+                </h2>
+                <a href="register.html" onclick="bmsStart(event)" class="inline-block px-8 py-4 text-lg font-bold rounded-lg text-white bg-green-600 hover:bg-green-700 shadow-lg hover:shadow-xl transition">
+                    Hire Your First Assistant (5-Min Setup)
+                </a>
             </div>
         </div>
     </section>
@@ -87,10 +136,10 @@
                     Proof in Action
                 </span>
             <h2 class="text-4xl font-extrabold text-gray-900 tracking-tight mt-4 mb-4">
-                How Creators Reclaim Their Sanity
+                How Founders Reclaim Their Time
             </h2>
             <p class="text-xl text-gray-500">
-                See how solo founders and scaling businesses deploy Aura-Assist to turn overwhelming admin loops into background clockwork.
+                See how solo operators and scaling businesses deploy Be More Swan's digital assistants to turn overwhelming admin loops into background clockwork.
             </p>
         </div>
 
@@ -99,7 +148,7 @@
 
             <!-- Floating Popular Badge (Renders in vibrant Neon Pink) -->
             <div class="absolute top-4 right-4 bg-emerald-700 text-white px-3 py-1 rounded-full text-xs font-bold tracking-wide shadow-sm z-20">
-                🔥 POPULAR ASSISTANT
+                🔥 POPULAR ASSISTANT: The Social Media Manager
             </div>
 
             <!-- Visual Left Panel -->
@@ -148,23 +197,23 @@
                 <div class="space-y-4 text-gray-600 leading-relaxed">
                     <blockquote>
                         <p class="text-lg font-medium italic text-gray-900 mb-4">
-                            "I knew that posting consistently on Facebook and Instagram was key to bringing in clients, but the constant loop of writing captions, sizing images, and struggling with scheduling tools was eating up all my energy. I’d post heavily for a week, get drained, and then my feeds would go dark for a month. It looked unprofessional."
+                            "I knew that posting consistently on Facebook and Instagram was key to bringing in clients, but the constant loop of writing captions, sizing images, and struggling with scheduling tools was eating up all my energy. I’d post heavily for a week, get drained, and then my feeds would go dark for a month."
                         </p>
                     </blockquote>
                     <p class="text-sm">
                         <strong class="text-gray-900 block mb-1">The Challenge:</strong> Cat wanted a reliable way to transform raw industry insights into platform-optimized posts on a fixed schedule without spending weekends trapped inside editing dashboards.
                     </p>
                     <p class="text-sm">
-                        <strong class="text-gray-900 block mb-1">The Aura-Assist Solution:</strong> Aura-Assist's engineering team deployed a custom **Social Media Manager**. Cat simply drops unedited voice notes or quick thoughts into a Notion scratchpad throughout her week. Aura-Assist's assistant steps in to clean up formatting, match her voice, select stock imagery layouts, and stage the calendar. She reviews the full batch with a single neon green approval click every Monday.
+                        <strong class="text-gray-900 block mb-1">The Be More Swan Solution:</strong> Cat hired the Social Media Manager assistant and connected her apps in two clicks. Now, she simply drops unedited voice notes into a connected Notion pad. Her assistant automatically cleans up the formatting, matches her brand voice, selects imagery, and stages the calendar to hit her monthly engagement goals. She reviews the full batch with a single "Approve" click every Monday.
                     </p>
                 </div>
 
                 <div class="mt-8 pt-6 border-t border-gray-200 flex flex-col sm:flex-row items-center gap-4">
-                    <a href="onboarding.html?tier=saver" class="w-full sm:w-auto text-center px-6 py-3 font-bold rounded-lg text-white bg-green-600 hover:bg-green-700 shadow-md hover:shadow-lg transition">
-                        Automate My Social Queue
+                    <a href="register.html" onclick="bmsStart(event, 'saver')" class="w-full sm:w-auto text-center px-6 py-3 font-bold rounded-lg text-white bg-green-600 hover:bg-green-700 shadow-md hover:shadow-lg transition">
+                        Hire a Social Media Manager
                     </a>
-                    <a href="pricing.html" class="text-sm font-bold text-gray-500 hover:text-green-600 transition">
-                        Compare All Tiers &rarr;
+                    <a href="assistants.html" class="text-sm font-bold text-gray-500 hover:text-green-600 transition">
+                        View Assistants &rarr;
                     </a>
                 </div>
             </div>
@@ -187,7 +236,7 @@
                             </span>
                     </div>
                     <span class="text-[11px] font-semibold text-gray-500 pl-4 block">
-                            Assistant Role: Inventory & Order Manager
+                            Assistant Role: CRM Administrator
                         </span>
                 </div>
             </div>
@@ -208,7 +257,7 @@
                     </div>
                     <div>
                         <span class="block text-3xl font-extrabold text-gray-900">3 Apps</span>
-                        <span class="text-xs font-medium text-gray-500 tracking-wider uppercase">Connected</span>
+                        <span class="text-xs font-medium text-gray-500 tracking-wider uppercase">Seamlessly Connected</span>
                     </div>
                     <div>
                         <span class="block text-3xl font-extrabold text-gray-900">0 min</span>
@@ -219,23 +268,20 @@
                 <div class="space-y-4 text-gray-600 leading-relaxed">
                     <blockquote>
                         <p class="text-lg font-medium italic text-gray-900 mb-4">
-                            "Between school runs, managing the chaos of two young kids, and trying to get my lifestyle business up and running from our spare room, my brain was constantly fried. I was staying up until midnight manually copy-pasting order details and trying to keep track of requests. I was exhausted."
+                            "Between school runs and trying to get my lifestyle business up and running, my brain was fried. I was staying up until midnight manually copy-pasting order details across different platforms. I was exhausted."
                         </p>
                     </blockquote>
                     <p class="text-sm">
                         <strong class="text-gray-900 block mb-1">The Challenge:</strong> Elena was drowning in cross-platform data management. Orders needed to be manually moved into production logs, fulfillment files, and image archival drives.
                     </p>
                     <p class="text-sm">
-                        <strong class="text-gray-900 block mb-1">The Aura Solution:</strong> Using **The Workflow Saver**, Aura-Assist's team engineered an autonomous **CRM Administrator**. The moment an order registers, the assistant instantly updates stock counts, structures build logs, and drafts shipping slips, letting Elena verify updates in one central dashboard.
+                        <strong class="text-gray-900 block mb-1">The Be More Swan Solution:</strong> Elena provisioned the CRM Administrator assistant. The moment an order registers in her store, the assistant autonomously updates stock counts, structures build logs, and drafts shipping slips. Elena verifies everything in real-time from her centralized Be More Swan dashboard.
                     </p>
                 </div>
 
                 <div class="mt-8 pt-6 border-t border-gray-200 flex flex-col sm:flex-row items-center gap-4">
-                    <a href="onboarding.html?tier=saver" onclick="sessionStorage.setItem('aura_tier', 'saver')" class="w-full sm:w-auto text-center px-6 py-3 font-bold rounded-lg text-white bg-green-600 hover:bg-green-700 shadow-md hover:shadow-lg transition">
-                        Automate My Process Like Elena
-                    </a>
-                    <a href="pricing.html" class="text-sm font-bold text-gray-500 hover:text-green-600 transition">
-                        Compare All Tiers &rarr;
+                    <a href="register.html" onclick="bmsStart(event, 'saver')" class="w-full sm:w-auto text-center px-6 py-3 font-bold rounded-lg text-white bg-green-600 hover:bg-green-700 shadow-md hover:shadow-lg transition">
+                        Automate My Operations
                     </a>
                 </div>
             </div>
@@ -267,8 +313,8 @@
             <div class="w-full lg:w-1/2 text-left">
                 <div class="flex items-center gap-4 mb-6">
                     <div>
-                        <h3 class="text-2xl font-extrabold text-gray-900">DJ LImi</h3>
-                        <p class="text-sm font-medium text-gray-500">Electronic Music Producer, DJ & Independent Artist</p>
+                        <h3 class="text-2xl font-extrabold text-gray-900">DJ Limi</h3>
+                        <p class="text-sm font-medium text-gray-500">Electronic Music Producer & Independent Artist</p>
                     </div>
                 </div>
 
@@ -290,23 +336,20 @@
                 <div class="space-y-4 text-gray-600 leading-relaxed">
                     <blockquote>
                         <p class="text-lg font-medium italic text-gray-900 mb-4">
-                            "I used to spend four hours finishing a track, and then another eight hours chopping it up for TikTok, resizing vertical clips for Reels, and writing metadata tags. It felt so transactional—I’m an artist, not a marketing agency. I was completely burnt out on social media upkeep."
+                            "I used to spend four hours finishing a track, and then another eight hours chopping it up for TikTok and writing metadata tags. I’m an artist, not a marketing agency. I was completely burnt out."
                         </p>
                     </blockquote>
                     <p class="text-sm">
-                        <strong class="text-gray-900 block mb-1">The Challenge:</strong> Limi needed to push video drops, release schedules, and audio clips across four social platforms weekly to stay relevant while managing inbound venue inquiries.
+                        <strong class="text-gray-900 block mb-1">The Challenge:</strong> Limi needed to push video drops and audio clips across four social platforms weekly to hit her streaming targets, while simultaneously managing inbound venue inquiries.
                     </p>
                     <p class="text-sm">
-                        <strong class="text-gray-900 block mb-1">The Aura Solution:</strong> Aura-Assist’s engineers mapped an automated assistant to act as her **Performance Marketer**. Now, Limi drops her mix audio into a shared folder, and her assistant isolates energy peaks, hooks up branded visualization spectrums, maps promotional text, and cues the distribution logs.
+                        <strong class="text-gray-900 block mb-1">The Be More Swan Solution:</strong> Limi deployed a Performance Marketer assistant and set a SMART goal for follower growth. Now, she drops her mix audio into a shared folder, and her assistant autonomously isolates energy peaks, hooks up branded visuals, maps promotional text, and cues the distribution logs. If a campaign falls off track, the assistant automatically suggests a new brief.
                     </p>
                 </div>
 
                 <div class="mt-8 pt-6 border-t border-gray-200 flex flex-col sm:flex-row items-center gap-4">
-                    <a href="onboarding.html?tier=buster" class="w-full sm:w-auto text-center px-6 py-3 font-bold rounded-lg text-white bg-green-600 hover:bg-green-700 shadow-md hover:shadow-lg transition">
-                        Automate My Content Like Maya
-                    </a>
-                    <a href="pricing.html" class="text-sm font-bold text-gray-500 hover:text-green-600 transition">
-                        See Pricing Architecture &rarr;
+                    <a href="register.html" onclick="bmsStart(event, 'buster')" class="w-full sm:w-auto text-center px-6 py-3 font-bold rounded-lg text-white bg-green-600 hover:bg-green-700 shadow-md hover:shadow-lg transition">
+                        Automate My Marketing
                     </a>
                 </div>
             </div>
@@ -328,7 +371,7 @@
                             </span>
                     </div>
                     <span class="text-[11px] font-semibold text-gray-500 pl-4 block">
-                            Assistant Role: Operations Manager (Custom)
+                            Assistant Role: Operations Manager
                         </span>
                 </div>
             </div>
@@ -360,19 +403,19 @@
                 <div class="space-y-4 text-gray-600 leading-relaxed">
                     <blockquote>
                         <p class="text-lg font-medium italic text-gray-900 mb-4">
-                            "I partner with companies to support high-performing employees who are silently struggling with alcohol addiction. The HR teams loved my mission, but managing secure intake paperwork across time zones from my home in Greece was overwhelming."
+                            "I partner with companies to support employees silently struggling with addiction. The HR teams loved my mission, but managing secure intake paperwork across time zones from my home in Greece was overwhelming."
                         </p>
                     </blockquote>
                     <p class="text-sm">
-                        <strong class="text-gray-900 block mb-1">The Challenge:</strong> Angela needed a highly secure, confidential system to log incoming B2B corporate inquiries, process compliance forms, and schedule private employee assessments without sacrificing the peace she moved overseas to find.
+                        <strong class="text-gray-900 block mb-1">The Challenge:</strong> Angela needed a highly secure, confidential system to log incoming B2B corporate inquiries, process compliance forms, and schedule private employee assessments without sacrificing her time.
                     </p>
                     <p class="text-sm">
-                        <strong class="text-gray-900 block mb-1">The Aura Solution:</strong> Aura-Assist’s engineers configured an automated **Operations Manager (Custom)** assistant. Now, when a company reaches out, the assistant securely routes the inquiry, maps international calendars, and manages the onboarding logs automatically, letting Angela focus entirely on her coaching practice.
+                        <strong class="text-gray-900 block mb-1">The Be More Swan Solution:</strong> Angela activated the Operations Manager assistant. When a company reaches out, the assistant securely routes the inquiry, maps international calendars, and manages the onboarding logs. If a step is missed, the assistant triggers a Just-In-Time notification, letting Angela focus entirely on her coaching practice.
                     </p>
                 </div>
 
                 <div class="mt-8 pt-6 border-t border-gray-200 flex flex-col sm:flex-row items-center gap-4">
-                    <a href="onboarding.html?tier=employee" class="w-full sm:w-auto text-center px-6 py-3 font-bold rounded-lg text-white bg-green-600 hover:bg-green-700 shadow-md hover:shadow-lg transition">
+                    <a href="register.html" onclick="bmsStart(event, 'employee')" class="w-full sm:w-auto text-center px-6 py-3 font-bold rounded-lg text-white bg-green-600 hover:bg-green-700 shadow-md hover:shadow-lg transition">
                         Automate My Corporate Pipeline
                     </a>
                     <a href="pricing.html" class="text-sm font-bold text-gray-500 hover:text-green-600 transition">
@@ -384,10 +427,14 @@
     </div>
 </section>
 
-    <!-- Expert Team Section -->
-<section class="py-16 bg-emerald-700 text-white text-center">
-    <h2 class="text-2xl font-bold mb-4">You’re not buying a platform. You’re hiring a team.</h2>
-    <p class="max-w-xl mx-auto opacity-90">We are a team of real people using the latest technology to run your digital assistant. If an app updates or something stops working, we handle the fix behind the scenes—giving you the power of modern automation with zero tech stress.</p>
+    <!-- Closing Pitch — Stop Buying Software. Start Hiring Solutions. -->
+<section class="py-20 bg-emerald-700 text-white text-center px-4">
+    <div class="max-w-2xl mx-auto">
+        <p class="text-2xl font-extrabold mb-2">Delegate the work you hate.</p>
+        <p class="opacity-90 leading-relaxed">
+            Your invisible digital team. Constantly working in the background to turn your daily chaos into complete calm.
+        </p>
+    </div>
 </section>
 
 <div id="footer-placeholder"></div>
@@ -395,6 +442,17 @@
 <script src="./mobileMenu.js"></script>
 
 <script>
+    // CTA router — every "get started" button opens the Register page, unless this device is already
+    // known to belong to a registered Be More Swan user, in which case we send them to Login instead.
+    // The flag is set in the authenticated workspace and on successful registration.
+    function bmsStart(ev, tier) {
+        if (ev && ev.preventDefault) ev.preventDefault();
+        try { if (tier) sessionStorage.setItem('aura_tier', tier); } catch (e) {}
+        let known = false;
+        try { known = localStorage.getItem('bms_known_user') === '1'; } catch (e) {}
+        window.location.href = known ? 'login.html' : 'register.html';
+    }
+
     // Component Loader Engine
     async function loadComponent(placeholderId, filePath) {
         try {

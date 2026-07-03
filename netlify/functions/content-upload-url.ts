@@ -3,7 +3,7 @@
 //
 // When AWS credentials are configured (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
 // S3_BUCKET_NAME, S3_REGION), this returns a real presigned URL.
-// Until then, it returns a mock upload endpoint so the UI flow can be tested end-to-end.
+// Until then, it returns 501 (storage not configured) — no uploads are accepted.
 
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';

@@ -96,60 +96,101 @@ export const handler: Handler = async (event) => {
         }
     }
 
-    const chargePence = Math.round(chargeGbp * 100);
-
     const billingCycleLabel = billingCycle === 'annual'
         ? `Annual subscription (${Math.round((1 - ANNUAL_DISCOUNT) * 100)}% off)`
         : 'Monthly subscription';
 
     // 3. CREATE STRIPE CUSTOMER
-    // ── VAT (P3): Collect billing address at checkout via Stripe Payment Element.
-    // Stripe's automatic_payment_methods + address collection lets Stripe determine
-    // the customer's country and apply VAT/tax rates automatically.
-    // We set `automatic_tax: { enabled: true }` on the PaymentIntent so that
-    // UK customers are charged 20% VAT and EU/international customers are handled
-    // correctly by Stripe Tax (requires Stripe Tax to be enabled in the dashboard).
-    //
-    // Pre-fill billing info from the user's stored billing_information record when available.
     const customer = await stripe.customers.create({
       email: user.email,
       name: [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email,
       metadata: { auraUserId: user.id.toString() },
     });
 
-    // 4. CREATE PAYMENT INTENT
-    // setup_future_usage: 'off_session' saves the card for recurring subscription charges.
-    // The webhook (payment_intent.succeeded) creates the Stripe subscription + DB records.
-    // billingCycle is passed in metadata so the webhook can set interval: 'year' for annual plans.
+    // 4. CREATE THE SUBSCRIPTION — single source of truth for the charge.
+    // ── Single-subscription pattern ─────────────────────────────────────────────
+    // We create ONE subscription in `default_incomplete` state and hand its first
+    // invoice's PaymentIntent to the browser to confirm. Confirming that PI both
+    // takes the first payment AND activates the subscription, so the customer is
+    // charged exactly once.
     //
-    // automatic_tax.enabled = true: Stripe Tax calculates VAT based on the billing address
-    // provided in the Payment Element. The amount shown to the user is exclusive of tax;
-    // Stripe adds tax on top at confirmation time. The final charged amount (inc. VAT) is
-    // reflected in the payment_intent.succeeded webhook event's `amount_received`.
-    const paymentIntent = await stripe.paymentIntents.create({
-      amount: chargePence,
-      currency: 'gbp',
+    // Previously this endpoint created a standalone PaymentIntent and then BOTH the
+    // webhook (payment_intent.succeeded) and confirm-payment.ts each called
+    // subscriptions.create — every subscription with a saved card immediately
+    // invoices, so the first period was charged two or three times. Creating the
+    // subscription up front (and having the webhook/confirm-payment reuse it rather
+    // than create new ones) eliminates that double-charge.
+    let subscriptionItem: Stripe.SubscriptionCreateParams.Item;
+    if (billingCycle === 'annual') {
+      // Annual plans bill a 12-month lump sum (already discounted in baseChargeGbp) once a year.
+      // dahlia API requires price_data.product (an ID); create the product explicitly.
+      const annualProduct = await stripe.products.create({ name: masterPlan.name });
+      subscriptionItem = {
+        price_data: {
+          currency: 'gbp',
+          product: annualProduct.id,
+          unit_amount: Math.round(baseChargeGbp * 100),
+          recurring: { interval: 'year' },
+        },
+      };
+    } else {
+      subscriptionItem = { price: stripePriceId };
+    }
+
+    const subscription = await stripe.subscriptions.create({
       customer: customer.id,
-      setup_future_usage: 'off_session',
-      // Collect billing address so Stripe Tax can determine VAT liability
-      automatic_payment_methods: { enabled: true },
+      items: [subscriptionItem],
+      payment_behavior: 'default_incomplete',
+      payment_settings: { save_default_payment_method: 'on_subscription' },
+      proration_behavior: 'none',
+      // dahlia: the client secret for confirming the incomplete subscription comes
+      // from the latest invoice's confirmation_secret.
+      expand: ['latest_invoice.confirmation_secret'],
+      // SC3: apply a validated promotion code as a real Stripe discount on the invoice
+      ...(promotionCodeId ? { discounts: [{ promotion_code: promotionCodeId }] } : {}),
       metadata: {
-        userId:           user.id.toString(),
-        organisationId:   orgId.toString(),
-        tier:             tierKey,
-        masterPlanId:     masterPlan.id.toString(),
-        stripePriceId,
-        stripeCustomerId: customer.id,
+        userId:         user.id.toString(),
+        organisationId: orgId.toString(),
+        tier:           tierKey,
+        masterPlanId:   masterPlan.id.toString(),
         billingCycle,
-        ...(promotionCodeId ? { promotionCodeId } : {}),
       },
     });
+
+    const latestInvoice = subscription.latest_invoice as Stripe.Invoice;
+    const clientSecret = latestInvoice?.confirmation_secret?.client_secret ?? null;
+    if (!clientSecret) {
+      throw new Error('Stripe did not return a client secret for the subscription invoice.');
+    }
+
+    // Stamp our metadata onto the invoice's PaymentIntent so the existing
+    // payment_intent.succeeded webhook handler can create the plan/payment/invoice
+    // records exactly as before — and so it (and confirm-payment.ts) reuse THIS
+    // subscription instead of creating another. The PaymentIntent id is the prefix
+    // of its client secret (pi_xxx_secret_yyy).
+    const paymentIntentId = clientSecret.split('_secret_')[0];
+    try {
+      await stripe.paymentIntents.update(paymentIntentId, {
+        metadata: {
+          userId:               user.id.toString(),
+          organisationId:       orgId.toString(),
+          tier:                 tierKey,
+          masterPlanId:         masterPlan.id.toString(),
+          stripePriceId,
+          stripeCustomerId:     customer.id,
+          billingCycle,
+          stripeSubscriptionId: subscription.id,
+        },
+      });
+    } catch (metaErr: any) {
+      console.error('[create-subscription] Failed to stamp PaymentIntent metadata:', metaErr?.message);
+    }
 
     return {
       statusCode: 200,
       body: JSON.stringify({
         data: {
-          clientSecret:        paymentIntent.client_secret,
+          clientSecret,
           publishableKey:      process.env.STRIPE_PUBLISHABLE_KEY,
           planName:            masterPlan.name,
           amountGbp:           chargeGbp.toString(),

@@ -92,9 +92,9 @@ async function detectNoTasks7d(db: any) {
                 to: user.email,
                 subject: 'Your assistant is waiting — here\'s how to get started in 2 minutes',
                 html: `<p>Hi ${user.firstName || 'there'},</p>
-                       <p>Your Aura assistant has been set up and is ready to help — but it looks like you haven't run a task yet.</p>
+                       <p>Your Be More Swan assistant has been set up and is ready to help — but it looks like you haven't run a task yet.</p>
                        <p>It only takes 2 minutes to see what it can do. <a href="${process.env.BASE_URL}/workspace.html">Try your first task now →</a></p>
-                       <p>The Aura Team</p>`,
+                       <p>The Be More Swan Team</p>`,
             });
         } catch { /* non-critical */ }
 
@@ -173,7 +173,7 @@ async function detectIntegrationDisconnected(db: any) {
                     html: `<p>Hi ${user.firstName || 'there'},</p>
                            <p>Your <strong>${integrationName}</strong> connection has been disconnected for more than 48 hours. Your assistant won't be able to use it until you reconnect.</p>
                            <p><a href="${process.env.BASE_URL}/integrations.html">Reconnect your ${integrationName} now →</a></p>
-                           <p>The Aura Team</p>`,
+                           <p>The Be More Swan Team</p>`,
                 });
             } catch { /* non-critical */ }
         }
@@ -248,7 +248,7 @@ async function detectUpgradeIntentNotConverted(db: any) {
                     html: `<p>Hi ${user.firstName || 'there'},</p>
                            <p>We noticed you were checking out our plans recently. Higher tiers unlock features like brand voice analysis, compliance checking, priority support, and more assistants.</p>
                            <p><a href="${process.env.BASE_URL}/pricing.html">See what you're missing →</a></p>
-                           <p>The Aura Team</p>`,
+                           <p>The Be More Swan Team</p>`,
                 });
             } catch { /* non-critical */ }
         }

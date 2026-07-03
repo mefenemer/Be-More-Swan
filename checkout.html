@@ -4,7 +4,7 @@
   <script src="./auth-check.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Checkout | Aura-Assist</title>
+  <title>Checkout | Be More Swan</title>
   <link href="./style.css" rel="stylesheet">
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/favicon/apple-icon.png">
@@ -17,7 +17,7 @@
 <nav class="bg-white shadow-sm sticky top-0 z-40">
   <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
     <div class="flex justify-between h-16 items-center">
-      <a href="index.html" class="font-extrabold text-2xl text-emerald-700 tracking-tight">Aura-Assist</a>
+      <a href="index.html" class="font-extrabold text-2xl text-emerald-700 tracking-tight">Be More Swan</a>
       <div class="flex items-center gap-2 text-sm text-gray-500">
         <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
@@ -64,7 +64,7 @@
               </svg>
             </div>
             <div>
-              <p class="text-xs font-bold text-emerald-600 uppercase tracking-wide mb-0.5">Aura-Assist</p>
+              <p class="text-xs font-bold text-emerald-600 uppercase tracking-wide mb-0.5">Be More Swan</p>
               <h3 id="summary-plan-name" class="text-lg font-extrabold text-gray-900 leading-tight">Loading…</h3>
             </div>
           </div>
@@ -126,6 +126,16 @@
           </div>
         </div>
 
+        <div class="bg-pink-50 border border-pink-100 rounded-2xl p-5">
+          <div class="flex items-start gap-3">
+            <span class="text-lg leading-none mt-0.5 flex-shrink-0">🎨</span>
+            <div>
+              <p class="text-sm font-bold text-pink-800 mb-1">Includes AI media credits</p>
+              <p class="text-xs text-pink-700 leading-relaxed">Your plan includes a monthly allowance of AI credits for media generation — each AI image costs 1 credit and each AI video costs 5 credits. Unused credits roll over, and you can top up any time if you need more.</p>
+            </div>
+          </div>
+        </div>
+
         <div class="flex items-center justify-center gap-3 text-xs text-gray-400">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
@@ -167,7 +177,7 @@
             </button>
 
             <p id="checkout-tos-copy" class="text-center text-xs text-gray-400 mt-4">
-              By confirming, you agree to Aura-Assist's
+              By confirming, you agree to Be More Swan's
               <a href="terms_of_service.html" class="underline hover:text-gray-600">Terms of Service</a>
               and authorise this recurring charge. <span id="checkout-renewal-disclosure">Your subscription renews automatically. Cancel anytime from Settings → Billing.</span>
             </p>
@@ -329,15 +339,15 @@
   const PLAN_INFO = {
     buster: {
       label: 'The Busywork Buster',
-      features: ['1 Dedicated Assistant', 'Handles one specific task', 'Works inside 1 app', '1 monthly update'],
+      features: ['1 Dedicated Assistant', 'Handles one specific task', 'Works inside 1 app', '1 monthly update', '20 AI media credits/mo (images)'],
     },
     saver: {
       label: 'The Workflow Saver',
-      features: ['1 Smart Assistant', 'Handles multi-step processes', 'Connects up to 3 of your apps', 'Learns your style & voice', '2 monthly updates'],
+      features: ['1 Smart Assistant', 'Handles multi-step processes', 'Connects up to 3 of your apps', 'Learns your style & voice', '2 monthly updates', '50 AI media credits/mo (images & video)'],
     },
     employee: {
       label: 'The Digital Employee',
-      features: ['1 Dedicated Assistant for one core area', 'Manages a complete process (up to 5 steps)', 'Connects all standard apps', '24/7 monitoring', 'Unlimited volume & tweaks'],
+      features: ['1 Dedicated Assistant for one core area', 'Manages a complete process (up to 5 steps)', 'Connects all standard apps', '24/7 monitoring', 'Unlimited volume & tweaks', '100 AI media credits/mo (images & video)'],
     },
   };
 

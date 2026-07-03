@@ -16,7 +16,7 @@ import { getDb } from '../../db/client';
 import { dpaRequests } from '../../db/schema';
 import { sendMagicLinkEmail } from '../../src/utils/email';
 
-const LEGAL_EMAIL = process.env.LEGAL_EMAIL || 'hello@aura-assist.com';
+const LEGAL_EMAIL = process.env.LEGAL_EMAIL || 'hello@bemoreswan.com';
 
 export const handler: Handler = async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -68,7 +68,7 @@ export const handler: Handler = async (event) => {
         // (c) Auto-acknowledgement to the requester
         await sendMagicLinkEmail({
             to: email.trim(),
-            subject: 'Your DPA Request — Aura-Assist',
+            subject: 'Your DPA Request — Be More Swan',
             html: `
                 <div style="font-family:sans-serif;padding:24px;max-width:500px;background:#fff;border-radius:12px;border:1px solid #eae4d7">
                     <h2 style="color:#1f1e1b">DPA Request Received</h2>
@@ -81,7 +81,7 @@ export const handler: Handler = async (event) => {
                         If you have any questions in the meantime, reply to this email or contact us at
                         <a href="mailto:${LEGAL_EMAIL}">${LEGAL_EMAIL}</a>.
                     </p>
-                    <p style="color:#787263;font-size:13px;margin-top:24px">Aura-Assist · UK GDPR Compliant</p>
+                    <p style="color:#787263;font-size:13px;margin-top:24px">Be More Swan · UK GDPR Compliant</p>
                 </div>
             `,
         });

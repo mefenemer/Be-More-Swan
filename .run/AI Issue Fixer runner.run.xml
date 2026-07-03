@@ -1,0 +1,24 @@
+<!--
+  Shared WebStorm/IntelliJ run configuration for the AI auto-fix runner.
+
+  Appears in the run-configurations dropdown as "AI Issue Fixer (runner)":
+    ▶ Run     — starts the runner (config comes from .env.handoff in the repo root)
+    ⟳ Rerun   — restarts it, e.g. after pulling a new version of the script or when
+                the process has died and the admin portal's "Restart runner" button
+                can no longer reach it.
+
+  Uses the dev:issue-fixer:local npm script, which loads .env.handoff via node's
+  --env-file — no secrets live in this file, so it is safe to commit.
+-->
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="AI Issue Fixer (runner)" type="js.build_tools.npm">
+    <package-json value="$PROJECT_DIR$/package.json" />
+    <command value="run" />
+    <scripts>
+      <script value="dev:issue-fixer:local" />
+    </scripts>
+    <node-interpreter value="project" />
+    <envs />
+    <method v="2" />
+  </configuration>
+</component>

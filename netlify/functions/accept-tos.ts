@@ -8,6 +8,8 @@ import jwt from 'jsonwebtoken';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { tosAcceptances, users } from '../../db/schema';
+import { resolveBaseUrl } from '../../src/utils/base-url';
+import { retryBlockedAssistants } from '../../src/utils/retry-provisioning';
 
 export const CURRENT_TOS_VERSION = '2.0';
 
@@ -47,6 +49,12 @@ export const handler: Handler = async (event) => {
 
     if (!existing) {
         await db.insert(tosAcceptances).values({ userId, version, ipAddress, userAgent });
+    }
+
+    // Re-trigger any assistants this user blocked on a ToS gate (best-effort; re-evaluates all gates).
+    const baseUrl = resolveBaseUrl(event.headers);
+    if (baseUrl) {
+        await retryBlockedAssistants(db, { baseUrl, userId }).catch(() => {});
     }
 
     return { statusCode: 200, body: JSON.stringify({ accepted: true, version }) };

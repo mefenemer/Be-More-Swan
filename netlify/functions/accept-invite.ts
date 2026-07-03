@@ -55,7 +55,7 @@ export const handler: Handler = async (event) => {
         return {
             statusCode: 400,
             headers: { 'Content-Type': 'text/html' },
-            body: `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Invalid Invite — Aura</title>
+            body: `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Invalid Invite — Be More Swan</title>
 <style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f9fafb}
 .card{background:#fff;border-radius:1rem;padding:2.5rem;max-width:440px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.08)}</style></head>
 <body><div class="card">
@@ -75,7 +75,7 @@ export const handler: Handler = async (event) => {
         return {
             statusCode: 410,
             headers: { 'Content-Type': 'text/html' },
-            body: `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Invite Expired — Aura</title>
+            body: `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Invite Expired — Be More Swan</title>
 <style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f9fafb}
 .card{background:#fff;border-radius:1rem;padding:2.5rem;max-width:440px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.08)}</style></head>
 <body><div class="card">

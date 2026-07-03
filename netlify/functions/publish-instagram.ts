@@ -11,6 +11,7 @@ import {
     notifications, users, auditLogs,
 } from '../../db/schema';
 import { getSecret } from '../../src/utils/vault';
+import { recordPostedAssets } from '../../src/utils/pexels';
 
 const BATCH = 100;
 // Backoff in minutes: attempt 1→2m, 2→8m, 3→30m
@@ -19,6 +20,9 @@ const MAX_ATTEMPTS = 3;
 // Overrun threshold
 const OVERRUN_MS = 55_000;
 const GRAPH_VERSION = 'v19.0';
+// A row left in 'publishing' longer than this was orphaned by a timed-out tick — reclaim it.
+// Comfortably beyond the 120s video-processing poll so we never reclaim a live in-progress post.
+const STALE_PUBLISHING_MINS = 10;
 
 type FailureReason = { errorCode: number | null; errorMessage: string; errorSubcode?: number; isRetryable: boolean };
 
@@ -44,6 +48,14 @@ export const handler: Handler = async () => {
     const tickStart = Date.now();
     const now = new Date();
     let processed = 0, succeeded = 0, failed = 0;
+
+    // Self-heal: reclaim posts stranded in 'publishing' by an earlier timed-out tick (e.g. a
+    // slow video poll) so they are retried instead of sitting un-published forever.
+    await db.execute(
+        `UPDATE scheduled_posts SET status = 'scheduled', retry_at = NULL, updated_at = now()
+         WHERE status = 'publishing' AND platform = 'instagram'
+           AND updated_at < now() - interval '${STALE_PUBLISHING_MINS} minutes'`
+    );
 
     // Claim due posts — SKIP LOCKED prevents concurrent tick double-processing
     const posts = await db.execute<{
@@ -110,7 +122,7 @@ export const handler: Handler = async () => {
             // Build caption with hashtags
             const fullCaption = [post.caption, post.hashtags].filter(Boolean).join('\n\n');
             const isVideo = ['reel', 'video'].includes(post.post_format?.toLowerCase() ?? '');
-            const mediaProxyBase = `${process.env.BASE_URL || 'https://aura-assist.com'}/.netlify/functions/media-proxy?postId=${post.id}`;
+            const mediaProxyBase = `${process.env.BASE_URL || 'https://bemoreswan.com'}/.netlify/functions/media-proxy?postId=${post.id}`;
 
             // Step 1: create media container (image or video)
             const containerBody: Record<string, string> = {
@@ -196,6 +208,10 @@ export const handler: Handler = async () => {
             await db.execute(
                 `UPDATE scheduled_posts SET status = 'published', platform_post_id = '${instagramPostId}', published_at = now(), updated_at = now() WHERE id = ${post.id}`
             );
+
+            // US2 AC2.5: burn any Pexels asset on this post so it is never reused (idempotent).
+            await recordPostedAssets(db, { orgId: post.organisation_id, userId: post.user_id, scheduledPostId: post.id })
+                .catch(e => console.warn(`[publish-instagram] recordPostedAssets failed for post ${post.id}:`, e?.message || e));
 
             await db.insert(notifications).values({
                 userId: post.user_id,

@@ -1,16 +1,19 @@
 // netlify/functions/draft-horizon-fill.ts
-// US-SMM-2.4.1: Daily job — for each active Social Media Manager assistant,
-// check how many posts are planned within the draft horizon and enqueue a
-// gap-fill task run for each assistant that has uncovered days.
+// US-SMM-2.4.1 (+ Posting Schedule): Daily job — for each active Social Media Manager assistant,
+// fill any uncovered posting slots inside its draft horizon by enqueuing generation jobs, each
+// stamped with the exact target_publish_date derived from the assistant's frequency / days / times.
 //
 // Schedule: "0 6 * * *"  (06:00 UTC daily)
-// Does NOT generate post content itself — it enqueues a pending taskRun
-// which a worker will pick up and call the AI to fill the gaps.
+// The jobs land in content_generation_jobs; process-content-jobs.ts turns each into a dated draft
+// in the Review Queue. This function no longer enqueues opaque task runs — it directly tops up the
+// generation queue so the user always has content N days ahead.
 
 import { Handler } from '@netlify/functions';
-import { and, eq, gte, lte, sql } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, masterAssistants, scheduledPosts, taskRuns, notifications } from '../../db/schema';
+import { aiAssistants, masterAssistants } from '../../db/schema';
+import { enqueueScheduleGapFill } from '../../src/utils/schedule-gap-fill';
+import { SMM_ROLE_KEYS } from '../../src/constants/roles';
 
 export const handler: Handler = async (event) => {
     // Allow both scheduled invocations and manual POST for testing
@@ -20,85 +23,43 @@ export const handler: Handler = async (event) => {
 
     const db = getDb();
 
-    // Find all active SMM assistants with their horizon setting
+    // Find all active SMM assistants with their schedule + horizon settings
     const smmAssistants = await db
         .select({
             id: aiAssistants.id,
             userId: aiAssistants.userId,
+            organisationId: aiAssistants.organisationId,
             name: aiAssistants.name,
+            onboardingContext: aiAssistants.onboardingContext,
             draftHorizonDays: aiAssistants.draftHorizonDays,
+            configuration: aiAssistants.configuration,
         })
         .from(aiAssistants)
         .innerJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
         .where(and(
             eq(aiAssistants.isActive, true),
-            eq(masterAssistants.roleKey, 'social_media_manager'),
+            inArray(masterAssistants.roleKey, SMM_ROLE_KEYS),
         ));
 
-    let enqueued = 0;
     const now = new Date();
+    let jobsEnqueued = 0;
+    const skipped: Record<string, number> = { on_demand: 0, no_blueprint: 0, blocking_gaps: 0, fully_covered: 0, empty_library_skipped: 0 };
 
     for (const assistant of smmAssistants) {
-        const horizonDays = assistant.draftHorizonDays ?? 7;
-        const windowEnd   = new Date(now.getTime() + horizonDays * 24 * 60 * 60 * 1000);
-
-        // Count posts already in a planned state (draft, in_review, approved, scheduled)
-        // within the horizon window — one row per calendar day per platform
-        const coveredRows = await db
-            .select({ publishDate: scheduledPosts.publishDate, platform: scheduledPosts.platform })
-            .from(scheduledPosts)
-            .where(and(
-                eq(scheduledPosts.assistantId, assistant.id),
-                gte(scheduledPosts.publishDate, now),
-                lte(scheduledPosts.publishDate, windowEnd),
-                sql`status IN ('draft','in_review','approved','scheduled')`,
-            ));
-
-        // Build a set of "date:platform" already covered
-        const covered = new Set(
-            coveredRows.map(r => {
-                const d = new Date(r.publishDate);
-                return `${d.toISOString().slice(0, 10)}:${r.platform}`;
-            }),
-        );
-
-        // Check if there are any gaps (we can't know exact target — worker decides frequency)
-        // We just enqueue a gap-fill run if today's date isn't fully covered across all platforms
-        // The worker reads the draftHorizonDays and covered slots to decide what to generate
-        if (covered.size < horizonDays) {
-            // Don't enqueue if there's already a pending gap-fill for this assistant today
-            const existingRun = await db
-                .select({ id: taskRuns.id })
-                .from(taskRuns)
-                .where(and(
-                    eq(taskRuns.assistantId, assistant.id),
-                    eq(taskRuns.taskType, 'draft_gap_fill'),
-                    eq(taskRuns.status, 'pending'),
-                    gte(taskRuns.createdAt, new Date(now.getFullYear(), now.getMonth(), now.getDate())),
-                ))
-                .limit(1);
-
-            if (!existingRun.length) {
-                await db.insert(taskRuns).values({
-                    userId: assistant.userId,
-                    assistantId: assistant.id,
-                    taskType: 'draft_gap_fill',
-                    status: 'pending',
-                    metadata: {
-                        reason: 'daily_gap_check',
-                        horizonDays,
-                        windowEnd: windowEnd.toISOString(),
-                        coveredSlots: covered.size,
-                    },
-                });
-                enqueued++;
+        try {
+            const result = await enqueueScheduleGapFill(db, assistant, now);
+            jobsEnqueued += result.enqueued;
+            if (result.reason && result.reason !== 'ok' && skipped[result.reason] !== undefined) {
+                skipped[result.reason]++;
             }
+        } catch (err) {
+            console.error(`draft-horizon-fill: assistant ${assistant.id} failed`, err);
         }
     }
 
     return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ran: true, assistantsChecked: smmAssistants.length, gapFillRunsEnqueued: enqueued }),
+        body: JSON.stringify({ ran: true, assistantsChecked: smmAssistants.length, jobsEnqueued, skipped }),
     };
 };

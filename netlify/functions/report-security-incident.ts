@@ -12,7 +12,7 @@ import { users, securityIncidents, notifications, adminAuditLog } from '../../db
 import { sendEmail } from '../../src/utils/email';
 
 const jwtSecret = process.env.JWT_SECRET;
-const BASE_URL  = process.env.BASE_URL || 'https://aura-assist.com';
+const BASE_URL  = process.env.BASE_URL || 'https://bemoreswan.com';
 
 export const handler: Handler = async (event) => {
     if (event.httpMethod !== 'POST') {
@@ -102,7 +102,7 @@ export const handler: Handler = async (event) => {
                     to: sa.email,
                     subject: `[P0 ALERT] Security Incident Detected — ${title}`,
                     html: `<p>Hi ${sa.firstName || 'Admin'},</p>
-                           <p>A <strong>${severity.toUpperCase()}</strong> security incident has been logged on Aura-Assist:</p>
+                           <p>A <strong>${severity.toUpperCase()}</strong> security incident has been logged on Be More Swan:</p>
                            <p><strong>${title}</strong></p>
                            <p>${description}</p>
                            <p>

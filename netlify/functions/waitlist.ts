@@ -18,7 +18,7 @@ import { getDb } from '../../db/client';
 import { masterAssistants, waitlist, waitlistReferrals, users } from '../../db/schema';
 
 const jwtSecret = process.env.JWT_SECRET;
-const BASE_URL = process.env.BASE_URL || 'https://aura-assist.com';
+const BASE_URL = process.env.BASE_URL || 'https://bemoreswan.com';
 
 // Stripe (for SC6 coupon generation — imported lazily)
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
@@ -269,7 +269,7 @@ export const handler: Handler = async (event) => {
                                     <p style="font-size:24px;font-weight:bold;color:#059669;letter-spacing:2px;text-align:center;padding:16px 0;">${couponCode}</p>
                                     <p>Apply this code at checkout when ${assistant.name} launches. Valid for 90 days.</p>
                                     <p>Thank you for spreading the word!</p>
-                                    <p>— The Aura-Assist Team</p>
+                                    <p>— The Be More Swan Team</p>
                                 `,
                             });
                         }

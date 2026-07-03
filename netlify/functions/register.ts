@@ -1,27 +1,25 @@
 // netlify/functions/register.ts
 import { Handler } from '@netlify/functions';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import * as crypto from 'crypto';
 import { getDb } from '../../db/client';
-import { users, organisations, userOrganisations, userProfiles, plans, masterPlans, userReferrals } from '../../db/schema';
+import { users, organisations, userOrganisations, userProfiles, plans, masterPlans, userReferrals, referralInvites } from '../../db/schema';
 import { sendMagicLinkEmail } from '../../src/utils/email';
 import { checkRateLimit, getClientIp } from '../../src/utils/rate-limit';
 import { isRegistrationLocked } from '../../src/utils/platform-config';
 import { resolveBaseUrl } from '../../src/utils/base-url';
+import { businessDomainOf } from '../../src/utils/email-domain';
+import { findPaidDomainWorkspace } from '../../src/utils/domain-workspace';
+import { isEuCountry } from '../../src/config/compliance';
 
 const slugify = (str: string) =>
     str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
 
 // EU AI Act Article 50: EU-jurisdiction orgs must have aiDisclosureFooterEnabled=true by default.
-const EU_COUNTRIES = new Set([
-    'AT','BE','BG','CY','CZ','DE','DK','EE','ES','FI','FR','GR','HR',
-    'HU','IE','IT','LT','LU','LV','MT','NL','PL','PT','RO','SE','SI','SK',
-]);
-
+// Jurisdiction list lives in src/config/compliance.ts (AC4.1 modular compliance layer).
 function isEuJurisdiction(headers: Record<string, string | undefined>): boolean {
     // Netlify edge provides x-nf-country on all requests
-    const country = (headers['x-nf-country'] || headers['x-country'] || '').toUpperCase();
-    return EU_COUNTRIES.has(country);
+    return isEuCountry(headers['x-nf-country'] || headers['x-country']);
 }
 
 const SUPPORTED_LANGS = ['en', 'fr', 'de', 'es', 'pt'];
@@ -38,8 +36,11 @@ export const handler: Handler = async (event) => {
         return { statusCode: 405, body: 'Method Not Allowed' };
     }
 
+    // TEMP DEBUG (staging): track how far we get so a 500 names the failing phase. Remove after diagnosis.
+    let phase = 'init';
     try {
         // SC1 — US-GAP-7.1.1: IP-level rate limit: 5 requests per IP per 60 seconds
+        phase = 'rate-limit';
         const db = getDb();
         const ip = getClientIp(event.headers);
         const rl = await checkRateLimit(db, 'register', ip, { maxAttempts: 5, windowSecs: 60 });
@@ -56,6 +57,7 @@ export const handler: Handler = async (event) => {
             return { statusCode: 403, body: JSON.stringify({ error: 'New registrations are temporarily paused. Please check back soon.' }) };
         }
 
+        phase = 'parse-validate';
         const body = JSON.parse(event.body || '{}');
 
         const rawEmail = body.email || '';
@@ -67,6 +69,9 @@ export const handler: Handler = async (event) => {
         const isTrial = body.trial === true || body.trial === 'true'; // US-GAP-8.1.1 SC1
         const attributionRef = body.attributionRef?.trim() || null; // US-AUD-5.3.1 SC5
         const referralRef = body.referralRef?.trim() || null;        // US-GAP-8.2: workspace referral code
+        // US4 (Domain Consolidation): set once the user has seen the consolidation prompt and
+        // explicitly chose to create their own separate workspace anyway.
+        const forceNewWorkspace = body.forceNewWorkspace === true || body.forceNewWorkspace === 'true';
         const preferredLang = detectLangFromHeader(event.headers['accept-language']);
 
         if (!email || !firstName || !lastName) {
@@ -88,6 +93,7 @@ export const handler: Handler = async (event) => {
 
         // --- SCENARIO 5: ENUMERATION PROTECTION ---
         // Check if user already exists BEFORE doing anything else
+        phase = 'duplicate-check';
         const existingUsers = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);
         if (existingUsers.length > 0) {
             // Silently return success to the UI to prevent scraping, do not create a duplicate
@@ -101,11 +107,37 @@ export const handler: Handler = async (event) => {
         // we do a hard-delete cascade, check instead via a dedicated trialHistory or
         // rely on the existingUsers check above (returning users just see the login flow).
 
+        // --- US4: CORPORATE DOMAIN CONSOLIDATION ---
+        // Before creating anything, if this is a non-public business email whose domain already
+        // belongs to a PAID workspace, pause onboarding and offer to request to join it (AC4.2/4.3)
+        // — unless the user already saw the prompt and chose to make their own workspace anyway.
+        // The silent domain AUTO-JOIN path (allow_domain_join && domain_verified) takes precedence
+        // and is handled inside the transaction below, so we never prompt when we'd auto-join.
+        phase = 'domain-consolidation';
+        if (!forceNewWorkspace) {
+            const businessDomain = businessDomainOf(email);
+            if (businessDomain) {
+                const target = await findPaidDomainWorkspace(db, businessDomain);
+                const willAutoJoin = !!target && target.allowDomainJoin && target.domainVerified;
+                if (target && !willAutoJoin) {
+                    // Pause: surface the consolidation prompt. We deliberately do NOT reveal the
+                    // workspace name or owner — only that the company already uses Be More Swan.
+                    return {
+                        statusCode: 200,
+                        body: JSON.stringify({
+                            consolidation: { domain: businessDomain, appName: 'Be More Swan' },
+                        }),
+                    };
+                }
+            }
+        }
+
         // Generate Security Tokens (15 min expiry per AC)
         const plainToken = crypto.randomBytes(32).toString('hex');
         const hashedToken = crypto.createHash('sha256').update(plainToken).digest('hex');
         const tokenExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
+        phase = 'transaction';
         // --- SCENARIO 2: NEW REGISTRATION & DATA CAPTURE ---
         const resultUser = await db.transaction(async (tx) => {
 
@@ -119,25 +151,51 @@ export const handler: Handler = async (event) => {
                 tokenExpiresAt
             }).returning();
 
-            // 2. Create Organization
-            // EU AI Act Art. 50: enable disclosure footer by default for EU workspaces
-            const euJurisdiction = isEuJurisdiction(event.headers);
-            const [newOrg] = await tx.insert(organisations).values({
-                name: businessName,
-                slug: `${slugify(businessName)}-${crypto.randomBytes(3).toString('hex')}`,
-                ...(euJurisdiction ? { aiDisclosureFooterEnabled: true } : {}),
-            }).returning();
+            // 2. Resolve the organisation — join an existing one by business domain, or create.
+            // #2: if the email is a NON-public business domain and an existing org has opted in
+            // to domain join (allow_domain_join + domain_verified), the user joins THAT org as a
+            // member instead of getting their own isolated workspace. Public providers
+            // (gmail/outlook/…) resolve to null here, so unrelated users are never merged.
+            const businessDomain = businessDomainOf(email);
+            let joinOrg: { id: number } | null = null;
+            if (businessDomain) {
+                const [match] = await tx.select({ id: organisations.id })
+                    .from(organisations)
+                    .where(and(
+                        eq(organisations.businessDomain, businessDomain),
+                        eq(organisations.allowDomainJoin, true),
+                        eq(organisations.domainVerified, true),
+                    ))
+                    .limit(1);
+                joinOrg = match ?? null;
+            }
 
-            // 3. Link User to Organization
-            await tx.insert(userOrganisations).values({
-                userId: newUser.id,
-                organisationId: newOrg.id,
-                role: 'owner' // Upgraded to owner
-            });
+            let orgId: number;
+            if (joinOrg) {
+                // Join the existing workspace as a member (no new org/plan — shares the org's plan).
+                orgId = joinOrg.id;
+                await tx.insert(userOrganisations).values({
+                    userId: newUser.id, organisationId: orgId, role: 'member',
+                });
+            } else {
+                // Create a fresh organisation owned by this user.
+                // EU AI Act Art. 50: enable disclosure footer by default for EU workspaces.
+                const euJurisdiction = isEuJurisdiction(event.headers);
+                const [newOrg] = await tx.insert(organisations).values({
+                    name: businessName,
+                    slug: `${slugify(businessName)}-${crypto.randomBytes(3).toString('hex')}`,
+                    businessDomain: businessDomain ?? null, // stored for a future opt-in; join stays OFF by default
+                    ...(euJurisdiction ? { aiDisclosureFooterEnabled: true } : {}),
+                }).returning();
+                orgId = newOrg.id;
+                await tx.insert(userOrganisations).values({
+                    userId: newUser.id, organisationId: orgId, role: 'owner',
+                });
+            }
 
             // 4. Update User with Org ID
             await tx.update(users)
-                .set({ organisationId: newOrg.id, updatedAt: new Date() })
+                .set({ organisationId: orgId, updatedAt: new Date() })
                 .where(eq(users.id, newUser.id));
 
             // 5. Create default User Profile (Crucial for Account Settings hydration)
@@ -165,7 +223,9 @@ export const handler: Handler = async (event) => {
             // BUG-P2-5: Trial masterPlan catalog row must exist before registration runs.
             // The upsert was removed from here — it belongs in db/seed-catalog.ts so it
             // only runs once at deploy time, not on every registration request.
-            if (isTrial) {
+            // Members joining an existing org share that org's plan — only start a trial
+            // for a brand-new org.
+            if (isTrial && !joinOrg) {
                 const [trialMasterPlan] = await tx
                     .select({ id: masterPlans.id })
                     .from(masterPlans)
@@ -180,7 +240,7 @@ export const handler: Handler = async (event) => {
 
                 await tx.insert(plans).values({
                     userId: newUser.id,
-                    organisationId: newOrg.id,
+                    organisationId: orgId,
                     masterPlanId: trialMasterPlan.id,
                     planName: 'Free Trial',
                     planType: 'trial',
@@ -197,22 +257,34 @@ export const handler: Handler = async (event) => {
         // so a missing config fails fast rather than orphaning a half-created user.
         const magicLink = `${baseUrl}/verify-account.html?token=${plainToken}${priceId ? `&priceId=${encodeURIComponent(priceId)}` : ''}${isTrial ? '&trial=true' : ''}`;
 
-        await sendMagicLinkEmail({
-            to: email,
-            subject: 'Welcome to Aura Assist - Verify your email',
-            html: `
-                <div style="font-family: sans-serif; text-align: center; padding: 40px 20px; background-color: #fdfcf9;">
-                    <div style="max-width: 500px; margin: 0 auto; background-color: white; padding: 40px; border-radius: 16px; border: 1px solid #eae4d7; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
-                        <h2 style="color: #1f1e1b; margin-top: 0;">Welcome, ${firstName}!</h2>
-                        <p style="color: #5c564b; font-size: 16px; line-height: 1.5;">Click the button below to securely verify your account and complete your workspace setup.</p>
-                        <a href="${magicLink}" style="background-color: #00e55c; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; display: inline-block; margin: 24px 0; font-weight: bold; font-size: 16px;">
-                            Verify & Log In
-                        </a>
-                        <p style="color: #787263; font-size: 14px; margin-bottom: 0;">This secure link expires in 15 minutes.</p>
+        // Verification email is BEST-EFFORT: the account + workspace are already committed
+        // above, so a transient email failure (Resend outage, unverified domain, missing key)
+        // must NOT 500 the request and orphan an account the user can never get into. We record
+        // whether it actually sent so the client can surface a "Resend verification" affordance.
+        // (sendMagicLinkEmail returns null when no Resend key is configured — nothing was sent.)
+        phase = 'send-email';
+        let emailSent = false;
+        try {
+            const sendResult = await sendMagicLinkEmail({
+                to: email,
+                subject: 'Welcome to Be More Swan - Verify your email',
+                html: `
+                    <div style="font-family: sans-serif; text-align: center; padding: 40px 20px; background-color: #fdfcf9;">
+                        <div style="max-width: 500px; margin: 0 auto; background-color: white; padding: 40px; border-radius: 16px; border: 1px solid #eae4d7; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
+                            <h2 style="color: #1f1e1b; margin-top: 0;">Welcome, ${firstName}!</h2>
+                            <p style="color: #5c564b; font-size: 16px; line-height: 1.5;">Click the button below to securely verify your account and complete your workspace setup.</p>
+                            <a href="${magicLink}" style="background-color: #00e55c; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; display: inline-block; margin: 24px 0; font-weight: bold; font-size: 16px;">
+                                Verify & Log In
+                            </a>
+                            <p style="color: #787263; font-size: 14px; margin-bottom: 0;">This secure link expires in 15 minutes.</p>
+                        </div>
                     </div>
-                </div>
-            `
-        });
+                `
+            });
+            emailSent = sendResult !== null;
+        } catch (emailErr) {
+            console.error('[register] Verification email failed to send (account created; user can resend):', emailErr);
+        }
 
         // US-GAP-8.2: Record workspace referral if signup came from a referral link
         if (referralRef && resultUser) {
@@ -231,6 +303,16 @@ export const handler: Handler = async (event) => {
                         referralCode: referralRef,
                         status: 'pending',
                     }).onConflictDoNothing();
+
+                    // Close the loop on a sent invite: if this email was invited by the
+                    // referrer, mark it accepted so it advances past "awaiting sign-up".
+                    await db.update(referralInvites)
+                        .set({ status: 'accepted', acceptedUserId: resultUser.id, acceptedAt: new Date() })
+                        .where(and(
+                            eq(referralInvites.referrerId, referrer.id),
+                            eq(referralInvites.email, email),   // already normalized lowercase
+                            eq(referralInvites.status, 'invited'),
+                        ));
                 }
             } catch (refErr) {
                 console.warn('[referral] Failed to record referral:', refErr);
@@ -261,15 +343,27 @@ export const handler: Handler = async (event) => {
 
         return {
             statusCode: 200,
-            body: JSON.stringify({ success: true, message: 'Registration processed.' }),
+            body: JSON.stringify({
+                success: true,
+                emailSent,
+                message: emailSent
+                    ? 'Registration processed.'
+                    : 'Your account was created, but we could not send the verification email. Please use the “Resend verification” option to receive your link.',
+            }),
         };
     } catch (error: any) {
         // BUG-P1-5: Log full error server-side but never return internal detail to the client.
         // DB constraint names, column names, and query fragments aid attacker reconnaissance.
-        console.error('[register] Unhandled error:', error);
+        console.error(`[register] Unhandled error at phase "${phase}":`, error);
         return {
             statusCode: 500,
-            body: JSON.stringify({ error: 'Registration failed. Please try again.' }),
+            // TEMP DEBUG (staging): _debug surfaces the failing phase + error message in the
+            // response so it can be read from the Network tab while function logs are unavailable.
+            // REMOVE _debug (and the phase tracking) once the cause is identified.
+            body: JSON.stringify({
+                error: 'Registration failed. Please try again.',
+                _debug: { phase, detail: String(error?.message || error) },
+            }),
         };
     }
 };

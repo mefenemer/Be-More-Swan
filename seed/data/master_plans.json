@@ -1,0 +1,32 @@
+[
+  {
+    "tierKey": "buster",
+    "name": "The Busywork Buster",
+    "monthlyPriceGbp": "20.00",
+    "assistantLimit": 1,
+    "monthlyTaskLimit": 200,
+    "seatLimit": 1,
+    "isActive": true,
+    "features": { "monthly_ai_credits": 20 }
+  },
+  {
+    "tierKey": "saver",
+    "name": "The Workflow Saver",
+    "monthlyPriceGbp": "50.00",
+    "assistantLimit": 3,
+    "monthlyTaskLimit": 1000,
+    "seatLimit": 3,
+    "isActive": true,
+    "features": { "monthly_ai_credits": 50 }
+  },
+  {
+    "tierKey": "employee",
+    "name": "The Digital Employee",
+    "monthlyPriceGbp": "100.00",
+    "assistantLimit": null,
+    "monthlyTaskLimit": null,
+    "seatLimit": 5,
+    "isActive": true,
+    "features": { "monthly_ai_credits": 100 }
+  }
+]

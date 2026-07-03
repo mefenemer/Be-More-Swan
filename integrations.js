@@ -15,7 +15,7 @@ const PLATFORMS = [
         handlePlaceholder: 'https://facebook.com/yourpagename',
         handleHelp: 'The full URL of the Facebook Page you want this assistant to post to.',
         tokenLabel: 'Page Access Token',
-        tokenHelp: 'A token that authorises Aura-Assist to post on behalf of your Page. Never expires if generated correctly.',
+        tokenHelp: 'A token that authorises Be More Swan to post on behalf of your Page. Never expires if generated correctly.',
         steps: [
             { text: 'Open the Meta Graph API Explorer', url: 'https://developers.facebook.com/tools/explorer/' },
             { text: 'Sign in with the Facebook account that has <strong>Admin</strong> access to your Page.' },
@@ -101,8 +101,96 @@ const PLATFORMS = [
 let _connToDelete = null;
 let _userConnections = [];
 
+// ── Per-assistant relevance ──────────────────────────────────────
+// The relevance policy is owned and ENFORCED server-side (src/utils/connection-map.ts).
+// The page passes the selected assistantId to the integrations GET and renders only the
+// connectors the server returns in `allowedServices` — no policy is duplicated here.
+const _esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+let _assistants = [];
+let _selectedAssistantId = null;
+let _allowedServices = null; // null = no assistant scope → show all
+
+// Per-assistant "Use for this assistant" toggle state (set when rendered inside the
+// assistant detail Connections tab via initAssistantConnections). Connections are a
+// shared org pool; this set is which connection IDs THIS assistant actually uses.
+let _assistantScoped = false;
+let _assistantSelectedIds = new Set();
+// serviceName slug → short platform key stored in context.primary_platforms
+const PLATFORM_KEY_MAP = { facebook: 'fb', instagram: 'ig', linkedin: 'li', x: 'x', twitter: 'x', tiktok: 'tt', youtube: 'yt', pinterest: 'pin' };
+
+// Match a stored connection serviceName (e.g. 'x', 'linkedin' — lowercase from the OAuth
+// callback) against a PLATFORMS id (e.g. 'X', 'LinkedIn' — capitalised). Case-insensitive,
+// and treats x/twitter as the same platform via PLATFORM_KEY_MAP.
+function _serviceMatchesPlatform(serviceName, platformId) {
+    const s = String(serviceName || '').toLowerCase();
+    const p = String(platformId || '').toLowerCase();
+    if (s === p) return true;
+    return !!PLATFORM_KEY_MAP[s] && PLATFORM_KEY_MAP[s] === PLATFORM_KEY_MAP[p];
+}
+// Social handles captured on Business Information (lowercase platform slug → handle).
+// A platform can only be connected once a handle has been entered there.
+let _socialHandles = {};
+
+async function _loadSocialHandles() {
+    try {
+        const res = await fetch('/.netlify/functions/organisation-profile');
+        if (res.ok) {
+            const { profile } = await res.json();
+            _socialHandles = (profile && profile.socialHandles) || {};
+        }
+    } catch { /* non-fatal — gating falls back to "add handle first" */ }
+}
+
+function _handleFor(platform) {
+    const v = _socialHandles[(platform.id || '').toLowerCase()];
+    return (typeof v === 'string' && v.trim()) ? v.trim() : '';
+}
+
+function _relevantPlatforms() {
+    if (!_allowedServices) return PLATFORMS;
+    // Server returns lowercase serviceNames ('facebook'); PLATFORMS ids are capitalised
+    // ('Facebook'). Compare case-insensitively so the allow-list actually matches.
+    const allow = new Set(_allowedServices.map(s => String(s).toLowerCase()));
+    return PLATFORMS.filter(p => allow.has(String(p.id).toLowerCase()));
+}
+
+// Append the selected assistant so the OAuth flow binds the connection to it
+// (and the server can enforce relevance). oauthUrl already carries a query string.
+function _oauthUrl(platform) {
+    return _selectedAssistantId
+        ? `${platform.oauthUrl}&assistantId=${encodeURIComponent(_selectedAssistantId)}`
+        : platform.oauthUrl;
+}
+
+async function _loadAssistantsForFilter() {
+    const bar = document.getElementById('conn-assistant-bar');
+    const sel = document.getElementById('conn-assistant-select');
+    try {
+        const res = await fetch('/.netlify/functions/get-assistants');
+        if (res.ok) {
+            const data = await res.json();
+            _assistants = (data.assistants || []).filter(a => a.isActive !== false);
+        }
+    } catch { /* non-fatal */ }
+    if (!sel) return;
+    if (!_assistants.length) { if (bar) bar.classList.add('hidden'); return; }
+    sel.innerHTML = _assistants.map(a =>
+        `<option value="${a.id}">${_esc(a.name)}${a.role ? ' — ' + _esc(a.role) : ''}</option>`).join('');
+    const urlId = new URLSearchParams(location.search).get('assistantId');
+    _selectedAssistantId = (urlId && _assistants.some(a => String(a.id) === urlId)) ? urlId : String(_assistants[0].id);
+    sel.value = _selectedAssistantId;
+    if (bar) bar.classList.remove('hidden');
+    if (!sel.dataset.bound) {
+        sel.dataset.bound = '1';
+        sel.addEventListener('change', () => { _selectedAssistantId = sel.value; _loadConnections(); });
+    }
+}
+
 // ── Init ─────────────────────────────────────────────────────────
 window.initIntegrations = async function () {
+    await _loadSocialHandles();
+    await _loadAssistantsForFilter();
     await _loadConnections();
 
     // Disconnect confirm button
@@ -114,23 +202,90 @@ window.initIntegrations = async function () {
     }
 };
 
+// ── Init inside the assistant detail Connections tab ─────────────
+// Drives the same grid/modals as the standalone page, but scoped to ONE assistant
+// (no dropdown) and with a per-assistant "Use for this assistant" toggle on each
+// connected card. Connections remain a shared org pool.
+window.initAssistantConnections = async function (assistantId, currentData) {
+    _selectedAssistantId = String(assistantId);
+    _assistantScoped = true;
+    window._intLoadConnections = _loadConnections; // let the revoke-all flow refresh the grid
+    _assistantSelectedIds = new Set([
+        ...((currentData?.configuration?.appliedDefaults?.platforms) || []).map(Number),
+        ...((window.cachedContext?.linked_integrations) || []).map(Number),
+    ]);
+
+    await _loadSocialHandles();
+    await _loadConnections();
+
+    // Disconnect confirm button (same wiring as initIntegrations)
+    const confirmBtn = document.getElementById('btn-confirm-disconnect');
+    if (confirmBtn) {
+        const newBtn = confirmBtn.cloneNode(true);
+        confirmBtn.parentNode.replaceChild(newBtn, confirmBtn);
+        newBtn.addEventListener('click', _doDisconnect);
+    }
+};
+
+// Persist the per-assistant "Use for this assistant" toggle. Mirrors the old
+// _renderPlatformsTab save: recompute primary_platforms slugs + linked_integrations
+// + appliedDefaults.platforms, then PUT update-assistant-context.
+window._intToggleUseForAssistant = async function (connId, checked) {
+    connId = Number(connId);
+    if (checked) _assistantSelectedIds.add(connId); else _assistantSelectedIds.delete(connId);
+    const checkedIds = Array.from(_assistantSelectedIds);
+    const activeConns = _userConnections.filter(c => c.status === 'active' && c.userId);
+    const checkedKeys = activeConns
+        .filter(c => checkedIds.includes(c.id))
+        .map(c => PLATFORM_KEY_MAP[c.serviceName.toLowerCase()] || c.serviceName.toLowerCase());
+
+    const statusEl = document.getElementById('platforms-save-status');
+    if (statusEl) statusEl.textContent = 'Saving…';
+    try {
+        const updatedContext = { ...(window.cachedContext || {}), primary_platforms: checkedKeys, linked_integrations: checkedIds };
+        const r = await fetch('/.netlify/functions/update-assistant-context', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ assistantId: parseInt(_selectedAssistantId), newContext: updatedContext, appliedDefaults: { platforms: checkedIds } }),
+        });
+        if (r.ok) {
+            window.cachedContext = updatedContext;
+            if (statusEl) { statusEl.textContent = '✓ Saved'; setTimeout(() => { if (statusEl.textContent === '✓ Saved') statusEl.textContent = ''; }, 2500); }
+        } else if (statusEl) {
+            statusEl.textContent = 'Error saving';
+        }
+    } catch {
+        if (statusEl) statusEl.textContent = 'Error saving';
+    }
+};
+
 // ── Load & render platform cards ─────────────────────────────────
 async function _loadConnections() {
     const grid = document.getElementById('connections-grid');
     if (!grid) return;
 
     try {
-        const res = await fetch('/.netlify/functions/integrations');
+        const url = _selectedAssistantId
+            ? `/.netlify/functions/integrations?assistantId=${encodeURIComponent(_selectedAssistantId)}`
+            : '/.netlify/functions/integrations';
+        const res = await fetch(url);
         if (!res.ok) throw new Error('fetch failed');
         const data = await res.json();
         _userConnections = (data.connections || []).filter(c => c.userId !== null);
+        // Server-authoritative relevance allow-list (undefined when no assistant scope).
+        _allowedServices = Array.isArray(data.allowedServices) ? data.allowedServices : null;
     } catch (e) {
         console.warn('Could not load connections:', e);
     }
 
     grid.innerHTML = '';
-    PLATFORMS.forEach(platform => {
-        const conn = _userConnections.find(c => c.serviceName === platform.id);
+    const platforms = _relevantPlatforms();
+    if (!platforms.length) {
+        grid.innerHTML = '<div class="col-span-full bg-white border border-gray-200 rounded-2xl p-10 text-center text-sm text-gray-500">No connectors are relevant to this assistant yet. As we add more integrations (CRM, calendar, reviews), the right ones will appear here.</div>';
+        return;
+    }
+    platforms.forEach(platform => {
+        const conn = _userConnections.find(c => _serviceMatchesPlatform(c.serviceName, platform.id));
         grid.insertAdjacentHTML('beforeend', _platformCard(platform, conn));
     });
 }
@@ -140,11 +295,19 @@ function _platformCard(platform, conn) {
     const handle = conn?.externalUserId || '';
 
     // US-GAP-10.1.1 SC4: Active / Expiring Soon / Disconnected badges
+    // Healthy, connected platforms show a pink "Connected" pill. (Pink Tailwind bg
+    // utilities aren't in the prebuilt CSS, so the fills are set inline.)
+    const connectedPill = `<span class="inline-flex items-center gap-1.5 text-xs font-bold text-pink-700 border border-pink-200 px-2.5 py-1 rounded-full" style="background-color:#fce7f3"><span class="w-1.5 h-1.5 rounded-full" style="background-color:#ec4899"></span> Connected</span>`;
     let statusBadge;
+    // Connections that carry an offline refresh token (e.g. X) are renewed silently by
+    // the refresh-social-tokens cron, so their short-lived expiry shouldn't alarm the user.
+    const autoRenews = isConnected && typeof conn.scopes === 'string' && conn.scopes.includes('offline.access');
     if (!isConnected) {
         statusBadge = `<span class="inline-flex items-center gap-1.5 text-xs font-bold text-gray-500 bg-gray-100 border border-gray-200 px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span> Not connected</span>`;
-    } else if (conn.status === 'expired' || conn.status === 'failed' || conn.status === 'revoked') {
+    } else if (conn.status === 'expired' || conn.status === 'failed' || conn.status === 'revoked' || conn.status === 'token_refresh_failed') {
         statusBadge = `<span class="inline-flex items-center gap-1.5 text-xs font-bold text-red-700 bg-red-50 border border-red-200 px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span> Disconnected</span>`;
+    } else if (autoRenews) {
+        statusBadge = connectedPill;
     } else if (conn.tokenExpiresAt) {
         const daysLeft = Math.ceil((new Date(conn.tokenExpiresAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000));
         if (daysLeft <= 7 && daysLeft > 0) {
@@ -152,21 +315,31 @@ function _platformCard(platform, conn) {
         } else if (daysLeft <= 0) {
             statusBadge = `<span class="inline-flex items-center gap-1.5 text-xs font-bold text-red-700 bg-red-50 border border-red-200 px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span> Disconnected</span>`;
         } else {
-            statusBadge = `<span class="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Active</span>`;
+            statusBadge = connectedPill;
         }
     } else {
         statusBadge = conn.status === 'active'
-            ? `<span class="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> Active</span>`
+            ? connectedPill
             : `<span class="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span> Needs attention</span>`;
     }
 
+    // A platform can only be connected once its handle has been entered on Business
+    // Information (single source of truth). Without one, show a disabled prompt that
+    // points the user there instead of letting them start a connection.
+    const hasHandle = !!_handleFor(platform);
+
     // US-SMM-4.1.1 / 4.1.2: OAuth platforms use redirect; manual token entry kept for non-OAuth
-    const connectBtn = platform.oauthPlatform
-        ? `<a href="${platform.oauthUrl}" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer inline-block">Connect with ${platform.label}</a>`
+    const connectBtn = !hasHandle
+        ? `<div class="flex flex-col gap-1.5">
+               <button disabled class="px-4 py-2 bg-gray-100 text-gray-400 text-sm font-bold rounded-lg cursor-not-allowed self-start" type="button">Connect with ${platform.label}</button>
+               <button onclick="window.loadView && window.loadView('assets')" class="text-xs font-semibold text-emerald-700 hover:underline cursor-pointer self-start" type="button">Add your ${platform.label} handle in Business Information first →</button>
+           </div>`
+        : platform.oauthPlatform
+        ? `<a href="${_oauthUrl(platform)}" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer inline-block">Connect with ${platform.label}</a>`
         : `<button onclick="window._intOpenModal('${platform.id}')" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer" type="button">Connect</button>`;
 
     const reconnectBtn = platform.oauthPlatform
-        ? `<a href="${platform.oauthUrl}" class="text-sm font-bold text-gray-500 hover:text-gray-800 transition cursor-pointer">Reconnect</a>`
+        ? `<a href="${_oauthUrl(platform)}" class="text-sm font-bold text-gray-500 hover:text-gray-800 transition cursor-pointer">Reconnect</a>`
         : `<button onclick="window._intOpenModal('${platform.id}')" class="text-sm font-bold text-gray-500 hover:text-gray-800 transition cursor-pointer" type="button">Update token</button>`;
 
     // US-SMM-4.3.2: preflight audit status badge
@@ -213,15 +386,33 @@ function _platformCard(platform, conn) {
     const autoRespBtn = (isConnected && (platform.id === 'Instagram' || platform.id === 'Facebook'))
         ? `<button onclick="window._intGenerateAutoResponder()" class="text-xs font-bold text-purple-600 hover:text-purple-800 transition cursor-pointer" type="button">Auto-Responder</button>`
         : '';
+    // AC1: Generate Bio for the social profile platforms.
+    const bioBtn = (isConnected && (platform.id === 'Instagram' || platform.id === 'Facebook' || platform.id === 'LinkedIn'))
+        ? `<button onclick="window._intGenerateBio()" class="text-xs font-bold text-emerald-600 hover:text-emerald-800 transition cursor-pointer" type="button">Generate Bio</button>`
+        : '';
 
     const action = isConnected
         ? `<div class="flex items-center gap-2 flex-wrap">
                ${syncBtn}
+               ${bioBtn}
                ${autoRespBtn}
                ${reconnectBtn}
                <button onclick="window._intPromptDisconnect(${conn.id})" class="text-sm font-bold text-red-500 hover:text-red-700 transition cursor-pointer" type="button">Disconnect</button>
            </div>`
         : connectBtn;
+
+    // Per-assistant "Use for this assistant" toggle — only inside the assistant detail tab,
+    // for live connections. Connections are a shared org pool; this controls whether THIS
+    // assistant actually posts to it.
+    const useToggle = (_assistantScoped && isConnected && conn.status === 'active')
+        ? `<div class="flex items-center justify-between gap-3 pt-3 border-t border-gray-100">
+               <span class="text-sm font-semibold text-gray-700">Use for this assistant</span>
+               <label class="flex items-center cursor-pointer relative shrink-0">
+                   <input type="checkbox" class="sr-only peer" ${_assistantSelectedIds.has(conn.id) ? 'checked' : ''} onchange="window._intToggleUseForAssistant(${conn.id}, this.checked)">
+                   <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
+               </label>
+           </div>`
+        : '';
 
     return `
         <div class="bg-white rounded-2xl border ${isConnected ? 'border-emerald-200 shadow-md' : 'border-gray-200 shadow-sm'} p-6 flex flex-col gap-4">
@@ -241,6 +432,7 @@ function _platformCard(platform, conn) {
                 </div>
                 ${action}
             </div>
+            ${useToggle}
             ${troubleshootingHtml}
         </div>`;
 }
@@ -335,11 +527,11 @@ window._intOpenModal = function (platformId) {
 
     // US-SMM-4.1.1: OAuth platforms redirect instead of showing the token modal
     if (platform.oauthPlatform) {
-        window.location.href = platform.oauthUrl;
+        window.location.href = _oauthUrl(platform);
         return;
     }
 
-    const existing = _userConnections.find(c => c.serviceName === platformId);
+    const existing = _userConnections.find(c => _serviceMatchesPlatform(c.serviceName, platformId));
 
     // Header
     document.getElementById('modal-platform-icon').className = `w-12 h-12 rounded-xl flex items-center justify-center text-xl font-bold shadow-sm shrink-0 ${platform.iconBg} ${platform.iconText}`;
@@ -370,7 +562,8 @@ window._intOpenModal = function (platformId) {
     document.getElementById('handle-label').textContent = platform.handleLabel;
     document.getElementById('handle-help').textContent = platform.handleHelp;
     document.getElementById('conn-handle').placeholder = platform.handlePlaceholder;
-    document.getElementById('conn-handle').value = existing?.externalUserId || '';
+    // Prefill the handle from Business Information (source of truth) so it's never asked twice.
+    document.getElementById('conn-handle').value = existing?.externalUserId || _handleFor(platform) || '';
     document.getElementById('token-label').textContent = platform.tokenLabel;
     document.getElementById('token-help').textContent = platform.tokenHelp;
     document.getElementById('conn-token').value = '';
@@ -417,7 +610,7 @@ window._intSubmit = async function (e) {
         const res = await fetch('/.netlify/functions/integrations', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ serviceName, connectionType: 'api_key', apiKey: token, handle }),
+            body: JSON.stringify({ serviceName, connectionType: 'api_key', apiKey: token, handle, assistantId: _selectedAssistantId || undefined }),
         });
 
         if (res.ok) {
@@ -521,6 +714,23 @@ function _intRenderAutoResponderChatPanel(draft, metaPushStatus) {
         </div>`;
     }
 
+    // AC7: objection replies are review-only drafts (not pushed to Meta) — the user copies
+    // them into a DM/comment when a matching sales enquiry comes in.
+    function objectionBlock(responses) {
+        if (!Array.isArray(responses) || !responses.length) return '';
+        const esc = v => String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        const rows = responses.map(r => `
+            <div class="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                <p class="text-xs font-bold text-gray-700">“${esc(r.objection)}”</p>
+                <p class="text-sm text-gray-800 mt-1">${esc(r.reply)}</p>
+            </div>`).join('');
+        return `<div class="border border-emerald-200 rounded-xl p-4 flex flex-col gap-2">
+            <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">Sales Objection Replies — staged for your review</p>
+            <p class="text-xs text-gray-500">Copy these into a DM or comment reply when a matching enquiry comes in. They are not sent automatically.</p>
+            <div class="flex flex-col gap-2 mt-1">${rows}</div>
+        </div>`;
+    }
+
     panel.innerHTML = `
         <div class="flex items-start gap-3 p-5 border-b border-emerald-100">
             <div class="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-emerald-700 font-bold text-sm">AI</div>
@@ -533,6 +743,7 @@ function _intRenderAutoResponderChatPanel(draft, metaPushStatus) {
             ${scriptBlock('messengerGreeting', 'Messenger Greeting (max 160 chars)', draft.messengerGreeting)}
             ${scriptBlock('messengerAutoReply', 'Messenger Auto-Reply', draft.messengerAutoReply)}
             ${scriptBlock('instagramDmAutoReply', 'Instagram DM Auto-Reply', draft.instagramDmAutoReply)}
+            ${objectionBlock(draft.objectionResponses)}
         </div>
         <div class="px-5 pb-5 flex items-center justify-between gap-3">
             <button onclick="_intUndoAutoResponder(${undoDeadline})" id="ar-undo-btn" class="text-xs font-bold text-gray-400 hover:text-red-600 cursor-pointer transition">Undo (revert within 15 min)</button>
@@ -606,6 +817,133 @@ window._intUndoAutoResponder = async function (deadline) {
     } catch {
         if (undoBtn) { undoBtn.disabled = false; undoBtn.textContent = 'Undo (revert within 15 min)'; }
         alert('Undo failed. Please clear the messages manually in Meta Business Suite.');
+    }
+};
+
+// ── AC1: Generate profile bios ───────────────────────────────────
+window._intGenerateBio = async function () {
+    const panel = document.getElementById('profile-bio-chat-panel');
+    if (panel) {
+        panel.classList.remove('hidden');
+        panel.innerHTML = `<div class="flex items-center gap-3 p-5 border-b border-emerald-100">
+            <div class="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-emerald-700 font-bold text-sm">AI</div>
+            <p class="text-sm text-gray-500 italic">Writing your profile bios…</p>
+        </div>`;
+        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+    try {
+        const res = await fetch('/.netlify/functions/generate-profile-bio', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+        const data = await res.json();
+        if (data.ok && data.draft) {
+            _intRenderBioChatPanel(data.draft);
+        } else if (panel) {
+            panel.innerHTML = `<div class="p-5 flex items-start gap-3">
+                <div class="w-9 h-9 rounded-full bg-red-100 flex items-center justify-center shrink-0 text-red-600 font-bold text-sm">AI</div>
+                <p class="text-sm text-red-700 mt-1">${data.error ?? 'Bio generation failed. Please try again.'}</p>
+            </div>`;
+        }
+    } catch {
+        if (panel) {
+            panel.innerHTML = `<div class="p-5 flex items-start gap-3">
+                <div class="w-9 h-9 rounded-full bg-red-100 flex items-center justify-center shrink-0 text-red-600 font-bold text-sm">AI</div>
+                <p class="text-sm text-red-700 mt-1">Bio generation failed. Please try again.</p>
+            </div>`;
+        }
+    }
+};
+
+// Render generated bios with per-platform Edit/Save + a hint to push via Sync Profile.
+function _intRenderBioChatPanel(draft) {
+    const panel = document.getElementById('profile-bio-chat-panel');
+    if (!panel) return;
+    const limits = { instagram: 150, facebook: 255, linkedin: 700 };
+    const labels = { instagram: 'Instagram Bio', facebook: 'Facebook Page About', linkedin: 'LinkedIn About' };
+
+    function bioBlock(key, value) {
+        const esc = v => String(v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        return `<div class="border border-gray-200 rounded-xl p-4 flex flex-col gap-2" id="bio-block-${key}">
+            <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">${labels[key]} (max ${limits[key]} chars)</p>
+            <p class="text-sm text-gray-800 whitespace-pre-line" id="bio-text-${key}">${esc(value)}</p>
+            <textarea class="hidden w-full text-sm border border-emerald-300 rounded-lg p-2 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-300" id="bio-editor-${key}" rows="4" maxlength="${limits[key]}">${esc(value)}</textarea>
+            <div class="flex gap-2 mt-1">
+                <button onclick="_intEditBio('${key}')" id="bio-edit-btn-${key}" class="text-xs font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer">Edit</button>
+                <button onclick="_intSaveBio('${key}')" id="bio-save-btn-${key}" class="hidden text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-2 py-0.5 rounded cursor-pointer">Save</button>
+                <button onclick="_intCancelBioEdit('${key}')" id="bio-cancel-btn-${key}" class="hidden text-xs font-bold text-gray-500 hover:text-gray-700 cursor-pointer">Cancel</button>
+                <button onclick="_intCopyBio('${key}')" class="text-xs font-bold text-gray-500 hover:text-gray-700 cursor-pointer ml-auto">Copy</button>
+            </div>
+        </div>`;
+    }
+
+    panel.innerHTML = `
+        <div class="flex items-start gap-3 p-5 border-b border-emerald-100">
+            <div class="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-emerald-700 font-bold text-sm">AI</div>
+            <div class="flex-1 min-w-0">
+                <p class="text-sm font-semibold text-gray-900">Here are profile bios tailored to each platform. Edit any you like, then use <span class="font-bold">Sync Profile</span> to push the Facebook &amp; LinkedIn versions to your connected pages.</p>
+                <p class="text-xs text-gray-500 mt-1">Instagram bios must be pasted in manually — use Copy.</p>
+            </div>
+        </div>
+        <div class="p-5 flex flex-col gap-3">
+            ${bioBlock('instagram', draft.instagram)}
+            ${bioBlock('facebook', draft.facebook)}
+            ${bioBlock('linkedin', draft.linkedin)}
+        </div>
+        <div class="px-5 pb-5 flex items-center justify-end">
+            <button onclick="document.getElementById('profile-bio-chat-panel').classList.add('hidden')" class="text-xs text-gray-400 hover:text-gray-600 cursor-pointer">Dismiss</button>
+        </div>`;
+
+    panel._bioDraft = draft;
+}
+
+window._intEditBio = function (key) {
+    document.getElementById(`bio-text-${key}`)?.classList.add('hidden');
+    document.getElementById(`bio-editor-${key}`)?.classList.remove('hidden');
+    document.getElementById(`bio-edit-btn-${key}`)?.classList.add('hidden');
+    document.getElementById(`bio-save-btn-${key}`)?.classList.remove('hidden');
+    document.getElementById(`bio-cancel-btn-${key}`)?.classList.remove('hidden');
+};
+
+window._intCancelBioEdit = function (key) {
+    document.getElementById(`bio-text-${key}`)?.classList.remove('hidden');
+    document.getElementById(`bio-editor-${key}`)?.classList.add('hidden');
+    document.getElementById(`bio-edit-btn-${key}`)?.classList.remove('hidden');
+    document.getElementById(`bio-save-btn-${key}`)?.classList.add('hidden');
+    document.getElementById(`bio-cancel-btn-${key}`)?.classList.add('hidden');
+};
+
+window._intCopyBio = function (key) {
+    const panel = document.getElementById('profile-bio-chat-panel');
+    const value = panel?._bioDraft?.[key];
+    if (value) navigator.clipboard?.writeText(value).catch(() => {});
+};
+
+window._intSaveBio = async function (key) {
+    const panel = document.getElementById('profile-bio-chat-panel');
+    const editor = document.getElementById(`bio-editor-${key}`);
+    const textEl = document.getElementById(`bio-text-${key}`);
+    const saveBtn = document.getElementById(`bio-save-btn-${key}`);
+    if (!editor || !textEl || !panel?._bioDraft) return;
+    const newVal = editor.value.trim();
+    if (!newVal) return;
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Saving…'; }
+    const updatedDraft = { ...panel._bioDraft, [key]: newVal };
+    try {
+        const res = await fetch('/.netlify/functions/generate-profile-bio', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ editedDraft: updatedDraft }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+            panel._bioDraft = data.draft ?? updatedDraft;
+            textEl.textContent = newVal;
+            window._intCancelBioEdit(key);
+        } else {
+            if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+            alert(data.error ?? 'Failed to save. Please try again.');
+        }
+    } catch {
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = 'Save'; }
+        alert('Network error. Please try again.');
     }
 };
 

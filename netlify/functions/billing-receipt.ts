@@ -45,7 +45,7 @@ export const handler: Handler = async (event) => {
             organisationId: userOrganisations.organisationId,
         }).from(users).leftJoin(userOrganisations, eq(users.id, userOrganisations.userId)).where(eq(users.id, userId));
 
-        let orgName = 'Aura-Assist Customer';
+        let orgName = 'Be More Swan Customer';
         if (user?.organisationId) {
             const [org] = await db.select({ name: organisations.name })
                 .from(organisations).where(eq(organisations.id, user.organisationId));
@@ -53,7 +53,7 @@ export const handler: Handler = async (event) => {
         }
 
         // Load plan name — append " Plan" suffix if not already present
-        let planName = payment.description || 'Aura-Assist Subscription';
+        let planName = payment.description || 'Be More Swan Subscription';
         if (payment.planId) {
             const [plan] = await db.select({ planName: plans.planName })
                 .from(plans).where(eq(plans.id, payment.planId));
@@ -97,7 +97,7 @@ export const handler: Handler = async (event) => {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Receipt ${receiptNo} — Aura-Assist</title>
+<title>Receipt ${receiptNo} — Be More Swan</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f9fafb; color: #111827; }
@@ -133,7 +133,7 @@ export const handler: Handler = async (event) => {
 <body>
 <div class="page">
   <div class="header">
-    <div class="logo">Aura<span>-Assist</span></div>
+    <div class="logo">Be More Swan</div>
     <div class="receipt-label">
       <p>Payment Receipt</p>
       <h2>${receiptNo}</h2>
@@ -168,7 +168,7 @@ export const handler: Handler = async (event) => {
   </div>
 
   <div class="footer">
-    <p>Aura-Assist · <a href="mailto:support@aura-assist.com">support@aura-assist.com</a></p>
+    <p>Be More Swan · <a href="mailto:support@bemoreswan.com">support@bemoreswan.com</a></p>
     <p class="no-print"><a href="javascript:window.print()">🖨 Print / Save as PDF</a></p>
   </div>
 </div>

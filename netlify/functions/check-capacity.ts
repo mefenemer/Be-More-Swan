@@ -24,9 +24,9 @@
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import Stripe from 'stripe';
-import { eq, and, gte, gt, count, sum, asc, desc } from 'drizzle-orm';
+import { eq, and, gte, gt, count, sum, asc, desc, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { plans, masterPlans, planPrices, aiAssistants, taskRuns, usageCounters, userOrganisations, users, systemConnections } from '../../db/schema';
+import { plans, masterPlans, planPrices, aiAssistants, taskRuns, usageCounters, userOrganisations, users, systemConnections, organisations } from '../../db/schema';
 import { getPeriodStart } from '../../src/utils/atomic-cap-check';
 
 const stripe = process.env.STRIPE_SECRET_KEY
@@ -69,6 +69,7 @@ export const handler: Handler = async (event) => {
                 monthlyTokenLimit: masterPlans.monthlyTokenLimit,
                 appConnectionLimit: masterPlans.appConnectionLimit,
                 seatLimit: masterPlans.seatLimit,
+                features: masterPlans.features,
             })
             .from(plans)
             .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
@@ -95,6 +96,7 @@ export const handler: Handler = async (event) => {
                     monthlyTokenLimit: masterPlans.monthlyTokenLimit,
                     appConnectionLimit: masterPlans.appConnectionLimit,
                     seatLimit: masterPlans.seatLimit,
+                    features: masterPlans.features,
                 })
                 .from(plans)
                 .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
@@ -114,7 +116,9 @@ export const handler: Handler = async (event) => {
             : [];
 
         const plan = activePlan[0] ?? pastDuePlan[0] ?? null;
-        const assistantLimit: number | null = plan?.assistantLimit ?? null;
+        // Referral Program Expansion: bonus_assistants (earned via referral tokens) stacks on
+        // top of the tier limit below, once orgId is resolved (AC2.2/AC4.2).
+        let assistantLimit: number | null = plan?.assistantLimit ?? null;
         const monthlyTaskLimit: number | null = plan?.monthlyTaskLimit ?? null;
         const monthlyTokenLimit: number | null = plan?.monthlyTokenLimit ?? null;
         const appConnectionLimit: number | null = plan?.appConnectionLimit ?? null;
@@ -129,6 +133,17 @@ export const handler: Handler = async (event) => {
 
         const orgId = userOrg?.organisationId ?? null;
 
+        // Add referral bonus assistants to the tier limit (null tier = unlimited, bonus moot).
+        let bonusAssistants = 0;
+        let betaAccess = false;
+        if (orgId) {
+            const [org] = await db.select({ bonusAssistants: organisations.bonusAssistants, betaAccess: organisations.betaAccess })
+                .from(organisations).where(eq(organisations.id, orgId)).limit(1);
+            bonusAssistants = org?.bonusAssistants ?? 0;
+            betaAccess = org?.betaAccess ?? false;
+            if (assistantLimit !== null) assistantLimit += bonusAssistants;
+        }
+
         let seatCount = 1;
         if (orgId) {
             const [{ value: orgMemberCount }] = await db
@@ -139,13 +154,18 @@ export const handler: Handler = async (event) => {
         }
 
         // US-DB-1.4.1: Counts are now org-level, not user-level
-        // Active assistants across the whole organisation
+        // Assistants occupying a seat across the whole organisation.
+        // US2 (Digital Assistant Lifecycle): count by lifecycle state rather than isActive.
+        // A newly provisioned assistant now sits in `ready_for_work` (inactive) until the user
+        // kicks it off, so an isActive-only count would let users provision past their plan
+        // limit. provisioning/ready_for_work/working all occupy a seat; paused, system_paused
+        // and archived do not (preserves the prior "paused frees a seat" behaviour).
         const [{ value: assistantCount }] = await db
             .select({ value: count() })
             .from(aiAssistants)
             .where(and(
                 orgId ? eq(aiAssistants.organisationId, orgId) : eq(aiAssistants.userId, userId),
-                eq(aiAssistants.isActive, true),
+                inArray(aiAssistants.lifecycleStatus, ['provisioning', 'ready_for_work', 'working']),
             ));
 
         // ── 3. Task & token counts from usageCounters (authoritative) ──
@@ -209,7 +229,10 @@ export const handler: Handler = async (event) => {
             if (appConnectionLimit !== null) {
                 maxAppConnectionCount = connRows.reduce((m, r) => Math.max(m, r.cnt), 0);
             }
-            connectedPlatforms = [...new Set(connRows.map(r => r.serviceName.toLowerCase()))];
+            const SOCIAL_PLATFORMS = new Set(['instagram', 'facebook', 'x', 'twitter', 'linkedin', 'tiktok', 'youtube', 'pinterest']);
+            connectedPlatforms = [...new Set(
+                connRows.map(r => r.serviceName.toLowerCase()).filter(s => SOCIAL_PLATFORMS.has(s))
+            )];
         }
 
         // ── 4. Compute percentages ──────────────────────────────────
@@ -300,6 +323,9 @@ export const handler: Handler = async (event) => {
             body: JSON.stringify({
                 assistantCount,
                 assistantLimit,
+                bonusAssistants,
+                betaAccess,
+                features: (plan as any)?.features ?? {}, // AC3.2.4: active plan's feature unlocks
                 taskCount,
                 taskLimit: monthlyTaskLimit,
                 tokenUsage,

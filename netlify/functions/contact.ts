@@ -9,8 +9,8 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, leads } from '../../db/schema';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-const FROM_EMAIL  = process.env.FROM_EMAIL   || 'hello@aura-assist.com';
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
+const FROM_EMAIL  = process.env.FROM_EMAIL   || 'hello@bemoreswan.com';
 const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL || FROM_EMAIL; // internal inbox
 
 export const handler: Handler = async (event) => {
@@ -36,11 +36,11 @@ export const handler: Handler = async (event) => {
                 from: FROM_EMAIL,
                 to: NOTIFY_EMAIL,
                 replyTo: email,
-                subject: `[Aura-Assist Contact] ${subject}`,
+                subject: `[Be More Swan Contact] ${subject}`,
                 html: `
 <div style="font-family:-apple-system,sans-serif;max-width:600px;margin:40px auto;background:#fff;border-radius:12px;border:1px solid #e5e7eb;overflow:hidden">
   <div style="background:#111827;padding:20px 28px">
-    <span style="color:#10b981;font-size:20px;font-weight:800">Aura</span>
+    <span style="color:#10b981;font-size:20px;font-weight:800">Be More Swan</span>
     <span style="color:#fff;font-size:20px;font-weight:800">-Assist</span>
     <span style="color:#9ca3af;font-size:13px;margin-left:12px">Internal notification</span>
   </div>

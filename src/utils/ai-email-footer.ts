@@ -2,10 +2,12 @@
 // US-GOV-3.1.2: Mandatory AI disclosure footer for all outbound emails drafted by an assistant.
 // Injected at the infrastructure level — cannot be removed by system prompt or integration config.
 
+import { DISCLOSURE } from '../config/compliance';
+
 export const FOOTER_VERSION = '1.0';
 
-const DEFAULT_FOOTER_TEXT =
-    '--- This message was drafted with AI assistance by [Assistant Name]. Please verify any factual claims before acting.';
+// Default disclosure copy is owned by the compliance config (AC4.1 modular compliance layer).
+const DEFAULT_FOOTER_TEXT = DISCLOSURE.emailFooterDefault;
 
 /**
  * Returns the disclosure footer text for an assistant.

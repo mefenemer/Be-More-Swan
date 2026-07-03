@@ -34,6 +34,12 @@ const VALID_ACTIONS = ['comp_month', 'upgrade_tier', 'downgrade_tier', 'extend_t
 type OverrideAction = typeof VALID_ACTIONS[number];
 
 export const handler: Handler = async (event) => {
+    // Epic: Superadmin Environment Management — live-only admin action. Reject sandbox
+    // requests so this can never run while the operator believes they are in sandbox
+    // (prevents production bleed). See docs/SANDBOX-ENVIRONMENT.md.
+    if (((event.headers['x-environment'] || event.headers['X-Environment'] || '') + '').trim().toLowerCase() === 'sandbox') {
+        return { statusCode: 400, body: JSON.stringify({ error: 'This action is not available in Sandbox mode.' }) };
+    }
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed.' }) };
     }
@@ -239,7 +245,7 @@ export const handler: Handler = async (event) => {
                     html: `<p>Hi ${targetUser.firstName || 'there'},</p>
                            <p>${pauseMessage}</p>
                            <p>If you have any questions, please reply to this email or contact our support team.</p>
-                           <p>The Aura Team</p>`,
+                           <p>The Be More Swan Team</p>`,
                 }).catch(() => {});
 
                 stripeRef   = activePlan.stripeSubscriptionId!;

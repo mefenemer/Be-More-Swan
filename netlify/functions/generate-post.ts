@@ -3,28 +3,22 @@
 // GET ?jobId=<uuid> polls status for on-demand generation.
 
 import { Handler } from '@netlify/functions';
-import jwt from 'jsonwebtoken';
 import { eq, and, desc } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { getDb } from '../../db/client';
 import { aiBlueprints, aiAssistants, contentGenerationJobs, notifications } from '../../db/schema';
-
-const jwtSecret = process.env.JWT_SECRET;
-
-function getSession(event: any): { userId: number; organisationId: number } | null {
-    try {
-        const cookie = event.headers.cookie || '';
-        const token = cookie.match(/aura_session=([^;]+)/)?.[1];
-        if (!token || !jwtSecret) return null;
-        return jwt.verify(token, jwtSecret) as { userId: number; organisationId: number };
-    } catch { return null; }
-}
+import { enforcePromptModeration } from '../../src/utils/moderation';
+import { requireTenant } from '../../src/utils/tenant';
+import { assembleBlueprint } from '../../src/utils/blueprint';
 
 export const handler: Handler = async (event) => {
-    const session = getSession(event);
-    if (!session) return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized.' }) };
-    const { userId, organisationId } = session;
     const db = getDb();
+    // Resolve the active org from the session. NOTE: the JWT carries `activeOrganisationId`,
+    // not `organisationId` — reading the latter directly yields undefined and crashes the
+    // downstream SQL (502). requireTenant() resolves it correctly (matches the rest of the app).
+    const ctx = await requireTenant(event, db);
+    if ('error' in ctx) return ctx.error;
+    const { userId, organisationId } = ctx;
 
     // ── GET: poll job status ────────────────────────────────────────────────────
     if (event.httpMethod === 'GET') {
@@ -77,6 +71,12 @@ export const handler: Handler = async (event) => {
         return { statusCode: 400, body: JSON.stringify({ error: 'contextPrompt must be 500 characters or fewer.' }) };
     }
 
+    // US2: hard-block severe-violation prompts before generation (AC2.1–2.3).
+    if (contextPrompt) {
+        const modBlock = await enforcePromptModeration({ text: contextPrompt, userId, organisationId, source: 'generate-post' });
+        if (modBlock) return modBlock;
+    }
+
     // Verify assistant belongs to this org
     const [asst] = await db
         .select({ id: aiAssistants.id })
@@ -96,7 +96,21 @@ export const handler: Handler = async (event) => {
         .orderBy(desc(aiBlueprints.compiledAt))
         .limit(1);
 
-    const [bp] = await bpQuery;
+    let [bp] = await bpQuery;
+
+    // Self-serve assistants are never compiled by the admin Blueprint tool, so on their first
+    // on-demand generation no blueprint exists yet. Compile one now from the assistant's current
+    // data instead of hard-failing — this is what previously surfaced as a 404 "Blueprint not found".
+    // (An explicit blueprintId that can't be resolved is still an error — don't paper over that.)
+    if (!bp && !blueprintId) {
+        try {
+            const result = await assembleBlueprint(assistantId, String(userId), 'auto-on-demand');
+            bp = { id: result.blueprint.id, missingFields: result.blueprint.missingFields };
+        } catch (err) {
+            console.error('[generate-post] auto-compile blueprint failed', err);
+            return { statusCode: 500, body: JSON.stringify({ error: 'Could not prepare your assistant for generation. Please try again shortly.' }) };
+        }
+    }
 
     if (!bp) return { statusCode: 404, body: JSON.stringify({ error: 'Blueprint not found.' }) };
 

@@ -13,13 +13,13 @@
 
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
-import { eq, and, ilike, or } from 'drizzle-orm';
+import { eq, and, ilike, or, sql } from 'drizzle-orm';
 import { Resend } from 'resend';
 import { getDb } from '../../db/client';
-import { masterAssistants, waitlist, userProfiles, notifications } from '../../db/schema';
+import { masterAssistants, waitlist, userProfiles, notifications, organisations, userOrganisations } from '../../db/schema';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-const FROM_EMAIL = process.env.FROM_EMAIL || 'hello@aura-assist.com';
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
+const FROM_EMAIL = process.env.FROM_EMAIL || 'hello@bemoreswan.com';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -81,11 +81,16 @@ async function handlePatch(event: any): Promise<any> {
 
     if (launchingNow) {
         try {
-            // Find all user profiles with notifyAvailability=true
+            // Find all user profiles opted in to New Role Availability in-app alerts. The
+            // canonical store is in_app_preferences.new_role_availability (account settings →
+            // Notification Preferences); fall back to the legacy notify_availability column
+            // when the user has no stored in-app prefs yet. Mirrors resolveInAppPrefs so the
+            // creation gate agrees with the read-time filter in notifications.ts. (Errs
+            // permissive — the read filter hides any over-creation; it must never under-create.)
             const profiles = await db
                 .select({ userId: userProfiles.userId })
                 .from(userProfiles)
-                .where(eq(userProfiles.notifyAvailability, true));
+                .where(sql`COALESCE((${userProfiles.inAppPreferences} ->> 'new_role_availability')::boolean, ${userProfiles.notifyAvailability}) = true`);
 
             if (profiles.length > 0) {
                 const notifRows = profiles.map(p => ({
@@ -121,7 +126,7 @@ async function handlePatch(event: any): Promise<any> {
                         await resend.emails.send({
                             from: FROM_EMAIL,
                             to: entry.email,
-                            subject: `${updated.name} is now Live on Aura Assist!`,
+                            subject: `${updated.name} is now Live on Be More Swan!`,
                             html: `
 <!DOCTYPE html>
 <html>
@@ -129,7 +134,7 @@ async function handlePatch(event: any): Promise<any> {
 <body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">
   <div style="max-width:560px;margin:40px auto;background:#fff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.08)">
     <div style="background:#111827;padding:28px 32px;text-align:center">
-      <span style="color:#10b981;font-size:28px;font-weight:800;letter-spacing:-1px">Aura</span>
+      <span style="color:#10b981;font-size:28px;font-weight:800;letter-spacing:-1px">Be More Swan</span>
       <span style="color:#fff;font-size:28px;font-weight:800;letter-spacing:-1px">-Assist</span>
     </div>
     <div style="padding:32px">
@@ -141,14 +146,14 @@ async function handlePatch(event: any): Promise<any> {
         The role you've been waiting for is ready. Hire your ${updated.name} today and put AI to work for your business.
       </p>
       <div style="text-align:center;margin-bottom:32px">
-        <a href="${process.env.BASE_URL || 'https://aura-assist.com'}/assistants.html"
+        <a href="${process.env.BASE_URL || 'https://bemoreswan.com'}/assistants.html"
            style="display:inline-block;background:#10b981;color:#fff;font-weight:700;font-size:16px;padding:14px 32px;border-radius:8px;text-decoration:none">
           View ${updated.name} &rarr;
         </a>
       </div>
       <p style="margin:0;color:#9ca3af;font-size:13px;text-align:center">
         You're receiving this because you joined the waitlist for ${updated.name}.<br>
-        <a href="${process.env.BASE_URL || 'https://aura-assist.com'}/workspace.html" style="color:#10b981;text-decoration:none">Manage preferences</a>
+        <a href="${process.env.BASE_URL || 'https://bemoreswan.com'}/workspace.html" style="color:#10b981;text-decoration:none">Manage preferences</a>
       </p>
     </div>
   </div>
@@ -261,6 +266,18 @@ export const handler: Handler = async (event) => {
             filtered = filtered.filter(r => r.category === catParam);
         }
 
+        // AC3.1.2: pre-release ('beta' lifecycle) assistants are visible only to orgs that
+        // unlocked Beta access via the 50-hours milestone. Everything else is unchanged.
+        let betaAccess = false;
+        if (callerId) {
+            const [orgRow] = await db.select({ beta: organisations.betaAccess })
+                .from(userOrganisations)
+                .leftJoin(organisations, eq(userOrganisations.organisationId, organisations.id))
+                .where(eq(userOrganisations.userId, callerId)).limit(1);
+            betaAccess = orgRow?.beta ?? false;
+        }
+        filtered = filtered.filter(r => r.lifecycleState !== 'beta' || betaAccess);
+
         const assistants = filtered.map(r => ({
             id: r.id,
             roleKey: r.roleKey,
@@ -270,6 +287,7 @@ export const handler: Handler = async (event) => {
             iconKey: r.iconKey,
             iconColor: r.iconColor,
             comingSoon: r.comingSoon,
+            beta: r.lifecycleState === 'beta', // UI can badge these as Beta Program early access
             waitlistCount: countMap[r.id] || 0,
             onWaitlist: callerId ? userSet.has(r.id) : false,
         }));

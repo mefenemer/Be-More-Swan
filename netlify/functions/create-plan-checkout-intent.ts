@@ -81,7 +81,7 @@ export const handler: Handler = async (event) => {
             quantity: 1,
             price_data: {
                 currency: priceCurrency,
-                product_data: { name: `Aura-Assist ${plan.name}` },
+                product_data: { name: `Be More Swan ${plan.name}` },
                 unit_amount: Math.round(priceAmount * 100),
                 recurring: { interval: 'month' },
             },

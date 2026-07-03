@@ -229,8 +229,8 @@ export const handler: Handler = async (event) => {
                             <p>Hi ${owner.firstName || 'there'},</p>
                             <p><strong>${memberName}</strong> has been removed from <strong>${org?.name || 'your workspace'}</strong>. They had <strong>${tombstonedCount} file(s)</strong> uploaded that are now inactive.</p>
                             <p>You have <strong>30 days</strong> to reassign ownership of these files to keep them active. After 30 days, their content will be automatically purged to comply with data privacy requirements.</p>
-                            <p>Visit your workspace <a href="${process.env.BASE_URL || 'https://aura-assist.com'}/workspace.html">Connections &amp; Assets</a> section to review and reassign files.</p>
-                            <p style="color:#999;font-size:12px;margin-top:24px">Aura-Assist Data Privacy</p>
+                            <p>Visit your workspace <a href="${process.env.BASE_URL || 'https://bemoreswan.com'}/workspace.html">Connections &amp; Assets</a> section to review and reassign files.</p>
+                            <p style="color:#999;font-size:12px;margin-top:24px">Be More Swan Data Privacy</p>
                         </div>`,
                     }).catch(err => console.warn('[manage-members] Owner asset-notice email failed:', err));
                 }
@@ -240,14 +240,14 @@ export const handler: Handler = async (event) => {
             if (targetUser?.email) {
                 await sendMagicLinkEmail({
                     to: targetUser.email,
-                    subject: `You've been removed from ${org?.name || 'an organisation'} on Aura-Assist`,
+                    subject: `You've been removed from ${org?.name || 'an organisation'} on Be More Swan`,
                     html: `
                         <div style="font-family:sans-serif;padding:24px;max-width:500px">
                             <h2>Workspace Access Removed</h2>
                             <p>Hi ${[targetUser.firstName, targetUser.lastName].filter(Boolean).join(' ') || 'there'},</p>
-                            <p>You have been removed from <strong>${org?.name || 'a workspace'}</strong> on Aura-Assist.</p>
+                            <p>You have been removed from <strong>${org?.name || 'a workspace'}</strong> on Be More Swan.</p>
                             <p>If you believe this was a mistake, please contact the workspace owner directly.</p>
-                            <p style="color:#999;font-size:12px;margin-top:24px">Aura-Assist</p>
+                            <p style="color:#999;font-size:12px;margin-top:24px">Be More Swan</p>
                         </div>
                     `,
                 }).catch(err => console.warn('[manage-members] Email send failed (non-blocking):', err));

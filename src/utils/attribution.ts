@@ -1,7 +1,7 @@
 // src/utils/attribution.ts
-// US-AUD-5.3.1 SC2: Append "Powered by Aura-Assist" footer to exported deliverables.
+// US-AUD-5.3.1 SC2: Append "Powered by Be More Swan" footer to exported deliverables.
 
-const BASE_URL = process.env.BASE_URL || 'https://aura-assist.com';
+const BASE_URL = process.env.BASE_URL || 'https://bemoreswan.com';
 
 /**
  * Returns the attribution footer text for plain-text / markdown exports.
@@ -11,7 +11,7 @@ export function getAttributionFooterText(orgSlug?: string | null): string {
     const url = orgSlug
         ? `${BASE_URL}/powered-by/${encodeURIComponent(orgSlug)}`
         : `${BASE_URL}`;
-    return `\n\n---\nProduced with Aura-Assist | ${url}`;
+    return `\n\n---\nProduced with Be More Swan | ${url}`;
 }
 
 /**
@@ -31,6 +31,6 @@ export function getAttributionFooterHtml(orgSlug?: string | null): string {
         : `${BASE_URL}`;
     return `<hr style="margin-top:2rem;border:none;border-top:1px solid #e5e7eb;">
 <p style="font-size:0.75rem;color:#6b7280;margin-top:0.5rem;">
-  Produced with <a href="${url}" style="color:#059669;text-decoration:none;">Aura-Assist</a>
+  Produced with <a href="${url}" style="color:#059669;text-decoration:none;">Be More Swan</a>
 </p>`;
 }

@@ -1,0 +1,5 @@
+[
+  { "planTierKey": "buster",   "currency": "GBP", "monthlyPriceMajorUnit": "20.00",  "isActive": true },
+  { "planTierKey": "saver",    "currency": "GBP", "monthlyPriceMajorUnit": "50.00",  "isActive": true },
+  { "planTierKey": "employee", "currency": "GBP", "monthlyPriceMajorUnit": "100.00", "isActive": true }
+]

@@ -48,6 +48,31 @@
 
       <!-- Subscription cards (rendered by billing.js) -->
       <div id="subscriptions-list" class="space-y-4"></div>
+
+      <!-- ── AI Media Credits note ──────────────────────────────── -->
+      <div class="mt-4 bg-pink-50 border border-pink-100 rounded-2xl p-5">
+        <div class="flex items-start gap-3">
+          <span class="text-lg leading-none mt-0.5 flex-shrink-0">🎨</span>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center justify-between gap-3 flex-wrap mb-1.5">
+              <p class="text-sm font-bold text-pink-800">AI media credits are included in your plan</p>
+              <span id="ai-credit-balance-pill"
+                    class="inline-flex items-center gap-1.5 bg-white border border-pink-200 text-pink-800 text-xs font-bold px-3 py-1 rounded-full">
+                <span class="w-1.5 h-1.5 rounded-full bg-pink-600 animate-pulse"></span>
+                <span id="ai-credit-balance-value">Loading balance…</span>
+              </span>
+            </div>
+            <p id="ai-credit-monthly-note" class="hidden text-xs font-semibold text-pink-800 mb-1"></p>
+            <p id="ai-credit-held-note" class="hidden text-xs text-pink-700 mb-1.5"></p>
+            <p class="text-xs text-pink-700 leading-relaxed">
+              Every plan comes with a monthly allowance of AI credits for media generation — each AI-generated
+              image costs 1 credit and each AI-generated video costs 5 credits. Your allowance is set by your
+              subscription and unused credits roll over to the next month. Need more? You can top up with extra
+              credits any time your balance runs low.
+            </p>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- ── Payment Method ─────────────────────────────────────── -->
@@ -103,25 +128,25 @@
     <section id="billing-details-section">
       <div class="flex items-center justify-between mb-4 gap-4">
         <div>
-          <h2 class="text-lg font-extrabold text-gray-900">Billing Details</h2>
-          <p class="text-sm text-gray-500 mt-0.5">Used on your invoices. Add your company name, address, and VAT number if applicable.</p>
+          <h2 class="text-lg font-extrabold text-gray-900">Legal &amp; Billing Details</h2>
+          <p class="text-sm text-gray-500 mt-0.5">Shown on your invoices. Managed under <span class="font-semibold text-gray-700">Business Information</span>.</p>
         </div>
-        <button id="btn-edit-billing-details" onclick="window._billingDetailsEdit()"
+        <button onclick="window.loadView && window.loadView('assets')"
           class="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-gray-700 border border-gray-300 hover:border-gray-400 rounded-xl transition bg-white cursor-pointer">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-          Edit
+          Manage in Business Information
         </button>
       </div>
 
-      <!-- Display state -->
+      <!-- Read-only display (edited under Business Information) -->
       <div id="billing-details-display" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
         <!-- Empty state -->
         <div id="billing-details-empty" class="text-center py-4">
-          <p class="text-sm text-gray-500 mb-4">No billing details saved yet. Add your legal company name and address to appear on your invoices.</p>
-          <button onclick="window._billingDetailsEdit()"
+          <p class="text-sm text-gray-500 mb-4">No legal/billing details saved yet. Add your legal company name and address so they appear on your invoices.</p>
+          <button onclick="window.loadView && window.loadView('assets')"
             class="inline-flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-xl shadow transition cursor-pointer">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-            Add Billing Details
+            Add in Business Information
           </button>
         </div>
         <!-- Filled state -->
@@ -132,69 +157,6 @@
             <div><dt class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-0.5">Address</dt><dd id="bd-address" class="text-gray-700 whitespace-pre-line"></dd></div>
             <div><dt class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-0.5">VAT / Tax ID</dt><dd id="bd-vat" class="text-gray-700"></dd></div>
           </dl>
-        </div>
-      </div>
-
-      <!-- Edit form (hidden by default) -->
-      <div id="billing-details-form" class="hidden bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mt-4">
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div class="sm:col-span-2">
-            <label for="bd-input-name" class="block text-sm font-semibold text-gray-700 mb-1.5">Legal Name / Company Name <span class="text-red-500">*</span></label>
-            <input type="text" id="bd-input-name" placeholder="Acme Ltd" autocomplete="organization"
-              class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
-          </div>
-          <div>
-            <label for="bd-input-email" class="block text-sm font-semibold text-gray-700 mb-1.5">Billing Email</label>
-            <input type="email" id="bd-input-email" placeholder="billing@yourcompany.com" autocomplete="email"
-              class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
-          </div>
-          <div>
-            <label for="bd-input-vat" class="block text-sm font-semibold text-gray-700 mb-1.5">VAT / Tax ID <span class="text-xs font-normal text-gray-400">(optional)</span></label>
-            <input type="text" id="bd-input-vat" placeholder="GB123456789"
-              class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition uppercase">
-          </div>
-          <div class="sm:col-span-2">
-            <label for="bd-input-addr1" class="block text-sm font-semibold text-gray-700 mb-1.5">Address Line 1</label>
-            <input type="text" id="bd-input-addr1" placeholder="123 Business Street" autocomplete="address-line1"
-              class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
-          </div>
-          <div class="sm:col-span-2">
-            <label for="bd-input-addr2" class="block text-sm font-semibold text-gray-700 mb-1.5">Address Line 2 <span class="text-xs font-normal text-gray-400">(optional)</span></label>
-            <input type="text" id="bd-input-addr2" placeholder="Suite 100" autocomplete="address-line2"
-              class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
-          </div>
-          <div>
-            <label for="bd-input-city" class="block text-sm font-semibold text-gray-700 mb-1.5">City</label>
-            <input type="text" id="bd-input-city" placeholder="London" autocomplete="address-level2"
-              class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
-          </div>
-          <div>
-            <label for="bd-input-postal" class="block text-sm font-semibold text-gray-700 mb-1.5">Postcode / ZIP</label>
-            <input type="text" id="bd-input-postal" placeholder="EC1A 1BB" autocomplete="postal-code"
-              class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
-          </div>
-          <div>
-            <label for="bd-input-state" class="block text-sm font-semibold text-gray-700 mb-1.5">County / State <span class="text-xs font-normal text-gray-400">(optional)</span></label>
-            <input type="text" id="bd-input-state" placeholder="England" autocomplete="address-level1"
-              class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
-          </div>
-          <div>
-            <label for="bd-input-country" class="block text-sm font-semibold text-gray-700 mb-1.5">Country</label>
-            <input type="text" id="bd-input-country" placeholder="United Kingdom" autocomplete="country-name"
-              class="w-full px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
-          </div>
-        </div>
-        <div id="bd-form-error" class="hidden mt-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-xl px-4 py-3"></div>
-        <div class="flex items-center justify-end gap-3 mt-5">
-          <button onclick="window._billingDetailsCancel()"
-            class="px-4 py-2 text-sm font-semibold text-gray-700 border border-gray-300 rounded-xl hover:bg-gray-100 transition cursor-pointer">
-            Cancel
-          </button>
-          <button id="btn-save-billing-details" onclick="window._billingDetailsSave()"
-            class="inline-flex items-center gap-2 px-5 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow transition cursor-pointer">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-            Save Details
-          </button>
         </div>
       </div>
     </section>
@@ -357,7 +319,7 @@
           <!-- Security note -->
           <div class="flex items-center gap-2 text-xs text-gray-400">
             <svg class="w-4 h-4 text-emerald-500 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
-            Card number and CVC are encrypted by Stripe and never stored on Aura's servers. Only the last 4 digits are retained.
+            Card number and CVC are encrypted by Stripe and never stored on Be More Swan's servers. Only the last 4 digits are retained.
           </div>
 
         </div><!-- /card-form-fields -->
@@ -441,7 +403,7 @@
       <!-- Enterprise CTA -->
       <div id="change-plan-enterprise" class="hidden text-center py-4">
         <p class="text-sm text-gray-500 mb-3">You're on our highest available plan.</p>
-        <a href="mailto:hello@aura-assist.com?subject=Enterprise enquiry" class="inline-flex items-center px-5 py-2.5 bg-gray-900 text-white text-sm font-bold rounded-xl hover:bg-black transition">Contact us for Enterprise →</a>
+        <a href="mailto:hello@bemoreswan.com?subject=Enterprise enquiry" class="inline-flex items-center px-5 py-2.5 bg-gray-900 text-white text-sm font-bold rounded-xl hover:bg-black transition">Contact us for Enterprise →</a>
       </div>
       <div id="change-plan-error" class="hidden mb-4 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-2.5"></div>
       <div id="change-plan-actions" class="hidden flex gap-3 justify-end">
@@ -598,7 +560,7 @@
         return;
       }
       if (higher.length === 0) {
-        html += `<p class="text-xs text-gray-400 mt-3">To upgrade, <a href="mailto:hello@aura-assist.com" class="underline text-emerald-700">contact us for Enterprise</a>.</p>`;
+        html += `<p class="text-xs text-gray-400 mt-3">To upgrade, <a href="mailto:hello@bemoreswan.com" class="underline text-emerald-700">contact us for Enterprise</a>.</p>`;
       }
       document.getElementById('change-plan-tiers').innerHTML = html;
     } catch (e) {

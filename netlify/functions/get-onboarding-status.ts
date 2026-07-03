@@ -2,7 +2,7 @@ import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants } from '../../db/schema';
+import { aiAssistants, organisations, userOrganisations } from '../../db/schema';
 
 const jwtSecret = process.env.JWT_SECRET!;
 
@@ -16,16 +16,25 @@ export const handler: Handler = async (event) => {
         const decoded = jwt.verify(token, jwtSecret) as { userId: number };
         const db = getDb();
 
-        // Onboarding is complete once the user has at least one AI assistant set up.
-        // This is reliable — the old check used preferences.onboardingComplete which
-        // was never written by any function, so it always returned undefined.
-        const [assistant] = await db
-            .select({ id: aiAssistants.id })
-            .from(aiAssistants)
-            .where(eq(aiAssistants.userId, decoded.userId))
+        // Onboarding is complete when the workspace's onboarding_completed flag is set
+        // (the 3-step widget, US1.1). Fall back to assistant-existence for older workspaces
+        // whose flag predates the gamification migration (and was backfilled there anyway).
+        const [org] = await db
+            .select({ onboardingCompleted: organisations.onboardingCompleted })
+            .from(userOrganisations)
+            .leftJoin(organisations, eq(userOrganisations.organisationId, organisations.id))
+            .where(eq(userOrganisations.userId, decoded.userId))
             .limit(1);
 
-        const isComplete = !!assistant;
+        let isComplete = org?.onboardingCompleted === true;
+        if (!isComplete) {
+            const [assistant] = await db
+                .select({ id: aiAssistants.id })
+                .from(aiAssistants)
+                .where(eq(aiAssistants.userId, decoded.userId))
+                .limit(1);
+            isComplete = !!assistant;
+        }
 
         return {
             statusCode: 200,

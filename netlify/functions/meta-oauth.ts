@@ -4,13 +4,17 @@
 // GET ?action=callback — exchanges code, validates, stores token in vault, upserts system_connections
 
 import { Handler } from '@netlify/functions';
-import jwt from 'jsonwebtoken';
 import { eq, and } from 'drizzle-orm';
 import { createHmac, randomBytes } from 'crypto';
 import { getDb } from '../../db/client';
 import { systemConnections, notifications, users, auditLogs, userOrganisations } from '../../db/schema';
 import { storeSecret } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
+import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
+import { resolveAssistantRole } from '../../src/utils/assistant-role';
+import { resolveActionNotifications, CONNECTION_RESTORED_TYPES } from '../../src/utils/notification-actions';
+import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
+import { requireTenant } from '../../src/utils/tenant';
 
 const jwtSecret   = process.env.JWT_SECRET!;
 const metaAppId   = process.env.META_APP_ID!;
@@ -41,21 +45,15 @@ export const handler: Handler = async (event) => {
 
     const baseUrl = resolveBaseUrl(event.headers);
     if (!baseUrl) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
-    const REDIRECT_URI = `${baseUrl}/.netlify/functions/meta-oauth?action=callback`;
+    const REDIRECT_URI = process.env.META_REDIRECT_URI ?? `${baseUrl}/.netlify/functions/meta-oauth?action=callback`;
 
     // ── START: redirect to Meta OAuth ─────────────────────────────────────────
     if (action === 'start') {
-        const cookieHeader = event.headers.cookie || '';
-        const sessionToken = cookieHeader.match(/aura_session=([^;]+)/)?.[1];
-        if (!sessionToken) return { statusCode: 401, body: 'Unauthorized' };
-
-        let organisationId: number;
-        let userId: number;
-        try {
-            const p = jwt.verify(sessionToken, jwtSecret) as { userId: number; organisationId: number };
-            userId = p.userId;
-            organisationId = p.organisationId;
-        } catch { return { statusCode: 401, body: 'Invalid session' }; }
+        // Session carries `activeOrganisationId`, not `organisationId` — resolve via requireTenant
+        // (re-verifies current membership) rather than reading the JWT claim directly.
+        const ctx = await requireTenant(event, getDb());
+        if ('error' in ctx) return ctx.error;
+        const { organisationId } = ctx;
 
         const assistantId = event.queryStringParameters?.assistantId;
         const csrf = csrfToken();
@@ -90,6 +88,15 @@ export const handler: Handler = async (event) => {
 
         const organisationId = parseInt(state.organisationId);
         const assistantId   = state.assistantId ? parseInt(state.assistantId) : null;
+
+        // Connection sandboxing: if this connect was initiated for a specific
+        // assistant, Instagram must be relevant to that assistant's role.
+        if (assistantId) {
+            const assistant = await resolveAssistantRole(getDb(), organisationId, assistantId);
+            if (!assistant || !isServiceAllowedForAssistant('instagram', assistant)) {
+                return { statusCode: 302, headers: { Location: '/workspace.html?meta_error=connection_not_relevant' }, body: '' };
+            }
+        }
 
         // Exchange short-lived code for long-lived token
         const tokenRes = await fetch(
@@ -145,6 +152,14 @@ export const handler: Handler = async (event) => {
 
         const db = getDb();
 
+        // US1 AC1.3: block if this Instagram tenant is already live in a different workspace.
+        // Checked before any token is persisted, so nothing is stored on rejection.
+        const collision = await findTenantCollision(db, { serviceName: 'instagram', externalUserId: igUserId, organisationId });
+        if (collision) {
+            await recordCollisionAttempt(db, { requestingOrgId: organisationId, existingOrgId: collision.organisationId, serviceName: 'instagram', externalUserId: igUserId });
+            return { statusCode: 302, headers: { Location: '/workspace.html?meta_error=tenant_collision&platform=instagram' }, body: '' };
+        }
+
         // Store token in vault
         const refKey = `aura/org-${organisationId}/instagram-token`;
         await storeSecret(db, refKey, { token: longLivedToken });
@@ -171,6 +186,7 @@ export const handler: Handler = async (event) => {
                 status: 'active',
                 isActive: true,
                 metadata: { accountType, fbPageId },
+                ...(assistantId ? { assistantId } : {}),
                 updatedAt: new Date(),
             }).where(eq(systemConnections.id, existing.id));
         } else {
@@ -201,6 +217,8 @@ export const handler: Handler = async (event) => {
                     : `Instagram account connected successfully. You can now schedule and publish posts.${!fbPageId ? ' Note: No Facebook Page linked — some features may be limited.' : ''}`,
                 metadata: { igUserId, accountType, fbPageId },
             });
+            // Connection is live again — clear any open "reconnect Instagram" action items.
+            await resolveActionNotifications(db, orgUser.id, CONNECTION_RESTORED_TYPES);
         }
 
         await db.insert(auditLogs).values({ actionType: isReconnect ? 'instagram_reconnected' : 'instagram_connected', resourceType: 'system_connections', resourceId: igUserId, newState: { organisationId, accountType, fbPageId } });
@@ -221,7 +239,7 @@ export const handler: Handler = async (event) => {
 
         return {
             statusCode: 302,
-            headers: { Location: `/workspace.html?oauth_success=instagram` },
+            headers: { Location: `/workspace.html?oauth_success=instagram${assistantId ? `&assistantId=${assistantId}` : ''}` },
             body: '',
         };
     }

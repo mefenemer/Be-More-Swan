@@ -10,10 +10,14 @@
     <nav class="-mb-px flex space-x-8" aria-label="Tabs">
       <button id="tab-btn-docs" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-bold text-sm border-emerald-500 text-emerald-600">Knowledge Base</button>
       <button id="tab-btn-tickets" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">Support Tickets</button>
+      <button id="tab-btn-features" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300">Feature Requests</button>
     </nav>
   </div>
 
   <div id="tab-content-docs" class="tab-content block">
+
+    <!-- Article-list mode: search + filters + grid -->
+    <div id="help-list-mode">
     <div class="mb-8 max-w-2xl">
       <div class="relative">
         <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
@@ -32,6 +36,29 @@
       </div>
     </div>
     <div id="help-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+    </div><!-- /#help-list-mode -->
+
+    <!-- Single-article reader mode (merged from help.html so articles open in-workspace, not a new tab) -->
+    <article id="help-article-view" class="hidden max-w-4xl">
+      <button id="help-article-back" class="inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700 hover:text-emerald-800 mb-5">
+        &larr; Back to Help Center
+      </button>
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+        <p id="help-article-category" class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2"></p>
+        <h1 id="help-article-title" class="text-2xl font-extrabold text-gray-900 mb-6"></h1>
+        <div id="help-article-body"
+          class="prose prose-sm sm:prose max-w-none
+                 prose-headings:font-bold prose-headings:text-gray-900
+                 prose-a:text-emerald-700 prose-a:no-underline hover:prose-a:underline
+                 prose-table:text-sm prose-th:bg-gray-50 prose-th:font-semibold
+                 prose-blockquote:border-emerald-400 prose-blockquote:text-gray-600
+                 prose-code:bg-gray-100 prose-code:rounded prose-code:px-1">
+        </div>
+      </div>
+      <div class="mt-6 flex items-center justify-end text-sm text-gray-500">
+        <a href="mailto:hello@bemoreswan.com?subject=Help%20Article%20Feedback" class="hover:text-gray-700">Was this helpful? Contact us &rarr;</a>
+      </div>
+    </article>
   </div>
 
   <div id="tab-content-tickets" class="tab-content hidden">
@@ -94,4 +121,390 @@
     </div>
   </div>
 
+  <!-- Feature Requests & Roadmap — merged in from the former standalone side-menu page -->
+  <div id="tab-content-features" class="tab-content hidden">
+    <div class="space-y-6">
+
+      <!-- Header + avg-wait metric (US03) -->
+      <div class="flex items-start justify-between flex-wrap gap-4">
+        <div>
+          <h2 class="text-xl font-bold text-gray-900">Feature Requests</h2>
+          <p class="mt-1 text-gray-500">Shape Be More Swan — submit an idea, upvote your favourites, and track what's coming.</p>
+        </div>
+        <div id="fr-metric" class="hidden bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 text-center">
+          <p id="fr-metric-value" class="text-2xl font-extrabold text-emerald-600">—</p>
+          <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Avg. request → release</p>
+        </div>
+      </div>
+
+      <!-- Sub-tabs -->
+      <div class="border-b border-gray-200">
+        <nav class="-mb-px flex gap-6" id="fr-tabs">
+          <button data-tab="board" class="fr-tab border-b-2 border-emerald-500 text-emerald-600 font-semibold py-3 text-sm">Board</button>
+          <button data-tab="submit" class="fr-tab border-b-2 border-transparent text-gray-500 hover:text-gray-700 font-semibold py-3 text-sm">Submit an Idea</button>
+          <button data-tab="roadmap" class="fr-tab border-b-2 border-transparent text-gray-500 hover:text-gray-700 font-semibold py-3 text-sm">Roadmap</button>
+        </nav>
+      </div>
+
+      <!-- ── BOARD TAB (US02) ───────────────────────────────────────────────── -->
+      <section id="fr-tab-board" class="space-y-4">
+        <div class="flex flex-wrap items-center gap-3">
+          <input id="fr-search" type="text" placeholder="Search requests…" style="min-width:200px"
+                 class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400" />
+          <select id="fr-filter-category" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <option value="">All categories</option>
+            <option value="app_core">App Core</option>
+            <option value="existing_assistant">Existing Assistant</option>
+            <option value="new_assistant">New Assistant</option>
+          </select>
+          <select id="fr-filter-status" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <option value="">All statuses</option>
+            <option value="open">Open</option>
+            <option value="planned">Planned</option>
+            <option value="in_progress">In Progress</option>
+            <option value="released">Released</option>
+          </select>
+          <select id="fr-sort" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <option value="popular">Most popular</option>
+            <option value="newest">Newest</option>
+          </select>
+        </div>
+
+        <div id="fr-board-loading" class="text-center text-gray-400 py-12">Loading requests…</div>
+        <div id="fr-board-empty" class="hidden text-center text-gray-400 py-12">No matching requests yet. Be the first to submit one!</div>
+        <div id="fr-board-grid" class="grid sm:grid-cols-2 gap-4"></div>
+      </section>
+
+      <!-- ── SUBMIT TAB (US01) ──────────────────────────────────────────────── -->
+      <section id="fr-tab-submit" class="hidden space-y-6">
+        <div class="bg-white border border-gray-200 rounded-xl p-6 shadow-sm space-y-4">
+          <h2 class="font-bold text-gray-900 text-lg">Submit a feature request</h2>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Title</label>
+            <input id="fr-new-title" type="text" maxlength="200" placeholder="A short summary of your idea"
+                   class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400" />
+            <!-- Live duplicate search (US01) -->
+            <div id="fr-dupes" class="hidden mt-2 bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm">
+              <p class="font-semibold text-amber-800 mb-1">Similar requests already exist — upvote instead of duplicating?</p>
+              <ul id="fr-dupes-list" class="space-y-1"></ul>
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Description</label>
+            <textarea id="fr-new-desc" rows="4" maxlength="5000" placeholder="Describe the problem and how this would help."
+                      class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"></textarea>
+          </div>
+
+          <div class="grid sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Category</label>
+              <select id="fr-new-category" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                <option value="app_core">App Core</option>
+                <option value="existing_assistant">Existing Assistant</option>
+                <option value="new_assistant">New Assistant</option>
+              </select>
+            </div>
+            <div id="fr-assistant-wrap" class="hidden">
+              <label class="block text-sm font-medium text-gray-700 mb-1">Which assistant?</label>
+              <select id="fr-new-assistant" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm">
+                <option value="">Select an assistant…</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <button id="fr-submit-btn" class="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white text-sm font-semibold rounded-lg transition-colors">
+              Submit request
+            </button>
+            <span id="fr-submit-status" class="text-sm"></span>
+          </div>
+          <p class="text-xs text-gray-400">New requests are reviewed before appearing on the public board.</p>
+        </div>
+
+        <!-- The caller's own submissions, including pending ones (US01 visibility rule) -->
+        <div>
+          <h3 class="font-semibold text-gray-700 text-sm mb-2">Your submissions</h3>
+          <div id="fr-mine-empty" class="hidden text-sm text-gray-400">You haven't submitted any requests yet.</div>
+          <div id="fr-mine-list" class="space-y-2"></div>
+        </div>
+      </section>
+
+      <!-- ── ROADMAP TAB (US03) ─────────────────────────────────────────────── -->
+      <section id="fr-tab-roadmap" class="hidden space-y-4">
+        <p class="text-sm text-gray-500">Planned and in-progress features, grouped by delivery quarter.</p>
+        <div id="fr-roadmap-loading" class="text-center text-gray-400 py-12">Loading roadmap…</div>
+        <div id="fr-roadmap-empty" class="hidden text-center text-gray-400 py-12">Nothing on the roadmap yet — check back soon.</div>
+        <div id="fr-roadmap" class="space-y-6"></div>
+      </section>
+    </div>
+  </div>
+
 </div>
+
+<script>
+(function () {
+  const BASE = '/.netlify/functions';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+  const STATUS_STYLE = {
+    'Open':        'bg-gray-100 text-gray-600',
+    'Planned':     'bg-blue-100 text-blue-700',
+    'In Progress': 'bg-amber-100 text-amber-700',
+    'Released':    'bg-emerald-100 text-emerald-700',
+    'Pending Review': 'bg-gray-100 text-gray-500',
+    'Under Review':   'bg-gray-100 text-gray-500',
+    'Declined':    'bg-red-100 text-red-600',
+    'Duplicate':   'bg-gray-100 text-gray-500',
+  };
+  const badge = (label) =>
+    `<span class="inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${STATUS_STYLE[label] || 'bg-gray-100 text-gray-600'}">${esc(label)}</span>`;
+
+  // ── Sub-tabs (Board / Submit / Roadmap) ─────────────────────────────────
+  function showFrTab(name) {
+    ['board', 'submit', 'roadmap'].forEach((t) => {
+      $('fr-tab-' + t).classList.toggle('hidden', t !== name);
+    });
+    document.querySelectorAll('.fr-tab').forEach((btn) => {
+      const active = btn.dataset.tab === name;
+      btn.classList.toggle('border-emerald-500', active);
+      btn.classList.toggle('text-emerald-600', active);
+      btn.classList.toggle('border-transparent', !active);
+      btn.classList.toggle('text-gray-500', !active);
+    });
+    if (name === 'roadmap') loadRoadmap();
+    if (name === 'submit') loadMine();
+  }
+  document.querySelectorAll('.fr-tab').forEach((btn) =>
+    btn.addEventListener('click', () => showFrTab(btn.dataset.tab)));
+
+  // ── Board (US02) ───────────────────────────────────────────────────────
+  function voteButton(f) {
+    const voted = f.hasVoted;
+    return `<button data-vote="${f.id}"
+        class="fr-vote shrink-0 flex flex-col items-center justify-center w-12 py-1 rounded-lg border transition-colors ${
+          voted ? 'bg-emerald-50 border-emerald-300 text-emerald-600' : 'bg-white border-gray-200 text-gray-500 hover:border-emerald-300'}">
+      <svg class="w-4 h-4" fill="${voted ? 'currentColor' : 'none'}" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/></svg>
+      <span class="text-sm font-bold" data-count="${f.id}">${f.voteCount}</span>
+    </button>`;
+  }
+  function cardHtml(f) {
+    return `<div class="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex gap-3">
+      ${voteButton(f)}
+      <div class="min-w-0">
+        <div class="flex items-center gap-2 flex-wrap mb-1">
+          ${badge(f.statusLabel)}
+          <span class="text-xs text-gray-400">${esc(f.categoryLabel)}</span>
+        </div>
+        <h3 class="font-semibold text-gray-900 text-sm">${esc(f.title)}</h3>
+        ${f.description ? `<p class="text-sm text-gray-500 mt-1 line-clamp-3">${esc(f.description)}</p>` : ''}
+      </div>
+    </div>`;
+  }
+
+  async function loadBoard() {
+    const params = new URLSearchParams({
+      search: $('fr-search').value.trim(),
+      category: $('fr-filter-category').value,
+      status: $('fr-filter-status').value,
+      sort: $('fr-sort').value,
+    });
+    $('fr-board-loading').classList.remove('hidden');
+    $('fr-board-empty').classList.add('hidden');
+    try {
+      const res = await fetch(`${BASE}/feature-requests?${params}`);
+      const data = await res.json();
+      const items = data.requests || [];
+      $('fr-board-grid').innerHTML = items.map(cardHtml).join('');
+      $('fr-board-empty').classList.toggle('hidden', items.length > 0);
+    } catch {
+      $('fr-board-grid').innerHTML = '<p class="text-sm text-red-500">Could not load the board.</p>';
+    } finally {
+      $('fr-board-loading').classList.add('hidden');
+    }
+  }
+
+  async function toggleVote(id, btn) {
+    btn.disabled = true;
+    try {
+      const res = await fetch(`${BASE}/feature-requests?action=vote`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ featureId: id }),
+      });
+      const d = await res.json();
+      if (!res.ok) { window.showToast?.(d.error || 'Could not register your vote.'); return; }
+      // Update count + voted styling in place.
+      const countEl = document.querySelector(`[data-count="${id}"]`);
+      if (countEl) countEl.textContent = d.voteCount;
+      btn.classList.toggle('bg-emerald-50', d.hasVoted);
+      btn.classList.toggle('border-emerald-300', d.hasVoted);
+      btn.classList.toggle('text-emerald-600', d.hasVoted);
+      btn.classList.toggle('bg-white', !d.hasVoted);
+      btn.classList.toggle('border-gray-200', !d.hasVoted);
+      btn.classList.toggle('text-gray-500', !d.hasVoted);
+      const svg = btn.querySelector('svg');
+      if (svg) svg.setAttribute('fill', d.hasVoted ? 'currentColor' : 'none');
+    } catch {
+      window.showToast?.('Network error — try again.');
+    } finally {
+      btn.disabled = false;
+    }
+  }
+  $('fr-board-grid').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-vote]');
+    if (btn) toggleVote(Number(btn.dataset.vote), btn);
+  });
+
+  // Debounced board filters
+  let boardTimer;
+  ['fr-search'].forEach((id) => $(id).addEventListener('input', () => {
+    clearTimeout(boardTimer); boardTimer = setTimeout(loadBoard, 300);
+  }));
+  ['fr-filter-category', 'fr-filter-status', 'fr-sort'].forEach((id) =>
+    $(id).addEventListener('change', loadBoard));
+
+  // ── Submit (US01) ──────────────────────────────────────────────────────
+  let catalogueLoaded = false;
+  async function loadCatalogue() {
+    if (catalogueLoaded) return;
+    try {
+      const res = await fetch(`${BASE}/feature-requests?action=catalogue`);
+      const d = await res.json();
+      const sel = $('fr-new-assistant');
+      (d.assistants || []).forEach((a) => {
+        const opt = document.createElement('option');
+        opt.value = a.roleKey; opt.textContent = a.name;
+        sel.appendChild(opt);
+      });
+      catalogueLoaded = true;
+    } catch { /* non-fatal — validated server-side too */ }
+  }
+  $('fr-new-category').addEventListener('change', (e) => {
+    const isExisting = e.target.value === 'existing_assistant';
+    $('fr-assistant-wrap').classList.toggle('hidden', !isExisting);
+    if (isExisting) loadCatalogue();
+  });
+
+  // Live duplicate search while typing the title.
+  let dupeTimer;
+  $('fr-new-title').addEventListener('input', () => {
+    clearTimeout(dupeTimer);
+    const q = $('fr-new-title').value.trim();
+    if (q.length < 2) { $('fr-dupes').classList.add('hidden'); return; }
+    dupeTimer = setTimeout(async () => {
+      try {
+        const res = await fetch(`${BASE}/feature-requests?action=search&q=${encodeURIComponent(q)}`);
+        const d = await res.json();
+        const matches = d.matches || [];
+        if (!matches.length) { $('fr-dupes').classList.add('hidden'); return; }
+        $('fr-dupes-list').innerHTML = matches.map((m) =>
+          `<li class="flex items-center justify-between gap-2">
+             <span class="text-amber-900">${esc(m.title)} ${badge(m.statusLabel)}</span>
+             <span class="text-xs text-amber-700 font-semibold">▲ ${m.voteCount}</span>
+           </li>`).join('');
+        $('fr-dupes').classList.remove('hidden');
+      } catch { /* ignore */ }
+    }, 350);
+  });
+
+  async function submitRequest() {
+    const title = $('fr-new-title').value.trim();
+    const description = $('fr-new-desc').value.trim();
+    const category = $('fr-new-category').value;
+    const assistantRef = $('fr-new-assistant').value;
+    const status = $('fr-submit-status');
+
+    if (!title) { status.textContent = 'A title is required.'; status.className = 'text-sm text-red-600'; return; }
+    if (!description) { status.textContent = 'A description is required.'; status.className = 'text-sm text-red-600'; return; }
+    if (category === 'existing_assistant' && !assistantRef) {
+      status.textContent = 'Please choose which assistant this is about.'; status.className = 'text-sm text-red-600'; return;
+    }
+
+    const btn = $('fr-submit-btn');
+    btn.disabled = true; status.textContent = '';
+    try {
+      const res = await fetch(`${BASE}/feature-requests`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, description, category, assistantRef: assistantRef || undefined }),
+      });
+      const d = await res.json();
+      if (!res.ok) { status.textContent = d.error || 'Could not submit.'; status.className = 'text-sm text-red-600'; return; }
+      window.showToast?.('Thanks! Your request was submitted for review.', { icon: '💡' });
+      $('fr-new-title').value = ''; $('fr-new-desc').value = '';
+      $('fr-new-category').value = 'app_core'; $('fr-assistant-wrap').classList.add('hidden');
+      $('fr-dupes').classList.add('hidden');
+      status.textContent = '';
+      loadMine();
+    } catch {
+      status.textContent = 'Network error — try again.'; status.className = 'text-sm text-red-600';
+    } finally {
+      btn.disabled = false;
+    }
+  }
+  $('fr-submit-btn').addEventListener('click', submitRequest);
+
+  async function loadMine() {
+    try {
+      const res = await fetch(`${BASE}/feature-requests?action=mine`);
+      const d = await res.json();
+      const items = d.requests || [];
+      $('fr-mine-empty').classList.toggle('hidden', items.length > 0);
+      $('fr-mine-list').innerHTML = items.map((f) =>
+        `<div class="bg-gray-50 border border-gray-200 rounded-lg p-3 flex items-center justify-between gap-2">
+           <span class="text-sm text-gray-700 truncate">${esc(f.title)}</span>
+           ${badge(f.statusLabel)}
+         </div>`).join('');
+    } catch { /* ignore */ }
+  }
+
+  // ── Roadmap (US03) ─────────────────────────────────────────────────────
+  let roadmapLoaded = false;
+  async function loadRoadmap() {
+    if (roadmapLoaded) return;
+    roadmapLoaded = true;
+    try {
+      const res = await fetch(`${BASE}/feature-requests?action=roadmap`);
+      const d = await res.json();
+      const groups = d.groups || [];
+      $('fr-roadmap-empty').classList.toggle('hidden', groups.length > 0);
+      $('fr-roadmap').innerHTML = groups.map((g) =>
+        `<div>
+           <h3 class="font-bold text-gray-800 mb-2">${g.year} · Q${g.q}</h3>
+           <div class="grid sm:grid-cols-2 gap-3">
+             ${g.items.map((f) =>
+               `<div class="bg-white border border-gray-200 rounded-lg p-3 shadow-sm">
+                  <div class="flex items-center gap-2 mb-1">${badge(f.statusLabel)}<span class="text-xs text-gray-400">▲ ${f.voteCount}</span></div>
+                  <p class="text-sm font-semibold text-gray-900">${esc(f.title)}</p>
+                </div>`).join('')}
+           </div>
+         </div>`).join('');
+    } catch {
+      $('fr-roadmap').innerHTML = '<p class="text-sm text-red-500">Could not load the roadmap.</p>';
+    } finally {
+      $('fr-roadmap-loading').classList.add('hidden');
+    }
+  }
+
+  async function loadMetric() {
+    try {
+      const res = await fetch(`${BASE}/feature-requests?action=metrics`);
+      const d = await res.json();
+      if (d.avgWaitDays != null && d.releasedCount > 0) {
+        $('fr-metric-value').textContent = `${d.avgWaitDays} days`;
+        $('fr-metric').classList.remove('hidden');
+      }
+    } catch { /* non-fatal */ }
+  }
+
+  // Exposed init — called by help.js when the Feature Requests tab is first activated.
+  window.initFeatureRequests = function () {
+    roadmapLoaded = false;
+    showFrTab('board');
+    loadBoard();
+    loadMetric();
+  };
+})();
+</script>

@@ -1,0 +1,18 @@
+[
+  {
+    "key": "safe_content_benchmark",
+    "version": "1.0",
+    "description": "Be More Swan Safe Content Benchmark — immutable safety layer injected at highest priority in every system prompt.",
+    "categories": [
+      "no_sexually_explicit_content",
+      "no_hate_speech_or_discrimination",
+      "no_violence_or_dangerous_content",
+      "no_self_harm_promotion",
+      "no_illegal_acts",
+      "no_harassment",
+      "no_spam_or_phishing",
+      "no_unauthorised_copyrighted_or_private_material",
+      "no_identity_based_bias_or_stereotyping"
+    ]
+  }
+]

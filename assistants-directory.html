@@ -11,11 +11,50 @@
         </button>
     </div>
 
-    <!-- Match Dashboard Grid Layout -->
-    <div id="directory-assistants-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+    <!-- 3-card grid: configured assistants + inviting "Add New" placeholders (US: My Assistants placeholders) -->
+    <div id="directory-assistants-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
         <div class="col-span-full py-12 text-center text-gray-500 font-medium bg-white rounded-2xl border border-gray-100 shadow-sm animate-pulse">
             Gathering your team...
         </div>
     </div>
 
 </div>
+
+<style>
+  /* "Add New Assistant" placeholder card. Scoped plain CSS (immune to the prebuilt Tailwind
+     build, same approach as the Command Center hero) so the muted/dashed styling and emerald
+     hover treatment render without a build:css step. Lower visual weight than the active
+     (solid, full-colour) cards per the visual-hierarchy requirement. */
+  .add-asst-card {
+    border: 2px dashed #d1d5db; border-radius: 1rem; background: #fafafa;
+    padding: 1.5rem; display: flex; flex-direction: column; align-items: center;
+    justify-content: center; text-align: center; cursor: pointer; min-height: 16rem;
+    transition: border-color .2s, background-color .2s, box-shadow .2s, transform .2s;
+  }
+  .add-asst-card:hover, .add-asst-card:focus-visible {
+    border-color: #34d399; background: #ecfdf5; outline: none; transform: translateY(-2px);
+    box-shadow: 0 12px 28px -12px rgba(16, 185, 129, .4);
+  }
+  .add-asst-ico {
+    width: 3.5rem; height: 3.5rem; border-radius: 1rem; background: #fff;
+    border: 2px dashed #d1d5db; color: #9ca3af; display: flex; align-items: center;
+    justify-content: center; margin-bottom: 1rem; transition: border-color .2s, color .2s;
+  }
+  .add-asst-card:hover .add-asst-ico, .add-asst-card:focus-visible .add-asst-ico {
+    border-color: #34d399; color: #059669;
+  }
+  .add-asst-ico svg { width: 1.75rem; height: 1.75rem; }
+  .add-asst-title { font-size: 1rem; font-weight: 700; color: #4b5563; transition: color .2s; }
+  .add-asst-card:hover .add-asst-title, .add-asst-card:focus-visible .add-asst-title { color: #047857; }
+  .add-asst-sub { font-size: .875rem; color: #9ca3af; margin: .25rem 0 1.25rem; max-width: 15rem; line-height: 1.4; }
+  .add-asst-cta {
+    display: inline-flex; align-items: center; gap: .375rem; padding: .5rem 1rem;
+    font-size: .875rem; font-weight: 700; color: #6b7280; background: #fff;
+    border: 1px solid #e5e7eb; border-radius: .5rem; box-shadow: 0 1px 2px rgba(0, 0, 0, .05);
+    transition: background-color .2s, color .2s, border-color .2s;
+  }
+  .add-asst-cta svg { width: 1rem; height: 1rem; }
+  .add-asst-card:hover .add-asst-cta, .add-asst-card:focus-visible .add-asst-cta {
+    background: #059669; color: #fff; border-color: #059669;
+  }
+</style>

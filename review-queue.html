@@ -4,64 +4,51 @@
   <div class="flex flex-wrap items-start justify-between gap-4 mb-6">
     <div>
       <h1 class="text-2xl font-extrabold text-gray-900">Review Queue</h1>
-      <p class="text-sm text-gray-500 mt-1">Review and approve pending AI actions and social media drafts.</p>
+      <p class="text-sm text-gray-500 mt-1">Follow each post from review through to posted — and review or amend anything before it goes live.</p>
     </div>
     <button onclick="openGeneratePostSheet()" class="px-4 py-2 text-sm font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg transition cursor-pointer flex items-center gap-1.5">
       <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-      Generate Post
+      Create Post
     </button>
   </div>
 
-  <!-- Card with tabs + list -->
+  <!-- Card with lifecycle columns + grouped content -->
   <div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
 
-    <!-- Tabs -->
+    <!-- Lifecycle columns -->
     <div class="flex gap-1 px-4 pt-3 border-b border-gray-100 overflow-x-auto">
-      <button class="rq-tab px-4 py-2 text-sm font-semibold rounded-t border-b-2 border-emerald-600 text-emerald-700 whitespace-nowrap"
-        data-tab-type="hitl" data-status="pending"
-        onclick="rqSetTab('pending', this, 'hitl')">
-        Pending
-        <span id="rq-pending-tab-count" class="ml-1 bg-emerald-100 text-emerald-700 text-xs px-1.5 py-0.5 rounded-full"></span>
+      <button class="rq-col px-4 py-2 text-sm font-semibold rounded-t border-b-2 border-emerald-600 text-emerald-700 whitespace-nowrap"
+        data-status="review" onclick="_rqSafeOpenStatus('review', this)">
+        Review
+        <span id="rq-col-count-review" class="ml-1 bg-amber-100 text-amber-700 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
       </button>
-      <button class="rq-tab px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
-        data-tab-type="hitl" data-status="approved"
-        onclick="rqSetTab('approved', this, 'hitl')">
-        Approved
-      </button>
-      <button class="rq-tab px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
-        data-tab-type="hitl" data-status="rejected"
-        onclick="rqSetTab('rejected', this, 'hitl')">
-        Rejected
-      </button>
-      <div class="w-px bg-gray-200 mx-1 self-stretch my-1"></div>
-      <button class="rq-tab px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
-        data-tab-type="social" data-status="pending_approval"
-        onclick="rqSetTab('pending_approval', this, 'social')">
-        Social Drafts
-        <span id="rq-social-tab-count" class="ml-1 bg-violet-100 text-violet-700 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
-      </button>
+      <button class="rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
+        data-status="approved" onclick="_rqSafeOpenStatus('approved', this)">Approved</button>
+      <button class="rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
+        data-status="scheduled" onclick="_rqSafeOpenStatus('scheduled', this)">Scheduled</button>
+      <button class="rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
+        data-status="posted" onclick="_rqSafeOpenStatus('posted', this)">Posted</button>
+      <button class="rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
+        data-status="archived" onclick="_rqSafeOpenStatus('archived', this)">Archived</button>
     </div>
 
-    <!-- Item list -->
-    <div id="rq-list" class="divide-y divide-gray-100 px-4 py-2 min-h-[200px]"></div>
+    <!-- Grouped, collapsible content -->
+    <div id="rq-groups" class="px-4 py-2 min-h-[200px]"></div>
 
   </div>
 </div>
 
 <script>
-(async function initReviewQueuePage() {
-  try {
-    const res = await fetch('/.netlify/functions/get-pending-actions?status=pending&limit=1');
-    const { totalPending } = res.ok ? await res.json() : { totalPending: 0 };
-    if (!totalPending) {
-      const socialRes = await fetch('/.netlify/functions/get-social-drafts?status=pending_approval');
-      const { drafts } = socialRes.ok ? await socialRes.json() : { drafts: [] };
-      if ((drafts || []).length > 0) {
-        const socialBtn = document.querySelector('.rq-tab[data-tab-type="social"]');
-        if (socialBtn) { rqSetTab('pending_approval', socialBtn, 'social'); return; }
-      }
-    }
-  } catch { /* fall through to default tab */ }
-  rqLoadItems('pending', 'hitl');
+(function initReviewQueuePage() {
+  // rqOpenStatus lives in workspace.html's main script, which normally finishes loading
+  // well before this view is ever reachable — but this view's own <script> is re-executed
+  // synchronously right after its markup is injected (see loadView() in workspace.html),
+  // so on a slow/first load there's a narrow window where the tab buttons above could be
+  // clicked before that global exists, throwing "rqOpenStatus is not defined" out of the
+  // onclick handler. Route clicks through this always-defined wrapper instead.
+  window._rqSafeOpenStatus = function (statusKey, btn) {
+    if (typeof rqOpenStatus === 'function') rqOpenStatus(statusKey, btn);
+  };
+  window._rqSafeOpenStatus('review', document.querySelector('.rq-col[data-status="review"]'));
 })();
 </script>

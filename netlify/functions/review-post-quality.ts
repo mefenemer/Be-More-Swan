@@ -4,7 +4,7 @@
 // POST { postId }
 // → { brandVoiceScore, complianceWarnings, suggestions, cachedAt }
 //
-// SC7: requires tierKey 'pro' or 'enterprise' (T1/T2)
+// SC7: requires tierKey 'saver' or 'employee'
 // SC8: result cached in scheduled_posts.qualityReview jsonb; re-run only on caption change
 
 import { Handler } from '@netlify/functions';
@@ -13,13 +13,15 @@ import { eq, and, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     users, userOrganisations, scheduledPosts, aiAssistants, aiBlueprints,
-    plans, masterPlans,
 } from '../../db/schema';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
+import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
-const GATED_TIERS = new Set(['pro', 'enterprise', 'agency']);
+// Tier keys are 'buster' | 'saver' | 'employee' (see db/schema.ts, seed/data/master_plans.json).
+// Quality review is a premium feature — available on Saver and above.
+const GATED_TIERS = new Set(['saver', 'employee']);
 
 export const handler: Handler = async (event) => {
     try {
@@ -66,15 +68,10 @@ export const handler: Handler = async (event) => {
         .limit(1);
     if (!membership) return { statusCode: 403, body: JSON.stringify({ error: 'Forbidden.' }) };
 
-    // SC7: tier gate — pro/enterprise only
-    const [planRow] = await db
-        .select({ tierKey: masterPlans.tierKey })
-        .from(plans)
-        .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
-        .where(and(eq(plans.organisationId, post.organisationId!), eq(plans.status, 'active')))
-        .limit(1);
-    if (!planRow?.tierKey || !GATED_TIERS.has(planRow.tierKey)) {
-        return { statusCode: 403, body: JSON.stringify({ error: 'tier_required', requiredTier: 'pro' }) };
+    // SC7: tier gate — saver/employee only
+    const tierKey = await getActiveTierKeyByOrg(db, post.organisationId!);
+    if (!tierKey || !GATED_TIERS.has(tierKey)) {
+        return { statusCode: 403, body: JSON.stringify({ error: 'tier_required', requiredTier: 'saver' }) };
     }
 
     // SC8: return cached result if caption unchanged

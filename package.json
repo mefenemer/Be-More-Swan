@@ -9,9 +9,24 @@
     "test:storage-isolation": "tsx tests/storage-tenant-isolation.test.ts",
     "test:tenant-guard": "tsx tests/tenant-guard.test.ts",
     "test:rls": "tsx tests/rls-enforcement.test.ts",
+    "test:connection-policy": "tsx tests/connection-policy.test.ts",
+    "test:webhook-verify": "tsx tests/webhook-verify.test.ts",
+    "test:bias-parity": "tsx tests/bias-parity.test.ts",
+    "test:env-routing": "tsx tests/env-routing.test.ts",
+    "test:email-domain": "tsx tests/email-domain.test.ts",
+    "test:compliance-config": "tsx tests/compliance-config.test.ts",
+    "test:goal-metrics": "tsx tests/goal-metrics.test.ts",
+    "test:goal-progress": "tsx tests/goal-progress.test.ts",
     "db:push": "drizzle-kit push",
+    "db:seed": "npx tsx seed/cli.ts",
+    "db:seed:sandbox": "npx tsx seed/cli.ts --sandbox",
     "db:seed-catalog": "npx tsx db/seed-catalog.ts",
+    "r2:cors": "npx tsx scripts/set-r2-cors.ts",
+    "dev:issue-fixer": "node scripts/dev-issue-fixer.mjs",
+    "dev:issue-fixer:local": "node --env-file=.env.handoff scripts/dev-issue-fixer.mjs",
     "build:css": "tailwindcss -i ./input.css -o ./style.css --watch",
+    "build:css:prod": "tailwindcss -i ./input.css -o ./style.css",
+    "build:version": "node scripts/stamp-view-version.mjs",
     "license:check": "license-checker --excludePrivatePackages --failOn 'GPL-1.0;GPL-2.0;GPL-3.0;AGPL-1.0;AGPL-3.0;EUPL-1.0;EUPL-1.1;EUPL-1.2;CDDL-1.0;CDDL-1.1'",
     "license:notices": "node scripts/generate-notices.js",
     "lint:no-encryption-import": "bash -c 'grep -rn \"from.*utils/encryption\" netlify src --include=\"*.ts\" && { echo \"ERROR: encryption.ts is deprecated — use vault.ts instead\"; exit 1; }; echo \"OK: no new imports of deprecated encryption.ts found\"'"
@@ -49,6 +64,7 @@
     "pdf-parse": "^2.4.5",
     "postgres": "^3.4.9",
     "resend": "^6.12.4",
-    "stripe": "^22.2.0"
+    "stripe": "^22.2.0",
+    "zod": "^4.4.3"
   }
 }

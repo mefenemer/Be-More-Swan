@@ -35,7 +35,7 @@ export const handler: Handler = async (event) => {
             headers: { 'Content-Type': 'text/html' },
             body: `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="UTF-8"><title>Unsubscribed — Aura</title>
+<head><meta charset="UTF-8"><title>Unsubscribed — Be More Swan</title>
 <style>body{font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#f9fafb}
 .card{background:#fff;border-radius:1rem;padding:2.5rem;max-width:400px;text-align:center;box-shadow:0 4px 24px rgba(0,0,0,.08)}
 h1{font-size:1.25rem;margin-bottom:.5rem}p{color:#6b7280;font-size:.9rem}a{color:#2563eb}</style></head>

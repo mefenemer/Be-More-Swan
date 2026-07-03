@@ -4,7 +4,7 @@
   <!-- Header -->
   <div>
     <h1 class="text-2xl font-bold text-gray-900">Refer a Friend</h1>
-    <p class="mt-1 text-gray-500">Earn <strong>£10 account credit</strong> for every friend who signs up and starts a paid subscription — it'll be applied to your next invoice automatically.</p>
+    <p class="mt-1 text-gray-500">Earn a <strong>referral token</strong> for every friend who signs up and starts a paid subscription. Redeem <strong>1 token for £10 credit</strong> — or save <strong>5 for a free assistant</strong>.</p>
   </div>
 
   <!-- No-plan empty state (US-GAP-BUG: shown when user has no active subscription) -->
@@ -23,6 +23,42 @@
 
   <!-- Plan-gated content (shown only when user has an active plan) -->
   <div id="ref-plan-content" class="hidden space-y-8">
+
+    <!-- Reward Vault (Referral Program Expansion) — US1 -->
+    <div id="ref-vault" class="hidden bg-gradient-to-br from-emerald-50 to-white border border-emerald-200 rounded-xl p-6 shadow-sm space-y-5">
+      <div class="flex items-start justify-between flex-wrap gap-3">
+        <div>
+          <h2 class="font-bold text-gray-900 text-lg">Your Reward Vault</h2>
+          <p class="text-sm text-gray-500">Earn 1 token per paying referral. Spend them your way.</p>
+        </div>
+        <div class="text-right">
+          <p id="vault-token-count" class="text-3xl font-extrabold text-emerald-600">0</p>
+          <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Available Tokens</p>
+        </div>
+      </div>
+
+      <!-- Milestone progress to free assistant (AC1.2) -->
+      <div>
+        <div class="flex justify-between items-baseline mb-1 gap-2">
+          <span id="vault-milestone-label" class="text-sm font-semibold text-gray-700">0/5 referrals until your free assistant!</span>
+          <span id="vault-maturing-note" class="hidden text-xs text-amber-600 font-medium whitespace-nowrap"></span>
+        </div>
+        <div class="h-3 w-full rounded-full bg-gray-100 overflow-hidden">
+          <div id="vault-progress-bar" class="h-3 rounded-full bg-emerald-500 transition-all duration-500" style="width:0%"></div>
+        </div>
+      </div>
+
+      <!-- Redemption CTAs (AC1.3 / AC1.4) -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <button id="vault-redeem-credit" class="px-4 py-3 rounded-lg font-semibold text-sm border border-emerald-300 text-emerald-700 bg-white hover:bg-emerald-50 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+          Redeem £10 Credit <span class="text-xs font-normal text-gray-400">(1 token)</span>
+        </button>
+        <button id="vault-redeem-assistant" class="px-4 py-3 rounded-lg font-semibold text-sm text-white bg-emerald-600 hover:bg-emerald-700 transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">
+          Unlock Free Assistant <span class="text-xs font-normal opacity-80">(5 tokens)</span>
+        </button>
+      </div>
+      <p id="vault-limit-note" class="text-xs text-gray-500"></p>
+    </div>
 
     <!-- US-GAP-8.3.1: Who referred me (AC7–AC12) -->
     <div id="ref-referred-by-section" class="hidden bg-emerald-50 border border-emerald-200 rounded-xl px-6 py-4">
@@ -66,6 +102,39 @@
         </button>
       </div>
 
+      <!-- Share actions (shown once a link exists) -->
+      <div id="ref-share-row" class="hidden space-y-3">
+        <p class="text-xs text-gray-500">This is your single, reusable link — share it with as many friends as you like. Each friend who subscribes earns you a token.</p>
+        <div class="flex flex-wrap items-center gap-2">
+          <button id="ref-share-email-btn"
+            class="inline-flex items-center gap-1.5 px-4 py-2 border border-gray-200 hover:border-emerald-300 hover:bg-emerald-50 text-gray-700 text-sm font-semibold rounded-lg transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+            Email a friend
+          </button>
+          <button type="button" disabled title="Available on higher plans"
+            class="inline-flex items-center gap-1.5 px-4 py-2 border border-gray-200 text-gray-400 text-sm font-semibold rounded-lg opacity-60 cursor-not-allowed">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-4-.8L3 20l1.3-3.9A7.96 7.96 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+            SMS
+            <span class="text-[10px] font-bold bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded-full border border-gray-200">Higher plans</span>
+          </button>
+          <button type="button" disabled title="Available on higher plans"
+            class="inline-flex items-center gap-1.5 px-4 py-2 border border-gray-200 text-gray-400 text-sm font-semibold rounded-lg opacity-60 cursor-not-allowed">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 20l1.3-3.9A7.96 7.96 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8-4.03 8-9 8a9.86 9.86 0 01-4-.8L3 20z"/></svg>
+            WhatsApp
+            <span class="text-[10px] font-bold bg-gray-100 text-gray-400 px-1.5 py-0.5 rounded-full border border-gray-200">Higher plans</span>
+          </button>
+        </div>
+        <div id="ref-email-form" class="hidden flex flex-wrap items-center gap-2">
+          <input id="ref-email-input" type="email" placeholder="friend@example.com" style="min-width:200px"
+            class="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+          <button id="ref-email-send-btn"
+            class="shrink-0 px-4 py-2 bg-[#00e55c] hover:bg-[#00cc52] text-white text-sm font-semibold rounded-lg transition-colors">
+            Send
+          </button>
+          <span id="ref-email-status" class="text-xs text-gray-500"></span>
+        </div>
+      </div>
+
       <!-- Stats row -->
       <div id="ref-stats" class="hidden grid grid-cols-3 gap-4 pt-2 border-t border-gray-100">
         <div class="text-center">
@@ -93,14 +162,14 @@
         </li>
         <li class="flex gap-3">
           <span class="shrink-0 w-6 h-6 rounded-full bg-[#e6faf0] text-[#00b347] font-bold flex items-center justify-center text-xs">2</span>
-          <span>They sign up via your link and start a paid Aura-Assist subscription.</span>
+          <span>They sign up via your link and start a paid Be More Swan subscription.</span>
         </li>
         <li class="flex gap-3">
           <span class="shrink-0 w-6 h-6 rounded-full bg-[#e6faf0] text-[#00b347] font-bold flex items-center justify-center text-xs">3</span>
-          <span>You automatically receive a <strong>£10 credit</strong> on your account, deducted from your next invoice.</span>
+          <span>Once they pass their 14-day refund window, a <strong>referral token</strong> lands in your Reward Vault to spend on £10 credit or a free assistant.</span>
         </li>
       </ol>
-      <p class="mt-4 text-xs text-gray-400">Credits are applied automatically. There's no limit to how many friends you can refer.</p>
+      <p class="mt-4 text-xs text-gray-400">You have <strong>one reusable referral link</strong> — share the same link with as many friends as you like; there's no limit. Tokens unlock after each referred friend's 14-day refund window.</p>
     </div>
 
     <!-- Activity table -->
@@ -156,10 +225,13 @@
     // Active plan — reveal plan-gated content
     document.getElementById('ref-plan-content').classList.remove('hidden');
 
+    // Reward Vault (Referral Program Expansion) — US1
+    renderVault(data);
+
     // US-GAP-8.3.1: Who referred me
     if (data.referredBy) {
       const dateStr = new Date(data.referredBy.joinedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-      document.getElementById('ref-referrer-name').textContent = data.referredBy.displayName || 'An Aura-Assist member';
+      document.getElementById('ref-referrer-name').textContent = data.referredBy.displayName || 'An Be More Swan member';
       document.getElementById('ref-referrer-date').textContent = dateStr;
       if (data.referredBy.referralBonusApplied) {
         document.getElementById('ref-bonus-badge').classList.remove('hidden');
@@ -173,6 +245,7 @@
     if (data.referralCode) {
       document.getElementById('ref-link-input').value = data.shareLink;
       document.getElementById('ref-link-row').classList.remove('hidden');
+      document.getElementById('ref-share-row').classList.remove('hidden');
     } else {
       document.getElementById('ref-no-code-row').classList.remove('hidden');
     }
@@ -186,27 +259,133 @@
     // Table
     document.getElementById('ref-table-loading').classList.add('hidden');
     const referrals = data.referrals || [];
-    if (referrals.length === 0) {
+    const invites = data.invites || [];
+    const fmtDate = (d) => d ? new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+
+    if (referrals.length === 0 && invites.length === 0) {
       document.getElementById('ref-table-empty').classList.remove('hidden');
+      document.getElementById('ref-table').classList.add('hidden');
     } else {
-      const tbody = document.getElementById('ref-table-body');
-      tbody.innerHTML = referrals.map(r => {
+      // Re-render safe (called again after sending an invite): hide the empty state.
+      document.getElementById('ref-table-empty').classList.add('hidden');
+      // Invited (awaiting sign-up) rows first — the earliest stage of the lifecycle.
+      const inviteRows = invites.map(i => `
+          <tr>
+            <td class="px-6 py-3 text-gray-900 font-medium"><span class="text-gray-400 font-normal">${i.email || ''}</span></td>
+            <td class="px-6 py-3 text-gray-400 italic">Awaiting sign-up</td>
+            <td class="px-6 py-3"><span class="inline-block text-xs font-semibold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Invited</span></td>
+          </tr>`).join('');
+
+      const referralRows = referrals.map(r => {
         const badgeClass = r.status === 'rewarded'
           ? 'bg-green-100 text-green-700'
           : r.status === 'qualified'
             ? 'bg-blue-100 text-blue-700'
             : 'bg-gray-100 text-gray-600';
         const label = r.status === 'rewarded' ? 'Rewarded' : r.status === 'qualified' ? 'Qualified' : 'Pending';
-        const dateStr = r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
         return `
           <tr>
             <td class="px-6 py-3 text-gray-900 font-medium">${r.name}<span class="ml-2 text-gray-400 font-normal">${r.email || ''}</span></td>
-            <td class="px-6 py-3 text-gray-500">${dateStr}</td>
+            <td class="px-6 py-3 text-gray-500">${fmtDate(r.createdAt)}</td>
             <td class="px-6 py-3"><span class="inline-block text-xs font-semibold px-2.5 py-0.5 rounded-full ${badgeClass}">${label}</span></td>
           </tr>`;
       }).join('');
+
+      document.getElementById('ref-table-body').innerHTML = inviteRows + referralRows;
       document.getElementById('ref-table').classList.remove('hidden');
     }
+  }
+
+  // ── Reward Vault (Referral Program Expansion) ──────────────────────
+  function renderVault(data) {
+    const vault = document.getElementById('ref-vault');
+    if (!vault) return;
+    const tokens    = data.availableTokens || 0;
+    const threshold = data.freeAssistantThreshold || 5;
+    const maturing  = data.maturingTokens || 0;
+
+    vault.classList.remove('hidden');
+    document.getElementById('vault-token-count').textContent = tokens;
+
+    // AC1.2: milestone progress
+    document.getElementById('vault-milestone-label').textContent = tokens >= threshold
+      ? "You've unlocked a free assistant! 🎉"
+      : `${tokens}/${threshold} referrals until your free assistant!`;
+    document.getElementById('vault-progress-bar').style.width =
+      Math.min(100, Math.round((tokens / threshold) * 100)) + '%';
+
+    const matNote = document.getElementById('vault-maturing-note');
+    if (maturing > 0) {
+      matNote.textContent = `${maturing} pending the 14-day window`;
+      matNote.classList.remove('hidden');
+    } else { matNote.classList.add('hidden'); }
+
+    // AC1.3 / AC1.4: redemption CTA states
+    document.getElementById('vault-redeem-credit').disabled    = tokens < 1;
+    document.getElementById('vault-redeem-assistant').disabled = tokens < threshold;
+
+    if (data.assistantLimit != null) {
+      const bonus = data.bonusAssistants || 0;
+      document.getElementById('vault-limit-note').textContent =
+        `Your plan currently allows ${data.assistantLimit} assistant${data.assistantLimit === 1 ? '' : 's'}` +
+        (bonus ? ` (includes ${bonus} bonus from referrals).` : '.');
+    }
+  }
+
+  async function redeem(type, btn) {
+    const orig = btn.innerHTML;
+    btn.disabled = true; btn.textContent = 'Redeeming…';
+    try {
+      const res = await fetch(`${BASE}/redeem-referral-reward`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        window.showToast?.(d.error || 'Could not redeem your tokens.');
+        btn.innerHTML = orig; btn.disabled = false;
+        return;
+      }
+      if (type === 'credit_10') {
+        window.showToast?.('£10 credit redeemed — it will be applied to your next invoice.', { icon: '💷' });
+      } else {
+        window.showToast?.('Free assistant unlocked! 🎉', { icon: '🎉' });
+        fireConfetti();
+      }
+      btn.innerHTML = orig;          // restore label; renderVault re-sets disabled state
+      await loadReferral();          // AC2.4: refresh counts/bar/limit without a page refresh
+    } catch {
+      window.showToast?.('Something went wrong. Please try again.');
+      btn.innerHTML = orig; btn.disabled = false;
+    }
+  }
+
+  document.getElementById('vault-redeem-credit').addEventListener('click', (e) => redeem('credit_10', e.currentTarget));
+  document.getElementById('vault-redeem-assistant').addEventListener('click', (e) => redeem('free_assistant', e.currentTarget));
+
+  // Dependency-free confetti burst (AC2.4) — inline canvas, no CDN.
+  function fireConfetti() {
+    const c = document.createElement('canvas');
+    c.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:12000;';
+    document.body.appendChild(c);
+    const ctx = c.getContext('2d');
+    c.width = window.innerWidth; c.height = window.innerHeight;
+    const colors = ['#00e55c', '#059669', '#fbbf24', '#f43f5e', '#3b82f6'];
+    const parts = Array.from({ length: 140 }, () => ({
+      x: c.width / 2, y: c.height / 3,
+      vx: (Math.random() - 0.5) * 12, vy: Math.random() * -12 - 4,
+      size: Math.random() * 8 + 4, color: colors[Math.floor(Math.random() * colors.length)],
+      rot: Math.random() * Math.PI, vr: (Math.random() - 0.5) * 0.3,
+    }));
+    let frame = 0;
+    (function anim() {
+      ctx.clearRect(0, 0, c.width, c.height);
+      parts.forEach(p => {
+        p.vy += 0.3; p.x += p.vx; p.y += p.vy; p.rot += p.vr;
+        ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.rot);
+        ctx.fillStyle = p.color; ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size); ctx.restore();
+      });
+      if (++frame < 160) requestAnimationFrame(anim); else c.remove();
+    })();
   }
 
   // Copy button
@@ -231,12 +410,52 @@
         document.getElementById('ref-link-input').value = data.shareLink;
         document.getElementById('ref-no-code-row').classList.add('hidden');
         document.getElementById('ref-link-row').classList.remove('hidden');
+        document.getElementById('ref-share-row').classList.remove('hidden');
       }
     } catch {
       btn.disabled = false;
       btn.textContent = 'Try Again';
     }
   });
+
+  // ── Email a friend (#5) ────────────────────────────────────────────
+  document.getElementById('ref-share-email-btn').addEventListener('click', () => {
+    const form = document.getElementById('ref-email-form');
+    form.classList.toggle('hidden');
+    if (!form.classList.contains('hidden')) document.getElementById('ref-email-input').focus();
+  });
+
+  async function sendReferralEmail() {
+    const input  = document.getElementById('ref-email-input');
+    const sendBtn = document.getElementById('ref-email-send-btn');
+    const status = document.getElementById('ref-email-status');
+    const friendEmail = input.value.trim();
+    if (!friendEmail) { status.textContent = 'Enter an email address.'; status.className = 'text-xs text-red-600'; return; }
+    sendBtn.disabled = true; sendBtn.textContent = 'Sending…';
+    status.textContent = ''; status.className = 'text-xs text-gray-500';
+    try {
+      const res = await fetch(`${BASE}/referral-share`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ friendEmail }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (res.ok) {
+        status.textContent = `Sent to ${friendEmail} ✓`; status.className = 'text-xs text-emerald-600';
+        input.value = '';
+        // Refresh the activity in place so the new "Invited" row appears immediately
+        // (no need to navigate away and back).
+        await loadReferral();
+      } else {
+        status.textContent = d.error || 'Could not send. Try again.'; status.className = 'text-xs text-red-600';
+      }
+    } catch {
+      status.textContent = 'Network error. Try again.'; status.className = 'text-xs text-red-600';
+    } finally {
+      sendBtn.disabled = false; sendBtn.textContent = 'Send';
+    }
+  }
+  document.getElementById('ref-email-send-btn').addEventListener('click', sendReferralEmail);
+  document.getElementById('ref-email-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); sendReferralEmail(); } });
 
   loadReferral();
 })();

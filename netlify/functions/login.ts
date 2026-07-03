@@ -93,7 +93,7 @@ export const handler: Handler = async (event) => {
                         <div style="font-family: sans-serif; text-align: center; padding: 40px 20px; background-color: #fdfcf9;">
                             <div style="max-width: 500px; margin: 0 auto; background-color: white; padding: 40px; border-radius: 16px; border: 1px solid #eae4d7; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">
                                 <h2 style="color: #1f1e1b; margin-top: 0;">${greeting}</h2>
-                                <p style="color: #5c564b; font-size: 16px; line-height: 1.5;">Click the button below to securely log into your Aura Assist dashboard.</p>
+                                <p style="color: #5c564b; font-size: 16px; line-height: 1.5;">Click the button below to securely log into your Be More Swan dashboard.</p>
                                 <a href="${magicLink}" style="background-color: #00e55c; color: white; padding: 14px 28px; text-decoration: none; border-radius: 8px; display: inline-block; margin: 24px 0; font-weight: bold; font-size: 16px;">
                                     Log In
                                 </a>

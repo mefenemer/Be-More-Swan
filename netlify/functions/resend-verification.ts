@@ -58,7 +58,7 @@ export const handler: Handler = async (event) => {
 
         await sendMagicLinkEmail({
             to: email,
-            subject: 'Your New Aura Assist Verification Link',
+            subject: 'Your New Be More Swan Verification Link',
             html: `
                 <div style="font-family: sans-serif; text-align: center; padding: 40px 20px; background-color: #fdfcf9;">
                     <div style="max-width: 500px; margin: 0 auto; background-color: white; padding: 40px; border-radius: 16px; border: 1px solid #eae4d7; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);">

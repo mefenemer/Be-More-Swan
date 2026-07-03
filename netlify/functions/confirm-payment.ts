@@ -4,6 +4,7 @@ import Stripe from 'stripe';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, plans, payments, masterPlans, notifications } from '../../db/schema';
+import { resolveActionNotifications, PAYMENT_RESTORED_TYPES } from '../../src/utils/notification-actions';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' });
 const jwtSecret = process.env.JWT_SECRET!;
@@ -49,7 +50,7 @@ export const handler: Handler = async (event) => {
             return { statusCode: 400, body: JSON.stringify({ error: `Payment not succeeded: ${pi.status}` }) };
         }
 
-        const { organisationId, tier, masterPlanId, stripePriceId, stripeCustomerId } = pi.metadata || {};
+        const { organisationId, tier, masterPlanId, stripeCustomerId, stripeSubscriptionId } = pi.metadata || {};
 
         // Confirm the PaymentIntent belongs to this user
         if (parseInt(pi.metadata?.userId || '0') !== userId) {
@@ -64,33 +65,38 @@ export const handler: Handler = async (event) => {
         const amountGbp = pi.amount ? (pi.amount / 100).toFixed(2) : '0.00';
 
         // 4. Look up plan name
-        let planName = tier ? `Aura-Assist (${tier})` : 'Aura-Assist Subscription';
+        let planName = tier ? `Be More Swan (${tier})` : 'Be More Swan Subscription';
         if (masterPlanIdInt) {
             const [mp] = await db.select().from(masterPlans).where(eq(masterPlans.id, masterPlanIdInt)).limit(1);
             if (mp) planName = mp.name;
         }
 
-        // 5. Create Stripe subscription with saved payment method (if not already created by webhook)
-        if (stripePriceId && pi.payment_method) {
-            await stripe.subscriptions.create({
-                customer: stripeCustomerId,
-                items: [{ price: stripePriceId }],
-                default_payment_method: pi.payment_method as string,
-                // billing cycle anchors to subscription creation time by default
-                proration_behavior: 'none',
-                metadata: { userId: userId.toString(), organisationId, tier: tier || '', masterPlanId: masterPlanId || '' },
-            }).catch(err => console.error('Subscription creation in confirm-payment failed:', err.message));
+        // 5. Create plan record.
+        // The Stripe subscription is created up-front by create-subscription.ts (default_incomplete
+        // pattern) and this PaymentIntent is its first invoice payment — so we never create a
+        // subscription here (that double-charged). We just persist the existing subscription's
+        // references, read from the PI metadata. The webhook normally creates this record first;
+        // this is the safety net for when the user lands before the webhook fires.
+        let newPlan: typeof plans.$inferSelect;
+        try {
+            const [inserted] = await db.insert(plans).values({
+                userId,
+                organisationId: orgIdInt,
+                masterPlanId: masterPlanIdInt,
+                planName,
+                planType: 'subscription',
+                status: 'active',
+                stripeCustomerId: stripeCustomerId || null,
+                stripeSubscriptionId: stripeSubscriptionId || null,
+            }).returning();
+            newPlan = inserted;
+        } catch (planErr: any) {
+            // Webhook won the race and already created the active plan (unique constraint).
+            if (planErr?.code === '23505' || planErr?.message?.includes('plans_one_active_per_org_unique')) {
+                return { statusCode: 200, body: JSON.stringify({ ok: true, alreadyExists: true }) };
+            }
+            throw planErr;
         }
-
-        // 6. Create plan record
-        const [newPlan] = await db.insert(plans).values({
-            userId,
-            organisationId: orgIdInt,
-            masterPlanId: masterPlanIdInt,
-            planName,
-            planType: 'subscription',
-            status: 'active',
-        }).returning();
 
         // 7. Create payment record
         await db.insert(payments).values({
@@ -113,6 +119,9 @@ export const handler: Handler = async (event) => {
             message: 'Your subscription is active. Click "Resume Setup" on your dashboard to build your Digital Assistant now.',
             isRead: false,
         });
+
+        // Clear any lingering "fix your billing" action items now the subscription is active.
+        await resolveActionNotifications(db, userId, PAYMENT_RESTORED_TYPES);
 
         return { statusCode: 200, body: JSON.stringify({ ok: true, alreadyExists: false }) };
 

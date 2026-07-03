@@ -1,90 +1,114 @@
-import { HandlerEvent } from '@netlify/functions';
-import jwt from 'jsonwebtoken';
-import { eq } from 'drizzle-orm';
+// netlify/functions/onboarding-draft.ts
+// Auto-save store for in-progress assistant setups. Multi-row: a user/org may have
+// several drafts at once, each surfaced as an "Onboarding" card.
+//
+//   GET                 → list the caller's drafts (newest first) — feeds the cards
+//   GET    ?id=N        → hydrate a single draft (wizard resume)
+//   POST                → create a new draft, returns { id }
+//   PATCH/PUT ?id=N     → autosave a draft by id (bumps updatedAt)
+//   DELETE ?id=N        → cancel/delete a draft by id
+//
+// Every id-scoped operation is authorised against the caller's userId.
+
+import { Handler } from '@netlify/functions';
+import { and, desc, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { onboardingDrafts } from '../../db/schema';
+import { getSession } from '../../src/utils/session';
+import { resolveActiveOrg } from '../../src/utils/tenant';
 
-// Ensure jwtSecret is strictly treated as a string
-const jwtSecret = process.env.JWT_SECRET;
+const json = (statusCode: number, body: unknown) => ({
+    statusCode,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+});
 
-export const handler = async (event: HandlerEvent) => {
-    // 1. Strict Security Validation
-    if (!jwtSecret) {
-        console.error("Critical: JWT_SECRET is not defined in environment.");
-        return { statusCode: 500, body: JSON.stringify({ error: 'Server configuration error.' }) };
-    }
-
-    // 2. Authenticate Session
-    const rawCookieHeader = event.headers.cookie || '';
-    const cookies = Object.fromEntries(
-        rawCookieHeader.split(';').map(c => {
-            const [key, ...v] = c.trim().split('=');
-            return [key, decodeURIComponent(v.join('='))];
-        }).filter(([key]) => key !== '')
-    );
-
-    const sessionToken = cookies['aura_session'];
-    if (!sessionToken) {
-        return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized.' }) };
-    }
-
-    let userId: number;
-    try {
-        const decoded = jwt.verify(sessionToken, jwtSecret) as { userId: number };
-        userId = decoded.userId;
-    } catch (err) {
-        return { statusCode: 401, body: JSON.stringify({ error: 'Invalid session.' }) };
-    }
+export const handler: Handler = async (event) => {
+    const session = getSession(event);
+    if (!session) return json(401, { error: 'Unauthorized.' });
+    const userId = session.userId;
 
     const db = getDb();
 
     try {
-        // GET: Fetch existing draft for hydration
+        // Org is best-effort — drafts still work for users mid-onboarding without a
+        // resolvable active org (organisation_id is nullable).
+        const org = await resolveActiveOrg(db, userId, session.activeOrganisationId);
+        const organisationId = org?.organisationId ?? null;
+
+        const qs = event.queryStringParameters || {};
+        const draftId = qs.id ? Number(qs.id) : null;
+
+        // ── GET ──────────────────────────────────────────────────────────
         if (event.httpMethod === 'GET') {
-            const [draft] = await db.select().from(onboardingDrafts).where(eq(onboardingDrafts.userId, userId));
-            return { statusCode: 200, body: JSON.stringify({ draft: draft || null }) };
+            if (draftId) {
+                const [draft] = await db.select().from(onboardingDrafts)
+                    .where(and(eq(onboardingDrafts.id, draftId), eq(onboardingDrafts.userId, userId)));
+                return json(200, { draft: draft || null });
+            }
+            const drafts = await db.select().from(onboardingDrafts)
+                .where(eq(onboardingDrafts.userId, userId))
+                .orderBy(desc(onboardingDrafts.updatedAt));
+            return json(200, { drafts });
         }
 
-        // DELETE: Wipe draft (Gap 4 implementation)
-        if (event.httpMethod === 'DELETE') {
-            await db.delete(onboardingDrafts).where(eq(onboardingDrafts.userId, userId));
-            return { statusCode: 200, body: JSON.stringify({ success: true }) };
-        }
-
-        // PUT/PATCH: Upsert draft data (Auto-save)
-        if (event.httpMethod === 'PUT' || event.httpMethod === 'PATCH') {
+        // ── POST: create a fresh draft ───────────────────────────────────
+        if (event.httpMethod === 'POST') {
             const body = JSON.parse(event.body || '{}');
-            const { currentStep, onboardingPath, draftData } = body;
+            const { onboardingPath, roleKey, displayName, currentStep, draftData } = body;
+            if (!onboardingPath) return json(400, { error: 'onboardingPath is required.' });
 
-            // Validate mandatory fields before updating database
-            if (!onboardingPath || !draftData) {
-                return { statusCode: 400, body: JSON.stringify({ error: 'Invalid draft data structure.' }) };
-            }
+            const [created] = await db.insert(onboardingDrafts).values({
+                userId,
+                organisationId,
+                onboardingPath,
+                roleKey: roleKey || null,
+                displayName: displayName || null,
+                currentStep: typeof currentStep === 'number' ? currentStep : 1,
+                draftData: draftData || {},
+            }).returning({ id: onboardingDrafts.id });
 
-            const [existing] = await db.select().from(onboardingDrafts).where(eq(onboardingDrafts.userId, userId));
-
-            if (existing) {
-                await db.update(onboardingDrafts).set({
-                    currentStep: currentStep ?? existing.currentStep,
-                    onboardingPath,
-                    draftData,
-                    updatedAt: new Date()
-                }).where(eq(onboardingDrafts.userId, userId));
-            } else {
-                await db.insert(onboardingDrafts).values({
-                    userId,
-                    currentStep,
-                    onboardingPath,
-                    draftData
-                });
-            }
-
-            return { statusCode: 200, body: JSON.stringify({ success: true }) };
+            return json(200, { id: created.id });
         }
 
-        return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
+        // ── PATCH / PUT: autosave by id ──────────────────────────────────
+        if (event.httpMethod === 'PATCH' || event.httpMethod === 'PUT') {
+            if (!draftId) return json(400, { error: 'Draft id is required.' });
+            const body = JSON.parse(event.body || '{}');
+            const { currentStep, onboardingPath, draftData, roleKey, displayName } = body;
+
+            const [existing] = await db.select().from(onboardingDrafts)
+                .where(and(eq(onboardingDrafts.id, draftId), eq(onboardingDrafts.userId, userId)));
+            if (!existing) return json(404, { error: 'Draft not found.' });
+
+            await db.update(onboardingDrafts).set({
+                currentStep: currentStep ?? existing.currentStep,
+                onboardingPath: onboardingPath ?? existing.onboardingPath,
+                draftData: draftData ?? existing.draftData,
+                roleKey: roleKey ?? existing.roleKey,
+                displayName: displayName ?? existing.displayName,
+                // Backfill org if it wasn't known at create time.
+                organisationId: existing.organisationId ?? organisationId,
+                updatedAt: new Date(),
+                // AC2.4: saving progress resets the 30-day clock — re-arm the nudge so an
+                // abandoned-again draft is reminded afresh next cycle.
+                reminderSentAt: null,
+            }).where(eq(onboardingDrafts.id, draftId));
+
+            return json(200, { success: true });
+        }
+
+        // ── DELETE by id ─────────────────────────────────────────────────
+        if (event.httpMethod === 'DELETE') {
+            if (!draftId) return json(400, { error: 'Draft id is required.' });
+            await db.delete(onboardingDrafts)
+                .where(and(eq(onboardingDrafts.id, draftId), eq(onboardingDrafts.userId, userId)));
+            return json(200, { success: true });
+        }
+
+        return json(405, { error: 'Method Not Allowed' });
     } catch (error) {
         console.error('Onboarding Draft API Error:', error);
-        return { statusCode: 500, body: JSON.stringify({ error: 'Internal Server Error' }) };
+        return json(500, { error: 'Internal Server Error' });
     }
 };

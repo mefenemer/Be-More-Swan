@@ -10,12 +10,13 @@
 //   • Horizon decrease → archives pending drafts beyond new horizon with a note
 
 import { Handler } from '@netlify/functions';
-import { and, eq, gt, lt, gte, lte } from 'drizzle-orm';
+import { and, eq, gt } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, notifications, scheduledPosts, taskRuns } from '../../db/schema';
+import { aiAssistants, notifications, scheduledPosts } from '../../db/schema';
 import { getSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
+import { enqueueScheduleGapFill } from '../../src/utils/schedule-gap-fill';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 const MIN_HORIZON = 1;
@@ -71,7 +72,14 @@ export const handler: Handler = async (event) => {
     // Load current assistant within the active organisation (RLS-enforced)
     const assistant = await withTenant(orgId, async (tx) => {
         const [row] = await tx
-            .select({ id: aiAssistants.id, draftHorizonDays: aiAssistants.draftHorizonDays, name: aiAssistants.name })
+            .select({
+                id: aiAssistants.id,
+                userId: aiAssistants.userId,
+                draftHorizonDays: aiAssistants.draftHorizonDays,
+                name: aiAssistants.name,
+                onboardingContext: aiAssistants.onboardingContext,
+                configuration: aiAssistants.configuration,
+            })
             .from(aiAssistants)
             .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId)))
             .limit(1);
@@ -91,37 +99,31 @@ export const handler: Handler = async (event) => {
         .set({ draftHorizonDays: days, updatedAt: new Date() })
         .where(eq(aiAssistants.id, assistantId)));
 
-    // ── Horizon expanded → schedule a gap-fill task run ───────────────────────
+    // ── Horizon expanded → fill the newly-opened window immediately ───────────
+    let gapFillEnqueued = 0;
     if (isExpanding) {
-        const newWindowStart = new Date();
-        newWindowStart.setDate(newWindowStart.getDate() + previousHorizon);
-        const newWindowEnd = new Date();
-        newWindowEnd.setDate(newWindowEnd.getDate() + days);
-
-        // userId is required NOT NULL on taskRuns; look it up from the assistant record
-        await db.insert(taskRuns).values({
-            userId,
-            assistantId,
-            taskType: 'draft_gap_fill',
-            status: 'pending',
-            metadata: {
-                reason: 'horizon_expanded',
-                previousHorizonDays: previousHorizon,
-                newHorizonDays: days,
-                fillFromDate: newWindowStart.toISOString(),
-                fillToDate: newWindowEnd.toISOString(),
-            },
+        const result = await enqueueScheduleGapFill(db, {
+            id: assistant.id,
+            userId: assistant.userId ?? userId,
+            organisationId: orgId,
+            name: assistant.name,
+            onboardingContext: assistant.onboardingContext,
+            draftHorizonDays: days,
+            configuration: assistant.configuration,
         });
+        gapFillEnqueued = result.enqueued;
 
-        // Notify user
-        const fromDate = newWindowStart.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-        const toDate   = newWindowEnd.toLocaleDateString('en-GB',   { day: 'numeric', month: 'short' });
-        await db.insert(notifications).values({
-            userId,
-            type: 'draft_horizon_expanded',
-            title: 'Draft horizon extended',
-            message: `${assistant.name} will now generate drafts for the period ${fromDate} – ${toDate}. New posts will appear in your Review Queue shortly.`,
-        }).catch(() => {});
+        if (gapFillEnqueued > 0) {
+            const newWindowEnd = new Date();
+            newWindowEnd.setDate(newWindowEnd.getDate() + days);
+            const toDate = newWindowEnd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+            await db.insert(notifications).values({
+                userId,
+                type: 'draft_horizon_expanded',
+                title: 'Draft horizon extended',
+                message: `${assistant.name} is generating ${gapFillEnqueued} new draft${gapFillEnqueued === 1 ? '' : 's'} to cover through ${toDate}. They'll appear in your Review Queue shortly.`,
+            }).catch(() => {});
+        }
     }
 
     // ── Horizon shrunk → archive pending drafts beyond new cutoff ────────────
@@ -160,7 +162,7 @@ export const handler: Handler = async (event) => {
             updated: true,
             draftHorizonDays: days,
             previousHorizonDays: previousHorizon,
-            gapFillEnqueued: isExpanding,
+            gapFillEnqueued,
         }),
     };
 };

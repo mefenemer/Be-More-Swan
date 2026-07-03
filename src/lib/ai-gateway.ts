@@ -1,5 +1,5 @@
 // src/lib/ai-gateway.ts
-// Centralized AI Gateway for all LLM calls in Aura-Assist.
+// Centralized AI Gateway for all LLM calls in Be More Swan.
 // US-AI-GW-1 (centralized routing) + US-AI-GW-2 (failover on 429/503).
 //
 // Config:

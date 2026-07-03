@@ -21,6 +21,7 @@ import { users, aiAssistants, plans, masterPlans } from '../../db/schema';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { getSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
+import { enforcePromptModeration } from '../../src/utils/moderation';
 
 const jwtSecret   = process.env.JWT_SECRET;
 const anthropic   = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -150,6 +151,10 @@ export const handler: Handler = async (event) => {
     const org = await resolveActiveOrg(db, userId, getSession(event)?.activeOrganisationId);
     if (!org) return { statusCode: 403, body: JSON.stringify({ error: 'No organisation associated with this account.' }) };
     const orgId = org.organisationId;
+
+    // US2: hard-block severe-violation prompts before any AI processing (AC2.1–2.3).
+    const modBlock = await enforcePromptModeration({ text: content, userId, organisationId: orgId, source: 'quality-review' });
+    if (modBlock) return modBlock;
 
     const tierKey = await getUserPlanTierKey(db, userId);
 

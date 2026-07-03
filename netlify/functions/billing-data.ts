@@ -256,7 +256,7 @@ export const handler: Handler = async (event) => {
             return {
                 id: p.id,
                 date: p.paidAt || p.createdAt,
-                description: p.description || 'Aura-Assist Subscription',
+                description: p.description || 'Be More Swan Subscription',
                 amount: p.amount,
                 currency: p.currency || 'GBP',
                 status: p.status,

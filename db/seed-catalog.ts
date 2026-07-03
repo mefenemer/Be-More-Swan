@@ -274,6 +274,7 @@ async function seedCatalog() {
         appConnectionLimit: 2,
         seatLimit: 1,
         isActive: true,
+        features: { monthly_ai_credits: 0 },   // no AI media generation on trial (Epic 2) — upgrade to use
     }).onConflictDoNothing();
     console.log('  ✓ masterPlan: trial');
 

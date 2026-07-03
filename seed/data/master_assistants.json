@@ -1,0 +1,12 @@
+[
+  { "roleKey": "social_media",   "name": "Social Media Manager",         "description": "Organic content creation and automated publishing.",                                                                 "isActive": true,  "comingSoon": false },
+  { "roleKey": "paid_ads",       "name": "Performance Marketer",         "description": "Ad generation, campaign publishing, and audience targeting.",                                                         "isActive": true,  "comingSoon": false },
+  { "roleKey": "data_entry",     "name": "Inventory & Order Manager",    "description": "Managing cross-platform orders, syncing stock, and automating fulfillment logs.",                                     "isActive": true,  "comingSoon": false },
+  { "roleKey": "custom",         "name": "Operations Manager",           "description": "A unique, multi-step process that does not fit standard roles.",                                                       "isActive": true,  "comingSoon": false },
+  { "roleKey": "community_mgmt", "name": "Community Manager",             "description": "Monitoring comments, answering DMs, and engaging with followers.",                                                    "isActive": false, "comingSoon": true },
+  { "roleKey": "inbox",          "name": "Support Specialist",           "description": "Categorizing emails, drafting replies, or handling customer queries.",                                                "isActive": false, "comingSoon": true },
+  { "roleKey": "reporting",      "name": "Data Analyst",                 "description": "Generating summaries, pulling metrics, or creating dashboards.",                                                      "isActive": false, "comingSoon": true },
+  { "roleKey": "receipt_admin",  "name": "Receipt & Invoice Organizer",  "description": "Automatically monitors your inbox for digital receipts and invoices, extracts key data, and updates your master accounting spreadsheets.", "isActive": false, "comingSoon": true },
+  { "roleKey": "lead_welcomer",  "name": "New Lead Welcomer",            "description": "Instantly engages with new leads from your website forms, drafting personalized welcome emails and updating your CRM records.",            "isActive": false, "comingSoon": true },
+  { "roleKey": "seo",            "name": "SEO Content Strategist",       "description": "Analyzes target keywords and drafts optimized blog posts and landing page copy to improve your search engine rankings.",                  "isActive": false, "comingSoon": true }
+]

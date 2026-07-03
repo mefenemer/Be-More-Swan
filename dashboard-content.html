@@ -1,133 +1,173 @@
-<div class="flex flex-col">
+<div class="flex flex-col" id="dash-root">
 
-  <!-- Post-payment welcome modal (shown once when ?payment=success) -->
-  <div id="welcome-modal" class="fixed inset-0 z-50 hidden items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
-    <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-8 text-center">
-      <div class="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
-        <svg class="w-8 h-8 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-        </svg>
-      </div>
-      <h2 class="text-2xl font-extrabold text-gray-900 mb-2">You're all set!</h2>
-      <p class="text-gray-500 mb-2">Your subscription is now active.</p>
-      <p class="text-gray-600 mb-8">Now let's build your Digital Assistant. It takes about 5 minutes — just answer a few plain-English questions and our team takes care of the rest.</p>
-      <a href="onboarding-social-media.html"
-         class="w-full inline-block text-center px-6 py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl shadow-md transition text-base">
-        Set Up My Assistant
-      </a>
-      <button onclick="document.getElementById('welcome-modal').classList.add('hidden'); document.getElementById('welcome-modal').classList.remove('flex');"
-        class="mt-3 w-full text-sm text-gray-400 hover:text-gray-600 transition">
-        I'll do this later
-      </button>
-    </div>
-  </div>
+  <!-- Post-payment / first-login welcome now lives in the Notifications area + the
+       Getting Started view (getting-started.html); no welcome modal is shown. -->
 
   <header class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 w-full">
 
     <!-- Setup prompt banner (shown when subscribed but no assistant yet) -->
     <div id="setup-assistant-banner" class="mb-8 hidden">
-      <div class="bg-gradient-to-r from-emerald-600 to-emerald-800 rounded-2xl p-6 flex flex-col sm:flex-row items-center justify-between shadow-lg text-white">
+      <div class="bg-gradient-to-r from-pink-600 to-pink-800 rounded-2xl p-6 flex flex-col sm:flex-row items-center justify-between shadow-lg text-white">
         <div class="flex items-center gap-4">
           <div class="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center text-2xl">🚀</div>
           <div>
             <h3 class="text-lg font-bold">Your subscription is active — now build your Assistant</h3>
-            <p class="text-emerald-100 text-sm">Answer a few questions and our team will set everything up for you.</p>
+            <p class="text-pink-100 text-sm">Answer a few questions and our team will set everything up for you.</p>
           </div>
         </div>
         <a href="onboarding-social-media.html"
-           class="mt-4 sm:mt-0 flex-shrink-0 px-6 py-2 bg-white text-emerald-800 font-bold rounded-lg hover:bg-emerald-50 transition shadow-sm">
+           class="mt-4 sm:mt-0 flex-shrink-0 px-6 py-2 bg-white text-pink-800 font-bold rounded-lg hover:bg-pink-50 transition shadow-sm">
           Start Setup
         </a>
       </div>
     </div>
 
-    <!-- Resume in-progress onboarding banner -->
+    <!-- US1.1: Dynamic onboarding progress widget (3 steps) -->
     <div id="onboarding-widget-container" class="mb-8 hidden">
-      <div class="bg-gradient-to-r from-emerald-600 to-emerald-800 rounded-2xl p-6 flex flex-col sm:flex-row items-center justify-between shadow-lg text-white">
-        <div class="flex items-center gap-4">
-          <div class="w-12 h-12 bg-white/20 rounded-full flex items-center justify-center text-2xl">🚀</div>
+      <div class="bg-white border border-pink-200 rounded-2xl p-6 shadow-sm">
+        <div class="flex items-center justify-between mb-4 gap-3">
           <div>
-            <h3 class="text-lg font-bold">Finish setting up your Assistant</h3>
-            <p class="text-emerald-100 text-sm">You are 50% through the setup process. Complete it now to start automating.</p>
+            <h3 class="text-lg font-bold text-gray-900">Get started — set up your workspace</h3>
+            <p class="text-sm text-gray-500">A few quick steps to start getting value from your digital team.</p>
           </div>
+          <span id="onboarding-progress-pct" class="text-2xl font-extrabold text-pink-600">0%</span>
         </div>
-        <button id="resume-onboarding-btn" class="mt-4 sm:mt-0 px-6 py-2 bg-white text-emerald-800 font-bold rounded-lg hover:bg-emerald-50 transition shadow-sm">
-          Resume Setup
-        </button>
+        <div class="h-2 w-full rounded-full bg-gray-100 overflow-hidden mb-5">
+          <div id="onboarding-progress-bar" class="h-2 rounded-full bg-pink-500 transition-all duration-500" style="width:0%"></div>
+        </div>
+        <ul id="onboarding-steps" class="space-y-2.5"></ul>
       </div>
     </div>
 
-    <!-- US-AUD-1.1.1 SC6: "First task" skip banner — shown until milestone complete -->
-    <div id="first-task-banner" class="hidden mb-6 bg-emerald-50 border border-emerald-100 rounded-xl px-4 py-3 flex items-center justify-between gap-4">
-      <div class="flex items-center gap-3">
-        <span class="text-emerald-600 text-xl">🚀</span>
-        <div>
-          <p class="text-sm font-semibold text-emerald-900">Complete your first task to unlock the full library</p>
-          <p id="first-task-banner-desc" class="text-xs text-emerald-700"></p>
-        </div>
-      </div>
-      <div class="flex items-center gap-2 shrink-0">
-        <button onclick="window._showFirstTaskScreen()"
-          class="px-4 py-2 bg-emerald-700 text-white text-xs font-bold rounded-lg hover:bg-emerald-800 transition cursor-pointer">
-          Start task
-        </button>
-        <button onclick="window._dismissFirstTaskBanner()"
-          class="text-gray-400 hover:text-gray-600 transition cursor-pointer" title="Dismiss">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-        </button>
-      </div>
-    </div>
-
-    <!-- US-AUD-1.1.1 SC1: First-task focused screen (shown post-payment, before milestone) -->
-    <div id="first-task-screen" class="hidden mb-8 bg-white rounded-2xl border border-emerald-200 shadow-md p-8 text-center max-w-xl mx-auto">
-      <div class="w-14 h-14 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
-        <svg class="w-7 h-7 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
-        </svg>
-      </div>
-      <h2 class="text-2xl font-extrabold text-gray-900 mb-1">Let's complete your first task</h2>
-      <p id="ft-task-title" class="text-base font-semibold text-emerald-700 mb-2"></p>
-      <p id="ft-task-desc" class="text-sm text-gray-500 mb-5"></p>
-      <textarea id="ft-task-input" rows="4"
-        class="w-full border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none resize-none mb-4"
-        placeholder="Describe what you need…"></textarea>
-      <p id="ft-task-error" class="hidden text-xs text-red-600 font-medium mb-2"></p>
-      <button onclick="window._submitFirstTask()"
-        class="w-full py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl transition cursor-pointer mb-2">
-        Run Task →
-      </button>
-      <button onclick="window._skipFirstTask()"
-        class="w-full text-sm text-gray-400 hover:text-gray-600 transition cursor-pointer py-1">
-        Skip for now
-      </button>
-    </div>
-
-    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-      <div>
-        <h1 class="text-3xl font-extrabold text-gray-900">Welcome back.</h1>
-        <p class="text-gray-500 mt-1">Here is what your digital team has been up to while you were away.</p>
-      </div>
-
-      <!-- US-AUD-1.2.1: Full ROI widget with £ value, break-even, and period toggle -->
-      <div class="bg-white px-5 py-4 rounded-xl border border-emerald-100 shadow-sm min-w-[220px]">
-        <div class="flex items-center justify-between mb-1 gap-3">
-          <p class="text-sm text-gray-500 font-medium">Savings</p>
-          <!-- SC4: month/week toggle -->
-          <div class="flex bg-gray-100 rounded-lg p-0.5 text-xs">
-            <button id="roi-btn-month" onclick="window._roiSetPeriod('month')"
-              class="px-2 py-1 rounded-md font-semibold transition bg-white shadow text-gray-800">Month</button>
-            <button id="roi-btn-week" onclick="window._roiSetPeriod('week')"
-              class="px-2 py-1 rounded-md font-semibold transition text-gray-500">Week</button>
-          </div>
-        </div>
-        <p id="roi-value" class="text-2xl font-extrabold text-gray-900">—</p>
-        <p id="roi-subtext" class="text-xs text-gray-500 mt-0.5"></p>
-        <p id="roi-hint" class="hidden text-xs text-emerald-600 mt-1 cursor-pointer hover:underline"></p>
-      </div>
+    <div>
+      <h1 id="dash-welcome-heading" class="text-3xl font-extrabold text-gray-900">Welcome back.</h1>
+      <p class="text-gray-500 mt-1">Here is what your digital team has been up to while you were away.</p>
     </div>
   </header>
 
   <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 w-full pb-20">
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         US-DASH-1: "Wow" Metrics + Activity Heatmap (Swan Command Center)
+         AC1 animated Hours Saved / Tasks Handled · AC2 Estimated Money Saved
+         · AC3 24/7 activity heatmap. Driven by roi-stats + dashboard-heatmap.
+         ════════════════════════════════════════════════════════════════════ -->
+    <section id="command-center-hero" class="mb-10">
+      <div class="cc-hero">
+        <div class="cc-hero-glow" aria-hidden="true"></div>
+
+        <div class="cc-hero-head">
+          <div>
+            <p class="cc-eyebrow">Your Command Center</p>
+            <h2 class="cc-hero-title">Here's the value your digital team created.</h2>
+          </div>
+          <div class="cc-toggle" role="tablist" aria-label="Time period">
+            <button id="cc-tab-week"  type="button" class="cc-toggle-btn is-active" data-period="week"  role="tab">This Week</button>
+            <button id="cc-tab-month" type="button" class="cc-toggle-btn"           data-period="month" role="tab">This Month</button>
+          </div>
+        </div>
+
+        <div class="cc-metrics">
+          <!-- AC1: Hours Saved -->
+          <div class="cc-tile">
+            <div class="cc-tile-icon">⏱️</div>
+            <div class="cc-tile-label">Hours Saved</div>
+            <div class="cc-tile-value"><span id="cc-hours" data-count="0"><span class="cc-skel-text"></span></span><span class="cc-unit">hrs</span></div>
+            <div class="cc-tile-sub" id="cc-hours-sub">this week</div>
+          </div>
+
+          <!-- AC1: Tasks Handled -->
+          <div class="cc-tile">
+            <div class="cc-tile-icon">✅</div>
+            <div class="cc-tile-label">Tasks Handled</div>
+            <div class="cc-tile-value"><span id="cc-tasks" data-count="0"><span class="cc-skel-text"></span></span></div>
+            <button id="cc-tasks-link" type="button" class="cc-tile-sub cc-link"
+              onclick="window._showSavingsModal && window._showSavingsModal()">See the tasks behind this →</button>
+          </div>
+
+          <!-- AC2: Estimated Money Saved -->
+          <div class="cc-tile cc-tile-accent">
+            <div class="cc-tile-icon">💷</div>
+            <div class="cc-tile-label">Estimated Money Saved</div>
+            <div class="cc-tile-value"><span id="cc-money"><span class="cc-skel-text"></span></span></div>
+            <div class="cc-tile-sub" id="cc-money-sub"></div>
+          </div>
+        </div>
+
+        <!-- AC3: Activity heatmap — proves 24/7 background productivity -->
+        <div class="cc-heatmap-wrap">
+          <div class="cc-heatmap-head">
+            <span class="cc-heatmap-title">When your team is working</span>
+            <span class="cc-heatmap-legend" id="cc-heatmap-legend">
+              <span>Quiet</span>
+              <i class="cc-key cc-key-0"></i><i class="cc-key cc-key-1"></i><i class="cc-key cc-key-2"></i><i class="cc-key cc-key-3"></i><i class="cc-key cc-key-4"></i>
+              <span>Busy</span>
+            </span>
+          </div>
+          <div id="cc-heatmap" class="cc-heatmap" aria-label="Assistant activity by day and hour"><div class="cc-hm-skel"></div></div>
+          <p id="cc-heatmap-caption" class="cc-heatmap-caption">Loading activity…</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         US-DASH-2: The Proactive "Action Stream"
+         AC1 live "Currently working on" · AC2 "Requires your attention" feed
+         with one-click Approve/Edit/Reject · AC3 proactive suggestion cards.
+         Hidden until there is at least one item, to keep the dashboard calm.
+         ════════════════════════════════════════════════════════════════════ -->
+    <section id="action-stream" class="mb-10 hidden">
+      <!-- AC1: live status -->
+      <div id="as-live" class="as-live hidden"></div>
+
+      <!-- AC2: requires your attention -->
+      <div id="as-attention-wrap" class="hidden">
+        <div class="as-head">
+          <h3 class="as-h3">Requires your attention</h3>
+          <span id="as-attention-count" class="as-badge">0</span>
+        </div>
+        <div id="as-attention" class="as-grid"></div>
+      </div>
+
+      <!-- AC3: proactive suggestions -->
+      <div id="as-suggest-wrap" class="hidden">
+        <div class="as-head">
+          <h3 class="as-h3">Your Ideas & Suggestions</h3>
+          <span class="as-sub">One tap and your assistant will get started</span>
+        </div>
+        <div id="as-suggest" class="as-suggest-row"></div>
+      </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════════════════════════
+         US-DASH-4: Modular, Personalized Workspaces
+         AC1 "Customize" → widget-library tray · AC2 drag-and-drop snap grid
+         · AC3 silent auto-save to the user's profile (preferences.dashboardLayout).
+         ════════════════════════════════════════════════════════════════════ -->
+    <section id="dash-widgets-section" class="mb-12">
+      <div class="dw-head">
+        <h3 class="dw-title">Your workspace</h3>
+        <button id="dw-customize" type="button" class="dw-customize">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6V4m0 2a2 2 0 1 0 0 4m0-4a2 2 0 1 1 0 4m-6 8a2 2 0 1 0 0-4m0 4a2 2 0 1 1 0-4m0 4v2m0-6V4m6 14a2 2 0 1 0 0-4m0 4a2 2 0 1 1 0-4m0 4v2m0-6V4"/></svg>
+          <span>Customize</span>
+        </button>
+      </div>
+      <div id="dash-widgets" class="dw-grid"></div>
+      <p id="dw-empty" class="dw-empty hidden">No widgets here yet — tap <strong>Customize</strong> to add some.</p>
+    </section>
+
+    <!-- Edit-mode widget library tray -->
+    <div id="dw-tray-backdrop" class="dw-tray-backdrop" aria-hidden="true"></div>
+    <aside id="dw-tray" class="dw-tray" aria-hidden="true" aria-label="Widget library">
+      <div class="dw-tray-head">
+        <div>
+          <h4 class="dw-tray-title">Widget library</h4>
+          <p class="dw-tray-sub">Toggle widgets on or off, then drag cards to reorder.</p>
+        </div>
+        <button id="dw-tray-close" type="button" class="dw-tray-close">Done</button>
+      </div>
+      <div id="dw-tray-list" class="dw-tray-list"></div>
+    </aside>
 
     <!-- Dynamic Assistants Grid -->
     <div id="dashboard-assistants-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -136,238 +176,717 @@
       </div>
     </div>
 
-    <div class="mt-12 bg-emerald-700 rounded-2xl p-8 text-center shadow-lg">
-      <h3 class="text-2xl font-bold text-white mb-2">Got another chore you hate?</h3>
-      <p class="text-emerald-100 mb-6 max-w-xl mx-auto">You can hire another assistant or upgrade your plan to automate entirely new workflows.</p>
-      <a href="#" id="route-to-catalog" class="inline-block bg-white text-emerald-700 font-bold px-8 py-3 rounded-lg shadow-sm hover:bg-gray-50 transition">Delegate a New Task</a>
+    <div class="mt-12 bg-pink-700 rounded-2xl p-8 text-center shadow-lg">
+      <h3 class="text-2xl font-bold text-white mb-2">Got another chore to take off your plate?</h3>
+      <p class="text-pink-100 mb-6 max-w-xl mx-auto">You can hire another assistant or upgrade your plan to automate entirely new workflows.</p>
+      <a href="#" id="route-to-catalog" class="inline-block bg-white text-pink-700 font-bold px-8 py-3 rounded-lg shadow-sm hover:bg-gray-50 transition">Delegate a New Task</a>
     </div>
 
   </div>
 </div>
 
+<style>
+  /* US-DASH-1 — Swan Command Center hero. Scoped plain CSS (immune to the prebuilt
+     Tailwind build), so new visual treatments render without a build:css step. */
+  #command-center-hero * { box-sizing: border-box; }
+  .cc-hero {
+    position: relative; overflow: hidden;
+    border-radius: 28px;
+    padding: 28px;
+    background:
+      linear-gradient(135deg, rgba(255,255,255,0.92), rgba(255,255,255,0.78)),
+      radial-gradient(120% 140% at 0% 0%, #fce7f3 0%, rgba(252,231,243,0) 55%),
+      radial-gradient(120% 140% at 100% 0%, #e0e7ff 0%, rgba(224,231,255,0) 55%);
+    border: 1px solid rgba(236,72,153,0.18);
+    box-shadow: 0 20px 50px -24px rgba(131,24,67,0.35), 0 2px 8px -4px rgba(0,0,0,0.06);
+    backdrop-filter: blur(8px);
+  }
+  .cc-hero-glow {
+    position: absolute; top: -120px; right: -80px; width: 360px; height: 360px;
+    background: radial-gradient(circle, rgba(236,72,153,0.22), rgba(236,72,153,0) 70%);
+    filter: blur(12px); pointer-events: none; animation: ccFloat 9s ease-in-out infinite;
+  }
+  @keyframes ccFloat { 0%,100% { transform: translateY(0) } 50% { transform: translateY(22px) } }
+
+  .cc-hero-head { position: relative; display: flex; flex-wrap: wrap; gap: 16px;
+    align-items: flex-start; justify-content: space-between; margin-bottom: 22px; }
+  .cc-eyebrow { font-size: 12px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase;
+    color: #db2777; margin: 0 0 4px; }
+  .cc-hero-title { font-size: 22px; font-weight: 800; color: #0f172a; margin: 0; line-height: 1.2; }
+
+  .cc-toggle { display: inline-flex; background: rgba(15,23,42,0.06); border-radius: 12px; padding: 4px; gap: 2px; }
+  .cc-toggle-btn { border: 0; background: transparent; cursor: pointer; font-size: 13px; font-weight: 600;
+    color: #475569; padding: 6px 14px; border-radius: 9px; transition: all .2s ease; }
+  .cc-toggle-btn.is-active { background: #ffffff; color: #0f172a; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+  .cc-toggle-btn:hover:not(.is-active) { color: #0f172a; }
+
+  .cc-metrics { position: relative; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  @media (max-width: 760px) { .cc-metrics { grid-template-columns: 1fr; } }
+  .cc-tile {
+    position: relative; padding: 20px; border-radius: 18px;
+    background: rgba(255,255,255,0.72); border: 1px solid rgba(15,23,42,0.06);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    transition: transform .25s cubic-bezier(.2,.8,.2,1), box-shadow .25s ease;
+  }
+  .cc-tile:hover { transform: translateY(-4px); box-shadow: 0 18px 30px -18px rgba(131,24,67,0.4); }
+  .cc-tile-accent { background: linear-gradient(160deg, #fdf2f8, rgba(255,255,255,0.85)); border-color: rgba(236,72,153,0.25); }
+  .cc-tile-icon { font-size: 20px; line-height: 1; margin-bottom: 10px; }
+  .cc-tile-label { font-size: 12px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: #64748b; }
+  .cc-tile-value { font-size: 38px; font-weight: 800; color: #0f172a; line-height: 1.05; margin-top: 6px;
+    font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: 6px; }
+  .cc-unit { font-size: 16px; font-weight: 600; color: #94a3b8; }
+  .cc-tile-sub { display: inline-block; margin-top: 8px; font-size: 13px; color: #64748b; }
+  .cc-link { border: 0; background: transparent; padding: 0; cursor: pointer; color: #db2777; font-weight: 600; }
+  .cc-link:hover { text-decoration: underline; }
+
+  /* Heatmap */
+  .cc-heatmap-wrap { position: relative; margin-top: 26px; padding-top: 22px; border-top: 1px solid rgba(15,23,42,0.07); }
+  .cc-heatmap-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+  .cc-heatmap-title { font-size: 13px; font-weight: 700; color: #334155; }
+  .cc-heatmap-legend { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #94a3b8; }
+  .cc-key { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  .cc-key-0, .cc-lvl-0 { background: #eef2f5; }
+  .cc-key-1, .cc-lvl-1 { background: #fbcfe8; }
+  .cc-key-2, .cc-lvl-2 { background: #f472b6; }
+  .cc-key-3, .cc-lvl-3 { background: #db2777; }
+  .cc-key-4, .cc-lvl-4 { background: #9d174d; }
+
+  .cc-heatmap { display: flex; flex-direction: column; gap: 4px; overflow-x: auto; }
+  .cc-hm-row { display: grid; grid-template-columns: 34px repeat(24, minmax(9px, 1fr)); gap: 4px; align-items: center; }
+  .cc-hm-daylabel { font-size: 11px; font-weight: 600; color: #94a3b8; text-align: right; padding-right: 4px; }
+  .cc-cell { aspect-ratio: 1 / 1; min-width: 9px; border-radius: 3px; transition: transform .12s ease; }
+  .cc-cell:hover { transform: scale(1.35); outline: 2px solid rgba(236,72,153,0.5); position: relative; z-index: 2; }
+  .cc-hm-axis { display: grid; grid-template-columns: 34px repeat(24, minmax(9px, 1fr)); gap: 4px; margin-top: 6px; }
+  .cc-hm-tick { font-size: 10px; color: #cbd5e1; text-align: center; }
+  .cc-heatmap-caption { margin-top: 12px; font-size: 13px; color: #475569; }
+  .cc-heatmap-caption strong { color: #be185d; }
+</style>
+
 <script>
   (function () {
-    const params = new URLSearchParams(window.location.search);
+    // ── US-DASH-1: animated "Wow" metrics + activity heatmap ──────────────────
+    const root = document.getElementById('command-center-hero');
+    if (!root) return;
 
-    if (params.get('payment') === 'success') {
-      // Show the welcome modal
-      const modal = document.getElementById('welcome-modal');
-      if (modal) {
-        modal.classList.remove('hidden');
-        modal.classList.add('flex');
-      }
-      // Clean the URL so a refresh doesn't re-trigger it
-      const cleanUrl = window.location.pathname;
-      history.replaceState(null, '', cleanUrl);
+    const fmtGBP = v => Number(v).toLocaleString('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 });
+    const prefersReduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // Smooth count-up with easing. `format` maps the running number → display text.
+    function countUp(el, target, { decimals = 0, duration = 1100, format } = {}) {
+      if (!el) return;
+      const fmt = format || (n => decimals ? n.toFixed(decimals) : String(Math.round(n)));
+      const from = parseFloat(el.dataset.count || '0') || 0;
+      el.dataset.count = String(target);
+      if (prefersReduced || from === target) { el.textContent = fmt(target); return; }
+      const start = performance.now();
+      const ease = t => 1 - Math.pow(1 - t, 3); // easeOutCubic
+      (function tick(now) {
+        const p = Math.min((now - start) / duration, 1);
+        el.textContent = fmt(from + (target - from) * ease(p));
+        if (p < 1) requestAnimationFrame(tick);
+      })(start);
     }
 
-    // US-AUD-1.2.1: Full ROI widget — £ value, break-even messaging, period toggle
-    let _roiPeriod = 'month';
-    window._roiSetPeriod = async function (period) {
-      _roiPeriod = period;
-      document.getElementById('roi-btn-month')?.classList.toggle('bg-white', period === 'month');
-      document.getElementById('roi-btn-month')?.classList.toggle('shadow', period === 'month');
-      document.getElementById('roi-btn-month')?.classList.toggle('text-gray-800', period === 'month');
-      document.getElementById('roi-btn-month')?.classList.toggle('text-gray-500', period !== 'month');
-      document.getElementById('roi-btn-week')?.classList.toggle('bg-white', period === 'week');
-      document.getElementById('roi-btn-week')?.classList.toggle('shadow', period === 'week');
-      document.getElementById('roi-btn-week')?.classList.toggle('text-gray-800', period === 'week');
-      document.getElementById('roi-btn-week')?.classList.toggle('text-gray-500', period !== 'week');
-      await window._roiRender();
-    };
+    let period = 'week';
 
-    window._roiRender = async function () {
-      const roiValue = document.getElementById('roi-value');
-      const roiSubtext = document.getElementById('roi-subtext');
-      const roiHint = document.getElementById('roi-hint');
-      if (!roiValue) return;
+    async function renderMetrics() {
+      const hoursEl = document.getElementById('cc-hours');
+      const tasksEl = document.getElementById('cc-tasks');
+      const moneyEl = document.getElementById('cc-money');
+      const moneySub = document.getElementById('cc-money-sub');
+      const hoursSub = document.getElementById('cc-hours-sub');
+      if (hoursSub) hoursSub.textContent = period === 'week' ? 'this week' : 'this month';
       try {
-        const res = await fetch(`/.netlify/functions/roi-stats?period=${_roiPeriod}`);
+        const res = await fetch(`/.netlify/functions/roi-stats?period=${period}`);
         if (!res.ok) return;
         const d = await res.json();
 
-        if (d.gbpSaved !== null) {
-          // SC1: Show £ value
-          const fmt = v => v.toLocaleString('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 });
-          roiValue.innerHTML = `${fmt(d.gbpSaved)} <span class="text-base font-normal text-gray-500">saved</span>`;
+        const hours = Number(d.hoursSaved) || 0;
+        countUp(hoursEl, hours, { decimals: Number.isInteger(hours) ? 0 : 1 });
+        countUp(tasksEl, Number(d.taskCount) || 0);
 
-          if (_roiPeriod === 'month') {
-            if (d.multiplier !== null && d.multiplier >= 1) {
-              // SC2: Paid for itself
-              roiSubtext.textContent = `Your subscription has paid for itself ${d.multiplier}× this month`;
-            } else if (d.tasksToBreakEven !== null && d.tasksToBreakEven > 0) {
-              // SC3: Below break-even
-              roiSubtext.textContent = `${d.tasksToBreakEven} more task${d.tasksToBreakEven === 1 ? '' : 's'} and it's paid for itself`;
+        if (d.gbpSaved !== null && d.gbpSaved !== undefined) {
+          // AC2: animated £ value
+          countUp(moneyEl, Number(d.gbpSaved), { format: n => fmtGBP(n) });
+          if (moneySub) {
+            if (period === 'month' && d.multiplier !== null && d.multiplier >= 1) {
+              moneySub.innerHTML = `Paid for itself <strong style="color:#be185d">${d.multiplier}×</strong> this month 🎉`;
+            } else if (period === 'month' && d.tasksToBreakEven > 0) {
+              moneySub.textContent = `${d.tasksToBreakEven} more task${d.tasksToBreakEven === 1 ? '' : 's'} to break even`;
             } else {
-              roiSubtext.textContent = `${d.hoursSaved} hrs saved from ${d.taskCount} tasks`;
+              moneySub.textContent = 'based on your hourly rate';
             }
-          } else {
-            roiSubtext.textContent = `${d.hoursSaved} hrs saved from ${d.taskCount} tasks this week`;
           }
-          roiHint?.classList.add('hidden');
         } else {
-          // SC5 (from US-AUD-1.1.2): hours fallback + rate CTA
-          roiValue.innerHTML = `${d.hoursSaved} <span class="text-base font-normal text-gray-500">hrs saved</span>`;
-          roiSubtext.textContent = `from ${d.taskCount} completed task${d.taskCount === 1 ? '' : 's'}`;
-          if (roiHint) {
-            roiHint.textContent = '£ value: Set your hourly rate →';
-            roiHint.classList.remove('hidden');
-            roiHint.onclick = () => { if (window.loadView) window.loadView('settings'); };
+          // Fallback: no rate set → CTA to unlock the £ figure
+          moneyEl.dataset.count = '0';
+          moneyEl.textContent = '£—';
+          if (moneySub) {
+            moneySub.innerHTML = '<button type="button" class="cc-link">Set your hourly rate to see this →</button>';
+            const btn = moneySub.querySelector('button');
+            if (btn) btn.onclick = () => window.loadView && window.loadView('settings');
           }
         }
       } catch (_) { /* fail silently */ }
-    };
+    }
 
-    window._roiRender();
+    const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const ORDER = [1, 2, 3, 4, 5, 6, 0]; // Mon-first display
+    const hourLabel = h => { const ampm = h < 12 ? 'a' : 'p'; const hr = h % 12 === 0 ? 12 : h % 12; return `${hr}${ampm}`; };
 
-    // US-AUD-1.1.1: First-task onboarding milestone
-    (async function initFirstTask() {
+    function level(count, max) {
+      if (!count) return 0;
+      const r = count / max;
+      if (r > 0.75) return 4;
+      if (r > 0.5) return 3;
+      if (r > 0.25) return 2;
+      return 1;
+    }
+
+    async function renderHeatmap() {
+      const wrap = document.getElementById('cc-heatmap');
+      const caption = document.getElementById('cc-heatmap-caption');
+      if (!wrap) return;
       try {
-        const res = await fetch('/.netlify/functions/first-task');
+        const res = await fetch('/.netlify/functions/dashboard-heatmap?weeks=8');
+        if (!res.ok) { if (caption) caption.textContent = ''; return; }
+        const d = await res.json();
+        const grid = d.grid || [];
+        const max = d.maxCount || 0;
+
+        wrap.innerHTML = ORDER.map(dow => {
+          const cells = Array.from({ length: 24 }, (_, h) => {
+            const c = (grid[dow] && grid[dow][h]) || 0;
+            const lvl = level(c, max);
+            const title = `${DOW[dow]} ${hourLabel(h)} — ${c} task${c === 1 ? '' : 's'}`;
+            return `<div class="cc-cell cc-lvl-${lvl}" title="${title}"></div>`;
+          }).join('');
+          return `<div class="cc-hm-row"><span class="cc-hm-daylabel">${DOW[dow]}</span>${cells}</div>`;
+        }).join('') + `<div class="cc-hm-axis"><span></span>${
+          Array.from({ length: 24 }, (_, h) => `<span class="cc-hm-tick">${[0,6,12,18].includes(h) ? hourLabel(h) : ''}</span>`).join('')
+        }</div>`;
+
+        if (caption) {
+          if (d.totalTasks > 0 && d.peak) {
+            const p = d.peak;
+            caption.innerHTML = `Your team handled <strong>${d.totalTasks}</strong> task${d.totalTasks === 1 ? '' : 's'} over the last 8 weeks — busiest on <strong>${DOW[p.dow]}s around ${hourLabel(p.hour)}</strong>, often while you were away.`;
+          } else {
+            caption.textContent = 'As your assistants complete work, you’ll see exactly when they were busy here — including overnight.';
+          }
+        }
+      } catch (_) {
+        if (caption) caption.textContent = '';
+      }
+    }
+
+    // Period toggle
+    root.querySelectorAll('.cc-toggle-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (btn.dataset.period === period) return;
+        period = btn.dataset.period;
+        root.querySelectorAll('.cc-toggle-btn').forEach(b => b.classList.toggle('is-active', b === btn));
+        renderMetrics();
+      });
+    });
+
+    renderMetrics();
+    renderHeatmap();
+  })();
+</script>
+
+<style>
+  /* US-DASH-2 — Action Stream. Scoped plain CSS (immune to prebuilt-Tailwind). */
+  .as-head { display: flex; align-items: center; gap: 10px; margin: 0 0 14px; }
+  .as-h3 { font-size: 16px; font-weight: 800; color: #0f172a; margin: 0; }
+  .as-sub { font-size: 13px; color: #94a3b8; }
+  .as-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; height: 22px;
+    padding: 0 7px; border-radius: 999px; background: #f59e0b; color: #fff; font-size: 12px; font-weight: 700; }
+
+  /* AC1 — live banner */
+  .as-live { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 14px 18px; margin-bottom: 22px;
+    border-radius: 16px; background: linear-gradient(120deg, rgba(236,72,153,0.10), rgba(99,102,241,0.08));
+    border: 1px solid rgba(236,72,153,0.22); }
+  .as-live-pulse { position: relative; width: 10px; height: 10px; border-radius: 50%; background: #ec4899; flex: 0 0 auto; }
+  .as-live-pulse::after { content: ''; position: absolute; inset: -6px; border-radius: 50%;
+    background: rgba(236,72,153,0.35); animation: asPulse 1.6s ease-out infinite; }
+  @keyframes asPulse { 0% { transform: scale(.6); opacity: .8 } 100% { transform: scale(1.8); opacity: 0 } }
+  .as-live-label { font-size: 12px; font-weight: 700; color: #be185d; text-transform: uppercase; letter-spacing: .06em; }
+  .as-live-items { display: flex; gap: 8px; flex-wrap: wrap; }
+  .as-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px;
+    background: rgba(255,255,255,0.85); border: 1px solid rgba(15,23,42,0.08); font-size: 13px; color: #334155; }
+
+  /* AC2 — attention cards */
+  .as-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  @media (max-width: 760px) { .as-grid { grid-template-columns: 1fr; } }
+  .as-card { position: relative; padding: 16px 16px 14px; border-radius: 16px; background: #fff;
+    border: 1px solid rgba(15,23,42,0.08); box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+    transition: box-shadow .2s ease, transform .25s ease, opacity .25s ease; }
+  .as-card:hover { box-shadow: 0 14px 26px -16px rgba(131,24,67,0.35); }
+  .as-card.as-removing { opacity: 0; transform: translateY(-6px) scale(.98); }
+  .as-card-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .as-card-assist { font-size: 12px; font-weight: 700; color: #db2777; }
+  .as-pill { margin-left: auto; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: #f1f5f9; color: #64748b; }
+  .as-pill-warn { background: #fef3c7; color: #b45309; }
+  .as-card-title { font-size: 14px; font-weight: 700; color: #0f172a; margin: 0 0 4px; }
+  .as-card-prev { font-size: 13px; color: #64748b; margin: 0 0 12px; line-height: 1.45; }
+  .as-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .as-btn { border: 0; cursor: pointer; font-size: 13px; font-weight: 700; padding: 8px 14px; border-radius: 10px; transition: all .15s ease; }
+  .as-btn-approve { background: #ec4899; color: #fff; }
+  .as-btn-approve:hover { background: #db2777; }
+  .as-btn-edit { background: #f1f5f9; color: #334155; }
+  .as-btn-edit:hover { background: #e2e8f0; }
+  .as-btn-reject { background: #fff; color: #dc2626; border: 1px solid #fecaca; }
+  .as-btn-reject:hover { background: #fef2f2; }
+  .as-btn:disabled { opacity: .5; cursor: default; }
+  .as-reject-box { margin-top: 10px; display: none; }
+  .as-reject-box.open { display: block; }
+  .as-reject-input { width: 100%; font-size: 13px; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 10px; resize: vertical; min-height: 54px; font-family: inherit; }
+  .as-reject-row { display: flex; gap: 8px; margin-top: 8px; }
+
+  /* AC3 — suggestion cards */
+  .as-suggest-row { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 4px; }
+  .as-sg { flex: 0 0 300px; max-width: 300px; padding: 16px; border-radius: 16px;
+    background: linear-gradient(160deg, #eef2ff, #ffffff); border: 1px solid rgba(99,102,241,0.2);
+    transition: transform .25s ease, opacity .25s ease; }
+  .as-sg.as-removing { opacity: 0; transform: translateY(-6px) scale(.98); }
+  .as-sg-top { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; font-size: 12px; font-weight: 700; color: #4f46e5; }
+  .as-sg-idea { font-size: 14px; color: #1e293b; line-height: 1.5; margin: 0 0 14px; }
+  .as-sg-actions { display: flex; gap: 8px; align-items: center; }
+  .as-btn-yes { background: #4f46e5; color: #fff; }
+  .as-btn-yes:hover { background: #4338ca; }
+  .as-btn-later { background: transparent; color: #94a3b8; padding: 8px 6px; }
+  .as-btn-later:hover { color: #64748b; }
+</style>
+
+<script>
+  (function () {
+    // ── US-DASH-2: Proactive Action Stream ──────────────────────────────────
+    const section = document.getElementById('action-stream');
+    if (!section) return;
+
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const toast = (m, o) => (window.showToast ? window.showToast(m, o) : null);
+
+    function removeCard(el, sel, after) {
+      if (!el) return;
+      el.classList.add('as-removing');
+      setTimeout(() => { el.remove(); after && after(); }, 280);
+    }
+
+    function reconcile() {
+      const att = document.getElementById('as-attention');
+      const sg = document.getElementById('as-suggest');
+      const live = document.getElementById('as-live');
+      const attN = att ? att.querySelectorAll('.as-card').length : 0;
+      const sgN = sg ? sg.querySelectorAll('.as-sg').length : 0;
+      const countEl = document.getElementById('as-attention-count');
+      if (countEl) countEl.textContent = attN;
+      document.getElementById('as-attention-wrap').classList.toggle('hidden', attN === 0);
+      document.getElementById('as-suggest-wrap').classList.toggle('hidden', sgN === 0);
+      const liveVisible = live && !live.classList.contains('hidden');
+      section.classList.toggle('hidden', attN === 0 && sgN === 0 && !liveVisible);
+    }
+
+    // ── AC2: approvals ──
+    async function approvePost(id, btn, card) {
+      btn.disabled = true; btn.textContent = 'Approving…';
+      try {
+        const res = await fetch('/.netlify/functions/approve-post', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId: id, action: 'approve' }) });
+        if (res.status === 409) { // scheduled time is in the past → hand off to the full review modal
+          if (window.openPostReview) window.openPostReview(id);
+          btn.disabled = false; btn.textContent = 'Approve'; return;
+        }
+        if (!res.ok) throw 0;
+        toast('Approved — your assistant will publish it. ✅', { icon: '✅' });
+        removeCard(card, null, reconcile);
+      } catch { btn.disabled = false; btn.textContent = 'Approve'; toast('Could not approve — please try again.'); }
+    }
+    async function rejectPost(id, reason, card) {
+      try {
+        const res = await fetch('/.netlify/functions/reject-post', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId: id, feedbackText: reason, applyAsRule: false }) });
+        if (!res.ok) throw 0;
+        toast('Sent back with your feedback.');
+        removeCard(card, null, reconcile);
+      } catch { toast('Could not send that — please try again.'); }
+    }
+    async function decideAction(id, decision, reason, card, btn) {
+      if (btn) { btn.disabled = true; }
+      try {
+        const res = await fetch('/.netlify/functions/approve-pending-action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pendingActionId: id, decision, rejectionReason: reason }) });
+        if (!res.ok) throw 0;
+        toast(decision === 'approved' ? 'Approved. ✅' : 'Declined.');
+        removeCard(card, null, reconcile);
+      } catch { if (btn) btn.disabled = false; toast('Could not update — please try again.'); }
+    }
+
+    function attentionCard(item) {
+      const isPost = item.kind === 'post';
+      const card = document.createElement('div');
+      card.className = 'as-card';
+      const pill = item.platform
+        ? `<span class="as-pill">${esc(item.platform)}</span>`
+        : (item.reversibilityTier ? `<span class="as-pill ${item.reversibilityTier !== 'reversible' ? 'as-pill-warn' : ''}">${esc(item.reversibilityTier)}</span>` : '');
+      card.innerHTML = `
+        <div class="as-card-top"><span class="as-card-assist">${esc(item.assistantName)}</span>${pill}</div>
+        <p class="as-card-title">${esc(item.title)}</p>
+        ${item.preview ? `<p class="as-card-prev">${esc(item.preview)}${isPost && item.preview.length >= 140 ? '…' : ''}</p>` : ''}
+        <div class="as-actions">
+          <button class="as-btn as-btn-approve">Approve</button>
+          ${isPost ? '<button class="as-btn as-btn-edit">Edit</button>' : ''}
+          <button class="as-btn as-btn-reject">Reject</button>
+        </div>
+        <div class="as-reject-box">
+          <textarea class="as-reject-input" placeholder="${isPost ? 'What should change? (saved as feedback)' : 'Why are you declining this?'}"></textarea>
+          <div class="as-reject-row">
+            <button class="as-btn as-btn-reject as-reject-confirm">Confirm reject</button>
+            <button class="as-btn as-btn-edit as-reject-cancel">Cancel</button>
+          </div>
+        </div>`;
+      const approveBtn = card.querySelector('.as-btn-approve');
+      approveBtn.onclick = () => isPost ? approvePost(item.id, approveBtn, card) : decideAction(item.id, 'approved', undefined, card, approveBtn);
+      if (isPost) {
+        const editBtn = card.querySelector('.as-btn-edit');
+        if (editBtn) editBtn.onclick = () => { if (window.openPostReview) window.openPostReview(item.id); else if (window.loadView) window.loadView('review-queue'); };
+      }
+      const box = card.querySelector('.as-reject-box');
+      card.querySelector('.as-btn-reject').onclick = () => { box.classList.toggle('open'); if (box.classList.contains('open')) box.querySelector('.as-reject-input').focus(); };
+      card.querySelector('.as-reject-cancel').onclick = () => box.classList.remove('open');
+      card.querySelector('.as-reject-confirm').onclick = () => {
+        const input = card.querySelector('.as-reject-input');
+        const v = input.value.trim();
+        if (!v) { input.focus(); return; }
+        isPost ? rejectPost(item.id, v, card) : decideAction(item.id, 'rejected', v, card);
+      };
+      return card;
+    }
+
+    // ── AC3: act on a suggestion ──
+    async function actOnIdea(item, btn, card) {
+      btn.disabled = true; btn.textContent = 'On it…';
+      try {
+        const platform = item.platform ? item.platform.split(',')[0] : undefined;
+        const res = await fetch('/.netlify/functions/generate-post', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ assistantId: item.assistantId, platform, contextPrompt: item.idea, triggerType: 'on_demand' }) });
+        if (!res.ok) throw 0;
+        toast('On it — drafting this now. Find it in your review queue shortly. ✨', { icon: '✨' });
+        removeCard(card, null, reconcile);
+      } catch { btn.disabled = false; btn.textContent = 'Yes, please'; toast('Could not start that — please try again.'); }
+    }
+    function suggestCard(item) {
+      const card = document.createElement('div'); card.className = 'as-sg';
+      card.innerHTML = `
+        <div class="as-sg-top">💡 Suggested by ${esc(item.suggestedByName)} for ${esc(item.assistantName)}${item.platformLabel ? ` · ${esc(item.platformLabel)}` : ''}</div>
+        <p class="as-sg-idea">${esc(item.idea)}</p>
+        <div class="as-sg-actions">
+          <button class="as-btn as-btn-yes">Yes, please</button>
+          <button class="as-btn as-btn-later">Maybe later</button>
+        </div>`;
+      const yes = card.querySelector('.as-btn-yes');
+      yes.onclick = () => actOnIdea(item, yes, card);
+      card.querySelector('.as-btn-later').onclick = () => removeCard(card, null, reconcile);
+      return card;
+    }
+
+    async function render() {
+      try {
+        const res = await fetch('/.netlify/functions/dashboard-action-stream');
         if (!res.ok) return;
         const d = await res.json();
 
-        if (d.milestoneComplete) return; // SC7: never show again once done
+        const live = document.getElementById('as-live');
+        if (d.working && d.working.length) {
+          live.innerHTML = '<span class="as-live-pulse"></span><span class="as-live-label">Working now</span><div class="as-live-items">'
+            + d.working.slice(0, 4).map(w => `<span class="as-chip">${esc(w.icon)} <strong>${esc(w.assistantName)}</strong> — ${esc(w.label)}</span>`).join('')
+            + '</div>';
+          live.classList.remove('hidden');
+        } else { live.classList.add('hidden'); }
 
-        // SC1: Post-payment focused screen (only if within first 24h of plan activation)
-        const planAge = d.planActivatedAt
-          ? (Date.now() - new Date(d.planActivatedAt).getTime()) / (1000 * 60 * 60)
-          : 999;
-        const isNewUser = planAge < 24;
+        const att = document.getElementById('as-attention'); att.innerHTML = '';
+        (d.attention || []).forEach(i => att.appendChild(attentionCard(i)));
 
-        // Populate task details
-        const ftTaskTitle = document.getElementById('ft-task-title');
-        const ftTaskDesc = document.getElementById('ft-task-desc');
-        const ftInput = document.getElementById('ft-task-input');
-        if (ftTaskTitle) ftTaskTitle.textContent = d.starterTask.title;
-        if (ftTaskDesc) ftTaskDesc.textContent = d.starterTask.description;
-        if (ftInput) ftInput.placeholder = d.starterTask.placeholder;
+        const sg = document.getElementById('as-suggest'); sg.innerHTML = '';
+        (d.suggestions || []).forEach(i => sg.appendChild(suggestCard(i)));
 
-        if (isNewUser && !d.milestoneSkipped) {
-          // Show the focused first-task screen
-          document.getElementById('first-task-screen')?.classList.remove('hidden');
-        } else if (!d.milestoneSkipped) {
-          // SC6: Show the banner (previously skipped users already saw it; re-check sessionStorage)
-          const dismissed = sessionStorage.getItem('first_task_banner_dismissed');
-          if (!dismissed) {
-            const banner = document.getElementById('first-task-banner');
-            const bannerDesc = document.getElementById('first-task-banner-desc');
-            if (banner) banner.classList.remove('hidden');
-            if (bannerDesc) bannerDesc.textContent = d.starterTask.description;
-          }
-        }
+        reconcile();
+      } catch (_) { /* silent — dashboard still renders without the stream */ }
+    }
 
-        // SC3: Gate the assistant library until first task is complete
-        if (!d.milestoneComplete && !d.milestoneSkipped) {
-          const catalogBtn = document.getElementById('route-to-catalog');
-          if (catalogBtn) {
-            catalogBtn.removeAttribute('href');
-            catalogBtn.style.cssText += ';opacity:0.5;cursor:not-allowed;pointer-events:none;position:relative;';
-            catalogBtn.title = 'Complete your first task to unlock the full library.';
-            catalogBtn.setAttribute('aria-disabled', 'true');
-            // Tooltip wrapper
-            const wrapper = document.createElement('span');
-            wrapper.style.cssText = 'position:relative;display:inline-block;';
-            const tip = document.createElement('span');
-            tip.style.cssText = 'position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);white-space:nowrap;background:#1f2937;color:#fff;font-size:11px;font-weight:500;padding:4px 10px;border-radius:6px;pointer-events:none;opacity:0;transition:opacity .15s;z-index:20;';
-            tip.textContent = 'Complete your first task to unlock the full library.';
-            catalogBtn.parentNode.insertBefore(wrapper, catalogBtn);
-            wrapper.appendChild(catalogBtn);
-            wrapper.appendChild(tip);
-            wrapper.addEventListener('mouseenter', () => { tip.style.opacity = '1'; });
-            wrapper.addEventListener('mouseleave', () => { tip.style.opacity = '0'; });
-          }
-        }
-      } catch { /* fail silently */ }
-    })();
-
-    window._showFirstTaskScreen = function () {
-      document.getElementById('first-task-banner')?.classList.add('hidden');
-      document.getElementById('first-task-screen')?.classList.remove('hidden');
-    };
-
-    window._dismissFirstTaskBanner = function () {
-      document.getElementById('first-task-banner')?.classList.add('hidden');
-      sessionStorage.setItem('first_task_banner_dismissed', '1');
-    };
-
-    window._skipFirstTask = async function () {
-      document.getElementById('first-task-screen')?.classList.add('hidden');
-      // SC6: Show banner instead
-      const banner = document.getElementById('first-task-banner');
-      if (banner) banner.classList.remove('hidden');
-      await fetch('/.netlify/functions/first-task', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'skip' }),
-      }).catch(() => {});
-    };
-
-    window._submitFirstTask = async function () {
-      const input    = document.getElementById('ft-task-input')?.value?.trim();
-      const submitBtn = document.querySelector('#first-task-screen button[onclick*="_submitFirstTask"]');
-      const errorEl  = document.getElementById('ft-task-error');
-
-      if (!input) {
-        if (errorEl) { errorEl.textContent = 'Please describe what you need first.'; errorEl.classList.remove('hidden'); }
-        return;
-      }
-      if (errorEl) errorEl.classList.add('hidden');
-
-      // Disable button + show spinner
-      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Running task…'; }
-
-      try {
-        // Run the task via quality-review
-        const res = await fetch('/.netlify/functions/quality-review', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: input }),
-        });
-        const data = await res.json();
-
-        if (!res.ok) {
-          throw new Error(data.error || 'Task failed. Please try again.');
-        }
-
-        // Mark milestone complete (fire-and-forget)
-        fetch('/.netlify/functions/first-task', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'complete' }),
-        }).catch(() => {});
-
-        // SC4: In-app congratulatory notification
-        fetch('/.netlify/functions/notifications', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            type: 'milestone_first_task',
-            title: 'Your assistant just saved you time. Explore what else it can do.',
-          }),
-        }).catch(() => {});
-
-        // Hide the task screen and show the result inline
-        const screen = document.getElementById('first-task-screen');
-        if (screen) {
-          screen.innerHTML = `
-            <div class="w-14 h-14 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
-              <svg class="w-7 h-7 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-              </svg>
-            </div>
-            <h2 class="text-xl font-extrabold text-gray-900 mb-3">Your assistant delivered ✨</h2>
-            <div class="text-left bg-gray-50 border border-gray-200 rounded-xl px-5 py-4 text-sm text-gray-700 leading-relaxed whitespace-pre-wrap mb-5 max-h-64 overflow-y-auto">${(data.result || data.output || '').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
-            <button onclick="if(window.loadView) window.loadView('assistants')"
-              class="w-full py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl transition cursor-pointer">
-              See My Assistants →
-            </button>`;
-        }
-
-      } catch (err) {
-        if (errorEl) { errorEl.textContent = err.message || 'Something went wrong. Please try again.'; errorEl.classList.remove('hidden'); }
-        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Run Task →'; }
-      }
-    };
+    render();
   })();
 </script>
+
+<style>
+  /* US-DASH-4 — Modular widgets. Scoped plain CSS (immune to prebuilt-Tailwind). */
+  .dw-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+  .dw-title { font-size: 18px; font-weight: 800; color: #0f172a; margin: 0; }
+  .dw-customize { display: inline-flex; align-items: center; gap: 7px; border: 1px solid #e2e8f0; background: #fff;
+    color: #334155; font-size: 13px; font-weight: 700; padding: 8px 14px; border-radius: 10px; cursor: pointer; transition: all .15s ease; }
+  .dw-customize svg { width: 16px; height: 16px; color: #ec4899; }
+  .dw-customize:hover { background: #f8fafc; border-color: #cbd5e1; }
+  .dw-customize.active { background: #ec4899; color: #fff; border-color: #ec4899; }
+  .dw-customize.active svg { color: #fff; }
+
+  .dw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+  .dw-empty { text-align: center; color: #94a3b8; font-size: 14px; padding: 28px; border: 1.5px dashed #e2e8f0; border-radius: 16px; }
+
+  .dw-card { position: relative; background: #fff; border: 1px solid rgba(15,23,42,0.08); border-radius: 18px; padding: 18px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04); transition: box-shadow .2s ease, transform .18s ease, opacity .2s ease; }
+  .dw-card:hover { box-shadow: 0 14px 26px -18px rgba(131,24,67,0.3); }
+  .dw-card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .dw-card-ico { font-size: 16px; }
+  .dw-card-title { font-size: 13px; font-weight: 700; color: #334155; text-transform: uppercase; letter-spacing: .04em; }
+  .dw-card-body { font-size: 14px; color: #1e293b; }
+
+  /* edit mode */
+  #dash-widgets-section.editing .dw-card { cursor: grab; border-style: dashed; border-color: #fbcfe8; animation: dwWobble 2.4s ease-in-out infinite; }
+  #dash-widgets-section.editing .dw-card:active { cursor: grabbing; }
+  .dw-card.dragging { opacity: .45; transform: scale(.98); animation: none; }
+  @keyframes dwWobble { 0%,100% { transform: rotate(-.35deg) } 50% { transform: rotate(.35deg) } }
+  .dw-card-remove { display: none; position: absolute; top: -9px; right: -9px; width: 24px; height: 24px; border-radius: 50%;
+    background: #ef4444; color: #fff; border: 2px solid #fff; cursor: pointer; font-size: 15px; line-height: 1; align-items: center; justify-content: center; z-index: 2; }
+  #dash-widgets-section.editing .dw-card-remove { display: inline-flex; }
+
+  /* widget internals */
+  .dw-stat { font-size: 30px; font-weight: 800; color: #0f172a; line-height: 1; }
+  .dw-stat-sub { font-size: 13px; color: #64748b; margin-top: 6px; }
+  .dw-qa { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .dw-qa button { border: 1px solid #e2e8f0; background: #f8fafc; color: #334155; font-size: 13px; font-weight: 600;
+    padding: 10px; border-radius: 10px; cursor: pointer; text-align: left; transition: all .15s ease; }
+  .dw-qa button:hover { background: #fdf2f8; border-color: #fbcfe8; color: #be185d; }
+  .dw-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
+  .dw-list li { font-size: 13px; color: #475569; display: flex; gap: 8px; }
+  .dw-list .t { color: #0f172a; font-weight: 600; }
+  .dw-link { display: inline-block; margin-top: 10px; font-size: 13px; font-weight: 700; color: #db2777; cursor: pointer; }
+  .dw-link:hover { text-decoration: underline; }
+  .dw-skel { height: 14px; border-radius: 6px; background: linear-gradient(90deg,#f1f5f9,#e2e8f0,#f1f5f9);
+    background-size: 200% 100%; animation: dwShimmer 1.2s infinite; margin-bottom: 8px; }
+  @keyframes dwShimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
+
+  /* tray */
+  .dw-tray-backdrop { position: fixed; inset: 0; background: rgba(15,23,42,0.35); z-index: 88; display: none; }
+  .dw-tray-backdrop.open { display: block; }
+  .dw-tray { position: fixed; top: 0; right: 0; height: 100%; width: min(360px, 90vw); background: #fff; z-index: 89;
+    box-shadow: -20px 0 50px -20px rgba(0,0,0,0.4); transform: translateX(100%);
+    transition: transform .28s cubic-bezier(.2,.8,.2,1); display: flex; flex-direction: column; }
+  .dw-tray.open { transform: none; }
+  .dw-tray-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 20px; border-bottom: 1px solid #f1f5f9; }
+  .dw-tray-title { font-size: 16px; font-weight: 800; color: #0f172a; margin: 0; }
+  .dw-tray-sub { font-size: 12px; color: #94a3b8; margin: 4px 0 0; }
+  .dw-tray-close { border: 0; background: #ec4899; color: #fff; font-weight: 700; font-size: 13px; padding: 8px 16px; border-radius: 10px; cursor: pointer; }
+  .dw-tray-list { padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  .dw-tray-item { display: flex; align-items: center; gap: 12px; padding: 12px; border: 1px solid #f1f5f9; border-radius: 12px; }
+  .dw-tray-item .ico { font-size: 18px; }
+  .dw-tray-item .meta { flex: 1; }
+  .dw-tray-item .meta .n { font-size: 14px; font-weight: 700; color: #0f172a; }
+  .dw-tray-item .meta .d { font-size: 12px; color: #94a3b8; }
+  .dw-switch { position: relative; width: 42px; height: 24px; flex: 0 0 auto; }
+  .dw-switch input { opacity: 0; width: 0; height: 0; }
+  .dw-switch span { position: absolute; inset: 0; background: #cbd5e1; border-radius: 999px; transition: .2s; cursor: pointer; }
+  .dw-switch span::before { content: ''; position: absolute; height: 18px; width: 18px; left: 3px; top: 3px; background: #fff; border-radius: 50%; transition: .2s; }
+  .dw-switch input:checked + span { background: #ec4899; }
+  .dw-switch input:checked + span::before { transform: translateX(18px); }
+  @media (prefers-reduced-motion: reduce) { #dash-widgets-section.editing .dw-card { animation: none } .dw-skel { animation: none } }
+</style>
+
+<script>
+  (function () {
+    // ── US-DASH-4: Modular, personalized widget grid ─────────────────────────
+    const section = document.getElementById('dash-widgets-section');
+    const grid = document.getElementById('dash-widgets');
+    if (!section || !grid) return;
+
+    const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const fmtGBP = v => Number(v).toLocaleString('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 });
+
+    const CATALOG = {
+      'quick-actions': { title: 'Quick actions', icon: '⚡', desc: 'One-tap shortcuts', render: renderQuickActions },
+      'roi-mini':      { title: 'Value this week', icon: '💷', desc: 'Hours & money saved', render: renderRoiMini },
+      'team-status':   { title: 'Your assistants', icon: '👥', desc: 'Who is working right now', render: renderTeamStatus },
+      'notifications': { title: 'Latest updates', icon: '🔔', desc: 'Your most recent activity', render: renderNotifications },
+      'tips':          { title: 'Tip', icon: '💡', desc: 'Get more from your team', render: renderTips },
+      'referral':      { title: 'Invite a teammate', icon: '🎁', desc: 'Share Be More Swan', render: renderReferral },
+    };
+    const ORDER = ['quick-actions', 'roi-mini', 'team-status', 'notifications', 'tips', 'referral'];
+    const DEFAULT_ON = { 'quick-actions': true, 'roi-mini': true, 'team-status': true, 'notifications': true, 'tips': false, 'referral': false };
+
+    let layout = [];
+    let editing = false;
+    let saveTimer = null;
+    let dragEl = null;
+
+    const defaultLayout = () => ORDER.map(k => ({ key: k, enabled: DEFAULT_ON[k] }));
+    function mergeCatalog(l) {
+      const have = new Set(l.map(w => w.key));
+      ORDER.forEach(k => { if (!have.has(k)) l.push({ key: k, enabled: false }); });
+      return l.filter(w => CATALOG[w.key]);
+    }
+    function save() { // AC3: silent debounced persistence
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        fetch('/.netlify/functions/dashboard-layout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ layout }) }).catch(() => {});
+      }, 550);
+    }
+
+    function renderGrid() {
+      grid.innerHTML = '';
+      const enabled = layout.filter(w => w.enabled);
+      // Drive visibility via inline style (not Tailwind .hidden) so it works regardless
+      // of whether the prebuilt CSS has the utility compiled.
+      document.getElementById('dw-empty').style.display = enabled.length > 0 ? 'none' : 'block';
+      enabled.forEach(w => {
+        const meta = CATALOG[w.key]; if (!meta) return;
+        const card = document.createElement('div');
+        card.className = 'dw-card'; card.dataset.key = w.key; card.draggable = editing;
+        card.innerHTML = `<button class="dw-card-remove" title="Remove" aria-label="Remove">×</button>
+          <div class="dw-card-head"><span class="dw-card-ico">${meta.icon}</span><span class="dw-card-title">${esc(meta.title)}</span></div>
+          <div class="dw-card-body"><div class="dw-skel" style="width:80%"></div><div class="dw-skel" style="width:55%"></div></div>`;
+        card.querySelector('.dw-card-remove').onclick = e => { e.stopPropagation(); toggle(w.key, false); };
+        grid.appendChild(card);
+        try { meta.render(card.querySelector('.dw-card-body')); } catch (_) {}
+        bindDnD(card);
+      });
+      section.classList.toggle('editing', editing);
+    }
+
+    function toggle(key, on) {
+      const item = layout.find(w => w.key === key); if (!item) return;
+      item.enabled = on; renderGrid(); renderTray(); save();
+    }
+
+    // ── AC2: drag-and-drop reorder with snap ──
+    function bindDnD(card) {
+      card.addEventListener('dragstart', () => { if (!editing) return; dragEl = card; card.classList.add('dragging'); });
+      card.addEventListener('dragend', () => { card.classList.remove('dragging'); dragEl = null; persistOrder(); });
+    }
+    grid.addEventListener('dragover', e => {
+      if (!editing || !dragEl) return; e.preventDefault();
+      const after = afterElement(grid, e.clientY);
+      if (after == null) grid.appendChild(dragEl); else grid.insertBefore(dragEl, after);
+    });
+    function afterElement(container, y) {
+      const els = [...container.querySelectorAll('.dw-card:not(.dragging)')];
+      return els.reduce((closest, child) => {
+        const box = child.getBoundingClientRect();
+        const offset = y - box.top - box.height / 2;
+        return (offset < 0 && offset > closest.offset) ? { offset, element: child } : closest;
+      }, { offset: -Infinity, element: null }).element;
+    }
+    function persistOrder() {
+      const order = [...grid.querySelectorAll('.dw-card')].map(c => c.dataset.key);
+      const disabled = layout.filter(w => !w.enabled);
+      layout = [...order.map(k => ({ key: k, enabled: true })), ...disabled];
+      save();
+    }
+
+    // ── AC1: edit mode + widget-library tray ──
+    function renderTray() {
+      const list = document.getElementById('dw-tray-list'); if (!list) return;
+      list.innerHTML = '';
+      layout.forEach(w => {
+        const meta = CATALOG[w.key]; if (!meta) return;
+        const row = document.createElement('div'); row.className = 'dw-tray-item';
+        row.innerHTML = `<span class="ico">${meta.icon}</span>
+          <div class="meta"><div class="n">${esc(meta.title)}</div><div class="d">${esc(meta.desc || '')}</div></div>
+          <label class="dw-switch"><input type="checkbox" ${w.enabled ? 'checked' : ''}><span></span></label>`;
+        row.querySelector('input').onchange = e => toggle(w.key, e.target.checked);
+        list.appendChild(row);
+      });
+    }
+    const customizeBtn = document.getElementById('dw-customize');
+    function setBtn(on) { customizeBtn.classList.toggle('active', on); customizeBtn.querySelector('span').textContent = on ? 'Done' : 'Customize'; }
+    function openTray() { document.getElementById('dw-tray').classList.add('open'); document.getElementById('dw-tray-backdrop').classList.add('open'); renderTray(); }
+    function closeTray() { document.getElementById('dw-tray').classList.remove('open'); document.getElementById('dw-tray-backdrop').classList.remove('open'); }
+    function enterEdit() { editing = true; setBtn(true); openTray(); renderGrid(); }
+    function exitEdit() { editing = false; setBtn(false); closeTray(); renderGrid(); }
+
+    customizeBtn.onclick = () => editing ? exitEdit() : enterEdit();
+    document.getElementById('dw-tray-close').onclick = exitEdit;
+    document.getElementById('dw-tray-backdrop').onclick = exitEdit;
+
+    // ── widget renderers ──
+    function renderQuickActions(el) {
+      const acts = [['📝', 'Create a post', 'review-queue'], ['➕', 'Hire an assistant', 'catalog'], ['📅', 'Open calendar', 'calendar'], ['🎁', 'Invite a teammate', 'referral']];
+      el.innerHTML = `<div class="dw-qa">${acts.map(a => `<button data-v="${a[2]}">${a[0]} ${esc(a[1])}</button>`).join('')}</div>`;
+      el.querySelectorAll('button').forEach(b => b.onclick = () => window.loadView && window.loadView(b.dataset.v));
+    }
+    async function renderRoiMini(el) {
+      try {
+        const d = await (await fetch('/.netlify/functions/roi-stats?period=week')).json();
+        const money = (d.gbpSaved != null) ? fmtGBP(d.gbpSaved) : null;
+        el.innerHTML = `<div class="dw-stat">${d.hoursSaved ?? 0}<span style="font-size:15px;color:#94a3b8;font-weight:600"> hrs</span></div>
+          <div class="dw-stat-sub">${money ? money + ' saved · ' : ''}${d.taskCount ?? 0} task${(d.taskCount ?? 0) === 1 ? '' : 's'} this week</div>`;
+      } catch { el.innerHTML = '<div class="dw-stat-sub">Unavailable right now.</div>'; }
+    }
+    async function renderTeamStatus(el) {
+      try {
+        const d = await (await fetch('/.netlify/functions/get-assistants')).json();
+        const a = d.assistants || [];
+        const working = a.filter(x => x.lifecycleStatus === 'working').length;
+        el.innerHTML = `<div class="dw-stat">${working}<span style="font-size:15px;color:#94a3b8;font-weight:600"> / ${a.length} working</span></div>
+          <div class="dw-stat-sub">${a.length ? 'Your digital team' : 'No assistants yet'}</div>
+          <span class="dw-link">Manage assistants →</span>`;
+        el.querySelector('.dw-link').onclick = () => window.loadView && window.loadView('assistants');
+      } catch { el.innerHTML = '<div class="dw-stat-sub">Unavailable right now.</div>'; }
+    }
+    async function renderNotifications(el) {
+      try {
+        const d = await (await fetch('/.netlify/functions/notifications')).json();
+        const n = (d.notifications || []).slice(0, 3);
+        el.innerHTML = n.length
+          ? `<ul class="dw-list">${n.map(x => `<li><span class="t">${esc(x.title || 'Update')}</span></li>`).join('')}</ul><span class="dw-link">View all →</span>`
+          : `<div class="dw-stat-sub">You're all caught up. 🎉</div>`;
+        const link = el.querySelector('.dw-link'); if (link) link.onclick = () => window.loadView && window.loadView('notifications');
+      } catch { el.innerHTML = '<div class="dw-stat-sub">Unavailable right now.</div>'; }
+    }
+    function renderTips(el) {
+      const tips = ['Press ⌘K anywhere to tell your team what to do.', 'Reject a draft with feedback and it becomes a rule for next time.', 'Set your hourly rate in Settings to unlock the money-saved figure.'];
+      el.innerHTML = esc(tips[Math.floor(Math.random() * tips.length)]);
+    }
+    function renderReferral(el) {
+      el.innerHTML = `<div class="dw-stat-sub">Invite a teammate — you both get rewarded.</div><span class="dw-link">Invite now →</span>`;
+      el.querySelector('.dw-link').onclick = () => window.loadView && window.loadView('referral');
+    }
+
+    async function init() {
+      try {
+        const d = await (await fetch('/.netlify/functions/dashboard-layout')).json();
+        layout = (d && Array.isArray(d.layout) && d.layout.length) ? mergeCatalog(d.layout) : defaultLayout();
+      } catch { layout = defaultLayout(); }
+      renderGrid();
+    }
+    init();
+
+    // Issue #58: the "Latest updates" widget was only ever fetched once at load, so a
+    // notification created while the user is sitting on the dashboard (e.g. "issue fixed")
+    // never showed up until a manual refresh. Re-render it periodically, same cadence as
+    // the sidebar notification badge poll in workspace.html.
+    setInterval(() => {
+      const body = grid.querySelector('.dw-card[data-key="notifications"] .dw-card-body');
+      if (body) { try { renderNotifications(body); } catch (_) {} }
+    }, 60_000);
+  })();
+</script>
+
+<style>
+  /* ════════════════════════════════════════════════════════════════════════
+     US-DASH-5: Premium consumer-grade aesthetics
+     AC1 skeleton loaders · AC3 micro-interactions
+     The dashboard follows the same light theme as the rest of the application —
+     no dark-mode override, so it stays visually consistent with every other view.
+     ════════════════════════════════════════════════════════════════════════ */
+
+  /* ── AC1: skeleton loaders ── */
+  .cc-skel-text { display: inline-block; width: 68px; height: 30px; border-radius: 9px; vertical-align: middle;
+    background: linear-gradient(90deg, #eef2f5, #e2e8f0, #eef2f5); background-size: 200% 100%; animation: ccShimmer 1.2s infinite; }
+  .cc-hm-skel { height: 168px; border-radius: 12px;
+    background: linear-gradient(90deg, #eef2f5, #e2e8f0, #eef2f5); background-size: 200% 100%; animation: ccShimmer 1.2s infinite; }
+  @keyframes ccShimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
+
+  /* ── AC3: consistent micro-interactions ── */
+  #dash-root .cc-toggle-btn:active, #dash-root .as-btn:active, #dash-root .dw-customize:active,
+  #dash-root .dw-qa button:active, #dash-root .cc-tile:active { transform: scale(.97); }
+  #dash-root .as-btn, #dash-root .dw-customize, #dash-root .cc-toggle-btn, #dash-root .dw-qa button { transition: transform .12s ease, background .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease; }
+  #dash-root .as-btn-approve:hover, #dash-root .dw-tray-close:hover { box-shadow: 0 6px 16px -6px rgba(236,72,153,0.6); }
+  #dash-root button:focus-visible, #dash-root input:focus-visible, #dash-root [tabindex]:focus-visible {
+    outline: 2px solid #ec4899; outline-offset: 2px; border-radius: 8px; }
+  #dash-root .dw-switch input:focus-visible + span { outline: 2px solid #ec4899; outline-offset: 2px; }
+</style>

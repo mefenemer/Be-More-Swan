@@ -20,6 +20,7 @@
 
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
+import Stripe from 'stripe';
 import { eq, and, desc } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
 import {
@@ -36,6 +37,11 @@ import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { isAdminRole } from '../../src/utils/rbac';
 
 const jwtSecret = process.env.JWT_SECRET;
+
+// Stripe client for admin-driven product/price creation (US1.1/US1.2). Same init as stripe-webhook.ts.
+const stripe = process.env.STRIPE_SECRET_KEY
+    ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' })
+    : null;
 
 // Inline murmurhash3 32-bit (no external dependency)
 function murmurhash32(str: string, seed = 0): number {
@@ -102,9 +108,41 @@ async function handleMasterPlans(event: any, adminId: number, role: string, ip?:
 
     if (method === 'POST') {
         const body = JSON.parse(event.body || '{}');
-        const { tierKey, name, monthlyPriceGbp, assistantLimit, monthlyTaskLimit, monthlyTokenLimit, appConnectionLimit, seatLimit } = body;
+        const { tierKey, name, monthlyPriceGbp, assistantLimit, monthlyTaskLimit, monthlyTokenLimit, appConnectionLimit, seatLimit, features } = body;
+        const interval = body.interval === 'year' ? 'year' : 'month'; // AC1.1.1 billing cycle
         if (!tierKey || !name || !monthlyPriceGbp) return badRequest('tierKey, name, monthlyPriceGbp required.');
-        const [row] = await db.insert(masterPlans).values({ tierKey, name, monthlyPriceGbp, assistantLimit, monthlyTaskLimit, monthlyTokenLimit, appConnectionLimit, seatLimit }).returning();
+
+        // Insert the plan first so we have an id; then push to Stripe. If Stripe fails, roll the row back
+        // so the DB and Stripe never diverge (AC1.1.4).
+        const [row] = await db.insert(masterPlans).values({
+            tierKey, name, monthlyPriceGbp, assistantLimit, monthlyTaskLimit, monthlyTokenLimit, appConnectionLimit, seatLimit,
+            features: features ?? {},
+        }).returning();
+
+        try {
+            if (stripe) {
+                // AC1.1.2: create the Stripe Product + recurring Price.
+                const product = await stripe.products.create({ name, metadata: { tierKey } });
+                const price = await stripe.prices.create({
+                    product: product.id,
+                    unit_amount: Math.round(Number(monthlyPriceGbp) * 100),
+                    currency: 'gbp',
+                    recurring: { interval },
+                });
+                // AC1.1.3: store the returned ids — product on the plan, price on the GBP plan_prices row.
+                await db.update(masterPlans).set({ stripeProductId: product.id }).where(eq(masterPlans.id, row.id));
+                await db.insert(planPrices).values({
+                    masterPlanId: row.id, currency: 'GBP', monthlyPriceMajorUnit: monthlyPriceGbp, stripePriceId: price.id,
+                }).onConflictDoUpdate({ target: [planPrices.masterPlanId, planPrices.currency], set: { stripePriceId: price.id, monthlyPriceMajorUnit: monthlyPriceGbp } });
+                row.stripeProductId = product.id;
+            }
+        } catch (err: any) {
+            // AC1.1.4: roll back so we don't leave an orphan DB plan with no Stripe billing.
+            await db.delete(masterPlans).where(eq(masterPlans.id, row.id)).catch(() => {});
+            console.error('[master-data] Stripe push failed, rolled back plan:', err?.message);
+            return { statusCode: 502, body: JSON.stringify({ error: `Stripe sync failed — plan not created: ${err?.message || 'unknown error'}` }) };
+        }
+
         void insertAdminAuditLog({ adminId, action: 'record_delete', targetType: 'master_plan', targetId: row.id, newState: row, ipAddress: ip, userAgent: ua, reason: 'admin_create' });
         return { statusCode: 201, body: JSON.stringify(row) };
     }
@@ -112,9 +150,10 @@ async function handleMasterPlans(event: any, adminId: number, role: string, ip?:
     if (method === 'PATCH') {
         if (!id) return badRequest('id required.');
         const body = JSON.parse(event.body || '{}');
-        const { name, monthlyPriceGbp, assistantLimit, monthlyTaskLimit, monthlyTokenLimit, appConnectionLimit, seatLimit, isActive } = body;
+        const { name, monthlyPriceGbp, assistantLimit, monthlyTaskLimit, monthlyTokenLimit, appConnectionLimit, seatLimit, isActive, features } = body;
         const [prev] = await db.select().from(masterPlans).where(eq(masterPlans.id, id)).limit(1);
         if (!prev) return notFound();
+
         const updates: any = {};
         if (name !== undefined) updates.name = name;
         if (monthlyPriceGbp !== undefined) updates.monthlyPriceGbp = monthlyPriceGbp;
@@ -124,7 +163,52 @@ async function handleMasterPlans(event: any, adminId: number, role: string, ip?:
         if (appConnectionLimit !== undefined) updates.appConnectionLimit = appConnectionLimit;
         if (seatLimit !== undefined) updates.seatLimit = seatLimit;
         if (isActive !== undefined) updates.isActive = isActive;
+        if (features !== undefined) updates.features = features;
+
+        // Stripe sync runs BEFORE the DB write so a failure leaves the DB unchanged.
+        const priceChanged = monthlyPriceGbp !== undefined && Number(monthlyPriceGbp) !== Number(prev.monthlyPriceGbp);
+        const archiving = isActive === false && prev.isActive === true;
+        let newStripePriceId: string | null = null;
+        try {
+            if (stripe && prev.stripeProductId) {
+                if (priceChanged) {
+                    // AC1.2.2: mint a NEW price, archive the OLD one — never overwrite (legacy subs keep billing on it).
+                    const [gbpPrice] = await db.select().from(planPrices)
+                        .where(and(eq(planPrices.masterPlanId, id), eq(planPrices.currency, 'GBP'))).limit(1);
+                    const newPrice = await stripe.prices.create({
+                        product: prev.stripeProductId,
+                        unit_amount: Math.round(Number(monthlyPriceGbp) * 100),
+                        currency: 'gbp',
+                        recurring: { interval: 'month' },
+                    });
+                    if (gbpPrice?.stripePriceId) await stripe.prices.update(gbpPrice.stripePriceId, { active: false }).catch(() => {});
+                    newStripePriceId = newPrice.id;
+                }
+                if (archiving) {
+                    // AC1.2.1: deactivate the plan's Stripe prices so no new sign-ups can use them.
+                    const prices = await db.select().from(planPrices).where(eq(planPrices.masterPlanId, id));
+                    for (const p of prices) {
+                        if (p.stripePriceId) await stripe.prices.update(p.stripePriceId, { active: false }).catch(() => {});
+                    }
+                }
+            }
+        } catch (err: any) {
+            console.error('[master-data] Stripe sync failed on plan update:', err?.message);
+            return { statusCode: 502, body: JSON.stringify({ error: `Stripe sync failed — no changes saved: ${err?.message || 'unknown error'}` }) };
+        }
+
         const [row] = await db.update(masterPlans).set(updates).where(eq(masterPlans.id, id)).returning();
+
+        // Point the GBP price row at the freshly minted Stripe price (and mark the old DB row inactive).
+        if (newStripePriceId) {
+            await db.update(planPrices)
+                .set({ stripePriceId: newStripePriceId, monthlyPriceMajorUnit: monthlyPriceGbp })
+                .where(and(eq(planPrices.masterPlanId, id), eq(planPrices.currency, 'GBP')));
+        }
+        if (archiving) {
+            await db.update(planPrices).set({ isActive: false }).where(eq(planPrices.masterPlanId, id));
+        }
+
         void insertAdminAuditLog({ adminId, action: 'record_delete', targetType: 'master_plan', targetId: id, previousState: prev, newState: row, ipAddress: ip, userAgent: ua, reason: 'admin_update' });
         return { statusCode: 200, body: JSON.stringify(row) };
     }

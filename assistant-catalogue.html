@@ -212,7 +212,7 @@
             </div>
             <div class="p-4 bg-emerald-50 border-t border-emerald-100 flex justify-between items-center gap-3">
               <span class="text-xs font-bold text-emerald-700 uppercase tracking-wider">${required} tasks completed</span>
-              <button onclick="window._catHire('${a.roleKey}')" class="bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-emerald-800 transition">Hire Role</button>
+              <button onclick="window._catHire('${a.roleKey}')" style="cursor:pointer" class="bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-emerald-800 transition">Hire Role</button>
             </div>
           </div>`;
       }
@@ -258,7 +258,7 @@
         </div>
         <div class="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center gap-3">
           <span class="text-xs font-bold text-gray-500 uppercase tracking-wider">Included in Plan</span>
-          <button onclick="window._catHire('${a.roleKey}')" class="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-800 transition">Hire Role</button>
+          <button onclick="window._catHire('${a.roleKey}')" style="cursor:pointer" class="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-800 transition">Hire Role</button>
         </div>
       </div>`;
   }
@@ -358,14 +358,19 @@
       }
     } catch { /* allow through on error */ }
 
-    // Store intended role and go to onboarding
+    // Go straight to the role-specific onboarding wizard (skips the onboarding.html
+    // role-picker step). roleKey matches the master-assistant roleKey from the DB.
+    // Falls back to onboarding.html for any role without a dedicated wizard.
+    // (Previously this called loadView('onboarding'), but there is no 'onboarding'
+    // workspace route, so the click silently did nothing.)
+    const ROLE_ONBOARDING_PAGE = {
+      social_media: 'onboarding-social-media.html',
+      paid_ads:     'onboarding-performance.html',
+      data_entry:   'onboarding-inventory.html',
+      custom:       'onboarding-custom.html',
+    };
     sessionStorage.setItem('intended_role_key', roleKey);
-    if (typeof window.loadView === 'function') {
-      window.loadView('onboarding');
-    } else {
-      // Fallback for direct URL access
-      window.location.href = 'workspace.html?view=onboarding&role=' + encodeURIComponent(roleKey);
-    }
+    window.location.href = ROLE_ONBOARDING_PAGE[roleKey] || 'onboarding.html';
   };
 
   // ── US-AUD-2.3.1: Notify Me toggle (milestone progress bar cards) ──────────

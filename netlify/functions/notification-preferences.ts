@@ -1,97 +1,66 @@
 // notification-preferences.ts
-// GET  → returns the user's current email notification preferences
-// POST → instant-save a single preference toggle (or a full object)
+// Backs the unified Notification Preferences matrix (account settings).
 //
-// GET response:
-//   { preferences: Record<string, boolean>, categories: CategoryMeta[] }
+// GET  → { categories: MatrixRow[], smsAvailable, whatsappAvailable }
+//        Each row carries per-channel { value, locked } for inApp + email and
+//        { available } for sms + whatsapp. Locked channels are forced ON.
 //
-// POST body:
-//   { key: string, value: boolean }   — single toggle
-//   { preferences: Record<string,boolean> }  — full replace (for bulk update)
+// POST → { key, channel: 'inApp' | 'email', value }            — single toggle
+//        { channel, preferences: Record<string, boolean> }      — bulk for one channel
+//        Rejects locked channel changes and any sms/whatsapp write (422).
 //
-// POST response:
-//   { success: true, preferences: Record<string,boolean> }
+// The category model + per-channel rules live in src/utils/notification-prefs.ts.
 
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { userProfiles } from '../../db/schema';
+import {
+    PREF_CATEGORIES, buildDefaults, resolveInAppPrefs, CHANNEL_AVAILABILITY, type PrefChannel,
+} from '../../src/utils/notification-prefs';
 
 const jwtSecret = process.env.JWT_SECRET;
-
-// ── Category definitions (source of truth) ───────────────────────────────────
-// locked: true  → always enabled; toggle is visible but disabled
-// defaultValue  → used when the user has no stored preference
-export const EMAIL_CATEGORIES = [
-    {
-        key: 'payment_confirmation',
-        label: 'Payment Confirmations',
-        description: 'Receipts and payment status for every transaction.',
-        locked: true,
-        defaultValue: true,
-    },
-    {
-        key: 'account_creation',
-        label: 'Account & Security Alerts',
-        description: 'Verification emails, password changes, and new login notices.',
-        locked: true,
-        defaultValue: true,
-    },
-    {
-        key: 'account_cancellation',
-        label: 'Subscription Changes',
-        description: 'Notifications when your plan is changed, upgraded, or cancelled.',
-        locked: true,
-        defaultValue: true,
-    },
-    {
-        key: 'invoice_ready',
-        label: 'Invoice Ready',
-        description: 'Email alert when a new invoice is available to download.',
-        locked: false,
-        defaultValue: true,
-    },
-    {
-        key: 'assistant_tasks',
-        label: 'Assistant Tasks & Summaries',
-        description: 'Daily or on-demand reports from your active AI assistants.',
-        locked: false,
-        defaultValue: true,
-    },
-    {
-        key: 'content_calendar',
-        label: 'Content Calendar Updates',
-        description: 'Approval reminders, post status changes, and publishing confirmations.',
-        locked: false,
-        defaultValue: true,
-    },
-    {
-        key: 'onboarding_reminders',
-        label: 'Onboarding Reminders',
-        description: 'Nudges to complete your assistant setup if you step away mid-onboarding.',
-        locked: false,
-        defaultValue: true,
-    },
-    {
-        key: 'new_role_availability',
-        label: 'New Role Availability',
-        description: "Emails when a new assistant role you've joined the waitlist for becomes live.",
-        locked: false,
-        defaultValue: false,
-    },
-] as const;
-
-// Build defaults object for new / incomplete profiles
-export function buildDefaultPreferences(): Record<string, boolean> {
-    return Object.fromEntries(EMAIL_CATEGORIES.map(c => [c.key, c.defaultValue]));
-}
 
 function getAuth(event: any): number | null {
     if (!jwtSecret) return null;
     const cookie = (event.headers.cookie || '').match(/aura_session=([^;]+)/)?.[1];
     if (!cookie) return null;
     try { return (jwt.verify(cookie, jwtSecret) as { userId: number }).userId; } catch { return null; }
+}
+
+type PrefMap = Record<string, boolean>;
+
+// Load both preference maps + the legacy notify_availability seed. Defensive: if the
+// in_app_preferences column hasn't been migrated yet (db/notification-in-app-preferences.sql),
+// selecting it throws — fall back to the legacy columns so GET still works.
+async function loadPrefs(db: ReturnType<typeof getDb>, userId: number): Promise<{
+    email: PrefMap | null; inApp: PrefMap | null; legacyAvailability: boolean | null; inAppColumn: boolean;
+}> {
+    try {
+        const [p] = await db.select({
+            email: userProfiles.emailPreferences,
+            inApp: userProfiles.inAppPreferences,
+            notifyAvailability: userProfiles.notifyAvailability,
+        }).from(userProfiles).where(eq(userProfiles.userId, userId)).limit(1);
+        return {
+            email: (p?.email as PrefMap) ?? null,
+            inApp: (p?.inApp as PrefMap) ?? null,
+            legacyAvailability: p?.notifyAvailability ?? null,
+            inAppColumn: true,
+        };
+    } catch {
+        const [p] = await db.select({
+            email: userProfiles.emailPreferences,
+            notifyAvailability: userProfiles.notifyAvailability,
+        }).from(userProfiles).where(eq(userProfiles.userId, userId)).limit(1);
+        return {
+            email: (p?.email as PrefMap) ?? null,
+            inApp: null,
+            legacyAvailability: p?.notifyAvailability ?? null,
+            inAppColumn: false,
+        };
+    }
 }
 
 export const handler: Handler = async (event) => {
@@ -104,92 +73,87 @@ export const handler: Handler = async (event) => {
 
     const db = getDb();
 
-    // ── GET ────────────────────────────────────────────────────────────────────
+    // ── GET ─────────────────────────────────────────────────────────────────────
     if (event.httpMethod === 'GET') {
-        const [profile] = await db
-            .select({ emailPreferences: userProfiles.emailPreferences })
-            .from(userProfiles)
-            .where(eq(userProfiles.userId, userId))
-            .limit(1);
+        const { email, inApp, legacyAvailability } = await loadPrefs(db, userId);
+        const emailVals: PrefMap = { ...buildDefaults('email'), ...(email ?? {}) };
+        const inAppVals = resolveInAppPrefs(inApp, legacyAvailability);
 
-        const stored = (profile?.emailPreferences as Record<string, boolean> | null) || {};
-        const defaults = buildDefaultPreferences();
-
-        // Merge: stored values win; fall back to defaults for missing keys;
-        // locked keys are always forced to true regardless of stored value
-        const preferences: Record<string, boolean> = { ...defaults, ...stored };
-        for (const cat of EMAIL_CATEGORIES) {
-            if (cat.locked) preferences[cat.key] = true;
-        }
+        const categories = PREF_CATEGORIES.map(cat => ({
+            key: cat.key,
+            label: cat.label,
+            description: cat.description,
+            inApp: { value: cat.inApp.locked ? true : !!inAppVals[cat.key], locked: cat.inApp.locked },
+            email: { value: cat.email.locked ? true : !!emailVals[cat.key], locked: cat.email.locked },
+            sms: { available: CHANNEL_AVAILABILITY.sms },
+            whatsapp: { available: CHANNEL_AVAILABILITY.whatsapp },
+        }));
 
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                preferences,
-                categories: EMAIL_CATEGORIES,
+                categories,
+                smsAvailable: CHANNEL_AVAILABILITY.sms,
+                whatsappAvailable: CHANNEL_AVAILABILITY.whatsapp,
             }),
         };
     }
 
-    // ── POST ───────────────────────────────────────────────────────────────────
-    let body: { key?: string; value?: boolean; preferences?: Record<string, boolean> } = {};
-    try { body = JSON.parse(event.body || '{}'); } catch {
-        return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON.' }) };
+    // ── POST ────────────────────────────────────────────────────────────────────
+    let body: { key?: string; channel?: string; value?: boolean; preferences?: Record<string, boolean> } = {};
+    try { body = JSON.parse(event.body || '{}'); }
+    catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON.' }) }; }
+
+    const channel = body.channel as PrefChannel | undefined;
+    if (channel !== 'inApp' && channel !== 'email') {
+        return { statusCode: 400, body: JSON.stringify({ error: "channel must be 'inApp' or 'email'. SMS/WhatsApp are not yet available." }) };
     }
 
-    // Load existing profile to get current preferences
-    const [profile] = await db
-        .select({ id: userProfiles.id, emailPreferences: userProfiles.emailPreferences })
-        .from(userProfiles)
-        .where(eq(userProfiles.userId, userId))
-        .limit(1);
-
-    if (!profile) {
-        return { statusCode: 404, body: JSON.stringify({ error: 'Profile not found.' }) };
-    }
-
-    const current = (profile.emailPreferences as Record<string, boolean> | null) || buildDefaultPreferences();
-
-    let updated: Record<string, boolean>;
-
+    // Collect the requested changes as { key: value }.
+    const changes: Record<string, boolean> = {};
     if (body.preferences && typeof body.preferences === 'object') {
-        // Bulk replace — validate all keys
-        updated = { ...current };
-        for (const [k, v] of Object.entries(body.preferences)) {
-            if (typeof v !== 'boolean') continue;
-            const cat = EMAIL_CATEGORIES.find(c => c.key === k);
-            if (!cat) continue;           // unknown key — skip
-            if (cat.locked) continue;     // locked — ignore attempt to change
-            updated[k] = v;
-        }
-    } else if (body.key !== undefined && body.value !== undefined) {
-        // Single toggle
-        const cat = EMAIL_CATEGORIES.find(c => c.key === body.key);
-        if (!cat) {
-            return { statusCode: 400, body: JSON.stringify({ error: `Unknown preference key: ${body.key}` }) };
-        }
-        if (cat.locked) {
-            return { statusCode: 400, body: JSON.stringify({ error: `Cannot change locked preference: ${body.key}` }) };
-        }
-        updated = { ...current, [body.key]: !!body.value };
+        for (const [k, v] of Object.entries(body.preferences)) if (typeof v === 'boolean') changes[k] = v;
+    } else if (body.key !== undefined && typeof body.value === 'boolean') {
+        changes[body.key] = body.value;
     } else {
-        return { statusCode: 400, body: JSON.stringify({ error: 'Provide either { key, value } or { preferences }.' }) };
+        return { statusCode: 400, body: JSON.stringify({ error: 'Provide { key, channel, value } or { channel, preferences }.' }) };
     }
 
-    // Enforce locked keys are always true in stored object
-    for (const cat of EMAIL_CATEGORIES) {
-        if (cat.locked) updated[cat.key] = true;
+    // Validate keys + reject locked-channel changes.
+    for (const k of Object.keys(changes)) {
+        const cat = PREF_CATEGORIES.find(c => c.key === k);
+        if (!cat) return { statusCode: 400, body: JSON.stringify({ error: `Unknown preference key: ${k}` }) };
+        if (cat[channel].locked) {
+            return { statusCode: 422, body: JSON.stringify({ error: `${cat.label} is required and cannot be changed.`, code: 'PREFERENCE_LOCKED' }) };
+        }
     }
 
-    await db
-        .update(userProfiles)
-        .set({ emailPreferences: updated, updatedAt: new Date() })
-        .where(eq(userProfiles.userId, userId));
+    try {
+        const { email, inApp, legacyAvailability } = await loadPrefs(db, userId);
+        const current: PrefMap = channel === 'inApp'
+            ? resolveInAppPrefs(inApp, legacyAvailability)
+            : { ...buildDefaults('email'), ...(email ?? {}) };
 
-    return {
-        statusCode: 200,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ success: true, preferences: updated }),
-    };
+        const updated: PrefMap = { ...current, ...changes };
+        // Never persist a value that contradicts a locked rule.
+        for (const cat of PREF_CATEGORIES) if (cat[channel].locked) updated[cat.key] = true;
+
+        await db.update(userProfiles)
+            .set({ [channel === 'inApp' ? 'inAppPreferences' : 'emailPreferences']: updated, updatedAt: new Date() } as any)
+            .where(eq(userProfiles.userId, userId));
+
+        return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ success: true, channel, preferences: updated }),
+        };
+    } catch (err) {
+        // Most likely the in_app_preferences column isn't migrated yet.
+        console.error('[notification-preferences] save failed:', err);
+        if (channel === 'inApp') {
+            return { statusCode: 503, body: JSON.stringify({ error: 'In-app preferences are not available yet. Please try again shortly.', code: 'INAPP_PREFS_UNAVAILABLE' }) };
+        }
+        return { statusCode: 500, body: JSON.stringify({ error: 'Could not save preference.' }) };
+    }
 };

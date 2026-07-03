@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Check Your Email | Aura-Assist</title>
+  <title>Check Your Email | Be More Swan</title>
   <link href="./style.css" rel="stylesheet">
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
   <link rel="apple-touch-icon" href="/favicon/apple-icon.png">
@@ -28,6 +28,12 @@
     <p class="text-lg text-gray-600 mb-8 leading-relaxed">
       We've sent a verification link to <strong id="displayEmail" class="text-gray-900">your email</strong>. Please click it to securely verify your identity and continue your workspace setup.
     </p>
+
+    <!-- Shown when registration succeeded but the verification email could not be sent automatically -->
+    <div id="sendFailedNotice" class="hidden bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800 text-left mb-6">
+      <p class="font-bold mb-1">Your account was created.</p>
+      <p>We couldn't send your verification email automatically. Please click <strong>Resend Verification Link</strong> below to receive it.</p>
+    </div>
 
     <div class="bg-gray-50 rounded-xl p-5 border border-gray-200 text-sm text-gray-600 text-left shadow-inner mb-6">
       <p class="font-bold text-gray-800 mb-2">Didn't receive the email?</p>
@@ -70,6 +76,11 @@
     const pendingEmail = sessionStorage.getItem('aura_pending_email');
     if (pendingEmail) {
       document.getElementById('displayEmail').innerText = pendingEmail;
+    }
+
+    // If registration reported the verification email failed to send, surface the resend prompt.
+    if (new URLSearchParams(window.location.search).get('send') === 'failed') {
+      document.getElementById('sendFailedNotice').classList.remove('hidden');
     }
   });
 

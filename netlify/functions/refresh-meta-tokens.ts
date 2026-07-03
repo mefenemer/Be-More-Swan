@@ -9,6 +9,8 @@ import { getDb } from '../../db/client';
 import { systemConnections, scheduledPosts, notifications, users, auditLogs, userOrganisations } from '../../db/schema';
 import { storeSecret, getSecret } from '../../src/utils/vault';
 import { sendEmail } from '../../src/utils/email';
+import { resolveActionNotifications, CONNECTION_RESTORED_TYPES } from '../../src/utils/notification-actions';
+import { systemPauseWorkingAssistants } from '../../src/utils/assistant-lifecycle';
 
 const metaAppId  = process.env.META_APP_ID!;
 const metaSecret = process.env.META_APP_SECRET!;
@@ -23,6 +25,7 @@ export const handler: Handler = async () => {
         .select({
             id: systemConnections.id,
             organisationId: systemConnections.organisationId,
+            assistantId: systemConnections.assistantId,
             vaultRefKey: systemConnections.vaultRefKey,
             externalUserId: systemConnections.externalUserId,
             tokenExpiresAt: systemConnections.tokenExpiresAt,
@@ -46,7 +49,7 @@ export const handler: Handler = async () => {
 };
 
 async function refreshToken(db: ReturnType<typeof getDb>, conn: {
-    id: number; organisationId: number; vaultRefKey: string | null;
+    id: number; organisationId: number; assistantId: number | null; vaultRefKey: string | null;
     externalUserId: string | null; tokenExpiresAt: Date | null;
 }) {
     if (!conn.vaultRefKey) return;
@@ -72,6 +75,12 @@ async function refreshToken(db: ReturnType<typeof getDb>, conn: {
         }).where(eq(systemConnections.id, conn.id));
 
         await db.insert(auditLogs).values({ actionType: 'instagram_token_refreshed', resourceType: 'system_connections', resourceId: String(conn.id), newState: { organisationId: conn.organisationId, newExpiry } });
+
+        // Token is healthy again — clear any open "reconnect Instagram" prompt for this org's user.
+        const [refreshedUser] = await db.select({ id: users.id }).from(users)
+            .innerJoin(userOrganisations, eq(users.id, userOrganisations.userId))
+            .where(eq(userOrganisations.organisationId, conn.organisationId)).limit(1);
+        if (refreshedUser) await resolveActionNotifications(db, refreshedUser.id, CONNECTION_RESTORED_TYPES);
 
     } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -102,12 +111,20 @@ async function refreshToken(db: ReturnType<typeof getDb>, conn: {
             await sendEmail({
                 to: orgUser.email,
                 subject: 'Action required: Reconnect your Instagram account',
-                html: `<p>Your Instagram account connected to Aura-Assist needs to be reconnected — your token could not be automatically refreshed.</p>
+                html: `<p>Your Instagram account connected to Be More Swan needs to be reconnected — your token could not be automatically refreshed.</p>
                        <p>Your scheduled posts have been paused and will resume once you reconnect.</p>
-                       <p><a href="${process.env.BASE_URL || 'https://aura-assist.com'}/workspace.html?reconnect=instagram">Reconnect Instagram →</a></p>`,
+                       <p><a href="${process.env.BASE_URL || 'https://bemoreswan.com'}/workspace.html?reconnect=instagram">Reconnect Instagram →</a></p>`,
             });
         }
 
         await db.insert(auditLogs).values({ actionType: 'instagram_token_refresh_failed', resourceType: 'system_connections', resourceId: String(conn.id), newState: { error: msg } });
+
+        // US5 AC5.1(a): expired/unrefreshable token → force dependent working assistant(s) into
+        // system_paused (assistant-scoped when set, else the whole org).
+        await systemPauseWorkingAssistants(
+            db,
+            { organisationId: conn.organisationId, assistantId: conn.assistantId },
+            'token_refresh_failed:instagram',
+        );
     }
 }

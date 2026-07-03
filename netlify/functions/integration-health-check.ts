@@ -108,7 +108,7 @@ async function runIntegrationHealthCheck() {
                                Re-connect ${displayName} →
                              </a>
                            </p>
-                           <p>The Aura Team</p>`,
+                           <p>The Be More Swan Team</p>`,
                 }).catch(() => {});
             }
         }

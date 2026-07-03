@@ -13,18 +13,15 @@ import { getDb, withUpdatedAt } from '../../db/client';
 import { users, organisations, plans, userOrganisations } from '../../db/schema';
 import { and } from 'drizzle-orm';
 import Stripe from 'stripe';
+import { DISCLOSURE, isEuCountry } from '../../src/config/compliance';
 
 const jwtSecret = process.env.JWT_SECRET;
 const stripe = process.env.STRIPE_SECRET_KEY
     ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' })
     : null;
 
-const DEFAULT_FOOTER_TEXT = 'This message was composed with AI assistance.';
-
-const EU_COUNTRY_CODES = new Set([
-    'AT','BE','BG','CY','CZ','DE','DK','EE','ES','FI','FR','GR','HR','HU',
-    'IE','IT','LT','LU','LV','MT','NL','PL','PT','RO','SE','SI','SK',
-]);
+// Default disclosure copy + EU jurisdiction list live in src/config/compliance.ts (AC4.1).
+const DEFAULT_FOOTER_TEXT = DISCLOSURE.workspaceFooterDefault;
 
 async function getOrgBillingCountry(stripeCustomerId: string | null | undefined): Promise<string | null> {
     if (!stripe || !stripeCustomerId) return null;
@@ -82,7 +79,7 @@ export const handler: Handler = async (event) => {
             .limit(1);
 
         const billingCountry = await getOrgBillingCountry(plan?.stripeCustomerId);
-        const isEuJurisdiction = billingCountry ? EU_COUNTRY_CODES.has(billingCountry.toUpperCase()) : false;
+        const isEuJurisdiction = isEuCountry(billingCountry);
 
         // Auto-enable disclosure footer for EU orgs that haven't explicitly opted in yet
         if (isEuJurisdiction && !org.aiDisclosureFooterEnabled) {

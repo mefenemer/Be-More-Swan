@@ -18,6 +18,7 @@ import {
     invoices, supportTickets, systemConnections, notifications, dataExportRequests, plans,
 } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
+import { requireOnboarding } from '../../src/utils/onboarding-guard';
 
 const jwtSecret = process.env.JWT_SECRET!;
 const BASE_URL  = process.env.BASE_URL || '';
@@ -35,6 +36,10 @@ export const handler: Handler = async (event) => {
     if (!userId) return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized.' }) };
 
     const db = getDb();
+
+    // US3 (AC3.1/AC3.2): Export is gated until onboarding is complete.
+    const denied = await requireOnboarding(db, userId);
+    if (denied) return denied;
 
     // SC5: Rate limit — one export per 24 hours
     const cutoff24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
@@ -162,7 +167,7 @@ export const handler: Handler = async (event) => {
     // SC4: Send email with download link
     sendEmail({
         to: user?.email || '',
-        subject: 'Your Aura data export is ready',
+        subject: 'Your Be More Swan data export is ready',
         html: `<p>Hi ${user?.firstName || 'there'},</p>
                <p>Your personal data export is ready. Click the button below to download it — the link is valid for 24 hours.</p>
                <p style="margin-top:20px;">
@@ -171,7 +176,7 @@ export const handler: Handler = async (event) => {
                  </a>
                </p>
                <p style="font-size:0.8rem;color:#9ca3af;margin-top:12px;">This link expires in 24 hours. After that, you can request a new export from your account settings.</p>
-               <p>The Aura Team</p>`,
+               <p>The Be More Swan Team</p>`,
     }).catch(() => {});
 
     return {

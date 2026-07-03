@@ -160,7 +160,7 @@ const handler = async () => {
         if (admin.email) {
             await sendEmail({
                 to: admin.email,
-                subject: `[Aura-Assist] Monthly Bias Sampling Report — ${windowStart.toISOString().slice(0, 7)}`,
+                subject: `[Be More Swan] Monthly Bias Sampling Report — ${windowStart.toISOString().slice(0, 7)}`,
                 html: `<p>Hi ${admin.firstName || 'there'},</p>
 <p>The monthly bias sampling job completed for <strong>${windowStart.toISOString().slice(0, 7)}</strong>.</p>
 <ul>
@@ -168,7 +168,7 @@ const handler = async () => {
   <li>Anomalies flagged: <strong>${anomalies.length}</strong></li>
   ${anomalies.length > 0 ? `<li style="color:#dc2626">Assistants suspended: ${[...new Set(anomalies.map(a => a.assistantId))].length}</li>` : '<li style="color:#059669">No distributional anomalies detected.</li>'}
 </ul>
-<p>View the full report in the <a href="${process.env.BASE_URL || 'https://aura-assist.com'}/admin.html">Admin Dashboard → Bias Audit</a>.</p>`,
+<p>View the full report in the <a href="${process.env.BASE_URL || 'https://bemoreswan.com'}/admin.html">Admin Dashboard → Bias Audit</a>.</p>`,
             }).catch(() => {});
         }
     }

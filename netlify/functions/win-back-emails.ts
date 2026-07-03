@@ -116,14 +116,14 @@ async function runWinBackEmails() {
                 ));
 
             const taskLine = taskCount > 0
-                ? `<p>In your last month with Aura, your assistants completed <strong>${taskCount} task${taskCount === 1 ? '' : 's'}</strong> for you.</p>`
+                ? `<p>In your last month with Be More Swan, your assistants completed <strong>${taskCount} task${taskCount === 1 ? '' : 's'}</strong> for you.</p>`
                 : '';
 
             await sendEmail({
                 to: userRecord.email,
                 subject: `We miss you — here's what your assistants have been up to`,
                 html: `<p>Hi ${name},</p>
-                       <p>It's been a week since you left Aura, and we've been thinking about you.</p>
+                       <p>It's been a week since you left Be More Swan, and we've been thinking about you.</p>
                        ${taskLine}<p>Your AI assistants haven't stopped — they've been patiently waiting, ready to jump straight back in to scheduling, content creation, and growing your business the moment you return.</p>
                        <p>Coming back is easy. Your entire setup — assistants, brand voice, integrations — is preserved and ready.</p>
                        <p style="margin-top:24px;">
@@ -134,14 +134,14 @@ async function runWinBackEmails() {
                        <p style="margin-top:16px;font-size:0.875rem;color:#6b7280;">
                          <a href="${unsubUrl}" style="color:#9ca3af;">Unsubscribe from re-subscription emails</a>
                        </p>
-                       <p>The Aura Team</p>`,
+                       <p>The Be More Swan Team</p>`,
             }).catch(err => console.warn('[win-back-emails] Day 7 email failed:', err));
 
         } else {
             // SC3: Day 30 win-back — direct offer
             await sendEmail({
                 to: userRecord.email,
-                subject: `One last thing — come back to Aura (special offer inside)`,
+                subject: `One last thing — come back to Be More Swan (special offer inside)`,
                 html: `<p>Hi ${name},</p>
                        <p>It's been 30 days since you cancelled, and we'd love to have you back.</p>
                        <p>We've been listening to feedback and have made improvements since you left — new integrations, faster assistants, and more control over your content.</p>
@@ -155,7 +155,7 @@ async function runWinBackEmails() {
                        <p style="margin-top:16px;font-size:0.875rem;color:#6b7280;">
                          <a href="${unsubUrl}" style="color:#9ca3af;">Unsubscribe from re-subscription emails</a>
                        </p>
-                       <p>The Aura Team</p>`,
+                       <p>The Be More Swan Team</p>`,
             }).catch(err => console.warn('[win-back-emails] Day 30 email failed:', err));
         }
     }

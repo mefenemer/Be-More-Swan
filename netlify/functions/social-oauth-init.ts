@@ -5,13 +5,11 @@
 // AC1.1.3: LinkedIn uses minimum required scopes only.
 
 import { Handler } from '@netlify/functions';
-import jwt from 'jsonwebtoken';
 import { randomBytes } from 'crypto';
 import { getDb } from '../../db/client';
 import { storeSecret } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
-
-const jwtSecret = process.env.JWT_SECRET!;
+import { requireTenant } from '../../src/utils/tenant';
 
 const CSRF_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -28,35 +26,33 @@ export const handler: Handler = async (event) => {
         return { statusCode: 400, body: JSON.stringify({ error: 'Unknown platform' }) };
     }
 
-    const cookieHeader = event.headers.cookie || '';
-    const sessionToken = cookieHeader.match(/aura_session=([^;]+)/)?.[1];
-    if (!sessionToken) return { statusCode: 302, headers: { Location: '/workspace.html?oauth_error=unauthenticated' }, body: '' };
-
-    let userId: number;
-    let organisationId: number;
-    try {
-        const p = jwt.verify(sessionToken, jwtSecret) as { userId: number; organisationId: number };
-        userId = p.userId;
-        organisationId = p.organisationId;
-    } catch {
+    // Resolve the caller + their ACTIVE organisation from userOrganisations (never from a
+    // JWT field — the session token carries activeOrganisationId, not organisationId; reading
+    // the latter yielded `undefined`, which broke the callback's relevance/org scoping).
+    const db = getDb();
+    const ctx = await requireTenant(event, db);
+    if ('error' in ctx) {
         return { statusCode: 302, headers: { Location: '/workspace.html?oauth_error=invalid_session' }, body: '' };
     }
+    const { userId, organisationId } = ctx;
+
+    // Bind this connection to the assistant it's being connected for (optional).
+    const assistantId = event.queryStringParameters?.assistantId || '';
 
     const csrf = randomBytes(32).toString('hex');
     const expiresAt = Date.now() + CSRF_TTL_MS;
 
     const callbackUri = `${baseUrl}/.netlify/functions/social-oauth-callback?platform=${platform}`;
-    const db = getDb();
 
     let authUrl: string;
 
     if (platform === 'linkedin') {
         const clientId = process.env.LINKEDIN_CLIENT_ID;
-        if (!clientId) return { statusCode: 500, body: 'LinkedIn OAuth not configured' };
+        if (!clientId) return { statusCode: 302, headers: { Location: '/workspace.html?oauth_error=not_configured&platform=linkedin' }, body: '' };
 
         // AC1.1.2: store CSRF state server-side with TTL
         const csrfKey = `oauth_csrf:${userId}:linkedin`;
-        await storeSecret(db, csrfKey, { csrf, expiresAt, organisationId: String(organisationId) });
+        await storeSecret(db, csrfKey, { csrf, expiresAt, organisationId: String(organisationId), assistantId });
 
         // AC1.1.3: minimum required scopes only
         const scopes = 'r_organization_social,w_organization_social,r_basicprofile';
@@ -66,14 +62,14 @@ export const handler: Handler = async (event) => {
     } else {
         // X OAuth 2.0 with PKCE
         const clientId = process.env.X_CLIENT_ID;
-        if (!clientId) return { statusCode: 500, body: 'X OAuth not configured' };
+        if (!clientId) return { statusCode: 302, headers: { Location: '/workspace.html?oauth_error=not_configured&platform=x' }, body: '' };
         const codeVerifier = randomBytes(32).toString('base64url');
         const { createHash } = await import('crypto');
         const codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
 
         // AC1.1.2: store CSRF state + PKCE verifier server-side with TTL
         const csrfKey = `oauth_csrf:${userId}:x`;
-        await storeSecret(db, csrfKey, { csrf, expiresAt, organisationId: String(organisationId), codeVerifier });
+        await storeSecret(db, csrfKey, { csrf, expiresAt, organisationId: String(organisationId), codeVerifier, assistantId });
 
         const state = buildState({ platform, userId: String(userId), csrf });
         const scopes = 'tweet.read tweet.write users.read offline.access';
