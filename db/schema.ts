@@ -353,6 +353,11 @@ export const userProfiles = pgTable("user_profiles", {
   // payment_confirmation) are forced true in the application layer regardless of
   // stored value. Supersedes the legacy notify_wins/billing/availability columns.
   inAppPreferences: jsonb("in_app_preferences"),
+  // Per-assistant overrides of the notification matrix (assistant-scoped categories only).
+  // Shape: { [assistantId]: { [categoryKey]: { inApp?: bool, email?: bool } } }. Missing key
+  // at any level = use the workspace-wide preference above. Resolution in
+  // src/utils/notification-prefs.ts. Requires db/notifications-assistant-scope.sql.
+  assistantNotifPrefs: jsonb("assistant_notif_prefs"),
   language: text("language").default("en"),
   // Onboarding Wizard Step 3 (User Profile). Shape: { preset?, start?, end?, days?[] }.
   // A non-null value marks the working-hours step complete (see get-wizard-state.ts).
@@ -399,6 +404,11 @@ export const notifications = pgTable("notifications", {
   // per notification. Requires db/notifications-email-fallback.sql.
   deliveredAt: timestamp("delivered_at"),
   fallbackEmailSentAt: timestamp("fallback_email_sent_at"),
+  // Which assistant produced this notification (NULL = account-level). Stamped by a
+  // BEFORE INSERT trigger from metadata->>'assistantId' — insert sites carry the id in
+  // metadata rather than setting this column. Drives per-assistant preference gating
+  // (user_profiles.assistant_notif_prefs). Requires db/notifications-assistant-scope.sql.
+  assistantId: integer("assistant_id"),
 }, (t) => [
   // US-DB-1.1.1: Notification inbox query — userId + isRead + createdAt
   index("notifications_user_read_idx").on(t.userId, t.isRead, t.createdAt),

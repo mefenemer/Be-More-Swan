@@ -413,7 +413,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                     message: outOfCredits
                         ? `Your ${platformLabel} post draft is ready to review, but we couldn't generate an AI image — your AI credit balance is empty. Top up credits or add media in the Review Queue.`
                         : `Your ${platformLabel} post draft is ready to review, but we couldn't source any media for it. Check the assistant's Media Sources settings or add media in the Review Queue.`,
-                    metadata: { jobId: job.job_id, postId: post.id, reason: mediaExhaustedReason },
+                    metadata: { jobId: job.job_id, postId: post.id, reason: mediaExhaustedReason, assistantId: job.assistant_id },
                 });
             } else {
                 await db.insert(notifications).values({
@@ -423,7 +423,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                     message: job.trigger_type === 'on_demand'
                         ? 'Your on-demand post draft is ready to review.'
                         : `Your ${platformLabel} post draft is ready to review.`,
-                    metadata: { jobId: job.job_id, postId: post.id },
+                    metadata: { jobId: job.job_id, postId: post.id, assistantId: job.assistant_id },
                 });
             }
         }
@@ -442,7 +442,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 type: 'post_generation_failed',
                 title: 'Post generation failed',
                 message: 'We were unable to generate your post. Please try again or contact support if the issue persists.',
-                metadata: { jobId: job.job_id, error: errorMessage },
+                metadata: { jobId: job.job_id, error: errorMessage, assistantId: job.assistant_id },
             });
             await db.insert(auditLogs).values({ actionType: 'post_generation_failed', resourceType: 'content_generation_jobs', resourceId: job.job_id, userId: job.user_id, newState: { errorMessage, attempt } });
         } else {

@@ -452,6 +452,16 @@
         <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
       </div>
     </button>
+
+    <button type="button" data-tab="notifications" class="detail-tab-btn brief-card w-full text-left">
+      <div class="flex items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-bold text-gray-900">Notifications</p>
+          <p class="text-xs text-gray-500 mt-0.5">How you're alerted about this assistant's work</p>
+        </div>
+        <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </div>
+    </button>
   </div>
 
   </div><!-- /tab-profile-home -->
@@ -941,6 +951,62 @@
       </div>
     </div>
 
+  </div>
+
+  <!-- ── TAB: Notifications ────────────────────────────────────────
+       Assistant-work notification preferences (Approvals, Tasks, Content,
+       Connections) for THIS assistant. Rows are the scope:'assistant'
+       categories from /notification-preferences?assistantId=N — workspace
+       defaults overlaid with this assistant's per-user overrides; toggling
+       writes an override for this assistant only. Also hosts the review-alert
+       cadence (aiAssistants.reviewNotifPreference via set-review-notif-prefs).
+       Rendered by _initAssistantNotifPrefs() in assistants.js. -->
+  <div id="tab-notifications" class="detail-tab-content hidden space-y-6">
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+      <div class="mb-4">
+        <h3 class="text-lg font-bold text-gray-900">Notifications</h3>
+        <p class="text-sm text-gray-500 mt-1">Choose how you're alerted about this assistant's work — approvals, completed tasks, content and connections. Account &amp; billing alerts are managed in <a href="#" onclick="window.loadView && window.loadView('settings'); return false;" class="text-emerald-700 font-semibold hover:underline">Account Settings</a>.</p>
+      </div>
+      <div class="mb-5 flex items-start gap-2 text-xs text-emerald-700 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
+        <svg class="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <span>Toggles start on your workspace-wide settings; changing one here applies to this assistant only. SMS and WhatsApp delivery is coming to higher plans.</span>
+      </div>
+      <div id="assistant-notif-prefs-loading" class="text-sm text-gray-400">Loading preferences…</div>
+      <div id="assistant-notif-prefs-list" class="hidden divide-y divide-gray-100"></div>
+      <p id="assistant-notif-prefs-saved" class="hidden text-xs text-emerald-600 font-semibold mt-3">✓ Preference saved</p>
+    </div>
+
+    <!-- Review-alert cadence: how urgently to chase approvals for this assistant's drafts -->
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+      <div class="mb-4">
+        <h3 class="text-lg font-bold text-gray-900">Review alerts</h3>
+        <p class="text-sm text-gray-500 mt-1">How urgently should we chase you when this assistant's drafts are waiting for approval?</p>
+      </div>
+      <div id="review-cadence-options" class="space-y-3">
+        <label class="flex items-start gap-3 cursor-pointer">
+          <input type="radio" name="review-cadence" value="immediate" class="mt-1 h-4 w-4 text-emerald-600 border-gray-300 focus:ring-emerald-500">
+          <span>
+            <span class="block text-sm font-semibold text-gray-900">Immediate</span>
+            <span class="block text-xs text-gray-400 leading-snug">Alert me as soon as a pending post enters its final 12-hour approval window.</span>
+          </span>
+        </label>
+        <label class="flex items-start gap-3 cursor-pointer">
+          <input type="radio" name="review-cadence" value="red_urgency_only" class="mt-1 h-4 w-4 text-emerald-600 border-gray-300 focus:ring-emerald-500">
+          <span>
+            <span class="block text-sm font-semibold text-gray-900">Urgent only</span>
+            <span class="block text-xs text-gray-400 leading-snug">Only alert me for posts at risk of missing their publish window.</span>
+          </span>
+        </label>
+        <label class="flex items-start gap-3 cursor-pointer">
+          <input type="radio" name="review-cadence" value="daily_digest" class="mt-1 h-4 w-4 text-emerald-600 border-gray-300 focus:ring-emerald-500">
+          <span>
+            <span class="block text-sm font-semibold text-gray-900">Daily digest</span>
+            <span class="block text-xs text-gray-400 leading-snug">Skip instant alerts — I'll review pending posts from my daily approvals summary. Posts not approved before their cut-off are never auto-published.</span>
+          </span>
+        </label>
+      </div>
+      <p id="review-cadence-status" class="hidden text-xs font-semibold mt-3"></p>
+    </div>
   </div>
 
     </div><!-- /display:contents -->
@@ -1539,6 +1605,39 @@
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
         Encrypt &amp; Connect
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Pre-connect setup checklist modal (Meta OAuth platforms) ──────
+     Shown before redirecting to Facebook's OAuth dialog so users complete the
+     Meta-side setup (Business account, linked Page, admin access) instead of
+     landing on an unhelpful Facebook error page. Driven by integrations.js
+     (_intOpenPreConnect). -->
+<div id="modal-preconnect" class="fixed inset-0 bg-gray-900/60 hidden z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm">
+  <div class="bg-white w-full sm:rounded-2xl sm:max-w-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+    <div class="flex items-center justify-between px-6 py-5 border-b border-gray-100">
+      <div class="flex items-center gap-4">
+        <div id="preconnect-icon" class="w-12 h-12 rounded-xl flex items-center justify-center text-xl font-bold shadow-sm shrink-0"></div>
+        <div>
+          <h2 id="preconnect-title" class="text-xl font-extrabold text-gray-900"></h2>
+          <p id="preconnect-intro" class="text-sm text-gray-500 mt-0.5"></p>
+        </div>
+      </div>
+      <button onclick="document.getElementById('modal-preconnect').classList.add('hidden')" class="p-2 rounded-lg text-gray-400 hover:bg-gray-100 hover:text-gray-700 transition cursor-pointer" type="button">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="overflow-y-auto flex-1 px-6 py-6">
+      <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide mb-4">Set this up in Meta first</h3>
+      <ol id="preconnect-steps" class="space-y-3"></ol>
+      <div id="preconnect-note" class="hidden mt-4 flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800"></div>
+    </div>
+    <div class="px-6 py-4 border-t border-gray-100 flex items-center justify-between gap-3 bg-gray-50/50 rounded-b-2xl">
+      <button onclick="document.getElementById('modal-preconnect').classList.add('hidden')" type="button"
+        class="px-4 py-2.5 text-sm font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition cursor-pointer">Cancel</button>
+      <a id="btn-preconnect-continue" href="#"
+        class="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer inline-block"></a>
     </div>
   </div>
 </div>

@@ -1,15 +1,25 @@
 // notification-preferences.ts
-// Backs the unified Notification Preferences matrix (account settings).
+// Backs the unified Notification Preferences matrix (account settings + assistant drawer).
 //
 // GET  → { categories: MatrixRow[], smsAvailable, whatsappAvailable }
 //        Each row carries per-channel { value, locked } for inApp + email and
 //        { available } for sms + whatsapp. Locked channels are forced ON.
+//        Rows also carry `scope`: 'account' rows render in Account Settings,
+//        'assistant' rows in the Assistant Profile drawer.
+//        ?assistantId=N → assistant-scope rows resolve that assistant's per-user
+//        overrides: value becomes the EFFECTIVE value and the row gains
+//        { overridden: { inApp, email } } so the UI can show "Custom" vs default.
 //
-// POST → { key, channel: 'inApp' | 'email', value }            — single toggle
+// POST → { key, channel: 'inApp' | 'email', value }            — single workspace toggle
 //        { channel, preferences: Record<string, boolean> }      — bulk for one channel
+//        { assistantId, key, channel, value: bool|null }        — per-assistant override
+//                                                                  (null clears → workspace default)
+//        { assistantId, reset: true }                           — clear all overrides for assistant
 //        Rejects locked channel changes and any sms/whatsapp write (422).
 //
 // The category model + per-channel rules live in src/utils/notification-prefs.ts.
+// Per-assistant overrides are stored in user_profiles.assistant_notif_prefs
+// (db/notifications-assistant-scope.sql) and only apply to scope:'assistant' rows.
 
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
@@ -17,7 +27,8 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { userProfiles } from '../../db/schema';
 import {
-    PREF_CATEGORIES, buildDefaults, resolveInAppPrefs, CHANNEL_AVAILABILITY, type PrefChannel,
+    PREF_CATEGORIES, buildDefaults, resolveInAppPrefs, overrideFor, CHANNEL_AVAILABILITY,
+    type PrefChannel, type AssistantOverrideMap,
 } from '../../src/utils/notification-prefs';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -31,12 +42,30 @@ function getAuth(event: any): number | null {
 
 type PrefMap = Record<string, boolean>;
 
-// Load both preference maps + the legacy notify_availability seed. Defensive: if the
-// in_app_preferences column hasn't been migrated yet (db/notification-in-app-preferences.sql),
-// selecting it throws — fall back to the legacy columns so GET still works.
+// Load both preference maps + per-assistant overrides + the legacy notify_availability
+// seed. Defensive: if the in_app_preferences (db/notification-in-app-preferences.sql) or
+// assistant_notif_prefs (db/notifications-assistant-scope.sql) columns haven't been
+// migrated yet, selecting them throws — fall back progressively so GET still works.
 async function loadPrefs(db: ReturnType<typeof getDb>, userId: number): Promise<{
-    email: PrefMap | null; inApp: PrefMap | null; legacyAvailability: boolean | null; inAppColumn: boolean;
+    email: PrefMap | null; inApp: PrefMap | null; assistantPrefs: AssistantOverrideMap;
+    legacyAvailability: boolean | null; inAppColumn: boolean; assistantColumn: boolean;
 }> {
+    try {
+        const [p] = await db.select({
+            email: userProfiles.emailPreferences,
+            inApp: userProfiles.inAppPreferences,
+            assistantPrefs: userProfiles.assistantNotifPrefs,
+            notifyAvailability: userProfiles.notifyAvailability,
+        }).from(userProfiles).where(eq(userProfiles.userId, userId)).limit(1);
+        return {
+            email: (p?.email as PrefMap) ?? null,
+            inApp: (p?.inApp as PrefMap) ?? null,
+            assistantPrefs: (p?.assistantPrefs as AssistantOverrideMap) ?? null,
+            legacyAvailability: p?.notifyAvailability ?? null,
+            inAppColumn: true,
+            assistantColumn: true,
+        };
+    } catch { /* fall through */ }
     try {
         const [p] = await db.select({
             email: userProfiles.emailPreferences,
@@ -46,8 +75,10 @@ async function loadPrefs(db: ReturnType<typeof getDb>, userId: number): Promise<
         return {
             email: (p?.email as PrefMap) ?? null,
             inApp: (p?.inApp as PrefMap) ?? null,
+            assistantPrefs: null,
             legacyAvailability: p?.notifyAvailability ?? null,
             inAppColumn: true,
+            assistantColumn: false,
         };
     } catch {
         const [p] = await db.select({
@@ -57,8 +88,10 @@ async function loadPrefs(db: ReturnType<typeof getDb>, userId: number): Promise<
         return {
             email: (p?.email as PrefMap) ?? null,
             inApp: null,
+            assistantPrefs: null,
             legacyAvailability: p?.notifyAvailability ?? null,
             inAppColumn: false,
+            assistantColumn: false,
         };
     }
 }
@@ -75,19 +108,35 @@ export const handler: Handler = async (event) => {
 
     // ── GET ─────────────────────────────────────────────────────────────────────
     if (event.httpMethod === 'GET') {
-        const { email, inApp, legacyAvailability } = await loadPrefs(db, userId);
+        const { email, inApp, assistantPrefs, legacyAvailability } = await loadPrefs(db, userId);
         const emailVals: PrefMap = { ...buildDefaults('email'), ...(email ?? {}) };
         const inAppVals = resolveInAppPrefs(inApp, legacyAvailability);
 
-        const categories = PREF_CATEGORIES.map(cat => ({
-            key: cat.key,
-            label: cat.label,
-            description: cat.description,
-            inApp: { value: cat.inApp.locked ? true : !!inAppVals[cat.key], locked: cat.inApp.locked },
-            email: { value: cat.email.locked ? true : !!emailVals[cat.key], locked: cat.email.locked },
-            sms: { available: CHANNEL_AVAILABILITY.sms },
-            whatsapp: { available: CHANNEL_AVAILABILITY.whatsapp },
-        }));
+        // ?assistantId=N → assistant-scope rows resolve that assistant's overrides.
+        const rawAid = event.queryStringParameters?.assistantId;
+        const assistantId = rawAid && /^\d+$/.test(rawAid) ? rawAid : null;
+
+        const categories = PREF_CATEGORIES.map(cat => {
+            const base = {
+                key: cat.key,
+                label: cat.label,
+                description: cat.description,
+                scope: cat.scope,
+                inApp: { value: cat.inApp.locked ? true : !!inAppVals[cat.key], locked: cat.inApp.locked },
+                email: { value: cat.email.locked ? true : !!emailVals[cat.key], locked: cat.email.locked },
+                sms: { available: CHANNEL_AVAILABILITY.sms },
+                whatsapp: { available: CHANNEL_AVAILABILITY.whatsapp },
+            };
+            if (!assistantId || cat.scope !== 'assistant') return base;
+            const oInApp = overrideFor(assistantPrefs, assistantId, cat.key, 'inApp');
+            const oEmail = overrideFor(assistantPrefs, assistantId, cat.key, 'email');
+            return {
+                ...base,
+                inApp: { ...base.inApp, value: oInApp ?? base.inApp.value },
+                email: { ...base.email, value: oEmail ?? base.email.value },
+                overridden: { inApp: oInApp !== undefined, email: oEmail !== undefined },
+            };
+        });
 
         return {
             statusCode: 200,
@@ -101,9 +150,66 @@ export const handler: Handler = async (event) => {
     }
 
     // ── POST ────────────────────────────────────────────────────────────────────
-    let body: { key?: string; channel?: string; value?: boolean; preferences?: Record<string, boolean> } = {};
+    let body: {
+        key?: string; channel?: string; value?: boolean | null;
+        preferences?: Record<string, boolean>;
+        assistantId?: number | string; reset?: boolean;
+    } = {};
     try { body = JSON.parse(event.body || '{}'); }
     catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON.' }) }; }
+
+    // ── Per-assistant override writes ───────────────────────────────────────────
+    if (body.assistantId !== undefined) {
+        if (!/^\d+$/.test(String(body.assistantId))) {
+            return { statusCode: 400, body: JSON.stringify({ error: 'assistantId must be a number.' }) };
+        }
+        const aid = String(body.assistantId);
+
+        const saveOverrides = async (overrides: Record<string, any>) => {
+            await db.update(userProfiles)
+                .set({ assistantNotifPrefs: overrides, updatedAt: new Date() } as any)
+                .where(eq(userProfiles.userId, userId));
+        };
+
+        try {
+            const { assistantPrefs, assistantColumn } = await loadPrefs(db, userId);
+            if (!assistantColumn) throw new Error('assistant_notif_prefs column missing');
+            const overrides: Record<string, any> = { ...(assistantPrefs ?? {}) };
+
+            if (body.reset) {
+                delete overrides[aid];
+            } else {
+                const ch = body.channel as PrefChannel | undefined;
+                if (ch !== 'inApp' && ch !== 'email') {
+                    return { statusCode: 400, body: JSON.stringify({ error: "channel must be 'inApp' or 'email'." }) };
+                }
+                const cat = PREF_CATEGORIES.find(c => c.key === body.key);
+                if (!cat) return { statusCode: 400, body: JSON.stringify({ error: `Unknown preference key: ${body.key}` }) };
+                if (cat.scope !== 'assistant') {
+                    return { statusCode: 422, body: JSON.stringify({ error: `${cat.label} is a workspace-level preference and cannot be customised per assistant.` }) };
+                }
+                if (typeof body.value !== 'boolean' && body.value !== null) {
+                    return { statusCode: 400, body: JSON.stringify({ error: 'value must be a boolean, or null to restore the workspace default.' }) };
+                }
+                const forAssistant = { ...(overrides[aid] ?? {}) };
+                const forCat = { ...(forAssistant[cat.key] ?? {}) };
+                if (body.value === null) delete forCat[ch]; else forCat[ch] = body.value;
+                // Prune empty levels so "no override" is a missing key, not an empty object.
+                if (Object.keys(forCat).length) forAssistant[cat.key] = forCat; else delete forAssistant[cat.key];
+                if (Object.keys(forAssistant).length) overrides[aid] = forAssistant; else delete overrides[aid];
+            }
+
+            await saveOverrides(overrides);
+            return {
+                statusCode: 200,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ success: true, assistantId: Number(aid), overrides: overrides[aid] ?? null }),
+            };
+        } catch (err) {
+            console.error('[notification-preferences] per-assistant save failed:', err);
+            return { statusCode: 503, body: JSON.stringify({ error: 'Per-assistant preferences are not available yet. Please try again shortly.', code: 'ASSISTANT_PREFS_UNAVAILABLE' }) };
+        }
+    }
 
     const channel = body.channel as PrefChannel | undefined;
     if (channel !== 'inApp' && channel !== 'email') {

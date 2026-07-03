@@ -76,6 +76,7 @@ export const handler: Handler = async (event) => {
             type: 'action_rejected',
             title: `Action rejected: ${action.actionType}`,
             message: `You rejected the pending ${action.actionType} action for run #${action.taskRunId}. Reason: ${rejectionReason}`,
+            metadata: { pendingActionId, assistantId: action.assistantId },
         }).catch(() => {});
     }
 

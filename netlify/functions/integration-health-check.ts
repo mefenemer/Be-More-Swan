@@ -25,6 +25,7 @@ async function runIntegrationHealthCheck() {
         .select({
             id:            systemConnections.id,
             userId:        systemConnections.userId,
+            assistantId:   systemConnections.assistantId,
             serviceName:   systemConnections.serviceName,
             status:        systemConnections.status,
             tokenExpiresAt: systemConnections.tokenExpiresAt,
@@ -85,7 +86,7 @@ async function runIntegrationHealthCheck() {
             title: notifTitle,
             message: notifMsg,
             isRead: false,
-            metadata: { connectionId: conn.id, serviceName: conn.serviceName, alertType },
+            metadata: { connectionId: conn.id, serviceName: conn.serviceName, alertType, assistantId: conn.assistantId },
         }).catch(() => {});
 
         // SC3: Email only for already-expired connections

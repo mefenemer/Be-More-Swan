@@ -114,7 +114,7 @@ export const handler: Handler = async (event) => {
         type: 'post_generation_queued',
         title: 'Revising your post…',
         message: 'Your feedback was sent to the assistant. The revised draft will be ready to review shortly.',
-        metadata: { jobId, originalPostId: postId },
+        metadata: { jobId, originalPostId: postId, assistantId: post.assistantId },
     }).catch(() => {});
 
     return {

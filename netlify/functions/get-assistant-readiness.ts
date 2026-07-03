@@ -164,8 +164,8 @@ export async function computeAssistantReadiness(db: Db, orgId: number, assistant
         const items = [
             { key: 'brand_strategy', label: 'Brand & strategy configured', done: brandConfigured, required: false,
               hint: 'Complete the onboarding form so your assistant knows your brand and goals (recommended).' },
-            { key: 'connections', label: 'Tools connected', done: hasHealthyConnection, required: true,
-              hint: 'Connect at least one account — and reconnect any expired ones — so your assistant can do its work.' },
+            { key: 'connections', label: 'Tools connected', done: hasHealthyConnection, required: false,
+              hint: 'You can connect accounts later — you\'ll be asked to connect a platform when you approve a post for it (recommended).' },
             { key: 'disclosure', label: 'AI disclosure acknowledged', done: disclosureDone, required: true,
               hint: 'Enter the disclosure caption in the Guardrails tab — the text appended to every post to declare AI-generated content (this is separate from the general AI disclaimer you may have already accepted).' },
             { key: 'tos', label: 'Terms of Service accepted', done: tosDone, required: true,

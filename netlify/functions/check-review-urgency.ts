@@ -10,6 +10,7 @@ import { and, eq, gt, isNull, lt, lte, sql } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
 import { aiAssistants, notifications, scheduledPosts, users } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
+import { isEmailAllowedForUser } from '../../src/utils/notification-email-gate';
 
 export const handler: Handler = async (event) => {
     if (event.httpMethod !== 'POST' && !(event as any).schedule) {
@@ -52,22 +53,24 @@ export const handler: Handler = async (event) => {
             .set(withUpdatedAt({ redAlertSentAt: now }))
             .where(eq(scheduledPosts.id, post.id));
 
-        // In-app notification
+        // In-app notification (assistantId in metadata → per-assistant preference gating)
         await db.insert(notifications).values({
             userId,
             type: 'review_red_urgency',
             title: 'Action needed — post due soon',
             message: `${post.platform} post scheduled for ${publishLabel} needs your approval in the next ${hoursLeft} hours or it will be missed.`,
+            metadata: { assistantId: post.assistantId, postId: post.id },
         }).catch(() => {});
 
-        // Email (only for 'immediate' pref — red_urgency_only also qualifies)
+        // Email (only for 'immediate' pref — red_urgency_only also qualifies), respecting
+        // the user's Approvals email preference (incl. any per-assistant override).
         const [user] = await db
             .select({ email: users.email, firstName: users.firstName })
             .from(users)
             .where(eq(users.id, userId))
             .limit(1);
 
-        if (user) {
+        if (user && await isEmailAllowedForUser(userId, 'review_red_urgency', post.assistantId)) {
             sendEmail({
                 to: user.email,
                 subject: `Action needed: ${post.platform} post due in ${hoursLeft}h`,
@@ -118,6 +121,7 @@ export const handler: Handler = async (event) => {
             type: 'post_missed',
             title: 'Post not published — approval window passed',
             message: `${post.platform} post scheduled for ${publishLabel} was not approved in time and has not been published. You can reschedule it from your Missed Posts tab.`,
+            metadata: { assistantId: post.assistantId, postId: post.id },
         }).catch(() => {});
 
         const [user] = await db
@@ -126,7 +130,7 @@ export const handler: Handler = async (event) => {
             .where(eq(users.id, userId))
             .limit(1);
 
-        if (user) {
+        if (user && await isEmailAllowedForUser(userId, 'post_missed', post.assistantId)) {
             sendEmail({
                 to: user.email,
                 subject: `Missed post: ${post.platform} scheduled for ${publishLabel}`,

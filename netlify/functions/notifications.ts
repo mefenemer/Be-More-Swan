@@ -5,7 +5,7 @@ import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
 import { users, notifications, userProfiles } from '../../db/schema';
 import { kindOf, categoryOf, priorityOf, isDismissibleType, resolvesOnClick } from '../../src/utils/notification-actions';
-import { isInAppEnabled, resolveInAppPrefs } from '../../src/utils/notification-prefs';
+import { isInAppEnabledFor, resolveInAppPrefs, type AssistantOverrideMap } from '../../src/utils/notification-prefs';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -68,20 +68,38 @@ export const handler = async (event: HandlerEvent) => {
 
             // In-app delivery preferences: hide categories the user has switched off in the
             // bell (account settings → Notification Preferences). Locked categories
-            // (account/security, billing) always pass via isInAppEnabled. Single chokepoint —
-            // applies regardless of which function created the row. Defensive: if the
-            // in_app_preferences column isn't migrated yet, treat as "all defaults on".
+            // (account/security, billing) always pass via the gate. Single chokepoint —
+            // applies regardless of which function created the row. Rows attributed to an
+            // assistant (assistant_id column, or assistantId in metadata pre-migration)
+            // additionally honour that assistant's per-user overrides. Defensive: if the
+            // in_app_preferences / assistant_notif_prefs columns aren't migrated yet,
+            // degrade to "all defaults on" / "no overrides".
             let inAppPrefs: Record<string, boolean>;
+            let assistantOverrides: AssistantOverrideMap = null;
             try {
                 const [prof] = await db.select({
                     inApp: userProfiles.inAppPreferences,
                     notifyAvailability: userProfiles.notifyAvailability,
+                    assistantPrefs: userProfiles.assistantNotifPrefs,
                 }).from(userProfiles).where(eq(userProfiles.userId, userId)).limit(1);
                 inAppPrefs = resolveInAppPrefs((prof?.inApp as Record<string, boolean>) ?? null, prof?.notifyAvailability ?? null);
+                assistantOverrides = (prof?.assistantPrefs as AssistantOverrideMap) ?? null;
             } catch {
-                inAppPrefs = resolveInAppPrefs(null, null);
+                // assistant_notif_prefs may predate in_app_preferences in some environments —
+                // retry without it so the workspace-wide prefs still load.
+                try {
+                    const [prof] = await db.select({
+                        inApp: userProfiles.inAppPreferences,
+                        notifyAvailability: userProfiles.notifyAvailability,
+                    }).from(userProfiles).where(eq(userProfiles.userId, userId)).limit(1);
+                    inAppPrefs = resolveInAppPrefs((prof?.inApp as Record<string, boolean>) ?? null, prof?.notifyAvailability ?? null);
+                } catch {
+                    inAppPrefs = resolveInAppPrefs(null, null);
+                }
             }
-            allNotes = allNotes.filter(n => isInAppEnabled(inAppPrefs, n.type));
+            const assistantIdOf = (n: any): number | string | null =>
+                n.assistantId ?? (n.metadata as any)?.assistantId ?? (n.metadata as any)?.assistant_id ?? null;
+            allNotes = allNotes.filter(n => isInAppEnabledFor(inAppPrefs, assistantOverrides, assistantIdOf(n), n.type));
 
             // Counts for the sidebar badge. actionCount = OPEN (unresolved) action items —
             // the meaningful "things you must deal with" number. Unresolved (resolvedAt IS NULL),

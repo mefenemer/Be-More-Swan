@@ -25,6 +25,17 @@ const PLATFORMS = [
             { text: 'Paste the token into the field below.' },
         ],
         note: 'You must be an Admin of the Facebook Page. If your page does not appear in the dropdown, check your role in Page Settings → Page Roles.',
+        // Shown BEFORE redirecting to Meta's OAuth dialog — if this setup is missing,
+        // Facebook shows an error page instead of connecting, so we front-load it here.
+        preConnect: {
+            intro: 'You\'ll be sent to Facebook to approve the connection. Check these first:',
+            steps: [
+                { text: 'You need a Facebook <strong>Page</strong> for your business — a personal profile can\'t be used. Create one here if you don\'t have one yet.', url: 'https://www.facebook.com/pages/create' },
+                { text: 'The Facebook account you sign in with must have <strong>Admin (full control)</strong> access to that Page — check under Page Settings → Page access.' },
+                { text: 'When Facebook asks for permissions, <strong>approve everything requested</strong> — declining any permission stops us from posting for you.' },
+            ],
+            note: 'If any of these steps are incomplete, Facebook will show an error instead of connecting. Finish the checklist, then come back and try again.',
+        },
     },
     {
         id: 'Instagram',
@@ -48,6 +59,20 @@ const PLATFORMS = [
             { text: 'Copy the token and paste it below.' },
         ],
         note: 'Personal Instagram accounts cannot be used with third-party tools — the account must be Business or Creator and linked to a Facebook Page.',
+        // Shown BEFORE redirecting to Meta's OAuth dialog. Instagram connects THROUGH
+        // Facebook, so users who haven't done the Meta-side setup land on a Facebook
+        // error page — this checklist catches that before they leave our site.
+        preConnect: {
+            intro: 'Instagram connects through Facebook, so a little Meta setup is needed first:',
+            steps: [
+                { text: 'Switch your Instagram to a <strong>Professional</strong> account: Instagram app → Settings → Account type and tools → <strong>Switch to Professional Account</strong> → choose Business or Creator.' },
+                { text: 'You need a Facebook <strong>Page</strong> for your business. Create one here if you don\'t have one yet.', url: 'https://www.facebook.com/pages/create' },
+                { text: 'Link your Instagram to that Facebook Page: Instagram → <strong>Edit Profile → Page → Connect</strong> (or from the Page: Settings → Linked Accounts → Instagram).' },
+                { text: 'The Facebook account you sign in with must have <strong>Admin (full control)</strong> access to that Page.' },
+                { text: 'When Facebook asks for permissions, <strong>approve everything requested</strong> — declining any permission stops us from publishing your posts.' },
+            ],
+            note: 'If any of these steps are incomplete, Facebook will show an error instead of connecting your account. Finish the checklist, then come back and try again.',
+        },
     },
     {
         id: 'LinkedIn',
@@ -335,11 +360,17 @@ function _platformCard(platform, conn) {
                <button onclick="window.loadView && window.loadView('assets')" class="text-xs font-semibold text-emerald-700 hover:underline cursor-pointer self-start" type="button">Add your ${platform.label} handle in Business Information first →</button>
            </div>`
         : platform.oauthPlatform
-        ? `<a href="${_oauthUrl(platform)}" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer inline-block">Connect with ${platform.label}</a>`
+        // Platforms with a preConnect checklist (Meta) go via the setup modal first —
+        // skipping it lands unprepared users on a raw Facebook error page.
+        ? (platform.preConnect
+            ? `<button onclick="window._intOpenPreConnect('${platform.id}')" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer" type="button">Connect with ${platform.label}</button>`
+            : `<a href="${_oauthUrl(platform)}" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer inline-block">Connect with ${platform.label}</a>`)
         : `<button onclick="window._intOpenModal('${platform.id}')" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer" type="button">Connect</button>`;
 
     const reconnectBtn = platform.oauthPlatform
-        ? `<a href="${_oauthUrl(platform)}" class="text-sm font-bold text-gray-500 hover:text-gray-800 transition cursor-pointer">Reconnect</a>`
+        ? (platform.preConnect
+            ? `<button onclick="window._intOpenPreConnect('${platform.id}')" class="text-sm font-bold text-gray-500 hover:text-gray-800 transition cursor-pointer" type="button">Reconnect</button>`
+            : `<a href="${_oauthUrl(platform)}" class="text-sm font-bold text-gray-500 hover:text-gray-800 transition cursor-pointer">Reconnect</a>`)
         : `<button onclick="window._intOpenModal('${platform.id}')" class="text-sm font-bold text-gray-500 hover:text-gray-800 transition cursor-pointer" type="button">Update token</button>`;
 
     // US-SMM-4.3.2: preflight audit status badge
@@ -520,13 +551,61 @@ window._intVerifyCheck = async function (connId, platform, checkId, checkLabel, 
     }
 };
 
+// ── Pre-connect setup checklist (Meta platforms) ─────────────────
+// Instagram/Facebook OAuth fails on Facebook's side (with an unhelpful Meta error
+// page) when the user hasn't done the Business-account/Page setup. Show the
+// required steps BEFORE redirecting, with an explicit "Continue" to start OAuth.
+window._intOpenPreConnect = function (platformId) {
+    const platform = PLATFORMS.find(p => p.id === platformId);
+    if (!platform || !platform.preConnect) return;
+    const pc = platform.preConnect;
+
+    const iconEl = document.getElementById('preconnect-icon');
+    if (iconEl) {
+        iconEl.className = `w-12 h-12 rounded-xl flex items-center justify-center text-xl font-bold shadow-sm shrink-0 ${platform.iconBg} ${platform.iconText}`;
+        iconEl.textContent = platform.emoji;
+    }
+    const titleEl = document.getElementById('preconnect-title');
+    if (titleEl) titleEl.textContent = `Connect ${platform.label}`;
+    const introEl = document.getElementById('preconnect-intro');
+    if (introEl) introEl.textContent = pc.intro || '';
+
+    const stepsEl = document.getElementById('preconnect-steps');
+    if (stepsEl) {
+        stepsEl.innerHTML = pc.steps.map((s, i) => `<li class="flex items-start gap-3">
+            <span class="w-6 h-6 rounded-full bg-emerald-100 text-emerald-700 text-xs font-extrabold flex items-center justify-center shrink-0 mt-0.5">${i + 1}</span>
+            <p class="text-sm text-gray-700 leading-relaxed">${s.text}${s.url ? ` <a href="${s.url}" target="_blank" rel="noopener" class="text-emerald-600 hover:underline font-semibold">Open ↗</a>` : ''}</p>
+        </li>`).join('');
+    }
+
+    const noteEl = document.getElementById('preconnect-note');
+    if (noteEl) {
+        if (pc.note) {
+            noteEl.classList.remove('hidden');
+            noteEl.innerHTML = `<svg class="w-4 h-4 shrink-0 text-amber-600 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg><span>${pc.note}</span>`;
+        } else {
+            noteEl.classList.add('hidden');
+        }
+    }
+
+    const continueBtn = document.getElementById('btn-preconnect-continue');
+    if (continueBtn) {
+        continueBtn.setAttribute('href', _oauthUrl(platform));
+        continueBtn.textContent = `I've done all this — continue to ${platform.label}`;
+    }
+
+    document.getElementById('modal-preconnect')?.classList.remove('hidden');
+};
+
 // ── Open connect modal ────────────────────────────────────────────
 window._intOpenModal = function (platformId) {
     const platform = PLATFORMS.find(p => p.id === platformId);
     if (!platform) return;
 
     // US-SMM-4.1.1: OAuth platforms redirect instead of showing the token modal
+    // (via the pre-connect setup checklist when the platform defines one).
     if (platform.oauthPlatform) {
+        if (platform.preConnect) { window._intOpenPreConnect(platformId); return; }
         window.location.href = _oauthUrl(platform);
         return;
     }

@@ -20,6 +20,13 @@
 
 export type PrefChannel = 'inApp' | 'email';
 
+// Where a category's toggles are surfaced:
+//   'account'   → Account Settings › Notification Preferences (BMS customer-level alerts)
+//   'assistant' → the Assistant Profile drawer (alerts produced by assistants doing their work)
+// Scope only controls WHERE the toggle renders — storage and delivery gating are
+// unchanged (per-user, workspace-wide), so both UIs share the same endpoint and keys.
+export type PrefScope = 'account' | 'assistant';
+
 interface ChannelRule {
     locked: boolean;   // true → always ON, toggle disabled
     default: boolean;  // value when the user has no stored preference
@@ -29,6 +36,7 @@ export interface PrefCategory {
     key: string;
     label: string;
     description: string;
+    scope: PrefScope;
     types: string[];   // raw notification `type`s this category governs
     inApp: ChannelRule;
     email: ChannelRule;
@@ -44,6 +52,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         key: 'account_security',
         label: 'Account & Security',
         description: 'Sign-in alerts, security warnings, and account/organisation changes.',
+        scope: 'account',
         inApp: LOCKED_ON, email: LOCKED_ON,
         types: [
             'security', 'agent_anomaly', 'account_update', 'authorization_code',
@@ -55,6 +64,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         key: 'payment_confirmation', // preserves the existing locked email key
         label: 'Billing & Subscription',
         description: 'Payment receipts, failed payments, plan changes, and trial alerts.',
+        scope: 'account',
         inApp: LOCKED_ON, email: LOCKED_ON,
         types: [
             'billing_payment_failed', 'missing_stripe_sub', 'stripe_cancelled_but_db_active',
@@ -69,6 +79,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         key: 'invoice_ready',
         label: 'Invoices',
         description: 'A new invoice is available to download.',
+        scope: 'account',
         inApp: ON, email: ON,
         types: ['invoice_ready'],
     },
@@ -76,6 +87,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         key: 'approvals',
         label: 'Approvals & Reviews',
         description: 'Posts and actions waiting for your approval, and risk reviews.',
+        scope: 'assistant',
         inApp: ON, email: ON,
         types: [
             'hitl_approval_required', 'review_red_urgency', 'risk_assessment_submitted',
@@ -86,6 +98,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         key: 'assistant_tasks',
         label: 'Assistant Tasks & Summaries',
         description: 'Completed work, wins, and on-demand reports from your assistants.',
+        scope: 'assistant',
         inApp: ON, email: ON,
         types: ['assistant_task', 'assistant_ready'],
     },
@@ -93,6 +106,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         key: 'content_calendar',
         label: 'Content & Publishing',
         description: 'Draft status, publishing confirmations, and failed/missed posts.',
+        scope: 'assistant',
         inApp: ON, email: ON,
         types: [
             'post_published', 'post_revised', 'post_draft_ready', 'post_generation_queued',
@@ -104,6 +118,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         key: 'connections',
         label: 'Connections & Integrations',
         description: 'Connected accounts, reconnection prompts, and integration alerts.',
+        scope: 'assistant',
         inApp: ON, email: ON,
         types: [
             'social_oauth_revoked', 'instagram_token_refresh_failed', 'instagram_rate_limited',
@@ -114,6 +129,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         key: 'onboarding_reminders',
         label: 'Onboarding',
         description: 'Setup reminders and your welcome / setup-complete milestones.',
+        scope: 'account',
         inApp: ON, email: ON,
         types: ['welcome', 'onboarding_prompt', 'onboarding_incomplete', 'setup_complete'],
     },
@@ -121,6 +137,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         key: 'new_role_availability',
         label: 'New Role Availability',
         description: "Alerts when a waitlisted assistant role becomes available.",
+        scope: 'account', // catalogue/waitlist-level, not tied to a hired assistant
         inApp: OFF, email: OFF, // preserves the historical notify_availability default (off)
         types: ['new_role_availability'],
     },
@@ -128,6 +145,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         key: 'issues_feature_requests',
         label: 'Issues & Feature Requests',
         description: 'Updates on issues you reported and feature requests you submitted or backed.',
+        scope: 'account',
         inApp: ON, email: ON,
         types: ['issue_update', 'feature_status_change', 'feature_released'],
     },
@@ -135,6 +153,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         key: 'product_updates',
         label: 'Product, Milestones & Support',
         description: 'Milestones, referrals, support replies, and product announcements.',
+        scope: 'account',
         inApp: ON, email: ON,
         types: ['milestone', 'milestone_unlock', 'referral_reward', 'ticket_created', 'ticket_reply', 'system'],
     },
@@ -158,12 +177,42 @@ export function categoryForType(type: string): PrefCategory {
 
 type PrefMap = Record<string, boolean> | null | undefined;
 
+// Per-assistant preference overrides (user_profiles.assistant_notif_prefs).
+// Shape: { [assistantId]: { [categoryKey]: { inApp?: boolean, email?: boolean } } }.
+// A missing key at any level means "use the workspace-wide preference". Only
+// scope:'assistant' categories may carry overrides; locked rules still win.
+export type AssistantOverrideMap =
+    Record<string, Record<string, Partial<Record<PrefChannel, boolean>>>> | null | undefined;
+
+/** The stored override for one assistant/category/channel, or undefined if none. */
+export function overrideFor(
+    overrides: AssistantOverrideMap, assistantId: number | string | null | undefined,
+    catKey: string, channel: PrefChannel,
+): boolean | undefined {
+    if (assistantId == null || !overrides) return undefined;
+    const v = overrides[String(assistantId)]?.[catKey]?.[channel];
+    return typeof v === 'boolean' ? v : undefined;
+}
+
 function channelEnabled(prefs: PrefMap, type: string, channel: PrefChannel): boolean {
     const cat = categoryForType(type);
     const rule = cat[channel];
     if (rule.locked) return true; // essential — always delivered
     const stored = prefs?.[cat.key];
     return typeof stored === 'boolean' ? stored : rule.default;
+}
+
+function channelEnabledFor(
+    prefs: PrefMap, overrides: AssistantOverrideMap,
+    assistantId: number | string | null | undefined, type: string, channel: PrefChannel,
+): boolean {
+    const cat = categoryForType(type);
+    if (cat[channel].locked) return true;
+    if (cat.scope === 'assistant') {
+        const o = overrideFor(overrides, assistantId, cat.key, channel);
+        if (o !== undefined) return o;
+    }
+    return channelEnabled(prefs, type, channel);
 }
 
 /** Should this notification type appear in the in-app bell for this user? */
@@ -173,6 +222,18 @@ export const isInAppEnabled = (inAppPrefs: PrefMap, type: string): boolean =>
 /** Should an email of this notification type be sent to this user? */
 export const isEmailEnabled = (emailPrefs: PrefMap, type: string): boolean =>
     channelEnabled(emailPrefs, type, 'email');
+
+/** In-app gate honouring a per-assistant override when the row is assistant-attributed. */
+export const isInAppEnabledFor = (
+    inAppPrefs: PrefMap, overrides: AssistantOverrideMap,
+    assistantId: number | string | null | undefined, type: string,
+): boolean => channelEnabledFor(inAppPrefs, overrides, assistantId, type, 'inApp');
+
+/** Email gate honouring a per-assistant override when the sender knows the assistant. */
+export const isEmailEnabledFor = (
+    emailPrefs: PrefMap, overrides: AssistantOverrideMap,
+    assistantId: number | string | null | undefined, type: string,
+): boolean => channelEnabledFor(emailPrefs, overrides, assistantId, type, 'email');
 
 /** Default preference map for one channel (used for new/incomplete profiles). */
 export function buildDefaults(channel: PrefChannel): Record<string, boolean> {

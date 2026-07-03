@@ -34,7 +34,7 @@ type FailureReason = { httpStatus: number | null; errorMessage: string; isRetrya
 type PostRow = {
     id: number; user_id: number; organisation_id: number; caption: string | null;
     hashtags: string | null; connection_id: number | null; attempt_count: number;
-    publish_date: string; content_asset_ids: unknown;
+    publish_date: string; content_asset_ids: unknown; assistant_id: number | null;
 };
 type DriverResult = { ok: true; id: string } | { ok: false; status: number | null; error: string };
 
@@ -56,7 +56,7 @@ export const handler: Handler = async () => {
 
     const posts = await db.execute<PostRow>(
         `SELECT id, user_id, organisation_id, caption, hashtags, connection_id,
-                attempt_count, publish_date, content_asset_ids
+                attempt_count, publish_date, content_asset_ids, assistant_id
          FROM scheduled_posts
          WHERE status = 'scheduled'
            AND platform = 'facebook'
@@ -106,7 +106,7 @@ export const handler: Handler = async () => {
                 type: 'post_published',
                 title: 'Post published to Facebook',
                 message: 'Your post has been published to Facebook.',
-                metadata: { postId: post.id, platform: 'facebook', platformPostId: result.id },
+                metadata: { postId: post.id, platform: 'facebook', platformPostId: result.id, assistantId: post.assistant_id },
             });
             succeeded++;
         } catch (err) {
@@ -216,7 +216,7 @@ async function handleFailure(db: ReturnType<typeof getDb>, post: PostRow, reason
             type: 'post_publish_failed',
             title: 'Post failed to publish',
             message: `Publishing to Facebook failed: ${reason.errorMessage}`,
-            metadata: { postId: post.id, platform: 'facebook', reason },
+            metadata: { postId: post.id, platform: 'facebook', reason, assistantId: post.assistant_id },
         });
     } else {
         const retryAt = new Date(now.getTime() + (BACKOFF_MINS[attempt - 1] ?? 30) * 60 * 1000).toISOString();

@@ -285,21 +285,8 @@ window.showComplianceModals = function showComplianceModals(force) {
       </button>
     </div>
 
-    <!-- Connect-first gate — shown instead of the chooser when no social account is connected.
-         Generating, scheduling and posting only make sense once at least one account is linked. -->
-    <div id="gp-connect-gate" class="hidden text-center py-4">
-      <div class="mx-auto w-12 h-12 rounded-2xl bg-amber-100 text-amber-700 flex items-center justify-center mb-3">
-        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m9.656.656a4 4 0 010-5.656l3-3a4 4 0 015.656 5.656l-1.5 1.5"/></svg>
-      </div>
-      <h3 class="text-sm font-extrabold text-gray-900">Connect a social account first</h3>
-      <p class="text-xs text-gray-500 mt-1.5 max-w-sm mx-auto">Your assistant can't generate, schedule or publish posts until at least one social media account is connected. Link an account to get started.</p>
-      <div class="flex flex-col gap-2 mt-4">
-        <button type="button" onclick="gpGoConnect()" class="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer">Connect an account</button>
-        <button type="button" onclick="closeGeneratePostSheet()" class="w-full py-2.5 border border-gray-300 text-gray-700 text-sm font-bold rounded-xl hover:bg-gray-50 transition cursor-pointer">Maybe later</button>
-      </div>
-    </div>
-
-    <!-- Mode panels (shown after a mode is picked) -->
+    <!-- Mode panels (shown after a mode is picked). Drafting never requires a connected account —
+         the connection is asked for at the point a post is approved/scheduled for its platform. -->
     <div id="gp-modes" class="hidden">
       <button type="button" onclick="gpBackToChooser()" class="mb-3 text-xs font-semibold text-gray-500 hover:text-gray-700 transition cursor-pointer flex items-center gap-1">
         <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
@@ -464,9 +451,16 @@ window.showComplianceModals = function showComplianceModals(force) {
       <button id="gen-post-submit-btn" onclick="gpSubmit()" class="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Generate</button>
       <button onclick="closeGeneratePostSheet()" class="px-5 py-2.5 border border-gray-300 text-gray-700 text-sm font-bold rounded-xl hover:bg-gray-50 transition cursor-pointer">Cancel</button>
     </div>
+    <!-- Per-platform connect notice — publishing/scheduling needs a live connection for the draft's
+         platform, so when it's missing the approve buttons below are disabled and this asks for it. -->
+    <div id="gp-connect-notice" class="hidden mt-2 flex items-start gap-2.5 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+      <svg class="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m9.656.656a4 4 0 010-5.656l3-3a4 4 0 015.656 5.656l-1.5 1.5"/></svg>
+      <span class="flex-1"><span id="gp-connect-notice-text">Connect this platform to schedule or publish this post.</span></span>
+      <button type="button" onclick="gpGoConnect()" class="shrink-0 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg transition cursor-pointer">Connect</button>
+    </div>
     <div id="gen-post-approve-actions" class="hidden flex gap-2 mt-2">
-      <button onclick="gpApprovePost()" class="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer">Post Now</button>
-      <button onclick="gpSchedulePost()" class="flex-1 py-2.5 border border-emerald-600 text-emerald-700 hover:bg-emerald-50 text-sm font-bold rounded-xl transition cursor-pointer">Schedule for Later</button>
+      <button id="gp-approve-now-btn" onclick="gpApprovePost()" class="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-700">Post Now</button>
+      <button id="gp-approve-schedule-btn" onclick="gpSchedulePost()" class="flex-1 py-2.5 border border-emerald-600 text-emerald-700 hover:bg-emerald-50 text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent">Schedule for Later</button>
       <button onclick="gpRejectPost()" class="py-2.5 px-3 border border-red-300 text-red-600 hover:bg-red-50 text-sm font-bold rounded-xl transition cursor-pointer">Reject</button>
     </div>
     <!-- Schedule for later picker (shown when Schedule for Later is clicked) -->
@@ -615,8 +609,16 @@ window.showComplianceModals = function showComplianceModals(force) {
           <button onclick="rqReviewToggle()" class="py-2.5 px-4 text-xs font-bold text-gray-500 hover:bg-gray-50 rounded-lg cursor-pointer">Cancel</button>
         </div>
       </div>
+      <!-- Per-platform connect notice — approving commits the post to the publisher, which needs a
+           live connection for this post's platform. When it's missing, Approve is disabled and this
+           row asks for the connection instead (drafting/amending stays available). -->
+      <div id="post-review-connect" class="hidden flex items-start gap-2.5 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2.5 mb-2">
+        <svg class="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m9.656.656a4 4 0 010-5.656l3-3a4 4 0 015.656 5.656l-1.5 1.5"/></svg>
+        <span class="flex-1"><span id="post-review-connect-text">Connect this platform to approve and schedule this post.</span></span>
+        <button type="button" id="post-review-connect-btn" class="shrink-0 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg transition cursor-pointer">Connect</button>
+      </div>
       <div id="post-review-buttons" class="grid grid-cols-2 gap-2">
-        <button id="post-review-approve-btn" onclick="rqReviewApprove()" class="col-span-2 py-3 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition cursor-pointer">Approve — let the assistant pick a time</button>
+        <button id="post-review-approve-btn" onclick="rqReviewApprove()" class="col-span-2 py-3 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600">Approve — let the assistant pick a time</button>
         <button onclick="rqReviewAddMedia()" class="col-span-2 py-2.5 text-xs font-bold border border-emerald-300 text-emerald-700 hover:bg-emerald-50 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
           Add or change image
@@ -2495,8 +2497,8 @@ function formatCurrency(amount, currency) {
         connection_not_relevant: `${label} isn’t a relevant connection for this assistant.`,
         unauthenticated: 'Your session has expired. Please sign in and try connecting again.',
         invalid_session: 'Your session has expired. Please sign in and try connecting again.',
-        not_business: 'Instagram needs a Business or Creator account linked to a Facebook Page. Switch your account type, then try again.',
-        personal_account: 'Personal Instagram accounts can’t be connected — switch to a Business or Creator account first.',
+        not_business: 'It looks like your Meta setup isn’t finished — Instagram needs a Business or Creator account linked to a Facebook Page. Click “Connect with Instagram” again and follow the setup checklist, then retry.',
+        personal_account: 'Personal Instagram accounts can’t be connected. Click “Connect with Instagram” and follow the setup checklist to switch to a Business or Creator account, then try again.',
         // US1 AC1.4: tenant collision — this third-party account is already linked elsewhere.
         tenant_collision: `This ${label} account is already connected to another Be More Swan workspace. To use it, you must join the existing workspace or disconnect it from the other account.`,
       };
@@ -2900,7 +2902,11 @@ function formatCurrency(amount, currency) {
         if (!res.ok) throw new Error('Load failed');
         const { categories } = await res.json();
 
-        bodyEl.innerHTML = categories.map(cat => {
+        // Account settings shows customer-level categories only; assistant-scoped
+        // categories render in the Assistant Profile drawer (assistants.js).
+        const accountCategories = categories.filter(cat => cat.scope !== 'assistant');
+
+        bodyEl.innerHTML = accountCategories.map(cat => {
           const anyLocked = cat.inApp.locked || cat.email.locked;
           return `
             <tr>
@@ -4292,9 +4298,11 @@ async function sdApprove(postId, action) {
             body: JSON.stringify({ postId, action }),
         });
         const d = await res.json().catch(() => ({}));
-        if (!res.ok) { alert(d.error || 'Failed to approve post.'); return; }
+        if (rqHandleNotConnected(res.status, d, _rqPostCache[postId]?.assistantId)) return false;
+        if (!res.ok) { alert(d.error || 'Failed to approve post.'); return false; }
         rqLoadItems();
-    } catch { alert('Network error — please try again.'); }
+        return true;
+    } catch { alert('Network error — please try again.'); return false; }
 }
 
 function sdToggleReject(id) {
@@ -4358,8 +4366,13 @@ function rqRenderAiCard(d) {
       <div class="rq-ai-discard-${d.id} hidden mt-2">
         <input type="text" id="rq-ai-discard-reason-${d.id}" placeholder="Why? (optional — helps future drafts, e.g. Off-brand)" maxlength="300" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-300">
       </div>
+      ${rqPlatformConnected(d.platform) ? '' : `
+      <div class="mt-3 flex items-center gap-2 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+        <span class="flex-1">Connect your ${_rqEsc(platformLabel)} account to approve and schedule this post.</span>
+        <button onclick="rqGoConnect(${d.assistantId ?? 'null'})" class="shrink-0 px-2.5 py-1 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg transition cursor-pointer">Connect</button>
+      </div>`}
       <div class="flex flex-wrap gap-2 mt-3">
-        <button onclick="aiApprove(${d.id})" class="flex-1 min-w-[120px] py-2.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition cursor-pointer">Approve &amp; Schedule</button>
+        <button onclick="aiApprove(${d.id})" ${rqPlatformConnected(d.platform) ? '' : 'disabled'} class="flex-1 min-w-[120px] py-2.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600">Approve &amp; Schedule</button>
         <button onclick="aiToggleEdit(${d.id})" class="py-2.5 px-3 text-xs font-bold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer">Edit</button>
         ${!isVideo ? `<button onclick="aiRegenerate(${d.id})" class="py-2.5 px-3 text-xs font-bold border border-pink-300 text-pink-700 hover:bg-pink-50 rounded-lg transition cursor-pointer">Regenerate</button>` : ''}
         <button onclick="aiToggleDiscard(${d.id})" id="rq-ai-discard-btn-${d.id}" class="py-2.5 px-3 text-xs font-bold border border-red-300 text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer">Discard</button>
@@ -4374,6 +4387,7 @@ async function aiApprove(postId) {
             body: JSON.stringify({ postId, action: 'approve' }),
         });
         const d = await res.json().catch(() => ({}));
+        if (rqHandleNotConnected(res.status, d, _rqPostCache[postId]?.assistantId)) return;
         if (!res.ok) { alert(d.error || 'Failed to approve.'); return; }
         rqLoadItems('pending_approval', 'ai');
     } catch { alert('Network error — please try again.'); }
@@ -4495,6 +4509,50 @@ let _rqReviewPostId = null;
 
 function rqCachePost(p) { if (p && p.id != null) _rqPostCache[p.id] = p; return p; }
 
+// ── Per-platform connection gate (approve/schedule time) ─────────────────────
+// Setup no longer requires connecting accounts, so drafting is always allowed and the connection
+// is asked for at the moment a post is approved/scheduled for its platform. These helpers read the
+// capacity cache warmed at boot; rqEnsurePlatformConnection force-refreshes once before concluding
+// "not connected" so a connection made elsewhere in the session isn't missed.
+function rqPlatformLabel(p) {
+    return { instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X' }[p] || p;
+}
+
+function rqPlatformConnected(platform) {
+    if (!platform) return true;
+    const list = (window._capacityCache?.connectedPlatforms || []).map(s => String(s).toLowerCase());
+    return list.some(s => s.includes(String(platform).toLowerCase()));
+}
+
+async function rqEnsurePlatformConnection(platform) {
+    if (rqPlatformConnected(platform)) return true;
+    await window.checkCapacity(true).catch(() => null);
+    return rqPlatformConnected(platform);
+}
+
+// Route to the Connections tab so the user can link the missing platform's account.
+function rqGoConnect(assistantId) {
+    if (_rqReviewPostId != null && typeof closePostReview === 'function') closePostReview();
+    const id = assistantId || window._currentAssistantId || null;
+    if (id && typeof window.routeToAssistantDetail === 'function') {
+        window._assistantDetailInitialTab = 'platforms';
+        window.routeToAssistantDetail(id);
+    } else if (typeof window.loadView === 'function') {
+        window.loadView('assistants');
+    }
+}
+
+// Backstop for the server's 422 PLATFORM_NOT_CONNECTED (approve-post): offer to jump to Connections.
+// Returns true when the response was that error (i.e. it has been handled).
+function rqHandleNotConnected(status, d, assistantId) {
+    if (status !== 422 || d?.code !== 'PLATFORM_NOT_CONNECTED') return false;
+    const label = rqPlatformLabel(d.platform);
+    if (confirm(`${d.error || `Connect your ${label} account before this post can be scheduled or published.`}\n\nGo to Connections now?`)) {
+        rqGoConnect(assistantId);
+    }
+    return true;
+}
+
 // One render function, two layouts: media-first (Instagram/Facebook) vs text-first (X/LinkedIn).
 function renderPlatformMockup(post) {
     const meta = {
@@ -4582,6 +4640,16 @@ function openPostReview(postId) {
     })() : null;
     const approveBtn = document.getElementById('post-review-approve-btn');
     if (approveBtn) approveBtn.textContent = whenNumeric ? `Approve & Confirm Schedule ${whenNumeric}` : 'Approve — let the assistant pick a time';
+
+    // Approving needs a live connection for this post's platform (setup no longer requires one).
+    // Paint from the capacity cache immediately, then re-check with a forced refresh so a
+    // connection made elsewhere in the session lifts the gate without a reload.
+    rqReviewSetConnectGate(post, !reviewable || rqPlatformConnected(post.platform));
+    if (reviewable && !rqPlatformConnected(post.platform)) {
+        rqEnsurePlatformConnection(post.platform).then(connected => {
+            if (_rqReviewPostId === post.id) rqReviewSetConnectGate(post, connected);
+        });
+    }
 
     // Status note for non-reviewable states: archived (with countdown), scheduled/approved (when),
     // posted (with a live link if we have one).
@@ -4701,10 +4769,32 @@ function _rqReviewRefresh() {
     if (typeof refreshPendingBadge === 'function') { try { refreshPendingBadge(); } catch { /* ignore */ } }
 }
 
+// Toggle the review modal's approve button + connect notice for a post's platform connection.
+// Only Approve is gated — amend, request-changes, reschedule and reject all still work on drafts.
+function rqReviewSetConnectGate(post, connected) {
+    const approveBtn = document.getElementById('post-review-approve-btn');
+    const notice = document.getElementById('post-review-connect');
+    if (approveBtn) approveBtn.disabled = !connected;
+    if (notice) {
+        notice.classList.toggle('hidden', connected);
+        if (!connected) {
+            const label = rqPlatformLabel(post.platform);
+            const textEl = document.getElementById('post-review-connect-text');
+            if (textEl) textEl.textContent = `Connect your ${label} account to approve and schedule this post. You can still amend or reject it.`;
+            const btn = document.getElementById('post-review-connect-btn');
+            if (btn) btn.onclick = () => rqGoConnect(post.assistantId);
+        }
+    }
+}
+
 async function rqReviewApprove() {
     const id = _rqReviewPostId;
     if (!id) return;
     const post = _rqPostCache[id];
+    if (post && !(await rqEnsurePlatformConnection(post.platform))) {
+        rqReviewSetConnectGate(post, false);
+        return;
+    }
     if (post && post.platform === 'instagram' && !post.thumbnailUrl) {
         if (window.showToast) {
             window.showToast('Instagram needs an image. Use "Amend" or "Request changes" to add one before approving.', { icon: '🖼️', duration: 5000 });
@@ -4725,6 +4815,7 @@ async function rqReviewApprove() {
             }
             return;
         }
+        if (rqHandleNotConnected(res.status, d, post?.assistantId)) { rqReviewSetConnectGate(post || {}, false); return; }
         if (!res.ok) { alert(d.error || 'Failed to approve.'); return; }
         if (d.confirmation && window.showToast) window.showToast(d.confirmation);
         _rqReviewRefresh();
@@ -4740,6 +4831,7 @@ async function rqReviewPublishNow() {
             body: JSON.stringify({ postId: id, action: 'publish_now' }),
         });
         const d = await res.json().catch(() => ({}));
+        if (rqHandleNotConnected(res.status, d, _rqPostCache[id]?.assistantId)) return;
         if (!res.ok) { alert(d.error || 'Failed to publish.'); return; }
         if (d.confirmation && window.showToast) window.showToast(d.confirmation);
         _rqReviewRefresh();
@@ -5021,6 +5113,7 @@ let _gpPollInterval = null;
 let _gpCurrentJobId = null;
 let _gpCurrentPostId = null;
 let _gpSelectedPlatform = 'instagram';
+let _gpDraftPlatform = null;   // platform of the currently previewed draft (set by gpLoadPreview)
 let _gpCap = null;                 // cached capacity (connected platforms + AI task limit)
 let _gpwSelectedPlatforms = [];    // write-your-own: multi-select
 let _gpwSelectedAssets = [];       // write-your-own: chosen My Content asset ids
@@ -5048,15 +5141,9 @@ async function openGeneratePostSheet() {
     // Resolve an assistant up front (shared by all three modes).
     await gpPopulateAssistants();
 
-    // Generating, scheduling and posting only apply to connected accounts. With nothing connected,
-    // show the connect-first gate instead of the chooser so we never imply a post can progress.
-    if (gpConnectedPlatforms().length === 0) {
-        gpShowConnectGate();
-        return;
-    }
-    gpHideConnectGate();
-    // Limit every mode's platform picker to the accounts that are actually connected.
-    gpApplyConnectionConstraints();
+    // Drafting never requires a connected account — every mode and platform stays available.
+    // The connection is asked for at the point a post is approved/scheduled for its platform
+    // (see gpApplyApprovalConnectGate + the review modal's gate).
 }
 
 // Lowercase service names of the org's active social connections (e.g. ['instagram','x']).
@@ -5066,16 +5153,6 @@ function gpConnectedPlatforms() {
 
 function gpIsPlatformConnected(p) {
     return gpConnectedPlatforms().some(s => s.includes(p));
-}
-
-function gpShowConnectGate() {
-    document.getElementById('gp-chooser')?.classList.add('hidden');
-    document.getElementById('gp-modes')?.classList.add('hidden');
-    document.getElementById('gp-connect-gate')?.classList.remove('hidden');
-}
-
-function gpHideConnectGate() {
-    document.getElementById('gp-connect-gate')?.classList.add('hidden');
 }
 
 // Close the sheet and take the user to the assistant's Connections tab to link an account.
@@ -5091,26 +5168,9 @@ function gpGoConnect() {
     }
 }
 
-// Disable the platform chips for accounts that aren't connected across all three mode panels, so a
-// user can't queue a draft for a platform that will never publish. The "All platforms" idea chip is
-// left enabled (it means "all connected"). Returns the connected chips' platform values for the AI mode.
-function gpApplyConnectionConstraints() {
-    document.querySelectorAll('.gpw-platform-btn, .gpi-platform-btn, .gen-platform-btn').forEach(btn => {
-        const p = btn.dataset.platform;
-        if (p === 'all') return;
-        const connected = gpIsPlatformConnected(p);
-        btn.disabled = !connected;
-        btn.classList.toggle('opacity-40', !connected);
-        btn.classList.toggle('cursor-not-allowed', !connected);
-        btn.classList.toggle('pointer-events-none', !connected);
-        btn.title = connected ? '' : 'Connect this account first';
-    });
-}
-
 // Return to the three-card chooser and clear any in-progress mode state.
 function gpBackToChooser() {
     clearInterval(_gpPollInterval);
-    document.getElementById('gp-connect-gate')?.classList.add('hidden');
     document.getElementById('gp-chooser')?.classList.remove('hidden');
     document.getElementById('gp-modes')?.classList.add('hidden');
     ['gp-mode-write', 'gp-mode-idea', 'gp-mode-ai'].forEach(id =>
@@ -5125,6 +5185,10 @@ function gpBackToChooser() {
     document.getElementById('gen-post-conflict')?.classList.add('hidden');
     document.getElementById('gen-post-preview')?.classList.add('hidden');
     document.getElementById('gen-post-approve-actions')?.classList.add('hidden');
+    document.getElementById('gp-connect-notice')?.classList.add('hidden');
+    ['gp-approve-now-btn', 'gp-approve-schedule-btn'].forEach(id => {
+        const b = document.getElementById(id); if (b) b.disabled = false;
+    });
     document.getElementById('gen-post-schedule-picker')?.classList.add('hidden');
     document.getElementById('gen-post-reject-form')?.classList.add('hidden');
     document.getElementById('gen-post-actions')?.classList.remove('hidden');
@@ -5354,6 +5418,8 @@ async function gpLoadPreview(postId) {
         document.getElementById('gen-post-preview-media').textContent = draft.suggestedMediaDescription ? `Media suggestion: ${draft.suggestedMediaDescription}` : '';
         document.getElementById('gen-post-preview')?.classList.remove('hidden');
         document.getElementById('gen-post-approve-actions')?.classList.remove('hidden');
+        _gpDraftPlatform = draft.platform || _gpSelectedPlatform;
+        gpApplyApprovalConnectGate(_gpDraftPlatform);
 
         // Media controls: prompt for "Generate with AI" comes from the media description (else caption).
         // Show whatever image the assistant already attached, and let the user swap it.
@@ -5389,19 +5455,40 @@ function gpEnsureMediaBeforeApproval() {
     return window.confirm("You haven't added any media. Posts with images or video perform better — post without one?");
 }
 
+// Publishing/scheduling a draft needs a live connection for its platform (drafting doesn't).
+// Disables Post Now / Schedule for Later and shows the connect notice while it's missing;
+// Reject stays enabled since discarding a draft needs no connection.
+async function gpApplyApprovalConnectGate(platform) {
+    const connected = await rqEnsurePlatformConnection(platform);
+    ['gp-approve-now-btn', 'gp-approve-schedule-btn'].forEach(id => {
+        const b = document.getElementById(id); if (b) b.disabled = !connected;
+    });
+    const notice = document.getElementById('gp-connect-notice');
+    if (notice) {
+        notice.classList.toggle('hidden', connected);
+        if (!connected) {
+            const textEl = document.getElementById('gp-connect-notice-text');
+            if (textEl) textEl.textContent = `Connect your ${rqPlatformLabel(platform)} account to schedule or publish this post. Your draft is saved in the Review Queue in the meantime.`;
+        }
+    }
+    return connected;
+}
+
 async function gpApprovePost() {
     if (!_gpCurrentPostId) return;
     if (!gpEnsureMediaBeforeApproval()) return;
-    await sdApprove(_gpCurrentPostId, 'publish_now');
+    if (!(await gpApplyApprovalConnectGate(_gpDraftPlatform || _gpSelectedPlatform))) return;
+    if (!(await sdApprove(_gpCurrentPostId, 'publish_now'))) return;
     gpSetStatus('Post approved and queued to publish now.');
     document.getElementById('gen-post-approve-actions')?.classList.add('hidden');
     document.getElementById('gen-post-preview')?.classList.add('hidden');
     setTimeout(closeGeneratePostSheet, 1500);
 }
 
-function gpSchedulePost() {
+async function gpSchedulePost() {
     if (!_gpCurrentPostId) return;
     if (!gpEnsureMediaBeforeApproval()) return;
+    if (!(await gpApplyApprovalConnectGate(_gpDraftPlatform || _gpSelectedPlatform))) return;
     // Show date/time picker — set minimum to 5 minutes from now
     const picker = document.getElementById('gen-post-schedule-input');
     if (picker) {
@@ -5425,7 +5512,16 @@ async function gpConfirmSchedule() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ postId: _gpCurrentPostId, action: 'reschedule', rescheduleAt }),
         });
-        if (!res.ok) { const d = await res.json().catch(() => ({})); gpSetStatus(d.error || 'Failed to schedule.', 'error'); return; }
+        if (!res.ok) {
+            const d = await res.json().catch(() => ({}));
+            if (d.code === 'PLATFORM_NOT_CONNECTED') {
+                document.getElementById('gen-post-schedule-picker')?.classList.add('hidden');
+                document.getElementById('gen-post-approve-actions')?.classList.remove('hidden');
+                await gpApplyApprovalConnectGate(d.platform || _gpDraftPlatform || _gpSelectedPlatform);
+                return;
+            }
+            gpSetStatus(d.error || 'Failed to schedule.', 'error'); return;
+        }
         gpSetStatus(`Post scheduled for ${new Date(rescheduleAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}.`);
         document.getElementById('gen-post-schedule-picker')?.classList.add('hidden');
         document.getElementById('gen-post-preview')?.classList.add('hidden');

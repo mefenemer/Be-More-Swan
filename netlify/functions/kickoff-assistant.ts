@@ -85,8 +85,13 @@ export const handler: Handler = async (event) => {
     if (!a.disclosureText?.trim()) {
         return json(422, { error: 'AI disclosure text is required before this assistant can start (EU AI Act Art. 52).', code: 'DISCLOSURE_MISSING' });
     }
-    if (!hasConnection) {
-        return json(422, { error: 'Connect at least one account before starting your assistant.', code: 'NO_CONNECTION' });
+    // Connections are no longer required to start: users can draft posts immediately and are
+    // asked to connect a platform at the point they approve a post for it (approve-post gates
+    // per-platform). The one exception is recovering a connection-type system_pause — that state
+    // exists because every connection broke, so restarting without a healthy one would just
+    // re-pause immediately.
+    if (state === 'system_paused' && !hasConnection) {
+        return json(422, { error: 'Reconnect an account before restarting your assistant.', code: 'NO_CONNECTION' });
     }
 
     // ── Transition (ready_for_work | paused) → working ──────────────────────────

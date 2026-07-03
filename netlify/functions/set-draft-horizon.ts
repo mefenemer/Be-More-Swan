@@ -122,6 +122,7 @@ export const handler: Handler = async (event) => {
                 type: 'draft_horizon_expanded',
                 title: 'Draft horizon extended',
                 message: `${assistant.name} is generating ${gapFillEnqueued} new draft${gapFillEnqueued === 1 ? '' : 's'} to cover through ${toDate}. They'll appear in your Review Queue shortly.`,
+                metadata: { assistantId },
             }).catch(() => {});
         }
     }
@@ -151,6 +152,7 @@ export const handler: Handler = async (event) => {
                 type: 'draft_horizon_shrunk',
                 title: 'Draft horizon shortened',
                 message: `${archived.length} unreviewed draft${archived.length === 1 ? '' : 's'} beyond your new ${days}-day window have been moved to Archived Drafts.`,
+                metadata: { assistantId },
             }).catch(() => {});
         }
     }

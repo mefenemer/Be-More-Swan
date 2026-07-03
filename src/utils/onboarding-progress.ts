@@ -76,7 +76,7 @@ const STEP_DEFS: { key: string; label: string; view: string | null; benefit: str
     { key: 'compliance',           label: 'Compliance & data use',       view: 'settings',   benefit: 'Review and accept your agreements in My Account → My Agreements to keep your company data safe.' },
     { key: 'assistant_selection',  label: 'Choose your assistant',       view: 'catalog',    benefit: 'Pick the assistant persona that matches the work you want done for you.' },
     { key: 'assistant_onboarding', label: 'Onboard your assistant',      view: 'assistants', benefit: 'Give your assistant the context it needs — your goals, brand voice and guardrails.' },
-    { key: 'preparing',            label: 'Preparing your assistant',    view: 'assistants', benefit: 'Connect your tools, set your AI disclosure and guardrails, then run the Kick Off Meeting to put your assistant to work.' },
+    { key: 'preparing',            label: 'Preparing your assistant',    view: 'assistants', benefit: 'Set your AI disclosure and guardrails, then run the Kick Off Meeting to put your assistant to work. You can connect your social accounts later, when you approve a post.' },
     { key: 'go_live',              label: 'Your assistant goes live',    view: null,         benefit: "The finish line — your assistant is live and working for you." },
 ];
 
@@ -147,8 +147,9 @@ export async function computeOnboardingProgress(
     // Steps 7 ("Preparing your assistant") and 8 ("Your assistant goes live") both complete at
     // go-live: provisioning complete AND active (the inline Kick Off flipped ready_for_work →
     // working/isActive). Crucially `preparing` is NOT done merely at ready_for_work — the
-    // connection + disclosure sub-tasks are kick-off gates the user still completes after
-    // provisioning, so step 7 must stay current (surfacing those sub-tasks + the Kick Off action)
+    // disclosure/agreement sub-tasks are kick-off gates the user still completes after
+    // provisioning (connections are recommended-only: they're asked for at post approval),
+    // so step 7 must stay current (surfacing those sub-tasks + the Kick Off action)
     // right up until the assistant is actually live. Step 8 is the terminal milestone that ticks
     // alongside it.
     const live = scopedAssistants.some(a => a.provisioningStatus === 'complete' && a.isActive === true);

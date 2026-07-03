@@ -104,7 +104,8 @@ export const handler: Handler = async (event) => {
         );
         const tokenData: { access_token?: string; error?: { message: string } } = await tokenRes.json();
         if (!tokenData.access_token) {
-            return { statusCode: 400, body: JSON.stringify({ error: tokenData.error?.message ?? 'Token exchange failed' }) };
+            // Redirect back to the workspace toast rather than dumping raw JSON at the user.
+            return { statusCode: 302, headers: { Location: '/workspace.html?meta_error=token_exchange&platform=instagram' }, body: '' };
         }
 
         // Exchange for 60-day long-lived token
@@ -113,7 +114,7 @@ export const handler: Handler = async (event) => {
         );
         const llData: { access_token?: string; expires_in?: number; error?: { message: string } } = await llRes.json();
         if (!llData.access_token) {
-            return { statusCode: 400, body: JSON.stringify({ error: llData.error?.message ?? 'Long-lived token exchange failed' }) };
+            return { statusCode: 302, headers: { Location: '/workspace.html?meta_error=token_exchange&platform=instagram' }, body: '' };
         }
         const longLivedToken = llData.access_token;
 
@@ -215,7 +216,7 @@ export const handler: Handler = async (event) => {
                 message: isReconnect
                     ? `Instagram account connected successfully. Token refreshed.`
                     : `Instagram account connected successfully. You can now schedule and publish posts.${!fbPageId ? ' Note: No Facebook Page linked — some features may be limited.' : ''}`,
-                metadata: { igUserId, accountType, fbPageId },
+                metadata: { igUserId, accountType, fbPageId, assistantId },
             });
             // Connection is live again — clear any open "reconnect Instagram" action items.
             await resolveActionNotifications(db, orgUser.id, CONNECTION_RESTORED_TYPES);

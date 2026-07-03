@@ -544,13 +544,177 @@ window._openProfileDrawer = function() {
 // Open (or swap to) a specific section panel, with a back arrow to the home index.
 window._openBriefDrawer = function(tabKey) {
     _briefShowPanel('tab-' + tabKey);
-    const titles = { problem: 'Mandate', operation: 'Operational Setup', strategy: 'Creative Brief', platforms: 'Connections', guardrails: 'Brand Safety & Legal' };
+    const titles = { problem: 'Mandate', operation: 'Operational Setup', strategy: 'Creative Brief', platforms: 'Connections', guardrails: 'Brand Safety & Legal', notifications: 'Notifications' };
     const titleEl = document.getElementById('brief-drawer-title');
     if (titleEl) titleEl.textContent = titles[tabKey] || tabKey;
     const backBtn = document.getElementById('brief-drawer-back');
     if (backBtn) backBtn.hidden = false;
+    if (tabKey === 'notifications') _initAssistantNotifPrefs();
     _briefOpenChrome();
 };
+
+// ── Assistant Profile › Notifications panel ───────────────────────────────────
+// Renders the scope:'assistant' categories of the unified notification preference
+// matrix (Approvals, Assistant Tasks, Content & Publishing, Connections) for THIS
+// assistant. Values come from /notification-preferences?assistantId=N — the
+// workspace-wide setting overlaid with this assistant's per-user overrides.
+// Toggling writes an override for this assistant only; "Reset" restores the
+// workspace default. Also hosts the review-alert cadence (set-review-notif-prefs).
+let _assistantNotifPrefsLoadedFor = null;
+async function _initAssistantNotifPrefs() {
+    const assistantId = Number(window._currentAssistantId);
+    if (_assistantNotifPrefsLoadedFor === assistantId) return;
+    const loadingEl = document.getElementById('assistant-notif-prefs-loading');
+    const listEl = document.getElementById('assistant-notif-prefs-list');
+    if (!listEl || !assistantId) return;
+
+    const paintToggle = (btn, on) => {
+        btn.setAttribute('aria-checked', on ? 'true' : 'false');
+        btn.classList.toggle('bg-emerald-500', on);
+        btn.classList.toggle('bg-gray-300', !on);
+        const dot = btn.querySelector('span');
+        if (dot) { dot.classList.toggle('translate-x-5', on); dot.classList.toggle('translate-x-0', !on); }
+    };
+
+    const flashSaved = () => {
+        const saved = document.getElementById('assistant-notif-prefs-saved');
+        if (saved) { saved.classList.remove('hidden'); setTimeout(() => saved.classList.add('hidden'), 2500); }
+    };
+
+    // A category row is "custom" when either channel carries an override for this assistant.
+    const paintRowState = (row, custom) => {
+        const badge = row.querySelector('[data-custom-badge]');
+        const reset = row.querySelector('[data-reset-cat]');
+        if (badge) badge.classList.toggle('hidden', !custom);
+        if (reset) reset.classList.toggle('hidden', !custom);
+    };
+
+    try {
+        const res = await fetch(`/.netlify/functions/notification-preferences?assistantId=${assistantId}`);
+        if (!res.ok) throw new Error('Load failed');
+        const { categories } = await res.json();
+        const rows = (categories || []).filter(c => c.scope === 'assistant');
+
+        const toggleHtml = (cat, channel, on) => `
+            <label class="flex items-center gap-2">
+              <span class="text-xs font-semibold text-gray-500">${channel === 'inApp' ? 'In app' : 'Email'}</span>
+              <button type="button" data-notif-cat="${cat.key}" data-notif-channel="${channel}"
+                class="${on ? 'bg-emerald-500' : 'bg-gray-300'} relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                role="switch" aria-checked="${on ? 'true' : 'false'}">
+                <span aria-hidden="true" class="${on ? 'translate-x-5' : 'translate-x-0'} pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+              </button>
+            </label>`;
+
+        listEl.innerHTML = rows.map(cat => {
+            const custom = !!(cat.overridden && (cat.overridden.inApp || cat.overridden.email));
+            return `
+            <div class="py-4 first:pt-0 last:pb-0" data-notif-row="${cat.key}">
+              <div class="flex items-center gap-2 flex-wrap">
+                <p class="text-sm font-semibold text-gray-900">${cat.label}</p>
+                <span data-custom-badge class="${custom ? '' : 'hidden '}text-[10px] font-bold bg-amber-50 text-amber-700 px-2 py-0.5 rounded-full border border-amber-200">Custom for this assistant</span>
+              </div>
+              <p class="text-xs text-gray-400 mt-0.5 leading-snug">${cat.description}</p>
+              <div class="flex items-center gap-6 mt-2">
+                ${toggleHtml(cat, 'inApp', !!cat.inApp.value)}
+                ${toggleHtml(cat, 'email', !!cat.email.value)}
+                <button type="button" data-reset-cat="${cat.key}"
+                  class="${custom ? '' : 'hidden '}text-xs font-semibold text-gray-400 hover:text-emerald-700 underline decoration-dotted cursor-pointer">Reset to workspace default</button>
+              </div>
+            </div>`;
+        }).join('');
+
+        if (loadingEl) loadingEl.classList.add('hidden');
+        listEl.classList.remove('hidden');
+        _assistantNotifPrefsLoadedFor = assistantId;
+
+        if (!listEl.dataset.wired) {
+            listEl.dataset.wired = '1';
+            listEl.addEventListener('click', async (e) => {
+                // Reset a category → clear both channel overrides, reload effective values.
+                const resetBtn = e.target.closest('button[data-reset-cat]');
+                if (resetBtn) {
+                    const key = resetBtn.getAttribute('data-reset-cat');
+                    try {
+                        await Promise.all(['inApp', 'email'].map(channel =>
+                            fetch('/.netlify/functions/notification-preferences', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ assistantId: Number(window._currentAssistantId), key, channel, value: null }),
+                            })));
+                        _assistantNotifPrefsLoadedFor = null;
+                        await _initAssistantNotifPrefs();
+                        flashSaved();
+                    } catch { /* leave panel as-is */ }
+                    return;
+                }
+
+                const btn = e.target.closest('button[data-notif-channel]');
+                if (!btn) return;
+                const current = btn.getAttribute('aria-checked') === 'true';
+                const next = !current;
+                paintToggle(btn, next); // optimistic
+                try {
+                    const r = await fetch('/.netlify/functions/notification-preferences', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ assistantId: Number(window._currentAssistantId), key: btn.dataset.notifCat, channel: btn.dataset.notifChannel, value: next }),
+                    });
+                    if (!r.ok) { paintToggle(btn, current); return; }
+                    paintRowState(btn.closest('[data-notif-row]'), true);
+                    flashSaved();
+                } catch { paintToggle(btn, current); }
+            });
+        }
+    } catch {
+        if (loadingEl) loadingEl.textContent = 'Could not load preferences. Please refresh.';
+    }
+
+    _initReviewCadence();
+}
+
+// Review-alert cadence for this assistant (aiAssistants.reviewNotifPreference):
+// how urgently to alert when drafted posts are waiting for approval. Read from
+// get-assistant-context (stashed on window by initAssistantDetail), saved via
+// PATCH set-review-notif-prefs.
+function _initReviewCadence() {
+    const wrap = document.getElementById('review-cadence-options');
+    if (!wrap) return;
+    const current = window._reviewNotifPreference || 'immediate';
+
+    wrap.querySelectorAll('input[name="review-cadence"]').forEach(radio => {
+        radio.checked = radio.value === current;
+        if (radio.dataset.wired) return;
+        radio.dataset.wired = '1';
+        radio.addEventListener('change', async () => {
+            if (!radio.checked) return;
+            const previous = window._reviewNotifPreference || 'immediate';
+            const statusEl = document.getElementById('review-cadence-status');
+            try {
+                const r = await fetch('/.netlify/functions/set-review-notif-prefs', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ assistantId: Number(window._currentAssistantId), reviewNotifPreference: radio.value }),
+                });
+                if (!r.ok) throw new Error('save failed');
+                window._reviewNotifPreference = radio.value;
+                if (statusEl) {
+                    statusEl.textContent = '✓ Cadence saved';
+                    statusEl.classList.remove('hidden', 'text-red-600');
+                    statusEl.classList.add('text-emerald-600');
+                    setTimeout(() => statusEl.classList.add('hidden'), 2500);
+                }
+            } catch {
+                // Snap back to the last saved value
+                wrap.querySelectorAll('input[name="review-cadence"]').forEach(rb => { rb.checked = rb.value === previous; });
+                if (statusEl) {
+                    statusEl.textContent = 'Could not save — please try again.';
+                    statusEl.classList.remove('hidden', 'text-emerald-600');
+                    statusEl.classList.add('text-red-600');
+                }
+            }
+        });
+    });
+}
 
 window._closeBriefDrawer = function() {
     const drawer = document.getElementById('brief-drawer');
@@ -1442,6 +1606,10 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         }
         if (!res.ok) throw new Error('Failed to load');
         currentData = await res.json();
+
+        // Review-alert cadence for the Profile › Notifications panel (saved via
+        // set-review-notif-prefs; stashed here so the panel doesn't refetch context).
+        window._reviewNotifPreference = currentData.reviewNotifPreference || 'immediate';
 
         // Hero header
         const nameInput = document.getElementById('detail-name-input');

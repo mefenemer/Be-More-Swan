@@ -106,7 +106,7 @@ export const handler: Handler = async (event) => {
             type: 'post_generation_queued',
             title: 'Generating a conversion post…',
             message: `${assistant.name} is drafting a conversion post to invite your audience to work with you. It'll appear in your review queue shortly.`,
-            metadata: { jobId, triggerType: 'conversion' },
+            metadata: { jobId, triggerType: 'conversion', assistantId: assistant.id },
         }).catch(() => {});
 
         enqueued++;

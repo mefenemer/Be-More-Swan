@@ -13,7 +13,7 @@ import { Handler } from '@netlify/functions';
 import { and, eq, gte, lte, ne, sql } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
-import { aiAssistants, auditLogs, postIdeaSuggestions, scheduledPosts } from '../../db/schema';
+import { aiAssistants, auditLogs, postIdeaSuggestions, scheduledPosts, systemConnections } from '../../db/schema';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { resolvePostImage } from '../../src/utils/social-publish';
 import { resolvePostingSchedule, computeScheduleSlots } from '../../src/config/posting-cadence';
@@ -134,6 +134,36 @@ export const handler: Handler = async (event) => {
             statusCode: 409,
             body: JSON.stringify({ error: `Post is already in '${post.status}' state and cannot be approved.` }),
         };
+    }
+
+    // Approving/scheduling commits the post to the publisher, which needs a live connection for the
+    // post's platform. Setup no longer requires connecting accounts, so this is THE gate: without a
+    // healthy connection the publish would just fail later, so refuse now with a code the client
+    // turns into a "connect this platform" prompt. (Publisher matches serviceName === platform.)
+    if (post.platform) {
+        const connScope = post.organisationId
+            ? eq(systemConnections.organisationId, post.organisationId)
+            : eq(systemConnections.userId, userId);
+        const [conn] = await db.select({ id: systemConnections.id }).from(systemConnections)
+            .where(and(
+                connScope,
+                eq(systemConnections.serviceName, post.platform),
+                eq(systemConnections.isActive, true),
+                eq(systemConnections.status, 'active'),
+            ))
+            .limit(1);
+        if (!conn) {
+            const label = { instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X' }[post.platform] || post.platform;
+            return {
+                statusCode: 422,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    error: `Connect your ${label} account before this post can be scheduled or published.`,
+                    code: 'PLATFORM_NOT_CONNECTED',
+                    platform: post.platform,
+                }),
+            };
+        }
     }
 
     // Instagram cannot publish a text-only post — an image is mandatory. Enforce server-side so a draft

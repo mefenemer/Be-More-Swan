@@ -14,7 +14,7 @@ async function runExpiry() {
     const expired = await db.update(pendingActions)
         .set({ status: 'expired' })
         .where(and(eq(pendingActions.status, 'pending'), lt(pendingActions.expiresAt, now)))
-        .returning({ id: pendingActions.id, userId: pendingActions.userId, actionType: pendingActions.actionType, taskRunId: pendingActions.taskRunId });
+        .returning({ id: pendingActions.id, userId: pendingActions.userId, actionType: pendingActions.actionType, taskRunId: pendingActions.taskRunId, assistantId: pendingActions.assistantId });
 
     if (expired.length > 0) {
         // Notify each deployer whose actions expired
@@ -23,6 +23,7 @@ async function runExpiry() {
             type: 'action_expired' as const,
             title: `Pending action expired: ${a.actionType}`,
             message: `The ${a.actionType} action for run #${a.taskRunId} was not approved within 24 hours and has been automatically cancelled.`,
+            metadata: { pendingActionId: a.id, assistantId: a.assistantId },
         }));
         await db.insert(notifications).values(notifValues).catch(() => {});
     }

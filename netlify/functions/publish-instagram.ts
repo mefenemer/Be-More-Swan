@@ -61,10 +61,10 @@ export const handler: Handler = async () => {
     const posts = await db.execute<{
         id: number; user_id: number; organisation_id: number; caption: string | null;
         hashtags: string | null; platform_post_id: string | null; connection_id: number | null;
-        attempt_count: number; publish_date: string; post_format: string;
+        attempt_count: number; publish_date: string; post_format: string; assistant_id: number | null;
     }>(
         `SELECT id, user_id, organisation_id, caption, hashtags, platform_post_id,
-                connection_id, attempt_count, publish_date, post_format
+                connection_id, attempt_count, publish_date, post_format, assistant_id
          FROM scheduled_posts
          WHERE status = 'scheduled'
            AND platform = 'instagram'
@@ -218,7 +218,7 @@ export const handler: Handler = async () => {
                 type: 'post_published',
                 title: 'Post published to Instagram',
                 message: 'Your post has been published to Instagram — tap to view.',
-                metadata: { postId: post.id, instagramPostId },
+                metadata: { postId: post.id, instagramPostId, assistantId: post.assistant_id },
             });
 
             succeeded++;
@@ -246,7 +246,7 @@ export const handler: Handler = async () => {
 
 async function handlePublishFailure(
     db: ReturnType<typeof getDb>,
-    post: { id: number; user_id: number; organisation_id: number; attempt_count: number },
+    post: { id: number; user_id: number; organisation_id: number; attempt_count: number; assistant_id: number | null },
     reason: FailureReason,
     now: Date,
 ) {
@@ -274,7 +274,7 @@ async function handlePublishFailure(
                 type: 'instagram_rate_limited',
                 title: 'Instagram publishing delayed',
                 message: `Some posts have been delayed due to Instagram rate limits. They will publish automatically when the limit resets.`,
-                metadata: { rateLimitedUntil },
+                metadata: { rateLimitedUntil, assistantId: post.assistant_id },
             });
         }
         return;
@@ -290,7 +290,7 @@ async function handlePublishFailure(
             type: 'post_publish_failed',
             title: 'Post failed to publish',
             message: userMessage(reason),
-            metadata: { postId: post.id, reason },
+            metadata: { postId: post.id, reason, assistantId: post.assistant_id },
         });
         await db.insert(auditLogs).values({ actionType: 'instagram_publish_failed', resourceType: 'scheduled_posts', resourceId: String(post.id), userId: post.user_id, newState: { reason, attempt } });
 

@@ -221,6 +221,7 @@ export const handler: Handler = async (event) => {
                     vaultRefKey: systemConnections.vaultRefKey,
                     serviceName: systemConnections.serviceName,
                     organisationId: systemConnections.organisationId,
+                    assistantId: systemConnections.assistantId,
                 })
                 .from(systemConnections)
                 .where(and(
@@ -296,7 +297,7 @@ export const handler: Handler = async (event) => {
                 message: cancelledCount > 0
                     ? `${label} disconnected. ${cancelledCount} scheduled post${cancelledCount !== 1 ? 's have' : ' has'} been cancelled. Reconnect to resume publishing.`
                     : `${label} disconnected successfully.`,
-                metadata: { connectionId: connIdInt, platform: svcForPost, cancelledCount },
+                metadata: { connectionId: connIdInt, platform: svcForPost, cancelledCount, assistantId: conn?.assistantId ?? null },
             });
 
             // Audit log (AC1.2.2)

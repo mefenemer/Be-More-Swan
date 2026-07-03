@@ -131,7 +131,7 @@ export const handler: Handler = async () => {
                 type: 'post_published',
                 title: `Post published to ${LABEL[post.platform]}`,
                 message: `Your post has been published to ${LABEL[post.platform]}.`,
-                metadata: { postId: post.id, platform: post.platform, platformPostId: result.id },
+                metadata: { postId: post.id, platform: post.platform, platformPostId: result.id, assistantId: post.assistant_id },
             });
             // Orchestration (Phase 5): this assistant just published — hand off to any linked
             // assistants. Best-effort; never throws. Each downstream draft still needs approval.
@@ -273,7 +273,7 @@ async function handleFailure(db: ReturnType<typeof getDb>, post: PostRow, reason
             type: 'post_publish_failed',
             title: 'Post failed to publish',
             message: `Publishing to ${LABEL[post.platform]} failed: ${reason.errorMessage}`,
-            metadata: { postId: post.id, platform: post.platform, reason },
+            metadata: { postId: post.id, platform: post.platform, reason, assistantId: post.assistant_id },
         });
     } else {
         const retryAt = new Date(now.getTime() + (BACKOFF_MINS[attempt - 1] ?? 30) * 60 * 1000).toISOString();

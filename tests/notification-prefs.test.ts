@@ -15,6 +15,7 @@
 import assert from 'node:assert';
 import {
     PREF_CATEGORIES, categoryForType, isInAppEnabled, isEmailEnabled,
+    isInAppEnabledFor, isEmailEnabledFor, overrideFor,
     buildDefaults, resolveInAppPrefs,
 } from '../src/utils/notification-prefs';
 import { categoryOf } from '../src/utils/notification-actions';
@@ -77,6 +78,66 @@ check('resolveInAppPrefs seeds New Role from legacy notify_availability when uns
     assert.equal(resolveInAppPrefs(null, false)['new_role_availability'], false);
     // stored prefs win — legacy column is ignored once the user has in-app prefs
     assert.equal(resolveInAppPrefs({ new_role_availability: false }, true)['new_role_availability'], false);
+});
+
+check('every category carries a valid UI scope', () => {
+    for (const cat of PREF_CATEGORIES) {
+        assert.ok(cat.scope === 'account' || cat.scope === 'assistant', `bad scope on "${cat.key}"`);
+    }
+});
+
+check('assistant-work categories are assistant-scoped; essential/locked ones stay account-scoped', () => {
+    const assistantKeys = PREF_CATEGORIES.filter(c => c.scope === 'assistant').map(c => c.key).sort();
+    assert.deepEqual(assistantKeys, ['approvals', 'assistant_tasks', 'connections', 'content_calendar']);
+    // Locked (always-on account/billing) rows must never move out of Account Settings.
+    for (const cat of PREF_CATEGORIES) {
+        if (cat.inApp.locked || cat.email.locked) {
+            assert.equal(cat.scope, 'account', `locked category "${cat.key}" must be account-scoped`);
+        }
+    }
+});
+
+// ── Per-assistant overrides ────────────────────────────────────────────────────
+
+check('per-assistant override beats the workspace value for that assistant only', () => {
+    // Workspace has content_calendar ON (default); assistant 7 mutes it.
+    const overrides = { '7': { content_calendar: { inApp: false } } };
+    assert.equal(isInAppEnabledFor(null, overrides, 7, 'post_published'), false);
+    assert.equal(isInAppEnabledFor(null, overrides, '7', 'post_published'), false); // id as string too
+    assert.equal(isInAppEnabledFor(null, overrides, 8, 'post_published'), true);    // other assistant untouched
+    assert.equal(isInAppEnabledFor(null, overrides, null, 'post_published'), true); // unattributed row → workspace
+});
+
+check('per-assistant override can re-enable a workspace-muted category', () => {
+    const workspaceOff = { approvals: false };
+    const overrides = { '3': { approvals: { email: true } } };
+    assert.equal(isEmailEnabledFor(workspaceOff, overrides, 3, 'hitl_approval_required'), true);
+    assert.equal(isEmailEnabledFor(workspaceOff, overrides, 4, 'hitl_approval_required'), false);
+});
+
+check('overrides are per-channel: an inApp override leaves email on the workspace value', () => {
+    const overrides = { '7': { content_calendar: { inApp: false } } };
+    assert.equal(isEmailEnabledFor(null, overrides, 7, 'post_published'), true);
+});
+
+check('overrides never unlock a locked category and never apply to account-scoped rows', () => {
+    const overrides = {
+        '7': {
+            account_security: { inApp: false },        // locked — must stay ON
+            product_updates: { inApp: false },         // account scope — override ignored
+        },
+    };
+    assert.equal(isInAppEnabledFor(null, overrides, 7, 'security'), true);
+    assert.equal(isInAppEnabledFor(null, overrides, 7, 'milestone'), true);
+});
+
+check('overrideFor returns undefined for missing levels and non-boolean values', () => {
+    assert.equal(overrideFor(null, 7, 'approvals', 'inApp'), undefined);
+    assert.equal(overrideFor({}, 7, 'approvals', 'inApp'), undefined);
+    assert.equal(overrideFor({ '7': {} }, 7, 'approvals', 'inApp'), undefined);
+    assert.equal(overrideFor({ '7': { approvals: {} } }, 7, 'approvals', 'inApp'), undefined);
+    assert.equal(overrideFor({ '7': { approvals: { inApp: 'yes' as any } } }, 7, 'approvals', 'inApp'), undefined);
+    assert.equal(overrideFor({ '7': { approvals: { inApp: false } } }, undefined, 'approvals', 'inApp'), undefined);
 });
 
 check('every critical_action type lives in an in-app-locked category (models in sync)', () => {

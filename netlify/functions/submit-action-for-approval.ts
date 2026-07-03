@@ -133,6 +133,7 @@ export const handler: Handler = async (event) => {
                 type: 'action_rate_limited',
                 title: 'Publishing rate limit reached',
                 message: `Rate limit reached for ${actionType} actions in run #${taskRunId}. Review and release pending actions in your workspace.`,
+                metadata: { taskRunId, assistantId: assistantId ?? null },
             }).catch(() => {});
 
             return {
@@ -175,6 +176,7 @@ export const handler: Handler = async (event) => {
         type: 'hitl_approval_required',
         title: `Approval required: ${actionType}`,
         message: `${warning} Run #${taskRunId} proposes: ${actionType}${affectedRecordCount ? ` (${affectedRecordCount} records affected)` : ''}. Expires in 24 hours.`,
+        metadata: { taskRunId, pendingActionId: pending.id, assistantId: assistantId ?? null },
     }).catch(() => {});
 
     return {

@@ -106,7 +106,7 @@ async function refreshToken(db: ReturnType<typeof getDb>, conn: {
                 type: 'instagram_token_refresh_failed',
                 title: 'Instagram connection expired',
                 message: `Your Instagram account needs to be reconnected. Your scheduled posts will not be published until you reconnect.`,
-                metadata: { connectionId: conn.id },
+                metadata: { connectionId: conn.id, assistantId: conn.assistantId },
             });
             await sendEmail({
                 to: orgUser.email,

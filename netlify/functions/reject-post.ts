@@ -141,7 +141,7 @@ export const handler: Handler = async (event) => {
                     type: 'post_revised',
                     title: `${assistantName}: Your revised post is ready to review`,
                     message: `Your voice feedback has been applied. The revised draft is ready for your review.`,
-                    metadata: { revisedPostId: revised.id, originalPostId: postId },
+                    metadata: { revisedPostId: revised.id, originalPostId: postId, assistantId: post.assistantId },
                 });
             } catch { /* non-blocking */ }
         })();
