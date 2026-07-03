@@ -121,6 +121,11 @@ window.initNotifications = async function() {
         if (notif.type === 'media_ready') {
             return { label: 'View content', run: () => window.loadView?.('my-content', meta.assetId ? { assetId: meta.assetId } : null) };
         }
+        // Issue #87 — issue status updates need a link back to the reported issue itself,
+        // not just a passive FYI. Opens the "Report an Issue" modal on the specific issue.
+        if (notif.type === 'issue_update') {
+            return { label: 'View issue', run: () => window.routeToIssueReport?.(meta.issueId) };
+        }
         if (meta.action === 'view_invoices') return ACTIONS_BY_TYPE.invoice_ready;
         if (meta.action === 'view_ticket')   return ACTIONS_BY_TYPE.ticket_created;
         if (meta.action === 'open_wizard')   return { label: meta.ctaLabel || 'Open Setup Wizard', run: openWizard };

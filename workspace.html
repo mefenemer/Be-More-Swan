@@ -6107,6 +6107,8 @@ async function gpSubmitReject() {
 
   window.riFilterReports = function (status) {
     _myReportsFilter = status;
+    const select = document.getElementById('ri-status-filter');
+    if (select) select.value = status;
     renderMyReportsList();
   };
 
@@ -6135,7 +6137,7 @@ async function gpSubmitReject() {
     }
 
     return `
-      <div class="border border-gray-200 rounded-xl p-3">
+      <div class="border border-gray-200 rounded-xl p-3" data-issue-id="${i.id}">
         <div class="flex items-start justify-between gap-2">
           <p class="text-sm font-semibold text-gray-800 whitespace-pre-wrap">${esc(i.description)}</p>
           <span class="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded-full ${cls}">${esc(label)}</span>
@@ -6191,10 +6193,33 @@ async function gpSubmitReject() {
     if (e.key === 'Escape') { const m = modal(); if (m && !m.classList.contains('hidden')) window.closeReportIssue(); }
   });
 
-  // Deep link from the notification email (?issue=N) opens "My reports".
+  // Issue #87 — the in-app "issue_update" notification CTA (see notifications.js) routes
+  // here to jump straight to the reported issue instead of leaving the user to hunt for it.
+  window.routeToIssueReport = function (issueId) {
+    window.openReportIssue('mine');
+    if (issueId == null) return;
+    const focusCard = () => {
+      const card = document.querySelector(`[data-issue-id="${issueId}"]`);
+      if (!card) return false;
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.classList.add('ring-2', 'ring-amber-400');
+      setTimeout(() => card.classList.remove('ring-2', 'ring-amber-400'), 2000);
+      return true;
+    };
+    // loadMyReports() runs async on tab switch; give it a beat, then widen the status
+    // filter if the card isn't in the default "fixed_ready_to_test" view.
+    setTimeout(() => {
+      if (focusCard()) return;
+      window.riFilterReports('all');
+      setTimeout(focusCard, 150);
+    }, 400);
+  };
+
+  // Deep link from the notification email (?issue=N) opens "My reports" focused on that issue.
   try {
     const qs = new URLSearchParams(window.location.search);
-    if (qs.get('issue')) window.addEventListener('load', () => setTimeout(() => window.openReportIssue('mine'), 600));
+    const issueId = qs.get('issue');
+    if (issueId) window.addEventListener('load', () => setTimeout(() => window.routeToIssueReport(Number(issueId)), 600));
   } catch { /* noop */ }
 })();
 </script>
