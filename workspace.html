@@ -4338,7 +4338,10 @@ function ideaDelete(id) {
             });
             const d = await res.json().catch(() => ({}));
             if (!res.ok) { window.showToast?.(d.error || 'Could not delete this idea.'); return; }
+            // Refresh whichever Review Queue view is currently mounted — the global Review Queue
+            // page (Social tab) and/or the assistant-detail page's own scoped Review Queue tab.
             rqLoadItems();
+            if (typeof window.detailRqRefresh === 'function') { try { window.detailRqRefresh(); } catch { /* ignore */ } }
         } catch { window.showToast?.('Network error — please try again.'); }
     }, { title: 'Delete idea?', confirmLabel: 'Yes, delete idea' });
 }
