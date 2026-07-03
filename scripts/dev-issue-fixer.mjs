@@ -33,7 +33,7 @@
 //
 // Run:  npm run dev:issue-fixer
 
-import { spawnSync } from 'node:child_process';
+import { spawnSync, spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir, hostname, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -180,9 +180,9 @@ async function reportBlocked(id, payload) {
   return res.json();
 }
 
-// While paused, poll whether an admin has pressed "Resume runner". Doubles as a liveness
-// ping and keeps the portal's "active Claude session" display current while the admin
-// switches logins on this machine.
+// While paused, poll whether an admin has pressed "Resume runner" (or "Restart runner").
+// Doubles as a liveness ping and keeps the portal's "active Claude session" display current
+// while the admin switches logins on this machine. Returns { resume, restart }.
 async function checkResume() {
   const acct = activeClaudeAccount();
   const res = await apiFetch(`${ENDPOINT}?action=resume-check${acct ? `&account=${encodeURIComponent(acct)}` : ''}`, {
@@ -190,7 +190,25 @@ async function checkResume() {
   }, { label: 'resume-check' });
   if (!res.ok) throw new Error(`resume-check failed: ${res.status} ${await res.text()}`);
   const data = await res.json();
-  return data.resume === true;
+  return { resume: data.resume === true, restart: data.restart === true };
+}
+
+// Admin pressed "Restart runner" in the portal. Under launchd (KeepAlive) simply exiting is
+// the restart — launchd relaunches the service within its ThrottleInterval. When run by hand
+// in a terminal there is no supervisor, so spawn a detached fresh copy of ourselves first.
+// The server already deleted our status row; the new process re-reports if still blocked.
+function restartSelf() {
+  log('🔄 restart requested from the admin portal.');
+  if (process.env.AURA_RUNNER_SUPERVISED === '1') {
+    log('  supervised by launchd — exiting; KeepAlive relaunches a fresh process (~30s).');
+    process.exit(0);
+  }
+  log('  not supervised — re-spawning a fresh copy of this script…');
+  const child = spawn(process.argv[0], process.argv.slice(1), {
+    detached: true, stdio: 'inherit', cwd: process.cwd(), env: process.env,
+  });
+  child.unref();
+  process.exit(0);
 }
 
 // Report the result of the post-Resume login probe: ok:true clears the block server-side.
@@ -400,10 +418,11 @@ async function waitForResume() {
   log('⏸ runner paused — Claude session limit. Log into an account with credit on THIS machine, then press "Resume runner" in the admin portal.');
   while (!stopping) {
     await sleep(RESUME_POLL_MS);
-    let resume = false;
-    try { resume = await checkResume(); }
+    let status;
+    try { status = await checkResume(); }
     catch (e) { log(`  resume-check error: ${e.message}`); continue; }
-    if (!resume) continue;
+    if (status.restart) restartSelf(); // does not return
+    if (!status.resume) continue;
 
     log('▶ resume requested — verifying the Claude login…');
     const probe = probeClaude();

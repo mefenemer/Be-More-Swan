@@ -1142,6 +1142,9 @@ export const devRunnerStatus = pgTable("dev_runner_status", {
   // Self-reported by the runner on block / resume-check / resume-ack; display only — lets the
   // admin see whether the re-login actually took effect before pressing Resume.
   activeAccount: text("active_account"),
+  // Admin pressed "Restart runner". Consumed by the runner's next resume-check poll: the row
+  // is deleted and the runner exits (launchd KeepAlive relaunches it) or re-spawns itself.
+  restartRequested: boolean("restart_requested").notNull().default(false),
   blockedAt: timestamp("blocked_at"),
   lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

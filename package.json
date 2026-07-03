@@ -23,6 +23,7 @@
     "db:seed-catalog": "npx tsx db/seed-catalog.ts",
     "r2:cors": "npx tsx scripts/set-r2-cors.ts",
     "dev:issue-fixer": "node scripts/dev-issue-fixer.mjs",
+    "dev:issue-fixer:local": "node --env-file=.env.handoff scripts/dev-issue-fixer.mjs",
     "build:css": "tailwindcss -i ./input.css -o ./style.css --watch",
     "build:css:prod": "tailwindcss -i ./input.css -o ./style.css",
     "build:version": "node scripts/stamp-view-version.mjs",

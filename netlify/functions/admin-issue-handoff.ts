@@ -249,6 +249,13 @@ export const handler: Handler = async (event) => {
         // paused banner shows the live session while the admin switches logins.
         const account = (qs.account || '').toString().trim().slice(0, 200) || null;
         const [row] = await db.select().from(devRunnerStatus).where(eq(devRunnerStatus.runnerId, rid)).limit(1);
+        // Admin asked for a restart: consume the request and delete the row — this process
+        // identity (host:pid) dies with the restart, and the fresh process re-reports under
+        // a new id if it's still blocked. Deleting avoids a ghost "paused" banner forever.
+        if (row?.restartRequested) {
+            await db.delete(devRunnerStatus).where(eq(devRunnerStatus.runnerId, rid));
+            return json(200, { resume: false, restart: true, state: row.state || 'ok' });
+        }
         if (row) {
             await db.update(devRunnerStatus)
                 .set({ lastSeenAt: now, ...(account ? { activeAccount: account } : {}) })

@@ -30,4 +30,7 @@ if [ -z "${DEV_HANDOFF_TOKEN:-}" ]; then
 fi
 
 echo "▶ starting dev-issue-fixer watcher ($(date))"
+# Tells the watcher it's supervised: on a portal-requested restart it just exits and
+# launchd's KeepAlive relaunches it (instead of re-spawning itself).
+export AURA_RUNNER_SUPERVISED=1
 exec node scripts/dev-issue-fixer.mjs

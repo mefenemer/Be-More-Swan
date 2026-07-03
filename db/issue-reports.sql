@@ -232,3 +232,8 @@ END $$;
 -- Self-reported by the runner on block / resume-check / resume-ack; display only — shown in
 -- the paused banner so the admin can see whether the re-login took effect before Resume.
 ALTER TABLE dev_runner_status ADD COLUMN IF NOT EXISTS active_account TEXT;
+
+-- Admin pressed "Restart runner" in the paused banner. Consumed by the runner's next
+-- resume-check poll (~10s while paused): the row is deleted and the runner restarts itself
+-- (exit under launchd KeepAlive, or re-spawn when run manually in a terminal).
+ALTER TABLE dev_runner_status ADD COLUMN IF NOT EXISTS restart_requested BOOLEAN NOT NULL DEFAULT false;

@@ -177,6 +177,7 @@ export const handler: Handler = async (event) => {
             resumeRequested: r.resumeRequested,
             lastProbeResult: r.lastProbeResult,
             activeAccount: r.activeAccount,
+            restartRequested: r.restartRequested,
             blockedAt: r.blockedAt,
             lastSeenAt: r.lastSeenAt,
         }));
@@ -209,6 +210,35 @@ export const handler: Handler = async (event) => {
             return json(200, { ok: true, resumed: 0, message: 'No paused runner to resume. Make sure the runner process is running and has reported a session limit.' });
         }
         return json(200, { ok: true, resumed: updated.length, runners: updated.map((u) => u.runnerId) });
+    }
+
+    // ── POST ?action=restart-runner: ask a paused runner to restart itself ────────
+    // Super-admin only. Sets restart_requested; the paused runner consumes it on its next
+    // resume-check poll (~10s) and restarts (exit under launchd KeepAlive, or re-spawn when
+    // run manually). Only works while the runner process is alive and polling — a dead
+    // process can't be restarted remotely. Optionally scope to one runnerId; default is
+    // every currently-blocked runner.
+    if (event.httpMethod === 'POST' && action === 'restart-runner') {
+        if (admin.role !== 'super_admin') {
+            return json(403, { error: 'Restarting the runner requires super-admin privilege.' });
+        }
+        let body: any = {};
+        try { body = JSON.parse(event.body || '{}'); } catch { /* empty body is fine */ }
+        const rid = typeof body.runnerId === 'string' && body.runnerId.trim() ? body.runnerId.trim() : null;
+
+        const whereBlocked = rid
+            ? and(eq(devRunnerStatus.runnerId, rid), eq(devRunnerStatus.state, 'session_limited'))
+            : eq(devRunnerStatus.state, 'session_limited');
+
+        const updated = await db.update(devRunnerStatus)
+            .set({ restartRequested: true, updatedAt: new Date() })
+            .where(whereBlocked)
+            .returning({ runnerId: devRunnerStatus.runnerId });
+
+        if (updated.length === 0) {
+            return json(200, { ok: true, requested: 0, message: 'No paused runner to restart. Make sure the runner process is running and has reported a session limit.' });
+        }
+        return json(200, { ok: true, requested: updated.length, runners: updated.map((u) => u.runnerId) });
     }
 
     // ── GET single issue (with thread + screenshot) ──────────────────────────────
