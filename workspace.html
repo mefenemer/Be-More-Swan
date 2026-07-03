@@ -3915,12 +3915,13 @@ function formatCurrency(amount, currency) {
     const sub = document.getElementById('savings-modal-sub');
     const body = document.getElementById('savings-modal-body');
     const footer = document.getElementById('savings-modal-footer');
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     if (sub) sub.textContent = `${d.taskCount ?? 0} task${(d.taskCount ?? 0) === 1 ? '' : 's'} counted${d.month ? ' · ' + d.month : ''}`;
     if (body) body.innerHTML = tasks.length
       ? tasks.map(t => `
           <div class="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-            <div><span class="text-sm font-semibold text-gray-900">${t.label}</span>
-              <span class="ml-2 text-xs text-gray-400">${t.count} item${t.count === 1 ? '' : 's'}</span></div>
+            <div><span class="text-sm font-semibold text-gray-900">${esc(t.label)}</span>
+              ${t.assistant ? `<span class="ml-2 text-xs text-gray-400">${esc(t.assistant)}</span>` : ''}</div>
             <span class="text-sm font-semibold text-emerald-600">${t.hours} h</span>
           </div>`).join('')
       : '<p class="text-sm text-gray-400 text-center py-6">No tasks counted yet this month — your assistants will start clocking these up as they work.</p>';
