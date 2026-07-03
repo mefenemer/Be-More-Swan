@@ -33,6 +33,9 @@ const _platformName = (p?: string | null): string => {
     return map[p.toLowerCase()] ?? p;
 };
 
+// "X" is spoken "ex", so it takes "an" despite starting with a consonant letter.
+const _article = (word: string): string => (/^(x$|[aeiou])/i.test(word) ? 'an' : 'a');
+
 export const handler: Handler = async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
@@ -150,7 +153,7 @@ export const handler: Handler = async (event) => {
             ...genJobs.map(j => ({
                 icon: '✍️',
                 assistantName: j.assistantName || 'Your assistant',
-                label: `Writing a ${_platformName(j.platform) || 'social'} post`,
+                label: `Writing ${_article(_platformName(j.platform) || 'social')} ${_platformName(j.platform) || 'social'} post`,
                 since: j.createdAt,
             })),
             ...mediaJobs.map(m => ({
@@ -167,7 +170,7 @@ export const handler: Handler = async (event) => {
                 id: p.id,
                 assistantName: p.assistantName || 'Your assistant',
                 platform: _platformName(p.platform),
-                title: `${p.isAutonomous ? 'Drafted' : 'Prepared'} a ${_platformName(p.platform) || 'social'} post for review`,
+                title: `${p.isAutonomous ? 'Drafted' : 'Prepared'} ${_article(_platformName(p.platform) || 'social')} ${_platformName(p.platform) || 'social'} post for review`,
                 preview: (p.caption || '').slice(0, 140),
                 reason: p.generationReason || null,
                 when: p.publishDate || null,

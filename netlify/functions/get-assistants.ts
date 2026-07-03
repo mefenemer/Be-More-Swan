@@ -3,10 +3,7 @@ import { and, eq, sql, inArray } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
 import { aiAssistants, goals, scheduledPosts, userProfiles } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
-
-// Minutes of human time saved per post created by the assistant (industry average for drafting
-// a social post including research, copy, and scheduling). Admin-configurable in future.
-const MINUTES_SAVED_PER_POST = 30;
+import { getTimeMultipliers } from '../../src/utils/platform-config';
 
 export const handler: Handler = async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -35,7 +32,7 @@ export const handler: Handler = async (event) => {
         const assistantIds = assistants.map(a => a.id);
 
         // Run goals + post metrics + hourly rate in parallel
-        const [goalRows, postRows, profileRow] = await Promise.all([
+        const [goalRows, postRows, profileRow, mult] = await Promise.all([
             // SMART Goals AC2.1.1 — per-assistant goal status counts for dashboard card micro-summary.
             // goals has no RLS (owner-path, like content_rules), so query it on the owner connection.
             assistantIds.length > 0
@@ -66,6 +63,8 @@ export const handler: Handler = async (event) => {
                 .from(userProfiles)
                 .where(eq(userProfiles.userId, userId))
                 .limit(1),
+
+            getTimeMultipliers(),
         ]);
 
         // --- Goals summary ---
@@ -121,7 +120,7 @@ export const handler: Handler = async (event) => {
         // Assemble final response
         const withMetrics = assistants.map(a => {
             const pm = postMetrics.get(a.id) || { totalCreated: 0, totalScheduled: 0, totalPublished: 0, byPlatform: {} };
-            const hoursSaved = parseFloat(((pm.totalCreated * MINUTES_SAVED_PER_POST) / 60).toFixed(1));
+            const hoursSaved = parseFloat(((pm.totalCreated * mult.content_drafted) / 60).toFixed(1));
             const gbpSaved = hourlyRateGbp ? parseFloat((hoursSaved * hourlyRateGbp).toFixed(2)) : null;
             return {
                 ...a,

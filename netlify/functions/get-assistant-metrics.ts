@@ -7,8 +7,7 @@ import { and, eq, sql } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
 import { aiAssistants, scheduledPosts, userProfiles } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
-
-const MINUTES_SAVED_PER_POST = 30;
+import { getTimeMultipliers } from '../../src/utils/platform-config';
 
 const PUBLISHED_STATUSES = new Set(['published']);
 const SCHEDULED_STATUSES = new Set(['scheduled', 'approved', 'pending_approval', 'in_review']);
@@ -35,7 +34,7 @@ export const handler: Handler = async (event) => {
         );
         if (!assistant) return { statusCode: 404, body: JSON.stringify({ error: 'Not found' }) };
 
-        const [postRows, profileRow] = await Promise.all([
+        const [postRows, profileRow, mult] = await Promise.all([
             db.select({
                 status: scheduledPosts.status,
                 platform: scheduledPosts.platform,
@@ -49,6 +48,8 @@ export const handler: Handler = async (event) => {
               .from(userProfiles)
               .where(eq(userProfiles.userId, userId))
               .limit(1),
+
+            getTimeMultipliers(),
         ]);
 
         const prefs = (profileRow[0]?.preferences as Record<string, any>) || {};
@@ -67,7 +68,7 @@ export const handler: Handler = async (event) => {
             if (PUBLISHED_STATUSES.has(r.status)) { byPlatform[p].published += r.c; totalPublished += r.c; }
         }
 
-        const hoursSaved = parseFloat(((totalCreated * MINUTES_SAVED_PER_POST) / 60).toFixed(1));
+        const hoursSaved = parseFloat(((totalCreated * mult.content_drafted) / 60).toFixed(1));
         const gbpSaved = hourlyRateGbp ? parseFloat((hoursSaved * hourlyRateGbp).toFixed(2)) : null;
 
         return {
@@ -81,7 +82,7 @@ export const handler: Handler = async (event) => {
                 hoursSaved,
                 gbpSaved,
                 hourlyRateSet: hourlyRateGbp !== null,
-                minutesPerPost: MINUTES_SAVED_PER_POST,
+                minutesPerPost: mult.content_drafted,
             }),
         };
     } catch (err) {

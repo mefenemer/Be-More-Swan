@@ -98,6 +98,7 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'setup_complete' THEN 'celebratory'
     WHEN 'milestone_unlock' THEN 'celebratory'
     WHEN 'referral_reward' THEN 'celebratory'
+    WHEN 'roi_milestone' THEN 'celebratory'  -- Issue #84 — ROI/break-even milestone (replaces persistent banner)
     -- informational (explicit + default)
     ELSE 'informational'
   END;

@@ -115,12 +115,13 @@
   <div class="mb-8 border-b border-gray-200 overflow-x-auto">
     <nav class="-mb-px flex gap-x-8" aria-label="Assistant sections">
       <button type="button" data-maintab="overview"      class="main-tab-btn active-tab">Overview</button>
+      <button type="button" data-maintab="activity"      class="main-tab-btn">Activity</button>
       <button type="button" data-maintab="review-queue" class="main-tab-btn">Review Queue
         <span id="detail-rq-pending-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
       <button type="button" data-maintab="goals"         class="main-tab-btn">Goals</button>
       <button type="button" data-maintab="automation"    class="main-tab-btn">Automation</button>
-      <button type="button" data-maintab="meetings"      class="main-tab-btn" title="Runbook: the rules your assistant follows, what it's learned from your corrections, and your check-in history.">Runbook
+      <button type="button" data-maintab="meetings"      class="main-tab-btn" title="Notebook: the rules your assistant follows, what it's learned from your corrections, and your check-in history.">Notebook
         <span id="meetings-kickoff-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-blue-100 text-blue-700 text-[10px] font-black rounded-full inline-flex items-center justify-center">!</span>
       </button>
     </nav>
@@ -196,6 +197,83 @@
     <div id="metrics-by-platform" class="space-y-2"></div>
   </div>
 
+  <!-- Performance KPIs — positioned directly after Impact & ROI in Overview -->
+  <div class="mb-8">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Performance Metrics</h3>
+      <span id="metrics-status-note" class="text-xs text-gray-400 font-medium">Last 30 days</span>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+
+      <!-- The Thumb Stopper -->
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Engagement Rate by Reach</span>
+          <span id="metric-engagement-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
+        </div>
+        <div>
+          <p id="metric-engagement-value" class="text-2xl font-extrabold text-gray-900">—</p>
+          <p class="text-base font-bold text-gray-700 mt-0.5">The Thumb Stopper</p>
+          <p class="text-xs text-gray-500 mt-1">Of everyone who saw your content, how many actually stopped to engage with it.</p>
+        </div>
+        <div class="mt-auto pt-3 border-t border-gray-100">
+          <p class="text-xs text-gray-400">Trending: <span id="metric-engagement-trend" class="font-semibold text-gray-500">—</span></p>
+        </div>
+      </div>
+
+      <!-- Escaping the Echo Chamber -->
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Organic Reach Growth</span>
+          <span id="metric-reach-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
+        </div>
+        <div>
+          <p id="metric-reach-value" class="text-2xl font-extrabold text-gray-900">—</p>
+          <p class="text-base font-bold text-gray-700 mt-0.5">Escaping the Echo Chamber</p>
+          <p class="text-xs text-gray-500 mt-1">How far your content is spreading beyond your existing followers into new audiences.</p>
+        </div>
+        <div class="mt-auto pt-3 border-t border-gray-100">
+          <p class="text-xs text-gray-400">Trending: <span id="metric-reach-trend" class="font-semibold text-gray-500">—</span></p>
+        </div>
+      </div>
+
+      <!-- The Pack Your Bags Metric -->
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Click-Through Rate</span>
+          <span id="metric-ctr-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
+        </div>
+        <div>
+          <p id="metric-ctr-value" class="text-2xl font-extrabold text-gray-900">—</p>
+          <p class="text-base font-bold text-gray-700 mt-0.5">The "Pack Your Bags" Metric</p>
+          <p class="text-xs text-gray-500 mt-1">How many viewers clicked through and took the action your content asked for.</p>
+        </div>
+        <div class="mt-auto pt-3 border-t border-gray-100">
+          <p class="text-xs text-gray-400">Trending: <span id="metric-ctr-trend" class="font-semibold text-gray-500">—</span></p>
+        </div>
+      </div>
+
+      <!-- Meaningful Engagement — value over vanity (AC8) -->
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Meaningful Engagement</span>
+          <span id="metric-value-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
+        </div>
+        <div>
+          <p id="metric-value-value" class="text-2xl font-extrabold text-gray-900">—</p>
+          <p class="text-base font-bold text-gray-700 mt-0.5">Saves, Shares &amp; DMs</p>
+          <p class="text-xs text-gray-500 mt-1">The signals that convert trust into business — weighed above likes and view count.</p>
+        </div>
+        <div class="mt-auto pt-3 border-t border-gray-100">
+          <p class="text-xs text-gray-400">Trending: <span id="metric-value-trend" class="font-semibold text-gray-500">—</span></p>
+        </div>
+      </div>
+
+    </div>
+    <!-- Value wins: posts that converted on saves/shares regardless of reach (AC8) -->
+    <p id="metric-value-wins" class="hidden text-xs text-emerald-700 font-medium mt-3"></p>
+  </div>
+
   <!-- Active Workflows (Epic 4.2) — how this assistant hands off to / receives from others. Hidden when none. -->
   <div id="active-workflows-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6 hidden">
     <div class="flex items-center justify-between gap-3 mb-4">
@@ -206,23 +284,6 @@
       <button type="button" onclick="window.loadView && window.loadView('orchestrations')" class="shrink-0 text-xs font-bold text-emerald-600 hover:text-emerald-800 transition cursor-pointer">Manage in Orchestrations →</button>
     </div>
     <div id="active-workflows-list" class="space-y-2"></div>
-  </div>
-
-  <!-- Unified Activity feed (Epic 2.2) — chronological, with Failed/Needs-Input pinned on top. -->
-  <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-8">
-    <div class="flex items-center justify-between mb-4">
-      <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Activity</h3>
-      <div id="activity-timeframe-btns" class="flex gap-1">
-        <button data-tf="1d"  class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-indigo-500 bg-indigo-50 text-indigo-700 font-semibold">1d</button>
-        <button data-tf="7d"  class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">7d</button>
-        <button data-tf="30d" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">30d</button>
-        <button data-tf="90d" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">90d</button>
-        <button data-tf="all" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">All</button>
-      </div>
-    </div>
-    <div id="recent-activity-list" class="space-y-3">
-      <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading activity…</div>
-    </div>
   </div>
 
   <!-- Goals section is relocated here (directly under Recent Activity) by initAssistantDetail;
@@ -244,6 +305,28 @@
   </div>
 
   </div><!-- /maintab-overview -->
+
+  <!-- ── MAIN TAB: Activity ─────────────────────────────────────────── -->
+  <div id="maintab-activity" class="main-tab-content hidden">
+
+  <!-- Unified Activity feed (Epic 2.2) — chronological, with Failed/Needs-Input pinned on top. -->
+  <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-8">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Activity</h3>
+      <div id="activity-timeframe-btns" class="flex gap-1">
+        <button data-tf="1d"  class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-indigo-500 bg-indigo-50 text-indigo-700 font-semibold">1d</button>
+        <button data-tf="7d"  class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">7d</button>
+        <button data-tf="30d" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">30d</button>
+        <button data-tf="90d" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">90d</button>
+        <button data-tf="all" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">All</button>
+      </div>
+    </div>
+    <div id="recent-activity-list" class="space-y-3">
+      <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading activity…</div>
+    </div>
+  </div>
+
+  </div><!-- /maintab-activity -->
 
   <!-- ── MAIN TAB: Review Queue ──────────────────────────────────────── -->
   <div id="maintab-review-queue" class="main-tab-content hidden">
@@ -931,83 +1014,6 @@
         <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading goals…</div>
       </div>
     </div>
-
-    <!-- Performance KPIs -->
-    <div class="mb-8">
-      <div class="flex items-center justify-between mb-4">
-        <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Performance Metrics</h3>
-        <span id="metrics-status-note" class="text-xs text-gray-400 font-medium">Last 30 days</span>
-      </div>
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-
-        <!-- The Thumb Stopper -->
-        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Engagement Rate by Reach</span>
-            <span id="metric-engagement-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
-          </div>
-          <div>
-            <p id="metric-engagement-value" class="text-2xl font-extrabold text-gray-900">—</p>
-            <p class="text-base font-bold text-gray-700 mt-0.5">The Thumb Stopper</p>
-            <p class="text-xs text-gray-500 mt-1">Of everyone who saw your content, how many actually stopped to engage with it.</p>
-          </div>
-          <div class="mt-auto pt-3 border-t border-gray-100">
-            <p class="text-xs text-gray-400">Trending: <span id="metric-engagement-trend" class="font-semibold text-gray-500">—</span></p>
-          </div>
-        </div>
-
-        <!-- Escaping the Echo Chamber -->
-        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Organic Reach Growth</span>
-            <span id="metric-reach-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
-          </div>
-          <div>
-            <p id="metric-reach-value" class="text-2xl font-extrabold text-gray-900">—</p>
-            <p class="text-base font-bold text-gray-700 mt-0.5">Escaping the Echo Chamber</p>
-            <p class="text-xs text-gray-500 mt-1">How far your content is spreading beyond your existing followers into new audiences.</p>
-          </div>
-          <div class="mt-auto pt-3 border-t border-gray-100">
-            <p class="text-xs text-gray-400">Trending: <span id="metric-reach-trend" class="font-semibold text-gray-500">—</span></p>
-          </div>
-        </div>
-
-        <!-- The Pack Your Bags Metric -->
-        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Click-Through Rate</span>
-            <span id="metric-ctr-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
-          </div>
-          <div>
-            <p id="metric-ctr-value" class="text-2xl font-extrabold text-gray-900">—</p>
-            <p class="text-base font-bold text-gray-700 mt-0.5">The "Pack Your Bags" Metric</p>
-            <p class="text-xs text-gray-500 mt-1">How many viewers clicked through and took the action your content asked for.</p>
-          </div>
-          <div class="mt-auto pt-3 border-t border-gray-100">
-            <p class="text-xs text-gray-400">Trending: <span id="metric-ctr-trend" class="font-semibold text-gray-500">—</span></p>
-          </div>
-        </div>
-
-        <!-- Meaningful Engagement — value over vanity (AC8) -->
-        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Meaningful Engagement</span>
-            <span id="metric-value-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
-          </div>
-          <div>
-            <p id="metric-value-value" class="text-2xl font-extrabold text-gray-900">—</p>
-            <p class="text-base font-bold text-gray-700 mt-0.5">Saves, Shares &amp; DMs</p>
-            <p class="text-xs text-gray-500 mt-1">The signals that convert trust into business — weighed above likes and view count.</p>
-          </div>
-          <div class="mt-auto pt-3 border-t border-gray-100">
-            <p class="text-xs text-gray-400">Trending: <span id="metric-value-trend" class="font-semibold text-gray-500">—</span></p>
-          </div>
-        </div>
-
-      </div>
-      <!-- Value wins: posts that converted on saves/shares regardless of reach (AC8) -->
-      <p id="metric-value-wins" class="hidden text-xs text-emerald-700 font-medium mt-3"></p>
-    </div>
   </div>
 
   </div><!-- /maintab-goals -->
@@ -1076,8 +1082,8 @@
   <!-- ── MAIN TAB: Meetings ────────────────────────────────────────── -->
   <div id="maintab-meetings" class="main-tab-content hidden space-y-6">
 
-    <!-- Explains the "Runbook" name for users unfamiliar with the term (issue #76) -->
-    <p class="text-sm text-gray-500 -mt-2">The <strong>Runbook</strong> is your assistant's operating manual: the rules it's learned from your corrections, plus a history of your check-ins with it.</p>
+    <!-- Explains the "Notebook" name for users unfamiliar with the term (issue #92) -->
+    <p class="text-sm text-gray-500 -mt-2">The <strong>Notebook</strong> is your assistant's operating manual: the rules it's learned from your corrections, plus a history of your check-ins with it.</p>
 
     <!-- 1. Kick Off Meeting (moved from above the tabs) -->
     <div id="kickoff-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 hidden">

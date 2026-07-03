@@ -8,41 +8,26 @@
 // grid[dayOfWeek][hour] = count of completed work (task_runs + scheduled_posts)
 // that landed in that weekday/hour bucket over the trailing window.
 // dayOfWeek: 0=Sun … 6=Sat (Postgres DOW).
-// User-scoped via the aura_session cookie, mirroring roi-stats.ts.
+// Org-scoped via requireTenant, mirroring roi-stats.ts — activity is org-wide
+// (created by any teammate or by an assistant acting on the org's behalf), not
+// limited to the viewer's own userId (issue #90: today's teammate/assistant
+// activity was invisible on this widget because it filtered by user_id).
 
 import { HandlerEvent } from '@netlify/functions';
 import { sql } from 'drizzle-orm';
-import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
-
-const jwtSecret = process.env.JWT_SECRET;
+import { requireTenant } from '../../src/utils/tenant';
 
 export const handler = async (event: HandlerEvent) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
-    if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server configuration error.' }) };
 
-    const rawCookies = event.headers.cookie || '';
-    const cookies = Object.fromEntries(
-        rawCookies.split(';').map(c => {
-            const [k, ...v] = c.trim().split('=');
-            return [k, decodeURIComponent(v.join('='))];
-        }).filter(([k]) => k !== '')
-    );
-    const sessionToken = cookies['aura_session'];
-    if (!sessionToken) return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized.' }) };
-
-    let userId: number;
-    try {
-        const decoded = jwt.verify(sessionToken, jwtSecret) as { userId: number };
-        userId = decoded.userId;
-    } catch {
-        return { statusCode: 401, body: JSON.stringify({ error: 'Invalid or expired session.' }) };
-    }
+    const db = getDb();
+    const ctx = await requireTenant(event, db);
+    if ('error' in ctx) return ctx.error;
+    const { organisationId } = ctx;
 
     // Trailing window — clamp to a sane range (default 8 weeks)
     const weeks = Math.min(Math.max(parseInt(event.queryStringParameters?.weeks || '8', 10) || 8, 1), 26);
-
-    const db = getDb();
 
     // Empty 7×24 grid
     const grid: number[][] = Array.from({ length: 7 }, () => Array(24).fill(0));
@@ -60,13 +45,13 @@ export const handler = async (event: HandlerEvent) => {
             WITH activity AS (
                 SELECT COALESCE(completed_at, created_at) AS ts
                 FROM task_runs
-                WHERE user_id = ${userId}
+                WHERE organisation_id = ${organisationId}
                   AND status = 'completed'
                   AND COALESCE(completed_at, created_at) >= NOW() - (${weeks} * INTERVAL '1 week')
                 UNION ALL
                 SELECT created_at AS ts
                 FROM scheduled_posts
-                WHERE user_id = ${userId}
+                WHERE organisation_id = ${organisationId}
                   AND created_at >= NOW() - (${weeks} * INTERVAL '1 week')
             )
             SELECT
