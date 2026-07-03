@@ -4117,11 +4117,13 @@ async function refreshPendingBadge() {
 // Column = a lifecycle stage. postStatus filters scheduled_posts; ideaFilter selects which
 // post-ideas belong in this stage (ideas only make sense in Review and Archived).
 const RQ_COLUMNS = {
-    review:    { label: 'Review',    postStatus: 'pending_approval', ideaFilter: i => i.status === 'pending' || i.status === 'in_review' },
+    review:    { label: 'Review',    postStatus: 'pending_approval', ideaFilter: i => i.status === 'pending' },
     approved:  { label: 'Approved',  postStatus: 'approved',         ideaFilter: () => false },
     scheduled: { label: 'Scheduled', postStatus: 'scheduled',        ideaFilter: () => false },
     posted:    { label: 'Posted',    postStatus: 'published',        ideaFilter: () => false },
-    archived:  { label: 'Archived',  postStatus: 'rejected',         ideaFilter: i => i.status === 'discarded' },
+    // Once an idea has been woven into a post (in_review/delivered), its own review happens on
+    // that post's card in the Posts group — it no longer needs a separate slot in Review.
+    archived:  { label: 'Archived',  postStatus: 'rejected',         ideaFilter: i => i.status === 'discarded' || i.status === 'in_review' || i.status === 'delivered' },
 };
 
 // Content groups for this assistant type. Each: how to fetch its items for a column + how to render.

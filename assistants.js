@@ -403,11 +403,13 @@ window._activateMainTab = function(name) {
 // fetches to window._currentAssistantId so only this assistant's content shows.
 
 const _DETAIL_RQ_COLUMNS = {
-    review:    { postStatus: 'pending_approval', ideaFilter: i => i.status === 'pending' || i.status === 'in_review' },
+    review:    { postStatus: 'pending_approval', ideaFilter: i => i.status === 'pending' },
     approved:  { postStatus: 'approved',         ideaFilter: () => false },
     scheduled: { postStatus: 'scheduled',        ideaFilter: () => false },
     posted:    { postStatus: 'published',        ideaFilter: () => false },
-    archived:  { postStatus: 'rejected',         ideaFilter: i => i.status === 'discarded' },
+    // Once an idea has been woven into a post (in_review/delivered), its own review happens on
+    // that post's card in the Posts group — it no longer needs a separate slot in Review.
+    archived:  { postStatus: 'rejected',         ideaFilter: i => i.status === 'discarded' || i.status === 'in_review' || i.status === 'delivered' },
 };
 
 let _detailRqCurrentStatus = 'review';
