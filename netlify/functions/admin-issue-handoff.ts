@@ -205,17 +205,18 @@ export const handler: Handler = async (event) => {
         const rid = runnerId(event) || 'unknown-runner';
         const message = (typeof body.message === 'string' ? body.message : '').trim().slice(0, 1000) || 'Claude session/usage limit reached.';
         const resetHint = (typeof body.resetHint === 'string' ? body.resetHint : '').trim().slice(0, 200) || null;
+        const activeAccount = (typeof body.activeAccount === 'string' ? body.activeAccount : '').trim().slice(0, 200) || null;
         const now = new Date();
 
         await db.insert(devRunnerStatus).values({
             runnerId: rid, state: 'session_limited', message, resetHint,
-            blockedIssueId: id, resumeRequested: false, lastProbeResult: null,
+            blockedIssueId: id, resumeRequested: false, lastProbeResult: null, activeAccount,
             blockedAt: now, lastSeenAt: now, updatedAt: now,
         }).onConflictDoUpdate({
             target: devRunnerStatus.runnerId,
             set: {
                 state: 'session_limited', message, resetHint, blockedIssueId: id,
-                resumeRequested: false, lastProbeResult: null, blockedAt: now, lastSeenAt: now, updatedAt: now,
+                resumeRequested: false, lastProbeResult: null, activeAccount, blockedAt: now, lastSeenAt: now, updatedAt: now,
             },
         });
 
@@ -244,9 +245,14 @@ export const handler: Handler = async (event) => {
     if (event.httpMethod === 'GET' && action === 'resume-check') {
         const rid = runnerId(event) || 'unknown-runner';
         const now = new Date();
+        // The runner sends its currently-logged-in Claude account on every poll, so the
+        // paused banner shows the live session while the admin switches logins.
+        const account = (qs.account || '').toString().trim().slice(0, 200) || null;
         const [row] = await db.select().from(devRunnerStatus).where(eq(devRunnerStatus.runnerId, rid)).limit(1);
         if (row) {
-            await db.update(devRunnerStatus).set({ lastSeenAt: now }).where(eq(devRunnerStatus.runnerId, rid));
+            await db.update(devRunnerStatus)
+                .set({ lastSeenAt: now, ...(account ? { activeAccount: account } : {}) })
+                .where(eq(devRunnerStatus.runnerId, rid));
         }
         return json(200, { resume: !!row?.resumeRequested, state: row?.state || 'ok' });
     }
@@ -262,6 +268,7 @@ export const handler: Handler = async (event) => {
         const rid = runnerId(event) || 'unknown-runner';
         const ok = body.ok === true;
         const probeMsg = (typeof body.message === 'string' ? body.message : '').trim().slice(0, 1000) || (ok ? 'Claude login verified — runner resumed.' : 'The Claude account is still rate-limited.');
+        const activeAccount = (typeof body.activeAccount === 'string' ? body.activeAccount : '').trim().slice(0, 200) || null;
         const now = new Date();
 
         const [row] = await db.select().from(devRunnerStatus).where(eq(devRunnerStatus.runnerId, rid)).limit(1);
@@ -272,13 +279,15 @@ export const handler: Handler = async (event) => {
             message: ok ? null : (row?.message || null),
             resetHint: ok ? null : (row?.resetHint || null),
             blockedIssueId: ok ? null : (row?.blockedIssueId ?? null),
-            resumeRequested: false, lastProbeResult: probeMsg, lastSeenAt: now, updatedAt: now,
+            resumeRequested: false, lastProbeResult: probeMsg, activeAccount, lastSeenAt: now, updatedAt: now,
         }).onConflictDoUpdate({
             target: devRunnerStatus.runnerId,
             set: {
                 state: ok ? 'ok' : 'session_limited',
                 ...(ok ? { message: null, resetHint: null, blockedIssueId: null, blockedAt: null } : {}),
-                resumeRequested: false, lastProbeResult: probeMsg, lastSeenAt: now, updatedAt: now,
+                resumeRequested: false, lastProbeResult: probeMsg,
+                ...(activeAccount ? { activeAccount } : {}),
+                lastSeenAt: now, updatedAt: now,
             },
         });
 
@@ -290,8 +299,8 @@ export const handler: Handler = async (event) => {
                 authorType: 'admin',
                 authorId: null,
                 body: ok
-                    ? `▶️ Runner resumed — the new Claude login was verified. This issue will be picked up again shortly.`
-                    : `⚠️ Resume failed — the Claude account is still rate-limited or the login didn't switch on the runner machine.\n\n${probeMsg}\n\nLog into a Claude account with credit on the runner machine, then press "I've logged in — Resume runner" again.`,
+                    ? `▶️ Runner resumed — the new Claude login was verified${activeAccount ? ` (active session: ${activeAccount})` : ''}. This issue will be picked up again shortly.`
+                    : `⚠️ Resume failed — the Claude account is still rate-limited or the login didn't switch on the runner machine.\n\n${probeMsg}${activeAccount ? `\nActive Claude session on the runner: ${activeAccount}` : ''}\n\nLog into a Claude account with credit on the runner machine, then press "I've logged in — Resume runner" again.`,
                 status: null,
             });
         }

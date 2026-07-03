@@ -176,6 +176,7 @@ export const handler: Handler = async (event) => {
             blockedIssueId: r.blockedIssueId,
             resumeRequested: r.resumeRequested,
             lastProbeResult: r.lastProbeResult,
+            activeAccount: r.activeAccount,
             blockedAt: r.blockedAt,
             lastSeenAt: r.lastSeenAt,
         }));

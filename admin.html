@@ -3763,6 +3763,11 @@ let _irRunnerBlocked = false;
 function _irRunnerPausedCard(r) {
   const canResume = (typeof _adminRole !== 'undefined') && _adminRole === 'super_admin';
   const reset = r.resetHint ? ` — resets <b>${_esc(r.resetHint)}</b>` : '';
+  // Refreshed by the runner on every resume-check poll (~10s) while paused, so this shows
+  // the login the admin just switched to — not the one that ran out.
+  const acct = r.activeAccount
+    ? `<div class="mt-2 text-xs text-amber-900/90">Active Claude session on the runner: <b class="font-mono">${_esc(r.activeAccount)}</b></div>`
+    : `<div class="mt-2 text-xs text-amber-900/60">Active Claude session on the runner: not reported yet</div>`;
   const probe = r.lastProbeResult
     ? `<div class="mt-2 text-xs text-amber-900/80 bg-amber-100/60 rounded-lg p-2">Last resume attempt: ${_esc(r.lastProbeResult)}</div>` : '';
   const action = r.resumeRequested
@@ -3776,6 +3781,7 @@ function _irRunnerPausedCard(r) {
       <div class="flex-1 min-w-0">
         <p class="text-sm font-bold text-amber-900">AI auto-fix runner paused — Claude session limit${reset}</p>
         <p class="text-xs text-amber-800 mt-1">Runner <b class="font-mono">${_esc(r.runnerId)}</b> ran out of Claude usage. On the runner machine, log into a Claude account with credit (run <code class="font-mono bg-amber-100 px-1 rounded">claude</code> then <code class="font-mono bg-amber-100 px-1 rounded">/login</code>), then press Resume. Queued issues are retried automatically once it resumes — you don't need to re-submit them.</p>
+        ${acct}
         ${probe}
         <div class="mt-3">${action}</div>
       </div>
@@ -3783,22 +3789,54 @@ function _irRunnerPausedCard(r) {
   </div>`;
 }
 
+function _irRunnerLastSeen(r) {
+  if (!r.lastSeenAt) return '';
+  const mins = Math.floor((Date.now() - new Date(r.lastSeenAt).getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const h = Math.floor(mins / 60);
+  return h < 48 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`;
+}
+
+// The modal's runner-state section never hides: when nothing is paused it explains why
+// there's no Resume button (it only exists while a runner reports a Claude session limit),
+// so an admin looking for it isn't left staring at nothing.
+function _irRunnerModalStatus(runners, blocked) {
+  const cards = blocked.map(_irRunnerPausedCard).join('');
+  const others = runners.filter((r) => r.state !== 'session_limited');
+  const otherLines = others.map((r) => {
+    const seen = _irRunnerLastSeen(r);
+    return `<div class="flex items-center gap-1.5 text-xs text-gray-600">🖥 <b class="font-mono">${_esc(r.runnerId)}</b> — <span class="text-emerald-700 font-semibold">✓ ${_esc(r.state || 'ok')}</span>${seen ? ` · last seen ${seen}` : ''}</div>`;
+  }).join('');
+  const note = blocked.length ? '' : `<div class="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-500">
+      ${others.length ? otherLines + '<div class="mt-2 pt-2 border-t border-gray-200">' : ''}
+      No runner is paused right now — the <b>“Resume runner”</b> button only appears here (and as a banner above the Issues list) while a runner reports a Claude session limit. If your runner hit its limit but nothing shows, the runner process is no longer running: restart it with the command below.
+      ${others.length ? '</div>' : ''}
+    </div>`;
+  return cards + note;
+}
+
 async function loadRunnerStatus() {
   const banner = document.getElementById('ir-runner-alert');
   const modalEl = document.getElementById('ir-runner-paused');
   if (!banner && !modalEl) return;
-  let blocked = [];
+  let runners = [], blocked = [];
   try {
     const d = await api(`${IR_API}?action=runner-status`);
+    runners = d.runners || [];
     blocked = d.blocked || [];
-  } catch { blocked = []; }
+  } catch { runners = []; blocked = []; }
   _irRunnerBlocked = blocked.length > 0;
 
-  const html = blocked.map(_irRunnerPausedCard).join('');
-  for (const el of [banner, modalEl]) {
-    if (!el) continue;
-    el.classList.toggle('hidden', !blocked.length);
-    el.innerHTML = html;
+  // Banner above the Issues list: only while something is actually paused.
+  if (banner) {
+    banner.classList.toggle('hidden', !blocked.length);
+    banner.innerHTML = blocked.map(_irRunnerPausedCard).join('');
+  }
+  // Runner modal: always shows runner state, with an explanation when nothing is paused.
+  if (modalEl) {
+    modalEl.classList.remove('hidden');
+    modalEl.innerHTML = _irRunnerModalStatus(runners, blocked);
   }
 
   if (!blocked.length) {

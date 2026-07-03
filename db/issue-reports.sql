@@ -227,3 +227,8 @@ BEGIN
       CHECK (state IN ('ok', 'session_limited'));
   END IF;
 END $$;
+
+-- Claude account currently logged into the CLI on the runner machine (e.g. "dev@x.com").
+-- Self-reported by the runner on block / resume-check / resume-ack; display only — shown in
+-- the paused banner so the admin can see whether the re-login took effect before Resume.
+ALTER TABLE dev_runner_status ADD COLUMN IF NOT EXISTS active_account TEXT;

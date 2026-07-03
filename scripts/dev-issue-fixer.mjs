@@ -34,8 +34,8 @@
 // Run:  npm run dev:issue-fixer
 
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir, hostname } from 'node:os';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { tmpdir, hostname, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -153,6 +153,22 @@ async function reportMerge(id, payload) {
 }
 
 // ── Session-limit block / resume protocol ────────────────────────────────────
+// Which Claude account the CLI is logged into on THIS machine right now. Read from the
+// CLI's own config (~/.claude.json → oauthAccount) — there is no non-interactive `claude`
+// command that prints it. Sent with block/resume traffic so the portal can show the admin
+// whether the re-login actually took effect. Best-effort: null when unreadable.
+function activeClaudeAccount() {
+  try {
+    const cfg = JSON.parse(readFileSync(join(homedir(), '.claude.json'), 'utf8'));
+    const acct = cfg?.oauthAccount;
+    if (!acct) return null;
+    const email = acct.emailAddress || null;
+    const org = acct.organizationName || null;
+    const label = email ? (org && org !== email ? `${email} (${org})` : email) : org;
+    return label ? String(label).slice(0, 200) : null;
+  } catch { return null; }
+}
+
 // Tell the portal this runner is rate-limited (it re-queues the issue + prompts the admin).
 async function reportBlocked(id, payload) {
   const res = await apiFetch(`${ENDPOINT}?action=report-blocked&id=${id}`, {
@@ -164,9 +180,12 @@ async function reportBlocked(id, payload) {
   return res.json();
 }
 
-// While paused, poll whether an admin has pressed "Resume runner". Doubles as a liveness ping.
+// While paused, poll whether an admin has pressed "Resume runner". Doubles as a liveness
+// ping and keeps the portal's "active Claude session" display current while the admin
+// switches logins on this machine.
 async function checkResume() {
-  const res = await apiFetch(`${ENDPOINT}?action=resume-check`, {
+  const acct = activeClaudeAccount();
+  const res = await apiFetch(`${ENDPOINT}?action=resume-check${acct ? `&account=${encodeURIComponent(acct)}` : ''}`, {
     headers: { 'x-handoff-token': TOKEN, 'x-runner-id': RUNNER_ID },
   }, { label: 'resume-check' });
   if (!res.ok) throw new Error(`resume-check failed: ${res.status} ${await res.text()}`);
@@ -179,7 +198,7 @@ async function ackResume(ok, message) {
   const res = await apiFetch(`${ENDPOINT}?action=resume-ack`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'x-handoff-token': TOKEN, 'x-runner-id': RUNNER_ID },
-    body: JSON.stringify({ ok, message }),
+    body: JSON.stringify({ ok, message, activeAccount: activeClaudeAccount() }),
   }, { label: 'resume-ack' });
   if (!res.ok) throw new Error(`resume-ack failed: ${res.status} ${await res.text()}`);
   return res.json();
@@ -282,7 +301,7 @@ async function processIssue(issue) {
         const resetHint = (errText.match(/resets?\s+([^\n·]+?(?:\([^)]*\))?)\s*(?:[·\n]|$)/i) || [])[1]?.trim() || null;
         const message = (errText.match(/[^\n]*(?:session|usage|rate)\s+limit[^\n]*/i) || [errText.trim()])[0].trim().slice(0, 500);
         log(`#${id} ⏸ Claude session limit hit — pausing runner${resetHint ? ` (resets ${resetHint})` : ''}`);
-        await reportBlocked(id, { message, resetHint }).catch((e) => log(`#${id} ✖ could not report block: ${e.message}`));
+        await reportBlocked(id, { message, resetHint, activeAccount: activeClaudeAccount() }).catch((e) => log(`#${id} ✖ could not report block: ${e.message}`));
         paused = true;
         return; // the finally block cleans up the worktree; the issue was re-queued server-side
       }

@@ -1138,6 +1138,10 @@ export const devRunnerStatus = pgTable("dev_runner_status", {
   blockedIssueId: integer("blocked_issue_id").references(() => issueReports.id, { onDelete: "set null" }),
   resumeRequested: boolean("resume_requested").notNull().default(false),
   lastProbeResult: text("last_probe_result"), // outcome of the last verification probe after a Resume
+  // Claude account currently logged into the CLI on the runner machine (e.g. "dev@x.com").
+  // Self-reported by the runner on block / resume-check / resume-ack; display only — lets the
+  // admin see whether the re-login actually took effect before pressing Resume.
+  activeAccount: text("active_account"),
   blockedAt: timestamp("blocked_at"),
   lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
