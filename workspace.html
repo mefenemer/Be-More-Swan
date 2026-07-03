@@ -1537,6 +1537,12 @@ function formatCurrency(amount, currency) {
           await window.initCalendar();
         }
 
+        // Deep-link into a specific draft (e.g. from a "draft ready" notification): open the
+        // Review column and pop that post's mock-up modal, same as the Ideas tab's jump-in.
+        if (routeKey === 'review-queue' && param && param.postId && typeof rqViewIdeaDraft === 'function') {
+          await rqViewIdeaDraft(param.postId);
+        }
+
         if (routeKey === 'billing' && typeof window.initBilling === 'function') {
           await window.initBilling();
         }

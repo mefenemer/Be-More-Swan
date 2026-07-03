@@ -121,6 +121,12 @@ window.initNotifications = async function() {
         if (notif.type === 'media_ready') {
             return { label: 'View content', run: () => window.loadView?.('my-content', meta.assetId ? { assetId: meta.assetId } : null) };
         }
+        // Draft post ready to review (incl. the media-needed/out-of-credits variant of ai_review) —
+        // deep-link straight to that post's review modal instead of dropping the user on the
+        // queue list to hunt for it.
+        if ((notif.type === 'post_draft_ready' || notif.type === 'ai_review') && meta.postId) {
+            return { label: 'Review draft', run: () => window.loadView?.('review-queue', { postId: meta.postId }) };
+        }
         if (meta.action === 'view_invoices') return ACTIONS_BY_TYPE.invoice_ready;
         if (meta.action === 'view_ticket')   return ACTIONS_BY_TYPE.ticket_created;
         if (meta.action === 'open_wizard')   return { label: meta.ctaLabel || 'Open Setup Wizard', run: openWizard };
