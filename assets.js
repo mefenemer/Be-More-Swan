@@ -451,6 +451,8 @@ window.initBrandAssets = function() {
                     }
                 }
             } catch { /* non-fatal */ }
+            const bpEl = document.getElementById('bp-input-name');
+            if (bpEl) bpEl.placeholder = 'Acme Ltd';
         }
 
         // Legal & billing details
@@ -475,6 +477,7 @@ window.initBrandAssets = function() {
             // Prefill legal name from the business name when none is stored yet.
             const legalEl = document.getElementById('bd-input-name');
             if (legalEl && !legalEl.value.trim() && _prevBusinessName) legalEl.value = _prevBusinessName;
+            if (legalEl) legalEl.placeholder = 'Acme Ltd';
         }
 
         // Wire debounced auto-save on every field.
