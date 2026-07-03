@@ -115,6 +115,7 @@
   <div class="mb-8 border-b border-gray-200 overflow-x-auto">
     <nav class="-mb-px flex gap-x-8" aria-label="Assistant sections">
       <button type="button" data-maintab="overview"      class="main-tab-btn active-tab">Overview</button>
+      <button type="button" data-maintab="activity"      class="main-tab-btn">Activity</button>
       <button type="button" data-maintab="review-queue" class="main-tab-btn">Review Queue
         <span id="detail-rq-pending-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
@@ -285,23 +286,6 @@
     <div id="active-workflows-list" class="space-y-2"></div>
   </div>
 
-  <!-- Unified Activity feed (Epic 2.2) — chronological, with Failed/Needs-Input pinned on top. -->
-  <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-8">
-    <div class="flex items-center justify-between mb-4">
-      <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Activity</h3>
-      <div id="activity-timeframe-btns" class="flex gap-1">
-        <button data-tf="1d"  class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-indigo-500 bg-indigo-50 text-indigo-700 font-semibold">1d</button>
-        <button data-tf="7d"  class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">7d</button>
-        <button data-tf="30d" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">30d</button>
-        <button data-tf="90d" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">90d</button>
-        <button data-tf="all" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">All</button>
-      </div>
-    </div>
-    <div id="recent-activity-list" class="space-y-3">
-      <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading activity…</div>
-    </div>
-  </div>
-
   <!-- Goals section is relocated here (directly under Recent Activity) by initAssistantDetail;
        its markup lives in #tab-goals further down and is moved into this slot on load. -->
 
@@ -321,6 +305,28 @@
   </div>
 
   </div><!-- /maintab-overview -->
+
+  <!-- ── MAIN TAB: Activity ─────────────────────────────────────────── -->
+  <div id="maintab-activity" class="main-tab-content hidden">
+
+  <!-- Unified Activity feed (Epic 2.2) — chronological, with Failed/Needs-Input pinned on top. -->
+  <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-8">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Activity</h3>
+      <div id="activity-timeframe-btns" class="flex gap-1">
+        <button data-tf="1d"  class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-indigo-500 bg-indigo-50 text-indigo-700 font-semibold">1d</button>
+        <button data-tf="7d"  class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">7d</button>
+        <button data-tf="30d" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">30d</button>
+        <button data-tf="90d" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">90d</button>
+        <button data-tf="all" class="activity-tf-btn text-xs px-2.5 py-1 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50">All</button>
+      </div>
+    </div>
+    <div id="recent-activity-list" class="space-y-3">
+      <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading activity…</div>
+    </div>
+  </div>
+
+  </div><!-- /maintab-activity -->
 
   <!-- ── MAIN TAB: Review Queue ──────────────────────────────────────── -->
   <div id="maintab-review-queue" class="main-tab-content hidden">
