@@ -5661,8 +5661,10 @@ async function gpwSubmit() {
         const n = (d.created || []).length;
         gpSetPanelStatus('gpw-status', `Added ${n} draft${n === 1 ? '' : 's'} to your Review Queue.`);
         if (typeof refreshPendingBadge === 'function') refreshPendingBadge();
-        // Refresh the Review Queue's Social tab if it's currently mounted.
+        // Refresh whichever Review Queue view is currently mounted — the global Review Queue
+        // page (Social tab) and/or the assistant-detail page's own scoped Review Queue tab.
         if (typeof rqLoadItems === 'function') { try { rqLoadItems('pending_approval', 'social'); } catch { /* ignore */ } }
+        if (typeof window.detailRqRefresh === 'function') { try { window.detailRqRefresh(); } catch { /* ignore */ } }
         setTimeout(closeGeneratePostSheet, 1500);
     } catch {
         gpSetPanelStatus('gpw-status', 'Network error — please try again.', 'error');
@@ -5721,6 +5723,10 @@ async function gpiSubmit() {
             return;
         }
         gpSetPanelStatus('gpi-status', 'Thanks! Your assistant is drafting a post from your idea now — it will appear in the Review Queue shortly.');
+        // Refresh whichever Review Queue view is currently mounted so the new idea shows up
+        // immediately instead of only after a manual tab switch / reload.
+        if (typeof rqLoadItems === 'function') { try { rqLoadItems('pending_approval', 'social'); } catch { /* ignore */ } }
+        if (typeof window.detailRqRefresh === 'function') { try { window.detailRqRefresh(); } catch { /* ignore */ } }
         setTimeout(closeGeneratePostSheet, 1800);
     } catch {
         gpSetPanelStatus('gpi-status', 'Network error — please try again.', 'error');
