@@ -16,6 +16,10 @@
 
     <!-- Main Content -->
     <main class="flex-grow max-w-3xl mx-auto px-4 py-16">
+        <button type="button" id="privacy-back-btn" class="hidden mb-6 inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700 hover:underline cursor-pointer">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"/></svg>
+            Back
+        </button>
         <h1 class="text-4xl font-extrabold text-gray-900 mb-8">Privacy Policy</h1>
         <p class="text-gray-500 mb-8">Last updated: May 27, 2026</p>
 
@@ -121,6 +125,24 @@
         const targetTitleSpan = document.getElementById("nav-page-title");
         if (targetTitleSpan && titleMap[currentPage]) {
             targetTitleSpan.innerText = `| ${titleMap[currentPage]}`;
+        }
+
+        // 3b. This page is opened as a standalone tab (e.g. via window.open() from the
+        // Settings "My Agreements" review link or a compliance modal), so a fresh tab has no
+        // browser history to go "back" through. Surface an explicit back action: close the tab
+        // if we were opened from another one, otherwise fall back to returning to the workspace.
+        const backBtn = document.getElementById("privacy-back-btn");
+        if (backBtn) {
+            backBtn.classList.remove("hidden");
+            backBtn.addEventListener("click", () => {
+                if (window.opener) {
+                    window.close();
+                } else if (window.history.length > 1) {
+                    window.history.back();
+                } else {
+                    window.location.href = "/workspace.html";
+                }
+            });
         }
 
         // 4. Internal App Portal State Management

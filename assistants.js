@@ -425,6 +425,12 @@ window.detailRqOpenStatus = function(statusKey, btn) {
     _detailRqRenderGroups(statusKey);
 };
 
+// Re-render whichever column is currently open, e.g. after a new idea/post is added elsewhere
+// (the Create Post sheet) so the list reflects it without the user manually switching tabs.
+window.detailRqRefresh = function() {
+    if (document.getElementById('detail-rq-groups')) _detailRqRenderGroups(_detailRqCurrentStatus);
+};
+
 async function _detailRqRenderGroups(statusKey) {
     const col = _DETAIL_RQ_COLUMNS[statusKey] || _DETAIL_RQ_COLUMNS.review;
     const container = document.getElementById('detail-rq-groups');
@@ -1970,7 +1976,7 @@ async function _renderKickOff(assistantId) {
                 <p class="text-sm font-semibold text-red-800 mb-3">${b.message || 'An action is needed before setup can finish.'}</p>
                 <button type="button" id="btn-retry-prov" class="px-4 py-2 text-sm font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg shadow-sm transition cursor-pointer">${b.cta || 'Retry'} &amp; retry</button>`;
             const r = document.getElementById('btn-retry-prov');
-            if (r) r.onclick = () => window.retryProvisioning?.(assistantId, r);
+            if (r) r.onclick = () => window.retryProvisioning?.(assistantId, r, () => _renderKickOff(assistantId));
         }
         // Render the checklist inline so the user sees exactly which gates failed — incomplete
         // items as red rows (rather than the normal gray-cross/green-tick neutral flow).

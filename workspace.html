@@ -616,7 +616,7 @@ window.showComplianceModals = function showComplianceModals(force) {
         </div>
       </div>
       <div id="post-review-buttons" class="grid grid-cols-2 gap-2">
-        <button id="post-review-approve-btn" onclick="rqReviewApprove()" class="col-span-2 py-3 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition cursor-pointer">Approve — let the assistant schedule it</button>
+        <button id="post-review-approve-btn" onclick="rqReviewApprove()" class="col-span-2 py-3 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition cursor-pointer">Approve — let the assistant pick a time</button>
         <button onclick="rqReviewAddMedia()" class="col-span-2 py-2.5 text-xs font-bold border border-emerald-300 text-emerald-700 hover:bg-emerald-50 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
           Add or change image
@@ -3118,14 +3118,11 @@ function formatCurrency(amount, currency) {
         btn.classList.toggle('bg-gray-300', !on);
         if (knob) { knob.classList.toggle('translate-x-5', on); knob.classList.toggle('translate-x-0', !on); }
       };
-      let accepted = false;
-      try {
-        const r = await fetch('/.netlify/functions/accept-compliance');
-        if (r.ok) accepted = !!(await r.json()).acceptedAt;
-      } catch { /* non-fatal */ }
-      paint(accepted);
-      if (accepted && saved) saved.classList.remove('hidden');
 
+      // Wire the click handler up FRONT, before the hydration fetch below. A Netlify Function
+      // cold start can make that fetch take a second or more, and the button already looks
+      // interactive the moment the page renders — a click landing in that window was previously
+      // silently dropped (no listener attached yet), so it looked like clicking did nothing.
       btn.addEventListener('click', async () => {
         const next = btn.getAttribute('aria-checked') !== 'true';
         paint(next); // optimistic
@@ -3149,6 +3146,14 @@ function formatCurrency(amount, currency) {
       // so they stay reachable from My Account after onboarding is finished.
       document.getElementById('review-agreements-btn')
         ?.addEventListener('click', () => window.showComplianceModals?.(true));
+
+      let accepted = false;
+      try {
+        const r = await fetch('/.netlify/functions/accept-compliance');
+        if (r.ok) accepted = !!(await r.json()).acceptedAt;
+      } catch { /* non-fatal */ }
+      paint(accepted);
+      if (accepted && saved) saved.classList.remove('hidden');
     })();
 
     // ── My Agreements tab: render the consolidated acceptance/consent records ──
@@ -3486,15 +3491,19 @@ function formatCurrency(amount, currency) {
 
   // Retry a gate-blocked assistant: re-fires provisioning (which re-evaluates every gate, then
   // advances to ready_for_work or re-blocks with whatever is still missing).
-  window.retryProvisioning = async function(assistantId, btn) {
+  // `onSuccess`, if passed, replaces the default "jump to the dashboard" behaviour — callers that
+  // render this button somewhere other than the dashboard (e.g. the assistant detail Runbook tab)
+  // should pass a callback that refreshes their own view in place instead.
+  window.retryProvisioning = async function(assistantId, btn, onSuccess) {
     if (!assistantId) return;
     if (btn) { btn.disabled = true; btn.textContent = 'Retrying…'; }
     try {
       const res = await fetch(`/.netlify/functions/retry-provision-assistant?id=${assistantId}`, { method: 'POST' });
       if (res.ok || res.status === 202) {
         window.showToast?.("Retrying setup — we'll let you know if anything else is needed.", { icon: '🔄' });
-        // Give the background fn a moment to re-evaluate, then refresh the dashboard view.
-        setTimeout(() => window.loadView?.('dashboard'), 1500);
+        // Give the background fn a moment to re-evaluate, then refresh.
+        if (typeof onSuccess === 'function') setTimeout(onSuccess, 1500);
+        else setTimeout(() => window.loadView?.('dashboard'), 1500);
       } else {
         const data = await res.json().catch(() => ({}));
         window.showToast?.(data.error || 'Could not retry setup. Please try again.');
@@ -3906,12 +3915,13 @@ function formatCurrency(amount, currency) {
     const sub = document.getElementById('savings-modal-sub');
     const body = document.getElementById('savings-modal-body');
     const footer = document.getElementById('savings-modal-footer');
+    const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     if (sub) sub.textContent = `${d.taskCount ?? 0} task${(d.taskCount ?? 0) === 1 ? '' : 's'} counted${d.month ? ' · ' + d.month : ''}`;
     if (body) body.innerHTML = tasks.length
       ? tasks.map(t => `
           <div class="flex items-center justify-between py-2 border-b border-gray-50 last:border-0">
-            <div><span class="text-sm font-semibold text-gray-900">${t.label}</span>
-              <span class="ml-2 text-xs text-gray-400">${t.count} item${t.count === 1 ? '' : 's'}</span></div>
+            <div><span class="text-sm font-semibold text-gray-900">${esc(t.label)}</span>
+              ${t.assistant ? `<span class="ml-2 text-xs text-gray-400">${esc(t.assistant)}</span>` : ''}</div>
             <span class="text-sm font-semibold text-emerald-600">${t.hours} h</span>
           </div>`).join('')
       : '<p class="text-sm text-gray-400 text-center py-6">No tasks counted yet this month — your assistants will start clocking these up as they work.</p>';
@@ -4622,10 +4632,15 @@ function openPostReview(postId) {
     document.getElementById('post-review-actions').classList.toggle('hidden', !reviewable);
 
     // The draft already carries a proposed slot (shown above as "planned for …") — approving just
-    // confirms it, it doesn't schedule from scratch. Surface that date on the button itself so it's
-    // not misread as "no time has been picked yet".
+    // confirms it, it doesn't schedule from scratch. Surface that date on the button itself, in the
+    // exact DD/MM/YYYY HH:mm format the reporter asked for, so it's not misread as "no time has been picked yet".
+    const whenNumeric = post.publishDate ? (() => {
+        const d = new Date(post.publishDate);
+        const pad = n => String(n).padStart(2, '0');
+        return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    })() : null;
     const approveBtn = document.getElementById('post-review-approve-btn');
-    if (approveBtn) approveBtn.textContent = when ? `Confirm schedule — ${when}` : 'Approve — let the assistant pick a time';
+    if (approveBtn) approveBtn.textContent = whenNumeric ? `Approve & Confirm Schedule ${whenNumeric}` : 'Approve — let the assistant pick a time';
 
     // Status note for non-reviewable states: archived (with countdown), scheduled/approved (when),
     // posted (with a live link if we have one).
@@ -5652,8 +5667,10 @@ async function gpwSubmit() {
         const n = (d.created || []).length;
         gpSetPanelStatus('gpw-status', `Added ${n} draft${n === 1 ? '' : 's'} to your Review Queue.`);
         if (typeof refreshPendingBadge === 'function') refreshPendingBadge();
-        // Refresh the Review Queue's Social tab if it's currently mounted.
+        // Refresh whichever Review Queue view is currently mounted — the global Review Queue
+        // page (Social tab) and/or the assistant-detail page's own scoped Review Queue tab.
         if (typeof rqLoadItems === 'function') { try { rqLoadItems('pending_approval', 'social'); } catch { /* ignore */ } }
+        if (typeof window.detailRqRefresh === 'function') { try { window.detailRqRefresh(); } catch { /* ignore */ } }
         setTimeout(closeGeneratePostSheet, 1500);
     } catch {
         gpSetPanelStatus('gpw-status', 'Network error — please try again.', 'error');
@@ -5712,6 +5729,10 @@ async function gpiSubmit() {
             return;
         }
         gpSetPanelStatus('gpi-status', 'Thanks! Your assistant is drafting a post from your idea now — it will appear in the Review Queue shortly.');
+        // Refresh whichever Review Queue view is currently mounted so the new idea shows up
+        // immediately instead of only after a manual tab switch / reload.
+        if (typeof rqLoadItems === 'function') { try { rqLoadItems('pending_approval', 'social'); } catch { /* ignore */ } }
+        if (typeof window.detailRqRefresh === 'function') { try { window.detailRqRefresh(); } catch { /* ignore */ } }
         setTimeout(closeGeneratePostSheet, 1800);
     } catch {
         gpSetPanelStatus('gpi-status', 'Network error — please try again.', 'error');
@@ -6950,6 +6971,15 @@ async function gpSubmitReject() {
 
   document.getElementById('setup-wizard-close').addEventListener('click', collapse);
   fab.addEventListener('click', open);
+
+  // Clicking anywhere outside the open drawer collapses it — otherwise it stays pinned over
+  // the page underneath (e.g. Business Information fields) with no way to dismiss it short of
+  // hunting for the small "x", which reads as a bug ("it stays there covering the fields").
+  document.addEventListener('click', (e) => {
+    if (!isOpen) return;
+    if (drawer.contains(e.target) || fab.contains(e.target)) return;
+    collapse();
+  });
 
   window.SetupWizard = { refresh, open, collapse, toggle: () => (isOpen ? collapse() : open()), onNavigate, openForNewAssistant };
 })();

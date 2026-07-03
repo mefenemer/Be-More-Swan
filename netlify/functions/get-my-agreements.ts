@@ -13,7 +13,6 @@
 //   - AI acknowledgement → userProfiles.legalConsents.aiDisclaimerAcceptedAt (legal-consent.ts)
 
 import { Handler } from '@netlify/functions';
-import jwt from 'jsonwebtoken';
 import { eq, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
@@ -21,15 +20,13 @@ import {
     dpaAcceptances,
     organisations,
     userProfiles,
-    userOrganisations,
 } from '../../db/schema';
 import { CURRENT_TOS_VERSION } from './accept-tos';
 import { CURRENT_DPA_VERSION } from './accept-dpa';
+import { requireTenant } from '../../src/utils/tenant';
 
 // Keep in lockstep with the disclaimer version stamped in legal-consent.ts.
 const CURRENT_AI_DISCLAIMER_VERSION = '2026-06-10';
-
-const jwtSecret = process.env.JWT_SECRET;
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode,
@@ -39,26 +36,18 @@ const json = (statusCode: number, body: unknown) => ({
 
 export const handler: Handler = async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
-    if (!jwtSecret) return json(500, { error: 'Server misconfigured.' });
-
-    const match = (event.headers.cookie || '').match(/aura_session=([^;]+)/);
-    if (!match) return json(401, { error: 'Unauthorized.' });
-
-    let userId: number;
-    try {
-        userId = (jwt.verify(match[1], jwtSecret) as { userId: number }).userId;
-    } catch {
-        return json(401, { error: 'Invalid or expired session.' });
-    }
 
     const db = getDb();
 
-    const [org] = await db
-        .select({ organisationId: userOrganisations.organisationId })
-        .from(userOrganisations)
-        .where(eq(userOrganisations.userId, userId))
-        .limit(1);
-    const organisationId = org?.organisationId ?? null;
+    // Resolve org the same way every other agreement endpoint does (accept-compliance.ts,
+    // get-wizard-state.ts) — the session's active-org claim, re-verified against current
+    // membership. The previous ad-hoc "first userOrganisations row, no ordering" lookup could
+    // pick a DIFFERENT org than the one the toggle/wizard act on for any multi-org user, making
+    // this tab (and the ai_data completion check that advances the wizard) show the wrong org's
+    // agreement status.
+    const ctx = await requireTenant(event, db);
+    if ('error' in ctx) return ctx.error;
+    const { userId, organisationId } = ctx;
 
     // ── ToS (user-scoped) ─────────────────────────────────────────────
     // Pull the FULL acceptance history (every version the user has ever accepted, newest
