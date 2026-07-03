@@ -163,6 +163,25 @@ function _oauthUrl(platform) {
         : platform.oauthUrl;
 }
 
+// Instagram Business accounts authenticate via Meta's Facebook Login (there is no
+// separate Instagram-only OAuth dialog), so "Connect with Instagram" lands on a
+// facebook.com screen asking the user to log into Facebook and pick the linked Page.
+// Without warning, that reads as a bug ("I clicked Instagram and it opened Facebook").
+// Surface the existing platform note first so the redirect is expected, not surprising.
+window._intStartOAuth = function (platformId) {
+    const platform = PLATFORMS.find(p => p.id === platformId);
+    if (!platform) return;
+    if (platform.id === 'Instagram' && typeof window.showConfirmModal === 'function') {
+        window.showConfirmModal(
+            `Instagram connects through Meta's Facebook Login — you'll be asked to log into Facebook and choose the Facebook Page linked to your Instagram account. ${platform.note}`,
+            () => { window.location.href = _oauthUrl(platform); },
+            { title: 'Connecting Instagram', confirmLabel: 'Continue to Facebook', cancelLabel: 'Cancel', confirmColor: '#059669' }
+        );
+        return;
+    }
+    window.location.href = _oauthUrl(platform);
+};
+
 async function _loadAssistantsForFilter() {
     const bar = document.getElementById('conn-assistant-bar');
     const sel = document.getElementById('conn-assistant-select');
@@ -318,7 +337,7 @@ function _queueConnectPermissionPrompts(platforms) {
         window.showConfirmModal(
             `You added a ${platform.label} handle in Business Information. Be More Swan needs your permission to connect to ${platform.label} so it can post on your behalf. Connect now?`,
             async () => {
-                if (platform.oauthPlatform) window.location.href = _oauthUrl(platform);
+                if (platform.oauthPlatform) window._intStartOAuth(platform.id);
                 else window._intOpenModal(platform.id);
             },
             {
@@ -378,11 +397,11 @@ function _platformCard(platform, conn) {
                <button onclick="window.loadView && window.loadView('assets')" class="text-xs font-semibold text-emerald-700 hover:underline cursor-pointer self-start" type="button">Add your ${platform.label} handle in Business Information first →</button>
            </div>`
         : platform.oauthPlatform
-        ? `<a href="${_oauthUrl(platform)}" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer inline-block">Connect with ${platform.label}</a>`
+        ? `<button onclick="window._intStartOAuth('${platform.id}')" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer inline-block" type="button">Connect with ${platform.label}</button>`
         : `<button onclick="window._intOpenModal('${platform.id}')" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer" type="button">Connect</button>`;
 
     const reconnectBtn = platform.oauthPlatform
-        ? `<a href="${_oauthUrl(platform)}" class="text-sm font-bold text-gray-500 hover:text-gray-800 transition cursor-pointer">Reconnect</a>`
+        ? `<button onclick="window._intStartOAuth('${platform.id}')" class="text-sm font-bold text-gray-500 hover:text-gray-800 transition cursor-pointer" type="button">Reconnect</button>`
         : `<button onclick="window._intOpenModal('${platform.id}')" class="text-sm font-bold text-gray-500 hover:text-gray-800 transition cursor-pointer" type="button">Update token</button>`;
 
     // US-SMM-4.3.2: preflight audit status badge
