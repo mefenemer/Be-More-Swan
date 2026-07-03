@@ -1028,7 +1028,7 @@ function _detailHydrate(data) {
     const otherRules = allStrict.filter(r => !r.includes('KNOWLEDGE BASE (TEXT)'));
     _detailSetVal('edit_strict_rules', otherRules.join('\n'));
     if (kbLine) {
-        const m = kbLine.match(/:"([^"]+)"/);
+        const m = kbLine.match(/:\s*"([^"]+)"/);
         _detailSetVal('edit_knowledge', m ? m[1] : '');
     }
 
