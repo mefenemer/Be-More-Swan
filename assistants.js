@@ -1732,6 +1732,7 @@ async function _fetchAndRenderAssistantMetrics(assistantId) {
         el('metrics-total-scheduled').textContent = d.totalScheduled.toLocaleString();
         el('metrics-total-published').textContent = d.totalPublished.toLocaleString();
         el('metrics-hours-saved').textContent = `~${d.hoursSaved}h`;
+        if (d.minutesPerPost != null) el('metrics-hours-note').textContent = `Based on ~${d.minutesPerPost} min per post`;
 
         if (d.gbpSaved !== null) {
             el('metrics-gbp-saved').textContent = `£${d.gbpSaved.toLocaleString('en-GB', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
