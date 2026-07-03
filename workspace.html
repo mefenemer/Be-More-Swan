@@ -616,7 +616,7 @@ window.showComplianceModals = function showComplianceModals(force) {
         </div>
       </div>
       <div id="post-review-buttons" class="grid grid-cols-2 gap-2">
-        <button id="post-review-approve-btn" onclick="rqReviewApprove()" class="col-span-2 py-3 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition cursor-pointer">Approve — let the assistant schedule it</button>
+        <button id="post-review-approve-btn" onclick="rqReviewApprove()" class="col-span-2 py-3 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition cursor-pointer">Approve — let the assistant pick a time</button>
         <button onclick="rqReviewAddMedia()" class="col-span-2 py-2.5 text-xs font-bold border border-emerald-300 text-emerald-700 hover:bg-emerald-50 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
           Add or change image
@@ -4622,10 +4622,15 @@ function openPostReview(postId) {
     document.getElementById('post-review-actions').classList.toggle('hidden', !reviewable);
 
     // The draft already carries a proposed slot (shown above as "planned for …") — approving just
-    // confirms it, it doesn't schedule from scratch. Surface that date on the button itself so it's
-    // not misread as "no time has been picked yet".
+    // confirms it, it doesn't schedule from scratch. Surface that date on the button itself, in the
+    // exact DD/MM/YYYY HH:mm format the reporter asked for, so it's not misread as "no time has been picked yet".
+    const whenNumeric = post.publishDate ? (() => {
+        const d = new Date(post.publishDate);
+        const pad = n => String(n).padStart(2, '0');
+        return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    })() : null;
     const approveBtn = document.getElementById('post-review-approve-btn');
-    if (approveBtn) approveBtn.textContent = when ? `Confirm schedule — ${when}` : 'Approve — let the assistant pick a time';
+    if (approveBtn) approveBtn.textContent = whenNumeric ? `Approve & Confirm Schedule ${whenNumeric}` : 'Approve — let the assistant pick a time';
 
     // Status note for non-reviewable states: archived (with countdown), scheduled/approved (when),
     // posted (with a live link if we have one).
