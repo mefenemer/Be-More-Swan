@@ -717,6 +717,7 @@ function _initReviewCadence() {
 }
 
 window._closeBriefDrawer = function() {
+    window._flushAssistantDetailSave?.();
     const drawer = document.getElementById('brief-drawer');
     const backdrop = document.getElementById('brief-drawer-backdrop');
     if (drawer) drawer.style.transform = 'translateX(100%)';
@@ -1192,7 +1193,7 @@ function _detailHydrate(data) {
     const otherRules = allStrict.filter(r => !r.includes('KNOWLEDGE BASE (TEXT)'));
     _detailSetVal('edit_strict_rules', otherRules.join('\n'));
     if (kbLine) {
-        const m = kbLine.match(/:"([^"]+)"/);
+        const m = kbLine.match(/:\s*"([^"]+)"/);
         _detailSetVal('edit_knowledge', m ? m[1] : '');
     }
 
@@ -1526,6 +1527,18 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         clearTimeout(saveTimeout);
         saveTimeout = setTimeout(persistChanges, 1200);
     }
+
+    // Closing the drawer (X / backdrop / Escape) right after typing would otherwise leave the
+    // 1200ms debounce pending — the edit (and the Kick Off checklist refresh it triggers) only
+    // lands in the background afterwards, so the checklist reads stale until the user happens to
+    // re-check it later. Flush immediately so a close always reflects the save.
+    window._flushAssistantDetailSave = () => {
+        if (saveTimeout) {
+            clearTimeout(saveTimeout);
+            saveTimeout = null;
+            persistChanges();
+        }
+    };
 
     function attachAutoSave() {
         const selectors = [
@@ -2831,6 +2844,7 @@ async function _saveRuleRow(tr) {
         if (id) {
             try { await fetch(`${RULES_API}?id=${id}`, { method: 'DELETE' }); } catch {}
             delete tr.dataset.ruleId;
+            _renderKickOff(_rulesAssistantId);
         }
         return;
     }
@@ -2848,7 +2862,7 @@ async function _saveRuleRow(tr) {
                 if (data.rule?.id) tr.dataset.ruleId = String(data.rule.id);
             }
         }
-        if (res.ok) { tr.dataset.savedText = text; _setRulesStatus('✓ Saved'); if (!id) _renderKickOff(_rulesAssistantId); }
+        if (res.ok) { tr.dataset.savedText = text; _setRulesStatus('✓ Saved'); _renderKickOff(_rulesAssistantId); }
         else _setRulesStatus('Error saving', true);
     } catch { _setRulesStatus('Error saving', true); }
 }

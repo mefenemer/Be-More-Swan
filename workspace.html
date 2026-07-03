@@ -919,6 +919,12 @@ window.showComplianceModals = function showComplianceModals(force) {
   </div>
 
   <div class="flex items-center gap-3">
+    <!-- Issue #106: Notifications moved here from the side menu -->
+    <button id="nav-notifications" aria-label="Notifications" class="relative text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full p-2 transition-colors">
+      <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+      <span id="sidebar-nav-badge" class="absolute top-0.5 right-0.5 bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full hidden">0</span>
+    </button>
+
     <div class="block text-right" data-no-i18n>
       <p id="header-user-name" class="text-sm font-bold text-gray-900 truncate max-w-[160px]"></p>
       <p id="header-user-email" class="hidden sm:block text-xs text-gray-500 truncate max-w-[160px]"></p>
@@ -1353,7 +1359,6 @@ function formatCurrency(amount, currency) {
       'orchestrations': document.getElementById('nav-orchestrations'),
       'catalog': document.getElementById('nav-catalog'),
       'assets': document.getElementById('nav-assets'),
-      'notifications': document.getElementById('nav-notifications'),
       'settings': document.getElementById('nav-settings'),
       'help': document.getElementById('nav-help'),
       'my-content': document.getElementById('nav-my-content'),
@@ -2230,6 +2235,16 @@ function formatCurrency(amount, currency) {
         });
       }
     });
+
+    // Issue #106: Notifications lives in the header bell now, not the side menu —
+    // wired separately since it's outside the sidebar's navLinks/active-state loop.
+    const headerNotificationsBtn = document.getElementById('nav-notifications');
+    if (headerNotificationsBtn) {
+      headerNotificationsBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await loadView('notifications');
+      });
+    }
 
     // Render locks ASAP on boot (non-blocking).
     refreshOnboardingLock();
@@ -6979,7 +6994,13 @@ async function gpSubmitReject() {
     collapseStore.removeItem(COLLAPSE_KEY);
     setOpen(true);
     showFab(false);
-    if (lastData) render(lastData); else refresh();
+    // Render the cached snapshot immediately for a snappy open (no blank drawer while the
+    // fetch is in flight), then always refresh in the background — steps completed since the
+    // snapshot was taken (e.g. guardrails saved on another tab, then navigated back without an
+    // intervening SPA route change) would otherwise keep reading as incomplete until the next
+    // onNavigate() call happens to fire.
+    if (lastData) render(lastData);
+    refresh();
   }
 
   function collapse() {
@@ -7037,9 +7058,18 @@ async function gpSubmitReject() {
   // Clicking anywhere outside the open drawer collapses it — otherwise it stays pinned over
   // the page underneath (e.g. Business Information fields) with no way to dismiss it short of
   // hunting for the small "x", which reads as a bug ("it stays there covering the fields").
+  //
+  // The drawer is a fixed right-hand strip, so the fields it covers sit *underneath* it —
+  // a click there lands on the drawer's own background/whitespace (drawer.contains(e.target)
+  // is true), not on the page behind it. Excluding every click inside the drawer therefore
+  // never collapsed it for exactly the case being reported. Only genuine interactive controls
+  // (the checklist rows, sub-task links, kick-off button, etc.) should keep it open; a click
+  // anywhere else inside the drawer's bounds is treated the same as clicking through to
+  // whatever it's covering.
   document.addEventListener('click', (e) => {
     if (!isOpen) return;
-    if (drawer.contains(e.target) || fab.contains(e.target)) return;
+    if (fab.contains(e.target)) return;
+    if (drawer.contains(e.target) && e.target.closest('button, a')) return;
     collapse();
   });
 
