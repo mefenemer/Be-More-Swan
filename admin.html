@@ -1496,6 +1496,7 @@
             <p class="text-sm text-gray-500 mt-0.5">User-submitted issues from the testing phase. Update the status to notify the reporter.</p>
           </div>
           <div class="flex items-center gap-2">
+            <button onclick="passAllToDeveloper()" id="ir-pass-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🤖 Pass all to Developer</button>
             <button onclick="openRunnerModal()" id="ir-runner-btn" class="px-3 py-2 text-sm font-semibold border border-violet-300 text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 transition flex items-center gap-1.5">🤖 <span id="ir-runner-btn-label">Runner</span></button>
             <button onclick="loadIssueReports()" class="px-3 py-2 text-sm font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition">↻ Refresh</button>
           </div>
@@ -3473,6 +3474,7 @@ async function loadIssueReports() {
 
     const issues = d.issues || [];
     _updateRunnerBtnBadge(issues);
+    _updatePassAllBtn(issues);
     loadRunnerStatus();
     if (tbody) tbody.innerHTML = issues.map(i => `
       <tr class="border-t border-gray-50 hover:bg-gray-50 transition">
@@ -3886,6 +3888,40 @@ async function restartRunner(runnerId, btn) {
     alert(e.message);
     if (btn) { btn.disabled = false; btn.textContent = '↻ Restart runner'; }
   } finally { await loadRunnerStatus(); }
+}
+
+// "Pass all to Developer" — shown on the Reported tab when there are issues that
+// haven't been handed off yet (not already queued or being fixed).
+function _updatePassAllBtn(issues) {
+  const btn = document.getElementById('ir-pass-all-btn');
+  if (!btn) return;
+  const eligible = (issues || []).filter(i =>
+    i.status === 'reported' && i.devHandoffStatus !== 'queued' && i.devHandoffStatus !== 'in_progress');
+  if (_irFilter === 'reported' && eligible.length > 0) {
+    btn.dataset.count = eligible.length;
+    btn.disabled = false;
+    btn.textContent = `🤖 Pass all ${eligible.length} to Developer`;
+    btn.classList.remove('hidden');
+  } else {
+    btn.classList.add('hidden');
+  }
+}
+
+async function passAllToDeveloper() {
+  const btn = document.getElementById('ir-pass-all-btn');
+  const n = Number(btn?.dataset.count || 0);
+  if (_irRunnerBlocked) {
+    alert('The AI developer runner is paused (Claude session limit). Use the "Resume runner" banner at the top of the Issues list, then try again.');
+    return;
+  }
+  if (!confirm(`Pass all ${n} reported issue${n === 1 ? '' : 's'} to the AI developer? Each will be fixed on its own branch with a pull request opened for review.`)) return;
+  if (btn) { btn.disabled = true; btn.textContent = '🤖 Queuing…'; }
+  try {
+    await api(`${IR_API}?action=handoff-all`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+  } catch (e) { alert(e.message); }
+  finally { loadIssueReports(); }
 }
 
 async function passToDeveloper(id) {

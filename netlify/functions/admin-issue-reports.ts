@@ -13,7 +13,7 @@
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import postgres from 'postgres';
-import { and, eq, desc, asc, sql } from 'drizzle-orm';
+import { and, eq, desc, asc, sql, or, isNull, notInArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { issueReports, issueReportMessages, users, devRunnerStatus } from '../../db/schema';
 import { isAdminRole, hasPermission } from '../../src/utils/rbac';
@@ -79,6 +79,40 @@ export const handler: Handler = async (event) => {
             .catch((e) => console.error('[admin-issue-reports] handoff notify failed:', e?.message || e));
 
         return json(200, { ok: true, devHandoffStatus: 'queued' });
+    }
+
+    // ── POST ?action=handoff-all: queue every eligible Reported issue at once ─────
+    // Bulk version of ?action=handoff. Queues every issue still in "Reported" that
+    // isn't already queued or being fixed, posts the same thread message on each,
+    // and notifies each reporter.
+    if (event.httpMethod === 'POST' && action === 'handoff-all') {
+        const updated = await db.update(issueReports).set({
+            devHandoffStatus: 'queued',
+            devHandoffAt: new Date(),
+            devResult: null,
+            status: 'fix_in_progress',
+            updatedAt: new Date(),
+        }).where(and(
+            eq(issueReports.status, 'reported'),
+            or(isNull(issueReports.devHandoffStatus), notInArray(issueReports.devHandoffStatus, ['queued', 'in_progress'])),
+        )).returning({ id: issueReports.id, userId: issueReports.userId });
+
+        if (updated.length === 0) return json(200, { ok: true, queued: 0 });
+
+        await db.insert(issueReportMessages).values(updated.map((u) => ({
+            issueId: u.id,
+            authorType: 'admin',
+            authorId: admin.id,
+            body: '🤖 Passed to the developer for AI auto-fix. A fix is now in progress.',
+            status: 'fix_in_progress',
+        })));
+
+        await Promise.allSettled(updated.map((u) =>
+            notifyIssueUser(db, { userId: u.userId, issueId: u.id, status: 'fix_in_progress', headers: event.headers })
+                .catch((e) => console.error('[admin-issue-reports] handoff-all notify failed:', e?.message || e)),
+        ));
+
+        return json(200, { ok: true, queued: updated.length, ids: updated.map((u) => u.id) });
     }
 
     // ── POST ?action=run-sql: run the AI-proposed migration against staging Neon ──
