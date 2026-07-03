@@ -1497,6 +1497,8 @@
           </div>
           <div class="flex items-center gap-2">
             <button onclick="passAllToDeveloper()" id="ir-pass-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🤖 Pass all to Developer</button>
+            <button onclick="requestMergeAll()" id="ir-merge-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🔀 Merge all to staging</button>
+            <button onclick="deployStaging()" id="ir-deploy-btn" class="hidden px-3 py-2 text-sm font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🚀 Commit to Staging</button>
             <button onclick="openRunnerModal()" id="ir-runner-btn" class="px-3 py-2 text-sm font-semibold border border-violet-300 text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 transition flex items-center gap-1.5">🤖 <span id="ir-runner-btn-label">Runner</span></button>
             <button onclick="loadIssueReports()" class="px-3 py-2 text-sm font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition">↻ Refresh</button>
           </div>
@@ -3475,6 +3477,7 @@ async function loadIssueReports() {
     const issues = d.issues || [];
     _updateRunnerBtnBadge(issues);
     _updatePassAllBtn(issues);
+    _updateMergeAllBtns(issues);
     loadRunnerStatus();
     if (tbody) tbody.innerHTML = issues.map(i => `
       <tr class="border-t border-gray-50 hover:bg-gray-50 transition">
@@ -4044,6 +4047,91 @@ async function requestMerge(id) {
   } catch (e) {
     if (btn) { btn.disabled = false; }
     alert(e.message);
+  }
+}
+
+// ── "Merge all to staging" + one-press staging deploy (super-admin only) ──────
+// On the Fix In Progress tab, merge every ready fix PR in one go instead of opening
+// each ticket. While the runner drains the queued merges we poll; once nothing is
+// left in flight the "Commit to Staging" button appears, which triggers a single
+// fresh Netlify staging build with everything included.
+let _irMergeAllTracking = false; // a bulk merge was queued this session and is draining
+let _irDeployReady = false;      // the bulk merge drained → offer "Commit to Staging"
+let _irMergePollTimer = null;
+
+function _irMergeEligible(i) {
+  return !!i.devPrUrl && (i.devMergeStatus === 'ready' || i.devMergeStatus === 'failed')
+    && i.devSqlStatus !== 'pending';
+}
+
+function _updateMergeAllBtns(issues) {
+  const mergeBtn = document.getElementById('ir-merge-all-btn');
+  const deployBtn = document.getElementById('ir-deploy-btn');
+  if (!mergeBtn || !deployBtn) return;
+  const isSuper = (typeof _adminRole !== 'undefined') && _adminRole === 'super_admin';
+  const onTab = _irFilter === 'fix_in_progress';
+  const eligible = (issues || []).filter(_irMergeEligible);
+  const inFlight = (issues || []).filter(i => i.devMergeStatus === 'queued' || i.devMergeStatus === 'merging');
+
+  if (onTab && isSuper && eligible.length > 0) {
+    mergeBtn.dataset.count = eligible.length;
+    mergeBtn.disabled = false;
+    mergeBtn.textContent = `🔀 Merge all ${eligible.length} to staging`;
+    mergeBtn.classList.remove('hidden');
+  } else {
+    mergeBtn.classList.add('hidden');
+  }
+
+  // Track the drain only from views that actually show in-flight merges (they keep the
+  // fix_in_progress status until merged) — other filters would report a false "done".
+  if (_irMergeAllTracking && (_irFilter === '' || _irFilter === 'fix_in_progress')) {
+    if (inFlight.length > 0) {
+      if (!_irMergePollTimer) _irMergePollTimer = setInterval(loadIssueReports, 5000);
+    } else {
+      _irMergeAllTracking = false;
+      _irDeployReady = true;
+      if (_irMergePollTimer) { clearInterval(_irMergePollTimer); _irMergePollTimer = null; }
+      // Failed merges pop back into the eligible list above — flag them rather than
+      // silently offering a deploy that's missing fixes.
+      if (eligible.length > 0) {
+        alert(`${eligible.length} merge${eligible.length === 1 ? '' : 's'} failed — open the ticket${eligible.length === 1 ? '' : 's'} to see the runner output, or press “Merge all” to retry. You can still commit what did merge to Staging.`);
+      }
+    }
+  }
+
+  deployBtn.classList.toggle('hidden', !(onTab && isSuper && _irDeployReady));
+}
+
+async function requestMergeAll() {
+  const btn = document.getElementById('ir-merge-all-btn');
+  const n = Number(btn?.dataset.count || 0);
+  if (!confirm(`Merge all ${n} ready fix${n === 1 ? '' : 'es'} to the staging branch now? The developer runner will merge each pull request in turn; once every merge has finished, a “Commit to Staging” button will appear to trigger one staging deploy.`)) return;
+  if (btn) { btn.disabled = true; btn.textContent = '🔀 Queuing…'; }
+  try {
+    const d = await api(`${IR_API}?action=request-merge-all`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    if ((d.queued || 0) > 0) { _irMergeAllTracking = true; _irDeployReady = false; }
+    else alert('Nothing to merge — no fix PRs are ready (fixes awaiting a database migration must be run from their ticket first).');
+  } catch (e) { alert(e.message); }
+  finally { loadIssueReports(); }
+}
+
+async function deployStaging() {
+  if (!confirm('Commit the merged fixes to Staging now? This triggers one fresh Netlify build of the staging branch — nothing is deployed to production.')) return;
+  const btn = document.getElementById('ir-deploy-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '🚀 Deploying…'; }
+  try {
+    await api(`${IR_API}?action=deploy-staging`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    _irDeployReady = false;
+    alert('✓ Staging deploy triggered — Netlify is rebuilding the staging branch with all merged fixes. It will be live in a few minutes.');
+  } catch (e) {
+    alert(e.message);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🚀 Commit to Staging'; }
+    loadIssueReports();
   }
 }
 
