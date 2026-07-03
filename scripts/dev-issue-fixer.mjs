@@ -96,11 +96,21 @@ const git = (args, opts = {}) => run('git', ['-C', opts.cwd || REPO, ...args], o
 // retry connection-level failures on a fresh connection, and — if we still give up —
 // surface the underlying cause so the recorded message is actionable instead of just
 // "fetch failed".
+//
+// Every attempt also carries an AbortSignal timeout: on links that drop connections
+// silently (no RST — e.g. Starlink/CGNAT), a fetch can otherwise hang FOREVER, turning
+// the runner into a zombie the portal still shows as "working". Netlify functions cap
+// out well under a minute, so anything slower is a dead connection, not a slow server.
+const FETCH_TIMEOUT_MS = Number(process.env.FETCH_TIMEOUT_MS || 60000);
 async function apiFetch(url, init = {}, { tries = 3, label = 'request' } = {}) {
   let lastErr;
   for (let attempt = 1; attempt <= tries; attempt++) {
     try {
-      return await fetch(url, { ...init, headers: { Connection: 'close', ...(init.headers || {}) } });
+      return await fetch(url, {
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+        ...init,
+        headers: { Connection: 'close', ...(init.headers || {}) },
+      });
     } catch (e) {
       lastErr = e;
       const cause = e?.cause;
