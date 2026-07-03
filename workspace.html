@@ -6951,6 +6951,15 @@ async function gpSubmitReject() {
   document.getElementById('setup-wizard-close').addEventListener('click', collapse);
   fab.addEventListener('click', open);
 
+  // Clicking anywhere outside the open drawer collapses it — otherwise it stays pinned over
+  // the page underneath (e.g. Business Information fields) with no way to dismiss it short of
+  // hunting for the small "x", which reads as a bug ("it stays there covering the fields").
+  document.addEventListener('click', (e) => {
+    if (!isOpen) return;
+    if (drawer.contains(e.target) || fab.contains(e.target)) return;
+    collapse();
+  });
+
   window.SetupWizard = { refresh, open, collapse, toggle: () => (isOpen ? collapse() : open()), onNavigate, openForNewAssistant };
 })();
 </script>
