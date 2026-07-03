@@ -1005,25 +1005,6 @@ window.showComplianceModals = function showComplianceModals(force) {
 
   <div id="task-volume-banner" class="hidden w-full px-4 pt-3"></div>
 
-  <!-- US-AUD-1.2.1: Persistent ROI Card -->
-  <div id="roi-card" class="hidden w-full px-4 pt-3">
-    <div class="bg-white border border-gray-200 rounded-xl px-5 py-4 flex flex-wrap items-center justify-between gap-3 shadow-sm">
-      <div id="roi-card-body" class="flex-1 min-w-0">
-        <p id="roi-card-primary" class="text-base font-bold text-gray-900 truncate"></p>
-        <p id="roi-card-secondary" class="text-sm text-gray-500 mt-0.5"></p>
-      </div>
-      <div class="flex items-center gap-2 shrink-0">
-        <div class="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-semibold">
-          <button id="roi-period-month" onclick="switchRoiPeriod('month')"
-            class="px-3 py-1.5 bg-emerald-700 text-white transition">Month</button>
-          <button id="roi-period-week" onclick="switchRoiPeriod('week')"
-            class="px-3 py-1.5 bg-white text-gray-500 hover:bg-gray-50 transition">Week</button>
-        </div>
-        <a id="roi-card-cta" href="#" class="hidden text-xs font-semibold text-emerald-700 hover:text-emerald-800 whitespace-nowrap transition"></a>
-      </div>
-    </div>
-  </div>
-
   <main id="workspace-content" class="flex-1 w-full"></main>
 </div>
 
@@ -1817,59 +1798,6 @@ function formatCurrency(amount, currency) {
       renderTrialBadge(cap);
       renderTaskVolumeBanner(cap);
     });
-
-    // US-AUD-1.2.1: Persistent ROI card
-    let _roiPeriod = 'month';
-    async function loadRoiCard(period) {
-      try {
-        const res = await fetch(`/.netlify/functions/roi-stats?period=${period}`);
-        if (!res.ok) return;
-        const roi = await res.json();
-        const card = document.getElementById('roi-card');
-        const primary = document.getElementById('roi-card-primary');
-        const secondary = document.getElementById('roi-card-secondary');
-        const cta = document.getElementById('roi-card-cta');
-        const label = period === 'week' ? 'this week' : 'this month';
-
-        cta.classList.add('hidden');
-        cta.removeAttribute('href');
-
-        if (roi.gbpSaved != null && roi.planCostGbp != null && roi.gbpSaved > 0) {
-          const saved = formatCurrency(roi.gbpSaved, roi.currency || 'GBP');
-          if (roi.gbpSaved >= roi.planCostGbp) {
-            const mult = (roi.gbpSaved / roi.planCostGbp).toFixed(1);
-            primary.textContent = `${saved} saved ${label}`;
-            secondary.textContent = `${mult}× your subscription cost — your assistants are paying for themselves.`;
-          } else {
-            const remaining = formatCurrency(roi.planCostGbp - roi.gbpSaved, roi.currency || 'GBP');
-            primary.textContent = `${saved} saved ${label}`;
-            secondary.textContent = `${remaining} more to beat your subscription cost — keep going.`;
-          }
-          card.classList.remove('hidden');
-        } else if (roi.hoursSaved != null && roi.hoursSaved > 0) {
-          const hrs = roi.hoursSaved % 1 === 0 ? roi.hoursSaved : roi.hoursSaved.toFixed(1);
-          primary.textContent = `${hrs}h saved ${label}`;
-          secondary.textContent = 'Set your hourly rate to see this as a £ value.';
-          cta.textContent = 'Set your rate →';
-          cta.href = '?view=settings';
-          cta.classList.remove('hidden');
-          card.classList.remove('hidden');
-        }
-      } catch { /* fail silently */ }
-    }
-
-    window.switchRoiPeriod = function(period) {
-      _roiPeriod = period;
-      document.getElementById('roi-period-month').className = period === 'month'
-        ? 'px-3 py-1.5 bg-emerald-700 text-white transition'
-        : 'px-3 py-1.5 bg-white text-gray-500 hover:bg-gray-50 transition';
-      document.getElementById('roi-period-week').className = period === 'week'
-        ? 'px-3 py-1.5 bg-emerald-700 text-white transition'
-        : 'px-3 py-1.5 bg-white text-gray-500 hover:bg-gray-50 transition';
-      loadRoiCard(period);
-    };
-
-    loadRoiCard('month');
 
     // US-AUD-4.3.1 SC5: Show the AI disclaimer modal if the user hasn't acknowledged it.
     // No longer auto-run on login — surfaced on demand from the Setup Wizard's
@@ -3896,7 +3824,9 @@ function formatCurrency(amount, currency) {
       if (!res.ok) return;
       const { notifications = [] } = await res.json();
       // List is newest-first; take the most recent milestone notification.
-      const m = notifications.find(n => n.type === 'milestone' || n.type === 'milestone_unlock');
+      // roi_milestone (Issue #84) replaces the old persistent "£X saved this month"
+      // banner — it's celebrated once here instead of shown as a constant banner.
+      const m = notifications.find(n => n.type === 'milestone' || n.type === 'milestone_unlock' || n.type === 'roi_milestone');
       if (!m || m.isRead) return; // only celebrate fresh (unread) milestones
       if (String(m.id) === localStorage.getItem('lastCelebratedMilestoneId')) return; // already done
       localStorage.setItem('lastCelebratedMilestoneId', String(m.id));

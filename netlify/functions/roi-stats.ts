@@ -5,9 +5,9 @@
 //   → { taskCount, hoursSaved, gbpSaved, planCostGbp, multiplier, period }
 
 import { HandlerEvent } from '@netlify/functions';
-import { eq, and, gte, count } from 'drizzle-orm';
+import { eq, and, gte, count, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { userProfiles, taskRuns, scheduledPosts, plans, masterPlans } from '../../db/schema';
+import { userProfiles, taskRuns, scheduledPosts, plans, masterPlans, notifications } from '../../db/schema';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
 import { requireSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
@@ -115,6 +115,32 @@ export const handler = async (event: HandlerEvent) => {
             const hoursNeeded = planCostGbp / hourlyRate;
             const tasksNeeded = Math.ceil((hoursNeeded * 60) / avgTaskDurationMinutes);
             tasksToBreakEven = Math.max(0, tasksNeeded - completedTasks);
+        }
+
+        // Issue #84: notify the user once per calendar month when they first cross
+        // break-even, instead of a permanently-visible banner. Fire-and-forget so it
+        // never blocks the response; dedup on the most recent 'roi_milestone' row's
+        // periodKey so it fires at most once per month.
+        if (period === 'month' && gbpSaved !== null && multiplier !== null && multiplier >= 1) {
+            const periodKey = `${now.getFullYear()}-${now.getMonth()}`;
+            void (async () => {
+                try {
+                    const [existing] = await db
+                        .select({ metadata: notifications.metadata })
+                        .from(notifications)
+                        .where(and(eq(notifications.userId, userId), eq(notifications.type, 'roi_milestone')))
+                        .orderBy(desc(notifications.createdAt))
+                        .limit(1);
+                    if (existing && (existing.metadata as Record<string, unknown> | null)?.periodKey === periodKey) return;
+                    await db.insert(notifications).values({
+                        userId,
+                        type: 'roi_milestone',
+                        title: 'Your assistants are paying for themselves!',
+                        message: `£${gbpSaved.toFixed(2)} saved this month — ${multiplier}× your subscription cost — your assistants are paying for themselves.`,
+                        metadata: { periodKey, gbpSaved, multiplier },
+                    });
+                } catch { /* non-blocking */ }
+            })();
         }
 
         return {
