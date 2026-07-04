@@ -100,7 +100,7 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         description: 'Completed work, wins, and on-demand reports from your assistants.',
         scope: 'assistant',
         inApp: ON, email: ON,
-        types: ['assistant_task', 'assistant_ready'],
+        types: ['assistant_task', 'assistant_ready', 'assistant_kickoff_complete'],
     },
     {
         key: 'content_calendar',
