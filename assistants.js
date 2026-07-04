@@ -947,8 +947,10 @@ window._tuningRevisePost = async function() {
 
 // ── Active Workflows dependency map (Epic 4.2) ────────────────────────────────
 // Shows how this assistant hands off to / receives from other assistants. Reads the
-// same orchestration_links the global Orchestrations hub manages; card stays hidden
-// when this assistant has no links.
+// same orchestration_links the global Orchestrations hub manages; card stays visible
+// (with an empty state) even with no links, since its "Manage in Orchestrations" CTA
+// is the only entry point into the Orchestrations hub now that #111 removed it from
+// the side menu.
 
 // Compact "fired …" relative time (Phase 5). Defined here too so the assistant page
 // doesn't depend on the Orchestrations hub view being loaded.
@@ -975,7 +977,11 @@ window._renderActiveWorkflows = async function(assistantId) {
         if (res.ok) links = (await res.json()).links || [];
     } catch { /* non-critical */ }
     const mine = links.filter(l => l.sourceAssistantId === aid || l.targetAssistantId === aid);
-    if (!mine.length) { card.classList.add('hidden'); return; }
+    card.classList.remove('hidden');
+    if (!mine.length) {
+        list.innerHTML = '<p class="text-sm text-gray-400 text-center py-3">No active workflows yet — connect this assistant to another in Orchestrations.</p>';
+        return;
+    }
 
     const arrow = '<svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>';
     list.innerHTML = mine.map(l => {
@@ -1873,7 +1879,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     // ── Review Queue tab — prefetch pending count so the badge shows without opening the tab ──
     _prefetchDetailRqBadge(assistantId);
 
-    // ── Epic 4.2 — Active Workflows dependency map (self-hides when this assistant has no links) ──
+    // ── Epic 4.2 — Active Workflows dependency map (always shown; empty state when no links) ──
     window._renderActiveWorkflows?.(assistantId);
 };
 
