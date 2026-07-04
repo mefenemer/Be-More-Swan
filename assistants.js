@@ -416,8 +416,6 @@ window._activateMainTab = function(name) {
     _resizeBriefAutoGrow();
     // Load the assistant-scoped review queue when the tab is first opened.
     if (name === 'review-queue') detailRqOpenStatus('review');
-    // Refresh the Runbook's Learned Directives when the (renamed) Runbook tab opens.
-    if (name === 'meetings') window._renderRunbookDirectives?.();
 };
 
 // ── Assistant-detail scoped Review Queue ─────────────────────────────────────
@@ -572,6 +570,9 @@ window._openBriefDrawer = function(tabKey) {
     const backBtn = document.getElementById('brief-drawer-back');
     if (backBtn) backBtn.hidden = false;
     if (tabKey === 'notifications') _initAssistantNotifPrefs();
+    // Learned Directives lives alongside Assistant Rules on this panel (issue #113) — refresh it
+    // whenever the panel is opened, same as the rules editor.
+    if (tabKey === 'guardrails') window._renderRunbookDirectives?.();
     _briefOpenChrome();
 };
 
@@ -1867,6 +1868,9 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
 
     // ── Per-assistant Assistant Rules (content_rules → this assistant's brief) ──
     await _fetchAndRenderAssistantRules(assistantId);
+
+    // ── Learned Directives (issue #113: lives alongside Assistant Rules) ──
+    window._renderRunbookDirectives?.(assistantId);
 
     // ── SMART Goals (Feature 1) ───────────────────────────────────
     await _fetchAndRenderGoals(assistantId);
