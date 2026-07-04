@@ -4614,7 +4614,16 @@ function renderPlatformMockup(post) {
     return `<div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden max-w-md mx-auto" style="border-top:3px solid ${meta.accent}">${body}</div>`;
 }
 
-function openPostReview(postId) {
+async function openPostReview(postId) {
+    // Cards elsewhere in the Review Queue warm this cache as they render, but callers outside
+    // it (e.g. the dashboard's "Requires your attention" list) can invoke this on a cold cache —
+    // fall back to fetching the pending drafts once so the modal still has data to show.
+    if (!_rqPostCache[postId]) {
+        try {
+            const res = await fetch('/.netlify/functions/get-social-drafts?status=pending_approval');
+            if (res.ok) ((await res.json()).drafts || []).forEach(rqCachePost);
+        } catch { /* handled by the !post check below */ }
+    }
     const post = _rqPostCache[postId];
     if (!post) return;
     _rqRestoreMediaPanel();   // ensure the shared media panel is home before (re)opening
