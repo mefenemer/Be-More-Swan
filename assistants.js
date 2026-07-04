@@ -390,7 +390,7 @@ function _initBriefAutoGrow() {
 
 function _resizeBriefAutoGrow() {
     _AUTOGROW_FIELDS.forEach(id => _autoGrowField(document.getElementById(id)));
-    // Per-assistant Assistant Rules rows (#tab-guardrails) are built dynamically and hit the
+    // Per-assistant Assistant Rules rows (#tab-rules) are built dynamically and hit the
     // same display:none / scrollHeight:0 problem — recompute their height too.
     document.querySelectorAll('#assistant-rules-editor .ar-input').forEach(_autoGrowField);
 }
@@ -564,15 +564,16 @@ window._openProfileDrawer = function() {
 // Open (or swap to) a specific section panel, with a back arrow to the home index.
 window._openBriefDrawer = function(tabKey) {
     _briefShowPanel('tab-' + tabKey);
-    const titles = { problem: 'Mandate', operation: 'Operational Setup', strategy: 'Creative Brief', platforms: 'Connections', guardrails: 'Brand Safety & Legal', notifications: 'Notifications' };
+    const titles = { problem: 'Mandate', operation: 'Operational Setup', strategy: 'Creative Brief', platforms: 'Connections', rules: 'Rules', guardrails: 'Brand Safety & Legal', notifications: 'Notifications' };
     const titleEl = document.getElementById('brief-drawer-title');
     if (titleEl) titleEl.textContent = titles[tabKey] || tabKey;
     const backBtn = document.getElementById('brief-drawer-back');
     if (backBtn) backBtn.hidden = false;
     if (tabKey === 'notifications') _initAssistantNotifPrefs();
-    // Learned Directives lives alongside Assistant Rules on this panel (issue #113) — refresh it
-    // whenever the panel is opened, same as the rules editor.
-    if (tabKey === 'guardrails') window._renderRunbookDirectives?.();
+    // Learned Directives lives alongside Assistant Rules on this panel (issue #113, moved into
+    // its own Rules section in issue #125) — refresh it whenever the panel is opened, same as
+    // the rules editor.
+    if (tabKey === 'rules') window._renderRunbookDirectives?.();
     _briefOpenChrome();
 };
 
@@ -1465,7 +1466,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
 
     // Deep-link to a specific section (e.g. post-OAuth returns to the Connections tab).
     // 'goals' is now its own main tab; the Configuration child tabs (problem/operation/
-    // strategy/platforms/guardrails) are surfaced by clicking the child button, which also
+    // strategy/platforms/rules/guardrails) are surfaced by clicking the child button, which also
     // reveals the Configuration main tab.
     if (window._assistantDetailInitialTab) {
         const wanted = window._assistantDetailInitialTab;
@@ -3343,7 +3344,7 @@ window._renderReviewChart = async function (goalId) {
 
 window._editBriefFromReview = function () {
     document.getElementById('modal-review-progress')?.classList.add('hidden');
-    document.querySelector('.detail-tab-btn[data-tab="guardrails"]')?.click();
+    document.querySelector('.detail-tab-btn[data-tab="rules"]')?.click();
     setTimeout(() => {
         const el = document.getElementById('edit_strict_rules');
         if (el) { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); el.focus(); }
