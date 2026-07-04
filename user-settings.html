@@ -364,7 +364,7 @@
                     <label for="ai-disclosure-text" class="block text-sm font-semibold text-gray-700">Footer text</label>
                     <div class="flex gap-2 items-start">
                         <input type="text" id="ai-disclosure-text" maxlength="500"
-                            placeholder="This message was composed with AI assistance."
+                            placeholder="This message was composed with Be More Swan AI assistance."
                             class="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 transition">
                         <button type="button" id="btn-save-ai-disclosure-text"
                             class="shrink-0 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer">
@@ -418,7 +418,7 @@
                 .then(data => {
                     setToggleState(data.enabled);
                     textInput.value = data.text || '';
-                    textInput.placeholder = data.defaultText || 'This message was composed with AI assistance.';
+                    textInput.placeholder = data.defaultText || 'This message was composed with Be More Swan AI assistance.';
                     if (data.isEuJurisdiction) euBadge.classList.remove('hidden');
                 })
                 .catch(() => {});
