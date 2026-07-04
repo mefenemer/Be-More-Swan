@@ -1356,7 +1356,6 @@ function formatCurrency(amount, currency) {
     const navLinks = {
       'dashboard': document.getElementById('nav-dashboard'),
       'assistants': document.getElementById('nav-assistants'),
-      'orchestrations': document.getElementById('nav-orchestrations'),
       'catalog': document.getElementById('nav-catalog'),
       'assets': document.getElementById('nav-assets'),
       'settings': document.getElementById('nav-settings'),
@@ -2115,7 +2114,7 @@ function formatCurrency(amount, currency) {
     function updateActiveNav(activeKey) {
       Object.values(navLinks).forEach(link => {
         if (!link) return;
-        // Issue #44: leave disabled/"Coming Soon" items (e.g. Orchestrations) alone —
+        // Issue #44: leave disabled/"Coming Soon" nav items alone —
         // they carry their own permanent gray-400/cursor-not-allowed styling and must
         // never be reset to the normal enabled nav-item classes.
         if (link.dataset.comingSoon === '1') return;
