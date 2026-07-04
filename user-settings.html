@@ -143,8 +143,10 @@
         </div>
     </div>
 
-    <!-- Business Information has no in-page panel: clicking its tab (see the
-         "Tab switching" script below) jumps straight to the assets.html view. -->
+    <!-- ══ Business Information (embedded from assets.html as a sub tab) ══ -->
+    <div class="settings-tab-panel hidden" data-panel="business">
+        <div id="business-panel-loading" class="text-sm text-gray-400 py-6">Loading…</div>
+    </div>
 
     <!-- ══ Notification Preferences (unified matrix) ══════════════ -->
     <div class="settings-tab-panel hidden" data-panel="notifications">
@@ -444,21 +446,48 @@
     (function () {
         const tabs = Array.from(document.querySelectorAll('#settings-tabs .settings-tab'));
         const panels = Array.from(document.querySelectorAll('.settings-tab-panel'));
+
+        // Business Information lives in assets.html; fetch it into the "business" panel
+        // the first time that sub tab is opened so it renders inline instead of navigating
+        // away to a separate full-page view.
+        let businessPanelLoaded = false;
+        async function ensureBusinessPanel() {
+            if (businessPanelLoaded) return;
+            businessPanelLoaded = true;
+            const panel = panels.find(p => p.dataset.panel === 'business');
+            try {
+                const response = await fetch('./assets.html');
+                if (!response.ok) throw new Error('Network component not found');
+                panel.innerHTML = await response.text();
+                // assets.html is designed as its own full-page view (page padding + an
+                // "Business Information" <h1>); embedded as a sub tab that would duplicate
+                // the "Account Settings" header above, so drop that outer chrome here.
+                const wrapper = panel.firstElementChild;
+                if (wrapper) {
+                    wrapper.classList.remove('max-w-5xl', 'mx-auto', 'py-10', 'pb-20');
+                    wrapper.querySelector('h1')?.closest('.mb-8')?.remove();
+                }
+                // Re-execute inline <script> blocks (browsers do not run scripts set via innerHTML)
+                Array.from(panel.querySelectorAll('script')).forEach(oldScript => {
+                    const newScript = document.createElement('script');
+                    Array.from(oldScript.attributes).forEach(attr => newScript.setAttribute(attr.name, attr.value));
+                    newScript.textContent = oldScript.textContent;
+                    oldScript.replaceWith(newScript);
+                });
+                if (typeof window.initBrandAssets === 'function') window.initBrandAssets();
+            } catch (e) {
+                panel.innerHTML = '<p class="text-sm text-red-600">Failed to load Business Information. Please refresh and try again.</p>';
+                businessPanelLoaded = false;
+            }
+        }
+
         function activate(name) {
             if (!name || !panels.some(p => p.dataset.panel === name)) return;
+            if (name === 'business') ensureBusinessPanel();
             tabs.forEach(t => t.classList.toggle('active', t.dataset.tab === name));
             panels.forEach(p => p.classList.toggle('hidden', p.dataset.panel !== name));
         }
-        tabs.forEach(t => t.addEventListener('click', () => {
-            // Business Information has no in-page panel content — it's a full view
-            // (assets.html). Jump straight there instead of showing a summary card
-            // with its own "Open Business Information" button (an extra, unnecessary click).
-            if (t.dataset.tab === 'business' && typeof window.loadView === 'function') {
-                window.loadView('assets');
-                return;
-            }
-            activate(t.dataset.tab);
-        }));
+        tabs.forEach(t => t.addEventListener('click', () => activate(t.dataset.tab)));
         // Exposed so other parts of the workspace can deep-link to a specific tab — notably
         // the Setup Wizard's "Compliance & data use" step, which routes here and opens the
         // "My Agreements" panel (not the default Profile Information one).
