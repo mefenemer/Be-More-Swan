@@ -1895,12 +1895,22 @@ async function _prefetchDetailRqBadge(assistantId) {
 // ─────────────────────────────────────────────────────────────────
 // Impact & ROI metrics — per-assistant post counts + time/money saved.
 // ─────────────────────────────────────────────────────────────────
-async function _fetchAndRenderAssistantMetrics(assistantId) {
+async function _fetchAndRenderAssistantMetrics(assistantId, period = 'week') {
     const card = document.getElementById('assistant-metrics-card');
     if (!card) return;
 
+    // Period toggle — mirrors the dashboard hero's This Week / This Month tabs so
+    // the hours/£ figures here are always comparable with whichever view the
+    // dashboard is showing.
+    card.querySelectorAll('.metrics-period-btn').forEach(btn => {
+        const active = btn.dataset.period === period;
+        btn.className = `metrics-period-btn px-3 py-1.5 text-xs font-bold rounded-lg transition ${active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`;
+        btn.setAttribute('aria-selected', String(active));
+        btn.onclick = active ? null : () => _fetchAndRenderAssistantMetrics(assistantId, btn.dataset.period);
+    });
+
     try {
-        const res = await fetch(`/.netlify/functions/get-assistant-metrics?id=${assistantId}`);
+        const res = await fetch(`/.netlify/functions/get-assistant-metrics?id=${assistantId}&period=${period}`);
         if (!res.ok) return;
         const d = await res.json();
 
@@ -1909,6 +1919,8 @@ async function _fetchAndRenderAssistantMetrics(assistantId) {
         card.classList.remove('hidden');
 
         const el = id => document.getElementById(id);
+        const periodLabel = period === 'month' ? 'this month' : 'this week';
+        el('metrics-period-note').textContent = `All-time posts created by this assistant; time & money saved ${periodLabel} (matches the dashboard's ${period === 'month' ? 'This Month' : 'This Week'} view)`;
         el('metrics-total-created').textContent = d.totalCreated.toLocaleString();
         el('metrics-total-scheduled').textContent = d.totalScheduled.toLocaleString();
         el('metrics-total-published').textContent = d.totalPublished.toLocaleString();

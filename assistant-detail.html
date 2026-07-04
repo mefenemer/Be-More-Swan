@@ -162,7 +162,12 @@
     <div class="flex items-center justify-between mb-5">
       <div>
         <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Impact &amp; ROI</h3>
-        <p class="text-xs text-gray-400 mt-1">All-time posts created by this assistant; time &amp; money saved this week (matches the dashboard)</p>
+        <p class="text-xs text-gray-400 mt-1" id="metrics-period-note">All-time posts created by this assistant; time &amp; money saved this week (matches the dashboard)</p>
+      </div>
+      <!-- Same This Week / This Month periods as the dashboard hero, so the two views always agree -->
+      <div class="flex items-center gap-1 p-1 rounded-xl bg-gray-100" role="tablist" aria-label="Time period">
+        <button type="button" data-period="week" class="metrics-period-btn px-3 py-1.5 text-xs font-bold rounded-lg transition" role="tab">This Week</button>
+        <button type="button" data-period="month" class="metrics-period-btn px-3 py-1.5 text-xs font-bold rounded-lg transition" role="tab">This Month</button>
       </div>
     </div>
     <!-- ROI hero row — Time Saved & Financial Saving first -->

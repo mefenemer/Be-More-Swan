@@ -2210,6 +2210,11 @@ function formatCurrency(amount, currency) {
       return await refreshOnboardingLock();
     }
 
+    // The platform tour (tour.js) pre-checks restricted views so it can skip those
+    // steps silently instead of tripping the route guard's toast + dashboard redirect.
+    window.isViewOnboardingLocked = async (routeKey) =>
+      ONBOARDING_RESTRICTED.includes(routeKey) && !(await ensureOnboardingStatus());
+
     // AC1.4: instant unlock without a page refresh. Called the moment we observe
     // the user has an assistant (e.g. dashboard team grid renders one).
     window.markOnboardingComplete = function () {

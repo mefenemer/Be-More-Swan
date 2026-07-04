@@ -11,6 +11,7 @@ import { userProfiles, taskRuns, scheduledPosts, plans, masterPlans, notificatio
 import { getTimeMultipliers } from '../../src/utils/platform-config';
 import { requireSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
+import { parseRoiPeriod, roiPeriodStart } from '../../src/utils/roi-period';
 
 export const handler = async (event: HandlerEvent) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -19,19 +20,13 @@ export const handler = async (event: HandlerEvent) => {
     const session = requireSession(event);
     if ('error' in session) return session.error;
     const userId = session.userId;
-    const period = (event.queryStringParameters?.period || 'month') as 'month' | 'week';
+    const raw = event.queryStringParameters?.period;
+    const period = raw ? parseRoiPeriod(raw) : 'month';
 
-    // SC6: Date range — current calendar month or week
+    // SC6: Date range — current calendar month or week, computed by the shared
+    // helper so get-assistant-metrics.ts aggregates over the identical window.
     const now = new Date();
-    let periodStart: Date;
-    if (period === 'week') {
-        const dayOfWeek = now.getDay(); // 0=Sun
-        periodStart = new Date(now);
-        periodStart.setDate(now.getDate() - dayOfWeek);
-        periodStart.setHours(0, 0, 0, 0);
-    } else {
-        periodStart = new Date(now.getFullYear(), now.getMonth(), 1); // start of month
-    }
+    const periodStart = roiPeriodStart(period, now);
 
     try {
         // Resolve the user's ACTIVE organisation (not just any membership) — task/post
