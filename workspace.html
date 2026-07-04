@@ -4035,6 +4035,7 @@ function formatCurrency(amount, currency) {
 <script src="/calendar.js?v=20260625-approve-gate"></script>
 <script src="/billing.js"></script>
 <script src="/swan-cursor.js"></script>
+<script src="/tour.js"></script>
 
 <!-- US-GOV-2.1.1: Review Queue + Pending Badge JS -->
 <script>
@@ -6777,9 +6778,14 @@ async function gpSubmitReject() {
           <h3 class="text-xl font-extrabold text-gray-900 mb-1">Your assistant is live!</h3>
           <p class="text-sm text-gray-500 mb-6">Everything's set up — your assistant is working for you. You can revisit any step from My Account.</p>
           <button type="button" id="setup-wizard-done-btn" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl px-5 py-2.5 transition cursor-pointer">Done</button>
+          <button type="button" id="setup-wizard-tour-btn" class="block mx-auto mt-3 text-sm font-semibold text-emerald-700 hover:text-emerald-800 hover:underline cursor-pointer">🦢 Take a quick tour of the platform &rarr;</button>
         </div>`;
       const doneBtn = document.getElementById('setup-wizard-done-btn');
       if (doneBtn) doneBtn.addEventListener('click', () => collapse());
+      // Setup (the wizard) is finished — orientation (the tour) is the natural next step.
+      // The tour also stays available on demand from Help & Support.
+      const tourBtn = document.getElementById('setup-wizard-tour-btn');
+      if (tourBtn) tourBtn.addEventListener('click', () => { collapse(); window.PlatformTour?.start?.(); });
       return;
     }
 
