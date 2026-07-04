@@ -32,6 +32,7 @@ window.initNotifications = async function() {
     const emptyStateEl = document.getElementById('notif-empty-state');
     const searchInput = document.getElementById('notif-search');
     const markAllBtn = document.getElementById('btn-mark-all-read');
+    const groupByTypeToggle = document.getElementById('notif-group-by-type');
 
     if (!listEl) return;
 
@@ -223,7 +224,10 @@ window.initNotifications = async function() {
     }
 
     const fmtDate = (d) => new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    // Human-readable label for a notif.type, e.g. "billing_payment_failed" -> "Billing Payment Failed".
+    const typeLabel = (type) => (type || 'other').split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
     let activeTab = 'action';
+    let groupByType = false;
 
     const tabActionBtn = document.getElementById('tab-action');
     const tabUpdatesBtn = document.getElementById('tab-updates');
@@ -400,8 +404,27 @@ window.initNotifications = async function() {
         }
         if (emptyStateEl) emptyStateEl.classList.add('hidden');
 
-        list.forEach(notif => listEl.appendChild(
-            activeTab === 'action' ? renderActionItem(notif) : renderUpdateItem(notif)));
+        const renderItem = (notif) => activeTab === 'action' ? renderActionItem(notif) : renderUpdateItem(notif);
+
+        if (!groupByType) {
+            list.forEach(notif => listEl.appendChild(renderItem(notif)));
+            return;
+        }
+
+        // Group by type, preserving the existing sort order both across and within groups.
+        const groups = new Map();
+        list.forEach(notif => {
+            const key = notif.type || 'other';
+            if (!groups.has(key)) groups.set(key, []);
+            groups.get(key).push(notif);
+        });
+        groups.forEach((items, type) => {
+            const header = document.createElement('li');
+            header.className = 'px-4 pt-4 pb-1 bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide';
+            header.textContent = `${typeLabel(type)} (${items.length})`;
+            listEl.appendChild(header);
+            items.forEach(notif => listEl.appendChild(renderItem(notif)));
+        });
     };
 
     const setRead = async (id, isRead) => {
@@ -474,6 +497,7 @@ window.initNotifications = async function() {
     if (tabActionBtn) tabActionBtn.addEventListener('click', () => { activeTab = 'action'; renderList(); });
     if (tabUpdatesBtn) tabUpdatesBtn.addEventListener('click', () => { activeTab = 'updates'; renderList(); });
     if (searchInput) searchInput.addEventListener('input', renderList);
+    if (groupByTypeToggle) groupByTypeToggle.addEventListener('change', () => { groupByType = groupByTypeToggle.checked; renderList(); });
 
     loadData();
 };
