@@ -1,4 +1,4 @@
-// GET ?id=<assistantId>
+// GET ?id=<assistantId>&period=week|month (default week)
 // Returns per-platform post counts (created / scheduled / published) for a single assistant,
 // plus hours saved and GBP saved based on the user's configured hourly rate.
 
@@ -8,6 +8,7 @@ import { getDb, withTenant } from '../../db/client';
 import { aiAssistants, scheduledPosts, taskRuns, userProfiles } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
+import { parseRoiPeriod, roiPeriodStart } from '../../src/utils/roi-period';
 
 const PUBLISHED_STATUSES = new Set(['published']);
 const SCHEDULED_STATUSES = new Set(['scheduled', 'approved', 'pending_approval', 'in_review']);
@@ -35,17 +36,17 @@ export const handler: Handler = async (event) => {
         if (!assistant) return { statusCode: 404, body: JSON.stringify({ error: 'Not found' }) };
 
         // Issue #110: the hero "hours/£ saved" figures must match the dashboard's
-        // roi-stats widget, which defaults to the current calendar week (US-DASH-1)
-        // — otherwise an all-time total will always outpace the dashboard's figure
-        // even for an org with a single assistant. The totals below (created/
-        // scheduled/published breakdown) stay all-time; only the ROI hero uses
-        // this window.
-        const now = new Date();
-        const weekStart = new Date(now);
-        weekStart.setDate(now.getDate() - now.getDay());
-        weekStart.setHours(0, 0, 0, 0);
+        // roi-stats widget. The dashboard has a This Week / This Month toggle, so
+        // this endpoint takes the same ?period param and computes the window via
+        // the shared roiPeriodStart helper — a hard-coded week here diverged from
+        // the dashboard whenever it was on the month view (the calendar week can
+        // reach into the previous month, so "this week" can exceed "this month").
+        // The totals below (created/scheduled/published breakdown) stay all-time;
+        // only the ROI hero uses this window.
+        const period = parseRoiPeriod(event.queryStringParameters?.period);
+        const periodStart = roiPeriodStart(period);
 
-        const [postRows, profileRow, mult, [{ postsThisWeek }], [{ taskRunsThisWeek }]] = await Promise.all([
+        const [postRows, profileRow, mult, [{ postsInPeriod }], [{ taskRunsInPeriod }]] = await Promise.all([
             db.select({
                 status: scheduledPosts.status,
                 platform: scheduledPosts.platform,
@@ -62,21 +63,21 @@ export const handler: Handler = async (event) => {
 
             getTimeMultipliers(),
 
-            db.select({ postsThisWeek: count() })
+            db.select({ postsInPeriod: count() })
               .from(scheduledPosts)
               .where(and(
                   eq(scheduledPosts.assistantId, aId),
                   eq(scheduledPosts.organisationId, orgId),
-                  gte(scheduledPosts.createdAt, weekStart)
+                  gte(scheduledPosts.createdAt, periodStart)
               )),
 
-            db.select({ taskRunsThisWeek: count() })
+            db.select({ taskRunsInPeriod: count() })
               .from(taskRuns)
               .where(and(
                   eq(taskRuns.assistantId, aId),
                   eq(taskRuns.organisationId, orgId),
                   eq(taskRuns.status, 'completed'),
-                  gte(taskRuns.createdAt, weekStart)
+                  gte(taskRuns.createdAt, periodStart)
               )),
         ]);
 
@@ -98,8 +99,8 @@ export const handler: Handler = async (event) => {
 
         // Same formula as roi-stats.ts (posts × content_drafted + completed task runs × tasks_completed)
         // so a single-assistant org sees identical hero figures on both pages.
-        const totalMinutesThisWeek = Number(postsThisWeek) * mult.content_drafted + Number(taskRunsThisWeek) * mult.tasks_completed;
-        const hoursSaved = parseFloat((totalMinutesThisWeek / 60).toFixed(1));
+        const totalMinutesInPeriod = Number(postsInPeriod) * mult.content_drafted + Number(taskRunsInPeriod) * mult.tasks_completed;
+        const hoursSaved = parseFloat((totalMinutesInPeriod / 60).toFixed(1));
         const gbpSaved = hourlyRateGbp ? parseFloat((hoursSaved * hourlyRateGbp).toFixed(2)) : null;
 
         return {
@@ -112,6 +113,7 @@ export const handler: Handler = async (event) => {
                 byPlatform,
                 hoursSaved,
                 gbpSaved,
+                period,
                 hourlyRateSet: hourlyRateGbp !== null,
                 minutesPerPost: mult.content_drafted,
             }),

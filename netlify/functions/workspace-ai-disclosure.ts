@@ -93,7 +93,12 @@ export const handler: Handler = async (event) => {
             statusCode: 200,
             body: JSON.stringify({
                 enabled: org.aiDisclosureFooterEnabled,
-                text: org.aiDisclosureFooterText ?? DEFAULT_FOOTER_TEXT,
+                // Raw override only — NOT falling back to the default here. Falling back would
+                // pre-fill the settings input's value (not just its placeholder), so an
+                // unmodified "Save" click permanently pins whatever the current default happens
+                // to be as a stored per-org override, and future default-copy changes would then
+                // never reach that org again.
+                text: org.aiDisclosureFooterText ?? '',
                 isEuJurisdiction,
                 defaultText: DEFAULT_FOOTER_TEXT,
             }),

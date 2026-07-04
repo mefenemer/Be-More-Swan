@@ -120,7 +120,7 @@
       </button>
       <button type="button" data-maintab="goals"         class="main-tab-btn">Goals</button>
       <button type="button" data-maintab="automation"    class="main-tab-btn">Automation</button>
-      <button type="button" data-maintab="meetings"      class="main-tab-btn" title="Notebook: the Kick Off Meeting and your check-in history. Rules — including Learned Directives — live in the Assistant Profile.">Notebook
+      <button type="button" data-maintab="meetings"      class="main-tab-btn" title="Progress Reviews: the Kick Off Meeting and your check-in history. Rules — including Learned Directives — live in the Assistant Profile.">Progress Reviews
         <span id="meetings-kickoff-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-blue-100 text-blue-700 text-[10px] font-black rounded-full inline-flex items-center justify-center">!</span>
       </button>
       <button type="button" data-maintab="activity"      class="main-tab-btn">Activity</button>
@@ -162,7 +162,12 @@
     <div class="flex items-center justify-between mb-5">
       <div>
         <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Impact &amp; ROI</h3>
-        <p class="text-xs text-gray-400 mt-1">All-time posts created by this assistant; time &amp; money saved this week (matches the dashboard)</p>
+        <p class="text-xs text-gray-400 mt-1" id="metrics-period-note">All-time posts created by this assistant; time &amp; money saved this week (matches the dashboard)</p>
+      </div>
+      <!-- Same This Week / This Month periods as the dashboard hero, so the two views always agree -->
+      <div class="flex items-center gap-1 p-1 rounded-xl bg-gray-100" role="tablist" aria-label="Time period">
+        <button type="button" data-period="week" class="metrics-period-btn px-3 py-1.5 text-xs font-bold rounded-lg transition" role="tab">This Week</button>
+        <button type="button" data-period="month" class="metrics-period-btn px-3 py-1.5 text-xs font-bold rounded-lg transition" role="tab">This Month</button>
       </div>
     </div>
     <!-- ROI hero row — Time Saved & Financial Saving first -->
@@ -274,7 +279,7 @@
     <p id="metric-value-wins" class="hidden text-xs text-emerald-700 font-medium mt-3"></p>
   </div>
 
-  <!-- Active Workflows (Epic 4.2) — how this assistant hands off to / receives from others. Hidden when none. -->
+  <!-- Active Workflows (Epic 4.2) — how this assistant hands off to / receives from others. Always visible so "Manage in Orchestrations" stays reachable; shows an empty state when there are no links. -->
   <div id="active-workflows-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6 hidden">
     <div class="flex items-center justify-between gap-3 mb-4">
       <div>
@@ -338,7 +343,7 @@
       </div>
       <button onclick="openGeneratePostSheet()" class="px-4 py-2 text-sm font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg transition cursor-pointer flex items-center gap-1.5">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-        Create Post
+        Assign Task
       </button>
     </div>
 
@@ -1166,8 +1171,8 @@
   <!-- ── MAIN TAB: Meetings ────────────────────────────────────────── -->
   <div id="maintab-meetings" class="main-tab-content hidden space-y-6">
 
-    <!-- Explains the "Notebook" name for users unfamiliar with the term (issue #92) -->
-    <p class="text-sm text-gray-500 -mt-2">The <strong>Notebook</strong> is your history of check-ins with this assistant: the Kick Off Meeting and past review meetings. Its rules — including Learned Directives — live in the <strong>Assistant Profile</strong>, under Brand Safety &amp; Legal.</p>
+    <!-- Explains the "Progress Reviews" name for users unfamiliar with the term (issue #92, renamed in #116) -->
+    <p class="text-sm text-gray-500 -mt-2"><strong>Progress Reviews</strong> is your history of check-ins with this assistant: the Kick Off Meeting and past review meetings. Its rules — including Learned Directives — live in the <strong>Assistant Profile</strong>, under Brand Safety &amp; Legal.</p>
 
     <!-- 1. Kick Off Meeting (moved from above the tabs) -->
     <div id="kickoff-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 hidden">
@@ -1200,12 +1205,13 @@
       </div>
     </div>
 
-    <!-- Governance review history — the former "Review Meetings" section, preserved & de-emphasised -->
+    <!-- Progress review history — the former "Review Meetings" section, preserved & de-emphasised -->
+    <!-- Learned Directives moved to the Assistant Profile drawer (issue #113) -->
     <details class="bg-white rounded-2xl border border-gray-200 shadow-sm group">
       <summary class="px-6 py-4 cursor-pointer text-sm font-bold text-gray-700 uppercase tracking-wide select-none flex items-center justify-between gap-4">
         <span class="flex items-center gap-2">
           <svg class="w-4 h-4 text-gray-400 transition-transform duration-200 group-open:rotate-180 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-          <span>Governance review history</span>
+          <span>Progress Review History</span>
         </span>
         <button id="btn-log-review" type="button" onclick="event.preventDefault(); window._openReviewForm()" class="px-3.5 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition cursor-pointer">Log a Review</button>
       </summary>

@@ -1,16 +1,31 @@
-// tour.js — Guided platform tour (window.PlatformTour)
+// tour.js — Guided platform tours (window.PlatformTour)
 //
-// On-demand interactive walkthrough started from Help & Support ("Take the Tour")
-// or from the setup wizard's completion screen. Dims the workspace behind a
-// spotlight cut-out, explains one element per step, and routes between SPA views
-// (window.loadView) so the flow never breaks when a step lives on another page.
+// Two on-demand interactive walkthroughs, started from Help & Support or from the
+// setup wizard's completion screen:
 //
-// Deliberately stateless: no server calls, no persistence, and it never mutates
-// user data — exiting (Esc, X, or clicking the dimmed background) simply removes
-// the overlay and leaves the workspace exactly as it was. The tour always starts
-// from step one; the setup wizard remains the single source of truth for
-// onboarding progress, so the two never compete (starting the tour collapses an
-// open wizard drawer for the duration).
+//   • orientation — a 5-step, ~60-second lap of the essentials (the user-story
+//     flow: command center → team → hiring → integrations → CTA). Its finale
+//     chains into the deep dive for users who want more.
+//   • deep-dive   — a 13-step room-by-room walkthrough: the Board Room (tabs,
+//     profile, pause/archive), Review Queue, Calendar, My Content, Refer a
+//     Friend, Help & Support, Feature Requests, Report an Issue, the ⌘K command
+//     bar, and My Account.
+//
+// Both dim the workspace behind a spotlight cut-out, explain one element per
+// step, and route between SPA views (window.loadView) so the flow never breaks
+// when a step lives on another page.
+//
+// Deliberately stateless: no server calls of their own, no persistence, and they
+// never mutate user data — exiting (Esc, X, or clicking the dimmed background)
+// removes the overlay and leaves the workspace exactly as it was. A tour always
+// starts from its step one; the setup wizard remains the single source of truth
+// for onboarding progress, so the two never compete (starting a tour collapses
+// an open wizard drawer for the duration).
+//
+// Steps that can't render for this user are skipped silently in the direction of
+// travel: onboarding-locked views (Review Queue / Calendar / My Content before
+// the first assistant exists) and the Board Room section when there are no
+// assistants yet.
 (function () {
   'use strict';
 
@@ -18,11 +33,18 @@
   const SPOT_PADDING = 8;      // breathing room around the spotlighted element
   const VIEW_WAIT_MS = 5000;   // max wait for a target to appear after a view change
 
-  // Each step: `view` routes there first (omit to stay put); `targets` are tried in
-  // order until one is visible (responsive layouts hide some anchors); `sidebar`
-  // opens the mobile nav drawer so the anchor is on screen; `center` renders a
-  // spotlight-free centered card (the finale).
-  const STEPS = [
+  // ── Step schema ──────────────────────────────────────────────────────────────
+  // view      route there first via loadView (omit to stay put)
+  // targets   selectors tried in order until one is visible (responsive layouts hide some)
+  // closest   expand the found element to this ancestor before spotlighting
+  // sidebar   open the mobile nav drawer so the anchor is on screen
+  // prepare   async hook run before the target search; return false to skip the step
+  // cleanup   hook run when leaving the step (also on exit)
+  // center    spotlight-free centered card (finales)
+  // cta       finale primary action: { label, view }
+  // chain     finale secondary action: { label, tour } — hands off to another tour
+
+  const ORIENTATION_STEPS = [
     {
       view: 'dashboard',
       targets: ['#command-center-hero', '#dash-root'],
@@ -54,18 +76,145 @@
     {
       center: true,
       title: 'You’re ready to glide.',
-      copy: 'You’ve got the lay of the land. Time to stop paddling frantically and start gliding — deploy your first assistant and watch the busywork disappear.',
+      copy: 'You’ve got the lay of the land. Time to stop paddling frantically and start gliding — deploy your first assistant and watch the busywork disappear. Or keep exploring: the deep dive walks you through every room of the platform.',
+      cta: { label: 'Deploy Your First Assistant', view: 'catalog' },
+      chain: { label: 'Continue: take the deep dive →', tour: 'deep-dive' },
+    },
+  ];
+
+  const DEEP_DIVE_STEPS = [
+    {
+      prepare: ensureAssistantDetail,
+      targets: ['#detail-avatar'],
+      closest: '.z-10',
+      title: 'The Board Room',
+      copy: 'Every assistant has its own Board Room. Step inside to review progress, rename your assistant, and see the impact it’s having — this header is its identity and vital signs.',
+      placement: 'bottom',
+    },
+    {
+      prepare: ensureAssistantDetail,
+      targets: ['nav[aria-label="Assistant sections"]'],
+      title: 'Everything In Its Place',
+      copy: 'The Board Room is organised into tabs: approve pending work in Review Queue, set measurable Goals, tune Automation, browse the Notebook of rules it has learned, and audit its full Activity history.',
+      placement: 'bottom',
+    },
+    {
+      prepare: ensureAssistantDetail,
+      targets: ['#btn-assistant-profile'],
+      title: 'Shape Your Assistant',
+      copy: 'The Assistant Profile is where you define who your assistant is — its persona, skills, strategy and the tools it connects to. Adjust it any time; your assistant adapts instantly.',
+      placement: 'bottom',
+    },
+    {
+      prepare: async () => {
+        if (!(await ensureAssistantDetail())) return false;
+        const btn = document.getElementById('btn-more-actions');
+        const menu = document.getElementById('more-actions-menu');
+        if (btn && menu && menu.classList.contains('hidden')) btn.click();
+        return true;
+      },
+      cleanup: () => {
+        const btn = document.getElementById('btn-more-actions');
+        const menu = document.getElementById('more-actions-menu');
+        if (menu && !menu.classList.contains('hidden')) {
+          menu.classList.add('hidden');
+          if (btn) btn.setAttribute('aria-expanded', 'false');
+        }
+      },
+      targets: ['#more-actions-menu', '#btn-more-actions'],
+      title: 'Pause or Retire',
+      copy: 'Life changes, and your team flexes with it. Pause an assistant while you regroup — it stops working until you say otherwise — or archive it for good once its job is done. Pausing is reversible; archiving is permanent.',
+      placement: 'bottom',
+    },
+    {
+      view: 'review-queue',
+      targets: ['.rq-col', '#workspace-content h1'],
+      closest: '.overflow-x-auto',
+      title: 'You Have the Final Say',
+      copy: 'Nothing goes out without your approval. The Review Queue gathers drafts from every assistant in one place, so you can approve, amend or decline each one — and follow it from review through to posted.',
+      placement: 'bottom',
+    },
+    {
+      view: 'calendar',
+      targets: ['#cal-title', '#cal-main'],
+      closest: '.bg-white',
+      title: 'Your Content, On Schedule',
+      copy: 'The Calendar lays your scheduled content out across the week or month. Spot the gaps before they become missed opportunities, and filter by platform or assistant.',
+      placement: 'bottom',
+    },
+    {
+      view: 'my-content',
+      targets: ['#btn-open-upload', '#workspace-content h1'],
+      title: 'Your Content Library',
+      copy: 'Upload images, videos and links — or generate them with AI — and your assistants will put them to work. My Content also tracks every asset through the publishing pipeline.',
+      placement: 'bottom',
+    },
+    {
+      view: 'referral',
+      targets: ['#nav-referral'],
+      sidebar: true,
+      title: 'Share the Glide',
+      copy: 'Love how this feels? Earn a referral token for every friend who signs up — redeem them for account credit, or save five for a free assistant.',
+      placement: 'right',
+    },
+    {
+      view: 'help',
+      targets: ['#tab-btn-docs'],
+      closest: 'nav',
+      title: 'Help, When You Want It',
+      copy: 'Stuck on anything? Search the Knowledge Base or raise a Support Ticket right here — and you can restart either tour from this page whenever you like.',
+      placement: 'bottom',
+    },
+    {
+      view: 'help',
+      targets: ['#tab-btn-features'],
+      title: 'Steer the Roadmap',
+      copy: 'Got an idea that would make your life easier? Post it in Feature Requests and vote on others — the roadmap is shaped by people like you.',
+      placement: 'bottom',
+    },
+    {
+      targets: ['#nav-report-issue'],
+      sidebar: true,
+      title: 'Spotted Something Off?',
+      copy: 'Report an Issue sends what you found straight to the team — along with where you were when you found it — so fixes land fast.',
+      placement: 'right',
+    },
+    {
+      targets: ['#nav-ask-team'],
+      sidebar: true,
+      title: 'Ask Your Team Anything',
+      copy: 'The fastest way to get things done: press ⌘K anywhere (or click here) and just ask. Your whole team of assistants is one keystroke away.',
+      placement: 'right',
+    },
+    {
+      view: 'settings',
+      targets: ['#settings-tabs'],
+      title: 'Your Account, Your Rules',
+      copy: 'My Account holds everything about you and your business in tabs: Profile, Business Information, Notification Preferences, Sounds, My Agreements, Branding & AI Notices, and Billing & Subscription.',
+      placement: 'bottom',
+    },
+    {
+      center: true,
+      title: 'Nothing left but the gliding.',
+      copy: 'That’s the full platform — you now know every room in the house. Put it all to work: deploy an assistant and let it take the busywork off your plate.',
       cta: { label: 'Deploy Your First Assistant', view: 'catalog' },
     },
   ];
 
-  let root = null;             // overlay container (null = tour inactive)
-  let spot = null;             // spotlight cut-out div
-  let card = null;             // tooltip card
+  const TOURS = {
+    'orientation': ORIENTATION_STEPS,
+    'deep-dive': DEEP_DIVE_STEPS,
+  };
+
+  let steps = ORIENTATION_STEPS; // active tour's steps
+  let root = null;               // overlay container (null = tour inactive)
+  let spot = null;               // spotlight cut-out div
+  let card = null;               // tooltip card
   let stepIndex = 0;
   let currentTarget = null;
   let openedMobileSidebar = false;
-  let navToken = 0;            // invalidates in-flight step renders after exit/re-nav
+  let navToken = 0;              // invalidates in-flight step renders after exit/re-nav
+  let detailUnavailable = false; // per-run cache: user has no assistant to open
 
   const reduceMotion = () =>
     window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -76,25 +225,56 @@
     return r.width > 0 && r.height > 0;
   }
 
+  function waitFor(fn, timeoutMs, token) {
+    return new Promise((resolve) => {
+      const started = Date.now();
+      (function poll() {
+        if (token !== navToken) return resolve(null);
+        const result = fn();
+        if (result) return resolve(result);
+        if (Date.now() - started > timeoutMs) return resolve(null);
+        setTimeout(poll, 100);
+      })();
+    });
+  }
+
   function findTarget(step) {
     for (const sel of step.targets || []) {
-      const el = document.querySelector(sel);
+      let el = document.querySelector(sel);
+      if (el && step.closest) el = el.closest(step.closest) || el;
       if (visible(el)) return el;
     }
     return null;
   }
 
-  function waitForTarget(step, token) {
-    return new Promise((resolve) => {
-      const started = Date.now();
-      (function poll() {
-        if (token !== navToken) return resolve(null);
-        const el = findTarget(step);
-        if (el) return resolve(el);
-        if (Date.now() - started > VIEW_WAIT_MS) return resolve(null);
-        setTimeout(poll, 100);
-      })();
-    });
+  // ── Board Room helper: the detail steps need a real assistant open ──────────
+  // Routes to the directory, waits for the grid to finish loading, and clicks the
+  // first assistant card (the app's own routing then owns the navigation). Fails
+  // fast — and caches the failure for this run — when the user has no assistants.
+  async function ensureAssistantDetail() {
+    if (window._currentViewKey === 'assistant-detail') return true;
+    if (detailUnavailable) return false;
+    const token = navToken;
+
+    if (window._currentViewKey !== 'assistants') await window.loadView('assistants');
+    if (token !== navToken) return false;
+
+    // Grid ready = the "Gathering your team..." pulse is gone.
+    const grid = await waitFor(() => {
+      const g = document.getElementById('directory-assistants-grid');
+      return g && !g.querySelector('.animate-pulse') ? g : null;
+    }, VIEW_WAIT_MS, token);
+    if (!grid) { detailUnavailable = true; return false; }
+
+    const cardEl = grid.querySelector('div[onclick*="routeToAssistantDetail"]');
+    if (!cardEl) { detailUnavailable = true; return false; }
+
+    cardEl.click();
+    const opened = await waitFor(
+      () => window._currentViewKey === 'assistant-detail' && document.getElementById('detail-avatar'),
+      VIEW_WAIT_MS, token
+    );
+    return !!opened;
   }
 
   // ── Mobile sidebar handling: nav anchors live in the off-canvas drawer on phones ──
@@ -156,14 +336,10 @@
 
   // ── Rendering ────────────────────────────────────────────────────────────────
   function renderCard(step) {
-    const total = STEPS.length;
+    const total = steps.length;
     const isFirst = stepIndex === 0;
     const isLast = stepIndex === total - 1;
-
-    const dots = STEPS.map((_, i) =>
-      `<span style="width:8px;height:8px;border-radius:9999px;display:inline-block;` +
-      `background:${i === stepIndex ? '#059669' : '#d1d5db'};"></span>`
-    ).join('');
+    const pct = Math.round(((stepIndex + 1) / total) * 100);
 
     card.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.75rem;">
@@ -174,19 +350,21 @@
           style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:1.15rem;line-height:1;padding:0;">&times;</button>
       </div>
       <h3 style="font-size:1.05rem;font-weight:800;color:#111827;margin:0 0 .4rem;">${step.title}</h3>
-      <p style="font-size:.85rem;color:#4b5563;line-height:1.55;margin:0 0 1rem;">${step.copy}</p>
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:.75rem;">
-        <span style="display:inline-flex;gap:5px;" aria-hidden="true">${dots}</span>
-        <span style="display:inline-flex;gap:.5rem;">
-          ${!isFirst ? `<button type="button" data-tour-back
-            style="font-size:.8rem;font-weight:700;color:#374151;background:#f3f4f6;border:none;border-radius:.6rem;padding:.5rem .9rem;cursor:pointer;">Back</button>` : ''}
-          ${isLast
-            ? `<button type="button" data-tour-cta
-                style="font-size:.8rem;font-weight:800;color:#fff;background:#059669;border:none;border-radius:.6rem;padding:.5rem 1rem;cursor:pointer;">${step.cta.label}</button>`
-            : `<button type="button" data-tour-next
-                style="font-size:.8rem;font-weight:800;color:#fff;background:#059669;border:none;border-radius:.6rem;padding:.5rem 1.1rem;cursor:pointer;">Next</button>`}
-        </span>
+      <p style="font-size:.85rem;color:#4b5563;line-height:1.55;margin:0 0 .85rem;">${step.copy}</p>
+      <div style="height:4px;border-radius:9999px;background:#e5e7eb;margin-bottom:.85rem;" aria-hidden="true">
+        <div style="height:100%;width:${pct}%;border-radius:9999px;background:#059669;${reduceMotion() ? '' : 'transition:width .3s ease;'}"></div>
       </div>
+      <div style="display:flex;align-items:center;justify-content:flex-end;gap:.5rem;flex-wrap:wrap;">
+        ${!isFirst ? `<button type="button" data-tour-back
+          style="font-size:.8rem;font-weight:700;color:#374151;background:#f3f4f6;border:none;border-radius:.6rem;padding:.5rem .9rem;cursor:pointer;">Back</button>` : ''}
+        ${isLast
+          ? `<button type="button" data-tour-cta
+              style="font-size:.8rem;font-weight:800;color:#fff;background:#059669;border:none;border-radius:.6rem;padding:.5rem 1rem;cursor:pointer;">${step.cta.label}</button>`
+          : `<button type="button" data-tour-next
+              style="font-size:.8rem;font-weight:800;color:#fff;background:#059669;border:none;border-radius:.6rem;padding:.5rem 1.1rem;cursor:pointer;">Next</button>`}
+      </div>
+      ${isLast && step.chain ? `<button type="button" data-tour-chain
+        style="display:block;width:100%;margin-top:.6rem;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:.6rem;padding:.5rem .9rem;cursor:pointer;font-size:.8rem;font-weight:700;color:#047857;">${step.chain.label}</button>` : ''}
       ${isLast ? `<button type="button" data-tour-exit
         style="display:block;margin:.75rem auto 0;background:none;border:none;cursor:pointer;font-size:.75rem;font-weight:600;color:#6b7280;">Maybe later — finish tour</button>` : ''}
     `;
@@ -202,6 +380,8 @@
       exit();
       if (typeof window.loadView === 'function') window.loadView(view);
     });
+    const chainBtn = card.querySelector('[data-tour-chain]');
+    if (chainBtn) chainBtn.addEventListener('click', () => start(step.chain.tour));
 
     (nextBtn || ctaBtn || backBtn)?.focus({ preventScroll: true });
   }
@@ -262,27 +442,51 @@
 
   function reposition() {
     if (!root) return;
-    const step = STEPS[stepIndex];
+    const step = steps[stepIndex];
     positionSpotlight(step.center ? null : currentTarget);
     positionCard(step.center ? null : currentTarget, step.placement);
   }
 
   // ── Step lifecycle ───────────────────────────────────────────────────────────
-  async function showStep(index) {
+  function runCleanup(index) {
+    try { steps[index]?.cleanup?.(); } catch { /* never let a hook break the tour */ }
+  }
+
+  // Renders step `index`; if it can't render for this user (locked view, missing
+  // anchor, no assistants), silently skips onward in the direction of travel.
+  async function showStep(index, dir = 1) {
+    if (index !== stepIndex) runCleanup(stepIndex);
     stepIndex = index;
-    const step = STEPS[index];
+    const step = steps[index];
     const token = ++navToken;
+
+    // Onboarding-locked views: pre-check so we skip without the route guard's
+    // toast + dashboard redirect (helper exposed by workspace.html).
+    if (step.view && typeof window.isViewOnboardingLocked === 'function' &&
+        (await window.isViewOnboardingLocked(step.view))) {
+      return skipFrom(index, dir);
+    }
+    if (token !== navToken) return;
+
+    if (step.prepare) {
+      let ok = false;
+      try { ok = await step.prepare(); } catch { ok = false; }
+      if (token !== navToken) return;
+      if (!ok) return skipFrom(index, dir);
+    }
 
     setMobileSidebar(!!step.sidebar);
 
-    // Route to the step's view first so the anchor exists (AC4). loadView guards
-    // and toasts on restricted routes itself; the poll below simply times out then.
+    // Route to the step's view so the anchor exists (AC4).
     if (step.view && typeof window.loadView === 'function' && window._currentViewKey !== step.view) {
       await window.loadView(step.view);
+      if (token !== navToken) return;
+      if (window._currentViewKey !== step.view) return skipFrom(index, dir); // guard redirected us
     }
 
-    const el = step.center ? null : await waitForTarget(step, token);
+    const el = step.center ? null : await waitFor(() => findTarget(step), VIEW_WAIT_MS, token);
     if (token !== navToken || !root) return; // user exited or moved on mid-wait
+    if (!el && !step.center) return skipFrom(index, dir);
     currentTarget = el;
 
     if (el) el.scrollIntoView({ block: 'center', behavior: 'auto' });
@@ -292,16 +496,24 @@
     positionCard(step.center ? null : el, step.placement);
   }
 
+  function skipFrom(index, dir) {
+    const nextIndex = index + dir;
+    if (nextIndex < 0) return showStep(0, 1);                       // can't go back past the start
+    if (nextIndex >= steps.length) return showStep(steps.length - 1, -1);
+    return showStep(nextIndex, dir);
+  }
+
   function next() {
-    if (stepIndex < STEPS.length - 1) showStep(stepIndex + 1);
+    if (stepIndex < steps.length - 1) showStep(stepIndex + 1, 1);
   }
 
   function back() {
-    if (stepIndex > 0) showStep(stepIndex - 1);
+    if (stepIndex > 0) showStep(stepIndex - 1, -1);
   }
 
   function exit() {
     if (!root) return;
+    runCleanup(stepIndex);
     navToken++;
     setMobileSidebar(false);
     document.removeEventListener('keydown', onKeydown, true);
@@ -311,12 +523,17 @@
     root = spot = card = currentTarget = null;
   }
 
-  function start() {
+  // start('orientation') is the default entry; start('deep-dive') jumps straight
+  // to the room-by-room walkthrough (also reachable from the orientation finale).
+  function start(tour) {
     if (typeof window.loadView !== 'function') return; // workspace shell only
     if (root) exit();                                  // restart cleanly from step one
+    steps = TOURS[tour] || ORIENTATION_STEPS;
+    stepIndex = 0;
+    detailUnavailable = false;
     window.SetupWizard?.collapse?.();                  // don't fight the wizard drawer
     build();
-    showStep(0);
+    showStep(0, 1);
   }
 
   window.PlatformTour = { start, exit, get active() { return !!root; } };

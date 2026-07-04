@@ -1369,13 +1369,6 @@ function formatCurrency(amount, currency) {
       const route = routes[routeKey];
       if (!route) return;
 
-      // Issue #43: Orchestrations is a future feature — block navigation entirely
-      // (deep links, command bar, "Manage in Orchestrations" CTA, etc.), not just the nav link.
-      if (routeKey === 'orchestrations') {
-        window.showToast('Orchestrations is coming soon!');
-        return;
-      }
-
       // ── US2 (AC2.1/2.2/2.3): Onboarding route guard (anti-snooping) ──
       // Catches deep links (?view=calendar) and any programmatic navigation into a
       // restricted area before onboarding is complete. Nav-link clicks are handled
@@ -2209,6 +2202,11 @@ function formatCurrency(amount, currency) {
       if (_onboardingLoaded) return window._onboardingComplete;
       return await refreshOnboardingLock();
     }
+
+    // The platform tour (tour.js) pre-checks restricted views so it can skip those
+    // steps silently instead of tripping the route guard's toast + dashboard redirect.
+    window.isViewOnboardingLocked = async (routeKey) =>
+      ONBOARDING_RESTRICTED.includes(routeKey) && !(await ensureOnboardingStatus());
 
     // AC1.4: instant unlock without a page refresh. Called the moment we observe
     // the user has an assistant (e.g. dashboard team grid renders one).

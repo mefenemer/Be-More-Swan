@@ -82,6 +82,8 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     org_invite_accepted: 'state_change', org_joined: 'state_change',
     risk_assessment_decision: 'state_change', risk_reclassification: 'state_change',
     account_update: 'state_change', assistant_task: 'state_change', assistant_ready: 'state_change',
+    // Issue #115 — Kick Off Meeting confirmed: assistant moved to actively working.
+    assistant_kickoff_complete: 'state_change',
     goal_autonomous_adjustment: 'state_change', // SMART Goals AC3.3.3 — autonomous brief change FYI
     feature_status_change: 'state_change', // Feature Requests US06 — a backed request moved status
     // celebratory

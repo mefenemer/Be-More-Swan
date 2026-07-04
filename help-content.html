@@ -4,13 +4,23 @@
       <h1 class="text-3xl font-extrabold text-gray-900">Help & Support</h1>
       <p class="text-gray-500 mt-1">Browse our documentation or get in touch with our support team.</p>
     </div>
-    <!-- On-demand guided platform tour (window.PlatformTour lives in tour.js) -->
-    <button type="button" id="btn-take-tour"
-      onclick="window.PlatformTour && window.PlatformTour.start()"
-      class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-sm shrink-0">
-      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
-      Take the Tour
-    </button>
+    <!-- On-demand guided platform tours (window.PlatformTour lives in tour.js):
+         a quick 5-step orientation, and a room-by-room deep dive. The orientation's
+         finale also chains into the deep dive. -->
+    <div class="flex items-center gap-2 shrink-0">
+      <button type="button" id="btn-take-tour"
+        onclick="window.PlatformTour && window.PlatformTour.start('orientation')"
+        class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-sm">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"/></svg>
+        Take the Tour
+      </button>
+      <button type="button" id="btn-take-deep-dive"
+        onclick="window.PlatformTour && window.PlatformTour.start('deep-dive')"
+        title="A room-by-room walkthrough of the whole platform"
+        class="inline-flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-emerald-700 bg-white border border-emerald-200 hover:bg-emerald-50 rounded-xl transition-colors shadow-sm">
+        Deep Dive
+      </button>
+    </div>
   </div>
 
   <div class="border-b border-gray-200 mb-8">
