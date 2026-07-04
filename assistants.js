@@ -238,6 +238,11 @@ window.initAssistantsDirectory = async function(loadViewCb) {
     if (catalogBtn) {
         catalogBtn.addEventListener('click', () => loadViewCb('catalog'));
     }
+
+    const orchestrationsBtn = document.getElementById('route-to-orchestrations-from-dir');
+    if (orchestrationsBtn) {
+        orchestrationsBtn.addEventListener('click', () => loadViewCb('orchestrations'));
+    }
 };
 
 // ==========================================
