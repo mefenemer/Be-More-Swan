@@ -488,19 +488,6 @@
     }
 
     // ── AC2: approvals ──
-    async function approvePost(id, btn, card) {
-      btn.disabled = true; btn.textContent = 'Approving…';
-      try {
-        const res = await fetch('/.netlify/functions/approve-post', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId: id, action: 'approve' }) });
-        if (res.status === 409) { // scheduled time is in the past → hand off to the full review modal
-          if (window.openPostReview) window.openPostReview(id);
-          btn.disabled = false; btn.textContent = 'Approve'; return;
-        }
-        if (!res.ok) throw 0;
-        toast('Approved — your assistant will publish it. ✅', { icon: '✅' });
-        removeCard(card, null, reconcile);
-      } catch { btn.disabled = false; btn.textContent = 'Approve'; toast('Could not approve — please try again.'); }
-    }
     async function rejectPost(id, reason, card) {
       try {
         const res = await fetch('/.netlify/functions/reject-post', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId: id, feedbackText: reason, applyAsRule: false }) });
@@ -532,7 +519,6 @@
         ${item.preview ? `<p class="as-card-prev">${esc(item.preview)}${isPost && item.preview.length >= 140 ? '…' : ''}</p>` : ''}
         <div class="as-actions">
           <button class="as-btn as-btn-approve">Approve</button>
-          ${isPost ? '<button class="as-btn as-btn-edit">Edit</button>' : ''}
           <button class="as-btn as-btn-reject">Reject</button>
         </div>
         <div class="as-reject-box">
@@ -543,11 +529,11 @@
           </div>
         </div>`;
       const approveBtn = card.querySelector('.as-btn-approve');
-      approveBtn.onclick = () => isPost ? approvePost(item.id, approveBtn, card) : decideAction(item.id, 'approved', undefined, card, approveBtn);
-      if (isPost) {
-        const editBtn = card.querySelector('.as-btn-edit');
-        if (editBtn) editBtn.onclick = () => { if (window.openPostReview) window.openPostReview(item.id); else if (window.loadView) window.loadView('review-queue'); };
-      }
+      // Posts follow the Review Queue's own rules (e.g. platform must be connected before
+      // approval) — rather than duplicate that logic here, open the same review modal it uses.
+      approveBtn.onclick = () => isPost
+        ? (window.openPostReview ? window.openPostReview(item.id) : (window.loadView && window.loadView('review-queue')))
+        : decideAction(item.id, 'approved', undefined, card, approveBtn);
       const box = card.querySelector('.as-reject-box');
       card.querySelector('.as-btn-reject').onclick = () => { box.classList.toggle('open'); if (box.classList.contains('open')) box.querySelector('.as-reject-input').focus(); };
       card.querySelector('.as-reject-cancel').onclick = () => box.classList.remove('open');
