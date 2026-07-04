@@ -8,11 +8,13 @@
 // → { maintenanceMode: bool, maintenanceMessage: string, registrationLocked: bool }
 
 import { Handler } from '@netlify/functions';
-import { warmPlatformConfigCache, CONFIG_KEYS } from '../../src/utils/platform-config';
+import { warmPlatformConfigCache, CONFIG_KEYS, DEFAULT_SESSION_TIMEOUT_CONFIG } from '../../src/utils/platform-config';
 
 export const handler: Handler = async () => {
     try {
         const config = await warmPlatformConfigCache();
+        const sessionTimeoutMinutes = Number(config[CONFIG_KEYS.SESSION_INACTIVITY_TIMEOUT_MINUTES]);
+        const sessionCountdownMinutes = Number(config[CONFIG_KEYS.SESSION_COUNTDOWN_MINUTES]);
         return {
             statusCode: 200,
             headers: {
@@ -25,6 +27,9 @@ export const handler: Handler = async () => {
                 maintenanceMessage:   config[CONFIG_KEYS.MAINTENANCE_MESSAGE]    || 'We are performing scheduled maintenance. Please check back shortly.',
                 registrationLocked:   config[CONFIG_KEYS.NEW_REGISTRATION_LOCK]  === true,
                 globalAiDisabled:     config[CONFIG_KEYS.GLOBAL_AI_DISABLED]     === true,
+                // issue #127: idle countdown timing, admin-configurable
+                sessionInactivityTimeoutMinutes: sessionTimeoutMinutes > 0 ? sessionTimeoutMinutes : DEFAULT_SESSION_TIMEOUT_CONFIG.inactivityTimeoutMinutes,
+                sessionCountdownMinutes:         sessionCountdownMinutes > 0 ? sessionCountdownMinutes : DEFAULT_SESSION_TIMEOUT_CONFIG.countdownMinutes,
             }),
         };
     } catch (err) {
@@ -32,7 +37,11 @@ export const handler: Handler = async () => {
         // Fail open — if config can't be read, allow access
         return {
             statusCode: 200,
-            body: JSON.stringify({ maintenanceMode: false, registrationLocked: false, globalAiDisabled: false }),
+            body: JSON.stringify({
+                maintenanceMode: false, registrationLocked: false, globalAiDisabled: false,
+                sessionInactivityTimeoutMinutes: DEFAULT_SESSION_TIMEOUT_CONFIG.inactivityTimeoutMinutes,
+                sessionCountdownMinutes: DEFAULT_SESSION_TIMEOUT_CONFIG.countdownMinutes,
+            }),
         };
     }
 };
