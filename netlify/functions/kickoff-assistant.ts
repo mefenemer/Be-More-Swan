@@ -10,9 +10,11 @@
 import { Handler } from '@netlify/functions';
 import { eq, and, inArray } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, systemConnections } from '../../db/schema';
+import { aiAssistants, systemConnections, notifications } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { transitionAssistantStatus, provisioningBlockInfo } from '../../src/utils/assistant-lifecycle';
+
+const CONN_LABELS: Record<string, string> = { x: 'X (Twitter)', instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn' };
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -34,6 +36,8 @@ export const handler: Handler = async (event) => {
     const gate = await withTenant(orgId, async (tx) => {
         const [a] = await tx.select({
             id: aiAssistants.id,
+            name: aiAssistants.name,
+            role: aiAssistants.aiAssistantJobRole,
             lifecycleStatus: aiAssistants.lifecycleStatus,
             provisioningStatus: aiAssistants.provisioningStatus,
             provisioningBlockedReason: aiAssistants.provisioningBlockedReason,
@@ -52,11 +56,16 @@ export const handler: Handler = async (event) => {
                 eq(systemConnections.status, 'active'),
             ))
             .limit(1);
-        return { a, hasConnection: !!conn };
+        // Same active-connection list the Kick Off Meeting summary panel shows (US3 AC3.1) — kept
+        // so the notification below carries identical detail rather than a bare "it's working" ping.
+        const connRows = await tx.select({ serviceName: systemConnections.serviceName }).from(systemConnections)
+            .where(and(eq(systemConnections.organisationId, orgId), eq(systemConnections.isActive, true)));
+        const connections = connRows.map(r => r.serviceName).filter(Boolean) as string[];
+        return { a, hasConnection: !!conn, connections };
     });
 
     if (!gate) return json(404, { error: 'Assistant not found.' });
-    const { a, hasConnection } = gate;
+    const { a, hasConnection, connections } = gate;
     const state = a.lifecycleStatus as string;
 
     // ── State guards ──────────────────────────────────────────────────────────
@@ -97,6 +106,24 @@ export const handler: Handler = async (event) => {
     // ── Transition (ready_for_work | paused) → working ──────────────────────────
     const result = await transitionAssistantStatus(db, assistantId, 'working', { reason: 'kick_off', actorUserId: userId });
     if (!result.ok) return json(409, { error: result.error, code: 'ILLEGAL_TRANSITION' });
+
+    // Issue #115: the Kick Off Meeting summary (primary directive + active connections) was only
+    // ever shown on this page and lost the moment the user navigated away. Send it as a
+    // notification with the same detail instead of leaving it stranded in the Notebook.
+    try {
+        const directive = a.role || 'Digital Assistant';
+        const connLabels = connections.map(c => CONN_LABELS[c] || (c.charAt(0).toUpperCase() + c.slice(1)));
+        const connSentence = connLabels.length ? `Connected accounts: ${connLabels.join(', ')}.` : 'No connected accounts yet.';
+        await db.insert(notifications).values({
+            userId,
+            type: 'assistant_kickoff_complete',
+            title: `${a.name} is now working`,
+            message: `${a.name} (${directive}) has been kicked off and is now actively working. ${connSentence}`,
+            metadata: { assistantId, directive, connections },
+        });
+    } catch (notifErr) {
+        console.warn('[kickoff-assistant] Notification insert failed (non-blocking):', notifErr);
+    }
 
     return json(200, { ok: true, from: result.from, lifecycleStatus: 'working' });
 };
