@@ -208,19 +208,9 @@ export const handler: Handler = async (event) => {
         const activeAccount = (typeof body.activeAccount === 'string' ? body.activeAccount : '').trim().slice(0, 200) || null;
         const now = new Date();
 
-        await db.insert(devRunnerStatus).values({
-            runnerId: rid, state: 'session_limited', message, resetHint,
-            blockedIssueId: id, resumeRequested: false, lastProbeResult: null, activeAccount,
-            blockedAt: now, lastSeenAt: now, updatedAt: now,
-        }).onConflictDoUpdate({
-            target: devRunnerStatus.runnerId,
-            set: {
-                state: 'session_limited', message, resetHint, blockedIssueId: id,
-                resumeRequested: false, lastProbeResult: null, activeAccount, blockedAt: now, lastSeenAt: now, updatedAt: now,
-            },
-        });
-
-        // Re-queue the issue so it isn't lost; clear the (now paused) runner's claim.
+        // Re-queue the issue FIRST — this is the write that must not be lost. If it ran after
+        // the dev_runner_status upsert and that upsert threw (e.g. table missing on an env),
+        // the issue would be stranded in 'in_progress' with no runner working it.
         const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
         if (issue) {
             await db.update(issueReports).set({
@@ -236,7 +226,32 @@ export const handler: Handler = async (event) => {
             });
         }
 
-        return json(200, { ok: true, state: 'session_limited', runnerId: rid });
+        // Park the runner as paused. Best-effort: a failure here must not undo the re-queue
+        // above, so report it as partial success instead of throwing.
+        let statusRecorded = true;
+        let statusError: string | null = null;
+        try {
+            await db.insert(devRunnerStatus).values({
+                runnerId: rid, state: 'session_limited', message, resetHint,
+                blockedIssueId: id, resumeRequested: false, lastProbeResult: null, activeAccount,
+                blockedAt: now, lastSeenAt: now, updatedAt: now,
+            }).onConflictDoUpdate({
+                target: devRunnerStatus.runnerId,
+                set: {
+                    state: 'session_limited', message, resetHint, blockedIssueId: id,
+                    resumeRequested: false, lastProbeResult: null, activeAccount, blockedAt: now, lastSeenAt: now, updatedAt: now,
+                },
+            });
+        } catch (e) {
+            statusRecorded = false;
+            statusError = e instanceof Error ? e.message : String(e);
+            console.error(`report-blocked: issue #${id} re-queued but dev_runner_status write failed:`, e);
+        }
+
+        return json(200, {
+            ok: true, state: 'session_limited', runnerId: rid,
+            requeued: !!issue, statusRecorded, ...(statusError ? { statusError } : {}),
+        });
     }
 
     // ── Runner asks whether it may resume (polled while paused) ───────────────────
@@ -248,20 +263,27 @@ export const handler: Handler = async (event) => {
         // The runner sends its currently-logged-in Claude account on every poll, so the
         // paused banner shows the live session while the admin switches logins.
         const account = (qs.account || '').toString().trim().slice(0, 200) || null;
-        const [row] = await db.select().from(devRunnerStatus).where(eq(devRunnerStatus.runnerId, rid)).limit(1);
-        // Admin asked for a restart: consume the request and delete the row — this process
-        // identity (host:pid) dies with the restart, and the fresh process re-reports under
-        // a new id if it's still blocked. Deleting avoids a ghost "paused" banner forever.
-        if (row?.restartRequested) {
-            await db.delete(devRunnerStatus).where(eq(devRunnerStatus.runnerId, rid));
-            return json(200, { resume: false, restart: true, state: row.state || 'ok' });
+        // Best-effort: if dev_runner_status is unreadable (e.g. table missing on an env),
+        // answer "stay paused" instead of 502ing so the runner keeps polling cleanly.
+        try {
+            const [row] = await db.select().from(devRunnerStatus).where(eq(devRunnerStatus.runnerId, rid)).limit(1);
+            // Admin asked for a restart: consume the request and delete the row — this process
+            // identity (host:pid) dies with the restart, and the fresh process re-reports under
+            // a new id if it's still blocked. Deleting avoids a ghost "paused" banner forever.
+            if (row?.restartRequested) {
+                await db.delete(devRunnerStatus).where(eq(devRunnerStatus.runnerId, rid));
+                return json(200, { resume: false, restart: true, state: row.state || 'ok' });
+            }
+            if (row) {
+                await db.update(devRunnerStatus)
+                    .set({ lastSeenAt: now, ...(account ? { activeAccount: account } : {}) })
+                    .where(eq(devRunnerStatus.runnerId, rid));
+            }
+            return json(200, { resume: !!row?.resumeRequested, state: row?.state || 'ok' });
+        } catch (e) {
+            console.error(`resume-check: dev_runner_status unavailable for runner ${rid}:`, e);
+            return json(200, { resume: false, state: 'unknown', statusError: e instanceof Error ? e.message : String(e) });
         }
-        if (row) {
-            await db.update(devRunnerStatus)
-                .set({ lastSeenAt: now, ...(account ? { activeAccount: account } : {}) })
-                .where(eq(devRunnerStatus.runnerId, rid));
-        }
-        return json(200, { resume: !!row?.resumeRequested, state: row?.state || 'ok' });
     }
 
     // ── Runner reports the result of verifying the new login ──────────────────────
@@ -278,25 +300,36 @@ export const handler: Handler = async (event) => {
         const activeAccount = (typeof body.activeAccount === 'string' ? body.activeAccount : '').trim().slice(0, 200) || null;
         const now = new Date();
 
-        const [row] = await db.select().from(devRunnerStatus).where(eq(devRunnerStatus.runnerId, rid)).limit(1);
+        // Best-effort: a dev_runner_status failure must not swallow the thread message below —
+        // that's the only place the admin sees the probe outcome.
+        let row: typeof devRunnerStatus.$inferSelect | undefined;
+        let statusRecorded = true;
+        let statusError: string | null = null;
+        try {
+            [row] = await db.select().from(devRunnerStatus).where(eq(devRunnerStatus.runnerId, rid)).limit(1);
 
-        await db.insert(devRunnerStatus).values({
-            runnerId: rid,
-            state: ok ? 'ok' : 'session_limited',
-            message: ok ? null : (row?.message || null),
-            resetHint: ok ? null : (row?.resetHint || null),
-            blockedIssueId: ok ? null : (row?.blockedIssueId ?? null),
-            resumeRequested: false, lastProbeResult: probeMsg, activeAccount, lastSeenAt: now, updatedAt: now,
-        }).onConflictDoUpdate({
-            target: devRunnerStatus.runnerId,
-            set: {
+            await db.insert(devRunnerStatus).values({
+                runnerId: rid,
                 state: ok ? 'ok' : 'session_limited',
-                ...(ok ? { message: null, resetHint: null, blockedIssueId: null, blockedAt: null } : {}),
-                resumeRequested: false, lastProbeResult: probeMsg,
-                ...(activeAccount ? { activeAccount } : {}),
-                lastSeenAt: now, updatedAt: now,
-            },
-        });
+                message: ok ? null : (row?.message || null),
+                resetHint: ok ? null : (row?.resetHint || null),
+                blockedIssueId: ok ? null : (row?.blockedIssueId ?? null),
+                resumeRequested: false, lastProbeResult: probeMsg, activeAccount, lastSeenAt: now, updatedAt: now,
+            }).onConflictDoUpdate({
+                target: devRunnerStatus.runnerId,
+                set: {
+                    state: ok ? 'ok' : 'session_limited',
+                    ...(ok ? { message: null, resetHint: null, blockedIssueId: null, blockedAt: null } : {}),
+                    resumeRequested: false, lastProbeResult: probeMsg,
+                    ...(activeAccount ? { activeAccount } : {}),
+                    lastSeenAt: now, updatedAt: now,
+                },
+            });
+        } catch (e) {
+            statusRecorded = false;
+            statusError = e instanceof Error ? e.message : String(e);
+            console.error(`resume-ack: dev_runner_status write failed for runner ${rid}:`, e);
+        }
 
         // Thread the probe outcome on the issue the runner was blocked on, so the admin sees it.
         const blockedId = row?.blockedIssueId ?? null;
@@ -312,7 +345,10 @@ export const handler: Handler = async (event) => {
             });
         }
 
-        return json(200, { ok: true, state: ok ? 'ok' : 'session_limited' });
+        return json(200, {
+            ok: true, state: ok ? 'ok' : 'session_limited',
+            statusRecorded, ...(statusError ? { statusError } : {}),
+        });
     }
 
     // ── Report the outcome of a fix attempt ──────────────────────────────────────
