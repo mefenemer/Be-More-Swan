@@ -1,7 +1,7 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, sql, inArray } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, goals, scheduledPosts, userProfiles } from '../../db/schema';
+import { aiAssistants, contentGenerationJobs, goals, scheduledPosts, userProfiles } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
 
@@ -32,7 +32,7 @@ export const handler: Handler = async (event) => {
         const assistantIds = assistants.map(a => a.id);
 
         // Run goals + post metrics + hourly rate in parallel
-        const [goalRows, postRows, profileRow, mult] = await Promise.all([
+        const [goalRows, postRows, activeJobRows, profileRow, mult] = await Promise.all([
             // SMART Goals AC2.1.1 — per-assistant goal status counts for dashboard card micro-summary.
             // goals has no RLS (owner-path, like content_rules), so query it on the owner connection.
             assistantIds.length > 0
@@ -57,6 +57,20 @@ export const handler: Handler = async (event) => {
                   ))
                   .groupBy(scheduledPosts.assistantId, scheduledPosts.status, scheduledPosts.platform)
                 : Promise.resolve([] as { assistantId: number | null; status: string; platform: string; c: number }[]),
+
+            // Operational signal (Epic 1 AC1.1.2): mid-flight generation jobs per assistant, same
+            // "active" statuses the detail page's Recent Activity loader uses (get-assistant-activity.ts)
+            // to drive the "Executing Task" sub-state. Mirrored here so the list card matches.
+            assistantIds.length > 0
+                ? db.select({ assistantId: contentGenerationJobs.assistantId, c: sql<number>`count(*)::int` })
+                    .from(contentGenerationJobs)
+                    .where(and(
+                        eq(contentGenerationJobs.organisationId, orgId),
+                        inArray(contentGenerationJobs.assistantId, assistantIds),
+                        inArray(contentGenerationJobs.status, ['processing', 'queued', 'pending']),
+                    ))
+                    .groupBy(contentGenerationJobs.assistantId)
+                : Promise.resolve([] as { assistantId: number | null; c: number }[]),
 
             // Hourly rate from the requesting user's profile preferences
             db.select({ preferences: userProfiles.preferences })
@@ -89,6 +103,10 @@ export const handler: Handler = async (event) => {
             byPlatform: Record<string, PlatformMetric>;
         }>();
 
+        // Operational signal: drafts awaiting the user (same status the detail page's
+        // "Awaiting Human Review" sub-state reads via get-social-drafts?status=pending_approval).
+        const pendingReviewCount = new Map<number, number>();
+
         for (const r of postRows) {
             if (r.assistantId == null) continue;
             const aId = r.assistantId;
@@ -111,6 +129,15 @@ export const handler: Handler = async (event) => {
                 m.totalPublished += r.c;
                 m.byPlatform[p].published += r.c;
             }
+            if (r.status === 'pending_approval') {
+                pendingReviewCount.set(aId, (pendingReviewCount.get(aId) || 0) + r.c);
+            }
+        }
+
+        const activeJobCount = new Map<number, number>();
+        for (const r of activeJobRows) {
+            if (r.assistantId == null) continue;
+            activeJobCount.set(r.assistantId, r.c);
         }
 
         // --- Hourly rate & ROI ---
@@ -130,6 +157,12 @@ export const handler: Handler = async (event) => {
                     hoursSaved,
                     gbpSaved,
                     hourlyRateSet: hourlyRateGbp !== null,
+                },
+                // Feeds the same "working" sub-state refinement (Executing Task / Awaiting
+                // Human Review / Idle) the assistant-detail pill uses, so the list card matches.
+                opSignals: {
+                    activeJobCount: activeJobCount.get(a.id) || 0,
+                    pendingReview: pendingReviewCount.get(a.id) || 0,
                 },
             };
         });

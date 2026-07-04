@@ -16,25 +16,47 @@ window._PLATFORM_ICONS = {
 };
 window._PLATFORM_LABEL = { instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X' };
 
+// ── Shared lifecycle badge resolver (Epic 1 AC1.1.2) ──────────────────────────
+// Single source of truth for the "My Assistants" list card and the Assistant Details pill,
+// so they can't diverge again. A `working` lifecycle refines into an operational sub-state
+// from live signals: a mid-flight job → "Executing Task"; else drafts awaiting the user →
+// "Awaiting Human Review"; else "Idle".
+window._LIFECYCLE_BADGES = {
+    blocked:        { cls: 'bg-amber-50 text-amber-700 border-amber-200',      dot: 'bg-amber-500',                 label: 'Action Required',    toggle: 'Initiate Kick-Off' },
+    provisioning:   { cls: 'bg-amber-50 text-amber-700 border-amber-200',      dot: 'bg-amber-500 animate-pulse',   label: 'Setup in Progress',  toggle: 'Pause Assistant' },
+    ready_for_work: { cls: 'bg-blue-50 text-blue-700 border-blue-200',          dot: 'bg-blue-500',                  label: 'Ready for Work',     toggle: 'Initiate Kick-Off' },
+    working:        { cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500 animate-pulse', label: 'Working',            toggle: 'Pause Assistant' },
+    paused:         { cls: 'bg-gray-100 text-gray-600 border-gray-200',         dot: 'bg-gray-400',                  label: 'Paused',             toggle: 'Resume Assistant' },
+    system_paused:  { cls: 'bg-red-50 text-red-700 border-red-200',             dot: 'bg-red-500 animate-pulse',     label: 'Attention Required', toggle: 'Resume Assistant' },
+    archived:       { cls: 'bg-gray-100 text-gray-500 border-gray-200',         dot: 'bg-gray-300',                  label: 'Archived',           toggle: 'Resume Assistant' },
+};
+
+window._resolveAssistantBadge = function(data, opSignals) {
+    // Lifecycle state machine (assistant-lifecycle-epic). Fall back to legacy fields.
+    // A gate-blocked assistant reads as lifecycle 'provisioning' but needs user action, so it gets
+    // its own "Action Required" badge instead of the passive "Setup in Progress" spinner.
+    const lifecycle = data.status === 'blocked' ? 'blocked' : (data.lifecycleStatus
+      || (data.status === 'pending' ? 'provisioning' : (data.isActive === false ? 'paused' : 'working')));
+    let p = window._LIFECYCLE_BADGES[lifecycle] || window._LIFECYCLE_BADGES.working;
+
+    if (lifecycle === 'working') {
+        const sig = opSignals || {};
+        if (sig.activeJobCount > 0) {
+            p = { ...p, cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500 animate-pulse', label: 'Executing Task' };
+        } else if (sig.pendingReview > 0) {
+            p = { ...p, cls: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-500', label: 'Awaiting Human Review' };
+        } else {
+            p = { ...p, cls: 'bg-gray-100 text-gray-600 border-gray-200', dot: 'bg-gray-400', label: 'Idle' };
+        }
+    }
+    return p;
+};
+
 window.generateAssistantCardHTML = function(assistant) {
     const initial = assistant.name ? assistant.name.charAt(0).toUpperCase() : 'A';
     const role = assistant.role || 'Custom Assistant';
 
-    // Lifecycle state machine (assistant-lifecycle-epic). Fall back to legacy fields.
-    // A gate-blocked assistant reads as lifecycle 'provisioning' but needs user action, so it gets
-    // its own "Action Required" badge instead of the passive "Setup in Progress" spinner.
-    const lifecycle = assistant.status === 'blocked' ? 'blocked' : (assistant.lifecycleStatus
-      || (assistant.status === 'pending' ? 'provisioning' : (assistant.isActive === false ? 'paused' : 'working')));
-    const DIR_BADGE = {
-        blocked:        { cls: 'bg-amber-50 text-amber-700 border-amber-200',      dot: 'bg-amber-500',                 label: 'Action Required' },
-        provisioning:   { cls: 'bg-amber-50 text-amber-700 border-amber-200',      dot: 'bg-amber-500 animate-pulse',   label: 'Setup in Progress' },
-        ready_for_work: { cls: 'bg-blue-50 text-blue-700 border-blue-200',          dot: 'bg-blue-500',                  label: 'Ready for Work' },
-        working:        { cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500 animate-pulse', label: 'Working' },
-        paused:         { cls: 'bg-gray-100 text-gray-600 border-gray-200',         dot: 'bg-gray-400',                  label: 'Paused' },
-        system_paused:  { cls: 'bg-red-50 text-red-700 border-red-200',             dot: 'bg-red-500 animate-pulse',     label: 'Attention Required' },
-        archived:       { cls: 'bg-gray-100 text-gray-500 border-gray-200',         dot: 'bg-gray-300',                  label: 'Archived' },
-    };
-    const db = DIR_BADGE[lifecycle] || DIR_BADGE.working;
+    const db = window._resolveAssistantBadge(assistant, assistant.opSignals);
     const statusHtml = `<span class="inline-flex items-center gap-1.5 py-1 px-2.5 rounded-md text-xs font-bold ${db.cls}"><span class="w-1.5 h-1.5 rounded-full ${db.dot}"></span> ${db.label}</span>`;
 
     // SMART Goals AC2.1.1 — "X On Track | Y Off Track" micro-summary + Review Progress button (AC2.2.1).
@@ -732,17 +754,9 @@ window._closeBriefDrawer = function() {
 // refines into an operational sub-state from live signals: a mid-flight job →
 // "Executing Task"; else drafts awaiting the user → "Awaiting Human Review"; else
 // "Idle". Signals are cached so the pill re-renders as activity/review data lands.
+// Badge resolution itself lives in window._resolveAssistantBadge, shared with the
+// "My Assistants" list card so the two views can't disagree on an assistant's status.
 window._detailOpSignals = { activeJobCount: 0, pendingReview: 0 };
-
-const _STATUS_PILL = {
-    blocked:        { cls: 'bg-amber-50 text-amber-700 border-amber-200',      dot: 'bg-amber-500',                 label: 'Action Required',    toggle: 'Initiate Kick-Off' },
-    provisioning:   { cls: 'bg-amber-50 text-amber-700 border-amber-200',      dot: 'bg-amber-500 animate-pulse',   label: 'Setup in Progress',  toggle: 'Pause Assistant' },
-    ready_for_work: { cls: 'bg-blue-50 text-blue-700 border-blue-200',          dot: 'bg-blue-500',                  label: 'Ready for Work',     toggle: 'Initiate Kick-Off' },
-    working:        { cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500 animate-pulse', label: 'Working',            toggle: 'Pause Assistant' },
-    paused:         { cls: 'bg-gray-100 text-gray-600 border-gray-200',         dot: 'bg-gray-400',                  label: 'Paused',             toggle: 'Resume Assistant' },
-    system_paused:  { cls: 'bg-red-50 text-red-700 border-red-200',             dot: 'bg-red-500 animate-pulse',     label: 'Attention Required', toggle: 'Resume Assistant' },
-    archived:       { cls: 'bg-gray-100 text-gray-500 border-gray-200',         dot: 'bg-gray-300',                  label: 'Archived',           toggle: 'Resume Assistant' },
-};
 
 window._renderStatusPill = function(data) {
     data = data || window._detailCurrentData;
@@ -750,22 +764,7 @@ window._renderStatusPill = function(data) {
     if (!statusEl || !data) return;
     const toggleBtn = document.getElementById('btn-toggle-status');
 
-    // Lifecycle state machine (assistant-lifecycle-epic). Fall back to legacy fields.
-    // Gate-blocked assistants read as lifecycle 'provisioning' but need action → own pill.
-    const lifecycle = data.status === 'blocked' ? 'blocked' : (data.lifecycleStatus
-      || (data.status === 'pending' ? 'provisioning' : (data.isActive === false ? 'paused' : 'working')));
-    let p = _STATUS_PILL[lifecycle] || _STATUS_PILL.working;
-
-    if (lifecycle === 'working') {
-        const sig = window._detailOpSignals || {};
-        if (sig.activeJobCount > 0) {
-            p = { ...p, cls: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500 animate-pulse', label: 'Executing Task' };
-        } else if (sig.pendingReview > 0) {
-            p = { ...p, cls: 'bg-amber-50 text-amber-700 border-amber-200', dot: 'bg-amber-500', label: 'Awaiting Human Review' };
-        } else {
-            p = { ...p, cls: 'bg-gray-100 text-gray-600 border-gray-200', dot: 'bg-gray-400', label: 'Idle' };
-        }
-    }
+    const p = window._resolveAssistantBadge(data, window._detailOpSignals);
 
     statusEl.className = `inline-flex items-center gap-1.5 py-1 px-2.5 rounded-md text-xs font-bold border ${p.cls}`;
     statusEl.innerHTML = `<span class="w-2 h-2 rounded-full ${p.dot}"></span> ${p.label}`;
