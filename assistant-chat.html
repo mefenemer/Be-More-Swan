@@ -83,31 +83,57 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (typeof setupMobileMenu === 'function') setupMobileMenu();
 
   const params = new URLSearchParams(window.location.search);
-  const assistantId = Number(params.get('assistantId'));
+  let assistantId = Number(params.get('assistantId')) || null;
   const sessionId = Number(params.get('sessionId')) || null;
 
-  if (!Number.isInteger(assistantId) || assistantId <= 0) {
+  if (!sessionId && (!Number.isInteger(assistantId) || assistantId <= 0)) {
     showChatError('No assistant was specified — open a conversation from your workspace.');
     return;
   }
 
-  // Resolve the assistant's display identity (and confirm it belongs to this org).
-  let assistant = null;
-  try {
-    const res = await fetch('/.netlify/functions/get-assistants');
-    if (res.ok) {
-      const data = await res.json();
-      assistant = (data.assistants || []).find((a) => a.id === assistantId) || null;
-    }
-  } catch { /* handled below */ }
+  // Continuing a thread: hydrate the transcript (and the assistant identity) from the
+  // history endpoint — it re-verifies org ownership server-side via requireTenant.
+  let assistantName = null;
+  let assistantRole = null;
+  let initialMessages = [];
 
-  if (!assistant) {
-    showChatError('This assistant could not be found in your workspace.');
-    return;
+  if (sessionId) {
+    let data = null;
+    try {
+      const res = await fetch(`/.netlify/functions/get-chat-session?chatSessionId=${sessionId}`);
+      if (res.ok) data = await res.json();
+    } catch { /* handled below */ }
+
+    if (!data?.session) {
+      showChatError('This conversation could not be found in your workspace.');
+      return;
+    }
+    assistantId = data.session.aiAssistantId;
+    assistantName = data.session.assistantName;
+    assistantRole = data.session.assistantRole;
+    initialMessages = data.messages || [];
+  } else {
+    // New conversation: resolve the assistant's display identity (and confirm it
+    // belongs to this org) from the workspace roster.
+    let assistant = null;
+    try {
+      const res = await fetch('/.netlify/functions/get-assistants');
+      if (res.ok) {
+        const data = await res.json();
+        assistant = (data.assistants || []).find((a) => a.id === assistantId) || null;
+      }
+    } catch { /* handled below */ }
+
+    if (!assistant) {
+      showChatError('This assistant could not be found in your workspace.');
+      return;
+    }
+    assistantName = assistant.name;
+    assistantRole = assistant.role;
   }
 
-  document.getElementById('chat-assistant-name').textContent = assistant.name;
-  document.getElementById('chat-assistant-role').textContent = assistant.role || 'Digital Assistant';
+  document.getElementById('chat-assistant-name').textContent = assistantName;
+  document.getElementById('chat-assistant-role').textContent = assistantRole || 'Digital Assistant';
   document.getElementById('chat-loading').classList.add('hidden');
   document.getElementById('chat-header').classList.remove('hidden');
   document.getElementById('chat-header').classList.add('flex');
@@ -116,8 +142,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   window.ChatSession.mount({
     container: document.getElementById('chat-root'),
     assistantId,
-    chatSessionId: sessionId, // continues an existing thread server-side (no history endpoint yet)
-    assistantName: assistant.name,
+    chatSessionId: sessionId,
+    assistantName,
+    initialMessages,
   });
 });
 </script>

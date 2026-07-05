@@ -3409,7 +3409,12 @@ function formatCurrency(amount, currency) {
           </div>
 
           <div class="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center gap-2 flex-wrap">
-              <button class="text-sm font-semibold text-emerald-700 hover:text-emerald-800 transition cursor-pointer" onclick="window.routeToAssistantDetail('${assistant.id}')">View Details &rarr;</button>
+              <div class="flex items-center gap-3">
+                  <button class="text-sm font-semibold text-emerald-700 hover:text-emerald-800 transition cursor-pointer" onclick="window.routeToAssistantDetail('${assistant.id}')">View Details &rarr;</button>
+                  ${lifecycle !== 'provisioning' && lifecycle !== 'archived' ? `
+                  <a href="assistant-chat.html?assistantId=${assistant.id}"
+                     class="px-3.5 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition">💬 Chat</a>` : ''}
+              </div>
               ${footerActions}
           </div>
       </div>`;

@@ -144,7 +144,9 @@ window.generateAssistantCardHTML = function(assistant) {
         <p class="text-sm text-gray-500 mb-4">${role}</p>
         ${goalsHtml}
         ${metricsHtml}
-        <div class="mt-auto pt-4 border-t border-gray-50 flex justify-end items-center">
+        <div class="mt-auto pt-4 border-t border-gray-50 flex justify-between items-center">
+            <a href="assistant-chat.html?assistantId=${assistant.id}" onclick="event.stopPropagation()"
+               class="px-3.5 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition">💬 Chat</a>
             <span class="text-sm font-bold text-gray-900 group-hover:text-emerald-700 transition-colors">View Details &rarr;</span>
         </div>
     </div>`;
