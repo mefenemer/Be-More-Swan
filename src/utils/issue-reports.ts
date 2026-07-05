@@ -100,12 +100,12 @@ export async function notifyIssueUser(
 
     // Status-specific call to action.
     const cta =
-        status === 'fixed_ready_to_test' ? 'Please re-test and confirm the fix worked.' :
-        status === 'more_info_required'  ? 'The team needs more information to proceed.' :
-        status === 'fix_in_progress'     ? 'A fix is now in progress.' :
-        status === 'roadmap'             ? "We've added your request to our feature roadmap, where it'll be prioritised and delivered as soon as we can." :
-        status === 'closed'              ? 'This issue has been closed.' :
-        'Your reported issue has been updated.';
+        status === 'fixed_ready_to_test' ? "We've pushed a fix — could you give it another try and let us know how it goes?" :
+        status === 'more_info_required'  ? "We'd love to help, but we need a bit more detail from you first." :
+        status === 'fix_in_progress'     ? "We've picked this up and are working on a fix now." :
+        status === 'roadmap'             ? "We've added your request to our roadmap — we'll get to it as soon as we can." :
+        status === 'closed'              ? "We've closed this one out. Thanks again for flagging it!" :
+        "There's an update on the issue you reported.";
 
     const title =
         status === 'fixed_ready_to_test' ? `✅ Issue #${issueId} fixed — ready to test` :
@@ -178,7 +178,7 @@ export async function maybeAdvanceToReadyToTest(
         issueId,
         authorType: 'admin',
         authorId: null,
-        body: '✅ Merged to staging — the fix is live on staging and ready to test.',
+        body: "✅ Good news — the fix is live on staging now, ready for you to test.",
         status: 'fixed_ready_to_test',
     });
 
