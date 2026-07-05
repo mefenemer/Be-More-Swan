@@ -7,7 +7,7 @@
 import { HandlerEvent } from '@netlify/functions';
 import { eq, and, gte, count, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { userProfiles, taskRuns, scheduledPosts, plans, masterPlans, notifications } from '../../db/schema';
+import { userProfiles, taskRuns, scheduledPosts, leads, plans, masterPlans, notifications } from '../../db/schema';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
 import { requireSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
@@ -59,13 +59,27 @@ export const handler = async (event: HandlerEvent) => {
                 gte(scheduledPosts.createdAt, periodStart)
             )) : [{ postCount: 0 }];
 
-        const completedTasks = Number(taskRunCount) + Number(postCount);
+        // Leads generated in the period — get-time-saved.ts already counts these towards
+        // "Hours Saved"; omitting them here meant an org whose assistant work is mostly lead
+        // generation (no task_runs, no scheduled_posts yet) saw 0 hours/£/tasks on this
+        // widget despite real, non-zero activity on the modal it's supposed to agree with.
+        const [{ leadCount }] = organisationId ? await db
+            .select({ leadCount: count() })
+            .from(leads)
+            .where(and(
+                eq(leads.organisationId, organisationId),
+                gte(leads.createdAt, periodStart)
+            )) : [{ leadCount: 0 }];
+
+        const completedTasks = Number(taskRunCount) + Number(postCount) + Number(leadCount);
 
         // SC1: minutes saved per item — admin-configurable via gamification.time_multipliers,
         // shared with the dashboard "Hours Saved" widget (get-time-saved.ts) so both views
-        // stay consistent. Task runs and drafted posts use their own multiplier.
+        // stay consistent. Task runs, drafted posts, and generated leads each use their own multiplier.
         const mult = await getTimeMultipliers();
-        const totalMinutes = Number(taskRunCount) * mult.tasks_completed + Number(postCount) * mult.content_drafted;
+        const totalMinutes = Number(taskRunCount) * mult.tasks_completed
+            + Number(postCount) * mult.content_drafted
+            + Number(leadCount) * mult.leads_generated;
         const avgTaskDurationMinutes = completedTasks > 0 ? totalMinutes / completedTasks : mult.tasks_completed;
 
         // SC1: hours saved = total minutes / 60
