@@ -1,0 +1,141 @@
+/**
+ * src/components/assistant-detail-modal.js
+ *
+ * Shared "assistant detail" modal — shows the marketing copy from
+ * src/config/assistant-role-content.js (tagline, description, key features,
+ * integrations) for a roleKey, plus a configurable CTA.
+ *
+ * Used by:
+ *   - assistants.html (public library; CTA → setup wizard or pricing)
+ *   - assistant-catalogue.html via workspace.html (CTA → window._catHire)
+ *
+ * Usage:
+ *   window.AssistantDetailModal.open('lead_qualifier', {
+ *     ctaLabel: 'Hire Role',
+ *     ctaHref: 'assistant-setup.html?roleKey=lead_qualifier',  // anchor CTA…
+ *     onCta: () => {},                                         // …or button CTA
+ *   });
+ */
+(function () {
+  'use strict';
+
+  // Same icon set as assistant-catalogue.html / assistants.html
+  const ICONS = {
+    document: `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>`,
+    smile:    `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`,
+    megaphone:`<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5.882V19.24a1.76 1.76 0 01-3.417.592l-2.147-6.15M18 13a3 3 0 100-6M5.436 13.683A4.001 4.001 0 017 6h1.832c4.1 0 7.625-1.234 9.168-3v14c-1.543-1.766-5.067-3-9.168-3H7a3.988 3.988 0 01-1.564-.317z"/></svg>`,
+    globe:    `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 019-9"/></svg>`,
+    chart:    `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>`,
+    lightning:`<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>`,
+    mail:     `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>`,
+    cog:      `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>`,
+  };
+
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // Builds the modal shell on first use. Icon tile colours are injected here too
+  // so the modal renders the same in pages that don't define .icon-* themselves.
+  function ensureModal() {
+    let modal = document.getElementById('assistant-detail-modal');
+    if (modal) return modal;
+
+    const style = document.createElement('style');
+    style.textContent = `
+      #assistant-detail-modal .icon-blue   { background: #eff6ff; color: #2563eb; }
+      #assistant-detail-modal .icon-purple { background: #f5f3ff; color: #7c3aed; }
+      #assistant-detail-modal .icon-orange { background: #fff7ed; color: #ea580c; }
+      #assistant-detail-modal .icon-teal   { background: #f0fdfa; color: #0d9488; }
+      #assistant-detail-modal .icon-pink   { background: #fdf2f8; color: #db2777; }
+      #assistant-detail-modal .icon-green  { background: #f0fdf4; color: #16a34a; }
+      #assistant-detail-modal .icon-yellow { background: #fefce8; color: #ca8a04; }
+      #assistant-detail-modal .icon-red    { background: #fef2f2; color: #dc2626; }`;
+    document.head.appendChild(style);
+
+    modal = document.createElement('div');
+    modal.id = 'assistant-detail-modal';
+    modal.className = 'fixed inset-0 hidden flex items-center justify-center p-4';
+    modal.style.cssText = 'background:rgba(0,0,0,0.4);z-index:9500';
+    modal.innerHTML = `
+      <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg relative max-h-[85vh] overflow-y-auto">
+        <button type="button" data-detail-close aria-label="Close" class="absolute top-4 right-4 text-gray-400 hover:text-gray-600 cursor-pointer">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+        <div id="assistant-detail-body"></div>
+      </div>`;
+    document.body.appendChild(modal);
+
+    modal.addEventListener('click', e => {
+      if (e.target === modal || e.target.closest('[data-detail-close]')) close();
+    });
+    return modal;
+  }
+
+  function close() {
+    const modal = document.getElementById('assistant-detail-modal');
+    if (modal) modal.classList.add('hidden');
+  }
+
+  function open(roleKey, opts) {
+    const c = (window.AssistantRoleContent || {})[roleKey];
+    if (!c) return;
+    opts = opts || {};
+
+    const modal = ensureModal();
+    const iconSvg = ICONS[c.iconKey] || ICONS.document;
+    const iconClass = `icon-${c.iconColor || 'blue'}`;
+
+    const features = (c.keyFeatures || []).map(f => `
+      <li class="flex items-start gap-2 text-sm text-gray-600">
+        <svg class="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+        <span>${escHtml(f)}</span>
+      </li>`).join('');
+
+    const apps = (c.integrations || []).map(app => `
+      <span class="inline-flex items-center gap-1.5 bg-white border border-gray-200 rounded-full px-2.5 py-1 text-[11px] font-semibold text-gray-600">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>${escHtml(app)}
+      </span>`).join('');
+
+    const ctaLabel = escHtml(opts.ctaLabel || 'Hire Role');
+    const cta = opts.ctaHref
+      ? `<a href="${escHtml(opts.ctaHref)}" class="bg-emerald-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-emerald-800 transition">${ctaLabel}</a>`
+      : `<button type="button" data-detail-cta class="bg-emerald-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-emerald-800 transition cursor-pointer">${ctaLabel}</button>`;
+
+    const body = document.getElementById('assistant-detail-body');
+    body.innerHTML = `
+      <div class="p-8">
+        <div class="flex items-start justify-between gap-4 pr-8">
+          <div class="w-12 h-12 rounded-xl ${iconClass} flex items-center justify-center mb-4">${iconSvg}</div>
+          <span class="inline-block px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold uppercase tracking-wider">Available Now</span>
+        </div>
+        <p class="text-sm text-gray-500 font-medium mb-1">${escHtml(c.category)}</p>
+        <h2 class="text-2xl font-extrabold text-gray-900 leading-tight mb-2">${escHtml(c.name)}</h2>
+        <p class="text-base font-bold text-emerald-700 mb-3">${escHtml(c.tagline)}</p>
+        <p class="text-sm text-gray-600 leading-relaxed mb-6">${escHtml(c.description)}</p>
+
+        <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Key Features</h3>
+        <ul class="space-y-1.5 mb-6">${features}</ul>
+
+        <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Integrations</h3>
+        <div class="flex flex-wrap gap-1.5 items-center">
+          <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mr-0.5">Works with</span>${apps}
+        </div>
+      </div>
+      <div class="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center gap-3 rounded-b-2xl">
+        <span class="text-xs font-bold text-gray-500 uppercase tracking-wider">Included in Plan</span>
+        ${cta}
+      </div>`;
+
+    if (!opts.ctaHref && typeof opts.onCta === 'function') {
+      body.querySelector('[data-detail-cta]').addEventListener('click', () => {
+        close();
+        opts.onCta(roleKey);
+      });
+    }
+
+    modal.classList.remove('hidden');
+  }
+
+  window.AssistantDetailModal = { open, close };
+})();

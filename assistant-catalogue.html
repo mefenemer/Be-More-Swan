@@ -248,14 +248,16 @@
         </div>`;
     }
 
-    // Roles with marketing copy in src/config/assistant-role-content.js get a
-    // detail page (assistant-role-detail.html) between the card and the hire flow.
-    const detailLink = (window.AssistantRoleContent && window.AssistantRoleContent[a.roleKey])
-      ? `<a href="assistant-role-detail.html?roleKey=${encodeURIComponent(a.roleKey)}" class="text-sm font-semibold text-emerald-700 hover:text-emerald-800 transition">View Details</a>`
-      : '';
+    // Roles with marketing copy in src/config/assistant-role-content.js open the
+    // shared detail modal (src/components/assistant-detail-modal.js) on click.
+    const hasDetail = !!(window.AssistantRoleContent && window.AssistantRoleContent[a.roleKey]);
+    const detailAttrs = hasDetail ? ` data-rolekey="${_esc(a.roleKey)}" role="button" tabindex="0" aria-haspopup="dialog" style="cursor:pointer"` : '';
+    const detailHint = hasDetail
+      ? `<span class="text-sm font-semibold text-emerald-700">View Details</span>`
+      : `<span class="text-xs font-bold text-gray-500 uppercase tracking-wider">Included in Plan</span>`;
 
     return `
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col hover:shadow-md transition-shadow">
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col hover:shadow-md transition-shadow"${detailAttrs}>
         <div class="p-6 flex-grow">
           <div class="w-12 h-12 rounded-xl ${iconCls} flex items-center justify-center mb-4">${icon}</div>
           <h2 class="text-xl font-bold text-gray-900 mb-1">${_esc(a.name)}</h2>
@@ -263,11 +265,8 @@
           <p class="text-sm text-gray-600 leading-relaxed">${_esc(a.description || '')}</p>
         </div>
         <div class="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center gap-3">
-          <span class="text-xs font-bold text-gray-500 uppercase tracking-wider">Included in Plan</span>
-          <div class="flex items-center gap-3">
-            ${detailLink}
-            <button onclick="window._catHire('${a.roleKey}')" style="cursor:pointer" class="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-800 transition">Hire Role</button>
-          </div>
+          ${detailHint}
+          <button onclick="window._catHire('${a.roleKey}')" style="cursor:pointer" class="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-800 transition">Hire Role</button>
         </div>
       </div>`;
   }
@@ -326,6 +325,22 @@
     }
     _renderGrid();
   }
+
+  // ── Card click → shared detail modal (Hire buttons excluded) ──────────────
+  document.getElementById('cat-grid').addEventListener('click', e => {
+    if (e.target.closest('button, a')) return;
+    const card = e.target.closest('[data-rolekey]');
+    if (card && window.AssistantDetailModal)
+      window.AssistantDetailModal.open(card.dataset.rolekey, { ctaLabel: 'Hire Role', onCta: window._catHire });
+  });
+  document.getElementById('cat-grid').addEventListener('keydown', e => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const card = e.target.closest('[data-rolekey]');
+    if (card && window.AssistantDetailModal) {
+      e.preventDefault();
+      window.AssistantDetailModal.open(card.dataset.rolekey, { ctaLabel: 'Hire Role', onCta: window._catHire });
+    }
+  });
 
   // ── Category tabs ──────────────────────────────────────────────────────────
   document.getElementById('cat-tabs').addEventListener('click', e => {

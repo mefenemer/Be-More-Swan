@@ -208,23 +208,12 @@
   </div>
 </div>
 
-<!-- Assistant Detail Modal — opened by clicking a card whose roleKey has marketing
-     copy in src/config/assistant-role-content.js -->
-<div id="assistant-detail-modal" class="fixed inset-0 z-50 hidden flex items-center justify-center p-4" style="background:rgba(0,0,0,0.4)">
-  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg relative max-h-[85vh] overflow-y-auto">
-    <button onclick="document.getElementById('assistant-detail-modal').classList.add('hidden')"
-            class="absolute top-4 right-4 text-gray-400 hover:text-gray-600">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-    </button>
-    <div id="assistant-detail-body"></div>
-  </div>
-</div>
-
 <!-- Footer -->
 <div id="footer-placeholder"></div>
 
 <script src="./mobileMenu.js"></script>
 <script src="/src/config/assistant-role-content.js"></script>
+<script src="/src/components/assistant-detail-modal.js"></script>
 <script>
 // ── Icons ────────────────────────────────────────────────────────────────────
 const ICONS = {
@@ -625,55 +614,13 @@ function hireAssistant(roleKey) {
   window.location.href = 'workspace.html?view=catalog';
 }
 
-// ── Assistant detail modal ───────────────────────────────────────────────────
+// ── Assistant detail modal (shared component) ────────────────────────────────
+// Same CTA rule as the cards: logged-in users drop into the setup wizard,
+// visitors go to pricing to pick a plan first.
 function openAssistantDetail(roleKey) {
-  const c = (window.AssistantRoleContent || {})[roleKey];
-  if (!c) return;
-
-  const iconSvg = ICONS[c.iconKey] || ICONS.document;
-  const iconClass = `icon-${c.iconColor || 'blue'}`;
-
-  const features = (c.keyFeatures || []).map(f => `
-    <li class="flex items-start gap-2 text-sm text-gray-600">
-      <svg class="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
-      <span>${escHtml(f)}</span>
-    </li>`).join('');
-
-  const apps = (c.integrations || []).map(app => `
-    <span class="inline-flex items-center gap-1.5 bg-white border border-gray-200 rounded-full px-2.5 py-1 text-[11px] font-semibold text-gray-600">
-      <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>${escHtml(app)}
-    </span>`).join('');
-
-  // Same CTA rule as the cards: logged-in users drop into the setup wizard,
-  // visitors go to pricing to pick a plan first.
-  const cta = _isLoggedIn
-    ? `<a href="assistant-setup.html?roleKey=${encodeURIComponent(roleKey)}" class="bg-emerald-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-emerald-800 transition">Hire Role</a>`
-    : `<a href="pricing.html" class="bg-emerald-700 text-white px-5 py-2.5 rounded-lg text-sm font-semibold hover:bg-emerald-800 transition">Get Started</a>`;
-
-  document.getElementById('assistant-detail-body').innerHTML = `
-    <div class="p-8">
-      <div class="flex items-start justify-between gap-4 pr-8">
-        <div class="w-12 h-12 rounded-xl ${iconClass} flex items-center justify-center mb-4">${iconSvg}</div>
-        <span class="inline-block px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold uppercase tracking-wider">Available Now</span>
-      </div>
-      <p class="text-sm text-gray-500 font-medium mb-1">${escHtml(c.category)}</p>
-      <h2 class="text-2xl font-extrabold text-gray-900 leading-tight mb-2">${escHtml(c.name)}</h2>
-      <p class="text-base font-bold text-emerald-700 mb-3">${escHtml(c.tagline)}</p>
-      <p class="text-sm text-gray-600 leading-relaxed mb-6">${escHtml(c.description)}</p>
-
-      <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Key Features</h3>
-      <ul class="space-y-1.5 mb-6">${features}</ul>
-
-      <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Integrations</h3>
-      <div class="flex flex-wrap gap-1.5 items-center">
-        <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mr-0.5">Works with</span>${apps}
-      </div>
-    </div>
-    <div class="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center gap-3 rounded-b-2xl">
-      <span class="text-xs font-bold text-gray-500 uppercase tracking-wider">Included in Plan</span>
-      ${cta}
-    </div>`;
-  document.getElementById('assistant-detail-modal').classList.remove('hidden');
+  window.AssistantDetailModal.open(roleKey, _isLoggedIn
+    ? { ctaLabel: 'Hire Role', ctaHref: `assistant-setup.html?roleKey=${encodeURIComponent(roleKey)}` }
+    : { ctaLabel: 'Get Started', ctaHref: 'pricing.html' });
 }
 
 // Card click → detail modal (ignore clicks on the card's own buttons/links/toggles)
@@ -686,10 +633,6 @@ document.getElementById('assistants-grid').addEventListener('keydown', e => {
   if (e.key !== 'Enter' && e.key !== ' ') return;
   const card = e.target.closest('[data-rolekey]');
   if (card) { e.preventDefault(); openAssistantDetail(card.dataset.rolekey); }
-});
-document.getElementById('assistant-detail-modal').addEventListener('click', e => {
-  if (e.target === document.getElementById('assistant-detail-modal'))
-    document.getElementById('assistant-detail-modal').classList.add('hidden');
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
