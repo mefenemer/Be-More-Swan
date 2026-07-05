@@ -6425,7 +6425,7 @@ async function gpSubmitReject() {
      · AC3 in-line execution (reply expands beneath the bar, no reload).
      Lives outside #workspace-content so it persists across loadView().
      ══════════════════════════════════════════════════════════════════════════ -->
-<!-- The trigger lives in the side menu (#nav-ask-team in components/sidebar.html); ⌘K also opens it. -->
+<!-- Triggered via ⌘K only — no side menu entry (see issue #129 feedback). -->
 <div id="cmdbar-overlay" class="cmdbar-overlay" aria-hidden="true">
   <div class="cmdbar-panel" role="dialog" aria-modal="true" aria-label="Command bar">
     <form id="cmdbar-form" class="cmdbar-inputrow">
@@ -6565,7 +6565,8 @@ async function gpSubmitReject() {
     }
     const isOpen = () => overlay.classList.contains('open');
 
-    // The trigger lives in the side menu (#nav-ask-team), injected async → delegate.
+    // #nav-ask-team no longer exists in the side menu (issue #129) — ⌘K is the only trigger.
+    // Delegated listener kept harmless in case a future entry point reintroduces the id.
     document.addEventListener('click', e => {
       if (e.target.closest && e.target.closest('#nav-ask-team')) { e.preventDefault(); open(); }
     });
