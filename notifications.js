@@ -1,18 +1,21 @@
 // notifications.js
 
 // --- GLOBAL NOTIFICATION BADGE CONTROLLER ---
+// Issue #156: tracks the previous badge count across polls so we can ding only when it
+// *rises* (a new notification arrived) rather than on every poll or on the initial load.
+let _lastNotifBadgeCount = null;
 window.updateNotificationBadge = async function() {
     try {
         const res = await fetch('/.netlify/functions/notifications?action=count');
         if (res.ok) {
             const data = await res.json();
             const badge = document.getElementById('sidebar-nav-badge');
+            // Badge reflects open ACTION items + unread UPDATES. Falls back to the older
+            // actionCount / unreadCount fields if the server hasn't been updated yet.
+            const count = (typeof data.badgeCount === 'number') ? data.badgeCount
+                : (typeof data.actionCount === 'number') ? data.actionCount
+                : (data.unreadCount || 0);
             if (badge) {
-                // Badge reflects open ACTION items + unread UPDATES. Falls back to the older
-                // actionCount / unreadCount fields if the server hasn't been updated yet.
-                const count = (typeof data.badgeCount === 'number') ? data.badgeCount
-                    : (typeof data.actionCount === 'number') ? data.actionCount
-                    : (data.unreadCount || 0);
                 if (count > 0) {
                     badge.textContent = count;
                     badge.classList.remove('hidden');
@@ -20,6 +23,10 @@ window.updateNotificationBadge = async function() {
                     badge.classList.add('hidden');
                 }
             }
+            if (_lastNotifBadgeCount !== null && count > _lastNotifBadgeCount) {
+                window._playNotificationSound?.();
+            }
+            _lastNotifBadgeCount = count;
         }
     } catch (e) {
         console.error("Failed to fetch notification badge count", e);
