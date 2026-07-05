@@ -39,7 +39,8 @@ export type AdminAction =
     | 'retry_failed_post'
     | 'sandbox_purge'
     | 'sandbox_seed'
-    | 'email_template_edit';
+    | 'email_template_edit'
+    | 'session_timeout_config_update';
 
 export interface AdminAuditParams {
     adminId: number;

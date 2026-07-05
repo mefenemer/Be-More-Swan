@@ -2390,3 +2390,46 @@ export const mediaGenerationJobs = pgTable("media_generation_jobs", {
   index("media_generation_jobs_org_idx").on(t.organisationId),
   index("media_generation_jobs_status_idx").on(t.status),
 ]);
+
+// ── Chat Persistence (Digital Assistant Orchestrator) ────────────────────────
+// Canonical DDL: db/chat-sessions.sql (apply manually as owner — no db:push).
+// One session = one conversation thread between a user and a per-org assistant
+// instance, routed through netlify/functions/chat-orchestrator.ts.
+
+export const chatSessions = pgTable("chat_sessions", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  // The per-org assistant INSTANCE (not the master template) this conversation belongs to.
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  // 'active' | 'archived'
+  status: text("status").notNull().default("active"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  // Hot path: "my open conversations in this workspace" (tenant-scoped list).
+  index("chat_sessions_org_user_status_idx").on(t.organisationId, t.userId, t.status),
+  index("chat_sessions_assistant_idx").on(t.aiAssistantId),
+  check("chat_sessions_status_check", sql`${t.status} IN ('active', 'archived')`),
+]);
+
+// Individual turns within a chat session. uiElementJson carries the serialised state of
+// "Disruptive UI" blocks rendered inline with an assistant reply (e.g. a Lead Scoring
+// Card or an Action Item table) so conversations re-hydrate exactly as first rendered.
+export const chatMessages = pgTable("chat_messages", {
+  id: serial().primaryKey(),
+  chatSessionId: integer("chat_session_id").notNull().references(() => chatSessions.id, { onDelete: "cascade" }),
+  // 'user' | 'assistant' | 'system'
+  role: text("role").notNull(),
+  content: text("content").notNull(),
+  uiElementJson: jsonb("ui_element_json"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  // Hot path: replaying a session's transcript in order.
+  index("chat_messages_session_created_idx").on(t.chatSessionId, t.createdAt),
+  check("chat_messages_role_check", sql`${t.role} IN ('user', 'assistant', 'system')`),
+]);
+
+// Relational-query definitions for the chat tables live in db/relations.ts
+// (drizzle-orm v2 `defineRelations` API — this drizzle version has no per-table
+// `relations()` export).

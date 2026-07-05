@@ -212,7 +212,8 @@ export const handler: Handler = async (event) => {
                 .orderBy(desc(contentAssets.createdAt));
 
             // Group by status
-            const grouped: Record<string, typeof rows> = {
+            type AssetWithUsage = (typeof rows)[number] & { usedInPosts?: AssetUsage[] };
+            const grouped: Record<string, AssetWithUsage[]> = {
                 pending: [], scheduled: [], posted: [], rejected: [],
             };
             // Resolve a displayable URL for visual assets (thumbnails in My Content).
