@@ -242,10 +242,7 @@ window.initAssistantsDirectory = async function(loadViewCb) {
         catalogBtn.addEventListener('click', () => loadViewCb('catalog'));
     }
 
-    const orchestrationsBtn = document.getElementById('route-to-orchestrations-from-dir');
-    if (orchestrationsBtn) {
-        orchestrationsBtn.addEventListener('click', () => loadViewCb('orchestrations'));
-    }
+    // Issue #134: disabled ("coming soon") in the markup — no click routing to wire up.
 };
 
 // ==========================================
