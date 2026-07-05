@@ -75,13 +75,13 @@ export const handler = async (event: HandlerEvent) => {
                 gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, periodStart)
             ))) : 0;
 
-        const [{ postCount }] = organisationId ? await db
-            .select({ postCount: count() })
+        const postCount = organisationId ? await safeCount(db
+            .select({ count: count() })
             .from(scheduledPosts)
             .where(and(
                 eq(scheduledPosts.organisationId, organisationId),
                 gte(scheduledPosts.createdAt, periodStart)
-            )) : [{ postCount: 0 }];
+            ))) : 0;
 
         // Leads generated in the period — get-time-saved.ts already counts these towards
         // "Hours Saved"; omitting them here meant an org whose assistant work is mostly lead
