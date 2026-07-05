@@ -518,7 +518,7 @@
         <p class="as-card-title">${esc(item.title)}</p>
         ${item.preview ? `<p class="as-card-prev">${esc(item.preview)}${isPost && item.preview.length >= 140 ? '…' : ''}</p>` : ''}
         <div class="as-actions">
-          <button class="as-btn as-btn-approve">Approve</button>
+          <button class="as-btn as-btn-approve">${isPost ? 'Review' : 'Approve'}</button>
           <button class="as-btn as-btn-reject">Reject</button>
         </div>
         <div class="as-reject-box">
