@@ -13,7 +13,7 @@
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import postgres from 'postgres';
-import { and, eq, ne, desc, asc, sql, or, isNull, isNotNull, inArray, notInArray } from 'drizzle-orm';
+import { and, eq, ne, lt, desc, asc, sql, or, isNull, isNotNull, inArray, notInArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { issueReports, issueReportMessages, users, devRunnerStatus } from '../../db/schema';
 import { isAdminRole, hasPermission } from '../../src/utils/rbac';
@@ -260,6 +260,15 @@ export const handler: Handler = async (event) => {
     // Powers the "runner paused — Claude session limit" prompt + Resume button. Returns every
     // runner's current state so the portal can surface a block and show how to recover it.
     if (event.httpMethod === 'GET' && action === 'runner-status') {
+        // Prune dead runners first. Identities are host:pid, so a paused runner that died
+        // before consuming its restart/resume request orphans its row — it would sit in the
+        // portal as "restart requested — waiting…" forever. Live runners heartbeat every
+        // 10-15s (and re-create their row on the next poll if we ever over-prune), so
+        // anything silent for 10+ minutes is a dead process, not a slow one.
+        const STALE_RUNNER_MS = 10 * 60 * 1000;
+        await db.delete(devRunnerStatus)
+            .where(lt(devRunnerStatus.lastSeenAt, new Date(Date.now() - STALE_RUNNER_MS)));
+
         const rows = await db.select().from(devRunnerStatus).orderBy(desc(devRunnerStatus.updatedAt));
         const runners = rows.map((r) => ({
             runnerId: r.runnerId,
