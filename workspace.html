@@ -1126,6 +1126,7 @@ function formatCurrency(amount, currency) {
         .then(d => { if (d) { try {
           localStorage.setItem('bms_soundOnLogin', d.soundOnLogin === false ? '0' : '1');
           localStorage.setItem('bms_soundOnMilestone', d.soundOnMilestone === false ? '0' : '1');
+          localStorage.setItem('bms_tourNarrationEnabled', d.tourNarrationEnabled === false ? '0' : '1');
         } catch {} } })
         .catch(() => {});
       const audio = new Audio('/Aurora.mp3');
@@ -2787,6 +2788,7 @@ function formatCurrency(amount, currency) {
       const btns = [
         document.getElementById('toggle-sound-login'),
         document.getElementById('toggle-sound-milestone'),
+        document.getElementById('toggle-sound-tour-narration'),
       ].filter(Boolean);
       if (!btns.length) return;
 
