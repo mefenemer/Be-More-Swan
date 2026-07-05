@@ -1508,6 +1508,7 @@
           </div>
           <div class="flex items-center gap-2">
             <button onclick="passAllToDeveloper()" id="ir-pass-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🤖 Pass all to Developer</button>
+            <button onclick="moveAllToBacklog()" id="ir-backlog-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition disabled:opacity-60 disabled:cursor-not-allowed">📥 Move all to Backlog</button>
             <button onclick="requestMergeAll()" id="ir-merge-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🔀 Merge all to staging</button>
             <button onclick="deployStaging()" id="ir-deploy-btn" class="hidden px-3 py-2 text-sm font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🚀 Commit to Staging</button>
             <button onclick="openRunnerModal()" id="ir-runner-btn" class="px-3 py-2 text-sm font-semibold border border-violet-300 text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 transition flex items-center gap-1.5">🤖 <span id="ir-runner-btn-label">Runner</span></button>
@@ -3491,6 +3492,7 @@ async function loadIssueReports() {
     const issues = d.issues || [];
     _updateRunnerBtnBadge(issues);
     _updatePassAllBtn(issues);
+    _updateMoveAllToBacklogBtn(issues);
     _updateMergeAllBtns(issues);
     loadRunnerStatus();
     if (tbody) tbody.innerHTML = issues.map(i => `
@@ -3996,6 +3998,35 @@ async function passAllToDeveloper() {
   if (btn) { btn.disabled = true; btn.textContent = '🤖 Queuing…'; }
   try {
     await api(`${IR_API}?action=handoff-all`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+  } catch (e) { alert(e.message); }
+  finally { loadIssueReports(); }
+}
+
+// "Move all to Backlog" — shown on the Reported tab when there are issues still
+// sitting in Reported, as a quick alternative to handing them to the AI developer.
+function _updateMoveAllToBacklogBtn(issues) {
+  const btn = document.getElementById('ir-backlog-all-btn');
+  if (!btn) return;
+  const eligible = (issues || []).filter(i => i.status === 'reported');
+  if (_irFilter === 'reported' && eligible.length > 0) {
+    btn.dataset.count = eligible.length;
+    btn.disabled = false;
+    btn.textContent = `📥 Move All (${eligible.length}) to Backlog`;
+    btn.classList.remove('hidden');
+  } else {
+    btn.classList.add('hidden');
+  }
+}
+
+async function moveAllToBacklog() {
+  const btn = document.getElementById('ir-backlog-all-btn');
+  const n = Number(btn?.dataset.count || 0);
+  if (!confirm(`Move all ${n} reported issue${n === 1 ? '' : 's'} to the Backlog?`)) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Moving…'; }
+  try {
+    await api(`${IR_API}?action=backlog-all`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     });
   } catch (e) { alert(e.message); }
