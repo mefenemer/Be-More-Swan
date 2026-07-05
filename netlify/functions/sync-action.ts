@@ -6,12 +6,18 @@
 // the disruptive-ui card was rendered from (untrusted; validated per handler).
 //
 // Handlers (one per hero integration):
-//   hubspot_update_record  — data_diff_view (crm_enricher / lead_qualifier)
-//                            → PATCH the matching HubSpot contact/company properties.
-//   xero_log_note          — aging_invoices_table row (accounts_receivable_clerk)
-//                            → push a history note onto the matching Xero invoice.
-//   slack_post_summary     — action_item_assignment (meeting_note_taker)
-//                            → post the summary + tasks as Block Kit via chat.postMessage.
+//   hubspot_update_record      — data_diff_view (crm_enricher / lead_qualifier)
+//                                → PATCH the matching HubSpot contact/company properties.
+//   xero_log_note              — aging_invoices_table row (accounts_receivable_clerk)
+//                                → push a history note onto the matching Xero invoice.
+//   slack_post_summary         — action_item_assignment (meeting_note_taker)
+//                                → post the summary + tasks as Block Kit via chat.postMessage.
+//   salesforce_update_record   — data_diff_view (crm_enricher, primaryCrm=salesforce)
+//                                → find the Contact/Account via SOQL, PATCH the enriched fields.
+//   zendesk_add_internal_note  — ticket_triage_view (tier1_support_agent)
+//                                → push a private (internal) comment onto the Zendesk ticket.
+//   notion_create_page         — action_item_assignment (meeting_note_taker, destination=notion)
+//                                → create a Notion page: summary paragraph + to_do blocks.
 //
 // Every path: requireTenant (org-scoped), token via getFreshAccessToken (which silently
 // refreshes an expired access token), and integration_api_calls audit rows (SC6 —
@@ -218,6 +224,202 @@ async function handleSlackPostSummary(db: Db, userId: number, organisationId: nu
     return json(200, { success: true, message: `Posted the summary and ${tasks.length} action item${tasks.length === 1 ? '' : 's'} to Slack.` });
 }
 
+// ── Salesforce: update a Contact or Account from a data_diff_view payload ──────
+
+const SALESFORCE_API_VERSION = 'v59.0';
+
+/** Escape a value for interpolation inside a single-quoted SOQL string literal. */
+function soqlEscape(value: string): string {
+    return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+/** "LinkedIn URL" → "LinkedInUrl" — best-effort PascalCase mapping when no propertyName
+ *  is given (Salesforce field API names are PascalCase, custom fields end in __c). */
+function toSalesforceField(fieldName: string): string {
+    return fieldName
+        .trim()
+        .split(/[^a-zA-Z0-9]+/)
+        .filter(Boolean)
+        .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+        .join('');
+}
+
+async function handleSalesforceUpdate(db: Db, userId: number, organisationId: number, payload: DataDiffPayload) {
+    const fields = (Array.isArray(payload.fields) ? payload.fields : [])
+        .filter((f): f is DiffField => Boolean(f && typeof f === 'object' && (f as DiffField).fieldName));
+    if (fields.length === 0) return json(400, { error: 'No fields to sync.' });
+
+    const recordName = typeof payload.recordName === 'string' ? payload.recordName.trim() : '';
+    const recordEmail = typeof payload.recordEmail === 'string' ? payload.recordEmail.trim() : '';
+    const isContact = payload.objectType === 'contact' || (!payload.objectType && Boolean(recordEmail));
+    const sobject = isContact ? 'Contact' : 'Account';
+    if (!recordEmail && !recordName) return json(400, { error: 'The payload names no record to update.' });
+
+    // tenantId carries the org's instance URL (every Salesforce REST call is rooted there).
+    const { accessToken, tenantId: instanceUrl } = await getFreshAccessToken(db, organisationId, 'salesforce');
+    if (!instanceUrl) return json(409, { error: 'Salesforce is connected but no instance is mapped — please reconnect it on the Integrations page.' });
+    const authHeaders = { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' };
+    const restBase = `${instanceUrl.replace(/\/$/, '')}/services/data/${SALESFORCE_API_VERSION}`;
+
+    // 1. Find the record: Contacts by email (exact) or name; Accounts by name.
+    const where = isContact && recordEmail
+        ? `Email = '${soqlEscape(recordEmail)}'`
+        : `Name = '${soqlEscape(recordName)}'`;
+    const soql = `SELECT Id FROM ${sobject} WHERE ${where} LIMIT 1`;
+    const searchRes = await fetch(`${restBase}/query?q=${encodeURIComponent(soql)}`, { headers: authHeaders });
+    await logApiCall(db, { userId, endpoint: `salesforce.com/services/data/${SALESFORCE_API_VERSION}/query`, httpStatus: searchRes.status });
+    const searchData: { records?: Array<{ Id?: string }> } = searchRes.ok ? await searchRes.json() : {};
+    const recordId = searchData.records?.[0]?.Id;
+    if (!recordId) {
+        return json(404, { error: `No matching Salesforce ${sobject} found for "${recordEmail || recordName}". Check the record exists in Salesforce, then try again.` });
+    }
+
+    // 2. Patch the enriched fields onto it (204 No Content on success).
+    const properties: Record<string, string> = {};
+    for (const f of fields) {
+        const prop = typeof f.propertyName === 'string' && f.propertyName ? f.propertyName : toSalesforceField(String(f.fieldName));
+        if (prop) properties[prop] = String(f.newValue ?? '');
+    }
+    const patchRes = await fetch(`${restBase}/sobjects/${sobject}/${recordId}`, {
+        method: 'PATCH',
+        headers: authHeaders,
+        body: JSON.stringify(properties),
+    });
+    await logApiCall(db, { userId, endpoint: `salesforce.com/services/data/${SALESFORCE_API_VERSION}/sobjects/${sobject}`, httpStatus: patchRes.status });
+    if (!patchRes.ok) {
+        const errs: Array<{ message?: string }> = await patchRes.json().catch(() => []);
+        const message = Array.isArray(errs) ? errs[0]?.message : undefined;
+        return json(502, { error: `Salesforce rejected the update${message ? `: ${message}` : '.'}` });
+    }
+
+    return json(200, { success: true, message: `Updated ${Object.keys(properties).length} field${Object.keys(properties).length === 1 ? '' : 's'} on Salesforce ${sobject} "${recordEmail || recordName}".` });
+}
+
+// ── Zendesk: add an internal (private) note to a ticket ────────────────────────
+
+interface ZendeskNotePayload {
+    ticketId?: unknown;
+    summary?: unknown;
+    status?: unknown;
+    confidenceScore?: unknown;
+    escalationReason?: unknown;
+}
+
+async function handleZendeskAddNote(db: Db, userId: number, organisationId: number, payload: ZendeskNotePayload) {
+    const ticketId = String(payload.ticketId ?? '').trim();
+    if (!/^\d+$/.test(ticketId)) {
+        return json(400, { error: 'The payload has no Zendesk ticket id — include the ticket number in the conversation so the triage card can carry it.' });
+    }
+    const summary = typeof payload.summary === 'string' ? payload.summary.trim() : '';
+    if (!summary) return json(400, { error: 'Nothing to log — the payload has no summary.' });
+
+    // tenantId carries the workspace's Zendesk subdomain captured at connect time.
+    const { accessToken, tenantId: subdomain } = await getFreshAccessToken(db, organisationId, 'zendesk');
+    if (!subdomain) return json(409, { error: 'Zendesk is connected but no subdomain is mapped — please reconnect it on the Integrations page.' });
+
+    const lines = [`Be More Swan triage summary: ${summary}`];
+    if (payload.status) lines.push(`Status: ${String(payload.status)}${Number.isFinite(Number(payload.confidenceScore)) ? ` (${Number(payload.confidenceScore)}% confident)` : ''}`);
+    if (typeof payload.escalationReason === 'string' && payload.escalationReason.trim()) lines.push(`Escalation reason: ${payload.escalationReason.trim()}`);
+
+    // public:false makes the comment an internal note — never shown to the requester.
+    const noteRes = await fetch(`https://${subdomain}.zendesk.com/api/v2/tickets/${ticketId}.json`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ticket: { comment: { body: lines.join('\n').slice(0, 5000), public: false } } }),
+    });
+    await logApiCall(db, { userId, endpoint: `${subdomain}.zendesk.com/api/v2/tickets`, httpStatus: noteRes.status });
+    if (noteRes.status === 404) {
+        return json(404, { error: `No Zendesk ticket #${ticketId} found — check the ticket number and try again.` });
+    }
+    if (!noteRes.ok) {
+        const err: { description?: string; error?: string } = await noteRes.json().catch(() => ({}));
+        return json(502, { error: `Zendesk rejected the note${err.description || err.error ? `: ${err.description || err.error}` : '.'}` });
+    }
+
+    return json(200, { success: true, message: `Internal note added to Zendesk ticket #${ticketId}.` });
+}
+
+// ── Notion: create a page with the summary + action items as to_do blocks ──────
+
+const NOTION_VERSION = '2022-06-28';
+interface NotionPagePayload {
+    meetingSummary?: unknown;
+    tasks?: unknown;
+    title?: unknown;
+}
+interface NotionTask { description?: unknown; assignee?: unknown; dueDate?: unknown }
+
+async function handleNotionCreatePage(db: Db, userId: number, organisationId: number, payload: NotionPagePayload) {
+    const summary = typeof payload.meetingSummary === 'string' ? payload.meetingSummary.trim() : '';
+    const tasks = (Array.isArray(payload.tasks) ? payload.tasks : [])
+        .filter((t): t is NotionTask => Boolean(t && typeof t === 'object' && (t as NotionTask).description));
+    if (!summary && tasks.length === 0) return json(400, { error: 'Nothing to sync — the payload has no summary or tasks.' });
+
+    const { accessToken } = await getFreshAccessToken(db, organisationId, 'notion');
+    const notionHeaders = { Authorization: `Bearer ${accessToken}`, 'Notion-Version': NOTION_VERSION, 'Content-Type': 'application/json' };
+
+    // 1. Notion pages need a parent the integration can see — pick the most recently
+    // edited page shared with the Be More Swan connection.
+    const searchRes = await fetch('https://api.notion.com/v1/search', {
+        method: 'POST',
+        headers: notionHeaders,
+        body: JSON.stringify({
+            filter: { property: 'object', value: 'page' },
+            sort: { direction: 'descending', timestamp: 'last_edited_time' },
+            page_size: 1,
+        }),
+    });
+    await logApiCall(db, { userId, endpoint: 'api.notion.com/v1/search', httpStatus: searchRes.status });
+    const searchData: { results?: Array<{ id?: string }> } = searchRes.ok ? await searchRes.json() : {};
+    const parentPageId = searchData.results?.[0]?.id;
+    if (!parentPageId) {
+        return json(404, { error: 'No Notion page is shared with Be More Swan yet — open Notion, share a page with the Be More Swan connection, then try again.' });
+    }
+
+    // 2. Create the page: summary as a paragraph block, each action item as a to_do block.
+    const title = typeof payload.title === 'string' && payload.title.trim()
+        ? payload.title.trim()
+        : `Meeting summary — ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}`;
+    const children: unknown[] = [];
+    if (summary) {
+        children.push({
+            object: 'block', type: 'paragraph',
+            paragraph: { rich_text: [{ type: 'text', text: { content: summary.slice(0, 2000) } }] },
+        });
+    }
+    if (tasks.length) {
+        children.push({
+            object: 'block', type: 'heading_2',
+            heading_2: { rich_text: [{ type: 'text', text: { content: 'Action items' } }] },
+        });
+        for (const t of tasks) {
+            const due = t.dueDate ? ` · due ${String(t.dueDate)}` : '';
+            const line = `${String(t.description)} — ${String(t.assignee || 'Unassigned')}${due}`;
+            children.push({
+                object: 'block', type: 'to_do',
+                to_do: { rich_text: [{ type: 'text', text: { content: line.slice(0, 2000) } }], checked: false },
+            });
+        }
+    }
+
+    const createRes = await fetch('https://api.notion.com/v1/pages', {
+        method: 'POST',
+        headers: notionHeaders,
+        body: JSON.stringify({
+            parent: { page_id: parentPageId },
+            properties: { title: { title: [{ type: 'text', text: { content: title.slice(0, 200) } }] } },
+            children,
+        }),
+    });
+    await logApiCall(db, { userId, endpoint: 'api.notion.com/v1/pages', httpStatus: createRes.status });
+    if (!createRes.ok) {
+        const err: { message?: string } = await createRes.json().catch(() => ({}));
+        return json(502, { error: `Notion rejected the page${err.message ? `: ${err.message}` : '.'}` });
+    }
+
+    return json(200, { success: true, message: `Created "${title}" in Notion with ${tasks.length} action item${tasks.length === 1 ? '' : 's'}.` });
+}
+
 // ── Handler ───────────────────────────────────────────────────────────────────
 
 export const handler: Handler = async (event) => {
@@ -241,6 +443,12 @@ export const handler: Handler = async (event) => {
                 return await handleXeroLogNote(db, ctx.userId, ctx.organisationId, payload);
             case 'slack_post_summary':
                 return await handleSlackPostSummary(db, ctx.userId, ctx.organisationId, payload);
+            case 'salesforce_update_record':
+                return await handleSalesforceUpdate(db, ctx.userId, ctx.organisationId, payload);
+            case 'zendesk_add_internal_note':
+                return await handleZendeskAddNote(db, ctx.userId, ctx.organisationId, payload);
+            case 'notion_create_page':
+                return await handleNotionCreatePage(db, ctx.userId, ctx.organisationId, payload);
             default:
                 return json(400, { error: `Unknown actionType "${body.actionType ?? ''}".` });
         }

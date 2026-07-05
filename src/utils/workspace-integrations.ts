@@ -1,6 +1,6 @@
 // src/utils/workspace-integrations.ts
-// Phase 1 External Integrations (HubSpot, Xero, Slack): the ONLY read/write path for
-// workspace_integrations rows and their token material.
+// External Integrations (Phase 1: HubSpot, Xero, Slack · Phase 2: Salesforce, Zendesk,
+// Notion): the ONLY read/write path for workspace_integrations rows and their token material.
 //
 // Token custody follows the platform standard (US-DB-1.6.1): access/refresh tokens are
 // never stored in table columns — they live AES-256-GCM encrypted in vault_secrets under
@@ -19,9 +19,9 @@ import { storeSecret, getSecret, deleteSecret } from './vault';
 
 type Db = ReturnType<typeof getDb>;
 
-export type IntegrationProvider = 'hubspot' | 'xero' | 'slack';
+export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion';
 
-export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack'];
+export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion'];
 
 export function isIntegrationProvider(value: unknown): value is IntegrationProvider {
     return typeof value === 'string' && (INTEGRATION_PROVIDERS as string[]).includes(value);
@@ -128,13 +128,18 @@ export async function deleteIntegration(db: Db, organisationId: number, provider
 // mid-way through a multi-call sync action.
 const REFRESH_SKEW_MS = 60 * 1000;
 
+// Salesforce token responses never include expires_in (access tokens die with the org's
+// session timeout, 2h by default). Persist this synthetic TTL instead so
+// getFreshAccessToken proactively refreshes before the real session lapses.
+export const SALESFORCE_SYNTHETIC_TTL_SEC = 90 * 60;
+
 interface RefreshResult {
     accessToken: string;
     refreshToken: string | null; // null = provider did not rotate it; keep the old one
     expiresInSec: number | null;
 }
 
-async function refreshProviderToken(provider: IntegrationProvider, refreshToken: string): Promise<RefreshResult> {
+async function refreshProviderToken(provider: IntegrationProvider, refreshToken: string, tenantId: string | null): Promise<RefreshResult> {
     if (provider === 'hubspot') {
         const res = await fetch('https://api.hubapi.com/oauth/v1/token', {
             method: 'POST',
@@ -162,6 +167,50 @@ async function refreshProviderToken(provider: IntegrationProvider, refreshToken:
         if (!res.ok || !data.access_token) throw new IntegrationError('refresh_failed', 'Xero token refresh was rejected.', 401);
         // Xero ALWAYS rotates the refresh token — the old one is now dead.
         return { accessToken: data.access_token, refreshToken: data.refresh_token ?? null, expiresInSec: data.expires_in ?? null };
+    }
+
+    if (provider === 'salesforce') {
+        const res = await fetch('https://login.salesforce.com/services/oauth2/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                grant_type: 'refresh_token',
+                client_id: process.env.SALESFORCE_CLIENT_ID ?? '',
+                client_secret: process.env.SALESFORCE_CLIENT_SECRET ?? '',
+                refresh_token: refreshToken,
+            }),
+        });
+        const data: { access_token?: string; instance_url?: string } = await res.json();
+        if (!res.ok || !data.access_token) throw new IntegrationError('refresh_failed', 'Salesforce token refresh was rejected.', 401);
+        // Salesforce refresh responses carry no expires_in — the token lives as long as
+        // the org's session timeout. Re-arm the same synthetic window used at connect
+        // time so getFreshAccessToken keeps refreshing proactively.
+        return { accessToken: data.access_token, refreshToken: null, expiresInSec: SALESFORCE_SYNTHETIC_TTL_SEC };
+    }
+
+    if (provider === 'zendesk') {
+        // Zendesk token endpoints live on the customer's subdomain (stored as tenantId).
+        // This path only runs when the Zendesk app is configured with expiring tokens.
+        if (!tenantId) throw new IntegrationError('refresh_failed', 'Zendesk token refresh needs the subdomain mapping — please reconnect it.', 401);
+        const res = await fetch(`https://${tenantId}.zendesk.com/oauth/tokens`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                grant_type: 'refresh_token',
+                client_id: process.env.ZENDESK_CLIENT_ID ?? '',
+                client_secret: process.env.ZENDESK_CLIENT_SECRET ?? '',
+                refresh_token: refreshToken,
+            }),
+        });
+        const data: { access_token?: string; refresh_token?: string; expires_in?: number } = await res.json().catch(() => ({}));
+        if (!res.ok || !data.access_token) throw new IntegrationError('refresh_failed', 'Zendesk token refresh was rejected.', 401);
+        return { accessToken: data.access_token, refreshToken: data.refresh_token ?? null, expiresInSec: data.expires_in ?? null };
+    }
+
+    if (provider === 'notion') {
+        // Notion access tokens never expire and there is no refresh grant — reaching
+        // here means the row's expiresAt was set in error; force a reconnect.
+        throw new IntegrationError('refresh_failed', 'Notion tokens cannot be refreshed — please reconnect it on the Integrations page.', 401);
     }
 
     // Slack: only used when token rotation is enabled on the app (otherwise bot tokens
@@ -213,7 +262,7 @@ export async function getFreshAccessToken(db: Db, organisationId: number, provid
     }
 
     try {
-        const refreshed = await refreshProviderToken(provider, secret.refreshToken);
+        const refreshed = await refreshProviderToken(provider, secret.refreshToken, row.tenantId);
         await storeSecret(db, row.vaultRefKey, {
             accessToken: refreshed.accessToken,
             refreshToken: refreshed.refreshToken ?? secret.refreshToken,
@@ -232,6 +281,15 @@ export async function getFreshAccessToken(db: Db, organisationId: number, provid
     }
 }
 
+const PROVIDER_LABELS: Record<IntegrationProvider, string> = {
+    hubspot: 'HubSpot',
+    xero: 'Xero',
+    slack: 'Slack',
+    salesforce: 'Salesforce',
+    zendesk: 'Zendesk',
+    notion: 'Notion',
+};
+
 export function providerLabel(provider: IntegrationProvider): string {
-    return provider === 'hubspot' ? 'HubSpot' : provider === 'xero' ? 'Xero' : 'Slack';
+    return PROVIDER_LABELS[provider];
 }

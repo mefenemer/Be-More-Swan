@@ -68,6 +68,33 @@
       tagline: 'Your Meeting Note Taker posts summaries and action items to your Slack channels.',
       usedBy: 'Meeting Note Taker',
     },
+    {
+      id: 'salesforce',
+      name: 'Salesforce',
+      emoji: '☁️',
+      iconBg: 'bg-blue-100',
+      tagline: 'Your CRM Enricher and Lead Qualifier write enriched contact and account data straight into Salesforce.',
+      usedBy: 'CRM Enricher · Lead Qualifier',
+    },
+    {
+      id: 'zendesk',
+      name: 'Zendesk',
+      emoji: '🎧',
+      iconBg: 'bg-teal-100',
+      tagline: 'Your Tier 1 Support Agent logs triage summaries as internal notes on your Zendesk tickets.',
+      usedBy: 'Tier 1 Support Agent',
+      // Zendesk OAuth lives on the customer's own subdomain — "Connect" reveals an
+      // inline subdomain field instead of redirecting straight away.
+      needsSubdomain: true,
+    },
+    {
+      id: 'notion',
+      name: 'Notion',
+      emoji: '📓',
+      iconBg: 'bg-gray-100',
+      tagline: 'Your Meeting Note Taker creates Notion pages with meeting summaries and action-item to-dos.',
+      usedBy: 'Meeting Note Taker',
+    },
   ];
 
   const grid = document.getElementById('integrations-grid');
@@ -98,6 +125,7 @@
       no_tenant: 'no organisation was authorised — pick one on the provider consent screen',
       invalid_session: 'your session expired — please sign in again',
       missing_params: 'the provider response was incomplete',
+      missing_subdomain: 'no valid Zendesk subdomain was given — enter the bit before .zendesk.com and try again',
     };
     const code = params.get('oauth_error');
     showBanner('error', 'Could not connect ' + providerName(params.get('provider')) + ' — ' + (reasons[code] || code) + '.');
@@ -117,10 +145,25 @@
           ? '<span class="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200">Reconnect needed</span>'
           : '<span class="text-xs font-bold px-2.5 py-1 rounded-full bg-gray-50 text-gray-500 border border-gray-200">Not connected</span>';
 
+      const connectLabel = (s.status === 'expired' ? 'Reconnect ' : 'Connect ') + esc(p.name);
       const action = s.connected
         ? '<button type="button" data-disconnect="' + p.id + '" class="w-full px-4 py-2 bg-white border border-gray-200 text-gray-600 hover:text-red-600 hover:border-red-200 text-sm font-bold rounded-lg transition">Disconnect</button>'
-        : '<a href="/api/oauth/' + p.id + '/connect" class="block w-full text-center px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition">' +
-            (s.status === 'expired' ? 'Reconnect ' : 'Connect ') + esc(p.name) + '</a>';
+        : p.needsSubdomain
+          // Zendesk: reveal an inline subdomain field first — OAuth needs it to build
+          // the https://{subdomain}.zendesk.com authorize URL.
+          ? '<button type="button" data-subdomain-reveal="' + p.id + '" class="block w-full text-center px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition">' + connectLabel + '</button>' +
+            '<div class="hidden space-y-1.5" data-subdomain-form="' + p.id + '">' +
+              '<label class="text-xs font-bold text-gray-600" for="subdomain-input-' + p.id + '">Zendesk Subdomain</label>' +
+              '<div class="flex items-stretch gap-2">' +
+                '<div class="flex items-center grow min-w-0 border border-gray-300 rounded-lg focus-within:border-emerald-500 overflow-hidden">' +
+                  '<input id="subdomain-input-' + p.id + '" data-subdomain-input="' + p.id + '" type="text" placeholder="yourcompany" autocomplete="off" spellcheck="false" class="min-w-0 grow px-2.5 py-2 text-sm focus:outline-none">' +
+                  '<span class="px-2 text-xs text-gray-400 shrink-0 select-none">.zendesk.com</span>' +
+                '</div>' +
+                '<button type="button" data-subdomain-next="' + p.id + '" class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition shrink-0">Next</button>' +
+              '</div>' +
+              '<p class="hidden text-xs font-semibold text-red-600" data-subdomain-error="' + p.id + '">Enter your Zendesk subdomain — the bit before .zendesk.com.</p>' +
+            '</div>'
+          : '<a href="/api/oauth/' + p.id + '/connect" class="block w-full text-center px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition">' + connectLabel + '</a>';
 
       return (
         '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">' +
@@ -154,7 +197,53 @@
     }
   }
 
+  // ── Zendesk subdomain flow: "Connect" reveals the inline field; "Next" starts OAuth ──
+  // Mirrors the server's parseZendeskSubdomain: accepts "acme", "acme.zendesk.com" or a
+  // full URL and reduces it to the bare subdomain.
+  function parseSubdomain(raw) {
+    let v = String(raw || '').trim().toLowerCase()
+      .replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/\.zendesk\.com$/, '');
+    return /^[a-z0-9][a-z0-9-]{0,62}$/.test(v) ? v : null;
+  }
+
+  function startSubdomainConnect(id) {
+    const input = grid.querySelector('[data-subdomain-input="' + id + '"]');
+    const error = grid.querySelector('[data-subdomain-error="' + id + '"]');
+    const subdomain = parseSubdomain(input && input.value);
+    if (!subdomain) {
+      if (error) error.classList.remove('hidden');
+      if (input) input.focus();
+      return;
+    }
+    if (error) error.classList.add('hidden');
+    window.location.href = '/api/oauth/' + id + '/connect?subdomain=' + encodeURIComponent(subdomain);
+  }
+
+  grid.addEventListener('keydown', function (e) {
+    const input = e.target.closest('[data-subdomain-input]');
+    if (!input || e.key !== 'Enter') return;
+    e.preventDefault();
+    startSubdomainConnect(input.getAttribute('data-subdomain-input'));
+  });
+
   grid.addEventListener('click', async function (e) {
+    const reveal = e.target.closest('[data-subdomain-reveal]');
+    if (reveal) {
+      const id = reveal.getAttribute('data-subdomain-reveal');
+      const form = grid.querySelector('[data-subdomain-form="' + id + '"]');
+      reveal.classList.add('hidden');
+      if (form) {
+        form.classList.remove('hidden');
+        const input = form.querySelector('[data-subdomain-input]');
+        if (input) input.focus();
+      }
+      return;
+    }
+    const next = e.target.closest('[data-subdomain-next]');
+    if (next) {
+      startSubdomainConnect(next.getAttribute('data-subdomain-next'));
+      return;
+    }
     const btn = e.target.closest('[data-disconnect]');
     if (!btn) return;
     const id = btn.getAttribute('data-disconnect');

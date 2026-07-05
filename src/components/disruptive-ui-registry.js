@@ -252,16 +252,22 @@
 
   // ── Built-in: Data Diff View Card ───────────────────────────────────────────
   // Renderer for the crm-enricher route's wire shape (chat-orchestrator.ts):
-  // { type: 'data_diff_view', recordName?, recordEmail?, objectType?,
+  // { type: 'data_diff_view', recordName?, recordEmail?, objectType?, crmProvider?,
   //   fields: [{ fieldName, oldValue: string|null, newValue, propertyName? }, ...] }
   // Side-by-side current → proposed comparison; the proposed value is highlighted in
   // emerald when it differs from the current value (or the current value is blank).
-  // "Apply in HubSpot" PATCHes the proposed values onto the matching contact/company
-  // via /api/actions/sync (hubspot_update_record).
+  // crmProvider echoes the user's onboarding primaryCrm: 'salesforce' routes the apply
+  // button to salesforce_update_record, anything else defaults to HubSpot
+  // (hubspot_update_record). Both PATCH the proposed values onto the matching
+  // contact/company record via /api/actions/sync.
   function renderDataDiffViewCard(ui, esc) {
     const fields = (Array.isArray(ui.fields) ? ui.fields : [])
       .filter((f) => f && typeof f === 'object' && f.fieldName);
     if (fields.length === 0) return null; // nothing to compare — fall back to text-only
+
+    const isSalesforce = String(ui.crmProvider || '').trim().toLowerCase() === 'salesforce';
+    const crmLabel = isSalesforce ? 'Salesforce' : 'HubSpot';
+    const crmAction = isSalesforce ? 'salesforce_update_record' : 'hubspot_update_record';
 
     const el = document.createElement('div');
     el.className = 'bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden max-w-2xl';
@@ -297,15 +303,15 @@
         </table>
       </div>
       <div class="flex items-center justify-between gap-3 px-5 py-3 border-t border-gray-100">
-        <p class="text-xs text-gray-400" data-diff-status>Review the proposed values, then apply them to the record in HubSpot.</p>
+        <p class="text-xs text-gray-400" data-diff-status>Review the proposed values, then apply them to the record in ${crmLabel}.</p>
         <button type="button" data-apply-diff
           class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">
-          Apply in HubSpot
+          Apply in ${crmLabel}
         </button>
       </div>
     `;
 
-    // Live behaviour: PATCH the proposed values onto the HubSpot record.
+    // Live behaviour: PATCH the proposed values onto the CRM record.
     const statusLine = el.querySelector('[data-diff-status]');
     el.addEventListener('click', async (e) => {
       const button = e.target.closest('[data-apply-diff]');
@@ -315,7 +321,7 @@
       button.textContent = 'Applying…';
       statusLine.className = 'text-xs text-gray-400';
       try {
-        const data = await postSyncAction('hubspot_update_record', {
+        const data = await postSyncAction(crmAction, {
           recordName: ui.recordName ?? null,
           recordEmail: ui.recordEmail ?? null,
           objectType: ui.objectType ?? null,
@@ -327,13 +333,13 @@
         });
         button.textContent = 'Applied ✓';
         button.className = 'px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-bold rounded-lg cursor-default shrink-0 whitespace-nowrap';
-        statusLine.textContent = data.message || 'Record updated in HubSpot.';
+        statusLine.textContent = data.message || `Record updated in ${crmLabel}.`;
         statusLine.className = 'text-xs font-semibold text-emerald-700';
       } catch (err) {
         button.disabled = false;
         button.textContent = 'Retry';
         button.className = 'px-4 py-2 bg-red-50 border border-red-200 text-red-700 hover:border-red-300 text-sm font-bold rounded-lg transition shrink-0 whitespace-nowrap';
-        statusLine.textContent = err.message || 'Could not update the record in HubSpot.';
+        statusLine.textContent = err.message || `Could not update the record in ${crmLabel}.`;
         statusLine.className = 'text-xs font-semibold text-red-600';
       }
     });
@@ -347,10 +353,13 @@
 
   // ── Built-in: Ticket Triage View Card ───────────────────────────────────────
   // Renderer for the tier1-support-agent route's wire shape (chat-orchestrator.ts):
-  // { type: 'ticket_triage_view', status: 'Resolved'|'Escalated', confidenceScore: 0-100,
-  //   summary, escalationReason: string|null, escalationEmail?: string|null }
+  // { type: 'ticket_triage_view', status: 'Resolved'|'Escalated', ticketId?: string|null,
+  //   confidenceScore: 0-100, summary, escalationReason: string|null,
+  //   escalationEmail?: string|null }
   // Escalated tickets get an amber/red warning treatment naming the escalation inbox;
-  // resolved tickets get an emerald treatment.
+  // resolved tickets get an emerald treatment. "Log to Zendesk" pushes the triage
+  // summary as an internal note on the ticket via /api/actions/sync
+  // (zendesk_add_internal_note) — the note is private, never requester-visible.
   function renderTicketTriageViewCard(ui, esc) {
     const escalated = String(ui.status).toLowerCase() === 'escalated';
     const confidence = Math.max(0, Math.min(100, Number(ui.confidenceScore) || 0));
@@ -386,7 +395,46 @@
         <div class="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-900">
           <span class="font-bold">Handled automatically</span> — no human follow-up needed.
         </div>`}
+
+      <div class="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-gray-100">
+        <p class="text-xs text-gray-400" data-zendesk-status>Logs this triage summary as an internal note on the ticket.</p>
+        <button type="button" data-log-zendesk
+          class="px-4 py-2 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">
+          Log to Zendesk
+        </button>
+      </div>
     `;
+
+    // Live behaviour: push the triage summary as a private Zendesk ticket comment.
+    const zendeskStatusLine = el.querySelector('[data-zendesk-status]');
+    el.addEventListener('click', async (e) => {
+      const button = e.target.closest('[data-log-zendesk]');
+      if (!button || button.disabled) return;
+
+      button.disabled = true;
+      button.textContent = 'Logging…';
+      zendeskStatusLine.className = 'text-xs text-gray-400';
+      try {
+        const data = await postSyncAction('zendesk_add_internal_note', {
+          ticketId: ui.ticketId ?? null,
+          summary: ui.summary ?? null,
+          status: ui.status ?? null,
+          confidenceScore: ui.confidenceScore ?? null,
+          escalationReason: ui.escalationReason ?? null,
+        });
+        button.textContent = 'Logged ✓';
+        button.className = 'px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-bold rounded-lg cursor-default shrink-0 whitespace-nowrap';
+        zendeskStatusLine.textContent = data.message || 'Internal note added in Zendesk.';
+        zendeskStatusLine.className = 'text-xs font-semibold text-emerald-700';
+      } catch (err) {
+        button.disabled = false;
+        button.textContent = 'Retry Zendesk';
+        button.className = 'px-4 py-2 bg-red-50 border border-red-200 text-red-700 hover:border-red-300 text-sm font-bold rounded-lg transition shrink-0 whitespace-nowrap';
+        zendeskStatusLine.textContent = err.message || 'Could not add the note in Zendesk.';
+        zendeskStatusLine.className = 'text-xs font-semibold text-red-600';
+      }
+    });
+
     return el;
   }
 
@@ -479,9 +527,11 @@
   // Renderer for the meeting-note-taker route's wire shape (chat-orchestrator.ts):
   // { type: 'action_item_assignment', meetingSummary, targetDestination,
   //   channel?, tasks: [{ description, assignee, dueDate: string|null }, ...] }
-  // "Sync" posts the summary + tasks to Slack as Block Kit via /api/actions/sync
-  // (slack_post_summary). targetDestination stays a display label; an optional
-  // ui.channel ('#name' or channel id) picks the Slack channel, defaulting to #general.
+  // targetDestination echoes the onboarding taskDestination label and picks the sync
+  // route: 'Notion' creates a page (summary paragraph + to_do blocks) via
+  // /api/actions/sync (notion_create_page); anything else posts the summary + tasks
+  // to Slack as Block Kit (slack_post_summary), where an optional ui.channel ('#name'
+  // or channel id) picks the channel, defaulting to #general.
   function renderActionItemAssignmentCard(ui, esc) {
     const tasks = (Array.isArray(ui.tasks) ? ui.tasks : [])
       .filter((t) => t && typeof t === 'object' && t.description);
@@ -489,6 +539,8 @@
 
     const destination = typeof ui.targetDestination === 'string' && ui.targetDestination.trim()
       ? ui.targetDestination.trim() : 'your task tracker';
+    const isNotion = destination.toLowerCase() === 'notion';
+    const syncActionType = isNotion ? 'notion_create_page' : 'slack_post_summary';
 
     const el = document.createElement('div');
     el.className = 'bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden max-w-2xl';
@@ -539,7 +591,7 @@
       </div>
     `;
 
-    // Live behaviour: post the summary + tasks to Slack as Block Kit.
+    // Live behaviour: create a Notion page or post to Slack, per the destination.
     const statusLine = el.querySelector('[data-sync-status]');
     el.addEventListener('click', async (e) => {
       const button = e.target.closest('[data-sync-action]');
@@ -549,7 +601,7 @@
       button.textContent = 'Syncing…';
       statusLine.className = 'text-xs text-gray-400';
       try {
-        const data = await postSyncAction('slack_post_summary', {
+        const data = await postSyncAction(syncActionType, {
           meetingSummary: ui.meetingSummary ?? null,
           targetDestination: ui.targetDestination ?? null,
           channel: ui.channel ?? null,

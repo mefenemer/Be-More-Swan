@@ -344,6 +344,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
   "uiElement": {                      // or null when there is nothing to enrich yet
     "type": "data_diff_view",
     "recordName": "<company or contact being enriched>",
+    "crmProvider": ${JSON.stringify(primaryCrm ?? null)},
     "fields": [
       { "fieldName": "<CRM field>", "oldValue": "<current value>" | null, "newValue": "<proposed value>" },
       ...
@@ -388,6 +389,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
   "uiElement": {                      // or null when there is no ticket to triage yet
     "type": "ticket_triage_view",
     "status": "Resolved" | "Escalated",
+    "ticketId": "<the helpdesk ticket number, digits only, when the query names one>" | null,
     "confidenceScore": <0-100>,
     "summary": "<one-sentence summary of the customer's issue>",
     "escalationReason": "<why it was escalated>" | null,

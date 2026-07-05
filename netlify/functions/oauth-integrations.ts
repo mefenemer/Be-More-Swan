@@ -1,5 +1,6 @@
 // netlify/functions/oauth-integrations.ts
-// Phase 1 External Integrations: universal OAuth 2.0 router for HubSpot, Xero and Slack.
+// External Integrations: universal OAuth 2.0 router for HubSpot, Xero, Slack (Phase 1)
+// and Salesforce, Zendesk, Notion (Phase 2).
 //
 // Routed via netlify.toml rewrites so the public URLs are:
 //   GET  /api/oauth/:provider/connect    → 302 to the provider's authorization URL
@@ -15,7 +16,13 @@
 // persisted via src/utils/workspace-integrations.ts (vault-encrypted, never plaintext).
 //
 // Client IDs/secrets come from env: HUBSPOT_CLIENT_ID/SECRET, XERO_CLIENT_ID/SECRET,
-// SLACK_CLIENT_ID/SECRET.
+// SLACK_CLIENT_ID/SECRET, SALESFORCE_CLIENT_ID/SECRET, ZENDESK_CLIENT_ID/SECRET,
+// NOTION_CLIENT_ID/SECRET.
+//
+// Zendesk special case: its OAuth endpoints live on the customer's own subdomain
+// (https://{subdomain}.zendesk.com), so /api/oauth/zendesk/connect requires a
+// ?subdomain= query param. The subdomain rides in the server-side CSRF vault entry
+// (never in the client-visible state) and is persisted as the row's tenantId.
 
 import { Handler, HandlerEvent } from '@netlify/functions';
 import { randomBytes } from 'crypto';
@@ -31,6 +38,7 @@ import {
     getIntegration,
     deleteIntegration,
     providerLabel,
+    SALESFORCE_SYNTHETIC_TTL_SEC,
 } from '../../src/utils/workspace-integrations';
 
 const CSRF_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -40,7 +48,24 @@ const SCOPES: Record<IntegrationProvider, string> = {
     hubspot: 'crm.objects.contacts.read crm.objects.contacts.write crm.objects.companies.read crm.objects.companies.write oauth',
     xero: 'offline_access accounting.transactions accounting.contacts',
     slack: 'chat:write,chat:write.public,channels:read',
+    // Phase 2 actions: Salesforce record patches, Zendesk internal notes, Notion pages.
+    salesforce: 'api refresh_token',
+    zendesk: 'read write',
+    notion: '', // Notion has no scope param — access is granted per-page on the consent screen
 };
+
+/**
+ * Normalise the Zendesk subdomain input: accepts a bare subdomain ("acme"), a host
+ * ("acme.zendesk.com") or a full URL, and returns the bare subdomain or null when the
+ * result isn't a valid Zendesk subdomain shape.
+ */
+function parseZendeskSubdomain(raw: string | undefined): string | null {
+    if (!raw) return null;
+    let value = raw.trim().toLowerCase();
+    value = value.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+    value = value.replace(/\.zendesk\.com$/, '');
+    return /^[a-z0-9][a-z0-9-]{0,62}$/.test(value) ? value : null;
+}
 
 function buildState(payload: object): string {
     return Buffer.from(JSON.stringify(payload)).toString('base64url');
@@ -132,12 +157,21 @@ export const handler: Handler = async (event) => {
         const clientId = process.env[`${provider.toUpperCase()}_CLIENT_ID`];
         if (!clientId) return redirect(`/integrations.html?oauth_error=not_configured&provider=${provider}`);
 
+        // Zendesk's authorize endpoint lives on the customer's subdomain, so the connect
+        // link must carry it. It travels to the callback inside the CSRF vault entry.
+        let zendeskSubdomain: string | null = null;
+        if (provider === 'zendesk') {
+            zendeskSubdomain = parseZendeskSubdomain(event.queryStringParameters?.subdomain);
+            if (!zendeskSubdomain) return redirect('/integrations.html?oauth_error=missing_subdomain&provider=zendesk');
+        }
+
         // CSRF held server-side (vault) with TTL; state carries only routing info.
         const csrf = randomBytes(32).toString('hex');
         await storeSecret(db, `oauth_csrf:${userId}:${provider}`, {
             csrf,
             expiresAt: Date.now() + CSRF_TTL_MS,
             organisationId: String(organisationId),
+            ...(zendeskSubdomain ? { zendeskSubdomain } : {}),
         });
 
         const redirectUri = `${baseUrl}/api/oauth/${provider}/callback`;
@@ -148,6 +182,12 @@ export const handler: Handler = async (event) => {
             authUrl = `https://app.hubspot.com/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.hubspot)}&state=${state}`;
         } else if (provider === 'xero') {
             authUrl = `https://login.xero.com/identity/connect/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.xero)}&state=${state}`;
+        } else if (provider === 'salesforce') {
+            authUrl = `https://login.salesforce.com/services/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.salesforce)}&state=${state}`;
+        } else if (provider === 'zendesk') {
+            authUrl = `https://${zendeskSubdomain}.zendesk.com/oauth/authorizations/new?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.zendesk)}&state=${state}`;
+        } else if (provider === 'notion') {
+            authUrl = `https://api.notion.com/v1/oauth/authorize?response_type=code&owner=user&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
         } else {
             authUrl = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=${encodeURIComponent(SCOPES.slack)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
         }
@@ -168,7 +208,7 @@ export const handler: Handler = async (event) => {
 
         // Verify + consume the server-side CSRF entry (one-time use, 10-minute TTL).
         const csrfKey = `oauth_csrf:${userId}:${provider}`;
-        const stored = await getSecret(db, csrfKey).catch(() => null) as { csrf?: string; expiresAt?: number; organisationId?: string } | null;
+        const stored = await getSecret(db, csrfKey).catch(() => null) as { csrf?: string; expiresAt?: number; organisationId?: string; zendeskSubdomain?: string } | null;
         await deleteSecret(db, csrfKey).catch(() => {});
         if (!stored || stored.csrf !== state.csrf || !stored.expiresAt || Date.now() > stored.expiresAt) {
             return redirect(`/integrations.html?oauth_error=csrf_fail&provider=${provider}`);
@@ -234,6 +274,95 @@ export const handler: Handler = async (event) => {
                     tenantId: org.tenantId,
                     externalAccountName: org.tenantName ?? null,
                     scopes: SCOPES.xero,
+                });
+            } else if (provider === 'salesforce') {
+                const tokenRes = await fetch('https://login.salesforce.com/services/oauth2/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        grant_type: 'authorization_code',
+                        client_id: process.env.SALESFORCE_CLIENT_ID ?? '',
+                        client_secret: process.env.SALESFORCE_CLIENT_SECRET ?? '',
+                        redirect_uri: redirectUri,
+                        code,
+                    }),
+                });
+                const tokenData: { access_token?: string; refresh_token?: string; instance_url?: string; id?: string } = await tokenRes.json();
+                if (!tokenData.access_token || !tokenData.instance_url) return redirect(`/integrations.html?oauth_error=token_exchange&provider=salesforce`);
+
+                // The identity URL in the token response gives the username for the card label.
+                let accountName: string | null = null;
+                if (tokenData.id) {
+                    const idRes = await fetch(tokenData.id, { headers: { Authorization: `Bearer ${tokenData.access_token}` } });
+                    const idData: { username?: string } = idRes.ok ? await idRes.json() : {};
+                    accountName = idData.username ?? null;
+                }
+                if (!accountName) {
+                    try { accountName = new URL(tokenData.instance_url).hostname; } catch { /* keep null */ }
+                }
+
+                await saveIntegration(db, {
+                    organisationId, userId, provider: 'salesforce',
+                    accessToken: tokenData.access_token,
+                    refreshToken: tokenData.refresh_token ?? null,
+                    // Salesforce sends no expires_in — synthetic TTL keeps refreshes proactive.
+                    expiresInSec: SALESFORCE_SYNTHETIC_TTL_SEC,
+                    // Every Salesforce REST call is rooted at the org's instance URL.
+                    tenantId: tokenData.instance_url,
+                    externalAccountName: accountName,
+                    scopes: SCOPES.salesforce,
+                });
+            } else if (provider === 'zendesk') {
+                // The subdomain captured at connect time rode in the CSRF vault entry.
+                const subdomain = parseZendeskSubdomain(stored.zendeskSubdomain);
+                if (!subdomain) return redirect(`/integrations.html?oauth_error=missing_subdomain&provider=zendesk`);
+
+                const tokenRes = await fetch(`https://${subdomain}.zendesk.com/oauth/tokens`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        grant_type: 'authorization_code',
+                        code,
+                        client_id: process.env.ZENDESK_CLIENT_ID ?? '',
+                        client_secret: process.env.ZENDESK_CLIENT_SECRET ?? '',
+                        redirect_uri: redirectUri,
+                        scope: SCOPES.zendesk,
+                    }),
+                });
+                const tokenData: { access_token?: string; refresh_token?: string; expires_in?: number } = await tokenRes.json().catch(() => ({}));
+                if (!tokenData.access_token) return redirect(`/integrations.html?oauth_error=token_exchange&provider=zendesk`);
+
+                await saveIntegration(db, {
+                    organisationId, userId, provider: 'zendesk',
+                    accessToken: tokenData.access_token,
+                    // refresh_token/expires_in only appear when the Zendesk app is
+                    // configured with expiring tokens — otherwise the token is permanent.
+                    refreshToken: tokenData.refresh_token ?? null,
+                    expiresInSec: tokenData.expires_in ?? null,
+                    // The subdomain roots every Zendesk API call — this IS the tenant mapping.
+                    tenantId: subdomain,
+                    externalAccountName: `${subdomain}.zendesk.com`,
+                    scopes: SCOPES.zendesk,
+                });
+            } else if (provider === 'notion') {
+                const credentials = Buffer.from(`${process.env.NOTION_CLIENT_ID ?? ''}:${process.env.NOTION_CLIENT_SECRET ?? ''}`).toString('base64');
+                const tokenRes = await fetch('https://api.notion.com/v1/oauth/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Authorization: `Basic ${credentials}` },
+                    body: JSON.stringify({ grant_type: 'authorization_code', code, redirect_uri: redirectUri }),
+                });
+                const tokenData: { access_token?: string; workspace_id?: string; workspace_name?: string } = await tokenRes.json().catch(() => ({}));
+                if (!tokenData.access_token) return redirect(`/integrations.html?oauth_error=token_exchange&provider=notion`);
+
+                await saveIntegration(db, {
+                    organisationId, userId, provider: 'notion',
+                    accessToken: tokenData.access_token,
+                    // Notion tokens never expire and there is no refresh grant.
+                    refreshToken: null,
+                    expiresInSec: null,
+                    tenantId: tokenData.workspace_id ?? null,
+                    externalAccountName: tokenData.workspace_name ?? null,
+                    scopes: null,
                 });
             } else {
                 const tokenRes = await fetch('https://slack.com/api/oauth.v2.access', {
