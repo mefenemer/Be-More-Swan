@@ -112,5 +112,84 @@
   // Alias for callers/routes that use the PascalCase component name as the type key.
   register('LeadScoringCard', renderLeadScoringCard);
 
+  // ── Built-in: Aging Invoices Table Card ─────────────────────────────────────
+  // Renderer for the accounts-receivable-clerk route's wire shape (chat-orchestrator.ts):
+  // { type: 'aging_invoices_table', title?, invoices: [{ clientName, daysPastDue,
+  //   amount, status: 'reminder'|'overdue'|'final_notice'|'escalated' }, ...] }
+  // The "Pause chasing" toggle is a client-side mock for now — it dims the row but
+  // does not persist anywhere yet.
+  const INVOICE_STATUS_STYLES = {
+    reminder: { chip: 'bg-emerald-50 text-emerald-800 border-emerald-200', label: 'Reminder' },
+    overdue: { chip: 'bg-amber-50 text-amber-800 border-amber-200', label: 'Overdue' },
+    final_notice: { chip: 'bg-orange-50 text-orange-800 border-orange-200', label: 'Final notice' },
+    escalated: { chip: 'bg-red-50 text-red-700 border-red-200', label: 'Escalated' },
+  };
+
+  function renderAgingInvoicesTableCard(ui, esc) {
+    const invoices = (Array.isArray(ui.invoices) ? ui.invoices : [])
+      .filter((inv) => inv && typeof inv === 'object');
+    if (invoices.length === 0) return null; // nothing to tabulate — fall back to text-only
+
+    const el = document.createElement('div');
+    el.className = 'bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden max-w-2xl';
+    el.innerHTML = `
+      <div class="flex items-center gap-3 px-5 py-4 border-b border-gray-100">
+        <div class="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center text-xl shrink-0">💷</div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-emerald-700 tracking-wider uppercase">Aged Receivables</p>
+          <p class="font-bold text-gray-900 truncate">${esc(ui.title) || 'Overdue invoices'}</p>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">
+              <th class="px-5 py-3">Client</th>
+              <th class="px-3 py-3 text-right">Days overdue</th>
+              <th class="px-3 py-3 text-right">Amount</th>
+              <th class="px-3 py-3">Status</th>
+              <th class="px-5 py-3 text-right">Chasing</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            ${invoices.map((inv) => {
+              const status = INVOICE_STATUS_STYLES[inv.status] || INVOICE_STATUS_STYLES.overdue;
+              const days = Number(inv.daysPastDue);
+              return `
+              <tr data-invoice-row>
+                <td class="px-5 py-3 font-semibold text-gray-900">${esc(inv.clientName) || 'Unknown client'}</td>
+                <td class="px-3 py-3 text-right font-semibold ${days >= 60 ? 'text-red-600' : days >= 30 ? 'text-orange-600' : 'text-gray-700'}">${Number.isFinite(days) ? days : '—'}</td>
+                <td class="px-3 py-3 text-right font-extrabold text-gray-900">${esc(inv.amount)}</td>
+                <td class="px-3 py-3"><span class="text-xs font-bold px-2 py-0.5 rounded-full border whitespace-nowrap ${status.chip}">${status.label}</span></td>
+                <td class="px-5 py-3 text-right">
+                  <label class="relative inline-flex items-center cursor-pointer align-middle" title="Pause chasing">
+                    <input type="checkbox" class="sr-only peer" data-pause-chasing checked>
+                    <span class="w-9 h-5 bg-gray-200 rounded-full peer-checked:bg-emerald-700 peer-focus:ring-2 peer-focus:ring-emerald-700 transition
+                      after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:shadow after:transition-all peer-checked:after:translate-x-4"></span>
+                  </label>
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+      <p class="px-5 py-3 text-xs text-gray-400 border-t border-gray-100">Toggle off to pause chasing a client. (Preview — pausing is not saved yet.)</p>
+    `;
+
+    // Mock behaviour: unticking "chasing" dims the row so the pause reads visually.
+    el.addEventListener('change', (e) => {
+      const toggle = e.target.closest('[data-pause-chasing]');
+      if (!toggle) return;
+      const row = toggle.closest('[data-invoice-row]');
+      if (row) row.classList.toggle('opacity-40', !toggle.checked);
+    });
+
+    return el;
+  }
+
+  register('aging_invoices_table', renderAgingInvoicesTableCard);
+  // Alias for callers/routes that use the PascalCase component name as the type key.
+  register('AgingInvoicesTableCard', renderAgingInvoicesTableCard);
+
   window.DisruptiveUIRegistry = { register, has, render, escapeHtml };
 })();

@@ -102,15 +102,38 @@ function parseStructuredReply(raw: string): { content: string; uiElement: unknow
     return { content: raw.trim(), uiElement: null };
 }
 
+/** Pull one onboarding answer out of the (untyped) onboardingContext JSON blob. */
+function onboardingValue(rc: RouteContext, key: string): unknown {
+    if (rc.onboardingContext && typeof rc.onboardingContext === 'object') {
+        return (rc.onboardingContext as Record<string, unknown>)[key];
+    }
+    return undefined;
+}
+
 const ROUTES: Record<string, AssistantRoute> = {
-    // STUB — Tier 1 Lead Qualifier. The real scoring rubric/tools land with its epic; the
-    // wire shape (reply + lead_scoring_card uiElement) is final so the client can build now.
+    // Tier 1, Batch 1 — Lead Qualifier. Scores inbound leads against the ideal-customer
+    // profile captured at hire time (targetIndustries / minHeadcount / salesTone, see
+    // src/config/assistant-onboarding-schemas.js). Wire shape: reply + lead_scoring_card
+    // uiElement, matching the LeadScoringCard renderer in disruptive-ui-registry.js.
     'lead-qualifier': {
         model: DEFAULT_MODEL,
         maxTokens: 1024,
-        buildSystemPrompt: (rc) => [
-            sharedContextBlock(rc),
-            `You qualify inbound leads for this business. When the conversation contains enough detail to assess a lead, include a scoring card; otherwise ask for what's missing.
+        buildSystemPrompt: (rc) => {
+            const industries = onboardingValue(rc, 'targetIndustries');
+            const minHeadcount = onboardingValue(rc, 'minHeadcount');
+            const salesTone = onboardingValue(rc, 'salesTone');
+            return [
+                sharedContextBlock(rc),
+                `You qualify inbound leads for this business. Score every lead against the ideal customer profile below — a lead that matches it well scores high; one that misses it scores low, and your reasons must say which criteria it met or missed.
+
+Ideal customer profile (from setup):
+- Target industries: ${industries ? JSON.stringify(industries) : 'not specified — treat industry as neutral'}
+- Minimum company headcount: ${minHeadcount ?? 'not specified — treat company size as neutral'}
+- Sales tone: ${salesTone ?? 'professional'} — write your reply (and the suggested next step) in this tone.
+
+Scoring bands: 70-100 = "hot" (strong profile fit + buying intent), 40-69 = "warm" (partial fit or unclear intent), 0-39 = "cold" (poor fit or no intent).
+
+When the conversation contains enough detail to assess a lead, include the scoring card; otherwise set uiElement to null and ask for what's missing (industry, company size, budget/intent).
 
 Return STRICT JSON (no markdown, no prose outside the JSON):
 {
@@ -120,11 +143,51 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
     "leadName": "<name or company>",
     "score": <0-100>,
     "rating": "hot" | "warm" | "cold",
-    "reasons": ["<short reason>", ...],
+    "reasons": ["<short reason tied to the profile criteria>", ...],
     "suggestedNextStep": "<one concrete action>"
   }
 }`,
-        ].join('\n\n'),
+            ].join('\n\n');
+        },
+        parseResponse: parseStructuredReply,
+    },
+
+    // Tier 1, Batch 1 — Accounts Receivable Clerk. Polite-but-firm collections agent;
+    // chases overdue invoices above the configured threshold on the configured cadence.
+    // Wire shape: reply + aging_invoices_table uiElement, matching the
+    // AgingInvoicesTableCard renderer in disruptive-ui-registry.js.
+    'accounts-receivable-clerk': {
+        model: DEFAULT_MODEL,
+        maxTokens: 1536,
+        buildSystemPrompt: (rc) => {
+            const platform = onboardingValue(rc, 'accountingPlatform');
+            const cadence = onboardingValue(rc, 'followUpCadence');
+            const minInvoiceValue = onboardingValue(rc, 'minInvoiceValue');
+            return [
+                sharedContextBlock(rc),
+                `You are a collections agent chasing overdue invoices for this business. Your voice is polite but firm: always courteous and professional, never apologetic about asking for money that is owed, and escalating in firmness the longer an invoice is past due.
+
+Collections policy (from setup):
+- Accounting platform: ${platform ?? 'not specified'} — refer to it by name when talking about where invoice data lives.
+- Follow-up cadence: ${cadence ?? 'weekly'} — recommend chasing on this rhythm.
+- Minimum invoice value to chase: ${minInvoiceValue ?? 'no threshold'} — do not recommend chasing invoices below this value; mention you are leaving them alone.
+
+When the conversation contains overdue-invoice details (from the user pasting a report, listing debtors, or asking you to review their aged receivables), include the aging table; otherwise set uiElement to null and ask for the aged-receivables detail you need. Sort invoices most-overdue first. status is your recommended chasing stage: "reminder" (gentle nudge), "overdue" (firm chase), "final_notice" (last warning before escalation), or "escalated" (recommend humans/legal take over).
+
+Return STRICT JSON (no markdown, no prose outside the JSON):
+{
+  "reply": "your conversational message to the user",
+  "uiElement": {                      // or null when there is no invoice data yet
+    "type": "aging_invoices_table",
+    "title": "<short heading, e.g. 'Overdue invoices — June'>",
+    "invoices": [
+      { "clientName": "<client>", "daysPastDue": <number>, "amount": "<formatted amount incl. currency symbol>", "status": "reminder" | "overdue" | "final_notice" | "escalated" },
+      ...
+    ]
+  }
+}`,
+            ].join('\n\n');
+        },
         parseResponse: parseStructuredReply,
     },
 };

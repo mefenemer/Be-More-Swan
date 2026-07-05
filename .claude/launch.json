@@ -42,6 +42,13 @@
       "runtimeArgs": ["-m", "http.server", "4173", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/3ee8939b-fb43-4f21-a065-8c8766e78c93/scratchpad/demo"],
       "port": 4173,
       "autoPort": false
+    },
+    {
+      "name": "component-harness-batch1",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4174", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/a9b8c9a2-3f78-497d-9faa-c9625b901d49/scratchpad/demo"],
+      "port": 4174,
+      "autoPort": false
     }
   ]
 }

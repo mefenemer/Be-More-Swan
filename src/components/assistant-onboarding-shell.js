@@ -21,9 +21,10 @@
  * or a flat array of fields (auto-wrapped into a single step). Each field:
  *   { key,                    // property name in the saved onboardingContext
  *     label,
- *     type,                   // 'text' | 'textarea' | 'dropdown' | 'toggle' | 'radio'
+ *     type,                   // 'text' | 'textarea' | 'number' | 'dropdown' | 'toggle' | 'radio'
  *     required?,              // boolean (toggles are never required — off is an answer)
  *     helpText?, placeholder?, defaultValue?,
+ *     min?, max?,             // number fields only
  *     options? }              // dropdown/radio: [{ value, label, description? }]
  *
  * "Complete Setup" saves the collected answers to aiAssistants.onboardingContext via
@@ -85,6 +86,13 @@
           <input type="text" name="${escapeHtml(name)}" value="${escapeHtml(value ?? '')}"
             placeholder="${escapeHtml(field.placeholder || '')}" class="${inputClasses()}">`;
 
+      case 'number':
+        return `${fieldHeader(field)}
+          <input type="number" name="${escapeHtml(name)}" value="${escapeHtml(value ?? '')}"
+            placeholder="${escapeHtml(field.placeholder || '')}"
+            ${field.min !== undefined ? `min="${escapeHtml(field.min)}"` : ''}
+            ${field.max !== undefined ? `max="${escapeHtml(field.max)}"` : ''} class="${inputClasses()}">`;
+
       case 'textarea':
         return `${fieldHeader(field)}
           <textarea name="${escapeHtml(name)}" rows="4" placeholder="${escapeHtml(field.placeholder || '')}"
@@ -142,6 +150,12 @@
       case 'radio': {
         const el = container.querySelector(`input[name="${CSS.escape(name)}"]:checked`);
         return el ? el.value : null;
+      }
+      case 'number': {
+        const el = container.querySelector(`[name="${CSS.escape(name)}"]`);
+        if (!el || el.value.trim() === '') return null;
+        const n = Number(el.value);
+        return Number.isFinite(n) ? n : null;
       }
       default: {
         const el = container.querySelector(`[name="${CSS.escape(name)}"]`);
