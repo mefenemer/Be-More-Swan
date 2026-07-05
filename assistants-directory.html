@@ -9,8 +9,9 @@
             <!-- Issue #111: the previous fixes buried the Orchestrations entry point one click deep,
                  inside each individual assistant's "Active Workflows" card — but reporters keep
                  checking this directory page itself and not finding it. Surface it directly here too. -->
-            <button id="route-to-orchestrations-from-dir" type="button" class="text-sm font-bold text-emerald-600 hover:text-emerald-800 transition-colors cursor-pointer">
-                Orchestrations →
+            <!-- Issue #134: not ready for general use yet — show it disabled with a "coming soon" hint instead of routing in. -->
+            <button id="route-to-orchestrations-from-dir" type="button" disabled title="Coming soon" aria-disabled="true" class="text-sm font-bold text-gray-400 cursor-not-allowed">
+                Orchestrations → <span class="font-normal">(coming soon)</span>
             </button>
             <button id="route-to-catalog-from-dir" class="hidden sm:flex items-center gap-2 px-4 py-2.5 text-sm font-bold text-white bg-gray-900 hover:bg-black rounded-lg transition-colors shadow-sm">
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
