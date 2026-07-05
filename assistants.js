@@ -1885,7 +1885,10 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'week') {
         if (!res.ok) return;
         const d = await res.json();
 
-        if (!d.totalCreated) return; // no posts yet — keep card hidden
+        // Gate on any real ROI signal, not just post creation — hoursSaved already accounts for
+        // completed task runs (see get-assistant-metrics.ts), so a task-driven assistant that
+        // hasn't created any scheduledPosts yet still surfaces the card once it's done work.
+        if (!d.totalCreated && !d.hoursSaved) return; // no recorded activity yet — keep card hidden
 
         card.classList.remove('hidden');
 
