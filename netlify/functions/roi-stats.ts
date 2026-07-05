@@ -66,13 +66,17 @@ export const handler = async (event: HandlerEvent) => {
         // over) was being dropped entirely, zeroing out this widget even with completed
         // work in the window. dashboard-heatmap.ts already uses this same COALESCE for
         // task_runs; this brings the ROI hero in line with it.
+        //
+        // The comparand must be an ISO string, not a Date: a raw sql`` fragment has no
+        // column type, so drizzle passes a Date through to postgres-js unserialized and
+        // the bind step throws ERR_INVALID_ARG_TYPE (500 on every call).
         const taskRunCount = organisationId ? await safeCount(db
             .select({ count: count() })
             .from(taskRuns)
             .where(and(
                 eq(taskRuns.organisationId, organisationId),
                 eq(taskRuns.status, 'completed'),
-                gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, periodStart)
+                gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, periodStart.toISOString())
             ))) : 0;
 
         const postCount = organisationId ? await safeCount(db

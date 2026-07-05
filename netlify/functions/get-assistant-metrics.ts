@@ -81,7 +81,7 @@ export const handler: Handler = async (event) => {
                   eq(taskRuns.assistantId, aId),
                   eq(taskRuns.organisationId, orgId),
                   eq(taskRuns.status, 'completed'),
-                  gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, periodStart)
+                  gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, periodStart.toISOString())
               )),
         ]);
 
