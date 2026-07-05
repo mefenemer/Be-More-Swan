@@ -38,6 +38,8 @@ export const handler: Handler = async (event) => {
             draftHorizonDays: aiAssistants.draftHorizonDays,
             reviewNotifPreference: aiAssistants.reviewNotifPreference,
             masterAssistantId: aiAssistants.masterAssistantId,
+            // Drives the role-aware dashboard (AssistantDashboardRegistry) on the detail page.
+            roleKey: masterAssistants.roleKey,
             disclosureText: aiAssistants.disclosureText,
             organisationId: aiAssistants.organisationId,
             lifecycleState: masterAssistants.lifecycleState,
@@ -82,6 +84,9 @@ export const handler: Handler = async (event) => {
                 status: row.status || 'pending',
                 isActive: row.isActive,
                 lifecycleStatus: row.lifecycleStatus || 'provisioning',
+                // null for legacy assistants with no master role — the frontend registry
+                // falls back to the social_media_manager (default) dashboard.
+                roleKey: row.roleKey ?? null,
                 disclosureText: row.disclosureText ?? null,
                 dpaAccepted: true,
                 lifecycleState: row.lifecycleState ?? 'live',

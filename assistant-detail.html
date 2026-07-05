@@ -119,7 +119,7 @@
   <div class="mb-8 border-b border-gray-200 overflow-x-auto">
     <nav class="-mb-px flex gap-x-8" aria-label="Assistant sections">
       <button type="button" data-maintab="overview"      class="main-tab-btn active-tab">Overview</button>
-      <button type="button" data-maintab="review-queue" class="main-tab-btn">Review Queue
+      <button type="button" id="maintab-btn-review-queue" data-maintab="review-queue" class="main-tab-btn">Review Queue
         <span id="detail-rq-pending-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
       <button type="button" data-maintab="goals"         class="main-tab-btn">Goals</button>
@@ -214,64 +214,64 @@
     </div>
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
-      <!-- The Thumb Stopper -->
+      <!-- KPI card 1 — label/title/desc injected from AssistantDashboardRegistry by role -->
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
         <div class="flex items-center justify-between">
-          <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Engagement Rate by Reach</span>
+          <span id="kpi-1-label" class="text-xs font-bold text-gray-400 uppercase tracking-wide"></span>
           <span id="metric-engagement-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
         </div>
         <div>
           <p id="metric-engagement-value" class="text-2xl font-extrabold text-gray-900">—</p>
-          <p class="text-base font-bold text-gray-700 mt-0.5">The Thumb Stopper</p>
-          <p class="text-xs text-gray-500 mt-1">Of everyone who saw your content, how many actually stopped to engage with it.</p>
+          <p id="kpi-1-title" class="text-base font-bold text-gray-700 mt-0.5"></p>
+          <p id="kpi-1-desc" class="text-xs text-gray-500 mt-1"></p>
         </div>
         <div class="mt-auto pt-3 border-t border-gray-100">
           <p class="text-xs text-gray-400">Trending: <span id="metric-engagement-trend" class="font-semibold text-gray-500">—</span></p>
         </div>
       </div>
 
-      <!-- Escaping the Echo Chamber -->
+      <!-- KPI card 2 -->
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
         <div class="flex items-center justify-between">
-          <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Organic Reach Growth</span>
+          <span id="kpi-2-label" class="text-xs font-bold text-gray-400 uppercase tracking-wide"></span>
           <span id="metric-reach-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
         </div>
         <div>
           <p id="metric-reach-value" class="text-2xl font-extrabold text-gray-900">—</p>
-          <p class="text-base font-bold text-gray-700 mt-0.5">Escaping the Echo Chamber</p>
-          <p class="text-xs text-gray-500 mt-1">How far your content is spreading beyond your existing followers into new audiences.</p>
+          <p id="kpi-2-title" class="text-base font-bold text-gray-700 mt-0.5"></p>
+          <p id="kpi-2-desc" class="text-xs text-gray-500 mt-1"></p>
         </div>
         <div class="mt-auto pt-3 border-t border-gray-100">
           <p class="text-xs text-gray-400">Trending: <span id="metric-reach-trend" class="font-semibold text-gray-500">—</span></p>
         </div>
       </div>
 
-      <!-- The Pack Your Bags Metric -->
+      <!-- KPI card 3 -->
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
         <div class="flex items-center justify-between">
-          <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Click-Through Rate</span>
+          <span id="kpi-3-label" class="text-xs font-bold text-gray-400 uppercase tracking-wide"></span>
           <span id="metric-ctr-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
         </div>
         <div>
           <p id="metric-ctr-value" class="text-2xl font-extrabold text-gray-900">—</p>
-          <p class="text-base font-bold text-gray-700 mt-0.5">The "Pack Your Bags" Metric</p>
-          <p class="text-xs text-gray-500 mt-1">How many viewers clicked through and took the action your content asked for.</p>
+          <p id="kpi-3-title" class="text-base font-bold text-gray-700 mt-0.5"></p>
+          <p id="kpi-3-desc" class="text-xs text-gray-500 mt-1"></p>
         </div>
         <div class="mt-auto pt-3 border-t border-gray-100">
           <p class="text-xs text-gray-400">Trending: <span id="metric-ctr-trend" class="font-semibold text-gray-500">—</span></p>
         </div>
       </div>
 
-      <!-- Meaningful Engagement — value over vanity (AC8) -->
+      <!-- KPI card 4 -->
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
         <div class="flex items-center justify-between">
-          <span class="text-xs font-bold text-gray-400 uppercase tracking-wide">Meaningful Engagement</span>
+          <span id="kpi-4-label" class="text-xs font-bold text-gray-400 uppercase tracking-wide"></span>
           <span id="metric-value-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
         </div>
         <div>
           <p id="metric-value-value" class="text-2xl font-extrabold text-gray-900">—</p>
-          <p class="text-base font-bold text-gray-700 mt-0.5">Saves, Shares &amp; DMs</p>
-          <p class="text-xs text-gray-500 mt-1">The signals that convert trust into business — weighed above likes and view count.</p>
+          <p id="kpi-4-title" class="text-base font-bold text-gray-700 mt-0.5"></p>
+          <p id="kpi-4-desc" class="text-xs text-gray-500 mt-1"></p>
         </div>
         <div class="mt-auto pt-3 border-t border-gray-100">
           <p class="text-xs text-gray-400">Trending: <span id="metric-value-trend" class="font-semibold text-gray-500">—</span></p>
@@ -410,6 +410,11 @@
 
   <!-- Read-only summary of every answer captured during onboarding (populated by assistants.js) -->
   <div id="onboarding-summary"></div>
+
+  <!-- Editable role-specific onboarding answers (assistant-setup.html roles) — rendered from
+       the role's AssistantOnboardingSchemas entry by _renderRoleAnswersEditor() in assistants.js;
+       values round-trip through aiAssistants.onboardingContext. Empty for social assistants. -->
+  <div id="role-answers-editor"></div>
 
   <!-- Operating File card list -->
   <div class="space-y-3">
@@ -552,8 +557,8 @@
             </label>
           </div>
         </div>
-        <!-- ── Posting Schedule ───────────────────────────────────── -->
-        <div class="pt-2 border-t border-gray-100">
+        <!-- ── Posting Schedule — social-only module, toggled by AssistantDashboardRegistry ── -->
+        <div id="module-posting-schedule" class="pt-2 border-t border-gray-100">
           <h4 class="text-sm font-bold text-gray-900 mb-1">Posting Schedule</h4>
           <p class="text-xs text-gray-500 mb-4">Set how often, on which days and at what times this assistant publishes — and how far ahead it should keep your Review Queue stocked with drafts.</p>
 
@@ -766,7 +771,8 @@
 
     <!-- Hashtags & Platform Strategy — parity with onboarding "Platform Algorithm Helpers".
          Blocks are shown per connected platform by _hydratePlatformStrategy(); values round-trip
-         through context.platform_strategy. -->
+         through context.platform_strategy. Social-only module, toggled by AssistantDashboardRegistry. -->
+    <div id="module-social-strategy">
     <div id="platform-strategy-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="mb-5">
         <h3 class="text-lg font-bold text-gray-900" data-explain="hashtags-keywords">Hashtags &amp; Platform Strategy</h3>
@@ -829,6 +835,7 @@
         </div>
       </div>
     </div>
+    </div><!-- /module-social-strategy -->
   </div>
 
   <!-- ── TAB: Connections (full connect/manage, scoped to this assistant) ── -->

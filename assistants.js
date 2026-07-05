@@ -1045,6 +1045,14 @@ function _renderOnboardingSummary(data) {
         ['Content Source', clean(inputs.sourceText)],
     ].filter(([, v]) => v && v !== MISSING);
 
+    // Role-specific answers captured by the schema wizard (assistant-setup.html) live in
+    // onboardingContext under the schema's own keys — surface them via the role's
+    // AssistantOnboardingSchemas entry so non-social roles aren't shown as "no answers".
+    const schemaRows = _roleSchemaFields(data && data.roleKey)
+        .map(f => [f.label || f.key, _formatSchemaAnswer(f, ctx[f.key])])
+        .filter(([, v]) => v !== '');
+    rows.unshift(...schemaRows);
+
     // Knowledge base + guardrail rules (strictRules) — strip the leading "- " bullet prefix.
     const rules = (Array.isArray(inputs.strictRules) ? inputs.strictRules : [])
         .map(r => clean(r).replace(/^-\s*/, '')).filter(Boolean);
@@ -1084,6 +1092,122 @@ function _renderOnboardingSummary(data) {
             </div>` : ''}
         </div>
       </details>`;
+}
+
+// ── Role-aware dashboard (AssistantDashboardRegistry) ────────────
+// Injects the role's KPI card copy and toggles the social-only UI modules
+// declared in src/components/assistant-dashboard-registry.js. Unknown or
+// missing roleKeys fall back to the registry's social_media_manager default
+// (legacy assistants are all social), so the page always has a complete
+// generic display; if the registry script isn't loaded we change nothing.
+function _applyDashboardRegistry(data) {
+    const registry = window.AssistantDashboardRegistry;
+    const cfg = (registry && typeof registry.get === 'function') ? registry.get(data.roleKey) : null;
+    if (!cfg) return;
+
+    const setText = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text || ''; };
+    (cfg.kpis || []).slice(0, 4).forEach((kpi, i) => {
+        setText(`kpi-${i + 1}-label`, kpi.label || kpi.title);
+        setText(`kpi-${i + 1}-title`, kpi.title);
+        setText(`kpi-${i + 1}-desc`, kpi.desc);
+    });
+
+    const mods = cfg.modules || {};
+    const toggle = (id, show) => { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', !show); };
+    // Review Queue = the main tab plus the Overview shortcut that opens it.
+    toggle('maintab-btn-review-queue', mods.hasReviewQueue !== false);
+    toggle('btn-review-pending', mods.hasReviewQueue !== false);
+    toggle('module-posting-schedule', mods.hasPostingSchedule !== false);
+    toggle('module-social-strategy', mods.hasSocialStrategy !== false);
+}
+
+// Flattened field list from the role's schema-driven onboarding definition
+// (src/config/assistant-onboarding-schemas.js) — [] when the role has none
+// (social assistants use the hand-built drawer fields instead).
+function _roleSchemaFields(roleKey) {
+    const schema = (window.AssistantOnboardingSchemas || {})[roleKey];
+    if (!Array.isArray(schema) || !schema.length) return [];
+    const steps = schema.every(s => Array.isArray(s?.fields)) ? schema : [{ fields: schema }];
+    return steps.flatMap(s => (s.fields || []).filter(f => f && f.key && f.type));
+}
+
+// Human-readable value for a schema answer (option label for radio/dropdown,
+// Yes/No for toggles). '' means "not answered" and the row is omitted.
+function _formatSchemaAnswer(field, value) {
+    if (field.type === 'toggle') return (value === undefined || value === null) ? '' : (value ? 'Yes' : 'No');
+    if (value === undefined || value === null || String(value).trim() === '') return '';
+    if ((field.type === 'radio' || field.type === 'dropdown') && Array.isArray(field.options)) {
+        const opt = field.options.find(o => String(o.value) === String(value));
+        if (opt) return String(opt.label ?? opt.value);
+    }
+    return String(value);
+}
+
+// Editable role-specific onboarding answers (drawer home, #role-answers-editor).
+// Rendered for roles onboarded via the schema wizard (assistant-setup.html) so the
+// user can revise those answers here. Inputs get ids of the form `edit_onb_<key>` —
+// the existing [id^="edit_"] auto-save wiring picks them up — and carry
+// data-onboarding-key so _detailCollect writes them back into onboardingContext
+// under their original keys.
+function _renderRoleAnswersEditor(data) {
+    const host = document.getElementById('role-answers-editor');
+    if (!host) return;
+    const fields = _roleSchemaFields(data.roleKey);
+    if (!fields.length) { host.innerHTML = ''; return; }
+    const ctx = (data.context && typeof data.context === 'object') ? data.context : {};
+    const esc = _escapeHtml;
+    const inputCls = 'w-full border border-gray-300 rounded-lg p-3 text-sm bg-white focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm';
+
+    const control = (f) => {
+        const id = `edit_onb_${f.key}`;
+        const common = `id="${esc(id)}" data-onboarding-key="${esc(f.key)}"`;
+        const v = ctx[f.key];
+        switch (f.type) {
+            case 'textarea':
+                return `<textarea ${common} rows="3" placeholder="${esc(f.placeholder || '')}" class="${inputCls} resize-y">${esc(v ?? '')}</textarea>`;
+            case 'number':
+                return `<input type="number" ${common} data-onb-type="number" value="${esc(v ?? '')}"
+                    ${f.min !== undefined ? `min="${esc(f.min)}"` : ''} ${f.max !== undefined ? `max="${esc(f.max)}"` : ''}
+                    placeholder="${esc(f.placeholder || '')}" class="${inputCls}">`;
+            case 'dropdown':
+            case 'radio':
+                return `<select ${common} class="${inputCls}">
+                    <option value="">${esc(f.placeholder || 'Please select…')}</option>
+                    ${(f.options || []).map(o => `<option value="${esc(o.value)}" ${String(o.value) === String(v ?? '') ? 'selected' : ''}>${esc(o.label ?? o.value)}</option>`).join('')}
+                </select>`;
+            case 'toggle':
+                return `<label class="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                    <input type="checkbox" ${common} class="rounded text-emerald-700 focus:ring-emerald-700" ${v ? 'checked' : ''}> Enabled
+                </label>`;
+            default: // text
+                return `<input type="text" ${common} value="${esc(v ?? '')}" placeholder="${esc(f.placeholder || '')}" class="${inputCls}">`;
+        }
+    };
+
+    host.innerHTML = `
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+        <div class="mb-5">
+          <h3 class="text-lg font-bold text-gray-900">Setup Answers</h3>
+          <p class="text-sm text-gray-500 mt-1">The answers you gave when hiring this assistant. Edit them here — changes apply to everything it does from now on.</p>
+        </div>
+        <div class="space-y-5">
+          ${fields.map(f => `
+            <div>
+              <label for="edit_onb_${esc(f.key)}" class="block text-sm font-bold text-gray-700 mb-1">${esc(f.label || f.key)}</label>
+              ${f.helpText ? `<p class="text-xs text-gray-500 mb-2">${esc(f.helpText)}</p>` : ''}
+              ${control(f)}
+            </div>`).join('')}
+        </div>
+      </div>`;
+
+    // Belt-and-braces: sync select values programmatically as well as via the
+    // `selected` attribute, so stored answers always pre-select their option.
+    fields.forEach(f => {
+        if (f.type !== 'dropdown' && f.type !== 'radio') return;
+        const sel = document.getElementById(`edit_onb_${f.key}`);
+        const v = ctx[f.key];
+        if (sel && v !== undefined && v !== null) sel.value = String(v);
+    });
 }
 
 function _detailHydrate(data) {
@@ -1371,6 +1495,22 @@ function _detailCollect(currentData) {
         primary_platforms: platforms,
     };
 
+    // Role-specific onboarding answers (schema-driven roles) — the drawer's
+    // #role-answers-editor inputs carry data-onboarding-key; write each back under its
+    // original onboardingContext key so assistant-setup.html answers stay editable here.
+    document.querySelectorAll('#role-answers-editor [data-onboarding-key]').forEach(el => {
+        const key = el.dataset.onboardingKey;
+        if (!key) return;
+        if (el.type === 'checkbox') {
+            newContext[key] = el.checked;
+        } else if (el.dataset.onbType === 'number') {
+            const n = Number(el.value);
+            newContext[key] = (el.value.trim() === '' || !Number.isFinite(n)) ? null : n;
+        } else {
+            newContext[key] = el.value;
+        }
+    });
+
     const newConfiguration = {
         ...(currentData.configuration || {}),
         inputs: {
@@ -1657,8 +1797,12 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         // Set window.cachedContext so fetchAndRenderIntegrations can use it
         window.cachedContext = currentData.context || {};
 
+        // Role-aware dashboard: KPI card copy + social-only module visibility
+        // (must run before attachAutoSave so the role-answers editor inputs exist).
+        _applyDashboardRegistry(currentData);
         _detailHydrate(currentData);
         _renderOnboardingSummary(currentData);
+        _renderRoleAnswersEditor(currentData);
         _renderMeetingsBrief(currentData);
         _hydrateAutonomousToggle(currentData);
         attachAutoSave();

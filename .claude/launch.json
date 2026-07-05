@@ -9,6 +9,13 @@
       "autoPort": false
     },
     {
+      "name": "component-harness-dashboard-registry",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4180", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/970ec166-d37e-4cfe-88aa-d1a767cde3e3/scratchpad/demo"],
+      "port": 4180,
+      "autoPort": false
+    },
+    {
       "name": "static-preview-alt",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8891"],
