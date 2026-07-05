@@ -759,6 +759,7 @@ window.showComplianceModals = function showComplianceModals(force) {
     </button>
   </div>
   <audio id="milestone-audio" src="/Aurora.mp3" preload="auto"></audio>
+  <audio id="notification-audio" src="/Aurora.mp3" preload="auto"></audio>
 </div>
 
 <!-- Savings tasks modal (#3) -->
@@ -1126,6 +1127,7 @@ function formatCurrency(amount, currency) {
         .then(d => { if (d) { try {
           localStorage.setItem('bms_soundOnLogin', d.soundOnLogin === false ? '0' : '1');
           localStorage.setItem('bms_soundOnMilestone', d.soundOnMilestone === false ? '0' : '1');
+          localStorage.setItem('bms_soundOnNotification', d.soundOnNotification === false ? '0' : '1');
         } catch {} } })
         .catch(() => {});
       const audio = new Audio('/Aurora.mp3');
@@ -2787,6 +2789,7 @@ function formatCurrency(amount, currency) {
       const btns = [
         document.getElementById('toggle-sound-login'),
         document.getElementById('toggle-sound-milestone'),
+        document.getElementById('toggle-sound-notification'),
       ].filter(Boolean);
       if (!btns.length) return;
 
@@ -3845,6 +3848,15 @@ function formatCurrency(amount, currency) {
         ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size); ctx.restore(); });
       if (++frame < 160) requestAnimationFrame(anim); else c.remove();
     })();
+  };
+
+  // Issue #156 — ding when a new notification arrives while the workspace is open.
+  // Gated by the "sound on notification" preference (My Account → Sounds); defaults to ON.
+  // Best-effort: browsers block autoplay without a prior user gesture, so this may no-op
+  // until the user has interacted with the page at least once.
+  window._playNotificationSound = function () {
+    if (localStorage.getItem('bms_soundOnNotification') === '0') return;
+    try { const a = document.getElementById('notification-audio'); if (a) { a.currentTime = 0; a.play().catch(() => {}); } } catch {}
   };
 
   // ── Milestone celebration (#2): modal + Aurora.mp3 + confetti, 10s auto-close ──
