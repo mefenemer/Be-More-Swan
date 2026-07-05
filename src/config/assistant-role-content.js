@@ -17,6 +17,25 @@
 
   window.AssistantRoleContent = {
 
+    // The flagship role — without this entry its card is the only live one that
+    // doesn't open the detail modal (cards are clickable only when copy exists here).
+    // CTA routing is already safe for schema-less roles: assistant-setup.html and
+    // _catHire both fall back to the legacy onboarding flow.
+    social_media_manager: {
+      name: 'The Social Media Manager',
+      category: 'Marketing & Sales',
+      iconKey: 'megaphone',
+      iconColor: 'pink',
+      tagline: 'Consistent, on-brand content — without the daily grind.',
+      description: 'Plans, writes, and schedules branded content across all your social channels. Every post lands in your Review Queue for approval, so nothing goes out without your sign-off.',
+      keyFeatures: [
+        'Automated Content Drafting & Scheduling',
+        'Human-in-the-loop Review Queue',
+        'Per-platform Hashtag & Format Strategy',
+      ],
+      integrations: ['Facebook', 'Instagram', 'LinkedIn', 'X (Twitter)'],
+    },
+
     lead_qualifier: {
       name: 'The Lead Qualifier',
       category: 'Marketing & Sales',
