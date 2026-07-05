@@ -1508,6 +1508,7 @@
           </div>
           <div class="flex items-center gap-2">
             <button onclick="passAllToDeveloper()" id="ir-pass-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🤖 Pass all to Developer</button>
+            <button onclick="moveAllToBacklog()" id="ir-backlog-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition disabled:opacity-60 disabled:cursor-not-allowed">📥 Move all to Backlog</button>
             <button onclick="requestMergeAll()" id="ir-merge-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🔀 Merge all to staging</button>
             <button onclick="deployStaging()" id="ir-deploy-btn" class="hidden px-3 py-2 text-sm font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🚀 Commit to Staging</button>
             <button onclick="openRunnerModal()" id="ir-runner-btn" class="px-3 py-2 text-sm font-semibold border border-violet-300 text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 transition flex items-center gap-1.5">🤖 <span id="ir-runner-btn-label">Runner</span></button>
@@ -3491,6 +3492,7 @@ async function loadIssueReports() {
     const issues = d.issues || [];
     _updateRunnerBtnBadge(issues);
     _updatePassAllBtn(issues);
+    _updateMoveAllToBacklogBtn(issues);
     _updateMergeAllBtns(issues);
     loadRunnerStatus();
     if (tbody) tbody.innerHTML = issues.map(i => `
@@ -3777,6 +3779,15 @@ let _irRunnerStatusTimer = null;
 // "Pass to Developer" / "Try again" buttons disable and point at the Resume banner —
 // the open detail panel covers the banner, so re-queuing from here would just re-fail.
 let _irRunnerBlocked = false;
+// Runner IDs the admin has dismissed the top-of-list banner for. Pruned to currently-blocked
+// runners on every poll, so a dismissal only lasts until that pause resolves — if the same
+// runner pauses again later it reappears rather than staying silenced forever.
+let _irDismissedRunnerAlerts = new Set();
+function dismissRunnerAlert(runnerId) {
+  _irDismissedRunnerAlerts.add(runnerId);
+  loadRunnerStatus();
+}
+
 // The switchable Claude accounts a runner reported ([{email, stored}]), defensively parsed.
 function _irRunnerAccounts(r) {
   try {
@@ -3810,8 +3821,10 @@ function _irSwitchButtons(r, amber) {
 }
 
 // One paused-runner card (reset hint + last probe result + Resume button). Rendered both in
-// the banner at the top of the Issues list and inside the 🤖 Runner modal.
-function _irRunnerPausedCard(r) {
+// the banner at the top of the Issues list and inside the 🤖 Runner modal. `dismissible` adds
+// a ✕ button — only used for the banner; the modal card has no way to hide itself since it's
+// the one place admins can always find the runner state.
+function _irRunnerPausedCard(r, dismissible) {
   const canResume = (typeof _adminRole !== 'undefined') && _adminRole === 'super_admin';
   const reset = r.resetHint ? ` — resets <b>${_esc(r.resetHint)}</b>` : '';
   // Refreshed by the runner on every resume-check poll (~10s) while paused, so this shows
@@ -3836,11 +3849,16 @@ function _irRunnerPausedCard(r) {
   // alive and polling — a dead process can't be restarted from here.
   const restartBtn = canResume && !r.restartRequested
     ? `<button onclick="restartRunner('${_esc(r.runnerId)}', this)" class="px-3 py-1.5 border border-amber-600 text-amber-700 text-xs font-bold rounded-lg hover:bg-amber-100 transition">↻ Restart runner</button>` : '';
+  const dismissBtn = dismissible
+    ? `<button onclick="dismissRunnerAlert('${_esc(r.runnerId)}')" title="Dismiss" class="text-amber-500 hover:text-amber-700 text-lg leading-none">✕</button>` : '';
   return `<div class="border border-amber-300 bg-amber-50 rounded-xl p-4">
     <div class="flex items-start gap-3">
       <span class="text-xl leading-none">⏸️</span>
       <div class="flex-1 min-w-0">
-        <p class="text-sm font-bold text-amber-900">AI auto-fix runner paused — Claude session limit${reset}</p>
+        <div class="flex items-start justify-between gap-2">
+          <p class="text-sm font-bold text-amber-900">AI auto-fix runner paused — Claude session limit${reset}</p>
+          ${dismissBtn}
+        </div>
         <p class="text-xs text-amber-800 mt-1">Runner <b class="font-mono">${_esc(r.runnerId)}</b> ran out of Claude usage. Switch it to another stored account below (no login needed — a verified switch resumes automatically), or log in by hand on the runner machine and press Resume. Queued issues are retried automatically once it resumes — you don't need to re-submit them.</p>
         ${acct}
         ${_irSwitchButtons(r, true)}
@@ -3864,7 +3882,7 @@ function _irRunnerLastSeen(r) {
 // there's no Resume button (it only exists while a runner reports a Claude session limit),
 // so an admin looking for it isn't left staring at nothing.
 function _irRunnerModalStatus(runners, blocked) {
-  const cards = blocked.map(_irRunnerPausedCard).join('');
+  const cards = blocked.map((r) => _irRunnerPausedCard(r)).join('');
   const others = runners.filter((r) => r.state !== 'session_limited');
   const otherLines = others.map((r) => {
     const seen = _irRunnerLastSeen(r);
@@ -3899,12 +3917,21 @@ async function loadRunnerStatus() {
   } catch { runners = []; blocked = []; }
   _irRunnerBlocked = blocked.length > 0;
 
-  // Banner above the Issues list: only while something is actually paused.
-  if (banner) {
-    banner.classList.toggle('hidden', !blocked.length);
-    banner.innerHTML = blocked.map(_irRunnerPausedCard).join('');
+  // Drop dismissals for runners that are no longer blocked, so a *new* pause on the same
+  // runner (after it resumed) shows the banner again instead of staying silenced forever.
+  const blockedIds = new Set(blocked.map((r) => r.runnerId));
+  for (const id of _irDismissedRunnerAlerts) {
+    if (!blockedIds.has(id)) _irDismissedRunnerAlerts.delete(id);
   }
-  // Runner modal: always shows runner state, with an explanation when nothing is paused.
+
+  // Banner above the Issues list: only while something is actually paused and not dismissed.
+  if (banner) {
+    const visible = blocked.filter((r) => !_irDismissedRunnerAlerts.has(r.runnerId));
+    banner.classList.toggle('hidden', !visible.length);
+    banner.innerHTML = visible.map((r) => _irRunnerPausedCard(r, true)).join('');
+  }
+  // Runner modal: always shows runner state (dismissing the banner doesn't hide it here),
+  // with an explanation when nothing is paused.
   if (modalEl) {
     modalEl.classList.remove('hidden');
     modalEl.innerHTML = _irRunnerModalStatus(runners, blocked);
@@ -3996,6 +4023,35 @@ async function passAllToDeveloper() {
   if (btn) { btn.disabled = true; btn.textContent = '🤖 Queuing…'; }
   try {
     await api(`${IR_API}?action=handoff-all`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+  } catch (e) { alert(e.message); }
+  finally { loadIssueReports(); }
+}
+
+// "Move all to Backlog" — shown on the Reported tab when there are issues still
+// sitting in Reported, as a quick alternative to handing them to the AI developer.
+function _updateMoveAllToBacklogBtn(issues) {
+  const btn = document.getElementById('ir-backlog-all-btn');
+  if (!btn) return;
+  const eligible = (issues || []).filter(i => i.status === 'reported');
+  if (_irFilter === 'reported' && eligible.length > 0) {
+    btn.dataset.count = eligible.length;
+    btn.disabled = false;
+    btn.textContent = `📥 Move All (${eligible.length}) to Backlog`;
+    btn.classList.remove('hidden');
+  } else {
+    btn.classList.add('hidden');
+  }
+}
+
+async function moveAllToBacklog() {
+  const btn = document.getElementById('ir-backlog-all-btn');
+  const n = Number(btn?.dataset.count || 0);
+  if (!confirm(`Move all ${n} reported issue${n === 1 ? '' : 's'} to the Backlog?`)) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Moving…'; }
+  try {
+    await api(`${IR_API}?action=backlog-all`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     });
   } catch (e) { alert(e.message); }

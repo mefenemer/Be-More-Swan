@@ -71,13 +71,15 @@ export const handler: Handler = async (event) => {
                   gte(scheduledPosts.createdAt, periodStart)
               )),
 
+            // Issue #110 (follow-up): window on COALESCE(completed_at, created_at) —
+            // see roi-stats.ts for why filtering on created_at alone can zero this out.
             db.select({ taskRunsInPeriod: count() })
               .from(taskRuns)
               .where(and(
                   eq(taskRuns.assistantId, aId),
                   eq(taskRuns.organisationId, orgId),
                   eq(taskRuns.status, 'completed'),
-                  gte(taskRuns.createdAt, periodStart)
+                  gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, periodStart)
               )),
         ]);
 

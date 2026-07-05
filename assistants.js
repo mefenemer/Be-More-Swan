@@ -59,23 +59,27 @@ window.generateAssistantCardHTML = function(assistant) {
     const db = window._resolveAssistantBadge(assistant, assistant.opSignals);
     const statusHtml = `<span class="inline-flex items-center gap-1.5 py-1 px-2.5 rounded-md text-xs font-bold ${db.cls}"><span class="w-1.5 h-1.5 rounded-full ${db.dot}"></span> ${db.label}</span>`;
 
-    // SMART Goals AC2.1.1 — "X On Track | Y Off Track" micro-summary + Review Progress button (AC2.2.1).
+    // SMART Goals AC2.1.1 — "X On Track | Y Off Track" micro-summary.
     // When no goals exist yet, show a prompt that deep-links to the assistant's Goals tab so the
-    // user is nudged (and able) to set measurable targets.
+    // user is nudged (and able) to set measurable targets. Goals start life as 'pending' until the
+    // run-rate engine assesses them (poll-goal-telemetry, gated by RUN_RATE_THRESHOLDS.minObservationDays),
+    // so a card whose goals are all still pending must say so instead of showing a misleading "0 On
+    // Track | 0 Off Track" (issue #135).
     const gs = assistant.goalSummary || { onTrack: 0, offTrack: 0, total: 0 };
-    const goalsHtml = gs.total > 0 ? `
+    const goalsAssessed = gs.onTrack + gs.offTrack;
+    const goalsHtml = gs.total > 0 ? (goalsAssessed > 0 ? `
         <div class="flex items-center gap-4 text-xs font-semibold mb-5">
             <span class="inline-flex items-center gap-1.5 text-emerald-600"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>${gs.onTrack} On Track</span>
             <span class="inline-flex items-center gap-1.5 text-red-600"><span class="w-2 h-2 rounded-full bg-red-500"></span>${gs.offTrack} Off Track</span>
         </div>` : `
+        <div class="flex items-center gap-2 text-xs font-semibold text-gray-400 mb-5">
+            <span class="w-2 h-2 rounded-full bg-gray-300"></span>Awaiting first progress check-in
+        </div>`) : `
         <button type="button" onclick="event.stopPropagation(); window._assistantDetailInitialTab='goals'; window.routeToAssistantDetail('${assistant.id}')"
             class="flex items-center gap-2 text-xs font-semibold text-gray-400 hover:text-emerald-700 mb-5 cursor-pointer transition-colors text-left">
             <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v8m4-4H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             No goals set yet — <span class="underline">add goals to track performance</span>
         </button>`;
-    const reviewBtn = gs.total > 0
-        ? `<button type="button" onclick="event.stopPropagation(); window._reviewProgressOnLoad=true; window.routeToAssistantDetail('${assistant.id}')" class="text-sm font-bold text-emerald-700 hover:text-emerald-800 transition-colors cursor-pointer">Review Progress</button>`
-        : '';
 
     // Post metrics strip
     const pm = assistant.postMetrics || {};
@@ -140,8 +144,7 @@ window.generateAssistantCardHTML = function(assistant) {
         <p class="text-sm text-gray-500 mb-4">${role}</p>
         ${goalsHtml}
         ${metricsHtml}
-        <div class="mt-auto pt-4 border-t border-gray-50 flex justify-between items-center">
-            ${reviewBtn || '<span></span>'}
+        <div class="mt-auto pt-4 border-t border-gray-50 flex justify-end items-center">
             <span class="text-sm font-bold text-gray-900 group-hover:text-emerald-700 transition-colors">View Details &rarr;</span>
         </div>
     </div>`;
@@ -239,10 +242,7 @@ window.initAssistantsDirectory = async function(loadViewCb) {
         catalogBtn.addEventListener('click', () => loadViewCb('catalog'));
     }
 
-    const orchestrationsBtn = document.getElementById('route-to-orchestrations-from-dir');
-    if (orchestrationsBtn) {
-        orchestrationsBtn.addEventListener('click', () => loadViewCb('orchestrations'));
-    }
+    // Issue #134: disabled ("coming soon") in the markup — no click routing to wire up.
 };
 
 // ==========================================
@@ -2249,34 +2249,15 @@ async function _renderKickOff(assistantId) {
     const overviewCta  = document.getElementById('meetings-kickoff-cta');
     const meetingsBadge = document.getElementById('meetings-kickoff-badge');
 
-    // Already working → confirmation state + a Pause control (US4 AC4.1: pause in settings).
+    // Issue #115: once kicked off, the Kick Off Meeting card has done its job — its detail
+    // (primary directive + connections) now lives in the notification sent by
+    // kickoff-assistant.ts, and pausing a working assistant is already available from the
+    // My Assistants grid (window._assistantTogglePause), so the card no longer needs to
+    // linger here at all.
     if (data.working) {
         if (overviewCta)   overviewCta.classList.add('hidden');
         if (meetingsBadge) meetingsBadge.classList.add('hidden');
-        const since = data.workingSince ? new Date(data.workingSince).toLocaleDateString('en-GB') : null;
-        subEl.textContent = since ? `Your assistant is working (since ${since}).` : 'Your assistant is working.';
-        btn.classList.add('hidden');
-        hintEl.innerHTML = `<span class="inline-flex items-center gap-1 text-emerald-700 font-semibold">✓ Active</span>
-            <button type="button" id="btn-pause-working" class="ml-3 px-3 py-1.5 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 transition cursor-pointer">⏸ Pause Assistant</button>`;
-        const pauseBtn = document.getElementById('btn-pause-working');
-        if (pauseBtn) pauseBtn.onclick = async () => {
-            if (!confirm('Pause this assistant? It will stop all actions until you kick it off again.')) return;
-            pauseBtn.disabled = true;
-            try {
-                // US4 AC4.2/4.3: working → paused (immediate halt).
-                const r = await fetch(`/.netlify/functions/manage-assistant?id=${assistantId}`, {
-                    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'pause' }),
-                });
-                if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'Could not pause the assistant.'); pauseBtn.disabled = false; return; }
-                window.showToast?.('Assistant paused.');
-                // Re-render: card flips to the Kick-Off state so the user can confirm to resume (AC4.4).
-                await _renderKickOff(assistantId);
-                if (window._detailCurrentData) { window._detailCurrentData.lifecycleStatus = 'paused'; window._detailCurrentData.isActive = false; }
-                window._renderStatusPill?.();
-            } catch { alert('Network error — please try again.'); pauseBtn.disabled = false; }
-        };
-        // Active/working → start collapsed (the user can expand to review the checklist).
-        setCollapsed(true);
+        card.classList.add('hidden');
         return;
     }
 

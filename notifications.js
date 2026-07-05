@@ -324,7 +324,7 @@ window.initNotifications = async function() {
             </div>
             <div class="flex-1 min-w-0">
                 <p class="text-sm ${textClass}">${notif.title}</p>
-                ${notif.message ? `<p class="text-sm text-gray-500 mt-1 line-clamp-2">${notif.message}</p>` : ''}
+                ${notif.message ? `<p class="text-sm text-gray-500 mt-1 line-clamp-4">${notif.message}</p>` : ''}
                 <p class="text-xs text-gray-400 mt-2">${fmtDate(notif.createdAt)}</p>
                 ${action ? `<button type="button" class="update-cta mt-2 inline-flex items-center gap-1 text-sm font-bold text-emerald-700 hover:text-emerald-800">${action.label}<span aria-hidden="true">&rarr;</span></button>` : ''}
             </div>

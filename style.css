@@ -1339,6 +1339,9 @@
   .overflow-y-auto {
     overflow-y: auto;
   }
+  .overflow-y-hidden {
+    overflow-y: hidden;
+  }
   .rounded {
     border-radius: 0.25rem;
   }

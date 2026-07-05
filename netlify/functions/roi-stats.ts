@@ -5,9 +5,9 @@
 //   → { taskCount, hoursSaved, gbpSaved, planCostGbp, multiplier, period }
 
 import { HandlerEvent } from '@netlify/functions';
-import { eq, and, gte, count, desc } from 'drizzle-orm';
+import { eq, and, gte, count, desc, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { userProfiles, taskRuns, scheduledPosts, plans, masterPlans, notifications } from '../../db/schema';
+import { userProfiles, taskRuns, scheduledPosts, leads, plans, masterPlans, notifications } from '../../db/schema';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
 import { requireSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
@@ -42,13 +42,20 @@ export const handler = async (event: HandlerEvent) => {
         // scheduled_posts — task_runs alone is near-always empty for that flow, which
         // is why this widget previously showed zero despite an assistant being active
         // (see get-assistant-metrics.ts, which already reads from scheduled_posts).
+        //
+        // Issue #110 (follow-up): task_runs are windowed on COALESCE(completed_at,
+        // created_at), not created_at alone — a run created before the period boundary
+        // but only completing after it (the normal case right after a week/month rolls
+        // over) was being dropped entirely, zeroing out this widget even with completed
+        // work in the window. dashboard-heatmap.ts already uses this same COALESCE for
+        // task_runs; this brings the ROI hero in line with it.
         const [{ taskRunCount }] = organisationId ? await db
             .select({ taskRunCount: count() })
             .from(taskRuns)
             .where(and(
                 eq(taskRuns.organisationId, organisationId),
                 eq(taskRuns.status, 'completed'),
-                gte(taskRuns.createdAt, periodStart)
+                gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, periodStart)
             )) : [{ taskRunCount: 0 }];
 
         const [{ postCount }] = organisationId ? await db
@@ -59,13 +66,27 @@ export const handler = async (event: HandlerEvent) => {
                 gte(scheduledPosts.createdAt, periodStart)
             )) : [{ postCount: 0 }];
 
-        const completedTasks = Number(taskRunCount) + Number(postCount);
+        // Leads generated in the period — get-time-saved.ts already counts these towards
+        // "Hours Saved"; omitting them here meant an org whose assistant work is mostly lead
+        // generation (no task_runs, no scheduled_posts yet) saw 0 hours/£/tasks on this
+        // widget despite real, non-zero activity on the modal it's supposed to agree with.
+        const [{ leadCount }] = organisationId ? await db
+            .select({ leadCount: count() })
+            .from(leads)
+            .where(and(
+                eq(leads.organisationId, organisationId),
+                gte(leads.createdAt, periodStart)
+            )) : [{ leadCount: 0 }];
+
+        const completedTasks = Number(taskRunCount) + Number(postCount) + Number(leadCount);
 
         // SC1: minutes saved per item — admin-configurable via gamification.time_multipliers,
         // shared with the dashboard "Hours Saved" widget (get-time-saved.ts) so both views
-        // stay consistent. Task runs and drafted posts use their own multiplier.
+        // stay consistent. Task runs, drafted posts, and generated leads each use their own multiplier.
         const mult = await getTimeMultipliers();
-        const totalMinutes = Number(taskRunCount) * mult.tasks_completed + Number(postCount) * mult.content_drafted;
+        const totalMinutes = Number(taskRunCount) * mult.tasks_completed
+            + Number(postCount) * mult.content_drafted
+            + Number(leadCount) * mult.leads_generated;
         const avgTaskDurationMinutes = completedTasks > 0 ? totalMinutes / completedTasks : mult.tasks_completed;
 
         // SC1: hours saved = total minutes / 60

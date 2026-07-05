@@ -115,6 +115,33 @@ export const handler: Handler = async (event) => {
         return json(200, { ok: true, queued: updated.length, ids: updated.map((u) => u.id) });
     }
 
+    // ── POST ?action=backlog-all: move every Reported issue to the Backlog at once ─
+    // Bulk alternative to ?action=handoff-all for issues that aren't ready to hand
+    // to the AI developer yet. Posts a thread message on each and notifies reporters.
+    if (event.httpMethod === 'POST' && action === 'backlog-all') {
+        const updated = await db.update(issueReports).set({
+            status: 'backlog',
+            updatedAt: new Date(),
+        }).where(eq(issueReports.status, 'reported')).returning({ id: issueReports.id, userId: issueReports.userId });
+
+        if (updated.length === 0) return json(200, { ok: true, moved: 0 });
+
+        await db.insert(issueReportMessages).values(updated.map((u) => ({
+            issueId: u.id,
+            authorType: 'admin',
+            authorId: admin.id,
+            body: `We've updated this to "${ISSUE_STATUS_LABEL.backlog}".`,
+            status: 'backlog' as IssueStatus,
+        })));
+
+        await Promise.allSettled(updated.map((u) =>
+            notifyIssueUser(db, { userId: u.userId, issueId: u.id, status: 'backlog', headers: event.headers })
+                .catch((e) => console.error('[admin-issue-reports] backlog-all notify failed:', e?.message || e)),
+        ));
+
+        return json(200, { ok: true, moved: updated.length, ids: updated.map((u) => u.id) });
+    }
+
     // ── POST ?action=run-sql: run the AI-proposed migration against staging Neon ──
     // Super-admin only. Executes the SQL on the deployment's owner DB connection and
     // returns the database's outcome. Only a SUCCESSFUL run advances the issue to

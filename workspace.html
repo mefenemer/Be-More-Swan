@@ -922,6 +922,10 @@ window.showComplianceModals = function showComplianceModals(force) {
   </div>
 
   <div class="flex items-center gap-3">
+    <!-- Issue #137: Report an Issue moved here from the side menu, next to Notifications -->
+    <a href="#" id="nav-report-issue" aria-label="Report an Issue" class="text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded-full p-2 transition-colors">
+      <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 00-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z"/></svg>
+    </a>
     <!-- Issue #106: Notifications moved here from the side menu -->
     <button id="nav-notifications" aria-label="Notifications" class="relative text-gray-500 hover:text-gray-900 hover:bg-gray-100 rounded-full p-2 transition-colors">
       <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
@@ -6421,7 +6425,7 @@ async function gpSubmitReject() {
      · AC3 in-line execution (reply expands beneath the bar, no reload).
      Lives outside #workspace-content so it persists across loadView().
      ══════════════════════════════════════════════════════════════════════════ -->
-<!-- The trigger lives in the side menu (#nav-ask-team in components/sidebar.html); ⌘K also opens it. -->
+<!-- Triggered via ⌘K only — no side menu entry (see issue #129 feedback). -->
 <div id="cmdbar-overlay" class="cmdbar-overlay" aria-hidden="true">
   <div class="cmdbar-panel" role="dialog" aria-modal="true" aria-label="Command bar">
     <form id="cmdbar-form" class="cmdbar-inputrow">
@@ -6561,7 +6565,8 @@ async function gpSubmitReject() {
     }
     const isOpen = () => overlay.classList.contains('open');
 
-    // The trigger lives in the side menu (#nav-ask-team), injected async → delegate.
+    // #nav-ask-team no longer exists in the side menu (issue #129) — ⌘K is the only trigger.
+    // Delegated listener kept harmless in case a future entry point reintroduces the id.
     document.addEventListener('click', e => {
       if (e.target.closest && e.target.closest('#nav-ask-team')) { e.preventDefault(); open(); }
     });

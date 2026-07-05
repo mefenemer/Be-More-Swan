@@ -1,25 +1,21 @@
-// tour.js — Guided platform tours (window.PlatformTour)
+// tour.js — Guided platform tour (window.PlatformTour)
 //
-// Two on-demand interactive walkthroughs, started from Help & Support or from the
-// setup wizard's completion screen:
+// One on-demand interactive walkthrough, started from Help & Support or from the
+// setup wizard's completion screen: a single room-by-room lap of the essentials
+// (the user-story flow: command center → team → hiring → integrations) that
+// continues straight into the Board Room (tabs, profile, pause/archive), Review
+// Queue, Calendar, My Content, Refer a Friend, Help & Support, Feature Requests,
+// Report an Issue, the ⌘K command bar, and My Account.
 //
-//   • orientation — a 5-step, ~60-second lap of the essentials (the user-story
-//     flow: command center → team → hiring → integrations → CTA). Its finale
-//     chains into the deep dive for users who want more.
-//   • deep-dive   — a 13-step room-by-room walkthrough: the Board Room (tabs,
-//     profile, pause/archive), Review Queue, Calendar, My Content, Refer a
-//     Friend, Help & Support, Feature Requests, Report an Issue, the ⌘K command
-//     bar, and My Account.
+// Dims the workspace behind a spotlight cut-out, explains one element per step,
+// and routes between SPA views (window.loadView) so the flow never breaks when a
+// step lives on another page.
 //
-// Both dim the workspace behind a spotlight cut-out, explain one element per
-// step, and route between SPA views (window.loadView) so the flow never breaks
-// when a step lives on another page.
-//
-// Deliberately stateless: no server calls of their own, no persistence, and they
-// never mutate user data — exiting (Esc, X, or clicking the dimmed background)
-// removes the overlay and leaves the workspace exactly as it was. A tour always
+// Deliberately stateless: no server calls of its own, no persistence, and it
+// never mutates user data — exiting (Esc, X, or clicking the dimmed background)
+// removes the overlay and leaves the workspace exactly as it was. The tour always
 // starts from its step one; the setup wizard remains the single source of truth
-// for onboarding progress, so the two never compete (starting a tour collapses
+// for onboarding progress, so the two never compete (starting the tour collapses
 // an open wizard drawer for the duration).
 //
 // Steps that can't render for this user are skipped silently in the direction of
@@ -40,11 +36,10 @@
   // sidebar   open the mobile nav drawer so the anchor is on screen
   // prepare   async hook run before the target search; return false to skip the step
   // cleanup   hook run when leaving the step (also on exit)
-  // center    spotlight-free centered card (finales)
+  // center    spotlight-free centered card (finale)
   // cta       finale primary action: { label, view }
-  // chain     finale secondary action: { label, tour } — hands off to another tour
 
-  const ORIENTATION_STEPS = [
+  const TOUR_STEPS = [
     {
       view: 'dashboard',
       targets: ['#command-center-hero', '#dash-root'],
@@ -73,16 +68,6 @@
       copy: 'Be More Swan plays nicely with your existing tools. Open any assistant’s Board Room and use its Connections tab to plug in your favourite apps for seamless, automated pipelines.',
       placement: 'top',
     },
-    {
-      center: true,
-      title: 'You’re ready to glide.',
-      copy: 'You’ve got the lay of the land. Time to stop paddling frantically and start gliding — deploy your first assistant and watch the busywork disappear. Or keep exploring: the deep dive walks you through every room of the platform.',
-      cta: { label: 'Deploy Your First Assistant', view: 'catalog' },
-      chain: { label: 'Continue: take the deep dive →', tour: 'deep-dive' },
-    },
-  ];
-
-  const DEEP_DIVE_STEPS = [
     {
       prepare: ensureAssistantDetail,
       targets: ['#detail-avatar'],
@@ -162,7 +147,7 @@
       targets: ['#tab-btn-docs'],
       closest: 'nav',
       title: 'Help, When You Want It',
-      copy: 'Stuck on anything? Search the Knowledge Base or raise a Support Ticket right here — and you can restart either tour from this page whenever you like.',
+      copy: 'Stuck on anything? Search the Knowledge Base or raise a Support Ticket right here — and you can restart the tour from this page whenever you like.',
       placement: 'bottom',
     },
     {
@@ -174,10 +159,9 @@
     },
     {
       targets: ['#nav-report-issue'],
-      sidebar: true,
       title: 'Spotted Something Off?',
       copy: 'Report an Issue sends what you found straight to the team — along with where you were when you found it — so fixes land fast.',
-      placement: 'right',
+      placement: 'bottom',
     },
     {
       targets: ['#nav-ask-team'],
@@ -201,12 +185,7 @@
     },
   ];
 
-  const TOURS = {
-    'orientation': ORIENTATION_STEPS,
-    'deep-dive': DEEP_DIVE_STEPS,
-  };
-
-  let steps = ORIENTATION_STEPS; // active tour's steps
+  let steps = TOUR_STEPS; // the tour's steps
   let root = null;               // overlay container (null = tour inactive)
   let spot = null;               // spotlight cut-out div
   let card = null;               // tooltip card
@@ -363,8 +342,6 @@
           : `<button type="button" data-tour-next
               style="font-size:.8rem;font-weight:800;color:#fff;background:#059669;border:none;border-radius:.6rem;padding:.5rem 1.1rem;cursor:pointer;">Next</button>`}
       </div>
-      ${isLast && step.chain ? `<button type="button" data-tour-chain
-        style="display:block;width:100%;margin-top:.6rem;background:#ecfdf5;border:1px solid #a7f3d0;border-radius:.6rem;padding:.5rem .9rem;cursor:pointer;font-size:.8rem;font-weight:700;color:#047857;">${step.chain.label}</button>` : ''}
       ${isLast ? `<button type="button" data-tour-exit
         style="display:block;margin:.75rem auto 0;background:none;border:none;cursor:pointer;font-size:.75rem;font-weight:600;color:#6b7280;">Maybe later — finish tour</button>` : ''}
     `;
@@ -380,9 +357,6 @@
       exit();
       if (typeof window.loadView === 'function') window.loadView(view);
     });
-    const chainBtn = card.querySelector('[data-tour-chain]');
-    if (chainBtn) chainBtn.addEventListener('click', () => start(step.chain.tour));
-
     (nextBtn || ctaBtn || backBtn)?.focus({ preventScroll: true });
   }
 
@@ -523,12 +497,9 @@
     root = spot = card = currentTarget = null;
   }
 
-  // start('orientation') is the default entry; start('deep-dive') jumps straight
-  // to the room-by-room walkthrough (also reachable from the orientation finale).
-  function start(tour) {
+  function start() {
     if (typeof window.loadView !== 'function') return; // workspace shell only
     if (root) exit();                                  // restart cleanly from step one
-    steps = TOURS[tour] || ORIENTATION_STEPS;
     stepIndex = 0;
     detailUnavailable = false;
     window.SetupWizard?.collapse?.();                  // don't fight the wizard drawer
