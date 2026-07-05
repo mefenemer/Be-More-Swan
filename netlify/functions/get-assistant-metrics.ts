@@ -17,7 +17,9 @@ export const handler: Handler = async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const assistantId = event.queryStringParameters?.id;
-    if (!assistantId) return { statusCode: 400, body: JSON.stringify({ error: 'id required' }) };
+    if (!assistantId || Number.isNaN(parseInt(assistantId))) {
+        return { statusCode: 400, body: JSON.stringify({ error: 'id required' }) };
+    }
     const aId = parseInt(assistantId);
 
     const db = getDb();
