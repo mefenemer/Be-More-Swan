@@ -2249,34 +2249,15 @@ async function _renderKickOff(assistantId) {
     const overviewCta  = document.getElementById('meetings-kickoff-cta');
     const meetingsBadge = document.getElementById('meetings-kickoff-badge');
 
-    // Already working → confirmation state + a Pause control (US4 AC4.1: pause in settings).
+    // Issue #115: once kicked off, the Kick Off Meeting card has done its job — its detail
+    // (primary directive + connections) now lives in the notification sent by
+    // kickoff-assistant.ts, and pausing a working assistant is already available from the
+    // My Assistants grid (window._assistantTogglePause), so the card no longer needs to
+    // linger here at all.
     if (data.working) {
         if (overviewCta)   overviewCta.classList.add('hidden');
         if (meetingsBadge) meetingsBadge.classList.add('hidden');
-        const since = data.workingSince ? new Date(data.workingSince).toLocaleDateString('en-GB') : null;
-        subEl.textContent = since ? `Your assistant is working (since ${since}).` : 'Your assistant is working.';
-        btn.classList.add('hidden');
-        hintEl.innerHTML = `<span class="inline-flex items-center gap-1 text-emerald-700 font-semibold">✓ Active</span>
-            <button type="button" id="btn-pause-working" class="ml-3 px-3 py-1.5 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 rounded-lg hover:bg-amber-100 transition cursor-pointer">⏸ Pause Assistant</button>`;
-        const pauseBtn = document.getElementById('btn-pause-working');
-        if (pauseBtn) pauseBtn.onclick = async () => {
-            if (!confirm('Pause this assistant? It will stop all actions until you kick it off again.')) return;
-            pauseBtn.disabled = true;
-            try {
-                // US4 AC4.2/4.3: working → paused (immediate halt).
-                const r = await fetch(`/.netlify/functions/manage-assistant?id=${assistantId}`, {
-                    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'pause' }),
-                });
-                if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'Could not pause the assistant.'); pauseBtn.disabled = false; return; }
-                window.showToast?.('Assistant paused.');
-                // Re-render: card flips to the Kick-Off state so the user can confirm to resume (AC4.4).
-                await _renderKickOff(assistantId);
-                if (window._detailCurrentData) { window._detailCurrentData.lifecycleStatus = 'paused'; window._detailCurrentData.isActive = false; }
-                window._renderStatusPill?.();
-            } catch { alert('Network error — please try again.'); pauseBtn.disabled = false; }
-        };
-        // Active/working → start collapsed (the user can expand to review the checklist).
-        setCollapsed(true);
+        card.classList.add('hidden');
         return;
     }
 
