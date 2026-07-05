@@ -6440,14 +6440,18 @@ async function gpSubmitReject() {
   }
   @media (prefers-reduced-motion: reduce) { #setup-wizard-fab { animation: none; } }
 
-  .cmdbar-overlay { position: fixed; inset: 0; z-index: 95; display: none; padding-top: 12vh;
-    background: rgba(15,23,42,0.42); backdrop-filter: blur(4px); }
+  /* US-DASH-3 fix (issue #129): floating field docked top-right of the workspace
+     area, underneath the fixed header — not a centred full-screen modal. The
+     overlay stays as a full-page, background-free click-catcher so "click
+     outside to close" keeps working without dimming the workspace. */
+  .cmdbar-overlay { position: fixed; inset: 0; z-index: 95; display: none; }
   .cmdbar-overlay.open { display: block; animation: cmdFade .18s ease; }
   @keyframes cmdFade { from { opacity: 0 } to { opacity: 1 } }
-  .cmdbar-panel { width: min(680px, 92vw); margin: 0 auto; background: #fff; border-radius: 20px;
-    border: 1px solid rgba(15,23,42,0.08); box-shadow: 0 40px 80px -24px rgba(0,0,0,0.5);
+  .cmdbar-panel { position: fixed; top: 5rem; right: 1.5rem; width: min(420px, 92vw);
+    background: #fff; border-radius: 20px;
+    border: 1px solid rgba(15,23,42,0.08); box-shadow: 0 20px 45px -12px rgba(15,23,42,0.35);
     overflow: hidden; animation: cmdRise .22s cubic-bezier(.2,.8,.2,1); }
-  @keyframes cmdRise { from { opacity: 0; transform: translateY(14px) scale(.98) } to { opacity: 1; transform: none } }
+  @keyframes cmdRise { from { opacity: 0; transform: translateY(-10px) scale(.98) } to { opacity: 1; transform: none } }
 
   .cmdbar-inputrow { display: flex; align-items: center; gap: 10px; padding: 16px 16px; }
   .cmdbar-spark { color: #10b981; font-size: 18px; }
