@@ -55,6 +55,8 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'review_red_urgency' THEN 'suggested_action'
     WHEN 'trial_expiring_soon' THEN 'suggested_action'
     WHEN 'task_limit_warning' THEN 'suggested_action'
+    WHEN 'workspace_access_request' THEN 'suggested_action'  -- Abuse Prevention US2
+    WHEN 'domain_join_request' THEN 'suggested_action'  -- Abuse Prevention US4
     WHEN 'run_cost_warning' THEN 'suggested_action'
     WHEN 'social_oauth_revoked' THEN 'suggested_action'
     WHEN 'instagram_token_refresh_failed' THEN 'suggested_action'
@@ -63,6 +65,7 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'post_publish_failed' THEN 'suggested_action'
     WHEN 'post_missed' THEN 'suggested_action'
     WHEN 'post_generation_failed' THEN 'suggested_action'
+    WHEN 'content_library_empty' THEN 'suggested_action'  -- Empty-Library Draft Fallback
     WHEN 'risk_assessment_submitted' THEN 'suggested_action'
     WHEN 'billing_renewal_due' THEN 'suggested_action'
     WHEN 'billing_alert' THEN 'suggested_action'
@@ -94,10 +97,13 @@ RETURNS text LANGUAGE sql IMMUTABLE AS $$
     WHEN 'account_update' THEN 'state_change'
     WHEN 'assistant_task' THEN 'state_change'
     WHEN 'assistant_ready' THEN 'state_change'
+    WHEN 'assistant_kickoff_complete' THEN 'state_change'  -- Issue #115 — Kick Off Meeting confirmed
+    WHEN 'feature_status_change' THEN 'state_change'  -- Feature Requests US06 — a backed request moved status
     -- celebratory
     WHEN 'setup_complete' THEN 'celebratory'
     WHEN 'milestone_unlock' THEN 'celebratory'
     WHEN 'referral_reward' THEN 'celebratory'
+    WHEN 'feature_released' THEN 'celebratory'  -- Feature Requests US06 — a backed request shipped
     WHEN 'roi_milestone' THEN 'celebratory'  -- Issue #84 — ROI/break-even milestone (replaces persistent banner)
     -- informational (explicit + default)
     ELSE 'informational'
@@ -144,3 +150,17 @@ SET category       = notification_category_for_type(type),
     priority       = notification_priority_for_category(notification_category_for_type(type)),
     is_dismissible = (notification_category_for_type(type) <> 'critical_action')
 WHERE category IS NULL;
+
+-- 7. Re-stamp rows whose type was added to notification_category_for_type() after the initial
+--    backfill (e.g. Feature Requests' feature_status_change/feature_released, previously
+--    absent from the CASE and so mis-stamped 'informational'). Safe to re-run: recomputes
+--    from type and only touches rows where that recomputed value actually differs.
+UPDATE notifications
+SET category       = notification_category_for_type(type),
+    priority       = notification_priority_for_category(notification_category_for_type(type)),
+    is_dismissible = (notification_category_for_type(type) <> 'critical_action')
+WHERE type IN (
+    'workspace_access_request', 'domain_join_request', 'content_library_empty',
+    'assistant_kickoff_complete', 'feature_status_change', 'feature_released'
+  )
+  AND category IS DISTINCT FROM notification_category_for_type(type);
