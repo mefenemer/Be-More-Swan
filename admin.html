@@ -3385,14 +3385,15 @@ async function api(url, opts) {
 
 // ── Issue Reports (Testing) ──────────────────────────────────────────────────
 const IR_API = '/.netlify/functions/admin-issue-reports';
-const IR_STATUSES = ['reported','fix_in_progress','fixed_ready_to_test','more_info_required','closed','roadmap'];
+const IR_STATUSES = ['reported','backlog','fix_in_progress','merge','fixed_ready_to_test','more_info_required','closed','roadmap'];
 const IR_STATUS_LABEL = {
-  reported: 'Reported', fix_in_progress: 'Fix In Progress',
+  reported: 'Reported', backlog: 'Backlog', fix_in_progress: 'Fix In Progress', merge: 'Merge',
   fixed_ready_to_test: 'Fixed & Ready to Test', more_info_required: 'More Info Required', closed: 'Closed',
   roadmap: 'On Roadmap',
 };
 const IR_STATUS_CLS = {
-  reported: 'bg-gray-100 text-gray-700', fix_in_progress: 'bg-blue-100 text-blue-700',
+  reported: 'bg-gray-100 text-gray-700', backlog: 'bg-slate-100 text-slate-700',
+  fix_in_progress: 'bg-blue-100 text-blue-700', merge: 'bg-indigo-100 text-indigo-700',
   fixed_ready_to_test: 'bg-emerald-100 text-emerald-700', more_info_required: 'bg-amber-100 text-amber-800',
   closed: 'bg-gray-200 text-gray-500', roadmap: 'bg-violet-100 text-violet-700',
 };
@@ -4112,8 +4113,8 @@ async function requestMerge(id) {
 }
 
 // ── "Merge all to staging" + one-press staging deploy (super-admin only) ──────
-// On the Fix In Progress tab, merge every ready fix PR in one go instead of opening
-// each ticket. While the runner drains the queued merges we poll; once nothing is
+// On the Merge tab, merge every ready fix PR in one go instead of opening each
+// ticket. While the runner drains the queued merges we poll; once nothing is
 // left in flight the "Commit to Staging" button appears, which triggers a single
 // fresh Netlify staging build with everything included.
 let _irMergeAllTracking = false; // a bulk merge was queued this session and is draining
@@ -4130,7 +4131,7 @@ function _updateMergeAllBtns(issues) {
   const deployBtn = document.getElementById('ir-deploy-btn');
   if (!mergeBtn || !deployBtn) return;
   const isSuper = (typeof _adminRole !== 'undefined') && _adminRole === 'super_admin';
-  const onTab = _irFilter === 'fix_in_progress';
+  const onTab = _irFilter === 'merge';
   const eligible = (issues || []).filter(_irMergeEligible);
   const inFlight = (issues || []).filter(i => i.devMergeStatus === 'queued' || i.devMergeStatus === 'merging');
 
@@ -4144,8 +4145,8 @@ function _updateMergeAllBtns(issues) {
   }
 
   // Track the drain only from views that actually show in-flight merges (they keep the
-  // fix_in_progress status until merged) — other filters would report a false "done".
-  if (_irMergeAllTracking && (_irFilter === '' || _irFilter === 'fix_in_progress')) {
+  // merge status until merged) — other filters would report a false "done".
+  if (_irMergeAllTracking && (_irFilter === '' || _irFilter === 'merge')) {
     if (inFlight.length > 0) {
       if (!_irMergePollTimer) _irMergePollTimer = setInterval(loadIssueReports, 5000);
     } else {

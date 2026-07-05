@@ -13,7 +13,9 @@ type Db = ReturnType<typeof getDb>;
 // Canonical lifecycle states. KEEP IN SYNC with db/issue-reports.sql status CHECK.
 export const ISSUE_STATUSES = [
     'reported',
+    'backlog',
     'fix_in_progress',
+    'merge',
     'fixed_ready_to_test',
     'more_info_required',
     'closed',
@@ -29,7 +31,9 @@ export function isIssueStatus(v: unknown): v is IssueStatus {
 // Human-readable labels — match the wording the admin owner sees in the portal.
 export const ISSUE_STATUS_LABEL: Record<IssueStatus, string> = {
     reported: 'Reported',
+    backlog: 'Backlog',
     fix_in_progress: 'Fix In Progress',
+    merge: 'Merge',
     fixed_ready_to_test: 'Fixed & Ready to Test',
     more_info_required: 'More Info Required',
     closed: 'Closed',
@@ -103,6 +107,8 @@ export async function notifyIssueUser(
         status === 'fixed_ready_to_test' ? 'Please re-test and confirm the fix worked.' :
         status === 'more_info_required'  ? 'The team needs more information to proceed.' :
         status === 'fix_in_progress'     ? 'A fix is now in progress.' :
+        status === 'backlog'             ? "It's been added to our backlog and will be investigated." :
+        status === 'merge'               ? 'The fix is complete and queued to be merged to staging.' :
         status === 'roadmap'             ? "We've added your request to our feature roadmap, where it'll be prioritised and delivered as soon as we can." :
         status === 'closed'              ? 'This issue has been closed.' :
         'Your reported issue has been updated.';
@@ -110,6 +116,7 @@ export async function notifyIssueUser(
     const title =
         status === 'fixed_ready_to_test' ? `✅ Issue #${issueId} fixed — ready to test` :
         status === 'more_info_required'  ? `❓ Issue #${issueId} — more info needed` :
+        status === 'backlog'             ? `🗂️ Issue #${issueId} added to the backlog` :
         status === 'roadmap'             ? `🗺️ Issue #${issueId} added to our roadmap` :
         `🔧 Issue #${issueId} updated: ${label}`;
 
