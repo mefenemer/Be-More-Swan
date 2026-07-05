@@ -3763,6 +3763,38 @@ let _irRunnerStatusTimer = null;
 // "Pass to Developer" / "Try again" buttons disable and point at the Resume banner —
 // the open detail panel covers the banner, so re-queuing from here would just re-fail.
 let _irRunnerBlocked = false;
+// The switchable Claude accounts a runner reported ([{email, stored}]), defensively parsed.
+function _irRunnerAccounts(r) {
+  try {
+    const a = JSON.parse(r.knownAccounts || '[]');
+    return Array.isArray(a) ? a.filter((x) => x && x.email) : [];
+  } catch { return []; }
+}
+
+// "Switch CLI to <account>" buttons for a runner. Stored accounts are clickable; accounts that
+// still need their one-time login on the runner machine are greyed with an explanatory title.
+// The active account is skipped (nothing to switch). Super-admin only — mirrors Resume/Restart.
+function _irSwitchButtons(r, amber) {
+  if (!((typeof _adminRole !== 'undefined') && _adminRole === 'super_admin')) return '';
+  const accounts = _irRunnerAccounts(r);
+  if (!accounts.length) return '';
+  const activeEmail = ((r.activeAccount || '').match(/^[^\s(]+/) || [''])[0].toLowerCase();
+  if (r.switchAccountRequested) {
+    return `<span class="inline-flex items-center gap-1.5 text-xs font-semibold ${amber ? 'text-amber-700' : 'text-violet-700'}"><span class="animate-pulse">●</span> switching the CLI to <b class="font-mono">${_esc(r.switchAccountRequested)}</b> — the runner picks this up within ~15s…</span>`;
+  }
+  const on = amber
+    ? 'border border-amber-600 text-amber-700 hover:bg-amber-100'
+    : 'border border-violet-400 text-violet-700 hover:bg-violet-50';
+  const off = 'border border-gray-300 text-gray-400 cursor-not-allowed';
+  const btns = accounts
+    .filter((a) => a.email.toLowerCase() !== activeEmail)
+    .map((a) => a.stored
+      ? `<button onclick="switchRunnerAccount('${_esc(r.runnerId)}', '${_esc(a.email)}', this)" class="px-3 py-1.5 ${on} text-xs font-bold rounded-lg transition">⇄ Switch CLI to ${_esc(a.email)}</button>`
+      : `<button disabled title="Not available yet — log into this account once on the runner machine (claude auth login); it is snapshotted automatically and switchable from then on." class="px-3 py-1.5 ${off} text-xs font-bold rounded-lg">⇄ ${_esc(a.email)} (needs one-time login)</button>`)
+    .join('');
+  return btns ? `<div class="mt-2 flex items-center gap-2 flex-wrap">${btns}</div>` : '';
+}
+
 // One paused-runner card (reset hint + last probe result + Resume button). Rendered both in
 // the banner at the top of the Issues list and inside the 🤖 Runner modal.
 function _irRunnerPausedCard(r) {
@@ -3795,8 +3827,9 @@ function _irRunnerPausedCard(r) {
       <span class="text-xl leading-none">⏸️</span>
       <div class="flex-1 min-w-0">
         <p class="text-sm font-bold text-amber-900">AI auto-fix runner paused — Claude session limit${reset}</p>
-        <p class="text-xs text-amber-800 mt-1">Runner <b class="font-mono">${_esc(r.runnerId)}</b> ran out of Claude usage. On the runner machine, log into a Claude account with credit (run <code class="font-mono bg-amber-100 px-1 rounded">claude</code> then <code class="font-mono bg-amber-100 px-1 rounded">/login</code>), then press Resume. Queued issues are retried automatically once it resumes — you don't need to re-submit them.</p>
+        <p class="text-xs text-amber-800 mt-1">Runner <b class="font-mono">${_esc(r.runnerId)}</b> ran out of Claude usage. Switch it to another stored account below (no login needed — a verified switch resumes automatically), or log in by hand on the runner machine and press Resume. Queued issues are retried automatically once it resumes — you don't need to re-submit them.</p>
         ${acct}
+        ${_irSwitchButtons(r, true)}
         ${probe}
         <div class="mt-3 flex items-center gap-2 flex-wrap">${action}${restartBtn}</div>
       </div>
@@ -3821,7 +3854,16 @@ function _irRunnerModalStatus(runners, blocked) {
   const others = runners.filter((r) => r.state !== 'session_limited');
   const otherLines = others.map((r) => {
     const seen = _irRunnerLastSeen(r);
-    return `<div class="flex items-center gap-1.5 text-xs text-gray-600">🖥 <b class="font-mono">${_esc(r.runnerId)}</b> — <span class="text-emerald-700 font-semibold">✓ ${_esc(r.state || 'ok')}</span>${seen ? ` · last seen ${seen}` : ''}</div>`;
+    const acct = r.activeAccount
+      ? `<div class="mt-1 text-xs text-gray-600">Active Claude account: <b class="font-mono">${_esc(r.activeAccount)}</b></div>` : '';
+    // Healthy runners get the same Switch buttons as the paused banner — that's how you
+    // rotate the CLI to a fresh account BEFORE the current one runs out.
+    return `<div class="rounded-lg border border-gray-200 bg-white p-2.5">
+      <div class="flex items-center gap-1.5 text-xs text-gray-600">🖥 <b class="font-mono">${_esc(r.runnerId)}</b> — <span class="text-emerald-700 font-semibold">✓ ${_esc(r.state || 'ok')}</span>${seen ? ` · last seen ${seen}` : ''}</div>
+      ${acct}
+      ${_irSwitchButtons(r, false)}
+      ${r.lastProbeResult ? `<div class="mt-1.5 text-xs text-gray-500 bg-gray-50 rounded p-1.5">Last switch/resume: ${_esc(r.lastProbeResult)}</div>` : ''}
+    </div>`;
   }).join('');
   const note = blocked.length ? '' : `<div class="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-500">
       ${others.length ? otherLines + '<div class="mt-2 pt-2 border-t border-gray-200">' : ''}
@@ -3854,13 +3896,14 @@ async function loadRunnerStatus() {
     modalEl.innerHTML = _irRunnerModalStatus(runners, blocked);
   }
 
-  if (!blocked.length) {
+  // Keep refreshing while anything is in flight — a paused runner, or an account switch
+  // pending on a healthy one — so "switching…"/"verifying…" clears and the probe result
+  // appears without a manual reload.
+  const busy = blocked.length > 0 || runners.some((r) => r.switchAccountRequested);
+  if (!busy) {
     if (_irRunnerStatusTimer) { clearInterval(_irRunnerStatusTimer); _irRunnerStatusTimer = null; }
     return;
   }
-
-  // While something is blocked, refresh so "verifying…" clears and the probe result appears
-  // without a manual reload. Cleared once nothing is blocked (above).
   if (!_irRunnerStatusTimer) _irRunnerStatusTimer = setInterval(loadRunnerStatus, 5000);
 }
 
@@ -3890,6 +3933,24 @@ async function restartRunner(runnerId, btn) {
   } catch (e) {
     alert(e.message);
     if (btn) { btn.disabled = false; btn.textContent = '↻ Restart runner'; }
+  } finally { await loadRunnerStatus(); }
+}
+
+// "Switch CLI to <account>" — swaps the runner machine's Claude Code login to a stored
+// account snapshot. The runner picks the request up on its next poll (~15s healthy, ~10s
+// paused), swaps credentials locally, verifies with a probe call, and reports back; if it
+// was paused on a session limit, a verified switch resumes it automatically.
+async function switchRunnerAccount(runnerId, account, btn) {
+  if (btn) { btn.disabled = true; btn.textContent = 'Requesting…'; }
+  try {
+    const d = await api(`${IR_API}?action=switch-account`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runnerId, account }),
+    });
+    if (!d.requested) alert(d.message || 'That runner is not reporting in — check the runner process is running.');
+  } catch (e) {
+    alert(e.message);
+    if (btn) { btn.disabled = false; btn.textContent = `⇄ Switch CLI to ${account}`; }
   } finally { await loadRunnerStatus(); }
 }
 

@@ -271,6 +271,8 @@ export const handler: Handler = async (event) => {
             lastProbeResult: r.lastProbeResult,
             activeAccount: r.activeAccount,
             restartRequested: r.restartRequested,
+            switchAccountRequested: r.switchAccountRequested,
+            knownAccounts: r.knownAccounts,
             blockedAt: r.blockedAt,
             lastSeenAt: r.lastSeenAt,
         }));
@@ -332,6 +334,35 @@ export const handler: Handler = async (event) => {
             return json(200, { ok: true, requested: 0, message: 'No paused runner to restart. Make sure the runner process is running and has reported a session limit.' });
         }
         return json(200, { ok: true, requested: updated.length, runners: updated.map((u) => u.runnerId) });
+    }
+
+    // ── POST ?action=switch-account: swap the runner's Claude CLI login ───────────
+    // Super-admin only. Sets switch_account_requested; the runner consumes it on its next poll
+    // (~10-15s), swaps its LOCAL credential snapshot to that account, verifies with a probe, and
+    // reports back via switch-ack. Works whether the runner is healthy (proactive rotation) or
+    // paused on a session limit (a verified switch doubles as the Resume). No credential ever
+    // travels through here — only the account label. Requires the runner process to be alive
+    // and the target account to have been logged into once on the runner machine (stored:true
+    // in known_accounts); otherwise the runner acks failure and says so.
+    if (event.httpMethod === 'POST' && action === 'switch-account') {
+        if (admin.role !== 'super_admin') {
+            return json(403, { error: 'Switching the runner\'s Claude account requires super-admin privilege.' });
+        }
+        let body: any = {};
+        try { body = JSON.parse(event.body || '{}'); } catch { /* empty body is fine */ }
+        const rid = typeof body.runnerId === 'string' && body.runnerId.trim() ? body.runnerId.trim() : null;
+        const account = (typeof body.account === 'string' ? body.account : '').trim().slice(0, 200);
+        if (!rid || !account) return json(400, { error: 'runnerId and account are required.' });
+
+        const updated = await db.update(devRunnerStatus)
+            .set({ switchAccountRequested: account, lastProbeResult: null, updatedAt: new Date() })
+            .where(eq(devRunnerStatus.runnerId, rid))
+            .returning({ runnerId: devRunnerStatus.runnerId });
+
+        if (updated.length === 0) {
+            return json(200, { ok: true, requested: 0, message: 'That runner is not reporting in — make sure the runner process is running, then try again.' });
+        }
+        return json(200, { ok: true, requested: updated.length, account });
     }
 
     // ── GET single issue (with thread + screenshot) ──────────────────────────────

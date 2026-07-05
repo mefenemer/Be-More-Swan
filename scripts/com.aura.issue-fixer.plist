@@ -21,11 +21,11 @@
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/mefenemer/WebstormProjects/aura/scripts/dev-issue-fixer-service.sh</string>
+        <string>/Users/mefenemer/WebstormProjects/Be More Swan/scripts/dev-issue-fixer-service.sh</string>
     </array>
 
     <key>WorkingDirectory</key>
-    <string>/Users/mefenemer/WebstormProjects/aura</string>
+    <string>/Users/mefenemer/WebstormProjects/Be More Swan</string>
 
     <!-- Start at login and keep it alive; auto-restart if it crashes or exits. -->
     <key>RunAtLoad</key>

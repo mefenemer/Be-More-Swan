@@ -254,15 +254,33 @@ export const handler: Handler = async (event) => {
         });
     }
 
-    // ── Runner asks whether it may resume (polled while paused) ───────────────────
-    // Doubles as a liveness ping (updates last_seen_at). Returns resume:true once a super-admin
-    // has pressed "Resume runner" in the portal after re-logging in on the runner machine.
+    // ── Runner asks whether it may resume / has control signals (polled) ──────────
+    // Polled every ~10s while paused AND every main-loop iteration (~15s) while healthy, so it
+    // doubles as the liveness heartbeat that keeps the Runner panel's status current. Upserts
+    // the runner's row (state 'ok') when missing so healthy runners are visible in the portal —
+    // that's what the "Switch CLI account" buttons hang off. Returns:
+    //   resume:true         once a super-admin pressed "Resume runner"
+    //   restart:true        once a super-admin pressed "Restart runner" (row deleted, consumed)
+    //   switchAccount:"a@x" once a super-admin pressed "Switch CLI to <account>" (consumed here;
+    //                       the runner swaps its local credential snapshot and POSTs switch-ack)
     if (event.httpMethod === 'GET' && action === 'resume-check') {
         const rid = runnerId(event) || 'unknown-runner';
         const now = new Date();
         // The runner sends its currently-logged-in Claude account on every poll, so the
         // paused banner shows the live session while the admin switches logins.
         const account = (qs.account || '').toString().trim().slice(0, 200) || null;
+        // JSON array of accounts the runner can switch to ([{email,stored}]) — display only.
+        // Bounded and re-serialised so a rogue runner can't stuff arbitrary blobs in the row.
+        let knownAccounts: string | null = null;
+        try {
+            const parsed = JSON.parse((qs.accounts || '').toString());
+            if (Array.isArray(parsed)) {
+                knownAccounts = JSON.stringify(parsed.slice(0, 12).map((a: any) => ({
+                    email: String(a?.email || '').slice(0, 200),
+                    stored: a?.stored === true,
+                })).filter((a) => a.email)).slice(0, 4000);
+            }
+        } catch { /* absent or malformed — leave whatever the row already has */ }
         // Best-effort: if dev_runner_status is unreadable (e.g. table missing on an env),
         // answer "stay paused" instead of 502ing so the runner keeps polling cleanly.
         try {
@@ -274,16 +292,107 @@ export const handler: Handler = async (event) => {
                 await db.delete(devRunnerStatus).where(eq(devRunnerStatus.runnerId, rid));
                 return json(200, { resume: false, restart: true, state: row.state || 'ok' });
             }
+            // Deliver a pending account switch exactly once: clear it in the same write that
+            // stamps the heartbeat, so a crashed runner doesn't re-trigger the swap forever.
+            const switchAccount = row?.switchAccountRequested || null;
             if (row) {
                 await db.update(devRunnerStatus)
-                    .set({ lastSeenAt: now, ...(account ? { activeAccount: account } : {}) })
+                    .set({
+                        lastSeenAt: now,
+                        ...(account ? { activeAccount: account } : {}),
+                        ...(knownAccounts ? { knownAccounts } : {}),
+                        ...(switchAccount ? { switchAccountRequested: null } : {}),
+                    })
                     .where(eq(devRunnerStatus.runnerId, rid));
+            } else {
+                // First sight of a healthy runner — create its row so the portal can show it
+                // (and offer account switching) without waiting for a session limit to hit.
+                await db.insert(devRunnerStatus).values({
+                    runnerId: rid, state: 'ok', activeAccount: account, knownAccounts,
+                    lastSeenAt: now, updatedAt: now,
+                }).onConflictDoNothing();
             }
-            return json(200, { resume: !!row?.resumeRequested, state: row?.state || 'ok' });
+            return json(200, {
+                resume: !!row?.resumeRequested,
+                state: row?.state || 'ok',
+                ...(switchAccount ? { switchAccount } : {}),
+            });
         } catch (e) {
             console.error(`resume-check: dev_runner_status unavailable for runner ${rid}:`, e);
             return json(200, { resume: false, state: 'unknown', statusError: e instanceof Error ? e.message : String(e) });
         }
+    }
+
+    // ── Runner reports the result of a requested account switch ───────────────────
+    // After consuming switchAccount from resume-check, the runner swaps its local credential
+    // snapshot, probes Claude, and reports here. ok:true → the new account works: record it and,
+    // if the runner was parked on a session limit, clear the block (same effect as a successful
+    // Resume — the re-queued issue gets re-claimed). ok:false → leave the state as it was and
+    // record why, so the admin can pick another account or seed the missing login.
+    if (event.httpMethod === 'POST' && action === 'switch-ack') {
+        let body: any;
+        try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON.' }); }
+        const rid = runnerId(event) || 'unknown-runner';
+        const ok = body.ok === true;
+        const probeMsg = (typeof body.message === 'string' ? body.message : '').trim().slice(0, 1000)
+            || (ok ? 'Account switched and verified.' : 'The account switch could not be completed.');
+        const activeAccount = (typeof body.activeAccount === 'string' ? body.activeAccount : '').trim().slice(0, 200) || null;
+        let knownAccounts: string | null = null;
+        try {
+            if (Array.isArray(body.knownAccounts)) {
+                knownAccounts = JSON.stringify(body.knownAccounts.slice(0, 12).map((a: any) => ({
+                    email: String(a?.email || '').slice(0, 200),
+                    stored: a?.stored === true,
+                })).filter((a: any) => a.email)).slice(0, 4000);
+            }
+        } catch { /* display only */ }
+        const now = new Date();
+
+        let row: typeof devRunnerStatus.$inferSelect | undefined;
+        let statusRecorded = true;
+        let statusError: string | null = null;
+        try {
+            [row] = await db.select().from(devRunnerStatus).where(eq(devRunnerStatus.runnerId, rid)).limit(1);
+            const wasBlocked = row?.state === 'session_limited';
+            await db.insert(devRunnerStatus).values({
+                runnerId: rid,
+                state: ok ? 'ok' : (row?.state || 'ok'),
+                resumeRequested: false, lastProbeResult: probeMsg, activeAccount, knownAccounts,
+                lastSeenAt: now, updatedAt: now,
+            }).onConflictDoUpdate({
+                target: devRunnerStatus.runnerId,
+                set: {
+                    // A verified switch clears a session-limit block; a failed one changes nothing.
+                    ...(ok ? { state: 'ok', message: null, resetHint: null, blockedIssueId: null, blockedAt: null } : {}),
+                    resumeRequested: false, lastProbeResult: probeMsg,
+                    ...(activeAccount ? { activeAccount } : {}),
+                    ...(knownAccounts ? { knownAccounts } : {}),
+                    lastSeenAt: now, updatedAt: now,
+                },
+            });
+            // Thread the outcome on the blocked issue (if any) so the admin sees it in the ticket.
+            const blockedId = wasBlocked ? (row?.blockedIssueId ?? null) : null;
+            if (blockedId) {
+                await db.insert(issueReportMessages).values({
+                    issueId: blockedId,
+                    authorType: 'admin',
+                    authorId: null,
+                    body: ok
+                        ? `▶️ Runner switched Claude account${activeAccount ? ` to ${activeAccount}` : ''} and verified the login — this issue will be picked up again shortly.`
+                        : `⚠️ Account switch failed on the runner.\n\n${probeMsg}\n\nPick a different account in the Runner panel, or log into the requested account once on the runner machine so its credential snapshot exists.`,
+                    status: null,
+                });
+            }
+        } catch (e) {
+            statusRecorded = false;
+            statusError = e instanceof Error ? e.message : String(e);
+            console.error(`switch-ack: dev_runner_status write failed for runner ${rid}:`, e);
+        }
+
+        return json(200, {
+            ok: true, state: ok ? 'ok' : (row?.state || 'ok'),
+            statusRecorded, ...(statusError ? { statusError } : {}),
+        });
     }
 
     // ── Runner reports the result of verifying the new login ──────────────────────

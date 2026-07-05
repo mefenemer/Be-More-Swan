@@ -1155,6 +1155,13 @@ export const devRunnerStatus = pgTable("dev_runner_status", {
   // Admin pressed "Restart runner". Consumed by the runner's next resume-check poll: the row
   // is deleted and the runner exits (launchd KeepAlive relaunches it) or re-spawns itself.
   restartRequested: boolean("restart_requested").notNull().default(false),
+  // Admin pressed "Switch CLI to <account>": the requested account email. Consumed (cleared)
+  // when the runner's next poll delivers it; the runner swaps its local credential snapshot,
+  // probes, and reports via switch-ack. Only the label travels — never a credential.
+  switchAccountRequested: text("switch_account_requested"),
+  // JSON array self-reported by the runner: accounts it can switch to,
+  // e.g. [{"email":"a@x.com","stored":true}]. Display only.
+  knownAccounts: text("known_accounts"),
   blockedAt: timestamp("blocked_at"),
   lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

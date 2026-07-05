@@ -133,7 +133,34 @@ immediately. So instead of burning the issue as a failure, the runner recovers g
      press Resume again.
 
 The runner polls for the resume signal every `RESUME_POLL_INTERVAL_MS` (default 10s) while paused,
-which also serves as a liveness heartbeat (`dev_runner_status.last_seen_at`). The portal never
-authenticates Claude itself — it can't reach the runner machine — and no Claude credential is ever
-stored; `dev_runner_status` only coordinates the human-in-the-loop re-login. Requires
-`db/issue-reports.sql` applied (it adds the `dev_runner_status` table).
+and the same poll runs as a liveness heartbeat every main-loop pass (~15s) while healthy
+(`dev_runner_status.last_seen_at`). The portal never authenticates Claude itself — it can't reach
+the runner machine; `dev_runner_status` only coordinates. Requires `db/issue-reports.sql` applied
+(it adds the `dev_runner_status` table).
+
+## Switching Claude accounts from the portal
+
+Manual re-login is no longer the only way out of a session limit. The Runner panel (and the
+paused banner) show **⇄ Switch CLI to \<account\>** buttons — super-admin only. Pressing one:
+
+1. Sets `dev_runner_status.switch_account_requested`; the runner consumes it on its next poll
+   (~15s healthy / ~10s paused).
+2. The runner swaps the Claude Code CLI's stored login to that account's **local credential
+   snapshot**, verifies it with a cheap probe call, and reports back (`?action=switch-ack`).
+3. If the runner was paused on a session limit, a verified switch **resumes it automatically** —
+   no Resume press, no terminal, no WebStorm.
+
+Snapshots are taken automatically whenever the runner sees an account logged in (startup,
+heartbeat, resume probes, and before every switch-away — so the outgoing account's freshest
+tokens are kept). That means each rotation account needs exactly **one** ordinary
+`claude auth login` on the runner machine, ever; from then on it's a button.
+
+Storage matches the CLI's own: on macOS snapshots live in the user Keychain (service
+`Claude Code-credentials.aura-snapshot`, one item per account email); elsewhere they're `0600`
+files under `~/.claude/aura-account-snapshots/`. Only account *labels* ever reach the portal —
+credentials never leave the runner machine.
+
+Set `AURA_CLAUDE_ACCOUNTS` (comma-separated emails) in `.env.handoff` to list your rotation
+accounts up front: not-yet-seeded ones appear greyed out in the portal as a reminder that a
+one-time login is still needed. Requires the `switch_account_requested` / `known_accounts`
+columns from `db/issue-reports.sql`.

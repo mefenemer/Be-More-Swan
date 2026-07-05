@@ -237,3 +237,15 @@ ALTER TABLE dev_runner_status ADD COLUMN IF NOT EXISTS active_account TEXT;
 -- resume-check poll (~10s while paused): the row is deleted and the runner restarts itself
 -- (exit under launchd KeepAlive, or re-spawn when run manually in a terminal).
 ALTER TABLE dev_runner_status ADD COLUMN IF NOT EXISTS restart_requested BOOLEAN NOT NULL DEFAULT false;
+
+-- Admin pressed "Switch CLI to <account>" in the Runner panel: the requested account email.
+-- Consumed (cleared) when the runner's next poll delivers it; the runner then swaps its locally
+-- stored Claude CLI credential snapshot to that account, verifies with a probe, and reports the
+-- outcome via ?action=switch-ack. Credentials themselves NEVER leave the runner machine — this
+-- column only carries the account label.
+ALTER TABLE dev_runner_status ADD COLUMN IF NOT EXISTS switch_account_requested TEXT;
+
+-- JSON array self-reported by the runner on every poll: the Claude accounts it can switch to,
+-- e.g. [{"email":"a@x.com","stored":true}]. "stored" means a local credential snapshot exists
+-- (the account has been logged into at least once on the runner machine). Display only.
+ALTER TABLE dev_runner_status ADD COLUMN IF NOT EXISTS known_accounts TEXT;
