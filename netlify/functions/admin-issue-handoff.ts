@@ -476,9 +476,10 @@ export const handler: Handler = async (event) => {
 
         if (ok) {
             // A fix no longer jumps straight to "Fixed & Ready to Test". The PR has to be
-            // merged to staging first (and any DB migration applied). So we park the issue
-            // at 'fix_in_progress' with dev_merge_status='ready' — a super-admin then merges
-            // it from the ticket, which is what finally advances + notifies the reporter.
+            // merged to staging first (and any DB migration applied). So the AI confirming
+            // the fix is ready moves the ticket into 'merge' with dev_merge_status='ready' —
+            // a super-admin then merges it from the ticket, which is what finally advances
+            // + notifies the reporter.
             const needsSql = !!migrationSql;
 
             await db.update(issueReports).set({
@@ -495,7 +496,7 @@ export const handler: Handler = async (event) => {
                 devMergeResult: null,
                 devRunnerId: null,
                 devRunnerHeartbeat: null,
-                status: 'fix_in_progress',
+                status: 'merge',
                 updatedAt: new Date(),
             }).where(eq(issueReports.id, id));
 
@@ -512,12 +513,12 @@ export const handler: Handler = async (event) => {
                 authorType: 'admin',
                 authorId: null,
                 body: threadBody,
-                status: 'fix_in_progress',
+                status: 'merge',
             });
 
             // The reporter is NOT pinged here — only once the fix is merged to staging
             // (and any migration applied) and the issue is genuinely ready to re-test.
-            return json(200, { ok: true, status: 'fix_in_progress', needsSql, devMergeStatus: 'ready' });
+            return json(200, { ok: true, status: 'merge', needsSql, devMergeStatus: 'ready' });
         }
 
         // Failure — surface it to the admin without bothering the reporter (status unchanged).

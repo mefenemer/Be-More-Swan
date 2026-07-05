@@ -7,7 +7,8 @@
 -- the feature works without S3/R2 being provisioned). Issues are stored against the user
 -- so they can track progress; the admin owner is emailed on every new report.
 --
--- Lifecycle (status): reported → fix_in_progress → fixed_ready_to_test → closed
+-- Lifecycle (status): reported → fix_in_progress → merge → fixed_ready_to_test → closed
+--                     ↘ backlog (super-admin defers the ticket for later investigation)
 --                     ↘ more_info_required (admin asks the user for detail) ↗
 --                     ↘ roadmap (feature request promoted to the Feature Roadmap; see db/feature-roadmap.sql)
 -- The threaded back-and-forth (admin status messages + user replies) lives in
@@ -31,7 +32,7 @@ CREATE TABLE IF NOT EXISTS issue_reports (
   image_data       TEXT,
   image_mime       TEXT,
 
-  -- reported | fix_in_progress | fixed_ready_to_test | more_info_required | closed | roadmap
+  -- reported | backlog | fix_in_progress | merge | fixed_ready_to_test | more_info_required | closed | roadmap
   status           TEXT NOT NULL DEFAULT 'reported',
 
   created_at       TIMESTAMP NOT NULL DEFAULT now(),
@@ -44,16 +45,14 @@ CREATE INDEX IF NOT EXISTS issue_reports_user_idx   ON issue_reports (user_id, c
 CREATE INDEX IF NOT EXISTS issue_reports_org_idx    ON issue_reports (organisation_id);
 CREATE INDEX IF NOT EXISTS issue_reports_status_idx ON issue_reports (status, created_at);
 
--- Constrain status to the known set (idempotent add).
+-- Constrain status to the known set (idempotent — drop + recreate so re-running this
+-- file after the set changes, e.g. adding 'backlog'/'merge', updates an existing constraint).
 DO $$
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'issue_reports_status_check'
-  ) THEN
-    ALTER TABLE issue_reports
-      ADD CONSTRAINT issue_reports_status_check
-      CHECK (status IN ('reported', 'fix_in_progress', 'fixed_ready_to_test', 'more_info_required', 'closed', 'roadmap'));
-  END IF;
+  ALTER TABLE issue_reports DROP CONSTRAINT IF EXISTS issue_reports_status_check;
+  ALTER TABLE issue_reports
+    ADD CONSTRAINT issue_reports_status_check
+    CHECK (status IN ('reported', 'backlog', 'fix_in_progress', 'merge', 'fixed_ready_to_test', 'more_info_required', 'closed', 'roadmap'));
 END $$;
 
 -- Threaded conversation: admin status updates / supporting messages, and user replies
