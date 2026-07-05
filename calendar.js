@@ -18,14 +18,6 @@ const PLATFORM_META = {
     x:         { label: 'X (Twitter)', bg: '#000000', text: 'text-white' },
 };
 
-// Returns a platform logo rendered in a sized container (inline SVG).
-function _platLogo(platform, size = 'sm') {
-    const svg = PLATFORM_LOGOS[platform];
-    const px = size === 'lg' ? '20px' : size === 'md' ? '16px' : '13px';
-    if (!svg) return `<span style="font-size:${px}">📣</span>`;
-    return `<span style="display:inline-flex;width:${px};height:${px};color:#fff;flex-shrink:0">${svg}</span>`;
-}
-
 // Returns a circular platform avatar (logo on brand bg) for list/panel use.
 function _platAvatar(platform, sizePx = 36) {
     const meta = PLATFORM_META[platform];
@@ -442,7 +434,7 @@ function _postChip(post, viewType) {
         class="group flex items-center gap-1.5 px-2 py-1 rounded-lg ${chipBg} shadow-sm cursor-pointer transition select-none text-left w-full"
         style="border-left:3px solid ${asstColor}"
         aria-label="${_escHtml(asstName)} · ${_escHtml(post.caption || post.platform)}${titleSuffix}">
-        ${_platLogo(post.platform, 'sm')}
+        ${_platAvatar(post.platform, 16)}
         <div class="flex-1 min-w-0">
             <p class="text-[11px] font-bold ${timeColor} truncate">${overdue ? '⚠ ' : ''}${time}</p>
             <p class="text-[11px] text-gray-500 truncate leading-tight">${_escHtml(summary.substring(0, 40))}</p>
