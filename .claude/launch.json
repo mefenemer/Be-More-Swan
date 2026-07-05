@@ -35,6 +35,13 @@
       "runtimeArgs": ["-m", "http.server", "8894"],
       "port": 8894,
       "autoPort": false
+    },
+    {
+      "name": "component-harness",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4173", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/3ee8939b-fb43-4f21-a065-8c8766e78c93/scratchpad/demo"],
+      "port": 4173,
+      "autoPort": false
     }
   ]
 }
