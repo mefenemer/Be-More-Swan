@@ -5,7 +5,7 @@
 // returns the total hours plus a per-assistant breakdown (AC2.1.1–2.1.3).
 
 import { Handler } from '@netlify/functions';
-import { and, eq, gte } from 'drizzle-orm';
+import { and, eq, gte, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { leads, scheduledPosts, taskRuns, aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
@@ -38,9 +38,12 @@ export const handler: Handler = async (event) => {
         db.select({ id: scheduledPosts.id, assistantId: scheduledPosts.assistantId, platform: scheduledPosts.platform, caption: scheduledPosts.caption, createdAt: scheduledPosts.createdAt })
             .from(scheduledPosts)
             .where(and(eq(scheduledPosts.organisationId, orgId), gte(scheduledPosts.createdAt, monthStart))),
+        // Issue #110 (follow-up): window on COALESCE(completed_at, created_at) — a run
+        // created last month but only completing this month was otherwise dropped,
+        // zeroing this tile out right after a month/week boundary despite real activity.
         db.select({ id: taskRuns.id, assistantId: taskRuns.assistantId, completedAt: taskRuns.completedAt, createdAt: taskRuns.createdAt })
             .from(taskRuns)
-            .where(and(eq(taskRuns.organisationId, orgId), eq(taskRuns.status, 'completed'), gte(taskRuns.createdAt, monthStart))),
+            .where(and(eq(taskRuns.organisationId, orgId), eq(taskRuns.status, 'completed'), gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, monthStart))),
         db.select({ id: aiAssistants.id, name: aiAssistants.name, role: aiAssistants.aiAssistantJobRole })
             .from(aiAssistants).where(eq(aiAssistants.organisationId, orgId)),
     ]);

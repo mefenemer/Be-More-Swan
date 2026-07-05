@@ -5,7 +5,7 @@
 //   → { taskCount, hoursSaved, gbpSaved, planCostGbp, multiplier, period }
 
 import { HandlerEvent } from '@netlify/functions';
-import { eq, and, gte, count, desc } from 'drizzle-orm';
+import { eq, and, gte, count, desc, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { userProfiles, taskRuns, scheduledPosts, plans, masterPlans, notifications } from '../../db/schema';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
@@ -42,13 +42,20 @@ export const handler = async (event: HandlerEvent) => {
         // scheduled_posts — task_runs alone is near-always empty for that flow, which
         // is why this widget previously showed zero despite an assistant being active
         // (see get-assistant-metrics.ts, which already reads from scheduled_posts).
+        //
+        // Issue #110 (follow-up): task_runs are windowed on COALESCE(completed_at,
+        // created_at), not created_at alone — a run created before the period boundary
+        // but only completing after it (the normal case right after a week/month rolls
+        // over) was being dropped entirely, zeroing out this widget even with completed
+        // work in the window. dashboard-heatmap.ts already uses this same COALESCE for
+        // task_runs; this brings the ROI hero in line with it.
         const [{ taskRunCount }] = organisationId ? await db
             .select({ taskRunCount: count() })
             .from(taskRuns)
             .where(and(
                 eq(taskRuns.organisationId, organisationId),
                 eq(taskRuns.status, 'completed'),
-                gte(taskRuns.createdAt, periodStart)
+                gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, periodStart)
             )) : [{ taskRunCount: 0 }];
 
         const [{ postCount }] = organisationId ? await db
