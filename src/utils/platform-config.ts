@@ -30,6 +30,9 @@ export const CONFIG_KEYS = {
     // ── AI-regulatory compliance overrides (AC4.1; defaults in src/config/compliance.ts) ──
     COMPLIANCE_EU_EXTRA_COUNTRIES:  'compliance.eu_extra_countries',    // string[] — extra ISO codes added to the EU jurisdiction set
     COMPLIANCE_SYSTEMIC_RISK_FLOPS: 'compliance.systemic_risk_flops',   // number — GPAI systemic-risk compute trigger (FLOPs)
+    // ── Session inactivity timeout (issue #127; admin-editable in Admin Portal) ──
+    SESSION_INACTIVITY_TIMEOUT_MINUTES: 'session.inactivity_timeout_minutes', // number — idle minutes before the "stay signed in" countdown appears
+    SESSION_COUNTDOWN_MINUTES:          'session.countdown_minutes',          // number — minutes the countdown gives the user before auto-logout
 } as const;
 
 export type ConfigKey = typeof CONFIG_KEYS[keyof typeof CONFIG_KEYS];
@@ -134,4 +137,19 @@ export async function getMilestones(): Promise<Milestones> {
 
 export async function areRewardsPaused(): Promise<boolean> {
     return (await getPlatformConfig(CONFIG_KEYS.GAMIFICATION_REWARDS_PAUSED)) === true;
+}
+
+// ── Session inactivity timeout config (issue #127; with safe defaults) ────────
+export interface SessionTimeoutConfig { inactivityTimeoutMinutes: number; countdownMinutes: number; }
+export const DEFAULT_SESSION_TIMEOUT_CONFIG: SessionTimeoutConfig = { inactivityTimeoutMinutes: 15, countdownMinutes: 10 };
+
+export async function getSessionTimeoutConfig(): Promise<SessionTimeoutConfig> {
+    const [timeout, countdown] = await Promise.all([
+        getPlatformConfig(CONFIG_KEYS.SESSION_INACTIVITY_TIMEOUT_MINUTES),
+        getPlatformConfig(CONFIG_KEYS.SESSION_COUNTDOWN_MINUTES),
+    ]);
+    return {
+        inactivityTimeoutMinutes: Number(timeout) > 0 ? Number(timeout) : DEFAULT_SESSION_TIMEOUT_CONFIG.inactivityTimeoutMinutes,
+        countdownMinutes: Number(countdown) > 0 ? Number(countdown) : DEFAULT_SESSION_TIMEOUT_CONFIG.countdownMinutes,
+    };
 }
