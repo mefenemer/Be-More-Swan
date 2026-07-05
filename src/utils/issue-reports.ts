@@ -1,7 +1,7 @@
 // src/utils/issue-reports.ts
 // Shared constants/helpers for the testing-phase "Report an Issue" feature.
 
-import { eq, or } from 'drizzle-orm';
+import { eq, or, inArray, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { users, notifications, issueReports, issueReportMessages } from '../../db/schema';
 import { sendEmail } from './email';
@@ -192,4 +192,27 @@ export async function maybeAdvanceToReadyToTest(
     await notifyIssueUser(db, { userId: row.userId, issueId, status: 'fixed_ready_to_test', headers })
         .catch((e) => console.error('[issue-reports] ready-to-test notify failed:', e?.message || e));
     return true;
+}
+
+/**
+ * Fire the Netlify staging build hook once the merge queue has drained — called after
+ * every merge-result (success or failure) so "Merge to Staging" alone puts the fix live,
+ * matching what maybeAdvanceToReadyToTest already tells the reporter. Only fires when
+ * nothing else is still queued/merging, so a bulk "merge all" still yields one rebuild
+ * instead of one per PR. Best-effort: a hook failure is logged, never thrown.
+ */
+export async function triggerStagingDeployIfDrained(db: Db): Promise<void> {
+    const hook = process.env.NETLIFY_STAGING_BUILD_HOOK;
+    if (!hook) return;
+
+    const [pending] = await db.select({ n: sql<number>`count(*)::int` }).from(issueReports)
+        .where(inArray(issueReports.devMergeStatus, ['queued', 'merging']));
+    if (pending && pending.n > 0) return;
+
+    try {
+        const res = await fetch(hook, { method: 'POST' });
+        if (!res.ok) console.error(`[issue-reports] staging deploy hook returned ${res.status}`);
+    } catch (e) {
+        console.error('[issue-reports] staging deploy hook unreachable:', e instanceof Error ? e.message : e);
+    }
 }
