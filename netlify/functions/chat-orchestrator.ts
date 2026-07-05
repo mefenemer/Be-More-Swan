@@ -25,6 +25,9 @@ const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 
 const MAX_MESSAGE_CHARS = 4000;
+// Cap on the serialised payloadToPass a HandoffProposalCard approval may carry — the
+// payload is LLM-authored and client-echoed, so treat it as untrusted input.
+const HANDOFF_PAYLOAD_MAX_CHARS = 4000;
 // LLM context window: the most recent turns only — older history stays in the DB and can
 // be summarised into the window later without changing the client contract.
 const HISTORY_LIMIT = 20;
@@ -133,18 +136,36 @@ Ideal customer profile (from setup):
 
 Scoring bands: 70-100 = "hot" (strong profile fit + buying intent), 40-69 = "warm" (partial fit or unclear intent), 0-39 = "cold" (poor fit or no intent).
 
-When the conversation contains enough detail to assess a lead, include the scoring card; otherwise set uiElement to null and ask for what's missing (industry, company size, budget/intent).
+When the conversation contains enough detail to assess a lead, include the scoring card.
 
-Return STRICT JSON (no markdown, no prose outside the JSON):
+HANDOFF PROTOCOL — when you lack the firmographic data to score a named lead confidently against the profile (e.g. company size/headcount, industry, or revenue is unknown), do NOT output the lead_scoring_card yet. Instead propose a handoff to "The CRM Enricher": explain in your reply what is missing and that the enricher can fill the gaps, and emit the handoff_proposal uiElement below. Put everything the enricher needs in payloadToPass — the lead/company name, every detail already known from the conversation, and the fields you are missing. The user must approve the handoff before it runs.
+
+A later user turn may be marked "[Approved handoff result]" and contain enriched data from The CRM Enricher — when it does, treat that data as trusted CRM enrichment, complete your original scoring task, and emit the lead_scoring_card. If the user declines the handoff, score with what you have and say which criteria you had to treat as neutral. Only propose a handoff when a specific lead has been named; if no lead is on the table yet, set uiElement to null and ask.
+
+Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EXACTLY ONE of the two shapes below, or null:
 {
   "reply": "your conversational message to the user",
-  "uiElement": {                      // or null when no card is warranted yet
+  "uiElement": {                      // shape 1 — enough data to score
     "type": "lead_scoring_card",
     "leadName": "<name or company>",
     "score": <0-100>,
     "rating": "hot" | "warm" | "cold",
     "reasons": ["<short reason tied to the profile criteria>", ...],
     "suggestedNextStep": "<one concrete action>"
+  }
+}
+{
+  "reply": "your conversational message to the user",
+  "uiElement": {                      // shape 2 — missing data, propose enrichment
+    "type": "handoff_proposal",
+    "targetAssistantName": "The CRM Enricher",
+    "targetRoleKey": "crm_enricher",
+    "reason": "<one sentence naming the missing data, e.g. 'Company size and revenue are unknown, so the lead cannot be scored against the profile yet.'>",
+    "payloadToPass": {
+      "recordName": "<lead or company name>",
+      "knownDetails": { "<field>": "<value already known from the conversation>", ... },
+      "missingFields": ["<field the enricher should fill>", ...]
+    }
   }
 }`,
             ].join('\n\n');
@@ -291,12 +312,37 @@ export const handler: Handler = async (event) => {
         return json(429, { error: 'You are sending messages very quickly — give me a moment and try again.' });
     }
 
-    let body: { chatSessionId?: number; aiAssistantId?: number; message?: string };
+    let body: {
+        chatSessionId?: number;
+        aiAssistantId?: number;
+        message?: string;
+        approvedHandoff?: { targetRoleKey?: string; targetAssistantName?: string; payloadToPass?: unknown };
+    };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
     const message = (body.message || '').trim();
     if (!message) return json(400, { error: 'message is required' });
     if (message.length > MAX_MESSAGE_CHARS) return json(400, { error: `Message too long (max ${MAX_MESSAGE_CHARS} characters).` });
+
+    // ── HITL handoff approval — the hidden flag sent by chat-session.js when the user
+    // clicks "Approve Handoff" on a HandoffProposalCard. Validated up front: the target
+    // must be a routed assistant, and the payload (LLM-authored) is size-capped.
+    let handoff: { targetRoleKey: string; targetAssistantName: string; payloadJson: string } | null = null;
+    if (body.approvedHandoff !== undefined) {
+        const h = body.approvedHandoff;
+        const targetRoleKey = typeof h?.targetRoleKey === 'string' ? h.targetRoleKey : '';
+        if (!ROUTES[targetRoleKey]) return json(400, { error: 'Unknown handoff target.' });
+        let payloadJson: string;
+        try { payloadJson = JSON.stringify(h.payloadToPass ?? {}); } catch { return json(400, { error: 'Invalid handoff payload.' }); }
+        if (payloadJson.length > HANDOFF_PAYLOAD_MAX_CHARS) return json(400, { error: 'Handoff payload too large.' });
+        handoff = {
+            targetRoleKey,
+            targetAssistantName: typeof h.targetAssistantName === 'string' && h.targetAssistantName.trim()
+                ? h.targetAssistantName.trim().slice(0, 100)
+                : targetRoleKey,
+            payloadJson,
+        };
+    }
 
     // ── Resolve the session (continue or create) — always scoped to the caller's org ──
     let session: { id: number; aiAssistantId: number };
@@ -375,6 +421,83 @@ export const handler: Handler = async (event) => {
     ];
 
     try {
+        // ── The Shadow Call: run the approved handoff target in the background first ──
+        // The target assistant is instantiated for this request only; its output is
+        // injected into the active assistant's context (never streamed to the UI
+        // directly) and persisted as a hidden 'system' row for audit.
+        let handoffAudit: { roleKey: string; targetName: string; content: string; uiElement: unknown | null } | null = null;
+
+        if (handoff) {
+            const targetRoute = ROUTES[handoff.targetRoleKey];
+
+            // Prefer the org's own hired instance of the target role (its name, custom
+            // prompt and onboarding answers); fall back to a synthetic context so the
+            // handoff still works when the target hasn't been hired yet.
+            const [shadowRow] = await db
+                .select({
+                    id: aiAssistants.id,
+                    name: aiAssistants.name,
+                    jobRole: aiAssistants.aiAssistantJobRole,
+                    systemPrompt: aiAssistants.systemPrompt,
+                    onboardingContext: aiAssistants.onboardingContext,
+                })
+                .from(aiAssistants)
+                .innerJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
+                .where(and(
+                    eq(masterAssistants.roleKey, handoff.targetRoleKey),
+                    eq(aiAssistants.organisationId, orgId),
+                ))
+                .limit(1);
+
+            const targetName = shadowRow?.name ?? handoff.targetAssistantName;
+            const shadowSystem = targetRoute.buildSystemPrompt({
+                assistantName: targetName,
+                jobRole: shadowRow?.jobRole ?? null,
+                baseSystemPrompt: shadowRow?.systemPrompt ?? null,
+                onboardingContext: shadowRow?.onboardingContext ?? null,
+            });
+
+            const shadowResponse = await anthropic.messages.create({
+                model: targetRoute.model,
+                max_tokens: targetRoute.maxTokens,
+                system: shadowSystem,
+                messages: [{
+                    role: 'user' as const,
+                    content: `Background handoff (automated — the user approved this handoff; they are not addressing you directly). "${assistantRow.name}" needs your output to finish its own task. Work the payload below and respond in your usual format; keep the reply brief.\n\nHandoff payload:\n${handoff.payloadJson}`,
+                }],
+            });
+
+            // Shadow calls burn real tokens — same telemetry as a foreground turn, with a
+            // :handoff session suffix so COGS reporting can split background work out.
+            void logAiUsage({
+                workspaceId: orgId,
+                userId,
+                assistantId: shadowRow?.id ?? assistantRow.id,
+                model: targetRoute.model,
+                inputTokens: shadowResponse.usage.input_tokens,
+                outputTokens: shadowResponse.usage.output_tokens,
+                sessionId: `chat:${session.id}:handoff`,
+                dataCategories: ['business_context'],
+            });
+
+            const shadowRaw = shadowResponse.content[0]?.type === 'text' ? shadowResponse.content[0].text : '';
+            const shadow = targetRoute.parseResponse(shadowRaw);
+            handoffAudit = { roleKey: handoff.targetRoleKey, targetName, content: shadow.content, uiElement: shadow.uiElement };
+
+            // The Context Injection + Resumption: append the shadow output as an extra
+            // user turn so the active assistant completes its original task with it.
+            // (Consecutive user turns are combined into one by the API.)
+            llmMessages.push({
+                role: 'user' as const,
+                content: [
+                    `[Approved handoff result] Here is the enriched data from ${targetName}:`,
+                    shadow.content,
+                    shadow.uiElement ? `Structured data:\n${JSON.stringify(shadow.uiElement)}` : '',
+                    'Please complete your original task using this data.',
+                ].filter(Boolean).join('\n\n'),
+            });
+        }
+
         const response = await anthropic.messages.create({
             model: route.model,
             max_tokens: route.maxTokens,
@@ -396,10 +519,23 @@ export const handler: Handler = async (event) => {
         const raw = response.content[0]?.type === 'text' ? response.content[0].text : '';
         const { content, uiElement } = route.parseResponse(raw);
 
-        const [assistantMessage] = await db
-            .insert(chatMessages)
-            .values({ chatSessionId: session.id, role: 'assistant', content, uiElementJson: uiElement })
-            .returning({ id: chatMessages.id, createdAt: chatMessages.createdAt });
+        // One transaction: the shadow call's audit row (role 'system' — hidden from the
+        // transcript and excluded from the LLM window, kept so the handoff's work is
+        // auditable) commits together with the final assistant reply, or not at all.
+        const [assistantMessage] = await db.transaction(async (tx) => {
+            if (handoffAudit) {
+                await tx.insert(chatMessages).values({
+                    chatSessionId: session.id,
+                    role: 'system',
+                    content: `[handoff:${handoffAudit.roleKey}] ${handoffAudit.targetName}: ${handoffAudit.content}`,
+                    uiElementJson: handoffAudit.uiElement,
+                });
+            }
+            return tx
+                .insert(chatMessages)
+                .values({ chatSessionId: session.id, role: 'assistant', content, uiElementJson: uiElement })
+                .returning({ id: chatMessages.id, createdAt: chatMessages.createdAt });
+        });
 
         await db.update(chatSessions).set({ updatedAt: new Date() }).where(eq(chatSessions.id, session.id));
 

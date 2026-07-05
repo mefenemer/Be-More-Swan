@@ -293,5 +293,86 @@
   // Alias for callers/routes that use the PascalCase component name as the type key.
   register('TicketTriageViewCard', renderTicketTriageViewCard);
 
+  // ── Built-in: Handoff Proposal Card ─────────────────────────────────────────
+  // Renderer for the cross-assistant HITL handoff wire shape (chat-orchestrator.ts):
+  // { type: 'handoff_proposal', targetAssistantName, targetRoleKey, reason,
+  //   payloadToPass: object }
+  // Indigo/purple treatment: this is a SYSTEM ROUTING action awaiting human approval,
+  // not a final deliverable — it must read visually distinct from the emerald cards.
+  // Clicking Approve/Decline dispatches a bubbling 'handoff:response' CustomEvent that
+  // chat-session.js turns into an orchestrator submission (Approve carries the
+  // payloadToPass + approved-handoff flag; Decline sends a plain decline message).
+  function renderHandoffProposalCard(ui, esc) {
+    const targetName = typeof ui.targetAssistantName === 'string' && ui.targetAssistantName.trim()
+      ? ui.targetAssistantName.trim() : 'another assistant';
+    const payload = (ui.payloadToPass && typeof ui.payloadToPass === 'object') ? ui.payloadToPass : {};
+
+    let payloadPreview = '';
+    try { payloadPreview = JSON.stringify(payload, null, 2); } catch { payloadPreview = '{}'; }
+
+    const el = document.createElement('div');
+    el.className = 'bg-indigo-50/60 border-2 border-indigo-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <div class="flex items-start gap-3 mb-3">
+        <div class="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center text-xl shrink-0">🔀</div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-indigo-700 tracking-wider uppercase">System Routing · Approval needed</p>
+          <p class="font-bold text-gray-900 truncate">Hand off to ${esc(targetName)}</p>
+        </div>
+      </div>
+
+      ${ui.reason ? `
+        <p class="text-sm text-gray-700 mb-3"><span class="font-bold text-indigo-900">Why:</span> ${esc(ui.reason)}</p>` : ''}
+
+      <details class="mb-4 group">
+        <summary class="text-xs font-bold text-indigo-700 cursor-pointer select-none hover:text-indigo-900">Data that will be passed</summary>
+        <pre class="mt-2 bg-white border border-indigo-100 rounded-lg p-3 text-xs text-gray-600 overflow-x-auto max-h-40 overflow-y-auto whitespace-pre-wrap break-words">${esc(payloadPreview)}</pre>
+      </details>
+
+      <div class="flex items-center gap-2" data-handoff-actions>
+        <button type="button" data-handoff-approve
+          class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          Approve Handoff
+        </button>
+        <button type="button" data-handoff-decline
+          class="px-4 py-2 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-sm font-bold rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed">
+          Decline
+        </button>
+      </div>
+      <p class="hidden mt-1 text-xs font-semibold text-indigo-700" data-handoff-status></p>
+    `;
+
+    function settle(statusText) {
+      el.querySelectorAll('[data-handoff-approve], [data-handoff-decline]').forEach((b) => { b.disabled = true; });
+      const status = el.querySelector('[data-handoff-status]');
+      status.textContent = statusText;
+      status.classList.remove('hidden');
+    }
+
+    el.addEventListener('click', (e) => {
+      const approve = e.target.closest('[data-handoff-approve]');
+      const decline = e.target.closest('[data-handoff-decline]');
+      if (!approve && !decline) return;
+      const approved = Boolean(approve);
+      settle(approved ? `Handoff approved — ${targetName} is working in the background…` : 'Handoff declined.');
+      el.dispatchEvent(new CustomEvent('handoff:response', {
+        bubbles: true,
+        detail: {
+          approved,
+          targetAssistantName: targetName,
+          targetRoleKey: typeof ui.targetRoleKey === 'string' ? ui.targetRoleKey : null,
+          reason: typeof ui.reason === 'string' ? ui.reason : null,
+          payloadToPass: payload,
+        },
+      }));
+    });
+
+    return el;
+  }
+
+  register('handoff_proposal', renderHandoffProposalCard);
+  // Alias for callers/routes that use the PascalCase component name as the type key.
+  register('HandoffProposalCard', renderHandoffProposalCard);
+
   window.DisruptiveUIRegistry = { register, has, render, escapeHtml };
 })();

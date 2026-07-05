@@ -170,7 +170,14 @@
       inputEl.disabled = value;
     }
 
-    async function sendMessage(text) {
+    /**
+     * Send one turn to the orchestrator.
+     * opts.approvedHandoff — hidden flag for HITL cross-assistant handoffs: rides in the
+     * request body (never in the visible message text) and tells the orchestrator to run
+     * the target assistant as a background "shadow call" before this assistant replies.
+     * Shape: { targetRoleKey, targetAssistantName, payloadToPass }.
+     */
+    async function sendMessage(text, opts) {
       const message = String(text ?? '').trim();
       if (!message || sending) return;
       if (message.length > MAX_MESSAGE_CHARS) {
@@ -187,6 +194,7 @@
         const body = chatSessionId != null
           ? { chatSessionId, message }
           : { aiAssistantId: assistantId, message };
+        if (opts && opts.approvedHandoff) body.approvedHandoff = opts.approvedHandoff;
 
         const res = await fetch(ORCHESTRATOR_URL, {
           method: 'POST',
@@ -234,9 +242,30 @@
       inputEl.style.height = `${Math.min(inputEl.scrollHeight, 160)}px`;
     }
 
+    // HITL handoff approvals bubble up from HandoffProposalCard (disruptive-ui-registry.js).
+    // Approve → submit a turn carrying the payload + hidden approved-handoff flag so the
+    // orchestrator runs the target assistant in the background before this one resumes.
+    // Decline → plain message so the assistant knows to continue with what it has.
+    function onHandoffResponse(e) {
+      const d = e.detail || {};
+      const targetName = d.targetAssistantName || 'the other assistant';
+      if (d.approved && d.targetRoleKey) {
+        sendMessage(`Approve handoff to ${targetName}.`, {
+          approvedHandoff: {
+            targetRoleKey: d.targetRoleKey,
+            targetAssistantName: targetName,
+            payloadToPass: d.payloadToPass ?? {},
+          },
+        });
+      } else {
+        sendMessage(`I've declined the handoff to ${targetName} — please continue with the information you already have.`);
+      }
+    }
+
     formEl.addEventListener('submit', onSubmit);
     inputEl.addEventListener('keydown', onKeydown);
     inputEl.addEventListener('input', onInput);
+    container.addEventListener('handoff:response', onHandoffResponse);
 
     // ── Hydrate history ──
     (props.initialMessages || []).forEach(appendMessage);
@@ -250,6 +279,7 @@
         formEl.removeEventListener('submit', onSubmit);
         inputEl.removeEventListener('keydown', onKeydown);
         inputEl.removeEventListener('input', onInput);
+        container.removeEventListener('handoff:response', onHandoffResponse);
         container.innerHTML = '';
       },
     };
