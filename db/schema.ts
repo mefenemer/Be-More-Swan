@@ -1075,7 +1075,7 @@ export const issueReports = pgTable("issue_reports", {
   imageData: text("image_data"),
   imageMime: text("image_mime"),
 
-  // 'reported' | 'fix_in_progress' | 'fixed_ready_to_test' | 'more_info_required' | 'closed'
+  // 'reported' | 'backlog' | 'fix_in_progress' | 'merge' | 'fixed_ready_to_test' | 'more_info_required' | 'closed' | 'roadmap'
   status: text("status").notNull().default("reported"),
 
   createdAt: timestamp("created_at").defaultNow().notNull(),

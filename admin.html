@@ -941,6 +941,17 @@
         </div>
       </section>
 
+      <!-- ── Issue #127: Session Inactivity Timeout — super_admin only ──── -->
+      <section id="view-session-timeout" class="admin-view hidden">
+        <div class="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-5 flex items-center gap-3">
+          <span class="text-2xl">⏱️</span>
+          <p class="text-sm text-amber-800">Controls the idle "stay signed in?" countdown shown to workspace users. Changes apply across the platform within ~30 seconds — no deploy needed.</p>
+        </div>
+        <div id="session-timeout-form" class="bg-white border border-gray-200 rounded-xl p-6 max-w-xl space-y-4">
+          <div class="text-gray-400 animate-pulse text-sm">Loading…</div>
+        </div>
+      </section>
+
       <!-- ── Epic: Superadmin Environment Management — US4/US5: Sandbox controls ── -->
       <section id="view-sandbox" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
         <div id="sandbox-panel" class="max-w-2xl space-y-5">
@@ -1981,7 +1992,7 @@ const VIEW_LABELS = {
   logs: 'System Logs', 'audit-log': 'Audit Log', 'security-abuse': 'Security & Abuse', cogs: 'COGS Dashboard',
   reconciliation: 'Stripe Reconciliation', dunning: 'Dunning Queue',
   'manage-admins': 'Admin Accounts', 'kill-switches': 'Emergency Controls',
-  gamification: 'Gamification Settings', 'reward-audits': 'Reward Audits',
+  gamification: 'Gamification Settings', 'session-timeout': 'Session Timeout', 'reward-audits': 'Reward Audits',
   'feature-flags': 'Feature Flags', 'sales-pipeline': 'Sales Pipeline',
   'breach-response': 'Breach Response', 'master-data': 'Master Data',
   workspaces: 'Workspaces', 'workspace-detail': 'Workspace Detail',
@@ -2018,6 +2029,7 @@ const ADMIN_CATS = {
     { view: 'feature-flags',        icon: '🚩', label: 'Feature Flags' },
     { view: 'kill-switches',        icon: '🚨', label: 'Emergency Controls' },
     { view: 'gamification',         icon: '🎮', label: 'Gamification Settings' },
+    { view: 'session-timeout',      icon: '⏱️', label: 'Session Timeout', superAdminOnly: true },
     { view: 'reward-audits',        icon: '🏆', label: 'Reward Audits' },
     { view: 'publish-pipeline',     icon: '📡', label: 'Publishing Pipeline' },
     { view: 'sandbox',              icon: '🧪', label: 'Sandbox Environment', superAdminOnly: true },
@@ -2239,6 +2251,7 @@ function adminNav(view) {
   if (view === 'sales-pipeline')  loadSalesPipeline();
   if (view === 'kill-switches')   loadKillSwitches();
   if (view === 'gamification')    loadGamificationSettings();
+  if (view === 'session-timeout') loadSessionTimeoutSettings();
   if (view === 'reward-audits')   loadRewardAudits();
   if (view === 'feature-flags')   loadFeatureFlags();
   if (view === 'breach-response') loadBreachResponse();
@@ -3385,14 +3398,15 @@ async function api(url, opts) {
 
 // ── Issue Reports (Testing) ──────────────────────────────────────────────────
 const IR_API = '/.netlify/functions/admin-issue-reports';
-const IR_STATUSES = ['reported','fix_in_progress','fixed_ready_to_test','more_info_required','closed','roadmap'];
+const IR_STATUSES = ['reported','backlog','fix_in_progress','merge','fixed_ready_to_test','more_info_required','closed','roadmap'];
 const IR_STATUS_LABEL = {
-  reported: 'Reported', fix_in_progress: 'Fix In Progress',
+  reported: 'Reported', backlog: 'Backlog', fix_in_progress: 'Fix In Progress', merge: 'Merge',
   fixed_ready_to_test: 'Fixed & Ready to Test', more_info_required: 'More Info Required', closed: 'Closed',
   roadmap: 'On Roadmap',
 };
 const IR_STATUS_CLS = {
-  reported: 'bg-gray-100 text-gray-700', fix_in_progress: 'bg-blue-100 text-blue-700',
+  reported: 'bg-gray-100 text-gray-700', backlog: 'bg-slate-100 text-slate-700',
+  fix_in_progress: 'bg-blue-100 text-blue-700', merge: 'bg-indigo-100 text-indigo-700',
   fixed_ready_to_test: 'bg-emerald-100 text-emerald-700', more_info_required: 'bg-amber-100 text-amber-800',
   closed: 'bg-gray-200 text-gray-500', roadmap: 'bg-violet-100 text-violet-700',
 };
@@ -4112,8 +4126,8 @@ async function requestMerge(id) {
 }
 
 // ── "Merge all to staging" + one-press staging deploy (super-admin only) ──────
-// On the Fix In Progress tab, merge every ready fix PR in one go instead of opening
-// each ticket. While the runner drains the queued merges we poll; once nothing is
+// On the Merge tab, merge every ready fix PR in one go instead of opening each
+// ticket. While the runner drains the queued merges we poll; once nothing is
 // left in flight the "Commit to Staging" button appears, which triggers a single
 // fresh Netlify staging build with everything included.
 let _irMergeAllTracking = false; // a bulk merge was queued this session and is draining
@@ -4130,7 +4144,7 @@ function _updateMergeAllBtns(issues) {
   const deployBtn = document.getElementById('ir-deploy-btn');
   if (!mergeBtn || !deployBtn) return;
   const isSuper = (typeof _adminRole !== 'undefined') && _adminRole === 'super_admin';
-  const onTab = _irFilter === 'fix_in_progress';
+  const onTab = _irFilter === 'merge';
   const eligible = (issues || []).filter(_irMergeEligible);
   const inFlight = (issues || []).filter(i => i.devMergeStatus === 'queued' || i.devMergeStatus === 'merging');
 
@@ -4144,8 +4158,8 @@ function _updateMergeAllBtns(issues) {
   }
 
   // Track the drain only from views that actually show in-flight merges (they keep the
-  // fix_in_progress status until merged) — other filters would report a false "done".
-  if (_irMergeAllTracking && (_irFilter === '' || _irFilter === 'fix_in_progress')) {
+  // merge status until merged) — other filters would report a false "done".
+  if (_irMergeAllTracking && (_irFilter === '' || _irFilter === 'merge')) {
     if (inFlight.length > 0) {
       if (!_irMergePollTimer) _irMergePollTimer = setInterval(loadIssueReports, 5000);
     } else {
@@ -4685,6 +4699,32 @@ async function saveGamificationSettings(btn) {
   const status = document.getElementById('gm-save-status');
   try {
     await api('/.netlify/functions/admin-api?resource=gamification-config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    status.textContent = '✓ Saved'; status.className = 'ml-3 text-sm text-emerald-600';
+  } catch (e) { status.textContent = e.message; status.className = 'ml-3 text-sm text-red-600'; }
+  btn.disabled = false;
+}
+
+// ── Issue #127: Session Inactivity Timeout Settings (super_admin only) ──────
+async function loadSessionTimeoutSettings() {
+  const form = document.getElementById('session-timeout-form');
+  form.innerHTML = '<div class="text-gray-400 animate-pulse text-sm">Loading…</div>';
+  try {
+    const d = await api('/.netlify/functions/admin-api?resource=session-timeout-config');
+    const num = (id, val, label, hint) => `<label class="block"><span class="text-sm font-semibold text-gray-700">${label}</span>${hint ? `<span class="block text-xs text-gray-400">${hint}</span>` : ''}<input id="${id}" type="number" min="1" value="${val}" class="mt-1 w-32 border border-gray-300 rounded-lg px-3 py-2 text-sm"></label>`;
+    form.innerHTML = `
+      ${num('st-timeout', d.inactivityTimeoutMinutes, 'Inactivity period (minutes)', 'How long a user can be idle before the countdown appears')}
+      ${num('st-countdown', d.countdownMinutes, 'Countdown length (minutes)', 'How long the user has to click "Stay signed in" before auto-logout')}
+      <div class="pt-2"><button onclick="saveSessionTimeoutSettings(this)" class="px-5 py-2 bg-emerald-700 text-white text-sm font-semibold rounded-lg hover:bg-emerald-800 cursor-pointer">Save settings</button><span id="st-save-status" class="ml-3 text-sm"></span></div>`;
+  } catch (e) { form.innerHTML = `<div class="text-red-500 text-sm">${e.message}</div>`; }
+}
+
+async function saveSessionTimeoutSettings(btn) {
+  const val = id => Number(document.getElementById(id).value);
+  const payload = { inactivityTimeoutMinutes: val('st-timeout'), countdownMinutes: val('st-countdown') };
+  btn.disabled = true;
+  const status = document.getElementById('st-save-status');
+  try {
+    await api('/.netlify/functions/admin-api?resource=session-timeout-config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     status.textContent = '✓ Saved'; status.className = 'ml-3 text-sm text-emerald-600';
   } catch (e) { status.textContent = e.message; status.className = 'ml-3 text-sm text-red-600'; }
   btn.disabled = false;

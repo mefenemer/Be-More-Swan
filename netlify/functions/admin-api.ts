@@ -1059,6 +1059,46 @@ export const handler: Handler = async (event) => {
             }
         }
 
+        // ── Session inactivity timeout settings (issue #127) — super_admin only ─
+        if (resource === 'session-timeout-config') {
+            const permErr = requirePermission(adminRole, 'platform_config');
+            if (permErr) return permErr;
+
+            const KEYS = { timeout: 'session.inactivity_timeout_minutes', countdown: 'session.countdown_minutes' };
+
+            if (event.httpMethod === 'GET') {
+                const rows = await db.select().from(platformConfig).where(inArray(platformConfig.key, [KEYS.timeout, KEYS.countdown]));
+                const map: Record<string, any> = Object.fromEntries(rows.map(r => [r.key, r.value]));
+                return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+                    inactivityTimeoutMinutes: Number(map[KEYS.timeout]) > 0 ? Number(map[KEYS.timeout]) : 15,
+                    countdownMinutes:         Number(map[KEYS.countdown]) > 0 ? Number(map[KEYS.countdown]) : 10,
+                }) };
+            }
+
+            if (event.httpMethod === 'POST') {
+                if (adminRole !== 'super_admin') {
+                    return { statusCode: 403, body: JSON.stringify({ error: 'Only super admins can change the session timeout.' }) };
+                }
+                const body = JSON.parse(event.body || '{}');
+                const timeout = Number(body.inactivityTimeoutMinutes);
+                const countdown = Number(body.countdownMinutes);
+                if (!(timeout > 0) || !(countdown > 0)) {
+                    return { statusCode: 400, body: JSON.stringify({ error: 'Both values must be positive numbers.' }) };
+                }
+                const upsert = async (key: string, value: number) => {
+                    const [prev] = await db.select({ value: platformConfig.value }).from(platformConfig).where(eq(platformConfig.key, key)).limit(1);
+                    await db.insert(platformConfig)
+                        .values({ key, value, updatedBy: adminId, updatedAt: new Date() })
+                        .onConflictDoUpdate({ target: platformConfig.key, set: { value, updatedBy: adminId, updatedAt: new Date() } });
+                    await insertAdminAuditLog({ adminId, action: 'session_timeout_config_update', targetType: 'platform_config', targetId: key,
+                        previousState: { value: prev?.value ?? null }, newState: { value }, ipAddress: getAdminIp(event.headers) });
+                };
+                await upsert(KEYS.timeout, timeout);
+                await upsert(KEYS.countdown, countdown);
+                return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
+            }
+        }
+
         if (resource === 'reward-audits' && event.httpMethod === 'GET') {
             const permErr = requirePermission(adminRole, 'platform_config');
             if (permErr) return permErr;

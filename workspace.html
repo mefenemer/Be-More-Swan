@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <script src="./auth-check.js"></script>
+  <script src="./session-timeout.js" defer></script>
   <script src="/src/i18n.js"></script>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -840,7 +841,9 @@ window.showComplianceModals = function showComplianceModals(force) {
           <option value="all">All statuses</option>
           <option value="fixed_ready_to_test">Fixed & Ready to Test</option>
           <option value="reported">Reported</option>
+          <option value="backlog">Backlog</option>
           <option value="fix_in_progress">Fix In Progress</option>
+          <option value="merge">Merge</option>
           <option value="more_info_required">More Info Required</option>
           <option value="roadmap">On Roadmap</option>
           <option value="closed">Closed</option>
@@ -989,6 +992,27 @@ window.showComplianceModals = function showComplianceModals(force) {
       <a href="mailto:hello@bemoreswan.com?subject=Trial%20Enquiry" class="text-sm text-gray-500 hover:text-gray-700 underline">
         Questions? Contact us
       </a>
+    </div>
+  </div>
+
+  <!-- Issue #127: Inactivity "stay signed in?" countdown — period + countdown length are admin-configurable -->
+  <div id="session-timeout-modal" class="hidden fixed inset-0 z-[9999] items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="session-timeout-title">
+    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 text-center">
+      <div class="flex items-center justify-center w-16 h-16 bg-amber-100 rounded-full mx-auto mb-4">
+        <svg class="w-8 h-8 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+      </div>
+      <h2 id="session-timeout-title" class="text-2xl font-bold text-gray-900 mb-2">Still there?</h2>
+      <p class="text-gray-600 mb-6">You've been inactive for a while. For your security, you'll be signed out in
+        <span id="session-timeout-countdown" class="font-bold text-amber-700">10:00</span> unless you stay signed in.</p>
+      <button id="session-timeout-stay-btn" type="button"
+         class="block w-full bg-emerald-700 hover:bg-emerald-800 text-white font-bold py-3 px-6 rounded-xl mb-3 transition-colors">
+        Stay Signed In
+      </button>
+      <button id="session-timeout-logout-btn" type="button" class="text-sm text-gray-500 hover:text-gray-700 underline">
+        Log Out Now
+      </button>
     </div>
   </div>
 
@@ -6106,7 +6130,9 @@ async function gpSubmitReject() {
 
   const STATUS_BADGE = {
     reported:            ['Reported', 'bg-gray-100 text-gray-700'],
+    backlog:             ['Backlog', 'bg-slate-100 text-slate-700'],
     fix_in_progress:     ['Fix In Progress', 'bg-blue-100 text-blue-700'],
+    merge:               ['Merge', 'bg-indigo-100 text-indigo-700'],
     fixed_ready_to_test: ['Fixed & Ready to Test', 'bg-emerald-100 text-emerald-700'],
     more_info_required:  ['More Info Required', 'bg-amber-100 text-amber-800'],
     closed:              ['Closed', 'bg-gray-200 text-gray-500'],
@@ -6440,14 +6466,18 @@ async function gpSubmitReject() {
   }
   @media (prefers-reduced-motion: reduce) { #setup-wizard-fab { animation: none; } }
 
-  .cmdbar-overlay { position: fixed; inset: 0; z-index: 95; display: none; padding-top: 12vh;
-    background: rgba(15,23,42,0.42); backdrop-filter: blur(4px); }
+  /* US-DASH-3 fix (issue #129): floating field docked top-right of the workspace
+     area, underneath the fixed header — not a centred full-screen modal. The
+     overlay stays as a full-page, background-free click-catcher so "click
+     outside to close" keeps working without dimming the workspace. */
+  .cmdbar-overlay { position: fixed; inset: 0; z-index: 95; display: none; }
   .cmdbar-overlay.open { display: block; animation: cmdFade .18s ease; }
   @keyframes cmdFade { from { opacity: 0 } to { opacity: 1 } }
-  .cmdbar-panel { width: min(680px, 92vw); margin: 0 auto; background: #fff; border-radius: 20px;
-    border: 1px solid rgba(15,23,42,0.08); box-shadow: 0 40px 80px -24px rgba(0,0,0,0.5);
+  .cmdbar-panel { position: fixed; top: 5rem; right: 1.5rem; width: min(420px, 92vw);
+    background: #fff; border-radius: 20px;
+    border: 1px solid rgba(15,23,42,0.08); box-shadow: 0 20px 45px -12px rgba(15,23,42,0.35);
     overflow: hidden; animation: cmdRise .22s cubic-bezier(.2,.8,.2,1); }
-  @keyframes cmdRise { from { opacity: 0; transform: translateY(14px) scale(.98) } to { opacity: 1; transform: none } }
+  @keyframes cmdRise { from { opacity: 0; transform: translateY(-10px) scale(.98) } to { opacity: 1; transform: none } }
 
   .cmdbar-inputrow { display: flex; align-items: center; gap: 10px; padding: 16px 16px; }
   .cmdbar-spark { color: #10b981; font-size: 18px; }
