@@ -248,6 +248,12 @@
         </div>`;
     }
 
+    // Roles with marketing copy in src/config/assistant-role-content.js get a
+    // detail page (assistant-role-detail.html) between the card and the hire flow.
+    const detailLink = (window.AssistantRoleContent && window.AssistantRoleContent[a.roleKey])
+      ? `<a href="assistant-role-detail.html?roleKey=${encodeURIComponent(a.roleKey)}" class="text-sm font-semibold text-emerald-700 hover:text-emerald-800 transition">View Details</a>`
+      : '';
+
     return `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col hover:shadow-md transition-shadow">
         <div class="p-6 flex-grow">
@@ -258,7 +264,10 @@
         </div>
         <div class="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center gap-3">
           <span class="text-xs font-bold text-gray-500 uppercase tracking-wider">Included in Plan</span>
-          <button onclick="window._catHire('${a.roleKey}')" style="cursor:pointer" class="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-800 transition">Hire Role</button>
+          <div class="flex items-center gap-3">
+            ${detailLink}
+            <button onclick="window._catHire('${a.roleKey}')" style="cursor:pointer" class="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-800 transition">Hire Role</button>
+          </div>
         </div>
       </div>`;
   }
