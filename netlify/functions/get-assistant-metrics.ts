@@ -17,7 +17,9 @@ export const handler: Handler = async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const assistantId = event.queryStringParameters?.id;
-    if (!assistantId) return { statusCode: 400, body: JSON.stringify({ error: 'id required' }) };
+    if (!assistantId || Number.isNaN(parseInt(assistantId))) {
+        return { statusCode: 400, body: JSON.stringify({ error: 'id required' }) };
+    }
     const aId = parseInt(assistantId);
 
     const db = getDb();
@@ -120,8 +122,26 @@ export const handler: Handler = async (event) => {
                 minutesPerPost: mult.content_drafted,
             }),
         };
-    } catch (err) {
-        console.error('[get-assistant-metrics]', err);
-        return { statusCode: 500, body: JSON.stringify({ error: 'Failed to load metrics.' }) };
+    } catch (err: any) {
+        // Impact & ROI is a SUPPLEMENTARY panel on the assistant detail page — a failure
+        // here (RLS/connection hiccup, transient DB error, etc.) must never surface as a
+        // 500 in the client console or block the rest of the page. Degrade to "no data"
+        // and log the real cause server-side for diagnosis (see issue #152).
+        console.error('[get-assistant-metrics] degraded to no-data after error:', err?.code || '', err?.message || err);
+        return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                totalCreated: 0,
+                totalScheduled: 0,
+                totalPublished: 0,
+                byPlatform: {},
+                hoursSaved: 0,
+                gbpSaved: null,
+                period: parseRoiPeriod(event.queryStringParameters?.period),
+                hourlyRateSet: false,
+                minutesPerPost: null,
+            }),
+        };
     }
 };
