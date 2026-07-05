@@ -37,6 +37,20 @@ export const handler = async (event: HandlerEvent) => {
         const org = await resolveActiveOrg(db, userId, session.activeOrganisationId);
         const organisationId = org?.organisationId ?? null;
 
+        // Issue #149: a single activity-source query throwing (e.g. a data/type edge
+        // case in one org's rows) was aborting the whole handler, turning the entire
+        // dashboard hero widget into a 500 instead of degrading gracefully. Each count
+        // is now isolated so one source failing can't blank out the others.
+        const safeCount = async (query: Promise<{ count: number }[]>): Promise<number> => {
+            try {
+                const [row] = await query;
+                return Number(row?.count ?? 0);
+            } catch (err) {
+                console.error('roi-stats: activity count query failed, defaulting to 0', err);
+                return 0;
+            }
+        };
+
         // SC6: Count completed task runs and drafted/scheduled posts in the period.
         // Real assistant work (e.g. the social media assistant) is recorded in
         // scheduled_posts — task_runs alone is near-always empty for that flow, which
@@ -49,14 +63,14 @@ export const handler = async (event: HandlerEvent) => {
         // over) was being dropped entirely, zeroing out this widget even with completed
         // work in the window. dashboard-heatmap.ts already uses this same COALESCE for
         // task_runs; this brings the ROI hero in line with it.
-        const [{ taskRunCount }] = organisationId ? await db
-            .select({ taskRunCount: count() })
+        const taskRunCount = organisationId ? await safeCount(db
+            .select({ count: count() })
             .from(taskRuns)
             .where(and(
                 eq(taskRuns.organisationId, organisationId),
                 eq(taskRuns.status, 'completed'),
                 gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, periodStart)
-            )) : [{ taskRunCount: 0 }];
+            ))) : 0;
 
         const [{ postCount }] = organisationId ? await db
             .select({ postCount: count() })
@@ -70,13 +84,13 @@ export const handler = async (event: HandlerEvent) => {
         // "Hours Saved"; omitting them here meant an org whose assistant work is mostly lead
         // generation (no task_runs, no scheduled_posts yet) saw 0 hours/£/tasks on this
         // widget despite real, non-zero activity on the modal it's supposed to agree with.
-        const [{ leadCount }] = organisationId ? await db
-            .select({ leadCount: count() })
+        const leadCount = organisationId ? await safeCount(db
+            .select({ count: count() })
             .from(leads)
             .where(and(
                 eq(leads.organisationId, organisationId),
                 gte(leads.createdAt, periodStart)
-            )) : [{ leadCount: 0 }];
+            ))) : 0;
 
         const completedTasks = Number(taskRunCount) + Number(postCount) + Number(leadCount);
 
