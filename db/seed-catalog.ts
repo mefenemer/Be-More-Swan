@@ -6,7 +6,8 @@
  * records get refreshed with the latest description / metadata.
  *
  * Run with:
- *   npx ts-node -r dotenv/config db/seed-catalog.ts
+ *   npx tsx db/seed-catalog.ts
+ * (ts-node exits silently without running the script in this repo — use tsx.)
  */
 
 import { config } from 'dotenv';
@@ -87,7 +88,7 @@ const CATALOG = [
         category: 'Marketing & Sales',
         iconKey: 'chart',
         iconColor: 'blue',
-        comingSoon: true,
+        comingSoon: false,   // ← Currently Live
         isActive: true,
     },
     {
@@ -107,7 +108,7 @@ const CATALOG = [
         category: 'Marketing & Sales',
         iconKey: 'cog',
         iconColor: 'purple',
-        comingSoon: true,
+        comingSoon: false,   // ← Currently Live (Tier 1, Batch 2)
         isActive: true,
     },
     {
@@ -161,7 +162,7 @@ const CATALOG = [
         category: 'Customer Success & Support',
         iconKey: 'smile',
         iconColor: 'teal',
-        comingSoon: true,
+        comingSoon: false,   // ← Currently Live (Tier 1, Batch 2)
         isActive: true,
     },
     {
@@ -225,7 +226,7 @@ const CATALOG = [
         category: 'Finance & Bookkeeping',
         iconKey: 'chart',
         iconColor: 'orange',
-        comingSoon: true,
+        comingSoon: false,   // ← Currently Live
         isActive: true,
     },
     {

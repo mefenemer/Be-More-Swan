@@ -191,5 +191,107 @@
   // Alias for callers/routes that use the PascalCase component name as the type key.
   register('AgingInvoicesTableCard', renderAgingInvoicesTableCard);
 
+  // ── Built-in: Data Diff View Card ───────────────────────────────────────────
+  // Renderer for the crm-enricher route's wire shape (chat-orchestrator.ts):
+  // { type: 'data_diff_view', recordName?, fields: [{ fieldName, oldValue: string|null,
+  //   newValue }, ...] }
+  // Side-by-side current → proposed comparison; the proposed value is highlighted in
+  // emerald when it differs from the current value (or the current value is blank).
+  function renderDataDiffViewCard(ui, esc) {
+    const fields = (Array.isArray(ui.fields) ? ui.fields : [])
+      .filter((f) => f && typeof f === 'object' && f.fieldName);
+    if (fields.length === 0) return null; // nothing to compare — fall back to text-only
+
+    const el = document.createElement('div');
+    el.className = 'bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden max-w-2xl';
+    el.innerHTML = `
+      <div class="flex items-center gap-3 px-5 py-4 border-b border-gray-100">
+        <div class="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center text-xl shrink-0">🔎</div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-emerald-700 tracking-wider uppercase">CRM Enrichment</p>
+          <p class="font-bold text-gray-900 truncate">${esc(ui.recordName) || 'Proposed changes'}</p>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">
+              <th class="px-5 py-3">Field</th>
+              <th class="px-3 py-3">Current</th>
+              <th class="px-5 py-3">Proposed</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            ${fields.map((f) => {
+              const hasOld = f.oldValue !== null && f.oldValue !== undefined && String(f.oldValue).trim() !== '';
+              const changed = !hasOld || String(f.oldValue) !== String(f.newValue);
+              return `
+              <tr>
+                <td class="px-5 py-3 font-semibold text-gray-900 whitespace-nowrap">${esc(f.fieldName)}</td>
+                <td class="px-3 py-3 ${hasOld ? 'text-gray-700' : 'text-gray-400 italic'}">${hasOld ? esc(f.oldValue) : 'Empty'}</td>
+                <td class="px-5 py-3 font-bold ${changed ? 'text-emerald-600' : 'text-gray-700'}">${esc(f.newValue)}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+      <p class="px-5 py-3 text-xs text-gray-400 border-t border-gray-100">Simulated enrichment preview — values are not written to your CRM yet.</p>
+    `;
+    return el;
+  }
+
+  register('data_diff_view', renderDataDiffViewCard);
+  // Alias for callers/routes that use the PascalCase component name as the type key.
+  register('DataDiffViewCard', renderDataDiffViewCard);
+
+  // ── Built-in: Ticket Triage View Card ───────────────────────────────────────
+  // Renderer for the tier1-support-agent route's wire shape (chat-orchestrator.ts):
+  // { type: 'ticket_triage_view', status: 'Resolved'|'Escalated', confidenceScore: 0-100,
+  //   summary, escalationReason: string|null, escalationEmail?: string|null }
+  // Escalated tickets get an amber/red warning treatment naming the escalation inbox;
+  // resolved tickets get an emerald treatment.
+  function renderTicketTriageViewCard(ui, esc) {
+    const escalated = String(ui.status).toLowerCase() === 'escalated';
+    const confidence = Math.max(0, Math.min(100, Number(ui.confidenceScore) || 0));
+
+    const el = document.createElement('div');
+    el.className = `bg-white border-2 rounded-xl shadow-sm p-5 max-w-md ${escalated ? 'border-red-300' : 'border-emerald-300'}`;
+    el.innerHTML = `
+      <div class="flex items-start justify-between gap-3 mb-3">
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="w-10 h-10 ${escalated ? 'bg-amber-100' : 'bg-emerald-100'} rounded-lg flex items-center justify-center text-xl shrink-0">${escalated ? '🚨' : '✅'}</div>
+          <div class="min-w-0">
+            <p class="text-xs font-bold ${escalated ? 'text-red-700' : 'text-emerald-700'} tracking-wider uppercase">Ticket Triage</p>
+            <p class="font-bold text-gray-900">${escalated ? 'Escalated' : 'Resolved'}</p>
+          </div>
+        </div>
+        <span class="text-xs font-bold px-2 py-0.5 rounded-full border shrink-0 ${escalated ? 'bg-red-50 text-red-700 border-red-200' : 'bg-emerald-50 text-emerald-800 border-emerald-200'}">${confidence}% confident</span>
+      </div>
+
+      <div class="flex items-center gap-3 mb-4">
+        <div class="bg-gray-100 h-2 rounded-full grow overflow-hidden">
+          <div class="${escalated ? 'bg-amber-500' : 'bg-emerald-700'} h-2 rounded-full transition-all duration-500" style="width: ${confidence}%;"></div>
+        </div>
+      </div>
+
+      ${ui.summary ? `
+        <p class="text-sm text-gray-700 mb-4"><span class="font-bold text-gray-900">Issue:</span> ${esc(ui.summary)}</p>` : ''}
+
+      ${escalated ? `
+        <div class="bg-amber-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-800">
+          <p class="font-bold mb-0.5">Escalated to ${esc(ui.escalationEmail) || 'your escalation contact'}</p>
+          ${ui.escalationReason ? `<p>${esc(ui.escalationReason)}</p>` : ''}
+        </div>` : `
+        <div class="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-900">
+          <span class="font-bold">Handled automatically</span> — no human follow-up needed.
+        </div>`}
+    `;
+    return el;
+  }
+
+  register('ticket_triage_view', renderTicketTriageViewCard);
+  // Alias for callers/routes that use the PascalCase component name as the type key.
+  register('TicketTriageViewCard', renderTicketTriageViewCard);
+
   window.DisruptiveUIRegistry = { register, has, render, escapeHtml };
 })();

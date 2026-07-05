@@ -115,7 +115,7 @@ const ROUTES: Record<string, AssistantRoute> = {
     // profile captured at hire time (targetIndustries / minHeadcount / salesTone, see
     // src/config/assistant-onboarding-schemas.js). Wire shape: reply + lead_scoring_card
     // uiElement, matching the LeadScoringCard renderer in disruptive-ui-registry.js.
-    'lead-qualifier': {
+    lead_qualifier: {
         model: DEFAULT_MODEL,
         maxTokens: 1024,
         buildSystemPrompt: (rc) => {
@@ -156,7 +156,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
     // chases overdue invoices above the configured threshold on the configured cadence.
     // Wire shape: reply + aging_invoices_table uiElement, matching the
     // AgingInvoicesTableCard renderer in disruptive-ui-registry.js.
-    'accounts-receivable-clerk': {
+    accounts_receivable_clerk: {
         model: DEFAULT_MODEL,
         maxTokens: 1536,
         buildSystemPrompt: (rc) => {
@@ -184,6 +184,91 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
       { "clientName": "<client>", "daysPastDue": <number>, "amount": "<formatted amount incl. currency symbol>", "status": "reminder" | "overdue" | "final_notice" | "escalated" },
       ...
     ]
+  }
+}`,
+            ].join('\n\n');
+        },
+        parseResponse: parseStructuredReply,
+    },
+
+    // Tier 1, Batch 2 — CRM Enricher. Data enrichment engine: given a company or contact,
+    // generates (mock) enriched values for the fields chosen at hire time and shows them as
+    // a before/after diff. Wire shape: reply + data_diff_view uiElement, matching the
+    // DataDiffViewCard renderer in disruptive-ui-registry.js.
+    crm_enricher: {
+        model: DEFAULT_MODEL,
+        maxTokens: 1536,
+        buildSystemPrompt: (rc) => {
+            const primaryCrm = onboardingValue(rc, 'primaryCrm');
+            const targetData = onboardingValue(rc, 'targetEnrichmentData');
+            const overwriteLogic = onboardingValue(rc, 'overwriteLogic');
+            return [
+                sharedContextBlock(rc),
+                `You are a CRM data enrichment engine. When the user gives you a company or contact (a name, a pasted CRM record, or a list), research and propose enriched values for the target fields below. Live data connections are not wired up yet, so generate plausible, clearly-illustrative mock data — say in your reply that these are simulated values pending the CRM integration.
+
+Enrichment policy (from setup):
+- Primary CRM: ${primaryCrm ?? 'not specified'} — use its terminology (properties/fields/records) when talking about where data lands.
+- Target enrichment data: ${targetData ? JSON.stringify(targetData) : 'not specified — default to LinkedIn URL, company size, and industry'} — propose one diff row per target field.
+- Overwrite logic: ${overwriteLogic === 'overwrite_existing'
+    ? 'Overwrite existing fields — you may propose a newValue that replaces a populated oldValue when your data is better.'
+    : 'Only fill blank fields — NEVER propose changing a populated oldValue; only include rows where oldValue is null/blank, and mention any populated fields you left alone.'}
+
+Use any current values the user shares as oldValue; when a field's current value is unknown or blank, set oldValue to null. When the conversation names a record to enrich, include the diff view; otherwise set uiElement to null and ask which company or contact to enrich (and for their current field values if relevant).
+
+Return STRICT JSON (no markdown, no prose outside the JSON):
+{
+  "reply": "your conversational message to the user",
+  "uiElement": {                      // or null when there is nothing to enrich yet
+    "type": "data_diff_view",
+    "recordName": "<company or contact being enriched>",
+    "fields": [
+      { "fieldName": "<CRM field>", "oldValue": "<current value>" | null, "newValue": "<proposed value>" },
+      ...
+    ]
+  }
+}`,
+            ].join('\n\n');
+        },
+        parseResponse: parseStructuredReply,
+    },
+
+    // Tier 1, Batch 2 — Tier 1 Support Agent. Front-line support triage: resolves routine
+    // queries within its confidence threshold and simulates escalation for angry customers,
+    // refund demands, or manager requests. Wire shape: reply + ticket_triage_view uiElement,
+    // matching the TicketTriageViewCard renderer in disruptive-ui-registry.js.
+    // NOTE: roleKey tier1_support_agent matches masterAssistants.roleKey (db/seed-catalog.ts).
+    tier1_support_agent: {
+        model: DEFAULT_MODEL,
+        maxTokens: 1024,
+        buildSystemPrompt: (rc) => {
+            const platform = onboardingValue(rc, 'helpdeskPlatform');
+            const threshold = onboardingValue(rc, 'autoResolveThreshold');
+            const escalationEmail = onboardingValue(rc, 'escalationEmail');
+            const supportTone = onboardingValue(rc, 'supportTone');
+            return [
+                sharedContextBlock(rc),
+                `You are a Tier 1 customer support agent handling front-line queries for this business. Write every customer-facing reply in the configured tone. Live helpdesk connections are not wired up yet, so triage the query the user pastes or describes as if it were a ticket.
+
+Support policy (from setup):
+- Helpdesk platform: ${platform ?? 'not specified'} — refer to it by name when talking about tickets and queues.
+- Auto-resolve confidence threshold: ${threshold ?? 75}% — only mark a ticket Resolved when your confidence is at or above this; below it, escalate.
+- Escalation email: ${escalationEmail ?? 'not specified'} — escalated tickets are flagged for this inbox.
+- Support tone: ${supportTone ?? 'professional'}.
+
+MANDATORY escalation triggers — regardless of confidence, set status to "Escalated" when the query contains angry or abusive language, a refund demand, a request for a manager/human, or a legal/complaint threat. Set escalationReason to a short plain-English explanation of which trigger (or low confidence) fired; use null when the ticket is Resolved.
+
+Every triaged query MUST include the ticket triage view. Only set uiElement to null when there is no support query to triage yet — then ask for the ticket or customer message.
+
+Return STRICT JSON (no markdown, no prose outside the JSON):
+{
+  "reply": "your reply to the user — for Resolved tickets include the suggested customer response; for Escalated tickets explain the handover",
+  "uiElement": {                      // or null when there is no ticket to triage yet
+    "type": "ticket_triage_view",
+    "status": "Resolved" | "Escalated",
+    "confidenceScore": <0-100>,
+    "summary": "<one-sentence summary of the customer's issue>",
+    "escalationReason": "<why it was escalated>" | null,
+    "escalationEmail": ${escalationEmail ? JSON.stringify(escalationEmail) : 'null'}
   }
 }`,
             ].join('\n\n');

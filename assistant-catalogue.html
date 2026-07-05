@@ -358,9 +358,18 @@
       }
     } catch { /* allow through on error */ }
 
-    // Go straight to the role-specific onboarding wizard (skips the onboarding.html
-    // role-picker step). roleKey matches the master-assistant roleKey from the DB.
-    // Falls back to onboarding.html for any role without a dedicated wizard.
+    // Schema-driven roles (Lead Qualifier, AR Clerk, CRM Enricher, Tier 1 Support, …)
+    // go to the AssistantOnboardingShell wizard on assistant-setup.html — it hires the
+    // instance and captures the role's configurationSchema defined in
+    // src/config/assistant-onboarding-schemas.js (loaded by workspace.html).
+    if (window.AssistantOnboardingSchemas && window.AssistantOnboardingSchemas[roleKey]) {
+      window.location.href = `assistant-setup.html?roleKey=${encodeURIComponent(roleKey)}`;
+      return;
+    }
+
+    // Otherwise go to the legacy role-specific onboarding wizard (skips the
+    // onboarding.html role-picker step). roleKey matches the master-assistant roleKey
+    // from the DB. Falls back to onboarding.html for any role without a dedicated wizard.
     // (Previously this called loadView('onboarding'), but there is no 'onboarding'
     // workspace route, so the click silently did nothing.)
     const ROLE_ONBOARDING_PAGE = {
