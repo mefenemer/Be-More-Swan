@@ -922,6 +922,10 @@ window.showComplianceModals = function showComplianceModals(force) {
   </div>
 
   <div class="flex items-center gap-3">
+    <!-- Issue #129: Ask your team anything moved here as a header icon, next to Report an Issue -->
+    <a href="#" id="nav-ask-team" aria-label="Ask your team anything" title="Ask your team anything" class="text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-full p-2 transition-colors">
+      <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+    </a>
     <!-- Issue #137: Report an Issue moved here from the side menu, next to Notifications -->
     <a href="#" id="nav-report-issue" aria-label="Report an Issue" class="text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded-full p-2 transition-colors">
       <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 00-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z"/></svg>
@@ -6452,7 +6456,7 @@ async function gpSubmitReject() {
 
 <style>
   /* US-DASH-3 — Swan Command Bar. Scoped plain CSS (immune to prebuilt-Tailwind).
-     The trigger now lives in the side menu (#nav-ask-team); the overlay below is opened
+     The trigger lives in the workspace header (#nav-ask-team); the overlay below is opened
      from there or via ⌘K. */
 
   /* Onboarding "Resume setup" pill — docked top-centre, pulses to catch the eye. */
@@ -6565,8 +6569,8 @@ async function gpSubmitReject() {
     }
     const isOpen = () => overlay.classList.contains('open');
 
-    // #nav-ask-team no longer exists in the side menu (issue #129) — ⌘K is the only trigger.
-    // Delegated listener kept harmless in case a future entry point reintroduces the id.
+    // #nav-ask-team now lives in the workspace header, next to Report an Issue (issue #129).
+    // ⌘K remains a second trigger for the same floating panel.
     document.addEventListener('click', e => {
       if (e.target.closest && e.target.closest('#nav-ask-team')) { e.preventDefault(); open(); }
     });
