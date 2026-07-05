@@ -13,7 +13,7 @@
 // WHERE the issue occurred. An optional screenshot is stored inline (base64 data URL).
 
 import { Handler } from '@netlify/functions';
-import { and, eq, desc, asc, inArray } from 'drizzle-orm';
+import { and, eq, desc, asc, inArray, isNotNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { issueReports, issueReportMessages, users } from '../../db/schema';
 import { requireSession } from '../../src/utils/session';
@@ -73,11 +73,15 @@ export const handler: Handler = async (event) => {
             .limit(100);
 
         const ids = issues.map((i) => i.id);
+        // Messages with no authorId are posted by the AI auto-fix runner itself (see
+        // admin-issue-handoff.ts) rather than a person. Those are internal/dev-facing
+        // and stay out of the reporter's view — only the conversation with the admin
+        // (and the admin's own status changes) should show here.
         const messages = ids.length
             ? await db
                 .select()
                 .from(issueReportMessages)
-                .where(inArray(issueReportMessages.issueId, ids))
+                .where(and(inArray(issueReportMessages.issueId, ids), isNotNull(issueReportMessages.authorId)))
                 .orderBy(asc(issueReportMessages.createdAt))
             : [];
 
