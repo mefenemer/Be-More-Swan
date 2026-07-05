@@ -37,9 +37,9 @@ export const handler = async (event: HandlerEvent) => {
         const org = await resolveActiveOrg(db, userId, session.activeOrganisationId);
         const organisationId = org?.organisationId ?? null;
 
-        // Issue #132 (follow-up): the reporter saw this widget go from "0" to
-        // completely blank after the coalesce/leads changes below landed — i.e. one
-        // of these queries started throwing, which turned the whole response into a
+        // Issue #132 (follow-up) / issue #149: the reporter saw this widget go from
+        // "0" to completely blank after the coalesce/leads changes below landed — i.e.
+        // one of these queries started throwing, which turned the whole response into a
         // 500 (the frontend leaves the tiles in their loading-skeleton state on any
         // non-200 response). Whatever the exact trigger, a single activity source
         // failing must never blank the entire widget again, so each count is now
