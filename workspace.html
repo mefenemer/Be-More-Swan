@@ -3854,11 +3854,31 @@ function formatCurrency(amount, currency) {
 
   // Issue #156 — ding when a new notification arrives while the workspace is open.
   // Gated by the "sound on notification" preference (My Account → Sounds); defaults to ON.
-  // Best-effort: browsers block autoplay without a prior user gesture, so this may no-op
-  // until the user has interacted with the page at least once.
+  // Browsers block autoplay without a prior user gesture on this navigation, and the poll
+  // that triggers this is never itself a gesture — so if the user hasn't clicked/typed
+  // anything yet, the first play() is silently rejected and (without this retry) the ding
+  // never fires at all for the rest of the session. Mirrors playWelcomeSound's retry-on-
+  // next-gesture fallback above.
+  let _pendingNotifSound = false;
   window._playNotificationSound = function () {
     if (localStorage.getItem('bms_soundOnNotification') === '0') return;
-    try { const a = document.getElementById('notification-audio'); if (a) { a.currentTime = 0; a.play().catch(() => {}); } } catch {}
+    const a = document.getElementById('notification-audio');
+    if (!a) return;
+    const attempt = () => { a.currentTime = 0; return a.play(); };
+    try {
+      attempt().catch(() => {
+        if (_pendingNotifSound) return;
+        _pendingNotifSound = true;
+        const retry = () => {
+          _pendingNotifSound = false;
+          window.removeEventListener('pointerdown', retry);
+          window.removeEventListener('keydown', retry);
+          attempt().catch(() => {});
+        };
+        window.addEventListener('pointerdown', retry);
+        window.addEventListener('keydown', retry);
+      });
+    } catch {}
   };
 
   // ── Milestone celebration (#2): modal + Aurora.mp3 + confetti, 10s auto-close ──
