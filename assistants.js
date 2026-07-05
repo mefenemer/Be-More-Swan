@@ -59,23 +59,27 @@ window.generateAssistantCardHTML = function(assistant) {
     const db = window._resolveAssistantBadge(assistant, assistant.opSignals);
     const statusHtml = `<span class="inline-flex items-center gap-1.5 py-1 px-2.5 rounded-md text-xs font-bold ${db.cls}"><span class="w-1.5 h-1.5 rounded-full ${db.dot}"></span> ${db.label}</span>`;
 
-    // SMART Goals AC2.1.1 — "X On Track | Y Off Track" micro-summary + Review Progress button (AC2.2.1).
+    // SMART Goals AC2.1.1 — "X On Track | Y Off Track" micro-summary.
     // When no goals exist yet, show a prompt that deep-links to the assistant's Goals tab so the
-    // user is nudged (and able) to set measurable targets.
+    // user is nudged (and able) to set measurable targets. Goals start life as 'pending' until the
+    // run-rate engine assesses them (poll-goal-telemetry, gated by RUN_RATE_THRESHOLDS.minObservationDays),
+    // so a card whose goals are all still pending must say so instead of showing a misleading "0 On
+    // Track | 0 Off Track" (issue #135).
     const gs = assistant.goalSummary || { onTrack: 0, offTrack: 0, total: 0 };
-    const goalsHtml = gs.total > 0 ? `
+    const goalsAssessed = gs.onTrack + gs.offTrack;
+    const goalsHtml = gs.total > 0 ? (goalsAssessed > 0 ? `
         <div class="flex items-center gap-4 text-xs font-semibold mb-5">
             <span class="inline-flex items-center gap-1.5 text-emerald-600"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>${gs.onTrack} On Track</span>
             <span class="inline-flex items-center gap-1.5 text-red-600"><span class="w-2 h-2 rounded-full bg-red-500"></span>${gs.offTrack} Off Track</span>
         </div>` : `
+        <div class="flex items-center gap-2 text-xs font-semibold text-gray-400 mb-5">
+            <span class="w-2 h-2 rounded-full bg-gray-300"></span>Awaiting first progress check-in
+        </div>`) : `
         <button type="button" onclick="event.stopPropagation(); window._assistantDetailInitialTab='goals'; window.routeToAssistantDetail('${assistant.id}')"
             class="flex items-center gap-2 text-xs font-semibold text-gray-400 hover:text-emerald-700 mb-5 cursor-pointer transition-colors text-left">
             <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v8m4-4H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             No goals set yet — <span class="underline">add goals to track performance</span>
         </button>`;
-    const reviewBtn = gs.total > 0
-        ? `<button type="button" onclick="event.stopPropagation(); window._reviewProgressOnLoad=true; window.routeToAssistantDetail('${assistant.id}')" class="text-sm font-bold text-emerald-700 hover:text-emerald-800 transition-colors cursor-pointer">Review Progress</button>`
-        : '';
 
     // Post metrics strip
     const pm = assistant.postMetrics || {};
@@ -140,8 +144,7 @@ window.generateAssistantCardHTML = function(assistant) {
         <p class="text-sm text-gray-500 mb-4">${role}</p>
         ${goalsHtml}
         ${metricsHtml}
-        <div class="mt-auto pt-4 border-t border-gray-50 flex justify-between items-center">
-            ${reviewBtn || '<span></span>'}
+        <div class="mt-auto pt-4 border-t border-gray-50 flex justify-end items-center">
             <span class="text-sm font-bold text-gray-900 group-hover:text-emerald-700 transition-colors">View Details &rarr;</span>
         </div>
     </div>`;
