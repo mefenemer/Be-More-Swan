@@ -1509,6 +1509,7 @@
           <div class="flex items-center gap-2">
             <button onclick="passAllToDeveloper()" id="ir-pass-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🤖 Pass all to Developer</button>
             <button onclick="moveAllToBacklog()" id="ir-backlog-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition disabled:opacity-60 disabled:cursor-not-allowed">📥 Move all to Backlog</button>
+            <button onclick="moveBacklogAllToDeveloper()" id="ir-backlog-dev-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🤖 Move All to a Developer</button>
             <button onclick="requestMergeAll()" id="ir-merge-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🔀 Merge all to staging</button>
             <button onclick="openRunnerModal()" id="ir-runner-btn" class="px-3 py-2 text-sm font-semibold border border-violet-300 text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 transition flex items-center gap-1.5">🤖 <span id="ir-runner-btn-label">Runner</span></button>
             <button onclick="loadIssueReports()" class="px-3 py-2 text-sm font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition">↻ Refresh</button>
@@ -3492,6 +3493,7 @@ async function loadIssueReports() {
     _updateRunnerBtnBadge(issues);
     _updatePassAllBtn(issues);
     _updateMoveAllToBacklogBtn(issues);
+    _updateMoveAllToDeveloperBtn(issues);
     _updateMergeAllBtns(issues);
     loadRunnerStatus();
     if (tbody) tbody.innerHTML = issues.map(i => `
@@ -4051,6 +4053,40 @@ async function moveAllToBacklog() {
   if (btn) { btn.disabled = true; btn.textContent = 'Moving…'; }
   try {
     await api(`${IR_API}?action=backlog-all`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+  } catch (e) { alert(e.message); }
+  finally { loadIssueReports(); }
+}
+
+// "Move all to a Developer" — shown on the Backlog tab when there are backlog issues
+// not already queued or being fixed, so admins can hand off a deferred batch in one click.
+function _updateMoveAllToDeveloperBtn(issues) {
+  const btn = document.getElementById('ir-backlog-dev-all-btn');
+  if (!btn) return;
+  const eligible = (issues || []).filter(i =>
+    i.status === 'backlog' && i.devHandoffStatus !== 'queued' && i.devHandoffStatus !== 'in_progress');
+  if (_irFilter === 'backlog' && eligible.length > 0) {
+    btn.dataset.count = eligible.length;
+    btn.disabled = false;
+    btn.textContent = `🤖 Move All (${eligible.length}) to a Developer`;
+    btn.classList.remove('hidden');
+  } else {
+    btn.classList.add('hidden');
+  }
+}
+
+async function moveBacklogAllToDeveloper() {
+  const btn = document.getElementById('ir-backlog-dev-all-btn');
+  const n = Number(btn?.dataset.count || 0);
+  if (_irRunnerBlocked) {
+    alert('The AI developer runner is paused (Claude session limit). Use the "Resume runner" banner at the top of the Issues list, then try again.');
+    return;
+  }
+  if (!confirm(`Pass all ${n} backlog issue${n === 1 ? '' : 's'} to the AI developer? Each will be fixed on its own branch with a pull request opened for review.`)) return;
+  if (btn) { btn.disabled = true; btn.textContent = '🤖 Queuing…'; }
+  try {
+    await api(`${IR_API}?action=handoff-backlog-all`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     });
   } catch (e) { alert(e.message); }

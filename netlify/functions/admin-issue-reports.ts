@@ -115,6 +115,39 @@ export const handler: Handler = async (event) => {
         return json(200, { ok: true, queued: updated.length, ids: updated.map((u) => u.id) });
     }
 
+    // ── POST ?action=handoff-backlog-all: queue every eligible Backlog issue at once ─
+    // Bulk version of ?action=handoff, scoped to the Backlog tab — lets an admin hand off
+    // a batch of previously-deferred issues to the AI developer in one click.
+    if (event.httpMethod === 'POST' && action === 'handoff-backlog-all') {
+        const updated = await db.update(issueReports).set({
+            devHandoffStatus: 'queued',
+            devHandoffAt: new Date(),
+            devResult: null,
+            status: 'fix_in_progress',
+            updatedAt: new Date(),
+        }).where(and(
+            eq(issueReports.status, 'backlog'),
+            or(isNull(issueReports.devHandoffStatus), notInArray(issueReports.devHandoffStatus, ['queued', 'in_progress'])),
+        )).returning({ id: issueReports.id, userId: issueReports.userId });
+
+        if (updated.length === 0) return json(200, { ok: true, queued: 0 });
+
+        await db.insert(issueReportMessages).values(updated.map((u) => ({
+            issueId: u.id,
+            authorType: 'admin',
+            authorId: admin.id,
+            body: "Thanks for reporting this — we've passed it to the developer and a fix is now underway.",
+            status: 'fix_in_progress',
+        })));
+
+        await Promise.allSettled(updated.map((u) =>
+            notifyIssueUser(db, { userId: u.userId, issueId: u.id, status: 'fix_in_progress', headers: event.headers })
+                .catch((e) => console.error('[admin-issue-reports] handoff-backlog-all notify failed:', e?.message || e)),
+        ));
+
+        return json(200, { ok: true, queued: updated.length, ids: updated.map((u) => u.id) });
+    }
+
     // ── POST ?action=backlog-all: move every Reported issue to the Backlog at once ─
     // Bulk alternative to ?action=handoff-all for issues that aren't ready to hand
     // to the AI developer yet. Posts a thread message on each and notifies reporters.
