@@ -952,59 +952,15 @@ window._tuningRevisePost = async function() {
 };
 
 // ── Active Workflows dependency map (Epic 4.2) ────────────────────────────────
-// Shows how this assistant hands off to / receives from other assistants. Reads the
-// same orchestration_links the global Orchestrations hub manages; card stays visible
-// (with an empty state) even with no links, since its "Manage in Orchestrations" CTA
-// is the only entry point into the Orchestrations hub now that #111 removed it from
-// the side menu.
+// Orchestrations has no runtime consumer yet (see netlify/functions/orchestrations.ts),
+// so this card is disabled and just shows a "Coming soon" state (issue #147) instead of
+// fetching/rendering real orchestration_links or linking into the Orchestrations hub.
 
-// Compact "fired …" relative time (Phase 5). Defined here too so the assistant page
-// doesn't depend on the Orchestrations hub view being loaded.
-function _orchRelTime(iso) {
-    if (!iso) return '';
-    const then = new Date(iso).getTime();
-    if (isNaN(then)) return '';
-    const s = Math.max(0, Math.floor((Date.now() - then) / 1000));
-    if (s < 60) return 'just now';
-    const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`;
-    const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`;
-    const d = Math.floor(h / 24); return `${d}d ago`;
-}
-
-window._renderActiveWorkflows = async function(assistantId) {
+window._renderActiveWorkflows = function(assistantId) {
     const card = document.getElementById('active-workflows-card');
-    const list = document.getElementById('active-workflows-list');
-    if (!card || !list) return;
+    if (!card) return;
     const aid = Number(assistantId || window._currentAssistantId);
     if (!aid) return;
-    let links = [];
-    try {
-        const res = await fetch('/.netlify/functions/orchestrations');
-        if (res.ok) links = (await res.json()).links || [];
-    } catch { /* non-critical */ }
-    const mine = links.filter(l => l.sourceAssistantId === aid || l.targetAssistantId === aid);
-    card.classList.remove('hidden');
-    if (!mine.length) {
-        list.innerHTML = '<p class="text-sm text-gray-400 text-center py-3">No active workflows yet — connect this assistant to another in Orchestrations.</p>';
-        return;
-    }
-
-    const arrow = '<svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>';
-    list.innerHTML = mine.map(l => {
-        const outbound = l.sourceAssistantId === aid;
-        const other = outbound ? l.targetAssistantName : l.sourceAssistantName;
-        const dim = l.isActive === false ? 'opacity-60' : '';
-        const left = outbound
-            ? `<span class="font-bold text-gray-800">This assistant</span> ${arrow} <span class="font-bold text-gray-800">${_escapeHtml(other)}</span>`
-            : `<span class="font-bold text-gray-800">${_escapeHtml(other)}</span> ${arrow} <span class="font-bold text-gray-800">This assistant</span>`;
-        const fired = l.lastFiredAt ? `<span class="shrink-0 text-xs text-gray-400">fired ${_orchRelTime(l.lastFiredAt)}</span>` : '';
-        return `<div class="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-gray-100 text-sm ${dim}">
-            <span class="shrink-0 px-2 py-0.5 rounded-full text-xs font-bold ${outbound ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}">${outbound ? 'Sends to' : 'Receives from'}</span>
-            <span class="flex items-center gap-1.5 min-w-0">${left}</span>
-            <span class="text-gray-500 truncate flex-1">— ${_escapeHtml(l.targetAction)}</span>
-            ${fired}
-        </div>`;
-    }).join('');
     card.classList.remove('hidden');
 };
 
