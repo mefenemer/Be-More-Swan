@@ -25,6 +25,18 @@ export const handler: Handler = async (event) => {
     if ('error' in ctx) return ctx.error;
     const { organisationId: orgId, userId } = ctx;
 
+    // Issue #110: the hero "hours/£ saved" figures must match the dashboard's
+    // roi-stats widget. The dashboard has a This Week / This Month toggle, so
+    // this endpoint takes the same ?period param and computes the window via
+    // the shared roiPeriodStart helper — a hard-coded week here diverged from
+    // the dashboard whenever it was on the month view (the calendar week can
+    // reach into the previous month, so "this week" can exceed "this month").
+    // The totals below (created/scheduled/published breakdown) stay all-time;
+    // only the ROI hero uses this window. Computed outside the try block so it's
+    // still available to build the degrade-to-no-data response below on error.
+    const period = parseRoiPeriod(event.queryStringParameters?.period);
+    const periodStart = roiPeriodStart(period);
+
     try {
         // IDOR guard
         const [assistant] = await withTenant(orgId, (tx) =>
@@ -34,17 +46,6 @@ export const handler: Handler = async (event) => {
               .limit(1)
         );
         if (!assistant) return { statusCode: 404, body: JSON.stringify({ error: 'Not found' }) };
-
-        // Issue #110: the hero "hours/£ saved" figures must match the dashboard's
-        // roi-stats widget. The dashboard has a This Week / This Month toggle, so
-        // this endpoint takes the same ?period param and computes the window via
-        // the shared roiPeriodStart helper — a hard-coded week here diverged from
-        // the dashboard whenever it was on the month view (the calendar week can
-        // reach into the previous month, so "this week" can exceed "this month").
-        // The totals below (created/scheduled/published breakdown) stay all-time;
-        // only the ROI hero uses this window.
-        const period = parseRoiPeriod(event.queryStringParameters?.period);
-        const periodStart = roiPeriodStart(period);
 
         const [postRows, profileRow, mult, [{ postsInPeriod }], [{ taskRunsInPeriod }]] = await Promise.all([
             db.select({
@@ -121,7 +122,26 @@ export const handler: Handler = async (event) => {
             }),
         };
     } catch (err) {
-        console.error('[get-assistant-metrics]', err);
-        return { statusCode: 500, body: JSON.stringify({ error: 'Failed to load metrics.' }) };
+        // Performance/Impact metrics are a SUPPLEMENTARY panel on the assistant detail
+        // page — a failure here must never 500 the page (see commit 2373001, which
+        // established this for the same endpoint). Degrade gracefully to "no data" for
+        // ANY error (RLS/connection hiccup, brand-new assistant, etc.) and log the real
+        // cause server-side for diagnosis rather than surfacing a 500 to the client.
+        console.error('[get-assistant-metrics] degraded to no-data after error:', err);
+        return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                totalCreated: 0,
+                totalScheduled: 0,
+                totalPublished: 0,
+                byPlatform: {},
+                hoursSaved: 0,
+                gbpSaved: null,
+                period,
+                hourlyRateSet: false,
+                minutesPerPost: null,
+            }),
+        };
     }
 };
