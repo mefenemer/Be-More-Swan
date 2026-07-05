@@ -222,5 +222,63 @@
         ],
       },
     ],
+
+    // Tier 1, Batch 3 — Meeting Note Taker. Captures where meetings happen, where
+    // extracted action items should be synced, and how summaries should read.
+    meeting_note_taker: [
+      {
+        title: 'Where do your meetings happen?',
+        description: 'Your Note Taker frames its workflow around the platform your calls run on.',
+        fields: [
+          {
+            key: 'meetingPlatform',
+            label: 'Meeting platform',
+            type: 'dropdown',
+            required: true,
+            placeholder: 'Choose your platform…',
+            options: [
+              { value: 'zoom', label: 'Zoom' },
+              { value: 'google_meet', label: 'Google Meet' },
+              { value: 'teams', label: 'Teams' },
+            ],
+          },
+        ],
+      },
+      {
+        title: 'Where should action items go?',
+        description: 'Every task extracted from a meeting is prepared for sync to this tool.',
+        fields: [
+          {
+            key: 'taskDestination',
+            label: 'Task destination',
+            type: 'dropdown',
+            required: true,
+            placeholder: 'Choose your tool…',
+            options: [
+              { value: 'notion', label: 'Notion' },
+              { value: 'jira', label: 'Jira' },
+              { value: 'asana', label: 'Asana' },
+              { value: 'monday', label: 'Monday.com' },
+            ],
+          },
+        ],
+      },
+      {
+        title: 'How should summaries read?',
+        description: 'This sets the shape of every meeting summary your Note Taker writes.',
+        fields: [
+          {
+            key: 'summaryFormat',
+            label: 'Summary format',
+            type: 'radio',
+            required: true,
+            options: [
+              { value: 'executive_bullets', label: 'Executive Bullet Points', description: 'Crisp, scannable bullets — decisions and outcomes at a glance.' },
+              { value: 'paragraph_narrative', label: 'Paragraph Narrative', description: 'A flowing prose recap that reads like formal minutes.' },
+            ],
+          },
+        ],
+      },
+    ],
   };
 })();

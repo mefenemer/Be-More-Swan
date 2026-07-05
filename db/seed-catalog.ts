@@ -204,7 +204,7 @@ const CATALOG = [
         category: 'Project Management',
         iconKey: 'document',
         iconColor: 'blue',
-        comingSoon: true,
+        comingSoon: false,   // ← Currently Live (Tier 1, Batch 3)
         isActive: true,
     },
     {

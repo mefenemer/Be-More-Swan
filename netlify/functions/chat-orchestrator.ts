@@ -66,7 +66,9 @@ interface RouteContext {
 interface AssistantRoute {
     model: string;
     maxTokens: number;
-    buildSystemPrompt(rc: RouteContext): string;
+    /** Role-specific prompt body. buildSystemPrompt() appends the hardened
+     *  <strict_configuration> block to this before every API call. */
+    buildRolePrompt(rc: RouteContext): string;
     /** Turn the raw LLM text into displayable content + an optional Disruptive UI element. */
     parseResponse(raw: string): { content: string; uiElement: unknown | null };
 }
@@ -76,16 +78,66 @@ function sharedContextBlock(rc: RouteContext): string {
         rc.baseSystemPrompt ? rc.baseSystemPrompt.trim() : '',
         `You are "${rc.assistantName}"${rc.jobRole ? `, the ${rc.jobRole}` : ''} for a small business using Be More Swan.`,
         rc.onboardingContext
-            ? `Business context gathered during setup (use it — never ask for information already answered here):\n${JSON.stringify(rc.onboardingContext)}`
+            ? 'The <strict_configuration> block at the end of these instructions holds the answers this business gave during setup — never ask for information already answered there.'
             : 'No onboarding context has been captured for this assistant yet.',
     ].filter(Boolean).join('\n\n');
+}
+
+// ── System prompt hardening ───────────────────────────────────────────────────
+// Every API call gets the user's onboarding answers restated in a <strict_configuration>
+// XML block appended AFTER the role prompt, with an explicit priority override. The role
+// prompts still weave individual values (tone, thresholds, overwrite rules) into their
+// task instructions; this block is the authoritative restatement that stops drift when
+// those instructions and the model's own judgement disagree.
+
+/** "minInvoiceValue" / "support_tone" → "Min invoice value" / "Support tone". */
+function humanizeConfigKey(key: string): string {
+    const words = key.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').trim();
+    return words ? words.charAt(0).toUpperCase() + words.slice(1).toLowerCase() : key;
+}
+
+function formatConfigValue(value: unknown): string {
+    if (Array.isArray(value)) return value.map(formatConfigValue).join(', ');
+    if (value !== null && typeof value === 'object') return JSON.stringify(value);
+    return String(value).trim();
+}
+
+/**
+ * Compose the final system string sent to Anthropic: the base prompt (the route's full
+ * role prompt, which already folds in the instance's own aiAssistants.systemPrompt via
+ * sharedContextBlock) followed by the onboardingContext rendered as human-readable
+ * key/value rules inside <strict_configuration> tags.
+ */
+function buildSystemPrompt(baseSystemPrompt: string, onboardingContext: unknown): string {
+    // onboardingContext is a JSON column, but tolerate a serialised string from older rows.
+    let context = onboardingContext;
+    if (typeof context === 'string') {
+        try { context = JSON.parse(context); } catch { context = null; }
+    }
+    const entries = context && typeof context === 'object' && !Array.isArray(context)
+        ? Object.entries(context as Record<string, unknown>)
+            .filter(([, v]) => v !== null && v !== undefined && v !== '')
+        : [];
+    if (entries.length === 0) return baseSystemPrompt;
+
+    const parameters = entries
+        .map(([key, value]) => `- ${humanizeConfigKey(key)}: ${formatConfigValue(value)}`)
+        .join('\n');
+
+    return `${baseSystemPrompt}
+
+<strict_configuration>
+The user has configured your specific behavior with the following parameters. You MUST obey these rules at all times. If these rules conflict with your base instructions, these rules take priority:
+
+${parameters}
+</strict_configuration>`;
 }
 
 // Plain conversational reply, no structured UI.
 const defaultRoute: AssistantRoute = {
     model: DEFAULT_MODEL,
     maxTokens: 1024,
-    buildSystemPrompt: (rc) => [
+    buildRolePrompt: (rc) => [
         sharedContextBlock(rc),
         'Reply conversationally in plain text. Be concise, warm, and practical. Do not use markdown headings.',
     ].join('\n\n'),
@@ -105,6 +157,15 @@ function parseStructuredReply(raw: string): { content: string; uiElement: unknow
     return { content: raw.trim(), uiElement: null };
 }
 
+// Display labels for the meeting-note-taker's taskDestination onboarding values
+// (src/config/assistant-onboarding-schemas.js) — shown verbatim in the card's sync button.
+const TASK_DESTINATION_LABELS: Record<string, string> = {
+    notion: 'Notion',
+    jira: 'Jira',
+    asana: 'Asana',
+    monday: 'Monday.com',
+};
+
 /** Pull one onboarding answer out of the (untyped) onboardingContext JSON blob. */
 function onboardingValue(rc: RouteContext, key: string): unknown {
     if (rc.onboardingContext && typeof rc.onboardingContext === 'object') {
@@ -121,7 +182,7 @@ const ROUTES: Record<string, AssistantRoute> = {
     lead_qualifier: {
         model: DEFAULT_MODEL,
         maxTokens: 1024,
-        buildSystemPrompt: (rc) => {
+        buildRolePrompt: (rc) => {
             const industries = onboardingValue(rc, 'targetIndustries');
             const minHeadcount = onboardingValue(rc, 'minHeadcount');
             const salesTone = onboardingValue(rc, 'salesTone');
@@ -180,7 +241,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EXACTL
     accounts_receivable_clerk: {
         model: DEFAULT_MODEL,
         maxTokens: 1536,
-        buildSystemPrompt: (rc) => {
+        buildRolePrompt: (rc) => {
             const platform = onboardingValue(rc, 'accountingPlatform');
             const cadence = onboardingValue(rc, 'followUpCadence');
             const minInvoiceValue = onboardingValue(rc, 'minInvoiceValue');
@@ -219,7 +280,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
     crm_enricher: {
         model: DEFAULT_MODEL,
         maxTokens: 1536,
-        buildSystemPrompt: (rc) => {
+        buildRolePrompt: (rc) => {
             const primaryCrm = onboardingValue(rc, 'primaryCrm');
             const targetData = onboardingValue(rc, 'targetEnrichmentData');
             const overwriteLogic = onboardingValue(rc, 'overwriteLogic');
@@ -261,7 +322,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
     tier1_support_agent: {
         model: DEFAULT_MODEL,
         maxTokens: 1024,
-        buildSystemPrompt: (rc) => {
+        buildRolePrompt: (rc) => {
             const platform = onboardingValue(rc, 'helpdeskPlatform');
             const threshold = onboardingValue(rc, 'autoResolveThreshold');
             const escalationEmail = onboardingValue(rc, 'escalationEmail');
@@ -290,6 +351,54 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
     "summary": "<one-sentence summary of the customer's issue>",
     "escalationReason": "<why it was escalated>" | null,
     "escalationEmail": ${escalationEmail ? JSON.stringify(escalationEmail) : 'null'}
+  }
+}`,
+            ].join('\n\n');
+        },
+        parseResponse: parseStructuredReply,
+    },
+
+    // Tier 1, Batch 3 — Meeting Note Taker. Executive assistant that turns raw meeting
+    // transcripts or messy notes into a summary (in the configured format) plus action
+    // items with implied owners. Wire shape: reply + action_item_assignment uiElement,
+    // matching the ActionItemAssignmentCard renderer in disruptive-ui-registry.js.
+    meeting_note_taker: {
+        model: DEFAULT_MODEL,
+        maxTokens: 1536,
+        buildRolePrompt: (rc) => {
+            const meetingPlatform = onboardingValue(rc, 'meetingPlatform');
+            const taskDestination = onboardingValue(rc, 'taskDestination');
+            const summaryFormat = onboardingValue(rc, 'summaryFormat');
+            // Display label for the sync target — the ActionItemAssignmentCard renders it
+            // verbatim in its "Sync to <destination>" button.
+            const destinationLabel = TASK_DESTINATION_LABELS[String(taskDestination)]
+                ?? (taskDestination ? String(taskDestination) : 'your task tracker');
+            return [
+                sharedContextBlock(rc),
+                `You are an executive assistant who turns raw meeting transcripts and messy meeting notes into crisp minutes. When the user pastes a transcript, notes, or a recap, extract two things: the core meeting summary, and every specific action item with its implied owner. Live meeting/task-tool connections are not wired up yet, so work only from the text the user provides.
+
+Note-taking policy (from setup):
+- Meeting platform: ${meetingPlatform ?? 'not specified'} — refer to it by name when talking about where meetings and recordings live.
+- Task destination: ${destinationLabel} — extracted action items are prepared for sync there; use its terminology when discussing tasks.
+- Summary format: ${summaryFormat === 'paragraph_narrative'
+    ? 'Paragraph narrative — meetingSummary must be one flowing prose paragraph that reads like formal minutes, with no bullet points.'
+    : 'Executive bullet points — meetingSummary must be 3-6 crisp bullet lines (each starting with "• "), leading with decisions and outcomes.'}
+
+Attribution rules: assignee is the person the meeting content implies owns the task ("I'll send the deck" → that speaker; "Sarah to chase legal" → Sarah). Use "Unassigned" when no owner is implied. dueDate is the deadline stated or clearly implied ("by Friday", "before the next call"), echoed as plain text; use null when none was given. Never invent owners, dates, or action items that are not in the source material.
+
+When the conversation contains meeting content to process, include the action item card; otherwise set uiElement to null and ask the user to paste their transcript or notes.
+
+Return STRICT JSON (no markdown, no prose outside the JSON):
+{
+  "reply": "your conversational message to the user",
+  "uiElement": {                      // or null when there is no meeting content yet
+    "type": "action_item_assignment",
+    "meetingSummary": "<the summary, in the configured format>",
+    "targetDestination": ${JSON.stringify(destinationLabel)},
+    "tasks": [
+      { "description": "<specific action item>", "assignee": "<owner name, or 'Unassigned'>", "dueDate": "<deadline as stated>" | null },
+      ...
+    ]
   }
 }`,
             ].join('\n\n');
@@ -403,12 +512,15 @@ export const handler: Handler = async (event) => {
         .returning({ id: chatMessages.id, createdAt: chatMessages.createdAt });
 
     const route = (assistantRow.roleKey && ROUTES[assistantRow.roleKey]) || defaultRoute;
-    const system = route.buildSystemPrompt({
-        assistantName: assistantRow.name,
-        jobRole: assistantRow.jobRole,
-        baseSystemPrompt: assistantRow.systemPrompt,
-        onboardingContext: assistantRow.onboardingContext,
-    });
+    const system = buildSystemPrompt(
+        route.buildRolePrompt({
+            assistantName: assistantRow.name,
+            jobRole: assistantRow.jobRole,
+            baseSystemPrompt: assistantRow.systemPrompt,
+            onboardingContext: assistantRow.onboardingContext,
+        }),
+        assistantRow.onboardingContext,
+    );
 
     // Only user/assistant turns go to the LLM ('system' rows are audit/injected notices),
     // capped to the most recent HISTORY_LIMIT.
@@ -450,12 +562,15 @@ export const handler: Handler = async (event) => {
                 .limit(1);
 
             const targetName = shadowRow?.name ?? handoff.targetAssistantName;
-            const shadowSystem = targetRoute.buildSystemPrompt({
-                assistantName: targetName,
-                jobRole: shadowRow?.jobRole ?? null,
-                baseSystemPrompt: shadowRow?.systemPrompt ?? null,
-                onboardingContext: shadowRow?.onboardingContext ?? null,
-            });
+            const shadowSystem = buildSystemPrompt(
+                targetRoute.buildRolePrompt({
+                    assistantName: targetName,
+                    jobRole: shadowRow?.jobRole ?? null,
+                    baseSystemPrompt: shadowRow?.systemPrompt ?? null,
+                    onboardingContext: shadowRow?.onboardingContext ?? null,
+                }),
+                shadowRow?.onboardingContext ?? null,
+            );
 
             const shadowResponse = await anthropic.messages.create({
                 model: targetRoute.model,

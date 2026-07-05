@@ -374,5 +374,88 @@
   // Alias for callers/routes that use the PascalCase component name as the type key.
   register('HandoffProposalCard', renderHandoffProposalCard);
 
+  // ── Built-in: Action Item Assignment Card ───────────────────────────────────
+  // Renderer for the meeting-note-taker route's wire shape (chat-orchestrator.ts):
+  // { type: 'action_item_assignment', meetingSummary, targetDestination,
+  //   tasks: [{ description, assignee, dueDate: string|null }, ...] }
+  // The "Sync to <destination>" button is a client-side mock for now — no live
+  // Notion/Jira/Asana/Monday.com API keys yet, so it just settles into a Synced! state.
+  function renderActionItemAssignmentCard(ui, esc) {
+    const tasks = (Array.isArray(ui.tasks) ? ui.tasks : [])
+      .filter((t) => t && typeof t === 'object' && t.description);
+    if (!ui.meetingSummary && tasks.length === 0) return null; // nothing extracted — fall back to text-only
+
+    const destination = typeof ui.targetDestination === 'string' && ui.targetDestination.trim()
+      ? ui.targetDestination.trim() : 'your task tracker';
+
+    const el = document.createElement('div');
+    el.className = 'bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden max-w-2xl';
+    el.innerHTML = `
+      <div class="flex items-center gap-3 px-5 py-4 border-b border-gray-100">
+        <div class="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center text-xl shrink-0">📝</div>
+        <div class="min-w-0">
+          <p class="text-xs font-bold text-emerald-700 tracking-wider uppercase">Meeting Minutes</p>
+          <p class="font-bold text-gray-900 truncate">Summary &amp; action items</p>
+        </div>
+      </div>
+
+      ${ui.meetingSummary ? `
+        <div class="px-5 py-4 ${tasks.length ? 'border-b border-gray-100' : ''}">
+          <p class="text-sm text-gray-700 whitespace-pre-line">${esc(ui.meetingSummary)}</p>
+        </div>` : ''}
+
+      ${tasks.length ? `
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-xs font-bold text-gray-500 uppercase tracking-wider border-b border-gray-100">
+              <th class="px-5 py-3">Action item</th>
+              <th class="px-3 py-3">Owner</th>
+              <th class="px-5 py-3">Due</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            ${tasks.map((t) => {
+              const hasDue = t.dueDate !== null && t.dueDate !== undefined && String(t.dueDate).trim() !== '';
+              return `
+              <tr>
+                <td class="px-5 py-3 text-gray-900">${esc(t.description)}</td>
+                <td class="px-3 py-3 font-semibold text-gray-700 whitespace-nowrap">${esc(t.assignee) || 'Unassigned'}</td>
+                <td class="px-5 py-3 whitespace-nowrap ${hasDue ? 'text-gray-700' : 'text-gray-400 italic'}">${hasDue ? esc(t.dueDate) : 'No due date'}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>` : ''}
+
+      <div class="flex items-center justify-between gap-3 px-5 py-4 border-t border-gray-100">
+        <p class="text-xs text-gray-400" data-sync-hint>Pushes ${tasks.length} action item${tasks.length === 1 ? '' : 's'} to ${esc(destination)}.</p>
+        <p class="hidden text-xs font-semibold text-emerald-700" data-sync-status>Synced to ${esc(destination)}. (Preview — no live connection yet.)</p>
+        <button type="button" data-sync-action
+          class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:cursor-not-allowed shrink-0">
+          Sync to ${esc(destination)}
+        </button>
+      </div>
+    `;
+
+    // Mock behaviour: no live task-tool APIs yet, so syncing settles the button into an
+    // emerald success state instead of calling anywhere.
+    el.addEventListener('click', (e) => {
+      const button = e.target.closest('[data-sync-action]');
+      if (!button || button.disabled) return;
+      button.disabled = true;
+      button.textContent = 'Synced!';
+      button.className = 'px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-bold rounded-lg cursor-default shrink-0';
+      el.querySelector('[data-sync-hint]').classList.add('hidden');
+      el.querySelector('[data-sync-status]').classList.remove('hidden');
+    });
+
+    return el;
+  }
+
+  register('action_item_assignment', renderActionItemAssignmentCard);
+  // Alias for callers/routes that use the PascalCase component name as the type key.
+  register('ActionItemAssignmentCard', renderActionItemAssignmentCard);
+
   window.DisruptiveUIRegistry = { register, has, render, escapeHtml };
 })();
