@@ -112,12 +112,30 @@
   // Alias for callers/routes that use the PascalCase component name as the type key.
   register('LeadScoringCard', renderLeadScoringCard);
 
+  // ── Shared: POST an action payload to the generic sync endpoint ─────────────
+  // /api/actions/sync (netlify/functions/sync-action.ts) resolves the workspace's
+  // OAuth token for the target provider and executes the third-party call.
+  // Throws Error(message) on any non-2xx / {error} response so callers can render
+  // their local error state.
+  async function postSyncAction(actionType, payload) {
+    const res = await fetch('/api/actions/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actionType, payload }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.error) throw new Error(data.error || `Sync failed (HTTP ${res.status}).`);
+    return data;
+  }
+
   // ── Built-in: Aging Invoices Table Card ─────────────────────────────────────
   // Renderer for the accounts-receivable-clerk route's wire shape (chat-orchestrator.ts):
   // { type: 'aging_invoices_table', title?, invoices: [{ clientName, daysPastDue,
-  //   amount, status: 'reminder'|'overdue'|'final_notice'|'escalated' }, ...] }
-  // The "Pause chasing" toggle is a client-side mock for now — it dims the row but
-  // does not persist anywhere yet.
+  //   amount, status: 'reminder'|'overdue'|'final_notice'|'escalated',
+  //   invoiceNumber?: string|null }, ...] }
+  // "Log note" pushes a chasing note onto the matching Xero invoice via
+  // /api/actions/sync (xero_log_note). The "Pause chasing" toggle is still a
+  // client-side mock — it dims the row but does not persist anywhere yet.
   const INVOICE_STATUS_STYLES = {
     reminder: { chip: 'bg-emerald-50 text-emerald-800 border-emerald-200', label: 'Reminder' },
     overdue: { chip: 'bg-amber-50 text-amber-800 border-amber-200', label: 'Overdue' },
@@ -148,11 +166,12 @@
               <th class="px-3 py-3 text-right">Days overdue</th>
               <th class="px-3 py-3 text-right">Amount</th>
               <th class="px-3 py-3">Status</th>
-              <th class="px-5 py-3 text-right">Chasing</th>
+              <th class="px-3 py-3 text-right">Chasing</th>
+              <th class="px-5 py-3 text-right">Xero</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
-            ${invoices.map((inv) => {
+            ${invoices.map((inv, i) => {
               const status = INVOICE_STATUS_STYLES[inv.status] || INVOICE_STATUS_STYLES.overdue;
               const days = Number(inv.daysPastDue);
               return `
@@ -161,19 +180,25 @@
                 <td class="px-3 py-3 text-right font-semibold ${days >= 60 ? 'text-red-600' : days >= 30 ? 'text-orange-600' : 'text-gray-700'}">${Number.isFinite(days) ? days : '—'}</td>
                 <td class="px-3 py-3 text-right font-extrabold text-gray-900">${esc(inv.amount)}</td>
                 <td class="px-3 py-3"><span class="text-xs font-bold px-2 py-0.5 rounded-full border whitespace-nowrap ${status.chip}">${status.label}</span></td>
-                <td class="px-5 py-3 text-right">
+                <td class="px-3 py-3 text-right">
                   <label class="relative inline-flex items-center cursor-pointer align-middle" title="Pause chasing">
                     <input type="checkbox" class="sr-only peer" data-pause-chasing checked>
                     <span class="w-9 h-5 bg-gray-200 rounded-full peer-checked:bg-emerald-700 peer-focus:ring-2 peer-focus:ring-emerald-700 transition
                       after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-4 after:h-4 after:bg-white after:rounded-full after:shadow after:transition-all peer-checked:after:translate-x-4"></span>
                   </label>
                 </td>
+                <td class="px-5 py-3 text-right">
+                  <button type="button" data-log-note="${i}"
+                    class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition whitespace-nowrap disabled:opacity-60 disabled:cursor-not-allowed">
+                    Log note
+                  </button>
+                </td>
               </tr>`;
             }).join('')}
           </tbody>
         </table>
       </div>
-      <p class="px-5 py-3 text-xs text-gray-400 border-t border-gray-100">Toggle off to pause chasing a client. (Preview — pausing is not saved yet.)</p>
+      <p class="px-5 py-3 text-xs text-gray-400 border-t border-gray-100" data-table-status>Toggle off to pause chasing a client (visual only). "Log note" writes a chasing note to the invoice history in Xero.</p>
     `;
 
     // Mock behaviour: unticking "chasing" dims the row so the pause reads visually.
@@ -182,6 +207,40 @@
       if (!toggle) return;
       const row = toggle.closest('[data-invoice-row]');
       if (row) row.classList.toggle('opacity-40', !toggle.checked);
+    });
+
+    // Live behaviour: "Log note" pushes a history record onto the Xero invoice.
+    const statusLine = el.querySelector('[data-table-status]');
+    el.addEventListener('click', async (e) => {
+      const button = e.target.closest('[data-log-note]');
+      if (!button || button.disabled) return;
+      const inv = invoices[Number(button.getAttribute('data-log-note'))];
+      if (!inv) return;
+
+      button.disabled = true;
+      button.textContent = 'Logging…';
+      statusLine.className = 'px-5 py-3 text-xs text-gray-400 border-t border-gray-100';
+      try {
+        const data = await postSyncAction('xero_log_note', {
+          title: ui.title ?? null,
+          clientName: inv.clientName ?? null,
+          invoiceNumber: inv.invoiceNumber ?? null,
+          invoiceId: inv.invoiceId ?? null,
+          daysPastDue: inv.daysPastDue ?? null,
+          amount: inv.amount ?? null,
+          status: inv.status ?? null,
+        });
+        button.textContent = 'Logged ✓';
+        button.className = 'px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-lg cursor-default whitespace-nowrap';
+        statusLine.textContent = data.message || 'Note logged in Xero.';
+        statusLine.className = 'px-5 py-3 text-xs font-semibold text-emerald-700 border-t border-gray-100';
+      } catch (err) {
+        button.disabled = false;
+        button.textContent = 'Retry note';
+        button.className = 'px-3 py-1.5 bg-red-50 border border-red-200 text-red-700 hover:border-red-300 text-xs font-bold rounded-lg transition whitespace-nowrap';
+        statusLine.textContent = err.message || 'Could not log the note in Xero.';
+        statusLine.className = 'px-5 py-3 text-xs font-semibold text-red-600 border-t border-gray-100';
+      }
     });
 
     return el;
@@ -193,10 +252,12 @@
 
   // ── Built-in: Data Diff View Card ───────────────────────────────────────────
   // Renderer for the crm-enricher route's wire shape (chat-orchestrator.ts):
-  // { type: 'data_diff_view', recordName?, fields: [{ fieldName, oldValue: string|null,
-  //   newValue }, ...] }
+  // { type: 'data_diff_view', recordName?, recordEmail?, objectType?,
+  //   fields: [{ fieldName, oldValue: string|null, newValue, propertyName? }, ...] }
   // Side-by-side current → proposed comparison; the proposed value is highlighted in
   // emerald when it differs from the current value (or the current value is blank).
+  // "Apply in HubSpot" PATCHes the proposed values onto the matching contact/company
+  // via /api/actions/sync (hubspot_update_record).
   function renderDataDiffViewCard(ui, esc) {
     const fields = (Array.isArray(ui.fields) ? ui.fields : [])
       .filter((f) => f && typeof f === 'object' && f.fieldName);
@@ -235,8 +296,48 @@
           </tbody>
         </table>
       </div>
-      <p class="px-5 py-3 text-xs text-gray-400 border-t border-gray-100">Simulated enrichment preview — values are not written to your CRM yet.</p>
+      <div class="flex items-center justify-between gap-3 px-5 py-3 border-t border-gray-100">
+        <p class="text-xs text-gray-400" data-diff-status>Review the proposed values, then apply them to the record in HubSpot.</p>
+        <button type="button" data-apply-diff
+          class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">
+          Apply in HubSpot
+        </button>
+      </div>
     `;
+
+    // Live behaviour: PATCH the proposed values onto the HubSpot record.
+    const statusLine = el.querySelector('[data-diff-status]');
+    el.addEventListener('click', async (e) => {
+      const button = e.target.closest('[data-apply-diff]');
+      if (!button || button.disabled) return;
+
+      button.disabled = true;
+      button.textContent = 'Applying…';
+      statusLine.className = 'text-xs text-gray-400';
+      try {
+        const data = await postSyncAction('hubspot_update_record', {
+          recordName: ui.recordName ?? null,
+          recordEmail: ui.recordEmail ?? null,
+          objectType: ui.objectType ?? null,
+          fields: fields.map((f) => ({
+            fieldName: f.fieldName,
+            newValue: f.newValue ?? '',
+            propertyName: f.propertyName ?? null,
+          })),
+        });
+        button.textContent = 'Applied ✓';
+        button.className = 'px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-bold rounded-lg cursor-default shrink-0 whitespace-nowrap';
+        statusLine.textContent = data.message || 'Record updated in HubSpot.';
+        statusLine.className = 'text-xs font-semibold text-emerald-700';
+      } catch (err) {
+        button.disabled = false;
+        button.textContent = 'Retry';
+        button.className = 'px-4 py-2 bg-red-50 border border-red-200 text-red-700 hover:border-red-300 text-sm font-bold rounded-lg transition shrink-0 whitespace-nowrap';
+        statusLine.textContent = err.message || 'Could not update the record in HubSpot.';
+        statusLine.className = 'text-xs font-semibold text-red-600';
+      }
+    });
+
     return el;
   }
 
@@ -377,9 +478,10 @@
   // ── Built-in: Action Item Assignment Card ───────────────────────────────────
   // Renderer for the meeting-note-taker route's wire shape (chat-orchestrator.ts):
   // { type: 'action_item_assignment', meetingSummary, targetDestination,
-  //   tasks: [{ description, assignee, dueDate: string|null }, ...] }
-  // The "Sync to <destination>" button is a client-side mock for now — no live
-  // Notion/Jira/Asana/Monday.com API keys yet, so it just settles into a Synced! state.
+  //   channel?, tasks: [{ description, assignee, dueDate: string|null }, ...] }
+  // "Sync" posts the summary + tasks to Slack as Block Kit via /api/actions/sync
+  // (slack_post_summary). targetDestination stays a display label; an optional
+  // ui.channel ('#name' or channel id) picks the Slack channel, defaulting to #general.
   function renderActionItemAssignmentCard(ui, esc) {
     const tasks = (Array.isArray(ui.tasks) ? ui.tasks : [])
       .filter((t) => t && typeof t === 'object' && t.description);
@@ -429,25 +531,45 @@
       </div>` : ''}
 
       <div class="flex items-center justify-between gap-3 px-5 py-4 border-t border-gray-100">
-        <p class="text-xs text-gray-400" data-sync-hint>Pushes ${tasks.length} action item${tasks.length === 1 ? '' : 's'} to ${esc(destination)}.</p>
-        <p class="hidden text-xs font-semibold text-emerald-700" data-sync-status>Synced to ${esc(destination)}. (Preview — no live connection yet.)</p>
+        <p class="text-xs text-gray-400" data-sync-status>Pushes ${tasks.length} action item${tasks.length === 1 ? '' : 's'} to ${esc(destination)}.</p>
         <button type="button" data-sync-action
-          class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:cursor-not-allowed shrink-0">
+          class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">
           Sync to ${esc(destination)}
         </button>
       </div>
     `;
 
-    // Mock behaviour: no live task-tool APIs yet, so syncing settles the button into an
-    // emerald success state instead of calling anywhere.
-    el.addEventListener('click', (e) => {
+    // Live behaviour: post the summary + tasks to Slack as Block Kit.
+    const statusLine = el.querySelector('[data-sync-status]');
+    el.addEventListener('click', async (e) => {
       const button = e.target.closest('[data-sync-action]');
       if (!button || button.disabled) return;
+
       button.disabled = true;
-      button.textContent = 'Synced!';
-      button.className = 'px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-bold rounded-lg cursor-default shrink-0';
-      el.querySelector('[data-sync-hint]').classList.add('hidden');
-      el.querySelector('[data-sync-status]').classList.remove('hidden');
+      button.textContent = 'Syncing…';
+      statusLine.className = 'text-xs text-gray-400';
+      try {
+        const data = await postSyncAction('slack_post_summary', {
+          meetingSummary: ui.meetingSummary ?? null,
+          targetDestination: ui.targetDestination ?? null,
+          channel: ui.channel ?? null,
+          tasks: tasks.map((t) => ({
+            description: t.description,
+            assignee: t.assignee ?? null,
+            dueDate: t.dueDate ?? null,
+          })),
+        });
+        button.textContent = 'Synced ✓';
+        button.className = 'px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-bold rounded-lg cursor-default shrink-0 whitespace-nowrap';
+        statusLine.textContent = data.message || `Synced to ${destination}.`;
+        statusLine.className = 'text-xs font-semibold text-emerald-700';
+      } catch (err) {
+        button.disabled = false;
+        button.textContent = 'Retry sync';
+        button.className = 'px-4 py-2 bg-red-50 border border-red-200 text-red-700 hover:border-red-300 text-sm font-bold rounded-lg transition shrink-0 whitespace-nowrap';
+        statusLine.textContent = err.message || `Could not sync to ${destination}.`;
+        statusLine.className = 'text-xs font-semibold text-red-600';
+      }
     });
 
     return el;
@@ -456,6 +578,46 @@
   register('action_item_assignment', renderActionItemAssignmentCard);
   // Alias for callers/routes that use the PascalCase component name as the type key.
   register('ActionItemAssignmentCard', renderActionItemAssignmentCard);
+
+  // ── Built-in: Upgrade Required Card (paywall) ───────────────────────────────
+  // Renderer for the orchestrator's 403 over-limit wire shape (chat-orchestrator.ts):
+  // { type: 'upgrade_required', reason }
+  // Amber→purple gradient border marks this as a PLAN BOUNDARY, not an assistant
+  // deliverable (emerald) or a routing action (indigo). Rendered by chat-session.js in
+  // place of the assistant reply when the orchestrator rejects a turn over the cap;
+  // the CTA goes to the pricing page, the app's existing upgrade/checkout entry point.
+  function renderUpgradeRequiredCard(ui, esc) {
+    const reason = typeof ui.reason === 'string' && ui.reason.trim()
+      ? ui.reason.trim() : 'You have reached your monthly AI task limit.';
+
+    const el = document.createElement('div');
+    el.className = 'bg-gradient-to-br from-amber-400 via-purple-400 to-purple-600 p-[2px] rounded-xl shadow-sm max-w-md';
+    el.innerHTML = `
+      <div class="bg-white rounded-[10px] p-5">
+        <div class="flex items-start gap-3 mb-3">
+          <div class="w-10 h-10 bg-gradient-to-br from-amber-100 to-purple-100 rounded-lg flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-purple-700" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z"/>
+            </svg>
+          </div>
+          <div class="min-w-0">
+            <p class="text-xs font-bold text-purple-700 tracking-wider uppercase">Plan limit reached</p>
+            <p class="font-bold text-gray-900">Upgrade to keep going</p>
+          </div>
+        </div>
+        <p class="text-sm text-gray-700 mb-4">${esc(reason)}</p>
+        <a href="/pricing.html"
+          class="block w-full text-center px-4 py-2.5 bg-purple-600 hover:bg-purple-700 text-white text-sm font-bold rounded-lg transition">
+          Upgrade to Premium
+        </a>
+        <p class="mt-2.5 text-xs text-gray-400 text-center">Your conversation is saved — pick up right where you left off.</p>
+      </div>`;
+    return el;
+  }
+
+  register('upgrade_required', renderUpgradeRequiredCard);
+  // Alias for callers/routes that use the PascalCase component name as the type key.
+  register('UpgradeRequiredCard', renderUpgradeRequiredCard);
 
   window.DisruptiveUIRegistry = { register, has, render, escapeHtml };
 })();

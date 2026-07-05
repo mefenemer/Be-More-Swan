@@ -15,11 +15,12 @@
 
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, chatMessages, chatSessions, masterAssistants } from '../../db/schema';
+import { aiAssistants, chatMessages, chatSessions, masterAssistants, masterPlans, plans } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
+import { atomicCapCheck } from '../../src/utils/atomic-cap-check';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
@@ -46,6 +47,46 @@ function allow(userId: number): boolean {
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
+}
+
+// ── Billing enforcement ───────────────────────────────────────────────────────
+// Every chat turn consumes one task credit from the org plan's monthly allowance
+// (masterPlans.monthlyTaskLimit; null = unlimited), and an approved handoff's shadow
+// call consumes a second one — background work must not run for an out-of-credit org.
+// atomicCapCheck checks-and-increments in a single UPDATE, so concurrent turns cannot
+// race past the cap. The credit is spent up-front; a later provider failure does not
+// refund it (same semantics as task_runs).
+
+const UPGRADE_REQUIRED_REASON = 'You have reached your monthly AI task limit.';
+
+/** 403 paywall response — chat-session.js renders uiElementJson as an UpgradeRequiredCard. */
+function upgradeRequired(reason: string | undefined, extra: Record<string, unknown> = {}) {
+    return json(403, {
+        ...extra,
+        uiElementJson: { type: 'upgrade_required', reason: reason || UPGRADE_REQUIRED_REASON },
+    });
+}
+
+/**
+ * Resolve the org's monthly task limit from its plan (active preferred, then past_due —
+ * a lapsed plan keeps its limits through the grace window, mirroring check-capacity.ts)
+ * and atomically consume one credit. No plan row / no master plan = uncapped.
+ */
+async function consumeTaskCredit(db: ReturnType<typeof getDb>, organisationId: number) {
+    const [plan] = await db
+        .select({ monthlyTaskLimit: masterPlans.monthlyTaskLimit })
+        .from(plans)
+        .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
+        .where(and(eq(plans.organisationId, organisationId), inArray(plans.status, ['active', 'past_due'])))
+        // 'active' sorts before 'past_due', so an active plan always wins.
+        .orderBy(asc(plans.status), asc(plans.startedAt))
+        .limit(1);
+
+    return atomicCapCheck({
+        organisationId,
+        counterKey: 'taskCount',
+        limit: plan?.monthlyTaskLimit ?? null,
+    });
 }
 
 // ── Router factory ────────────────────────────────────────────────────────────
@@ -433,6 +474,15 @@ export const handler: Handler = async (event) => {
     if (!message) return json(400, { error: 'message is required' });
     if (message.length > MAX_MESSAGE_CHARS) return json(400, { error: `Message too long (max ${MAX_MESSAGE_CHARS} characters).` });
 
+    // ── Foreground cap check — consume this turn's task credit before any state is
+    // created or the LLM is called. Over-limit turns get the 403 paywall payload, not
+    // a generic error; the client renders it inline and logs the conversion event.
+    const capacity = await consumeTaskCredit(db, orgId);
+    if (!capacity.allowed) {
+        console.warn(`[chat-orchestrator] paywall hit (foreground) org=${orgId} user=${userId}`);
+        return upgradeRequired(capacity.limitMessage);
+    }
+
     // ── HITL handoff approval — the hidden flag sent by chat-session.js when the user
     // clicks "Approve Handoff" on a HandoffProposalCard. Validated up front: the target
     // must be a routed assistant, and the payload (LLM-authored) is size-capped.
@@ -541,6 +591,18 @@ export const handler: Handler = async (event) => {
 
         if (handoff) {
             const targetRoute = ROUTES[handoff.targetRoleKey];
+
+            // ── Shadow cap check — the background call burns a task credit of its own.
+            // The user's turn is already persisted, so return the session/message ids the
+            // same way the 502 path does; the paywall card replaces the assistant reply.
+            const shadowCapacity = await consumeTaskCredit(db, orgId);
+            if (!shadowCapacity.allowed) {
+                console.warn(`[chat-orchestrator] paywall hit (shadow handoff) org=${orgId} user=${userId}`);
+                return upgradeRequired(shadowCapacity.limitMessage, {
+                    chatSessionId: session.id,
+                    userMessageId: userMessage.id,
+                });
+            }
 
             // Prefer the org's own hired instance of the target role (its name, custom
             // prompt and onboarding answers); fall back to a synthetic context so the

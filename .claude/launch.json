@@ -49,6 +49,34 @@
       "runtimeArgs": ["-m", "http.server", "4174", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/a9b8c9a2-3f78-497d-9faa-c9625b901d49/scratchpad/demo"],
       "port": 4174,
       "autoPort": false
+    },
+    {
+      "name": "component-harness-sync-cards",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4177", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/bfbdcfb0-3b19-418a-835f-b02c5d804a3f/scratchpad/demo"],
+      "port": 4177,
+      "autoPort": false
+    },
+    {
+      "name": "component-harness-starter-prompts",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4178", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/f55b86c2-748c-460f-8cd2-a5015137fdb8/scratchpad/demo"],
+      "port": 4178,
+      "autoPort": false
+    },
+    {
+      "name": "component-harness-paywall",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4179", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/d14699bb-123e-424c-a24f-fb1490a2800c/scratchpad/demo"],
+      "port": 4179,
+      "autoPort": false
+    },
+    {
+      "name": "component-harness-meeting-notes",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4176", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/a9b033f1-f313-474e-8700-9c204663668d/scratchpad/demo"],
+      "port": 4176,
+      "autoPort": false
     }
   ]
 }

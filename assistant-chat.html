@@ -63,6 +63,7 @@
 
 <script src="./mobileMenu.js"></script>
 <script src="/src/components/disruptive-ui-registry.js"></script>
+<script src="/src/components/assistant-starter-prompts.js"></script>
 <script src="/src/components/chat-session.js"></script>
 <script>
 async function loadComponent(id, path) {
@@ -95,6 +96,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   // history endpoint — it re-verifies org ownership server-side via requireTenant.
   let assistantName = null;
   let assistantRole = null;
+  let assistantRoleKey = null;
   let initialMessages = [];
 
   if (sessionId) {
@@ -130,6 +132,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     assistantName = assistant.name;
     assistantRole = assistant.role;
+    assistantRoleKey = assistant.roleKey;
   }
 
   document.getElementById('chat-assistant-name').textContent = assistantName;
@@ -144,6 +147,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     assistantId,
     chatSessionId: sessionId,
     assistantName,
+    roleKey: assistantRoleKey,
     initialMessages,
   });
 });

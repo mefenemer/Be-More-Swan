@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="./auth-check.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Integrations | Be More Swan</title>
+  <link href="./style.css" rel="stylesheet">
+  <link rel="icon" href="/favicon/favicon.ico" sizes="any">
+  <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
+  <link rel="manifest" href="/favicon/manifest.json">
+</head>
+<body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen overflow-x-hidden">
+
+<!-- Nav -->
+<div id="nav-placeholder"></div>
+
+<main class="grow max-w-4xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-10 pb-20">
+
+  <div class="mb-8">
+    <h1 class="text-3xl font-extrabold text-gray-900">Integrations</h1>
+    <p class="text-gray-500 mt-1">Connect the tools your assistants act in — synced actions go straight into your CRM, accounts and channels.</p>
+  </div>
+
+  <!-- OAuth result banners (populated from ?connected= / ?oauth_error= redirect params) -->
+  <div id="integrations-banner" class="hidden mb-6 px-4 py-3 rounded-lg border text-sm font-medium"></div>
+
+  <div id="integrations-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center text-gray-500 col-span-full" id="integrations-loading">
+      Loading your connections…
+    </div>
+  </div>
+
+  <p class="text-xs text-gray-400 mt-6">
+    Connections are workspace-wide and stored encrypted. Only workspace owners and admins can disconnect a tool.
+  </p>
+
+</main>
+
+<script src="./mobileMenu.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  // ── Provider catalogue (display only — auth flows live server-side) ─────────
+  const PROVIDERS = [
+    {
+      id: 'hubspot',
+      name: 'HubSpot',
+      emoji: '🟠',
+      iconBg: 'bg-orange-100',
+      tagline: 'Your CRM Enricher and Lead Qualifier write enriched contact and company data straight into HubSpot.',
+      usedBy: 'CRM Enricher · Lead Qualifier',
+    },
+    {
+      id: 'xero',
+      name: 'Xero',
+      emoji: '🔵',
+      iconBg: 'bg-sky-100',
+      tagline: 'Your Accounts Receivable Clerk logs chasing notes against overdue invoices in Xero.',
+      usedBy: 'Accounts Receivable Clerk',
+    },
+    {
+      id: 'slack',
+      name: 'Slack',
+      emoji: '💬',
+      iconBg: 'bg-purple-100',
+      tagline: 'Your Meeting Note Taker posts summaries and action items to your Slack channels.',
+      usedBy: 'Meeting Note Taker',
+    },
+  ];
+
+  const grid = document.getElementById('integrations-grid');
+  const banner = document.getElementById('integrations-banner');
+
+  function esc(v) {
+    return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+
+  function showBanner(kind, text) {
+    banner.className = 'mb-6 px-4 py-3 rounded-lg border text-sm font-medium ' + (kind === 'success'
+      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+      : 'bg-red-50 border-red-200 text-red-700');
+    banner.textContent = text;
+  }
+
+  // ── OAuth redirect result banners ────────────────────────────────────────────
+  const params = new URLSearchParams(window.location.search);
+  const providerName = (id) => (PROVIDERS.find((p) => p.id === id) || { name: id || 'the tool' }).name;
+  if (params.get('connected')) {
+    showBanner('success', providerName(params.get('connected')) + ' connected — your assistants can now sync actions to it.');
+  } else if (params.get('oauth_error')) {
+    const reasons = {
+      access_denied: 'you cancelled the authorisation',
+      not_configured: 'this integration is not configured on the server yet',
+      csrf_fail: 'the sign-in link expired — please try again',
+      token_exchange: 'the provider rejected the token exchange',
+      no_tenant: 'no organisation was authorised — pick one on the provider consent screen',
+      invalid_session: 'your session expired — please sign in again',
+      missing_params: 'the provider response was incomplete',
+    };
+    const code = params.get('oauth_error');
+    showBanner('error', 'Could not connect ' + providerName(params.get('provider')) + ' — ' + (reasons[code] || code) + '.');
+  }
+  if (params.get('connected') || params.get('oauth_error')) {
+    window.history.replaceState({}, '', window.location.pathname); // don't re-trigger on refresh
+  }
+
+  // ── Cards ────────────────────────────────────────────────────────────────────
+  function renderCards(statusByProvider) {
+    grid.innerHTML = PROVIDERS.map(function (p) {
+      const s = statusByProvider[p.id] || { connected: false };
+      const badge = s.connected
+        ? '<span class="inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">' +
+            '<span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span>Connected</span>'
+        : s.status === 'expired'
+          ? '<span class="text-xs font-bold px-2.5 py-1 rounded-full bg-amber-50 text-amber-800 border border-amber-200">Reconnect needed</span>'
+          : '<span class="text-xs font-bold px-2.5 py-1 rounded-full bg-gray-50 text-gray-500 border border-gray-200">Not connected</span>';
+
+      const action = s.connected
+        ? '<button type="button" data-disconnect="' + p.id + '" class="w-full px-4 py-2 bg-white border border-gray-200 text-gray-600 hover:text-red-600 hover:border-red-200 text-sm font-bold rounded-lg transition">Disconnect</button>'
+        : '<a href="/api/oauth/' + p.id + '/connect" class="block w-full text-center px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition">' +
+            (s.status === 'expired' ? 'Reconnect ' : 'Connect ') + esc(p.name) + '</a>';
+
+      return (
+        '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">' +
+          '<div class="flex items-start justify-between gap-3">' +
+            '<div class="w-10 h-10 ' + p.iconBg + ' rounded-lg flex items-center justify-center text-xl shrink-0">' + p.emoji + '</div>' +
+            badge +
+          '</div>' +
+          '<div class="grow">' +
+            '<p class="font-bold text-gray-900">' + esc(p.name) + '</p>' +
+            (s.connected && s.accountName ? '<p class="text-xs font-semibold text-emerald-700 truncate">' + esc(s.accountName) + '</p>' : '') +
+            '<p class="text-sm text-gray-500 mt-1">' + esc(p.tagline) + '</p>' +
+            '<p class="text-xs text-gray-400 mt-2">Used by: ' + esc(p.usedBy) + '</p>' +
+          '</div>' +
+          action +
+        '</div>'
+      );
+    }).join('');
+  }
+
+  async function loadStatus() {
+    try {
+      const res = await fetch('/api/oauth/status');
+      if (!res.ok) throw new Error('status ' + res.status);
+      const data = await res.json();
+      renderCards(data.providers || {});
+    } catch (err) {
+      grid.innerHTML = '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center col-span-full">' +
+        '<p class="font-bold text-gray-900 mb-1">Couldn’t load your connections</p>' +
+        '<p class="text-sm text-gray-500 mb-4">Check your connection and try again.</p>' +
+        '<button type="button" onclick="window.location.reload()" class="px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition">Retry</button></div>';
+    }
+  }
+
+  grid.addEventListener('click', async function (e) {
+    const btn = e.target.closest('[data-disconnect]');
+    if (!btn) return;
+    const id = btn.getAttribute('data-disconnect');
+    if (!window.confirm('Disconnect ' + providerName(id) + '? Assistants will no longer be able to sync actions to it.')) return;
+    btn.disabled = true;
+    btn.textContent = 'Disconnecting…';
+    try {
+      const res = await fetch('/api/oauth/' + id + '/disconnect', { method: 'POST' });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok) throw new Error(data.error || 'Disconnect failed');
+      showBanner('success', providerName(id) + ' disconnected.');
+      loadStatus();
+    } catch (err) {
+      showBanner('error', String(err.message || 'Disconnect failed — please try again.'));
+      btn.disabled = false;
+      btn.textContent = 'Disconnect';
+    }
+  });
+
+  // ── Boot ─────────────────────────────────────────────────────────────────────
+  (async function () {
+    try {
+      const r = await fetch('./components/nav.html');
+      if (r.ok) document.getElementById('nav-placeholder').innerHTML = await r.text();
+    } catch (e) {}
+    loadStatus();
+  })();
+})();
+</script>
+</body>
+</html>

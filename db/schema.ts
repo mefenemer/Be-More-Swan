@@ -527,6 +527,32 @@ export const systemConnections = pgTable("system_connections", {
   index("system_connections_user_active_idx").on(t.userId, t.isActive),
 ]);
 
+// ── Workspace Integrations — Phase 1 external integrations (HubSpot, Xero, Slack) ──
+// One row per (organisation, provider) OAuth grant, powering integrations.html and the
+// /api/actions/sync endpoint. Access/refresh tokens are NOT stored here in plaintext —
+// US-DB-1.6.1 dropped plaintext token columns platform-wide; token material lives
+// AES-256-GCM encrypted in vault_secrets under vaultRefKey
+// ('aura/org-<orgId>/integration-<provider>'). Read/write only via
+// src/utils/workspace-integrations.ts (which also handles expiry-driven refresh).
+// DDL: db/workspace-integrations.sql (apply manually — no db:push).
+export const workspaceIntegrations = pgTable("workspace_integrations", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(),                 // 'hubspot' | 'xero' | 'slack'
+  vaultRefKey: text("vault_ref_key").notNull(),         // vault_secrets.ref_key holding { accessToken, refreshToken }
+  tenantId: text("tenant_id"),                          // Xero tenant id; Slack team id; HubSpot hub id
+  externalAccountName: text("external_account_name"),   // human label: Xero org name, Slack workspace, HubSpot domain
+  scopes: text("scopes"),                               // granted scopes (comma/space separated, provider format)
+  status: text("status").notNull().default("active"),   // 'active' | 'expired' | 'revoked' | 'error'
+  connectedBy: integer("connected_by").references(() => users.id, { onDelete: "set null" }),
+  expiresAt: timestamp("expires_at"),                   // access-token expiry; null = non-expiring (Slack bot tokens)
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  unique("workspace_integrations_org_provider_unique").on(t.organisationId, t.provider),
+  index("workspace_integrations_org_idx").on(t.organisationId),
+]);
+
 // Abuse Prevention (US1/US2): a record of a rejected OAuth connection because the third-party
 // tenant was already live in another workspace. Lets the requester ask to join the existing
 // workspace WITHOUT us ever revealing that workspace's owner. Owner-db accessed (oauth callbacks

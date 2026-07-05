@@ -29,6 +29,20 @@
   to   = "/help.html"
   status = 301
 
+# Phase 1 External Integrations: pretty /api/* routes for the OAuth router and the
+# generic action-sync endpoint. Rewrites (status 200) — the original path survives in
+# event.rawUrl, which oauth-integrations.ts parses for :provider/:action; provider
+# query params (?code=&state=) pass through untouched because `to` carries no query.
+[[redirects]]
+  from = "/api/oauth/*"
+  to = "/.netlify/functions/oauth-integrations"
+  status = 200
+
+[[redirects]]
+  from = "/api/actions/sync"
+  to = "/.netlify/functions/sync-action"
+  status = 200
+
 [build]
   # Rebuild the Tailwind stylesheet from input.css on every deploy so style.css can never
   # drift from the markup (a stale committed style.css silently drops classes and breaks layouts).

@@ -10,6 +10,8 @@
  *     chatSessionId,                // number — continue an existing conversation
  *     assistantId,                  // number — start a new one (maps to aiAssistantId)
  *     assistantName,                // optional display name for the header/empty state
+ *     roleKey,                      // optional snake_case catalog key — picks the
+ *                                   //   zero-state starter prompts (assistant-starter-prompts.js)
  *     initialMessages,              // optional history rows: { role, content,
  *                                   //   uiElement | uiElementJson, createdAt }
  *   });
@@ -72,15 +74,42 @@
     const assistantId = props.assistantId ?? null;
     let sending = false;
 
-    // ── Shell ──
-    container.innerHTML = `
-      <div class="flex flex-col h-full bg-gray-50" data-chat-root>
-        <div class="grow overflow-y-auto px-4 sm:px-6 py-6 space-y-4" data-chat-scroll>
+    // Zero-state: a brand-new session (no visible history — system rows don't count)
+    // greets with clickable starter prompts tailored to the assistant's roleKey.
+    const hasHistory = (props.initialMessages || []).some(
+      (m) => m && m.role !== 'system' && typeof m.content === 'string'
+    );
+    const starterPrompts = !hasHistory && window.AssistantStarterPrompts
+      ? window.AssistantStarterPrompts.get(props.roleKey)
+      : null;
+
+    const displayName = escapeHtml(assistantName || 'your assistant');
+    const emptyStateHtml = starterPrompts
+      ? `
+          <div class="max-w-md mx-auto text-center py-8" data-chat-empty>
+            <div class="w-14 h-14 bg-emerald-100 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">👋</div>
+            <p class="text-lg font-bold text-gray-900">Hi, I'm ${displayName}.</p>
+            <p class="text-sm text-gray-500 mt-1 mb-6">Here's how I can help — pick one to get started, or type your own message below.</p>
+            <div class="flex flex-col gap-2.5 text-left">
+              ${starterPrompts.map((prompt, i) => `
+                <button type="button" data-starter-prompt="${i}"
+                  class="group w-full flex items-center justify-between gap-3 bg-white border border-gray-200 hover:border-emerald-300 hover:bg-emerald-50 rounded-xl px-4 py-3 text-sm font-semibold text-gray-700 hover:text-emerald-800 shadow-sm transition text-left cursor-pointer">
+                  <span>${escapeHtml(prompt)}</span>
+                  <svg class="w-4 h-4 shrink-0 text-gray-300 group-hover:text-emerald-700 transition" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M14 5l7 7m0 0l-7 7m7-7H3"/></svg>
+                </button>`).join('')}
+            </div>
+          </div>`
+      : `
           <div class="text-center py-10" data-chat-empty>
             <div class="w-12 h-12 bg-emerald-100 rounded-full flex items-center justify-center text-2xl mx-auto mb-3">💬</div>
             <p class="font-bold text-gray-900">${escapeHtml(assistantName || 'Your assistant')} is ready</p>
             <p class="text-sm text-gray-500 mt-1">Send a message below to get started.</p>
-          </div>
+          </div>`;
+
+    // ── Shell ──
+    container.innerHTML = `
+      <div class="flex flex-col h-full bg-gray-50" data-chat-root>
+        <div class="grow overflow-y-auto px-4 sm:px-6 py-6 space-y-4" data-chat-scroll>${emptyStateHtml}
         </div>
         <div class="border-t border-gray-200 bg-white px-4 sm:px-6 py-4">
           <div class="hidden mb-2 text-sm text-red-600 font-semibold" data-chat-error role="alert"></div>
@@ -147,6 +176,40 @@
       scrollToBottom();
     }
 
+    /**
+     * Paywall (403 upgrade_required from the orchestrator): mount the
+     * UpgradeRequiredCard inline as an assistant-side bubble instead of the red
+     * error line. Falls back to showError if the registry isn't on the page.
+     */
+    function appendPaywallCard(uiElement) {
+      const card = window.DisruptiveUIRegistry ? window.DisruptiveUIRegistry.render(uiElement) : null;
+      if (!card) {
+        showError(uiElement.reason || 'You have reached your plan limit — upgrade to continue.');
+        return;
+      }
+      emptyEl?.remove();
+      const row = document.createElement('div');
+      row.className = 'flex flex-col gap-2 items-start';
+      row.appendChild(card);
+      scrollEl.appendChild(row);
+      scrollToBottom();
+    }
+
+    // Conversion telemetry: record the paywall impression through the existing
+    // page-events churn tracker (US-AUD-3.1.1) — fire-and-forget, never blocks the UI.
+    function trackPaywallHit(reason) {
+      const metadata = { event: 'chat_paywall_shown', reason: reason || null, chatSessionId };
+      if (typeof window._trackPageEvent === 'function') {
+        window._trackPageEvent(window.location.pathname, metadata);
+        return;
+      }
+      fetch('/.netlify/functions/page-events', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pagePath: window.location.pathname, metadata }),
+      }).catch(() => { /* non-critical */ });
+    }
+
     function showTypingSkeleton() {
       const el = document.createElement('div');
       el.dataset.chatTyping = '1';
@@ -208,6 +271,12 @@
         if (data.chatSessionId) chatSessionId = data.chatSessionId;
 
         if (!res.ok || !data.message) {
+          // Over plan limit: render the upgrade paywall as a native chat bubble.
+          if (res.status === 403 && data.uiElementJson && data.uiElementJson.type === 'upgrade_required') {
+            appendPaywallCard(data.uiElementJson);
+            trackPaywallHit(data.uiElementJson.reason);
+            return;
+          }
           showError(data.error || 'Something went wrong — please try again in a moment.');
           return;
         }
@@ -266,6 +335,15 @@
     inputEl.addEventListener('keydown', onKeydown);
     inputEl.addEventListener('input', onInput);
     container.addEventListener('handoff:response', onHandoffResponse);
+
+    // Starter pills send their prompt verbatim; the first appendMessage removes the
+    // zero-state (and the pills with it), so no explicit teardown is needed.
+    container.querySelectorAll('[data-starter-prompt]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const prompt = starterPrompts?.[Number(btn.dataset.starterPrompt)];
+        if (prompt) sendMessage(prompt);
+      });
+    });
 
     // ── Hydrate history ──
     (props.initialMessages || []).forEach(appendMessage);

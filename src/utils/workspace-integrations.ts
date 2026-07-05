@@ -1,0 +1,237 @@
+// src/utils/workspace-integrations.ts
+// Phase 1 External Integrations (HubSpot, Xero, Slack): the ONLY read/write path for
+// workspace_integrations rows and their token material.
+//
+// Token custody follows the platform standard (US-DB-1.6.1): access/refresh tokens are
+// never stored in table columns — they live AES-256-GCM encrypted in vault_secrets under
+// 'aura/org-<orgId>/integration-<provider>', and the row only carries the refKey plus
+// non-sensitive metadata (tenantId, expiry, scopes, account label).
+//
+// getFreshAccessToken() is what action endpoints call: it transparently refreshes an
+// expired (or about-to-expire) access token using the provider's refresh grant, persists
+// the rotated tokens (Xero rotates the refresh token on every use), and marks the row
+// 'expired' when the refresh grant itself is rejected so the UI can prompt a reconnect.
+
+import { and, eq } from 'drizzle-orm';
+import type { getDb } from '../../db/client';
+import { workspaceIntegrations } from '../../db/schema';
+import { storeSecret, getSecret, deleteSecret } from './vault';
+
+type Db = ReturnType<typeof getDb>;
+
+export type IntegrationProvider = 'hubspot' | 'xero' | 'slack';
+
+export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack'];
+
+export function isIntegrationProvider(value: unknown): value is IntegrationProvider {
+    return typeof value === 'string' && (INTEGRATION_PROVIDERS as string[]).includes(value);
+}
+
+/** Vault refKey for a workspace integration's token payload. */
+export function integrationRefKey(organisationId: number, provider: IntegrationProvider): string {
+    return `aura/org-${organisationId}/integration-${provider}`;
+}
+
+export class IntegrationError extends Error {
+    /** 'not_connected' | 'expired' | 'refresh_failed' | 'provider_error' */
+    code: string;
+    statusCode: number;
+    constructor(code: string, message: string, statusCode = 400) {
+        super(message);
+        this.code = code;
+        this.statusCode = statusCode;
+    }
+}
+
+interface TokenPayload {
+    accessToken: string;
+    refreshToken: string | null;
+}
+
+export interface SaveIntegrationInput {
+    organisationId: number;
+    userId: number;
+    provider: IntegrationProvider;
+    accessToken: string;
+    refreshToken?: string | null;
+    /** Seconds until the access token expires; null/undefined = non-expiring. */
+    expiresInSec?: number | null;
+    tenantId?: string | null;
+    externalAccountName?: string | null;
+    scopes?: string | null;
+}
+
+/** Upsert the (org, provider) integration row and store tokens in the vault. */
+export async function saveIntegration(db: Db, input: SaveIntegrationInput): Promise<void> {
+    const refKey = integrationRefKey(input.organisationId, input.provider);
+    await storeSecret(db, refKey, {
+        accessToken: input.accessToken,
+        refreshToken: input.refreshToken ?? null,
+    });
+
+    const expiresAt = input.expiresInSec ? new Date(Date.now() + input.expiresInSec * 1000) : null;
+
+    await db
+        .insert(workspaceIntegrations)
+        .values({
+            organisationId: input.organisationId,
+            provider: input.provider,
+            vaultRefKey: refKey,
+            tenantId: input.tenantId ?? null,
+            externalAccountName: input.externalAccountName ?? null,
+            scopes: input.scopes ?? null,
+            status: 'active',
+            connectedBy: input.userId,
+            expiresAt,
+        })
+        .onConflictDoUpdate({
+            target: [workspaceIntegrations.organisationId, workspaceIntegrations.provider],
+            set: {
+                vaultRefKey: refKey,
+                tenantId: input.tenantId ?? null,
+                externalAccountName: input.externalAccountName ?? null,
+                scopes: input.scopes ?? null,
+                status: 'active',
+                connectedBy: input.userId,
+                expiresAt,
+                updatedAt: new Date(),
+            },
+        });
+}
+
+export async function getIntegration(db: Db, organisationId: number, provider: IntegrationProvider) {
+    const [row] = await db
+        .select()
+        .from(workspaceIntegrations)
+        .where(and(
+            eq(workspaceIntegrations.organisationId, organisationId),
+            eq(workspaceIntegrations.provider, provider),
+        ))
+        .limit(1);
+    return row ?? null;
+}
+
+/** Remove the integration row and its vault secret (disconnect). */
+export async function deleteIntegration(db: Db, organisationId: number, provider: IntegrationProvider): Promise<void> {
+    await deleteSecret(db, integrationRefKey(organisationId, provider)).catch(() => {});
+    await db
+        .delete(workspaceIntegrations)
+        .where(and(
+            eq(workspaceIntegrations.organisationId, organisationId),
+            eq(workspaceIntegrations.provider, provider),
+        ));
+}
+
+// ── Token refresh ─────────────────────────────────────────────────────────────
+
+// Refresh an access token if it expires within this window, so a token can't die
+// mid-way through a multi-call sync action.
+const REFRESH_SKEW_MS = 60 * 1000;
+
+interface RefreshResult {
+    accessToken: string;
+    refreshToken: string | null; // null = provider did not rotate it; keep the old one
+    expiresInSec: number | null;
+}
+
+async function refreshProviderToken(provider: IntegrationProvider, refreshToken: string): Promise<RefreshResult> {
+    if (provider === 'hubspot') {
+        const res = await fetch('https://api.hubapi.com/oauth/v1/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                grant_type: 'refresh_token',
+                client_id: process.env.HUBSPOT_CLIENT_ID ?? '',
+                client_secret: process.env.HUBSPOT_CLIENT_SECRET ?? '',
+                refresh_token: refreshToken,
+            }),
+        });
+        const data: { access_token?: string; refresh_token?: string; expires_in?: number } = await res.json();
+        if (!res.ok || !data.access_token) throw new IntegrationError('refresh_failed', 'HubSpot token refresh was rejected.', 401);
+        return { accessToken: data.access_token, refreshToken: data.refresh_token ?? null, expiresInSec: data.expires_in ?? null };
+    }
+
+    if (provider === 'xero') {
+        const credentials = Buffer.from(`${process.env.XERO_CLIENT_ID ?? ''}:${process.env.XERO_CLIENT_SECRET ?? ''}`).toString('base64');
+        const res = await fetch('https://identity.xero.com/connect/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Basic ${credentials}` },
+            body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken }),
+        });
+        const data: { access_token?: string; refresh_token?: string; expires_in?: number } = await res.json();
+        if (!res.ok || !data.access_token) throw new IntegrationError('refresh_failed', 'Xero token refresh was rejected.', 401);
+        // Xero ALWAYS rotates the refresh token — the old one is now dead.
+        return { accessToken: data.access_token, refreshToken: data.refresh_token ?? null, expiresInSec: data.expires_in ?? null };
+    }
+
+    // Slack: only used when token rotation is enabled on the app (otherwise bot tokens
+    // never expire and this path is never reached — expiresAt stays null).
+    const res = await fetch('https://slack.com/api/oauth.v2.access', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+            grant_type: 'refresh_token',
+            client_id: process.env.SLACK_CLIENT_ID ?? '',
+            client_secret: process.env.SLACK_CLIENT_SECRET ?? '',
+            refresh_token: refreshToken,
+        }),
+    });
+    const data: { ok?: boolean; access_token?: string; refresh_token?: string; expires_in?: number } = await res.json();
+    if (!data.ok || !data.access_token) throw new IntegrationError('refresh_failed', 'Slack token refresh was rejected.', 401);
+    return { accessToken: data.access_token, refreshToken: data.refresh_token ?? null, expiresInSec: data.expires_in ?? null };
+}
+
+export interface FreshToken {
+    accessToken: string;
+    tenantId: string | null;
+    integrationId: number;
+}
+
+/**
+ * Resolve a valid access token for (org, provider), refreshing it first when expired
+ * or about to expire. Throws IntegrationError('not_connected' | 'refresh_failed').
+ */
+export async function getFreshAccessToken(db: Db, organisationId: number, provider: IntegrationProvider): Promise<FreshToken> {
+    const row = await getIntegration(db, organisationId, provider);
+    if (!row || row.status === 'revoked') {
+        throw new IntegrationError('not_connected', `${providerLabel(provider)} is not connected for this workspace. Connect it on the Integrations page first.`, 409);
+    }
+
+    const secret = (await getSecret(db, row.vaultRefKey).catch(() => null)) as TokenPayload | null;
+    if (!secret?.accessToken) {
+        throw new IntegrationError('not_connected', `${providerLabel(provider)} credentials are missing — please reconnect it on the Integrations page.`, 409);
+    }
+
+    const expired = row.expiresAt && row.expiresAt.getTime() - REFRESH_SKEW_MS < Date.now();
+    if (!expired) {
+        return { accessToken: secret.accessToken, tenantId: row.tenantId, integrationId: row.id };
+    }
+
+    if (!secret.refreshToken) {
+        await db.update(workspaceIntegrations).set({ status: 'expired', updatedAt: new Date() }).where(eq(workspaceIntegrations.id, row.id));
+        throw new IntegrationError('expired', `${providerLabel(provider)} access has expired and no refresh token is available — please reconnect it.`, 409);
+    }
+
+    try {
+        const refreshed = await refreshProviderToken(provider, secret.refreshToken);
+        await storeSecret(db, row.vaultRefKey, {
+            accessToken: refreshed.accessToken,
+            refreshToken: refreshed.refreshToken ?? secret.refreshToken,
+        });
+        await db.update(workspaceIntegrations).set({
+            status: 'active',
+            expiresAt: refreshed.expiresInSec ? new Date(Date.now() + refreshed.expiresInSec * 1000) : null,
+            updatedAt: new Date(),
+        }).where(eq(workspaceIntegrations.id, row.id));
+        return { accessToken: refreshed.accessToken, tenantId: row.tenantId, integrationId: row.id };
+    } catch (err) {
+        // Refresh grant rejected (revoked app, rotated secret, …) — surface as reconnect-needed.
+        await db.update(workspaceIntegrations).set({ status: 'expired', updatedAt: new Date() }).where(eq(workspaceIntegrations.id, row.id));
+        if (err instanceof IntegrationError) throw err;
+        throw new IntegrationError('refresh_failed', `${providerLabel(provider)} token refresh failed — please reconnect it on the Integrations page.`, 401);
+    }
+}
+
+export function providerLabel(provider: IntegrationProvider): string {
+    return provider === 'hubspot' ? 'HubSpot' : provider === 'xero' ? 'Xero' : 'Slack';
+}
