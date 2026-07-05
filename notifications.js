@@ -228,6 +228,8 @@ window.initNotifications = async function() {
     const typeLabel = (type) => (type || 'other').split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
     let activeTab = 'action';
     let groupByType = false;
+    // Persists across re-renders so a group stays collapsed while notifications update/resolve.
+    const collapsedGroups = new Set();
 
     const tabActionBtn = document.getElementById('tab-action');
     const tabUpdatesBtn = document.getElementById('tab-updates');
@@ -419,11 +421,27 @@ window.initNotifications = async function() {
             groups.get(key).push(notif);
         });
         groups.forEach((items, type) => {
+            const isCollapsed = collapsedGroups.has(type);
             const header = document.createElement('li');
-            header.className = 'px-4 pt-4 pb-1 bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide';
-            header.textContent = `${typeLabel(type)} (${items.length})`;
+            header.className = 'px-4 pt-4 pb-1 bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide flex items-center justify-between cursor-pointer select-none hover:bg-gray-100 transition-colors';
+            header.setAttribute('role', 'button');
+            header.setAttribute('tabindex', '0');
+            header.setAttribute('aria-expanded', String(!isCollapsed));
+            header.innerHTML = `
+                <span>${typeLabel(type)} (${items.length})</span>
+                <svg class="w-4 h-4 text-gray-400 transition-transform ${isCollapsed ? '' : 'rotate-180'}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                </svg>`;
+            const toggle = () => {
+                if (collapsedGroups.has(type)) collapsedGroups.delete(type); else collapsedGroups.add(type);
+                renderList();
+            };
+            header.addEventListener('click', toggle);
+            header.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+            });
             listEl.appendChild(header);
-            items.forEach(notif => listEl.appendChild(renderItem(notif)));
+            if (!isCollapsed) items.forEach(notif => listEl.appendChild(renderItem(notif)));
         });
     };
 
