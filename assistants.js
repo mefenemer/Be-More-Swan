@@ -121,13 +121,13 @@ window.generateAssistantCardHTML = function(assistant) {
             </div>
             ${platformPills ? `<div class="flex items-center gap-3 mb-2">${platformPills}</div>` : ''}
             <div class="flex items-center justify-between pt-2 border-t border-gray-200">
-                <span class="inline-flex items-center gap-1 text-xs font-semibold text-emerald-700" title="Estimated time saved (30 min per post)">
+                <span class="inline-flex items-center gap-1 text-xs font-semibold text-green-700" title="Estimated time saved (30 min per post)">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                     ~${hoursSaved}h saved
                 </span>
                 ${gbpSaved !== null
-                    ? `<span class="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">≈ £${gbpSaved.toLocaleString('en-GB', {minimumFractionDigits: 0, maximumFractionDigits: 0})} ROI</span>`
-                    : `<span class="text-xs text-gray-400 cursor-pointer hover:text-emerald-600 transition" onclick="event.stopPropagation(); loadView && loadView('account')" title="Set your hourly rate to see financial ROI">Set rate → ROI</span>`
+                    ? `<span class="text-xs font-bold text-green-700 bg-green-50 px-2 py-0.5 rounded-full">≈ £${gbpSaved.toLocaleString('en-GB', {minimumFractionDigits: 0, maximumFractionDigits: 0})} ROI</span>`
+                    : `<span class="text-xs text-gray-400 cursor-pointer hover:text-green-600 transition" onclick="event.stopPropagation(); loadView && loadView('account')" title="Set your hourly rate to see financial ROI">Set rate → ROI</span>`
                 }
             </div>
         </div>` : '';
