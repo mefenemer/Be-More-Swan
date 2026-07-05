@@ -37,10 +37,13 @@ export const handler = async (event: HandlerEvent) => {
         const org = await resolveActiveOrg(db, userId, session.activeOrganisationId);
         const organisationId = org?.organisationId ?? null;
 
-        // Issue #149: a single activity-source query throwing (e.g. a data/type edge
-        // case in one org's rows) was aborting the whole handler, turning the entire
-        // dashboard hero widget into a 500 instead of degrading gracefully. Each count
-        // is now isolated so one source failing can't blank out the others.
+        // Issue #132 (follow-up) / issue #149: the reporter saw this widget go from
+        // "0" to completely blank after the coalesce/leads changes below landed — i.e.
+        // one of these queries started throwing, which turned the whole response into a
+        // 500 (the frontend leaves the tiles in their loading-skeleton state on any
+        // non-200 response). Whatever the exact trigger, a single activity source
+        // failing must never blank the entire widget again, so each count is now
+        // isolated and defaults to 0 on error instead of aborting the request.
         const safeCount = async (query: Promise<{ count: number }[]>): Promise<number> => {
             try {
                 const [row] = await query;
@@ -63,22 +66,26 @@ export const handler = async (event: HandlerEvent) => {
         // over) was being dropped entirely, zeroing out this widget even with completed
         // work in the window. dashboard-heatmap.ts already uses this same COALESCE for
         // task_runs; this brings the ROI hero in line with it.
+        //
+        // The comparand must be an ISO string, not a Date: a raw sql`` fragment has no
+        // column type, so drizzle passes a Date through to postgres-js unserialized and
+        // the bind step throws ERR_INVALID_ARG_TYPE (500 on every call).
         const taskRunCount = organisationId ? await safeCount(db
             .select({ count: count() })
             .from(taskRuns)
             .where(and(
                 eq(taskRuns.organisationId, organisationId),
                 eq(taskRuns.status, 'completed'),
-                gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, periodStart)
+                gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, periodStart.toISOString())
             ))) : 0;
 
-        const [{ postCount }] = organisationId ? await db
-            .select({ postCount: count() })
+        const postCount = organisationId ? await safeCount(db
+            .select({ count: count() })
             .from(scheduledPosts)
             .where(and(
                 eq(scheduledPosts.organisationId, organisationId),
                 gte(scheduledPosts.createdAt, periodStart)
-            )) : [{ postCount: 0 }];
+            ))) : 0;
 
         // Leads generated in the period — get-time-saved.ts already counts these towards
         // "Hours Saved"; omitting them here meant an org whose assistant work is mostly lead

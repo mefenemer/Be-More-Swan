@@ -165,10 +165,9 @@
     },
     {
       targets: ['#nav-ask-team'],
-      sidebar: true,
       title: 'Ask Your Team Anything',
       copy: 'The fastest way to get things done: press ⌘K anywhere (or click here) and just ask. Your whole team of assistants is one keystroke away.',
-      placement: 'right',
+      placement: 'bottom',
     },
     {
       view: 'settings',
@@ -197,6 +196,51 @@
 
   const reduceMotion = () =>
     window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ── Voice narration: reads each step aloud in a calming British female voice ──
+  // Gated by "Narrate the guided tour" (My Account → Sounds); default-on like the
+  // other Aurora sound preferences, read from the localStorage cache the settings
+  // page keeps in sync with the server (see workspace.html initSoundToggles).
+  let narrationVoice = null;
+  const FEMALE_BRITISH_HINTS = /female|serena|kate|fiona|martha|amy|emma|hazel|sonia|libby/i;
+
+  function pickNarrationVoice() {
+    if (!window.speechSynthesis) return null;
+    const voices = window.speechSynthesis.getVoices();
+    if (!voices.length) return null;
+    const british = voices.filter((v) => v.lang === 'en-GB' || v.lang === 'en_GB');
+    return (
+      british.find((v) => FEMALE_BRITISH_HINTS.test(v.name)) ||
+      british[0] ||
+      voices.find((v) => /^en/i.test(v.lang) && FEMALE_BRITISH_HINTS.test(v.name)) ||
+      null
+    );
+  }
+
+  if (window.speechSynthesis) {
+    narrationVoice = pickNarrationVoice();
+    window.speechSynthesis.onvoiceschanged = () => { narrationVoice = pickNarrationVoice(); };
+  }
+
+  function narrationEnabled() {
+    return localStorage.getItem('bms_tourNarrationEnabled') !== '0';
+  }
+
+  function speakStep(step) {
+    if (!window.speechSynthesis || !narrationEnabled()) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(`${step.title}. ${step.copy}`);
+    if (!narrationVoice) narrationVoice = pickNarrationVoice();
+    if (narrationVoice) utterance.voice = narrationVoice;
+    utterance.lang = 'en-GB';
+    utterance.pitch = 1;
+    utterance.rate = 0.95; // slightly slower — calmer, easier to follow alongside the spotlight
+    window.speechSynthesis.speak(utterance);
+  }
+
+  function stopNarration() {
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
+  }
 
   function visible(el) {
     if (!el) return false;
@@ -468,6 +512,7 @@
     renderCard(step);
     positionSpotlight(step.center ? null : el);
     positionCard(step.center ? null : el, step.placement);
+    speakStep(step);
   }
 
   function skipFrom(index, dir) {
@@ -489,6 +534,7 @@
     if (!root) return;
     runCleanup(stepIndex);
     navToken++;
+    stopNarration();
     setMobileSidebar(false);
     document.removeEventListener('keydown', onKeydown, true);
     window.removeEventListener('resize', reposition);

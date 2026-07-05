@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Referral Program | Be More Swan</title>
+    <link href="./style.css" rel="stylesheet">
+    <link rel="icon" href="/favicon/favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
+    <link rel="manifest" href="/favicon/manifest.json">
+    <script src="/src/i18n.js"></script>
+</head>
+<body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
+
+<div id="nav-placeholder"></div>
+
+<!-- Hero Section -->
+<section class="bg-white border-b border-gray-100">
+    <div class="max-w-4xl mx-auto px-4 py-20 text-center">
+        <span class="inline-block px-3 py-1 bg-emerald-50 text-emerald-700 rounded-full text-xs font-bold uppercase tracking-wider mb-6 border border-emerald-100">The Partner Network</span>
+        <h1 class="text-4xl md:text-6xl font-extrabold text-gray-900 tracking-tight leading-tight mb-6">
+            Good Things Are Meant<br class="hidden sm:block"> to <span class="text-emerald-700">Be Shared.</span>
+        </h1>
+        <p class="text-xl text-gray-500 max-w-2xl mx-auto mb-10">
+            Help other founders stop paddling. Give them priority onboarding, and get a month of Be More Swan on us.
+        </p>
+        <a href="register.html" onclick="refStart(event)" class="inline-block px-8 py-4 text-lg font-bold rounded-lg text-white bg-green-600 hover:bg-green-700 shadow-lg hover:shadow-xl transition">
+            Generate My Referral Link
+        </a>
+        <p class="text-sm text-gray-400 mt-4">Every paying referral earns you a token — worth £10 credit, or bank 5 for a free assistant.</p>
+    </div>
+</section>
+
+<!-- How It Works — 3-Step Timeline -->
+<section class="py-20 bg-gray-50">
+    <div class="max-w-7xl mx-auto px-4">
+        <div class="text-center max-w-3xl mx-auto mb-16">
+            <span class="text-xs font-bold tracking-wider uppercase text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full">How It Works</span>
+            <h2 class="text-4xl font-extrabold text-gray-900 tracking-tight mt-4 mb-4">Three Steps. Zero Awkwardness.</h2>
+            <p class="text-xl text-gray-500">No pitch decks, no sales calls. Just share the thing that's already saving you hours.</p>
+        </div>
+
+        <div class="relative grid grid-cols-1 md:grid-cols-3 gap-8">
+            <!-- Connector line (desktop) -->
+            <div class="hidden md:block absolute top-10 left-[16%] right-[16%] h-0.5 bg-emerald-100"></div>
+
+            <div class="relative bg-white p-8 rounded-2xl border border-gray-100 shadow-sm text-center">
+                <div class="w-20 h-20 rounded-full bg-emerald-700 text-white flex items-center justify-center mx-auto mb-6 text-2xl font-extrabold shadow-lg relative z-10">1</div>
+                <h3 class="text-xl font-bold mb-3">Share Your Link</h3>
+                <p class="text-gray-600">Send your unique referral code to a fellow operator who's still drowning in busywork. Email it, text it, drop it in a group chat — it's your link, your way.</p>
+            </div>
+            <div class="relative bg-white p-8 rounded-2xl border border-gray-100 shadow-sm text-center">
+                <div class="w-20 h-20 rounded-full bg-emerald-700 text-white flex items-center justify-center mx-auto mb-6 text-2xl font-extrabold shadow-lg relative z-10">2</div>
+                <h3 class="text-xl font-bold mb-3">They Deploy</h3>
+                <p class="text-gray-600">They get priority onboarding, a seamless setup, and immediate access to their own digital workforce. Most new members are live in minutes, not weeks.</p>
+            </div>
+            <div class="relative bg-white p-8 rounded-2xl border border-gray-100 shadow-sm text-center">
+                <div class="w-20 h-20 rounded-full bg-emerald-700 text-white flex items-center justify-center mx-auto mb-6 text-2xl font-extrabold shadow-lg relative z-10">3</div>
+                <h3 class="text-xl font-bold mb-3">You Both Win</h3>
+                <p class="text-gray-600">When they start a paid plan, you earn a referral token. Redeem 1 token for £10 credit — or save up 5 and unlock a free assistant: a month of Be More Swan on us.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Dashboard Preview -->
+<section class="py-20 bg-white border-t border-gray-100">
+    <div class="max-w-7xl mx-auto px-4">
+        <div class="text-center max-w-3xl mx-auto mb-12">
+            <span class="text-xs font-bold tracking-wider uppercase text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full">Your Reward Vault</span>
+            <h2 class="text-4xl font-extrabold text-gray-900 tracking-tight mt-4 mb-4">Track Every Referral in Real Time</h2>
+            <p class="text-xl text-gray-500">Your referral dashboard lives inside your workspace — watch invites convert into tokens, and tokens into free months.</p>
+        </div>
+
+        <!-- Mockup -->
+        <div class="max-w-3xl mx-auto bg-gray-50 rounded-3xl border border-gray-200 shadow-xl overflow-hidden" aria-hidden="true">
+            <!-- Faux window chrome -->
+            <div class="bg-white border-b border-gray-200 px-5 py-3 flex items-center gap-2">
+                <span class="w-3 h-3 rounded-full bg-red-300"></span>
+                <span class="w-3 h-3 rounded-full bg-yellow-300"></span>
+                <span class="w-3 h-3 rounded-full bg-green-300"></span>
+                <span class="ml-4 text-xs font-semibold text-gray-400">workspace · Refer a Friend</span>
+            </div>
+            <div class="p-6 sm:p-8 space-y-6">
+                <!-- Vault summary -->
+                <div class="bg-gradient-to-br from-emerald-50 to-white border border-emerald-200 rounded-2xl p-6 flex items-start justify-between flex-wrap gap-4">
+                    <div>
+                        <h3 class="font-bold text-gray-900 text-lg">Your Reward Vault</h3>
+                        <p class="text-sm text-gray-500">Earn 1 token per paying referral. Spend them your way.</p>
+                    </div>
+                    <div class="text-right">
+                        <p class="text-4xl font-extrabold text-emerald-700">3</p>
+                        <p class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Available Tokens</p>
+                    </div>
+                </div>
+                <!-- Progress to free assistant -->
+                <div class="bg-white rounded-2xl border border-gray-200 p-6">
+                    <div class="flex justify-between items-center mb-2">
+                        <span class="text-sm font-bold text-gray-900">Progress to a free assistant</span>
+                        <span class="text-xs font-semibold text-emerald-700">3 of 5 tokens</span>
+                    </div>
+                    <div class="w-full bg-gray-100 rounded-full h-2.5 overflow-hidden">
+                        <div class="h-2.5 rounded-full bg-emerald-500" style="width:60%"></div>
+                    </div>
+                    <p class="text-xs text-gray-400 mt-2">2 more referrals unlock a free month of an assistant.</p>
+                </div>
+                <!-- Referral rows -->
+                <div class="bg-white rounded-2xl border border-gray-200 divide-y divide-gray-100">
+                    <div class="px-6 py-4 flex items-center justify-between gap-3">
+                        <div class="flex items-center gap-3">
+                            <span class="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-extrabold">JM</span>
+                            <div>
+                                <p class="text-sm font-bold text-gray-900">jess@lunastudio.co</p>
+                                <p class="text-xs text-gray-400">Joined 12 days ago</p>
+                            </div>
+                        </div>
+                        <span class="text-xs font-bold px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">Token earned</span>
+                    </div>
+                    <div class="px-6 py-4 flex items-center justify-between gap-3">
+                        <div class="flex items-center gap-3">
+                            <span class="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs font-extrabold">RP</span>
+                            <div>
+                                <p class="text-sm font-bold text-gray-900">rob@peakops.io</p>
+                                <p class="text-xs text-gray-400">Joined 4 days ago</p>
+                            </div>
+                        </div>
+                        <span class="text-xs font-bold px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">Token earned</span>
+                    </div>
+                    <div class="px-6 py-4 flex items-center justify-between gap-3">
+                        <div class="flex items-center gap-3">
+                            <span class="w-9 h-9 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center text-xs font-extrabold">AK</span>
+                            <div>
+                                <p class="text-sm font-bold text-gray-900">anna@kioskbakery.com</p>
+                                <p class="text-xs text-gray-400">Invited yesterday</p>
+                            </div>
+                        </div>
+                        <span class="text-xs font-bold px-3 py-1 rounded-full bg-yellow-50 text-yellow-700 border border-yellow-100">Signed up — trial</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- Final CTA -->
+<section class="py-20 bg-emerald-700 text-white text-center px-4">
+    <div class="max-w-2xl mx-auto">
+        <h2 class="text-3xl md:text-4xl font-extrabold mb-4 tracking-tight">Ready to share the calm?</h2>
+        <p class="opacity-90 leading-relaxed mb-8 text-lg">
+            Log in to grab your unique link, or join Be More Swan today — your referral dashboard is waiting inside your workspace.
+        </p>
+        <a href="register.html" onclick="refStart(event)" class="inline-block px-8 py-4 text-lg font-bold rounded-lg text-white bg-green-600 hover:bg-green-700 shadow-lg hover:shadow-xl transition">
+            Generate My Referral Link
+        </a>
+    </div>
+</section>
+
+<div id="footer-placeholder"></div>
+
+<script src="./mobileMenu.js"></script>
+<script>
+    // CTA router — logged-in members go straight to the workspace referral dashboard;
+    // known-but-logged-out devices go to Login; everyone else registers first.
+    function getCookie(name) {
+        const v = `; ${document.cookie}`;
+        const p = v.split(`; ${name}=`);
+        if (p.length === 2) return p.pop().split(';').shift();
+        return null;
+    }
+    function isLoggedIn() {
+        const token = getCookie('aura_session');
+        if (!token) return false;
+        try {
+            const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+            return payload.exp && payload.exp * 1000 > Date.now();
+        } catch { return false; }
+    }
+    function refStart(ev) {
+        if (ev && ev.preventDefault) ev.preventDefault();
+        if (isLoggedIn()) { window.location.href = 'workspace.html'; return; }
+        let known = false;
+        try { known = localStorage.getItem('bms_known_user') === '1'; } catch (e) {}
+        window.location.href = known ? 'login.html' : 'register.html';
+    }
+
+    async function loadComponent(id, path) {
+        try {
+            const r = await fetch(path);
+            if (r.ok) document.getElementById(id).innerHTML = await r.text();
+        } catch {}
+    }
+
+    document.addEventListener('DOMContentLoaded', async () => {
+        await loadComponent('nav-placeholder', './components/nav.html');
+        loadComponent('footer-placeholder', './components/footer.html');
+        if (window.i18n) window.i18n.apply();
+        setupMobileMenu();
+    });
+</script>
+</body>
+</html>

@@ -13,7 +13,7 @@
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
   <script src="./explainers.js?v=20260701-media-sources" defer></script>
   <link rel="icon" href="/favicon/favicon.ico" sizes="any">
-  <link rel="apple-touch-icon" href="/favicon/apple-icon.png">
+  <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
   <link rel="manifest" href="/favicon/manifest.json">
 </head>
 <body class="bg-gray-50 text-gray-900 font-sans antialiased min-h-screen overflow-x-hidden">
@@ -759,6 +759,7 @@ window.showComplianceModals = function showComplianceModals(force) {
     </button>
   </div>
   <audio id="milestone-audio" src="/Aurora.mp3" preload="auto"></audio>
+  <audio id="notification-audio" src="/Aurora.mp3" preload="auto"></audio>
 </div>
 
 <!-- Savings tasks modal (#3) -->
@@ -922,6 +923,10 @@ window.showComplianceModals = function showComplianceModals(force) {
   </div>
 
   <div class="flex items-center gap-3">
+    <!-- Issue #129: Ask your team anything moved here as a header icon, next to Report an Issue -->
+    <a href="#" id="nav-ask-team" aria-label="Ask your team anything" title="Ask your team anything" class="text-emerald-600 hover:text-emerald-800 hover:bg-emerald-50 rounded-full p-2 transition-colors">
+      <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+    </a>
     <!-- Issue #137: Report an Issue moved here from the side menu, next to Notifications -->
     <a href="#" id="nav-report-issue" aria-label="Report an Issue" class="text-amber-600 hover:text-amber-800 hover:bg-amber-50 rounded-full p-2 transition-colors">
       <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86c1.54 0 2.5-1.67 1.73-3L13.73 4a2 2 0 00-3.46 0L3.34 16c-.77 1.33.19 3 1.73 3z"/></svg>
@@ -1122,6 +1127,8 @@ function formatCurrency(amount, currency) {
         .then(d => { if (d) { try {
           localStorage.setItem('bms_soundOnLogin', d.soundOnLogin === false ? '0' : '1');
           localStorage.setItem('bms_soundOnMilestone', d.soundOnMilestone === false ? '0' : '1');
+          localStorage.setItem('bms_soundOnNotification', d.soundOnNotification === false ? '0' : '1');
+          localStorage.setItem('bms_tourNarrationEnabled', d.tourNarrationEnabled === false ? '0' : '1');
         } catch {} } })
         .catch(() => {});
       const audio = new Audio('/Aurora.mp3');
@@ -1711,16 +1718,16 @@ function formatCurrency(amount, currency) {
         tiers: ['starter', 'pro_team'],
         selector: '[data-feature="analytics"]',
         title: 'Analytics Dashboard',
-        subtitle: 'Available on Business Automator and above.',
-        body: (cap) => `Upgrade to the ${cap?.nextPlan?.name || 'Business Automator'} plan (${cap?.nextPlan ? formatCurrency(cap.nextPlan.monthlyPrice || cap.nextPlan.monthlyPriceGbp, cap.currency) + '/mo' : 'see pricing'}) to unlock detailed task analytics, performance trends, and assistant health reports.`,
+        subtitle: 'Available on The Digital Employee and above.',
+        body: (cap) => `Upgrade to the ${cap?.nextPlan?.name || 'The Digital Employee'} plan (${cap?.nextPlan ? formatCurrency(cap.nextPlan.monthlyPrice || cap.nextPlan.monthlyPriceGbp, cap.currency) + '/mo' : 'see pricing'}) to unlock detailed task analytics, performance trends, and assistant health reports.`,
       },
       {
         // 24/7 monitoring — locked on Starter and Pro Team
         tiers: ['starter', 'pro_team'],
         selector: '[data-feature="monitoring"]',
         title: '24/7 Background Monitoring',
-        subtitle: 'Available on Business Automator and above.',
-        body: 'Upgrade to Business Automator to enable around-the-clock monitoring so your assistants act on events even while you sleep.',
+        subtitle: 'Available on The Digital Employee and above.',
+        body: 'Upgrade to The Digital Employee to enable around-the-clock monitoring so your assistants act on events even while you sleep.',
       },
       {
         // Automated triggers — locked on Starter only
@@ -2783,6 +2790,8 @@ function formatCurrency(amount, currency) {
       const btns = [
         document.getElementById('toggle-sound-login'),
         document.getElementById('toggle-sound-milestone'),
+        document.getElementById('toggle-sound-notification'),
+        document.getElementById('toggle-sound-tour-narration'),
       ].filter(Boolean);
       if (!btns.length) return;
 
@@ -3841,6 +3850,15 @@ function formatCurrency(amount, currency) {
         ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size); ctx.restore(); });
       if (++frame < 160) requestAnimationFrame(anim); else c.remove();
     })();
+  };
+
+  // Issue #156 — ding when a new notification arrives while the workspace is open.
+  // Gated by the "sound on notification" preference (My Account → Sounds); defaults to ON.
+  // Best-effort: browsers block autoplay without a prior user gesture, so this may no-op
+  // until the user has interacted with the page at least once.
+  window._playNotificationSound = function () {
+    if (localStorage.getItem('bms_soundOnNotification') === '0') return;
+    try { const a = document.getElementById('notification-audio'); if (a) { a.currentTime = 0; a.play().catch(() => {}); } } catch {}
   };
 
   // ── Milestone celebration (#2): modal + Aurora.mp3 + confetti, 10s auto-close ──
@@ -6452,7 +6470,7 @@ async function gpSubmitReject() {
 
 <style>
   /* US-DASH-3 — Swan Command Bar. Scoped plain CSS (immune to prebuilt-Tailwind).
-     The trigger now lives in the side menu (#nav-ask-team); the overlay below is opened
+     The trigger lives in the workspace header (#nav-ask-team); the overlay below is opened
      from there or via ⌘K. */
 
   /* Onboarding "Resume setup" pill — docked top-centre, pulses to catch the eye. */
@@ -6565,8 +6583,8 @@ async function gpSubmitReject() {
     }
     const isOpen = () => overlay.classList.contains('open');
 
-    // #nav-ask-team no longer exists in the side menu (issue #129) — ⌘K is the only trigger.
-    // Delegated listener kept harmless in case a future entry point reintroduces the id.
+    // #nav-ask-team now lives in the workspace header, next to Report an Issue (issue #129).
+    // ⌘K remains a second trigger for the same floating panel.
     document.addEventListener('click', e => {
       if (e.target.closest && e.target.closest('#nav-ask-team')) { e.preventDefault(); open(); }
     });

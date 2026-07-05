@@ -17,7 +17,9 @@ export const handler: Handler = async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const assistantId = event.queryStringParameters?.id;
-    if (!assistantId) return { statusCode: 400, body: JSON.stringify({ error: 'id required' }) };
+    if (!assistantId || Number.isNaN(parseInt(assistantId))) {
+        return { statusCode: 400, body: JSON.stringify({ error: 'id required' }) };
+    }
     const aId = parseInt(assistantId);
 
     const db = getDb();
@@ -79,7 +81,7 @@ export const handler: Handler = async (event) => {
                   eq(taskRuns.assistantId, aId),
                   eq(taskRuns.organisationId, orgId),
                   eq(taskRuns.status, 'completed'),
-                  gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, periodStart)
+                  gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, periodStart.toISOString())
               )),
         ]);
 
@@ -121,7 +123,24 @@ export const handler: Handler = async (event) => {
             }),
         };
     } catch (err) {
-        console.error('[get-assistant-metrics]', err);
-        return { statusCode: 500, body: JSON.stringify({ error: 'Failed to load metrics.' }) };
+        // This card is a SUPPLEMENTARY panel on the assistant detail page — a failure here
+        // (DB hiccup, RLS/connection issue, brand-new assistant, etc.) must never 500 the
+        // whole page. Degrade to a safe "no data" shape and log the real cause server-side.
+        console.error('[get-assistant-metrics] degraded to no-data after error:', err);
+        return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                totalCreated: 0,
+                totalScheduled: 0,
+                totalPublished: 0,
+                byPlatform: {},
+                hoursSaved: 0,
+                gbpSaved: null,
+                period: parseRoiPeriod(event.queryStringParameters?.period),
+                hourlyRateSet: false,
+                minutesPerPost: null,
+            }),
+        };
     }
 };
