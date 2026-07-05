@@ -6,18 +6,132 @@
     <title>Trust &amp; Security | Be More Swan</title>
     <link href="./style.css" rel="stylesheet">
     <link rel="icon" href="/favicon/favicon.ico" sizes="any">
-    <link rel="apple-touch-icon" href="/favicon/apple-icon.png">
+    <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
     <link rel="manifest" href="/favicon/manifest.json">
 </head>
 <body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
 
 <div id="nav-placeholder"></div>
 
-<main class="flex-grow max-w-3xl mx-auto px-4 py-16">
+<!-- ══ HERO ═══════════════════════════════════════════════════════ -->
+<section class="bg-gray-900 text-white">
+    <div class="max-w-4xl mx-auto px-4 py-20 text-center">
+        <span class="inline-flex items-center gap-1.5 bg-white/10 border border-white/20 text-emerald-200 text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full mb-6">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+            Trust &amp; Security Center
+        </span>
+        <h1 class="text-4xl md:text-5xl font-extrabold tracking-tight leading-tight mb-5">
+            Your Data is Your Business.<br class="hidden sm:block"> We Keep It That Way.
+        </h1>
+        <p class="text-lg md:text-xl text-gray-300 max-w-2xl mx-auto">
+            Bank-level encryption, strict data isolation, and uncompromising safety benchmarks — built in from day one, not bolted on.
+        </p>
+    </div>
+</section>
+
+<!-- ══ FEATURE BLOCKS (alternating) ═══════════════════════════════ -->
+<section class="py-20 bg-white border-b border-gray-100">
+    <div class="max-w-6xl mx-auto px-4 space-y-16">
+
+        <!-- Data Isolation -->
+        <div class="flex flex-col lg:flex-row gap-10 lg:gap-16 items-center">
+            <div class="w-full lg:w-2/5">
+                <div class="bg-gray-50 rounded-3xl border border-gray-100 p-10 flex items-center justify-center">
+                    <div class="w-24 h-24 rounded-3xl bg-emerald-50 border border-emerald-100 flex items-center justify-center">
+                        <svg class="w-12 h-12 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+                    </div>
+                </div>
+            </div>
+            <div class="w-full lg:w-3/5">
+                <span class="text-xs font-bold uppercase tracking-widest text-emerald-700">Data Isolation</span>
+                <h2 class="text-3xl font-extrabold text-gray-900 tracking-tight mt-2 mb-4">Your data trains your assistant. No one else's.</h2>
+                <p class="text-gray-600 leading-relaxed mb-4">
+                    Every workspace runs in its own secure sandbox with strict tenant isolation, enforced at the database layer. The proprietary data you share — brand voice, customer lists, internal documents — is used only to make <em>your</em> assistants better.
+                </p>
+                <p class="text-gray-600 leading-relaxed">
+                    It is never pooled with other customers' data, never shared, and never used to train anyone else's assistant. When you leave, it's permanently deleted within 30 days.
+                </p>
+            </div>
+        </div>
+
+        <!-- Safe Content Benchmark -->
+        <div class="flex flex-col lg:flex-row-reverse gap-10 lg:gap-16 items-center">
+            <div class="w-full lg:w-2/5">
+                <div class="bg-gray-50 rounded-3xl border border-gray-100 p-10 flex items-center justify-center">
+                    <div class="w-24 h-24 rounded-3xl bg-emerald-50 border border-emerald-100 flex items-center justify-center">
+                        <svg class="w-12 h-12 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                    </div>
+                </div>
+            </div>
+            <div class="w-full lg:w-3/5">
+                <span class="text-xs font-bold uppercase tracking-widest text-emerald-700">Safe Content Benchmark</span>
+                <h2 class="text-3xl font-extrabold text-gray-900 tracking-tight mt-2 mb-4">A safety layer nothing can switch off.</h2>
+                <p class="text-gray-600 leading-relaxed mb-4">
+                    Every piece of content your assistants produce passes through our mandatory Safe Content Benchmark. It runs at the highest priority in the system and cannot be disabled, overridden, or bypassed by any other setting — not even by us.
+                </p>
+                <p class="text-gray-600 leading-relaxed">
+                    That means your brand integrity is protected on every output, and everything published on your behalf adheres to platform policies and community standards. No exceptions, no embarrassing surprises.
+                </p>
+            </div>
+        </div>
+
+        <!-- Infrastructure -->
+        <div class="flex flex-col lg:flex-row gap-10 lg:gap-16 items-center">
+            <div class="w-full lg:w-2/5">
+                <div class="bg-gray-50 rounded-3xl border border-gray-100 p-10 flex items-center justify-center">
+                    <div class="w-24 h-24 rounded-3xl bg-emerald-50 border border-emerald-100 flex items-center justify-center">
+                        <svg class="w-12 h-12 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/></svg>
+                    </div>
+                </div>
+            </div>
+            <div class="w-full lg:w-3/5">
+                <span class="text-xs font-bold uppercase tracking-widest text-emerald-700">Infrastructure</span>
+                <h2 class="text-3xl font-extrabold text-gray-900 tracking-tight mt-2 mb-4">Hardened hosting, watched around the clock.</h2>
+                <p class="text-gray-600 leading-relaxed mb-4">
+                    Be More Swan runs on secure, managed cloud infrastructure with UK/EU data residency, continuous monitoring, and regular penetration testing. All traffic is encrypted with TLS&nbsp;1.3 and all storage with AES-256.
+                </p>
+                <p class="text-gray-600 leading-relaxed">
+                    The API keys and OAuth credentials that connect your business tools are stored with AES-256-GCM application-layer encryption. Plaintext credentials are never logged and never returned to a browser.
+                </p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ══ COMPLIANCE BADGE BAND ══════════════════════════════════════ -->
+<section class="bg-gray-50 border-b border-gray-100 py-12">
+    <div class="max-w-6xl mx-auto px-4">
+        <p class="text-center text-xs font-bold uppercase tracking-widest text-gray-400 mb-8">Built to recognised security standards</p>
+        <div class="flex flex-wrap justify-center gap-4">
+            <span class="inline-flex items-center gap-2 bg-white border border-gray-200 rounded-full px-5 py-2.5 text-sm font-bold text-gray-700 shadow-sm">
+                <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                UK / EU GDPR Compliant
+            </span>
+            <span class="inline-flex items-center gap-2 bg-white border border-gray-200 rounded-full px-5 py-2.5 text-sm font-bold text-gray-700 shadow-sm">
+                <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+                SOC 2-Aligned Controls
+            </span>
+            <span class="inline-flex items-center gap-2 bg-white border border-gray-200 rounded-full px-5 py-2.5 text-sm font-bold text-gray-700 shadow-sm">
+                <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                TLS 1.3 In Transit
+            </span>
+            <span class="inline-flex items-center gap-2 bg-white border border-gray-200 rounded-full px-5 py-2.5 text-sm font-bold text-gray-700 shadow-sm">
+                <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                AES-256 At Rest
+            </span>
+            <span class="inline-flex items-center gap-2 bg-white border border-gray-200 rounded-full px-5 py-2.5 text-sm font-bold text-gray-700 shadow-sm">
+                <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/></svg>
+                PCI DSS Payments via Stripe
+            </span>
+        </div>
+    </div>
+</section>
+
+<main class="flex-grow max-w-3xl mx-auto px-4 py-16 w-full">
 
     <!-- Header -->
     <div class="mb-10">
-        <h1 class="text-4xl font-extrabold text-gray-900 mb-2">Trust &amp; Security</h1>
+        <h1 class="text-4xl font-extrabold text-gray-900 mb-2">Compliance Details</h1>
         <!-- SC5: Last updated date -->
         <p class="text-sm text-gray-500">Last updated: <time datetime="2026-06-10">10 June 2026</time> · Reviewed quarterly</p>
     </div>

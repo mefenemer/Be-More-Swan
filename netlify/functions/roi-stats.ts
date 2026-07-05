@@ -37,6 +37,23 @@ export const handler = async (event: HandlerEvent) => {
         const org = await resolveActiveOrg(db, userId, session.activeOrganisationId);
         const organisationId = org?.organisationId ?? null;
 
+        // Issue #132 (follow-up): the reporter saw this widget go from "0" to
+        // completely blank after the coalesce/leads changes below landed — i.e. one
+        // of these queries started throwing, which turned the whole response into a
+        // 500 (the frontend leaves the tiles in their loading-skeleton state on any
+        // non-200 response). Whatever the exact trigger, a single activity source
+        // failing must never blank the entire widget again, so each count is now
+        // isolated and defaults to 0 on error instead of aborting the request.
+        const safeCount = async (query: Promise<{ count: number }[]>): Promise<number> => {
+            try {
+                const [row] = await query;
+                return Number(row?.count ?? 0);
+            } catch (err) {
+                console.error('roi-stats: activity count query failed, defaulting to 0', err);
+                return 0;
+            }
+        };
+
         // SC6: Count completed task runs and drafted/scheduled posts in the period.
         // Real assistant work (e.g. the social media assistant) is recorded in
         // scheduled_posts — task_runs alone is near-always empty for that flow, which
@@ -53,34 +70,34 @@ export const handler = async (event: HandlerEvent) => {
         // The comparand must be an ISO string, not a Date: a raw sql`` fragment has no
         // column type, so drizzle passes a Date through to postgres-js unserialized and
         // the bind step throws ERR_INVALID_ARG_TYPE (500 on every call).
-        const [{ taskRunCount }] = organisationId ? await db
-            .select({ taskRunCount: count() })
+        const taskRunCount = organisationId ? await safeCount(db
+            .select({ count: count() })
             .from(taskRuns)
             .where(and(
                 eq(taskRuns.organisationId, organisationId),
                 eq(taskRuns.status, 'completed'),
                 gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, periodStart.toISOString())
-            )) : [{ taskRunCount: 0 }];
+            ))) : 0;
 
-        const [{ postCount }] = organisationId ? await db
-            .select({ postCount: count() })
+        const postCount = organisationId ? await safeCount(db
+            .select({ count: count() })
             .from(scheduledPosts)
             .where(and(
                 eq(scheduledPosts.organisationId, organisationId),
                 gte(scheduledPosts.createdAt, periodStart)
-            )) : [{ postCount: 0 }];
+            ))) : 0;
 
         // Leads generated in the period — get-time-saved.ts already counts these towards
         // "Hours Saved"; omitting them here meant an org whose assistant work is mostly lead
         // generation (no task_runs, no scheduled_posts yet) saw 0 hours/£/tasks on this
         // widget despite real, non-zero activity on the modal it's supposed to agree with.
-        const [{ leadCount }] = organisationId ? await db
-            .select({ leadCount: count() })
+        const leadCount = organisationId ? await safeCount(db
+            .select({ count: count() })
             .from(leads)
             .where(and(
                 eq(leads.organisationId, organisationId),
                 gte(leads.createdAt, periodStart)
-            )) : [{ leadCount: 0 }];
+            ))) : 0;
 
         const completedTasks = Number(taskRunCount) + Number(postCount) + Number(leadCount);
 

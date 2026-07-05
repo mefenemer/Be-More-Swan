@@ -55,12 +55,15 @@
             <button id="btn-generate-name" title="Generate a name" class="p-1 rounded-lg hover:bg-emerald-50 transition-colors cursor-pointer" type="button">
               <img src="/images/BeMoreSwan_SwanAI.png" alt="Generate a name with Be More Swan AI" class="ai-wand-img">
             </button>
-            <span id="detail-status" class="inline-flex items-center gap-1.5 py-0.5 px-2 rounded-md text-xs font-bold bg-gray-100 text-gray-600 border border-gray-200">…</span>
             <!-- Brand Safety badge — shown when guardrails are configured -->
             <span id="guardrails-protected-badge" class="hidden inline-flex items-center gap-1 py-0.5 px-2 rounded-md text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
               <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
               Brand Protected
             </span>
+          </div>
+          <!-- Issue #154: status pill moved below the name so it reads as the assistant's status, not part of the name -->
+          <div class="flex items-center gap-3 mt-1">
+            <span id="detail-status" class="inline-flex items-center gap-1.5 py-0.5 px-2 rounded-md text-xs font-bold bg-gray-100 text-gray-600 border border-gray-200">…</span>
           </div>
           <div class="flex items-center gap-3 mt-0.5">
             <p id="detail-role" class="text-gray-500 font-medium text-xs">Reviewing tasks…</p>
@@ -279,16 +282,19 @@
     <p id="metric-value-wins" class="hidden text-xs text-emerald-700 font-medium mt-3"></p>
   </div>
 
-  <!-- Active Workflows (Epic 4.2) — how this assistant hands off to / receives from others. Always visible so "Manage in Orchestrations" stays reachable; shows an empty state when there are no links. -->
+  <!-- Active Workflows (Epic 4.2) — Orchestrations has no runtime consumer yet (see netlify/functions/orchestrations.ts),
+       so this card is disabled and shows a "Coming soon" state rather than linking into the hub. -->
   <div id="active-workflows-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6 hidden">
     <div class="flex items-center justify-between gap-3 mb-4">
       <div>
         <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Active Workflows</h3>
         <p class="text-xs text-gray-400 mt-1">How this assistant connects to the rest of your team.</p>
       </div>
-      <button type="button" onclick="window.loadView && window.loadView('orchestrations')" class="shrink-0 text-xs font-bold text-emerald-600 hover:text-emerald-800 transition cursor-pointer">Manage in Orchestrations →</button>
+      <button type="button" disabled class="shrink-0 text-xs font-bold text-gray-400 cursor-not-allowed">Manage in Orchestrations →</button>
     </div>
-    <div id="active-workflows-list" class="space-y-2"></div>
+    <div id="active-workflows-list" class="space-y-2">
+      <p class="text-sm text-gray-400 text-center py-3">Coming soon</p>
+    </div>
   </div>
 
   <!-- Goals section is relocated here (directly under Recent Activity) by initAssistantDetail;
