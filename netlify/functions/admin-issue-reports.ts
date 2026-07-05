@@ -71,7 +71,7 @@ export const handler: Handler = async (event) => {
             issueId: id,
             authorType: 'admin',
             authorId: admin.id,
-            body: '🤖 Passed to the developer for AI auto-fix. A fix is now in progress.',
+            body: "Thanks for reporting this — we've passed it to the developer and a fix is now underway.",
             status: 'fix_in_progress',
         });
 
@@ -103,7 +103,7 @@ export const handler: Handler = async (event) => {
             issueId: u.id,
             authorType: 'admin',
             authorId: admin.id,
-            body: '🤖 Passed to the developer for AI auto-fix. A fix is now in progress.',
+            body: "Thanks for reporting this — we've passed it to the developer and a fix is now underway.",
             status: 'fix_in_progress',
         })));
 
@@ -148,8 +148,8 @@ export const handler: Handler = async (event) => {
             authorType: 'admin',
             authorId: admin.id,
             body: exec.ok
-                ? `🗄️ Migration SQL ran successfully against staging.\n\n${exec.outcome}`
-                : `🗄️ Migration SQL FAILED on staging — issue left as-is.\n\n${exec.outcome}`,
+                ? `🗄️ The database update for this fix ran successfully on staging.\n\n${exec.outcome}`
+                : `🗄️ The database update for this fix didn't go through on staging, so we've left things as they are for now.\n\n${exec.outcome}`,
             status: null,
         });
 
@@ -190,7 +190,7 @@ export const handler: Handler = async (event) => {
             issueId: id,
             authorType: 'admin',
             authorId: admin.id,
-            body: '🔀 Merge to staging requested — the developer runner will merge the pull request shortly.',
+            body: "🔀 We've queued this fix to merge into staging — it should be there shortly.",
             status: null,
         });
 
@@ -222,7 +222,7 @@ export const handler: Handler = async (event) => {
             issueId: u.id,
             authorType: 'admin',
             authorId: admin.id,
-            body: '🔀 Merge to staging requested — the developer runner will merge the pull request shortly.',
+            body: "🔀 We've queued this fix to merge into staging — it should be there shortly.",
             status: null,
         })));
 
@@ -515,7 +515,7 @@ export const handler: Handler = async (event) => {
                 issueId: id,
                 authorType: 'admin',
                 authorId: admin.id,
-                body: message || `Status changed to "${ISSUE_STATUS_LABEL[finalStatus]}".`,
+                body: message || `We've updated this to "${ISSUE_STATUS_LABEL[finalStatus]}".`,
                 status: newStatus,
             });
         }
