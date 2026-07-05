@@ -165,10 +165,9 @@
     },
     {
       targets: ['#nav-ask-team'],
-      sidebar: true,
       title: 'Ask Your Team Anything',
       copy: 'The fastest way to get things done: press ⌘K anywhere (or click here) and just ask. Your whole team of assistants is one keystroke away.',
-      placement: 'right',
+      placement: 'bottom',
     },
     {
       view: 'settings',
