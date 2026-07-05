@@ -43,7 +43,7 @@ export const handler: Handler = async (event) => {
         // zeroing this tile out right after a month/week boundary despite real activity.
         db.select({ id: taskRuns.id, assistantId: taskRuns.assistantId, completedAt: taskRuns.completedAt, createdAt: taskRuns.createdAt })
             .from(taskRuns)
-            .where(and(eq(taskRuns.organisationId, orgId), eq(taskRuns.status, 'completed'), gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, monthStart))),
+            .where(and(eq(taskRuns.organisationId, orgId), eq(taskRuns.status, 'completed'), gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, monthStart.toISOString()))),
         db.select({ id: aiAssistants.id, name: aiAssistants.name, role: aiAssistants.aiAssistantJobRole })
             .from(aiAssistants).where(eq(aiAssistants.organisationId, orgId)),
     ]);
