@@ -62,8 +62,8 @@
             <h2 class="cc-hero-title">Here's the value your digital team created.</h2>
           </div>
           <div class="cc-toggle" role="tablist" aria-label="Time period">
-            <button id="cc-tab-week"  type="button" class="cc-toggle-btn is-active" data-period="week"  role="tab">This Week</button>
-            <button id="cc-tab-month" type="button" class="cc-toggle-btn"           data-period="month" role="tab">This Month</button>
+            <button id="cc-tab-week"  type="button" class="cc-toggle-btn"           data-period="week"  role="tab">This Week</button>
+            <button id="cc-tab-month" type="button" class="cc-toggle-btn is-active" data-period="month" role="tab">This Month</button>
           </div>
         </div>
 
@@ -73,7 +73,7 @@
             <div class="cc-tile-icon">⏱️</div>
             <div class="cc-tile-label">Hours Saved</div>
             <div class="cc-tile-value"><span id="cc-hours" data-count="0"><span class="cc-skel-text"></span></span><span class="cc-unit">hrs</span></div>
-            <div class="cc-tile-sub" id="cc-hours-sub">this week</div>
+            <div class="cc-tile-sub" id="cc-hours-sub">this month</div>
           </div>
 
           <!-- AC1: Tasks Handled -->
@@ -287,7 +287,12 @@
       })(start);
     }
 
-    let period = 'week';
+    // Issue #132 (follow-up): default to "This Month" — "This Week" resets hard at
+    // the Sunday boundary (roiPeriodStart), so for many hours after each week rolls
+    // over, an org with real historical activity legitimately has nothing yet in the
+    // still-brand-new week window and the hero tiles read as "broken" (0 hours/£/tasks)
+    // even though get-time-saved.ts's always-month-scoped modal shows real activity.
+    let period = 'month';
 
     async function renderMetrics() {
       const hoursEl = document.getElementById('cc-hours');
