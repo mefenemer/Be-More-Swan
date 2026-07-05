@@ -63,6 +63,7 @@ export const handler = async (event: HandlerEvent) => {
                     // Sound preferences (default-on when unset).
                     soundOnLogin: prefs.soundOnLogin !== false,
                     soundOnMilestone: prefs.soundOnMilestone !== false,
+                    tourNarrationEnabled: prefs.tourNarrationEnabled !== false,
                     // US-UX-1.1 SC1: role fields for header badges and settings display
                     platformRole: user?.role || 'user',
                     organisationRole: orgMembership?.role || 'member',
@@ -169,7 +170,7 @@ export const handler = async (event: HandlerEvent) => {
                     .set({ workingHours: whVal, updatedAt: new Date() })
                     .where(eq(userProfiles.userId, userId));
 
-            } else if (fieldKey === 'soundOnLogin' || fieldKey === 'soundOnMilestone') {
+            } else if (fieldKey === 'soundOnLogin' || fieldKey === 'soundOnMilestone' || fieldKey === 'tourNarrationEnabled') {
                 // Sound preferences — stored in userProfiles.preferences (boolean, default-on).
                 targetTable = 'user_profiles';
                 const currentPrefs = (currentProfile?.preferences as Record<string, any>) || {};
