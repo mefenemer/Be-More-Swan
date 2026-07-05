@@ -174,10 +174,9 @@
     },
     {
       targets: ['#nav-report-issue'],
-      sidebar: true,
       title: 'Spotted Something Off?',
       copy: 'Report an Issue sends what you found straight to the team — along with where you were when you found it — so fixes land fast.',
-      placement: 'right',
+      placement: 'bottom',
     },
     {
       targets: ['#nav-ask-team'],
