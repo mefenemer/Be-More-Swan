@@ -23,7 +23,7 @@ import { Handler } from '@netlify/functions';
 import { and, eq, asc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { issueReports, issueReportMessages, users, devRunnerStatus } from '../../db/schema';
-import { ISSUE_STATUS_LABEL, maybeAdvanceToReadyToTest } from '../../src/utils/issue-reports';
+import { ISSUE_STATUS_LABEL, maybeAdvanceToReadyToTest, triggerStagingDeployIfDrained } from '../../src/utils/issue-reports';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode,
@@ -170,6 +170,9 @@ export const handler: Handler = async (event) => {
             // Advances to "Fixed & Ready to Test" (and notifies the reporter) iff no
             // migration is still pending; otherwise the run-SQL step will trigger it.
             const advanced = await maybeAdvanceToReadyToTest(db, id, event.headers);
+            // Once nothing else is queued/merging, rebuild staging so the merge just made
+            // is actually live — no separate "Commit to Staging" step for an admin to remember.
+            await triggerStagingDeployIfDrained(db);
             return json(200, { ok: true, devMergeStatus: 'merged', advanced });
         }
 
@@ -189,6 +192,9 @@ export const handler: Handler = async (event) => {
             status: null,
         });
 
+        // A prior merge in this batch may have succeeded — drain check still applies so
+        // it gets deployed even though this particular one failed.
+        await triggerStagingDeployIfDrained(db);
         return json(200, { ok: true, devMergeStatus: 'failed' });
     }
 

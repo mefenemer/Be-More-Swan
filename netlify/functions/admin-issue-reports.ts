@@ -256,32 +256,9 @@ export const handler: Handler = async (event) => {
         return json(200, { ok: true, queued: updated.length, ids: updated.map((u) => u.id) });
     }
 
-    // ── POST ?action=deploy-staging: trigger one fresh Netlify staging build ──────
-    // Super-admin only. Fired from the "Commit to Staging" button once a bulk merge has
-    // drained, so staging rebuilds once with every merged fix included. Uses a Netlify
-    // build hook for the staging branch (NETLIFY_STAGING_BUILD_HOOK).
-    if (event.httpMethod === 'POST' && action === 'deploy-staging') {
-        if (admin.role !== 'super_admin') {
-            return json(403, { error: 'Deploying staging requires super-admin privilege.' });
-        }
-        const hook = process.env.NETLIFY_STAGING_BUILD_HOOK;
-        if (!hook) {
-            return json(500, { error: 'NETLIFY_STAGING_BUILD_HOOK is not configured. In Netlify, create a build hook for the staging branch (Site configuration → Build & deploy → Build hooks) and set its URL in this env var.' });
-        }
-        // A deploy started mid-merge would miss whatever is still in flight.
-        const [pending] = await db.select({ n: sql<number>`count(*)::int` }).from(issueReports)
-            .where(inArray(issueReports.devMergeStatus, ['queued', 'merging']));
-        if (pending && pending.n > 0) {
-            return json(409, { error: `${pending.n} merge${pending.n === 1 ? ' is' : 's are'} still in progress — wait for ${pending.n === 1 ? 'it' : 'them'} to finish before deploying.` });
-        }
-        try {
-            const res = await fetch(hook, { method: 'POST' });
-            if (!res.ok) return json(502, { error: `Netlify build hook returned ${res.status}.` });
-        } catch (e: any) {
-            return json(502, { error: `Could not reach the Netlify build hook: ${e?.message || e}` });
-        }
-        return json(200, { ok: true });
-    }
+    // Staging is now rebuilt automatically once a merge drains the queue — see
+    // triggerStagingDeployIfDrained(), called from admin-issue-handoff's merge-result
+    // handler. There is no separate manual "deploy" step to request here anymore.
 
     // ── GET ?action=runner-status: AI auto-fix runner health ─────────────────────
     // Powers the "runner paused — Claude session limit" prompt + Resume button. Returns every
