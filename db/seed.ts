@@ -6,7 +6,7 @@ config({ path: path.resolve(process.cwd(), '.env') });
 
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
-import { masterPlans, masterAssistants } from './schema';
+import { masterPlans } from './schema';
 
 // Grab the database URL directly from the environment
 const connectionString = process.env.NETLIFY_DATABASE_URL;
@@ -32,22 +32,12 @@ async function seed() {
         ]).onConflictDoNothing({ target: masterPlans.tierKey });
         // ^ onConflictDoNothing prevents duplicate errors if you run this twice!
 
-        // 2. Seed the Master Assistants
-        console.log('Seeding Master Assistants...');
-        await db.insert(masterAssistants).values([
-            { roleKey: 'social_media', name: 'Social Media Manager', description: 'Organic content creation and automated publishing.' },
-            { roleKey: 'paid_ads', name: 'Performance Marketer', description: 'Ad generation, campaign publishing, and audience targeting.' },
-            { roleKey: 'data_entry', name: 'Inventory & Order Manager', description: 'Managing cross-platform orders, syncing stock, and automating fulfillment logs.' },
-            { roleKey: 'custom', name: 'Operations Manager', description: 'A unique, multi-step process that does not fit standard roles.' },
-
-            // Including the "Coming Soon" roles so they are ready for launch!
-            { roleKey: 'community_mgmt', name: 'Community Manager', description: 'Monitoring comments, answering DMs, and engaging with followers.', isActive: false },
-            { roleKey: 'inbox', name: 'Support Specialist', description: 'Categorizing emails, drafting replies, or handling customer queries.', isActive: false },
-            { roleKey: 'reporting', name: 'Data Analyst', description: 'Generating summaries, pulling metrics, or creating dashboards.', isActive: false },
-            { roleKey: 'receipt_admin', name: 'Receipt & Invoice Organizer', description: 'Automatically monitors your inbox for digital receipts and invoices, extracts key data, and updates your master accounting spreadsheets.', isActive: false },
-            { roleKey: 'lead_welcomer', name: 'New Lead Welcomer', description: 'Instantly engages with new leads from your website forms, drafting personalized welcome emails and updating your CRM records', isActive: false },
-            { roleKey: 'seo', name: 'SEO Content Strategist', description: 'Analyzes target keywords and drafts optimized blog posts and landing page copy to improve your search engine rankings.', isActive: false }
-        ]).onConflictDoNothing({ target: masterAssistants.roleKey });
+        // 2. Master Assistants are seeded from seed/data/master_assistants.json via
+        // `npm run db:seed` (seed/run-seed.ts). The hardcoded list that used to live here
+        // carried the RETIRED pre-catalog roleKey namespace ('social_media', 'inbox', …) and
+        // was removed with db/rolekey-namespace-unification.sql so a manual re-run of this
+        // script can never reintroduce the drift.
+        console.log('Skipping Master Assistants — seeded from seed/data/master_assistants.json (npm run db:seed).');
 
         console.log('✅ Seeding completed successfully!');
     } catch (error) {

@@ -1,15 +1,16 @@
 // src/constants/roles.ts — canonical master-assistant role keys.
 //
-// Historical footgun: two seed sources disagree on the Social Media Manager's role key.
-//   • seed/data/master_assistants.json (the LIVE catalogue) → 'social_media'
-//   • db/seed-catalog.ts                                    → 'social_media_manager'
-// Cron jobs and role gates that hard-coded only 'social_media_manager' silently matched
-// ZERO live assistants (whose key is 'social_media'), so scheduled draft generation never
-// ran. Match BOTH keys so the gates work regardless of which source seeded an environment.
+// History: two seed sources used to disagree on the Social Media Manager's role key
+// ('social_media' from the old seed JSON vs 'social_media_manager' from db/seed-catalog.ts),
+// so cron jobs that hard-coded one spelling silently matched ZERO assistants seeded with
+// the other. The namespaces were unified by db/rolekey-namespace-unification.sql — the
+// db/seed-catalog.ts catalog keys are now the ONLY namespace, and seed/data/
+// master_assistants.json is exported with the same keys so re-seeding cannot
+// reintroduce the drift.
 
-/** The live catalogue's role key for the Social Media Manager. */
-export const SMM_ROLE_KEY = 'social_media';
+/** The canonical role key for the Social Media Manager. */
+export const SMM_ROLE_KEY = 'social_media_manager';
 
-/** Every role key that denotes a Social Media Manager (live + legacy catalog). Use with
- *  drizzle `inArray(masterAssistants.roleKey, SMM_ROLE_KEYS)`. */
-export const SMM_ROLE_KEYS: string[] = ['social_media', 'social_media_manager'];
+/** Every role key that denotes a Social Media Manager. Collapsed to the single canonical
+ *  key post-unification; kept as an array so drizzle `inArray(...)` call sites are stable. */
+export const SMM_ROLE_KEYS: string[] = [SMM_ROLE_KEY];

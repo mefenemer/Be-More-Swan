@@ -112,4 +112,14 @@
     },
 
   };
+
+  // Legacy roleKey aliases — assistants hired before the namespace unification
+  // (db/rolekey-namespace-unification.sql) were all Social Media Managers under the
+  // retired 'social_media' / 'community_mgmt' keys. Alias them to the canonical SMM
+  // entry so an un-migrated roleKey resolves to real content instead of undefined.
+  ['social_media', 'community_mgmt'].forEach(function (legacyKey) {
+    if (!window.AssistantRoleContent[legacyKey]) {
+      window.AssistantRoleContent[legacyKey] = window.AssistantRoleContent.social_media_manager;
+    }
+  });
 })();

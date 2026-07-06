@@ -5383,7 +5383,7 @@ async function gpPopulateAssistants() {
             a.lifecycleStatus !== 'archived');
         // Prefer Social Media Managers, but fall back to all active assistants so orgs whose
         // assistants predate the roleKey field aren't locked out of generating a post.
-        const social = active.filter(a => a.roleKey === 'social_media');
+        const social = active.filter(a => a.roleKey === 'social_media_manager');
         const eligible = social.length > 0 ? social : active;
 
         if (eligible.length === 0) {

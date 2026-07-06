@@ -26,14 +26,12 @@ export const CONNECTOR_CATEGORY: Record<string, string> = {
 };
 
 // Assistant roleKey (aiAssistants.configuration.type) → allowed connection categories.
-// NOTE: the LIVE roleKeys come from seed/data/master_assistants.json (e.g. 'social_media',
-// 'community_mgmt', 'paid_ads'); the longer keys below mirror seed-catalog.ts. Both are listed
-// so the policy is authoritative by roleKey rather than relying on the display-name keyword
-// fallback (which the live keys would otherwise depend on).
+// Keys are the canonical db/seed-catalog.ts namespace (the old 'social_media' /
+// 'community_mgmt' duplicates were merged by db/rolekey-namespace-unification.sql).
+// Assistants created before roleKey was stored still resolve through the display-name
+// keyword fallback below — keep it until no pre-roleKey assistants remain.
 export const ROLE_CONNECTIONS: Record<string, string[]> = {
-    // Live seed roleKeys (seed/data/master_assistants.json)
-    social_media:              ['social'],
-    community_mgmt:            ['social'],
+    // Legacy-only role with no catalog twin (kept canonical; hidden from the catalog)
     paid_ads:                  ['social'],
     // Catalog roleKeys (seed-catalog.ts)
     social_media_manager:      ['social'],

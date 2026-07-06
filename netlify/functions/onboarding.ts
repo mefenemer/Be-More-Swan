@@ -210,9 +210,27 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
     }
 
     // 5. LOOK UP MASTER ASSISTANT
-    const [assistantRecord] = await db.select().from(masterAssistants)
-      .where(eq(masterAssistants.name, assistantName || 'Social Media Manager'))
-      .limit(1);
+    // The wizards send a display name (sessionStorage aura_assistant_name, set by
+    // onboarding.html). Resolve it to the canonical roleKey (db/seed-catalog.ts namespace —
+    // see db/rolekey-namespace-unification.sql) and look the row up by that natural key;
+    // a pure name match would have broken when the merged SMM row took the catalog name
+    // 'The Social Media Manager'. Unknown names fall back to a name match so future roles
+    // keep working without touching this map.
+    const NAME_TO_ROLEKEY: Record<string, string> = {
+      'Social Media Manager':     'social_media_manager',
+      'The Social Media Manager': 'social_media_manager',
+      'Performance Marketer':     'paid_ads',
+      'Inventory & Order Manager':'data_entry',
+      'Operations Manager':       'custom',
+    };
+    const wantedRoleKey = NAME_TO_ROLEKEY[assistantName || 'Social Media Manager'];
+    const [assistantRecord] = wantedRoleKey
+      ? await db.select().from(masterAssistants)
+          .where(eq(masterAssistants.roleKey, wantedRoleKey))
+          .limit(1)
+      : await db.select().from(masterAssistants)
+          .where(eq(masterAssistants.name, assistantName || 'Social Media Manager'))
+          .limit(1);
 
     // Resolve the Visual Strategy → Media Source priority list. Validate/de-dupe what the
     // client sent; null when nothing was sent so the resolver applies its DEFAULT_ORDER.

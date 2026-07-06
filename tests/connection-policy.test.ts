@@ -64,9 +64,20 @@ check('allowedServiceNames filters the catalog for the assistant', () => {
 check('relevantConnectorsForAssistant returns social connectors with no DB rows', () => {
     // Regression: social connectors only become DB rows after OAuth, so the UI must
     // still surface them for a fresh Social Media Manager (was showing "none relevant").
-    const a = { roleKey: 'social_media', role: 'The Social Media Manager' };
+    const a = { roleKey: 'social_media_manager', role: 'The Social Media Manager' };
     const result = relevantConnectorsForAssistant(a);
     assert.deepEqual(result.sort(), ['facebook', 'instagram', 'linkedin', 'threads', 'tiktok', 'twitter', 'x', 'youtube']);
+});
+
+check('Un-migrated legacy roleKey degrades gracefully via the display-name fallback', () => {
+    // The retired 'social_media' key was merged into 'social_media_manager'
+    // (db/rolekey-namespace-unification.sql) and is no longer in ROLE_CONNECTIONS.
+    // A row that somehow escaped the migration must still resolve its social scope
+    // from the display name — never widen to unrestricted, never throw.
+    const a = { roleKey: 'social_media', role: 'The Social Media Manager' };
+    assert.equal(isServiceAllowedForAssistant('Instagram', a), true);
+    assert.equal(isServiceAllowedForAssistant('BambooHR', a), false); // still scoped, not fail-open
+    assert.deepEqual(relevantConnectorsForAssistant(a).sort(), ['facebook', 'instagram', 'linkedin', 'threads', 'tiktok', 'twitter', 'x', 'youtube']);
 });
 
 check('relevantConnectorsForAssistant excludes social for a CRM role', () => {

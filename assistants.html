@@ -63,15 +63,34 @@
 </div>
 
 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 pb-4 w-full">
-  <!-- Grid -->
-  <div id="assistants-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pb-4">
-    <!-- Loading skeleton -->
-    <div class="col-span-full flex justify-center py-20 text-gray-400" id="grid-loading">
-      <div class="flex flex-col items-center gap-3">
-        <div class="w-8 h-8 border-4 border-gray-200 border-t-emerald-600 rounded-full animate-spin"></div>
-        <p class="text-sm">Loading assistants…</p>
+
+  <!-- Live Assistants -->
+  <div id="live-section">
+    <div class="flex items-baseline gap-3 mb-6">
+      <h2 class="text-2xl font-extrabold text-gray-900">Live Assistants</h2>
+      <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 text-xs font-bold uppercase tracking-wider"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>Hire today</span>
+    </div>
+    <div id="assistants-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pb-4">
+      <!-- Loading skeleton -->
+      <div class="col-span-full flex justify-center py-20 text-gray-400" id="grid-loading">
+        <div class="flex flex-col items-center gap-3">
+          <div class="w-8 h-8 border-4 border-gray-200 border-t-emerald-600 rounded-full animate-spin"></div>
+          <p class="text-sm">Loading assistants…</p>
+        </div>
       </div>
     </div>
+  </div>
+
+  <!-- Coming Soon: intent capture — vote for what we build next -->
+  <div id="coming-soon-section" class="hidden mt-12">
+    <div class="mb-6">
+      <div class="flex items-baseline gap-3">
+        <h2 class="text-2xl font-extrabold text-gray-900">Coming Soon</h2>
+        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full bg-orange-100 text-orange-700 text-xs font-bold uppercase tracking-wider">In the workshop</span>
+      </div>
+      <p class="text-sm text-gray-500 mt-1.5">Vote for the role you need next — the most-wanted assistants get built first.</p>
+    </div>
+    <div id="coming-soon-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pb-4"></div>
   </div>
 
   <!-- Empty state -->
@@ -346,10 +365,18 @@ function renderCard(a) {
         </div>`;
     }
 
+    // Intent-capture card: faded, "Coming Soon" badge, and a Vote button in place of Hire.
+    const voted = _votedRoles().includes(a.roleKey);
+    const voteBtn = voted
+      ? `<button disabled data-vote-btn="${escHtml(a.roleKey)}"
+           class="bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-semibold cursor-default">Voted! ✅</button>`
+      : `<button onclick="voteForRole('${escAttr(a.roleKey)}')" data-vote-btn="${escHtml(a.roleKey)}"
+           class="bg-gray-900 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-800 transition">Vote for this</button>`;
+
     return `
-      <div class="assistant-card bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col relative hover:shadow-md transition-shadow">
+      <div class="assistant-card bg-white rounded-2xl border border-gray-300 border-dashed shadow-sm overflow-hidden flex flex-col relative hover:shadow-md transition-shadow">
         <div class="absolute top-4 right-4 bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-xs font-bold border border-orange-200">Coming Soon</div>
-        <div class="p-6 flex-grow">
+        <div class="p-6 flex-grow opacity-70">
           <div class="w-12 h-12 rounded-xl ${iconClass} flex items-center justify-center mb-4">${iconSvg}</div>
           <h2 class="text-xl font-bold text-gray-900 mb-1 pr-28">${escHtml(a.name)}</h2>
           <p class="text-sm text-gray-500 font-medium mb-3">${escHtml(a.category)}</p>
@@ -364,13 +391,16 @@ function renderCard(a) {
           <p class="text-xs text-gray-400 mt-1">${pct}% of ${required} tasks needed to unlock</p>
         </div>
         <div class="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center gap-3">
-          <span class="text-xs font-medium text-gray-500">Notify me when live</span>
-          <button onclick="_notifyToggle(${a.id}, ${notifyOn})"
-            data-notify-btn="${a.id}"
-            class="${notifyOn ? 'bg-emerald-500' : 'bg-gray-300'} relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
-            role="switch" aria-checked="${notifyOn}">
-            <span class="${notifyOn ? 'translate-x-5' : 'translate-x-0'} pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
-          </button>
+          <div class="flex items-center gap-2">
+            <button onclick="_notifyToggle(${a.id}, ${notifyOn})"
+              data-notify-btn="${a.id}"
+              class="${notifyOn ? 'bg-emerald-500' : 'bg-gray-300'} relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+              role="switch" aria-checked="${notifyOn}">
+              <span class="${notifyOn ? 'translate-x-5' : 'translate-x-0'} pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+            </button>
+            <span class="text-xs font-medium text-gray-500">Notify me</span>
+          </div>
+          ${voteBtn}
         </div>
       </div>`;
   }
@@ -404,7 +434,10 @@ function renderCard(a) {
 }
 
 function renderGrid() {
-  const grid = document.getElementById('assistants-grid');
+  const liveSection = document.getElementById('live-section');
+  const liveGrid = document.getElementById('assistants-grid');
+  const soonSection = document.getElementById('coming-soon-section');
+  const soonGrid = document.getElementById('coming-soon-grid');
   const empty = document.getElementById('grid-empty');
   let list = _all;
 
@@ -422,13 +455,15 @@ function renderGrid() {
 
   document.getElementById('grid-loading')?.classList.add('hidden');
 
-  if (list.length === 0) {
-    grid.innerHTML = '';
-    empty.classList.remove('hidden');
-    return;
-  }
-  empty.classList.add('hidden');
-  grid.innerHTML = list.map(renderCard).join('');
+  // Split into the two catalog sections: live roles vs coming-soon (intent capture).
+  const live = list.filter(a => !a.comingSoon);
+  const soon = list.filter(a => a.comingSoon);
+
+  liveGrid.innerHTML = live.map(renderCard).join('');
+  soonGrid.innerHTML = soon.map(renderCard).join('');
+  liveSection.classList.toggle('hidden', live.length === 0);
+  soonSection.classList.toggle('hidden', soon.length === 0);
+  empty.classList.toggle('hidden', list.length !== 0);
 }
 
 // ── Load data ────────────────────────────────────────────────────────────────
@@ -471,6 +506,42 @@ async function _notifyToggle(masterAssistantId, currentlyOn) {
   } catch { /* ignore */ }
 }
 window._notifyToggle = _notifyToggle;
+
+// ── Intent capture: "Vote for this" on Coming Soon cards ────────────────────
+// Same fire-and-forget tracker as workspace.html (US-AUD-3.1.1 SC5). page-events
+// requires a session, so guest votes only persist locally — that is fine for
+// launch; logged-in votes land in page_events as { event: 'assistant_vote', roleKey }.
+window._trackPageEvent = window._trackPageEvent || function (pagePath, metadata) {
+  fetch('/.netlify/functions/page-events', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ pagePath: pagePath || window.location.pathname, metadata: metadata || {} }),
+  }).catch(() => { /* non-critical */ });
+};
+
+function _votedRoles() {
+  try {
+    const v = JSON.parse(localStorage.getItem('voted_roles'));
+    return Array.isArray(v) ? v : [];
+  } catch { return []; }
+}
+
+function voteForRole(roleKey) {
+  const voted = _votedRoles();
+  if (voted.includes(roleKey)) return; // no vote spamming
+  voted.push(roleKey);
+  try { localStorage.setItem('voted_roles', JSON.stringify(voted)); } catch { /* private mode */ }
+
+  window._trackPageEvent(window.location.pathname, { event: 'assistant_vote', roleKey });
+
+  // Flip the button in place — instant feedback without a full re-render.
+  document.querySelectorAll(`[data-vote-btn="${roleKey}"]`).forEach(btn => {
+    btn.textContent = 'Voted! ✅';
+    btn.disabled = true;
+    btn.className = 'bg-emerald-600 text-white px-4 py-2 rounded-lg text-sm font-semibold cursor-default';
+  });
+}
+window.voteForRole = voteForRole;
 
 // ── Category tabs ────────────────────────────────────────────────────────────
 document.getElementById('category-tabs').addEventListener('click', e => {

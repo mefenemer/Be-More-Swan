@@ -1,41 +1,36 @@
 # TODO — Tech Debt
 
-## Unify the dual roleKey namespaces (legacy `social_media` / `paid_ads` fallback maps)
+## ✅ Unify the dual roleKey namespaces (legacy `social_media` / `paid_ads` fallback maps) — DONE (Launch Sprint, Jul 2026)
 
-Two roleKey vocabularies coexist for the same assistants:
+The two roleKey vocabularies (legacy seed keys like `social_media` vs the canonical
+`db/seed-catalog.ts` keys like `social_media_manager`) are unified. Canonical namespace:
+**the `db/seed-catalog.ts` catalog keys.**
 
-- **Live seed keys** from `seed/data/master_assistants.json` — short names such as
-  `social_media`, `community_mgmt`, `paid_ads`.
-- **Catalog keys** from `db/seed-catalog.ts` — long names such as
-  `social_media_manager` (plus the 20 Tier 1 keys like `lead_qualifier`,
-  `crm_enricher`, `tier1_support_agent`).
+Cleanup plan execution:
 
-Because both can appear in `masterAssistants.roleKey`, every role-keyed policy map has
-to list both spellings, and code that hard-codes one silently misses assistants seeded
-with the other (this already bit us once: cron jobs matching only
-`social_media_manager` matched ZERO live assistants — see the header comment in
-`src/constants/roles.ts`).
-
-Current fallback/duplication sites:
-
-- `src/utils/connection-map.ts` → `ROLE_CONNECTIONS` lists the live keys
-  (`social_media`, `community_mgmt`, `paid_ads`) *and* the catalog keys, plus a
-  display-name keyword fallback (`categoriesFromName`) for rows with no roleKey at all.
-- `src/constants/roles.ts` → `SMM_ROLE_KEY` / `SMM_ROLE_KEYS` carry both spellings for
-  the Social Media Manager.
-- `netlify/functions/chat-orchestrator.ts` → `ROUTES` is keyed by catalog keys only;
-  live-seed-keyed assistants fall through to `defaultRoute`.
-
-### Cleanup plan (future)
-
-1. Pick one canonical namespace (the `db/seed-catalog.ts` catalog keys — they are the
-   ones new code targets) and write a data migration mapping live seed keys →
-   catalog keys in `masterAssistants.roleKey`.
-2. Re-export `seed/data/master_assistants.json` with the canonical keys so re-seeding
-   doesn't reintroduce the drift.
-3. Delete the duplicate entries in `ROLE_CONNECTIONS` and collapse `SMM_ROLE_KEYS`
-   back to a single key.
-4. Keep (or then remove) the keyword fallback in `connection-map.ts` once no
-   pre-roleKey assistants remain.
-5. Consider moving the connection policy to the DB (category column on the connector
-   catalog + role→category table) as already noted in `connection-map.ts`.
+- [x] **1. Data migration** — `db/rolekey-namespace-unification.sql` maps every legacy key
+      to its catalog twin, merging duplicate `master_assistants` rows (repoints
+      `ai_assistants.master_assistant_id`, rewrites `ai_assistants.configuration->>'type'`,
+      dedupes waitlist/features/versions) and renames where no twin exists.
+      Legacy-only roles with no catalog equivalent keep their single key but are marked
+      `is_active = FALSE` so the launch catalog shows exactly the 20 catalog roles:
+      `paid_ads`, `data_entry`, `custom`.
+      ⚠ **Operational step: apply the SQL manually** (like db/gamification.sql — no db:push);
+      verification queries are at the bottom of the file.
+- [x] **2. Seed re-export** — `seed/data/master_assistants.json` now carries the canonical
+      keys (full 20-role catalog + the 3 deactivated legacy roles), so `npm run db:seed`
+      cannot reintroduce the drift. The stale hardcoded list in `db/seed.ts` was removed.
+- [x] **3. Constants collapsed** — `SMM_ROLE_KEY = 'social_media_manager'`,
+      `SMM_ROLE_KEYS = [SMM_ROLE_KEY]` (array kept so `inArray` call sites are stable);
+      `ROLE_CONNECTIONS` no longer lists `social_media` / `community_mgmt` duplicates.
+      `onboarding.ts` now resolves the master row by roleKey (display-name → key map)
+      instead of by name; workspace's generate-post filter matches the canonical key.
+- [x] **4. Keyword fallback kept** — `categoriesFromName` in `connection-map.ts` stays until
+      no pre-roleKey assistants remain; a regression test pins that an un-migrated
+      `social_media` row still resolves social scope from its display name (fail-closed,
+      never unrestricted). Frontend: unknown roleKeys fall back to the
+      `social_media_manager` entry in both `assistant-dashboard-registry.js` (existing)
+      and `assistant-role-content.js` (legacy aliases added) — no undefined errors.
+- [ ] **5. (Deferred) Move the connection policy to the DB** — category column on the
+      connector catalog + role→category table, as noted in `connection-map.ts`. Do this
+      when non-social connectors ship.
