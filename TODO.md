@@ -15,8 +15,10 @@ Cleanup plan execution:
       Legacy-only roles with no catalog equivalent keep their single key but are marked
       `is_active = FALSE` so the launch catalog shows exactly the 20 catalog roles:
       `paid_ads`, `data_entry`, `custom`.
-      Applied to the database on 2026-07-06 (verification queries are at the bottom of
-      the file if the state ever needs re-checking).
+      ⚠ **Operational step: apply the SQL manually** (like db/gamification.sql — no db:push).
+      The 2026-07-06 "applied" note was premature — staging still has the legacy
+      `social_media` row alongside `social_media_manager` (issue #166: SMM listed twice
+      on the Hire New Assistant page). Verification queries are at the bottom of the file.
 - [x] **2. Seed re-export** — `seed/data/master_assistants.json` now carries the canonical
       keys (full 20-role catalog + the 3 deactivated legacy roles), so `npm run db:seed`
       cannot reintroduce the drift. The stale hardcoded list in `db/seed.ts` was removed.
