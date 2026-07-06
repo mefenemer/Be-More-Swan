@@ -16,6 +16,22 @@
     </div>
   </div>
 
+  <!-- Issue #170: "Ask Your Team Anything" moved here from the workspace header now that
+       each assistant has its own chat (assistant-chat.html) — this is the one, overarching
+       entry point for platform-wide help, not tied to any single assistant. Try this before
+       raising a Support Ticket. -->
+  <div class="mb-8 rounded-2xl border border-emerald-100 bg-emerald-50/60 p-6 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div>
+      <h2 class="text-lg font-bold text-gray-900">Ask Your Team Anything</h2>
+      <p class="text-gray-600 text-sm mt-1">More than a chatbot — ask a question or get something done across your whole team of assistants. Try this before opening a support ticket.</p>
+    </div>
+    <button type="button" id="nav-ask-team" aria-label="Ask your team anything" title="Ask your team anything"
+      class="inline-flex items-center gap-2 px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-sm shrink-0">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+      Ask Your Team
+    </button>
+  </div>
+
   <div class="border-b border-gray-200 mb-8">
     <nav class="-mb-px flex space-x-8" aria-label="Tabs">
       <button id="tab-btn-docs" class="tab-btn whitespace-nowrap py-4 px-1 border-b-2 font-bold text-sm border-emerald-500 text-emerald-600">Knowledge Base</button>

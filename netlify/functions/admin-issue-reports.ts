@@ -257,6 +257,40 @@ export const handler: Handler = async (event) => {
         return json(200, { ok: true, devMergeStatus: 'queued' });
     }
 
+    // ── POST ?action=request-conflict-fix: investigate + auto-resolve a failed merge ─
+    // Super-admin only. Only valid once a merge attempt has actually failed. The local
+    // watcher (see scripts/dev-issue-fixer.mjs) claims it, merges the base branch into
+    // the fix branch, resolves any conflicts with Claude Code, pushes, and retries the
+    // PR merge — same as a normal merge, success moves the issue on to "Fixed & Ready
+    // to Test".
+    if (event.httpMethod === 'POST' && action === 'request-conflict-fix' && id) {
+        if (admin.role !== 'super_admin') {
+            return json(403, { error: 'Investigating a merge conflict requires super-admin privilege.' });
+        }
+        const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
+        if (!issue) return json(404, { error: 'Issue not found.' });
+        if (!issue.devPrUrl) return json(400, { error: 'This issue has no pull request to merge.' });
+        if (issue.devMergeStatus !== 'failed') {
+            return json(409, { error: 'Only a failed merge can be investigated.' });
+        }
+
+        await db.update(issueReports).set({
+            devMergeStatus: 'conflict_queued',
+            devMergeResult: null,
+            updatedAt: new Date(),
+        }).where(eq(issueReports.id, id));
+
+        await db.insert(issueReportMessages).values({
+            issueId: id,
+            authorType: 'admin',
+            authorId: admin.id,
+            body: "🔧 We've queued an investigation into the merge conflict — the AI developer will resolve it and merge to staging.",
+            status: null,
+        });
+
+        return json(200, { ok: true, devMergeStatus: 'conflict_queued' });
+    }
+
     // ── POST ?action=request-merge-all: queue every mergeable fix PR at once ──────
     // Bulk version of ?action=request-merge, for the "Fix In Progress" tab. Queues a
     // merge for every issue whose fix PR is ready (or whose last merge failed), skipping

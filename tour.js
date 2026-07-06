@@ -158,15 +158,16 @@
       placement: 'bottom',
     },
     {
-      targets: ['#nav-report-issue'],
-      title: 'Spotted Something Off?',
-      copy: 'Report an Issue sends what you found straight to the team — along with where you were when you found it — so fixes land fast.',
+      view: 'help',
+      targets: ['#nav-ask-team'],
+      title: 'Ask Your Team Anything',
+      copy: 'Need help and would rather not wait on a human? Ask here first — press ⌘K anywhere, or click this button. It spans your whole team of assistants, not just one.',
       placement: 'bottom',
     },
     {
-      targets: ['#nav-ask-team'],
-      title: 'Ask Your Team Anything',
-      copy: 'The fastest way to get things done: press ⌘K anywhere (or click here) and just ask. Your whole team of assistants is one keystroke away.',
+      targets: ['#nav-report-issue'],
+      title: 'Spotted Something Off?',
+      copy: 'Report an Issue sends what you found straight to the team — along with where you were when you found it — so fixes land fast.',
       placement: 'bottom',
     },
     {
