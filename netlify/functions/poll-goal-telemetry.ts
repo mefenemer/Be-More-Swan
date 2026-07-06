@@ -16,7 +16,7 @@ import { and, eq, sql, inArray, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     goals, goalTelemetry, aiAssistants, systemConnections,
-    scheduledPosts, leads, plans, masterPlans, notifications,
+    scheduledPosts, leads, plans, masterPlans, notifications, assistantRecords,
 } from '../../db/schema';
 import { getSecret } from '../../src/utils/vault';
 import { connectionDisplayName, getGoalMetric, pollCadenceHours, RUN_RATE_THRESHOLDS } from '../../src/config/goal-metrics';
@@ -92,6 +92,25 @@ async function fetchLinkedInFollowers(db: any, conn: LiConn): Promise<FetchResul
     return { value: typeof net.body?.firstDegreeSize === 'number' ? net.body.firstDegreeSize : null, disconnected: false };
 }
 
+/**
+ * Count of this assistant's records of a given type (optionally status-filtered) — the measurement
+ * behind the non-social role outcome metrics (Leads Scored, Tickets Resolved, …). Always org- AND
+ * assistant-scoped so one assistant's goal never counts another's records.
+ */
+async function countRecords(db: any, goal: any, recordType: string, statusFilter?: any): Promise<FetchResult> {
+    const where = [
+        eq(assistantRecords.aiAssistantId, goal.assistantId),
+        eq(assistantRecords.organisationId, goal.organisationId),
+        eq(assistantRecords.recordType, recordType),
+    ];
+    if (statusFilter) where.push(statusFilter);
+    const [row] = await db
+        .select({ v: sql<number>`count(*)::int` })
+        .from(assistantRecords)
+        .where(and(...where));
+    return { value: Number(row?.v ?? 0), disconnected: false };
+}
+
 async function fetchMetric(
     db: any,
     goal: any,
@@ -144,6 +163,38 @@ async function fetchMetric(
                 .from(scheduledPosts)
                 .where(and(eq(scheduledPosts.assistantId, goal.assistantId), eq(scheduledPosts.status, 'published')));
             return { value: Number(row?.v ?? 0), disconnected: false };
+        }
+
+        // ── Non-social role outcomes — counted from assistant_records (the Data Hub database). ──
+        // recordType is CHECK-constrained to lead|enrichment|meeting|invoice|ticket; status is a
+        // freeform lifecycle label, so status-filtered metrics match loosely (ILIKE), never enum.
+        case 'leads_scored':
+            return countRecords(db, goal, 'lead');
+        case 'records_enriched':
+            return countRecords(db, goal, 'enrichment');
+        case 'meetings_summarized':
+            return countRecords(db, goal, 'meeting');
+        case 'invoices_chased':
+            return countRecords(db, goal, 'invoice');
+        case 'tickets_resolved':
+            return countRecords(db, goal, 'ticket', sql`status ILIKE '%resolv%'`);
+        case 'cash_recovered': {
+            // Sum the numeric amount stashed in data (invoices.0.amount or a top-level amount) for
+            // invoices that have reached a settled/paid/recovered stage. Coerced defensively so a
+            // missing or non-numeric amount contributes 0 rather than erroring the whole poll.
+            const [row] = await db.execute(sql`
+                SELECT COALESCE(SUM(
+                    COALESCE(
+                        NULLIF(regexp_replace(COALESCE(data #>> '{invoices,0,amount}', data ->> 'amount', '0'), '[^0-9.]', '', 'g'), '')::numeric,
+                        0
+                    )
+                ), 0)::float AS v
+                FROM assistant_records
+                WHERE ai_assistant_id = ${goal.assistantId}
+                  AND organisation_id = ${goal.organisationId}
+                  AND record_type = 'invoice'
+                  AND status ILIKE ANY (ARRAY['%paid%', '%settled%', '%recover%'])`);
+            return { value: Number((row as any)?.v ?? 0), disconnected: false };
         }
         default:
             return { value: null, disconnected: false };

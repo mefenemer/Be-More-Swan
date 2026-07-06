@@ -19,7 +19,10 @@ export type MetricDirection = 'increase' | 'decrease';
 //   awareness  → top of funnel  (Followers, Reach, Impressions…)
 //   engagement → middle         (Engagement rate, Saves, Shares…)
 //   action     → bottom         (Leads, Link clicks, Profile visits…)
-export type GoalObjective = 'awareness' | 'engagement' | 'action';
+//   outcome    → the business result a non-social assistant is measured on (invoices chased,
+//                tickets resolved, records enriched, meetings summarised). These roles have no
+//                marketing funnel, so their metrics group under a single plain "Business Outcome".
+export type GoalObjective = 'awareness' | 'engagement' | 'action' | 'outcome';
 
 export interface GoalObjectiveDef { key: GoalObjective; label: string; }
 
@@ -27,6 +30,7 @@ export const GOAL_OBJECTIVES: readonly GoalObjectiveDef[] = [
     { key: 'awareness',  label: 'Grow my Audience (Awareness)' },
     { key: 'engagement', label: 'Increase Interaction (Engagement)' },
     { key: 'action',     label: 'Drive Traffic (Action)' },
+    { key: 'outcome',    label: 'Business Outcome' },
 ];
 
 /**
@@ -61,6 +65,13 @@ export interface GoalMetric {
     direction: MetricDirection;
     /** US-01 AC1.2 — the funnel objective this metric measures (drives the Objective→Metric dropdown). */
     objective: GoalObjective;
+    /**
+     * roleKeys (db/seed-catalog.ts) this metric is offered to. Omit for the general marketing
+     * metrics that apply to any content assistant — those default to the Social Media Manager and
+     * the legacy fallback. A metric with `roles` is ONLY shown to assistants of those roles, so an
+     * Accounts Receivable Clerk never sees "Instagram Followers" and vice-versa.
+     */
+    roles?: string[];
     /** One-line helper shown under the dropdown. */
     description: string;
     /**
@@ -126,17 +137,6 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         realism: { maxDailyDelta: 5000, maxDailyGrowthPct: 0.25 },
     },
     {
-        key: 'qualified_leads',
-        label: 'Qualified Leads',
-        unit: 'leads',
-        source: 'internal',
-        direction: 'increase',
-        objective: 'action',
-        description: 'Qualified leads captured in your Be More Swan workspace.',
-        available: true,
-        realism: { maxDailyDelta: 1000, maxDailyGrowthPct: 1 },
-    },
-    {
         key: 'content_published',
         label: 'Content Published',
         unit: 'posts',
@@ -147,6 +147,95 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         available: true,
         // Bounded by posting cadence — dozens a day is already aggressive.
         realism: { maxDailyDelta: 50 },
+    },
+
+    // ── Non-social role outcomes (objective: 'outcome') ─────────────────────────
+    // Counted from assistant_records (db/schema.ts) — the local database each Data Hub role
+    // builds as it works. See poll-goal-telemetry.ts for the measurement queries.
+    {
+        key: 'qualified_leads',
+        label: 'Qualified Leads',
+        unit: 'leads',
+        source: 'internal',
+        direction: 'increase',
+        objective: 'outcome',
+        roles: ['lead_qualifier'],
+        description: 'Leads that converted to a won state in your Be More Swan workspace.',
+        available: true,
+        realism: { maxDailyDelta: 1000, maxDailyGrowthPct: 1 },
+    },
+    {
+        key: 'leads_scored',
+        label: 'Leads Scored',
+        unit: 'leads',
+        source: 'internal',
+        direction: 'increase',
+        objective: 'outcome',
+        roles: ['lead_qualifier'],
+        description: 'Inbound leads this assistant has researched and scored.',
+        available: true,
+        realism: { maxDailyDelta: 2000, maxDailyGrowthPct: 1 },
+    },
+    {
+        key: 'records_enriched',
+        label: 'Records Enriched',
+        unit: 'records',
+        source: 'internal',
+        direction: 'increase',
+        objective: 'outcome',
+        roles: ['crm_enricher'],
+        description: 'CRM records this assistant has researched and brought up to date.',
+        available: true,
+        realism: { maxDailyDelta: 2000, maxDailyGrowthPct: 1 },
+    },
+    {
+        key: 'tickets_resolved',
+        label: 'Tickets Resolved',
+        unit: 'tickets',
+        source: 'internal',
+        direction: 'increase',
+        objective: 'outcome',
+        roles: ['tier1_support_agent'],
+        description: 'Support queries this assistant resolved end-to-end without escalation.',
+        available: true,
+        realism: { maxDailyDelta: 2000, maxDailyGrowthPct: 1 },
+    },
+    {
+        key: 'meetings_summarized',
+        label: 'Meetings Summarised',
+        unit: 'meetings',
+        source: 'internal',
+        direction: 'increase',
+        objective: 'outcome',
+        roles: ['meeting_note_taker'],
+        description: 'Transcripts and notes this assistant has turned into structured summaries.',
+        available: true,
+        realism: { maxDailyDelta: 200 },
+    },
+    {
+        key: 'invoices_chased',
+        label: 'Invoices Chased',
+        unit: 'invoices',
+        source: 'internal',
+        direction: 'increase',
+        objective: 'outcome',
+        roles: ['accounts_receivable_clerk'],
+        description: 'Overdue invoices this assistant has followed up on your behalf.',
+        available: true,
+        realism: { maxDailyDelta: 1000 },
+    },
+    {
+        key: 'cash_recovered',
+        label: 'Cash Recovered',
+        unit: '£',
+        source: 'internal',
+        direction: 'increase',
+        objective: 'outcome',
+        roles: ['accounts_receivable_clerk'],
+        description: 'Value of overdue invoices settled after this assistant chased them.',
+        available: true,
+        // No sensible daily ceiling on £ recovered — depends entirely on invoice sizes.
+        realism: { maxDailyGrowthPct: 5 },
     },
 ];
 
@@ -188,6 +277,31 @@ export function availableMetricsForConnections(connectedServices: readonly strin
     return GOAL_METRICS.filter(m =>
         m.source === 'internal' || (m.connectionService != null && connected.has(m.connectionService)),
     );
+}
+
+// roleKeys treated as the generic "social content" assistant: the marketing metrics (Instagram /
+// LinkedIn / Content Published) are offered to these and to legacy assistants (no roleKey), which
+// are all Social Media Managers. Everything else only sees metrics that name its role in `roles`.
+const SOCIAL_DEFAULT_ROLES = new Set(['social_media_manager']);
+
+/**
+ * The metrics a specific assistant may pick, filtered by BOTH its role and its active connections.
+ *   - A metric with `roles` is offered only to assistants of those roles.
+ *   - A metric without `roles` is a general marketing metric, offered to the Social Media Manager
+ *     and to legacy assistants (roleKey null/unknown → treated as social).
+ *   - Connection-backed metrics still require that service to be connected (AC1.1.3).
+ */
+export function availableMetricsForRole(
+    roleKey: string | null | undefined,
+    connectedServices: readonly string[],
+): GoalMetric[] {
+    const connected = new Set(connectedServices.map(s => s.toLowerCase()));
+    const isSocialDefault = !roleKey || SOCIAL_DEFAULT_ROLES.has(roleKey);
+    return GOAL_METRICS.filter(m => {
+        const roleOk = m.roles ? m.roles.includes(roleKey as string) : isSocialDefault;
+        if (!roleOk) return false;
+        return m.source === 'internal' || (m.connectionService != null && connected.has(m.connectionService));
+    });
 }
 
 /** US-01 AC1.2 — the objectives that actually have at least one measurable metric for this workspace. */
@@ -234,6 +348,16 @@ export const FUNNEL_DIAGNOSTICS: Record<GoalObjective, FunnelDiagnostic> = {
             'clearer call-to-action placement',
             'stronger, more compelling call-to-action wording',
             'lead-magnet promotion to give viewers a reason to click',
+        ],
+    },
+    // Business outcome (non-social roles — invoices chased, tickets resolved, records enriched…).
+    // There is no marketing funnel to pull; recovery is about throughput and coverage of the queue.
+    outcome: {
+        stage: 'business outcome (throughput)',
+        focus: [
+            'increasing the volume of items worked through the queue',
+            'reducing the share of items left unactioned or escalated',
+            'importing more source data so the assistant has more to process',
         ],
     },
 };

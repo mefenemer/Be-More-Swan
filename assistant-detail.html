@@ -135,7 +135,7 @@
         <span id="kb-tab-label">Knowledge Base</span>
       </button>
       <button type="button" data-maintab="goals"         class="main-tab-btn">Goals</button>
-      <button type="button" data-maintab="automation"    class="main-tab-btn">Automation</button>
+      <button type="button" id="maintab-btn-automation" data-maintab="automation" class="main-tab-btn">Automation</button>
       <button type="button" data-maintab="meetings"      class="main-tab-btn" title="Progress Reviews: the Kick Off Meeting and your check-in history. Rules — including Learned Directives — live in the Assistant Profile.">Progress Reviews
         <span id="meetings-kickoff-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-blue-100 text-blue-700 text-[10px] font-black rounded-full inline-flex items-center justify-center">!</span>
       </button>
@@ -148,10 +148,12 @@
 
   <!-- Primary action bar (Epic 2.1) — the two most common intents, front and centre. -->
   <div class="flex flex-col sm:flex-row gap-3 mb-6">
-    <button type="button" onclick="window.openGeneratePostSheet && window.openGeneratePostSheet()"
+    <!-- Primary action — label + handler set per role by _applyDashboardRegistry (generate_post
+         opens the post sheet for social; chat opens the assistant's chat intake for Data Hub roles). -->
+    <button type="button" id="btn-primary-action" onclick="window.openGeneratePostSheet && window.openGeneratePostSheet()"
       class="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-extrabold text-white bg-emerald-600 hover:bg-emerald-700 rounded-2xl shadow-md transition-colors cursor-pointer">
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-      Assign New Task
+      <span id="primary-action-label">Assign New Task</span>
     </button>
     <button type="button" id="btn-review-pending" onclick="window._activateMainTab('review-queue')"
       class="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-extrabold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-2xl shadow-sm transition-colors cursor-pointer">
@@ -466,7 +468,7 @@
       <div class="flex items-center justify-between gap-4">
         <div>
           <p class="text-sm font-bold text-gray-900">Operational Setup</p>
-          <p class="text-xs text-gray-500 mt-0.5">Trigger, content source and posting schedule</p>
+          <p id="opcard-operation-sub" class="text-xs text-gray-500 mt-0.5">Trigger, content source and posting schedule</p>
         </div>
         <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
       </div>
@@ -475,8 +477,8 @@
     <button type="button" data-tab="strategy" class="detail-tab-btn brief-card w-full text-left">
       <div class="flex items-center justify-between gap-4">
         <div>
-          <p class="text-sm font-bold text-gray-900">Creative Brief</p>
-          <p class="text-xs text-gray-500 mt-0.5">Objective, audience, voice and content pillars</p>
+          <p id="opcard-strategy-title" class="text-sm font-bold text-gray-900">Creative Brief</p>
+          <p id="opcard-strategy-sub" class="text-xs text-gray-500 mt-0.5">Objective, audience, voice and content pillars</p>
         </div>
         <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
       </div>
@@ -486,7 +488,7 @@
       <div class="flex items-center justify-between gap-4">
         <div>
           <p class="text-sm font-bold text-gray-900">Connections</p>
-          <p class="text-xs text-gray-500 mt-0.5">Social platforms and integrations</p>
+          <p class="text-xs text-gray-500 mt-0.5">Platforms, apps and integrations this assistant uses</p>
         </div>
         <svg class="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
       </div>
@@ -541,7 +543,7 @@
         </div>
         <textarea id="edit_problem" rows="3"
           class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm resize-none overflow-hidden"
-          placeholder="E.g., I spend hours every week researching topics, writing captions, and remembering to schedule posts…"></textarea>
+          placeholder="E.g., I lose hours every week to repetitive work — research, drafting, chasing and follow-ups — that I'd rather hand off…"></textarea>
         <p class="text-xs text-gray-400 mt-1">Be as specific as possible — the more detail, the smarter your assistant.</p>
       </div>
     </div>
@@ -682,7 +684,7 @@
       </div>
     </div>
 
-    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+    <div id="module-creative-objective" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="mb-6">
         <h3 class="text-lg font-bold text-gray-900">Objective &amp; Message</h3>
         <p class="text-sm text-gray-500 mt-1">The strategic goal and core message that drives everything your assistant produces.</p>
@@ -724,7 +726,7 @@
         </div>
       </div>
     </div>
-    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+    <div id="module-creative-audience" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="mb-6">
         <h3 class="text-lg font-bold text-gray-900">Audience &amp; Voice</h3>
         <p class="text-sm text-gray-500 mt-1">Who your assistant speaks to, and how it sounds.</p>
@@ -764,7 +766,7 @@
     </div>
 
     <!-- Sales Context — feeds the auto-responder objection playbook + DM reply drafting -->
-    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+    <div id="module-sales-context" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="mb-6">
         <h3 class="text-lg font-bold text-gray-900">Sales Context</h3>
         <p class="text-sm text-gray-500 mt-1">What you sell and how to handle common objections. Used to draft replies to sales enquiries in comments and DMs.</p>
@@ -789,7 +791,7 @@
     </div>
 
     <!-- Reference / Visual Style — parity with onboarding "Link to Reference Style / Visual Assets" -->
-    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+    <div id="module-reference-style" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="mb-5">
         <h3 class="text-lg font-bold text-gray-900">Reference &amp; Visual Style</h3>
         <p class="text-sm text-gray-500 mt-1">A link to a post you love or a folder of brand guidelines. Your assistant studies it to match your look and voice.</p>
@@ -945,7 +947,7 @@
         <label for="edit_strict_rules" class="block text-sm font-bold text-gray-700 mb-1">Strict Rules</label>
         <textarea id="edit_strict_rules" rows="6"
           class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm resize-y"
-          placeholder="- NEVER use emojis in LinkedIn posts&#10;- ALWAYS end Facebook posts with a question&#10;- NEVER mention competitor brand names"></textarea>
+          placeholder="- ALWAYS use British English spelling&#10;- NEVER promise pricing, discounts or delivery dates you haven't given it&#10;- NEVER mention competitor brand names"></textarea>
         <p class="text-xs text-gray-400 mt-1">Start each rule with a dash (–). Use MUST DO / NEVER DO for clarity.</p>
       </div>
     </div>
@@ -955,7 +957,7 @@
       <div class="flex items-start justify-between mb-2 gap-4 flex-wrap">
         <div>
           <h3 class="text-lg font-bold text-gray-900">Assistant Rules</h3>
-          <p class="text-sm text-gray-500 mt-1">Custom rules for this assistant. Anything you add here is written directly into this assistant's brief and shapes every post it creates.</p>
+          <p class="text-sm text-gray-500 mt-1">Custom rules for this assistant. Anything you add here is written directly into this assistant's brief and shapes everything it produces.</p>
         </div>
         <div class="flex items-center gap-3 shrink-0">
           <span id="assistant-rules-status" class="text-sm font-bold text-emerald-600 transition-all"></span>
@@ -968,7 +970,7 @@
       </div>
       <div class="mb-5 flex items-start gap-2 text-xs text-emerald-700 bg-emerald-50/70 border border-emerald-100 rounded-lg px-3 py-2">
         <svg class="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        <span>These rules are added to this assistant's brief. Changes apply to all future posts this assistant generates.</span>
+        <span>These rules are added to this assistant's brief. Changes apply to everything this assistant does from now on.</span>
       </div>
       <div id="assistant-rules-editor" class="space-y-6">
         <div class="h-10 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading rules…</div>
@@ -1046,8 +1048,8 @@
       <p class=”text-xs text-gray-400 mt-1”>Switch on the disclosures above to combine them (one per line), or write your own wording. Saved automatically. Once saved, the “AI disclosure text configured” item in the Kick Off checklist is ticked. It can't be cleared while the assistant is active.</p>
     </div>
 
-    <!-- Autonomous Content Fallback (US5) -->
-    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+    <!-- Autonomous Content Fallback (US5) — social-only; toggled by AssistantDashboardRegistry -->
+    <div id="module-empty-library" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="flex items-start justify-between gap-4">
         <div>
           <h3 class="text-lg font-bold text-gray-900">Empty-Library Draft Fallback</h3>
@@ -1094,8 +1096,9 @@
       <p id="assistant-notif-prefs-saved" class="hidden text-xs text-emerald-600 font-semibold mt-3">✓ Preference saved</p>
     </div>
 
-    <!-- Review-alert cadence: how urgently to chase approvals for this assistant's drafts -->
-    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+    <!-- Review-alert cadence: how urgently to chase approvals for this assistant's drafts.
+         Review Queue / drafts only exist for social roles → toggled by AssistantDashboardRegistry. -->
+    <div id="module-review-cadence" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="mb-4">
         <h3 class="text-lg font-bold text-gray-900">Review alerts</h3>
         <p class="text-sm text-gray-500 mt-1">How urgently should we chase you when this assistant's drafts are waiting for approval?</p>

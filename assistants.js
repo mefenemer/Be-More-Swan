@@ -1120,6 +1120,63 @@ function _applyDashboardRegistry(data) {
     toggle('module-posting-schedule', mods.hasPostingSchedule !== false);
     toggle('module-social-strategy', mods.hasSocialStrategy !== false);
 
+    // Overview — the post-based Impact & ROI card is meaningless for non-social roles (they publish
+    // nothing); their role KPI cards carry the Overview instead. A dataset flag makes the hide stick
+    // even though _fetchAndRenderAssistantMetrics runs asynchronously and would otherwise un-hide it.
+    const impactOn = mods.hasImpactRoi !== false;
+    const metricsCard = document.getElementById('assistant-metrics-card');
+    if (metricsCard) {
+        if (impactOn) { delete metricsCard.dataset.roleHidden; }
+        else { metricsCard.dataset.roleHidden = '1'; metricsCard.classList.add('hidden'); }
+    }
+    // Profile ▸ Creative Brief — the marketing cards (objective/CTA, audience/voice/pillars,
+    // reference style) and the Sales Context playbook. Business Information & the AI-disclosure
+    // cards stay for every role, so the tab itself is never hidden.
+    toggle('module-creative-objective', mods.hasCreativeBrief !== false);
+    toggle('module-creative-audience', mods.hasCreativeBrief !== false);
+    toggle('module-reference-style', mods.hasCreativeBrief !== false);
+    toggle('module-sales-context', mods.hasSalesContext !== false);
+    // Profile ▸ Brand Safety ▸ Empty-Library Draft Fallback, and Notifications ▸ Review-alert
+    // cadence — both only make sense when there's a posting Review Queue.
+    toggle('module-empty-library', mods.hasEmptyLibraryFallback !== false);
+    toggle('module-review-cadence', mods.hasReviewCadence !== false);
+    // Operating File nav-card subtitles — when the social cards inside are hidden, the subtitle
+    // shouldn't promise them. Creative Brief collapses to just Business Knowledge for these roles.
+    if (mods.hasCreativeBrief === false) {
+        setText('opcard-strategy-title', 'Brand Knowledge');
+        setText('opcard-strategy-sub', 'Business information and brand context your assistant applies');
+    }
+    if (mods.hasPostingSchedule === false) {
+        setText('opcard-operation-sub', 'Trigger and content source');
+    }
+
+    // Automation main tab (autonomous posting + media sources) — entirely post/media-centric.
+    const showAutomation = mods.hasContentAutomation !== false;
+    toggle('maintab-btn-automation', showAutomation);
+    // If the active tab is being hidden, fall back to Overview so the page never lands on a blank tab.
+    if (!showAutomation) {
+        const autoBtn = document.getElementById('maintab-btn-automation');
+        if (autoBtn && autoBtn.classList.contains('active-tab') && typeof window._activateMainTab === 'function') {
+            window._activateMainTab('overview');
+        }
+    }
+
+    // Overview primary action — relabel + rebind by role. 'chat' opens the assistant's chat intake
+    // (how Data Hub roles receive work); anything else keeps the post-generation sheet.
+    const pa = cfg.primaryAction;
+    if (pa) {
+        const label = document.getElementById('primary-action-label');
+        if (label) label.textContent = pa.label || 'Assign New Task';
+        const btn = document.getElementById('btn-primary-action');
+        if (btn) {
+            if (pa.kind === 'chat') {
+                btn.onclick = () => { window.location.href = `assistant-chat.html?assistantId=${data.id}`; };
+            } else {
+                btn.onclick = () => { if (window.openGeneratePostSheet) window.openGeneratePostSheet(); };
+            }
+        }
+    }
+
     // Internal Data Hub tab — role-specific local database (Leads / Ledger / …).
     // No hubTab in the registry entry (e.g. social_media_manager, and therefore
     // every legacy assistant via the fallback) = no tab.
@@ -2044,6 +2101,8 @@ async function _prefetchDetailRqBadge(assistantId) {
 async function _fetchAndRenderAssistantMetrics(assistantId, period = 'week') {
     const card = document.getElementById('assistant-metrics-card');
     if (!card) return;
+    // Non-social roles have no post-based ROI — the registry marks the card role-hidden; respect it.
+    if (card.dataset.roleHidden === '1') return;
 
     // Period toggle — mirrors the dashboard hero's This Week / This Month tabs so
     // the hours/£ figures here are always comparable with whichever view the
@@ -2064,6 +2123,7 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'week') {
         // completed task runs (see get-assistant-metrics.ts), so a task-driven assistant that
         // hasn't created any scheduledPosts yet still surfaces the card once it's done work.
         if (!d.totalCreated && !d.hoursSaved) return; // no recorded activity yet — keep card hidden
+        if (card.dataset.roleHidden === '1') return;  // role-hidden set while we were awaiting — respect it
 
         card.classList.remove('hidden');
 
@@ -3205,14 +3265,35 @@ window._openReviewMeeting = function () {
     }, 80);
 };
 
+// Objective labels — mirror GOAL_OBJECTIVES in src/config/goal-metrics.ts. 'outcome' is the
+// non-social bucket (invoices chased, tickets resolved…) that replaces the marketing funnel.
+const _GOAL_OBJECTIVE_LABELS = {
+    awareness: 'Grow my Audience (Awareness)',
+    engagement: 'Increase Interaction (Engagement)',
+    action: 'Drive Traffic (Action)',
+    outcome: 'Business Outcome',
+};
+const _GOAL_OBJECTIVE_ORDER = ['awareness', 'engagement', 'action', 'outcome'];
+
 // US-01 AC1.1/AC1.2 — the Objective dropdown drives which metrics appear; AC1.1.3 still gates the
-// metrics by which apps are actually connected. Selecting an objective instantly (re)populates the
-// Metric dropdown with that objective's measurable metrics.
+// metrics by which apps are actually connected. The objectives shown are derived from the metrics
+// this assistant's ROLE actually has (server-filtered), so a non-social role sees only "Business
+// Outcome" and a social role sees the funnel objectives it can measure. Selecting an objective
+// instantly (re)populates the Metric dropdown.
 function _populateGoalMetricDropdown() {
     const objSel = document.getElementById('goal-objective');
     const sel = document.getElementById('goal-metric');
     const help = document.getElementById('goal-metric-help');
     if (!objSel || !sel) return;
+
+    // Rebuild the objective options from the objectives present in this role's available metrics.
+    const present = _GOAL_OBJECTIVE_ORDER.filter(o => _goalMetrics.some(m => m.objective === o));
+    const single = present.length === 1;
+    objSel.innerHTML = (single
+        ? '' // no placeholder when there's only one objective — it's preselected below
+        : '<option value="">Select an objective…</option>'
+    ) + present.map(o => `<option value="${o}">${_escapeHtml(_GOAL_OBJECTIVE_LABELS[o] || o)}</option>`).join('');
+    if (single) objSel.value = present[0];
 
     const renderMetrics = () => {
         const objective = objSel.value;

@@ -10,7 +10,19 @@
  * Usage (assistants.js → _applyDashboardRegistry):
  *   const cfg = window.AssistantDashboardRegistry.get(roleKey);
  *   cfg.kpis     // → [{ label, title, desc }, …4] injected into #kpi-N-label/-title/-desc
- *   cfg.modules  // → { hasReviewQueue, hasPostingSchedule, hasSocialStrategy }
+ *   cfg.modules  // → per-role UI toggles. Anything omitted defaults to SHOWN (!== false), so the
+ *                //   social_media_manager entry can leave them all out; non-social roles set the
+ *                //   social-only ones false. Keys:
+ *                //     hasReviewQueue, hasPostingSchedule, hasSocialStrategy   (original 3)
+ *                //     hasImpactRoi            → Overview "Impact & ROI" card (post-based ROI)
+ *                //     hasCreativeBrief        → Profile ▸ Creative Brief social cards
+ *                //                               (Objective & Message, Audience & Voice, Reference)
+ *                //     hasSalesContext         → Profile ▸ Creative Brief ▸ Sales Context card
+ *                //     hasContentAutomation    → the Automation main tab (post/media autonomy)
+ *                //     hasEmptyLibraryFallback → Profile ▸ Brand Safety ▸ Empty-Library Draft card
+ *                //     hasReviewCadence        → Profile ▸ Notifications ▸ Review-alert cadence card
+ *   cfg.primaryAction // → Overview's primary button { label, kind }. kind: 'generate_post' opens the
+ *                //   post sheet (social); 'chat' opens the assistant's chat intake (Data Hub roles).
  *   cfg.hubTab   // → optional Internal Data Hub tab config (assistant-data-hub.js);
  *                //   absent = no Data Hub tab for this role (e.g. social_media_manager)
  *   cfg.kbTab    // → optional Knowledge Base tab config (assistant-knowledge-base.js);
@@ -57,6 +69,7 @@
         },
       ],
       modules: { hasReviewQueue: true, hasPostingSchedule: true, hasSocialStrategy: true },
+      primaryAction: { label: 'Assign New Task', kind: 'generate_post' },
     },
 
     lead_qualifier: {
@@ -82,7 +95,12 @@
           desc: 'Lead records updated with scores, firmographics and suggested next steps.',
         },
       ],
-      modules: { hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false },
+      modules: {
+        hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false,
+        hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
+        hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+      },
+      primaryAction: { label: 'Score New Leads', kind: 'chat' },
       hubTab: {
         id: 'datahub',
         label: 'Leads',
@@ -123,7 +141,12 @@
           desc: 'Accounts flagged for your personal attention — disputes or repeat non-payers.',
         },
       ],
-      modules: { hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false },
+      modules: {
+        hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false,
+        hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
+        hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+      },
+      primaryAction: { label: 'Chase an Invoice', kind: 'chat' },
       hubTab: {
         id: 'datahub',
         label: 'Ledger',
@@ -164,7 +187,12 @@
           desc: 'Conversations handed to a person — below your confidence threshold or by request.',
         },
       ],
-      modules: { hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false },
+      modules: {
+        hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false,
+        hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
+        hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+      },
+      primaryAction: { label: 'Handle a Query', kind: 'chat' },
       hubTab: {
         id: 'datahub',
         label: 'Tickets',
@@ -210,7 +238,12 @@
           desc: 'How reliably enriched values survive your review without correction.',
         },
       ],
-      modules: { hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false },
+      modules: {
+        hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false,
+        hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
+        hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+      },
+      primaryAction: { label: 'Enrich Records', kind: 'chat' },
       hubTab: {
         id: 'datahub',
         label: 'Database',
@@ -251,7 +284,12 @@
           desc: 'Action items pushed into your task tool of choice, ready to work.',
         },
       ],
-      modules: { hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false },
+      modules: {
+        hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false,
+        hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
+        hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+      },
+      primaryAction: { label: 'Summarise a Meeting', kind: 'chat' },
       hubTab: {
         id: 'datahub',
         label: 'Meeting Notes',

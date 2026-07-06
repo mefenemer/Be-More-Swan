@@ -12,14 +12,14 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, desc, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { goals, aiAssistants, systemConnections } from '../../db/schema';
+import { goals, aiAssistants, masterAssistants, systemConnections } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { normalizeMediaSources } from '../../src/utils/media-sources';
 import { monthlyAllowance } from '../../src/utils/ai-credits';
 import {
     assessGoalRealism,
-    availableMetricsForConnections,
+    availableMetricsForRole,
     getGoalMetric,
     isValidMetricKey,
     tierAllows,
@@ -52,6 +52,17 @@ async function assertOwnedAssistant(db: any, assistantId: number, orgId: number)
         .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId)))
         .limit(1);
     return !!row;
+}
+
+/** The master-catalog roleKey for an assistant (null for legacy assistants with no master row). */
+async function assistantRoleKey(db: any, assistantId: number, orgId: number): Promise<string | null> {
+    const [row] = await db
+        .select({ roleKey: masterAssistants.roleKey })
+        .from(aiAssistants)
+        .leftJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
+        .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId)))
+        .limit(1);
+    return (row?.roleKey as string | null) ?? null;
 }
 
 export const handler: Handler = async (event) => {
@@ -89,12 +100,13 @@ export const handler: Handler = async (event) => {
             .orderBy(desc(goals.isPrimary), desc(goals.createdAt));
 
         const services = await connectedServices(db, orgId);
+        const roleKey = await assistantRoleKey(db, assistantId, orgId);
         const tierKey = await getActiveTierKeyByOrg(db, orgId);
         const planMonthlyCredits = await monthlyAllowance(db, orgId);
 
         return json(200, {
             goals: rows,
-            availableMetrics: availableMetricsForConnections(services),
+            availableMetrics: availableMetricsForRole(roleKey, services),
             autonomousGoalSeeking: assistant.autonomousGoalSeeking,
             autonomousMediaEnabled: assistant.autonomousMediaEnabled,
             autonomousMediaMonthlyCap: assistant.autonomousMediaMonthlyCap,
@@ -144,10 +156,20 @@ export const handler: Handler = async (event) => {
             return json(404, { error: 'Assistant not found.' });
         }
 
-        // AC1.1.3 — connection-backed metrics require the relevant service to be connected.
+        // The metric must belong to this assistant's role — stops a client from setting an
+        // "Instagram Followers" goal on an Accounts Receivable Clerk (and vice-versa).
+        const roleKey = await assistantRoleKey(db, Number(assistantId), orgId);
+        const services = await connectedServices(db, orgId);
         const metric = getGoalMetric(metricKey)!;
+        if (!availableMetricsForRole(roleKey, services).some(m => m.key === metricKey)) {
+            // Connection-backed metric that simply isn't connected yet → the more specific 409 below.
+            if (!(metric.source === 'connection' && metric.connectionService && !services.includes(metric.connectionService))) {
+                return json(400, { error: `"${metric.label}" is not available for this assistant.` });
+            }
+        }
+
+        // AC1.1.3 — connection-backed metrics require the relevant service to be connected.
         if (metric.source === 'connection' && metric.connectionService) {
-            const services = await connectedServices(db, orgId);
             if (!services.includes(metric.connectionService)) {
                 return json(409, {
                     error: `Connect ${metric.connectionService} before setting a "${metric.label}" goal.`,

@@ -9,6 +9,7 @@ import {
     getGoalMetric,
     isValidMetricKey,
     availableMetricsForConnections,
+    availableMetricsForRole,
     assessGoalRealism,
     objectivesWithMetrics,
     GOAL_OBJECTIVES,
@@ -59,6 +60,26 @@ check('AC1.1.3 — internal metrics always available, connection metrics gated',
     assert.ok(availableMetricsForConnections(['INSTAGRAM']).map(m => m.key).includes('instagram_reach'));
 });
 
+check('role filtering — each assistant only sees metrics for its role', () => {
+    // Social Media Manager (and legacy null role) get the marketing metrics, not the role outcomes.
+    const smm = availableMetricsForRole('social_media_manager', ['instagram']).map(m => m.key);
+    assert.ok(smm.includes('instagram_followers') && smm.includes('content_published'));
+    assert.ok(!smm.includes('invoices_chased') && !smm.includes('qualified_leads'), 'SMM sees no role-scoped metrics');
+
+    const legacy = availableMetricsForRole(null, []).map(m => m.key);
+    assert.ok(legacy.includes('content_published'), 'legacy (no roleKey) is treated as social');
+
+    // Accounts Receivable Clerk sees only its outcome metrics — never Instagram, even if connected.
+    const arc = availableMetricsForRole('accounts_receivable_clerk', ['instagram']).map(m => m.key);
+    assert.deepEqual(arc.sort(), ['cash_recovered', 'invoices_chased']);
+
+    // Lead Qualifier sees its two lead metrics; Support sees tickets; nobody bleeds across.
+    assert.deepEqual(availableMetricsForRole('lead_qualifier', []).map(m => m.key).sort(), ['leads_scored', 'qualified_leads']);
+    assert.deepEqual(availableMetricsForRole('tier1_support_agent', []).map(m => m.key), ['tickets_resolved']);
+    assert.deepEqual(availableMetricsForRole('crm_enricher', []).map(m => m.key), ['records_enriched']);
+    assert.deepEqual(availableMetricsForRole('meeting_note_taker', []).map(m => m.key), ['meetings_summarized']);
+});
+
 check('AC: realism — blocks the egregiously impossible, allows the ambitious', () => {
     // The user's example: +10,000,000 followers in 1 day → blocked.
     const absurd = assessGoalRealism({ metricKey: 'instagram_followers', targetValue: 10_000_000, targetDate: inDays(1) });
@@ -84,9 +105,10 @@ check('AC: realism — blocks the egregiously impossible, allows the ambitious',
     assert.equal(assessGoalRealism({ metricKey: 'content_published', targetValue: 100, targetDate: inDays(90) }).ok, true);
 });
 
-check('US-01 AC1.1/AC1.2 — every metric maps to one of the three objectives', () => {
+check('US-01 AC1.1/AC1.2 — every metric maps to a defined objective', () => {
     const validObjectives = new Set(GOAL_OBJECTIVES.map(o => o.key));
-    assert.equal(GOAL_OBJECTIVES.length, 3);
+    // awareness / engagement / action (social funnel) + outcome (non-social role results).
+    assert.equal(GOAL_OBJECTIVES.length, 4);
     for (const m of GOAL_METRICS) assert.ok(validObjectives.has(m.objective), `${m.key} has invalid objective`);
 });
 
@@ -95,8 +117,10 @@ check('US-01 AC1.2 — objective→metric filtering respects connections', () =>
     const ig = availableMetricsForConnections(['instagram']);
     assert.ok(ig.some(m => m.objective === 'engagement' && m.key === 'instagram_engagement_rate'));
     // With nothing connected, only internal metrics remain — so only their objectives are offered.
+    // qualified_leads + the role-outcome metrics are internal 'outcome' metrics; content_published
+    // is an internal 'awareness' metric. Engagement is IG-only, so it drops when IG is absent.
     const offline = objectivesWithMetrics([]);
-    assert.ok(offline.includes('action'), 'qualified_leads (internal) keeps the action objective available');
+    assert.ok(offline.includes('outcome'), 'internal outcome metrics keep the outcome objective available');
     assert.ok(!offline.includes('engagement'), 'engagement has no internal metric, so it drops when IG is absent');
 });
 
@@ -112,10 +136,13 @@ check('US-02 AC2.2–2.4 — funnel diagnostics steer fixes by the metric\'s fun
     assert.ok(reach.focus.join(' ').match(/Reels|hook/i), 'awareness should mention format/hook levers');
     // AC2.3 — an Interaction metric (engagement rate) → conversational / utility levers.
     assert.ok(/Interaction/.test(funnelDiagnosticFor('instagram_engagement_rate')!.stage));
-    // AC2.4 — a Traffic/Action metric (leads) → CTA / lead-magnet levers.
+    // AC2.4 — a Traffic/Action metric (link clicks) → CTA / lead-magnet levers.
+    const clicks = funnelDiagnosticFor('content_published')!;
+    assert.ok(/Awareness/.test(clicks.stage), 'content_published is an awareness metric');
+    // Business-outcome metric (qualified_leads is now an outcome metric) → throughput levers.
     const leads = funnelDiagnosticFor('qualified_leads')!;
-    assert.ok(/Action/.test(leads.stage));
-    assert.ok(leads.focus.join(' ').match(/call-to-action|lead-magnet/i), 'action should mention CTA/lead-magnet levers');
+    assert.ok(/outcome/i.test(leads.stage));
+    assert.ok(leads.focus.join(' ').match(/queue|volume|throughput|import/i), 'outcome should mention throughput/queue levers');
     // Unknown metric → no diagnostic (graceful).
     assert.equal(funnelDiagnosticFor('made_up'), undefined);
 });
