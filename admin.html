@@ -1520,37 +1520,83 @@
         <div id="ir-runner-alert" class="hidden mb-5 space-y-3"></div>
 
         <!-- Runner modal -->
+        <!-- Collapsible-section chrome: hide the native disclosure triangle and rotate our own
+             chevron when a <details> is open. Scoped to this modal so it can't leak elsewhere. -->
+        <style>
+          #ir-runner-modal details > summary { list-style: none; }
+          #ir-runner-modal details > summary::-webkit-details-marker { display: none; }
+          #ir-runner-modal details[open] > summary .ir-chev { transform: rotate(180deg); }
+          #ir-runner-modal .ir-chev { transition: transform .15s ease; }
+        </style>
         <div id="ir-runner-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 space-y-5" onclick="event.stopPropagation()">
-            <div class="flex items-center justify-between">
+          <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden" style="max-height:90vh" onclick="event.stopPropagation()">
+            <!-- Header stays put while the sections below scroll -->
+            <div class="flex items-center justify-between gap-3 p-6 pb-4 border-b border-gray-100 shrink-0">
               <div>
                 <h3 class="text-base font-extrabold text-gray-900">AI Auto-Fix Runners</h3>
                 <p class="text-xs text-gray-500 mt-0.5">Each runner is a local process on a developer machine. Start several — they share the queue and never grab the same issue.</p>
               </div>
-              <button onclick="closeRunnerModal()" class="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+              <button onclick="closeRunnerModal()" class="text-gray-400 hover:text-gray-600 text-xl leading-none shrink-0">✕</button>
             </div>
 
-            <div id="ir-runner-queue-status" class="rounded-xl border p-3 text-sm"></div>
+            <!-- Scrollable body — each section collapses so the modal never outgrows the screen -->
+            <div class="flex-1 overflow-y-auto p-4 space-y-2.5">
 
-            <!-- Paused runner (Claude session limit) — populated by loadRunnerStatus() -->
-            <div id="ir-runner-paused" class="hidden space-y-3"></div>
+              <details open class="group border border-gray-200 rounded-xl overflow-hidden">
+                <summary class="flex items-center justify-between cursor-pointer select-none px-3.5 py-2.5 bg-gray-50 hover:bg-gray-100 transition text-xs font-bold uppercase tracking-wide text-gray-500">
+                  <span>Queue status</span>
+                  <span class="ir-chev text-gray-400">▾</span>
+                </summary>
+                <div class="p-3">
+                  <div id="ir-runner-queue-status" class="rounded-xl border p-3 text-sm"></div>
+                </div>
+              </details>
 
-            <div class="space-y-2">
-              <p class="text-xs font-bold uppercase text-gray-400">Start the runner — paste in your terminal</p>
-              <div class="relative">
-                <pre id="ir-runner-cmd" class="bg-gray-900 text-emerald-300 text-xs rounded-xl p-4 pr-20 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed"></pre>
-                <button onclick="copyRunnerCmd()" id="ir-runner-copy-btn" class="absolute top-2 right-2 px-2.5 py-1 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-lg transition">Copy</button>
-              </div>
+              <details open class="group border border-gray-200 rounded-xl overflow-hidden">
+                <summary class="flex items-center justify-between cursor-pointer select-none px-3.5 py-2.5 bg-gray-50 hover:bg-gray-100 transition text-xs font-bold uppercase tracking-wide text-gray-500">
+                  <span>Runner state &amp; account</span>
+                  <span class="ir-chev text-gray-400">▾</span>
+                </summary>
+                <div class="p-3">
+                  <!-- Paused runner (Claude session limit) — populated by loadRunnerStatus() -->
+                  <div id="ir-runner-paused" class="hidden space-y-3"></div>
+                </div>
+              </details>
+
+              <details class="group border border-gray-200 rounded-xl overflow-hidden">
+                <summary class="flex items-center justify-between cursor-pointer select-none px-3.5 py-2.5 bg-gray-50 hover:bg-gray-100 transition text-xs font-bold uppercase tracking-wide text-gray-500">
+                  <span>Start the runner</span>
+                  <span class="ir-chev text-gray-400">▾</span>
+                </summary>
+                <div class="p-3 space-y-2">
+                  <p class="text-xs text-gray-500">Paste in your terminal on the developer machine.</p>
+                  <div class="relative">
+                    <pre id="ir-runner-cmd" class="bg-gray-900 text-emerald-300 text-xs rounded-xl p-4 pr-20 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed"></pre>
+                    <button onclick="copyRunnerCmd()" id="ir-runner-copy-btn" class="absolute top-2 right-2 px-2.5 py-1 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-lg transition">Copy</button>
+                  </div>
+                </div>
+              </details>
+
+              <details class="group border border-gray-200 rounded-xl overflow-hidden">
+                <summary class="flex items-center justify-between cursor-pointer select-none px-3.5 py-2.5 bg-gray-50 hover:bg-gray-100 transition text-xs font-bold uppercase tracking-wide text-gray-500">
+                  <span>Required env vars</span>
+                  <span class="ir-chev text-gray-400">▾</span>
+                </summary>
+                <div class="p-3">
+                  <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 space-y-1">
+                    <p><code class="font-mono">AURA_BASE_URL</code> — staging URL, e.g. <code class="font-mono">https://staging--bemoreswan.netlify.app</code></p>
+                    <p><code class="font-mono">DEV_HANDOFF_TOKEN</code> — must match the Netlify env var of the same name</p>
+                    <p><code class="font-mono">RUNNER_ID</code> <span class="text-amber-700/70">(optional)</span> — a name for this runner shown against the issue it's fixing; defaults to <code class="font-mono">host:pid</code></p>
+                  </div>
+                </div>
+              </details>
+
             </div>
 
-            <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 space-y-1">
-              <p class="font-bold">Required env vars (set in <code class="bg-amber-100 px-1 rounded">scripts/.env</code> or your shell)</p>
-              <p><code class="font-mono">AURA_BASE_URL</code> — staging URL, e.g. <code class="font-mono">https://staging--bemoreswan.netlify.app</code></p>
-              <p><code class="font-mono">DEV_HANDOFF_TOKEN</code> — must match the Netlify env var of the same name</p>
-              <p><code class="font-mono">RUNNER_ID</code> <span class="text-amber-700/70">(optional)</span> — a name for this runner shown against the issue it's fixing; defaults to <code class="font-mono">host:pid</code></p>
+            <!-- Footer stays put too -->
+            <div class="p-4 pt-3 border-t border-gray-100 shrink-0">
+              <button onclick="closeRunnerModal()" class="w-full py-2.5 text-sm font-bold bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition">Close</button>
             </div>
-
-            <button onclick="closeRunnerModal()" class="w-full py-2.5 text-sm font-bold bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition">Close</button>
           </div>
         </div>
 

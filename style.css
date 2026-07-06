@@ -1679,6 +1679,9 @@
   .border-red-500 {
     border-color: var(--color-red-500);
   }
+  .border-rose-400 {
+    border-color: var(--color-rose-400);
+  }
   .border-sky-300 {
     border-color: var(--color-sky-300);
   }
