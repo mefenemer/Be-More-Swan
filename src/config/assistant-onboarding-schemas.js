@@ -281,4 +281,47 @@
       },
     ],
   };
+
+  // ── Shared "Operational Set-Up" step ───────────────────────────────────────────
+  // Every role — like the Social Media Manager — captures WHEN it runs and WHERE its
+  // input comes from during onboarding. Appended as the final step of each role's schema
+  // below so the answers land in onboardingContext under trigger_type / content_source —
+  // the same keys the detail page's "Operational Setup" section and "Your Onboarding
+  // Answers" summary read (see assistants.js _detailHydrate / _renderOnboardingSummary).
+  const OPERATIONAL_SETUP_STEP = {
+    title: 'Operational set-up',
+    description: 'Tell us when this assistant should run and where its work comes from.',
+    fields: [
+      {
+        key: 'trigger_type',
+        label: 'Trigger / Schedule',
+        type: 'radio',
+        required: true,
+        options: [
+          { value: 'on_demand', label: 'On Demand', description: 'I trigger it manually when I need it.' },
+          { value: 'reactive', label: 'Reactive', description: 'It runs automatically when a new brief or data arrives.' },
+          { value: 'scheduled', label: 'Scheduled', description: 'It runs on a fixed recurring schedule.' },
+        ],
+      },
+      {
+        key: 'content_source',
+        label: 'Content Source',
+        type: 'radio',
+        required: true,
+        options: [
+          { value: 'client_provided', label: 'Client Provided', description: 'I supply the drafts, data or notes — the assistant processes it.' },
+          { value: 'assistant_generated', label: 'Assistant Generated', description: 'The assistant researches and produces everything independently.' },
+          { value: 'hybrid', label: 'Hybrid', description: 'A mix — I provide direction, the assistant fills the gaps.' },
+        ],
+      },
+    ],
+  };
+
+  // Append a fresh copy of the operational step to every role's schema (deep-cloned so the
+  // roles never share a mutable step object).
+  Object.keys(window.AssistantOnboardingSchemas).forEach((roleKey) => {
+    window.AssistantOnboardingSchemas[roleKey].push(
+      JSON.parse(JSON.stringify(OPERATIONAL_SETUP_STEP))
+    );
+  });
 })();

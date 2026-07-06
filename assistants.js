@@ -1024,6 +1024,12 @@ function _renderOnboardingSummary(data) {
     const MISSING = '⚠️ [MISSING - PLEASE UPDATE]';
     const clean = (v) => (v === null || v === undefined) ? '' : String(v).trim();
 
+    // Roles onboarded via the schema wizard capture Trigger/Content Source under the shared
+    // Operational Set-Up step (surfaced by schemaRows below), so drop the legacy inputs-based
+    // rows for them to avoid showing each answer twice.
+    const schemaFields = _roleSchemaFields(data && data.roleKey);
+    const hasSchemaOperational = schemaFields.some(f => _OPERATIONAL_SCHEMA_KEYS.has(f.key));
+
     const objectiveLabels = { brand_awareness: 'Brand Awareness', lead_generation: 'Lead Generation', direct_sales: 'Direct Sales', community_engagement: 'Community & Engagement' };
     const objective = clean(ctx.primary_objective || inputs.primary_objective);
     const platforms = (Array.isArray(ctx.primary_platforms) && ctx.primary_platforms.length)
@@ -1041,14 +1047,16 @@ function _renderOnboardingSummary(data) {
         ['Tone of Voice', clean(ctx.tone_of_voice)],
         ['Posting Frequency', clean(ctx.posting_frequency)],
         ['Platforms', platforms.map(clean).filter(Boolean).join(', ')],
-        ['Trigger', clean(inputs.triggerText)],
-        ['Content Source', clean(inputs.sourceText)],
+        ...(hasSchemaOperational ? [] : [
+            ['Trigger', clean(inputs.triggerText)],
+            ['Content Source', clean(inputs.sourceText)],
+        ]),
     ].filter(([, v]) => v && v !== MISSING);
 
     // Role-specific answers captured by the schema wizard (assistant-setup.html) live in
     // onboardingContext under the schema's own keys — surface them via the role's
     // AssistantOnboardingSchemas entry so non-social roles aren't shown as "no answers".
-    const schemaRows = _roleSchemaFields(data && data.roleKey)
+    const schemaRows = schemaFields
         .map(f => [f.label || f.key, _formatSchemaAnswer(f, ctx[f.key])])
         .filter(([, v]) => v !== '');
     rows.unshift(...schemaRows);
@@ -1239,6 +1247,11 @@ function _applyDashboardRegistry(data) {
     }
 }
 
+// Onboarding-schema keys for the shared Operational Set-Up step. Both are surfaced through
+// the dedicated "Operational Setup" tab rather than the generic Setup Answers editor, and
+// they replace the legacy configuration.inputs Trigger/Content Source rows in the summary.
+const _OPERATIONAL_SCHEMA_KEYS = new Set(['trigger_type', 'content_source']);
+
 // Flattened field list from the role's schema-driven onboarding definition
 // (src/config/assistant-onboarding-schemas.js) — [] when the role has none
 // (social assistants use the hand-built drawer fields instead).
@@ -1270,7 +1283,10 @@ function _formatSchemaAnswer(field, value) {
 function _renderRoleAnswersEditor(data) {
     const host = document.getElementById('role-answers-editor');
     if (!host) return;
-    const fields = _roleSchemaFields(data.roleKey);
+    // Operational Set-Up answers (trigger_type / content_source) are edited in the dedicated
+    // "Operational Setup" tab, so keep them out of this generic Setup Answers card to avoid a
+    // duplicate editing surface.
+    const fields = _roleSchemaFields(data.roleKey).filter(f => !_OPERATIONAL_SCHEMA_KEYS.has(f.key));
     if (!fields.length) { host.innerHTML = ''; return; }
     const ctx = (data.context && typeof data.context === 'object') ? data.context : {};
     const esc = _escapeHtml;
@@ -1394,8 +1410,10 @@ function _detailHydrate(data) {
             if (r) { r.checked = true; return; }
         }
     };
-    _checkRadio('edit_trigger', inputs.trigger_type, inputs.triggerText);
-    _checkRadio('edit_source', inputs.content_source, inputs.sourceText);
+    // Candidates are tried in order: an in-tab edit (configuration.inputs) wins, then the
+    // original onboarding answer (onboardingContext) captured by the schema wizard.
+    _checkRadio('edit_trigger', inputs.trigger_type, inputs.triggerText, ctx.trigger_type);
+    _checkRadio('edit_source', inputs.content_source, inputs.sourceText, ctx.content_source);
 
     // Platforms are rendered dynamically in the Connections tab — see initAssistantConnections()
 
@@ -1621,6 +1639,11 @@ function _detailCollect(currentData) {
         reference_style_url: document.getElementById('edit_reference_url')?.value || '',
         platform_strategy: _collectPlatformStrategy(currentData.context?.platform_strategy),
         primary_platforms: platforms,
+        // Operational Set-Up — mirror the operation tab's radios back into onboardingContext
+        // (where the schema wizard first stored them) so "Your Onboarding Answers" stays in
+        // sync with in-tab edits. Preserve the existing answer when nothing is selected.
+        trigger_type: document.querySelector('input[name="edit_trigger"]:checked')?.value || currentData.context?.trigger_type || '',
+        content_source: document.querySelector('input[name="edit_source"]:checked')?.value || currentData.context?.content_source || '',
     };
 
     // Role-specific onboarding answers (schema-driven roles) — the drawer's
