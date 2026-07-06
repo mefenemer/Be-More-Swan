@@ -460,6 +460,7 @@ export const handler: Handler = async (event) => {
                 description: issue.description,
                 priority,
                 createdBy: admin.id,
+                submittedBy: issue.userId,
             }).catch((e) => console.error('[admin-issue-reports] roadmap promote failed:', e?.message || e));
         }
 
