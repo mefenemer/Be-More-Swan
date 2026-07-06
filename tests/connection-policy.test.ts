@@ -66,7 +66,7 @@ check('relevantConnectorsForAssistant returns social connectors with no DB rows'
     // still surface them for a fresh Social Media Manager (was showing "none relevant").
     const a = { roleKey: 'social_media', role: 'The Social Media Manager' };
     const result = relevantConnectorsForAssistant(a);
-    assert.deepEqual(result.sort(), ['facebook', 'instagram', 'linkedin', 'twitter', 'x']);
+    assert.deepEqual(result.sort(), ['facebook', 'instagram', 'linkedin', 'threads', 'tiktok', 'twitter', 'x', 'youtube']);
 });
 
 check('relevantConnectorsForAssistant excludes social for a CRM role', () => {
@@ -77,7 +77,7 @@ check('relevantConnectorsForAssistant excludes social for a CRM role', () => {
 
 check('relevantConnectorsForAssistant returns full catalog for unrestricted role', () => {
     const a = { roleKey: 'custom', role: 'My Bespoke Helper' };
-    assert.deepEqual(relevantConnectorsForAssistant(a).sort(), ['facebook', 'instagram', 'linkedin', 'twitter', 'x']);
+    assert.deepEqual(relevantConnectorsForAssistant(a).sort(), ['facebook', 'instagram', 'linkedin', 'threads', 'tiktok', 'twitter', 'x', 'youtube']);
 });
 
 console.log(`\n${passed} checks passed.`);

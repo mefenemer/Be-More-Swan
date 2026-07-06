@@ -833,6 +833,33 @@
           </div>
           <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700"><input type="checkbox" id="edit_x_opt_media" class="rounded text-emerald-700 focus:ring-emerald-700"> <span data-explain="media-placeholders">Include placeholders for media</span></label>
         </div>
+
+        <!-- Threads -->
+        <div id="edit_algo_block_threads" class="hidden algo-block space-y-3 border border-gray-200 rounded-xl p-4">
+          <h4 class="font-bold text-gray-800 text-sm">Threads Strategy</h4>
+          <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700"><input type="checkbox" id="edit_threads_opt_conversational" class="rounded text-emerald-700 focus:ring-emerald-700"> Conversational tone (No hashtags)</label>
+        </div>
+
+        <!-- TikTok -->
+        <div id="edit_algo_block_tiktok" class="hidden algo-block space-y-3 border border-gray-200 rounded-xl p-4">
+          <h4 class="font-bold text-gray-800 text-sm">TikTok Strategy</h4>
+          <input type="text" id="edit_algo_tags_tiktok" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition" placeholder="e.g., #FYP #SmallBusiness">
+          <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700"><input type="checkbox" id="edit_tiktok_opt_hooks" class="rounded text-emerald-700 focus:ring-emerald-700"> Auto-generate viral text hooks for the video</label>
+        </div>
+
+        <!-- YouTube -->
+        <div id="edit_algo_block_youtube" class="hidden algo-block space-y-3 border border-gray-200 rounded-xl p-4">
+          <h4 class="font-bold text-gray-800 text-sm">YouTube Strategy</h4>
+          <div>
+            <label for="edit_youtube_opt_format" class="block text-xs font-semibold text-gray-600 mb-1">Format Preference</label>
+            <select id="edit_youtube_opt_format" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-700 transition">
+              <option value="mix">Mix of Shorts and Long-form</option>
+              <option value="shorts">Prioritize Shorts</option>
+              <option value="longform">Prioritize Long-form</option>
+            </select>
+          </div>
+          <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700"><input type="checkbox" id="edit_youtube_opt_seo" class="rounded text-emerald-700 focus:ring-emerald-700"> Optimize description for YouTube SEO</label>
+        </div>
       </div>
     </div>
     </div><!-- /module-social-strategy -->

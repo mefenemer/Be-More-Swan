@@ -27,6 +27,19 @@
 //   gmail_create_draft         — lead_scoring_card / ticket_triage_view
 //                                → create a Gmail draft (to/subject/body) in the user's
 //                                outbox so they can review it before sending.
+//   threads_create_post        — social_publish_card (social_media_manager)
+//                                → two-step Threads publish: create the media/text
+//                                container, then publish it.
+//   tiktok_upload_video        — social_publish_card (social_media_manager)
+//                                → PULL_FROM_URL direct-post init with the AI caption
+//                                + hashtags; TikTok fetches and processes the video.
+//   youtube_upload_video       — social_publish_card (social_media_manager)
+//                                → resumable upload (Shorts or long-form) with the
+//                                AI-generated SEO title, description and tags.
+//
+// NOTE: the Threads/TikTok/YouTube calls follow the documented API contracts but have
+// NOT been validated against the live APIs (mirrors publish-social-posts.ts) — the
+// structural flow and token injection are exact; verify with real connected accounts.
 //
 // Every path: requireTenant (org-scoped), token via getFreshAccessToken (which silently
 // refreshes an expired access token), and integration_api_calls audit rows (SC6 —
@@ -627,6 +640,186 @@ async function handleGmailCreateDraft(db: Db, userId: number, organisationId: nu
     return json(200, { success: true, message: `Draft${to ? ` to ${to}` : ''} created in Gmail — review it in your Drafts folder before sending.` });
 }
 
+// ── Threads: two-step publish (create the container, then publish it) ─────────
+
+const THREADS_TEXT_MAX = 500;
+
+interface ThreadsPostPayload {
+    caption?: unknown;
+    text?: unknown;
+    hashtags?: unknown;
+    imageUrl?: unknown;
+    mediaUrl?: unknown;
+    conversational?: unknown;
+}
+
+async function handleThreadsCreatePost(db: Db, userId: number, organisationId: number, payload: ThreadsPostPayload) {
+    const caption = typeof payload.text === 'string' && payload.text.trim()
+        ? payload.text.trim()
+        : typeof payload.caption === 'string' ? payload.caption.trim() : '';
+    // Conversational strategy ("no hashtags") drops the hashtag line entirely.
+    const hashtags = payload.conversational ? '' : (typeof payload.hashtags === 'string' ? payload.hashtags.trim() : '');
+    const text = [caption, hashtags].filter(Boolean).join('\n\n').slice(0, THREADS_TEXT_MAX);
+    if (!text) return json(400, { error: 'Nothing to post — the payload has no text.' });
+
+    // tenantId carries the Threads user id captured at connect time (roots /{id}/threads).
+    const { accessToken, tenantId } = await getFreshAccessToken(db, organisationId, 'threads');
+    const threadsUserId = tenantId || 'me';
+    const authHeaders = { Authorization: `Bearer ${accessToken}` };
+
+    // 1. Create the media container (TEXT, or IMAGE when the draft carries an asset).
+    const imageUrl = typeof payload.imageUrl === 'string' && payload.imageUrl.trim()
+        ? payload.imageUrl.trim()
+        : typeof payload.mediaUrl === 'string' ? payload.mediaUrl.trim() : '';
+    const containerParams = new URLSearchParams({ media_type: imageUrl ? 'IMAGE' : 'TEXT', text });
+    if (imageUrl) containerParams.set('image_url', imageUrl);
+    const containerRes = await fetch(`https://graph.threads.net/v1.0/${encodeURIComponent(threadsUserId)}/threads`, {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: containerParams,
+    });
+    await logApiCall(db, { userId, endpoint: 'graph.threads.net/v1.0/threads', httpStatus: containerRes.status });
+    const containerData: { id?: string; error?: { message?: string } } = await containerRes.json().catch(() => ({}));
+    if (!containerRes.ok || !containerData.id) {
+        return json(502, { error: `Threads rejected the post container${containerData.error?.message ? `: ${containerData.error.message}` : '.'}` });
+    }
+
+    // 2. Publish the container.
+    const publishRes = await fetch(`https://graph.threads.net/v1.0/${encodeURIComponent(threadsUserId)}/threads_publish`, {
+        method: 'POST',
+        headers: { ...authHeaders, 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ creation_id: containerData.id }),
+    });
+    await logApiCall(db, { userId, endpoint: 'graph.threads.net/v1.0/threads_publish', httpStatus: publishRes.status });
+    const publishData: { id?: string; error?: { message?: string } } = await publishRes.json().catch(() => ({}));
+    if (!publishRes.ok || !publishData.id) {
+        return json(502, { error: `Threads rejected the publish step${publishData.error?.message ? `: ${publishData.error.message}` : '.'}` });
+    }
+
+    return json(200, { success: true, message: `Post published to Threads${imageUrl ? ' with image' : ''}.`, platformPostId: publishData.id });
+}
+
+// ── TikTok: direct-post a video from a URL with the AI caption + hashtags ─────
+
+const TIKTOK_TITLE_MAX = 2200;
+
+interface TiktokUploadPayload {
+    videoUrl?: unknown;
+    mediaUrl?: unknown;
+    caption?: unknown;
+    hashtags?: unknown;
+}
+
+async function handleTiktokUploadVideo(db: Db, userId: number, organisationId: number, payload: TiktokUploadPayload) {
+    const videoUrl = typeof payload.videoUrl === 'string' && payload.videoUrl.trim()
+        ? payload.videoUrl.trim()
+        : typeof payload.mediaUrl === 'string' ? payload.mediaUrl.trim() : '';
+    if (!/^https:\/\//.test(videoUrl)) return json(400, { error: 'The payload has no https video URL to upload.' });
+
+    const caption = typeof payload.caption === 'string' ? payload.caption.trim() : '';
+    const hashtags = typeof payload.hashtags === 'string' ? payload.hashtags.trim() : '';
+    const title = [caption, hashtags].filter(Boolean).join(' ').slice(0, TIKTOK_TITLE_MAX);
+
+    const { accessToken } = await getFreshAccessToken(db, organisationId, 'tiktok');
+
+    // PULL_FROM_URL: TikTok fetches the video itself and processes it asynchronously —
+    // the domain hosting videoUrl must be verified in the TikTok app settings.
+    const initRes = await fetch('https://open.tiktokapis.com/v2/post/publish/video/init/', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json; charset=UTF-8' },
+        body: JSON.stringify({
+            post_info: {
+                title,
+                privacy_level: 'PUBLIC_TO_EVERYONE',
+            },
+            source_info: {
+                source: 'PULL_FROM_URL',
+                video_url: videoUrl,
+            },
+        }),
+    });
+    await logApiCall(db, { userId, endpoint: 'open.tiktokapis.com/v2/post/publish/video/init', httpStatus: initRes.status });
+    const initData: { data?: { publish_id?: string }; error?: { code?: string; message?: string } } = await initRes.json().catch(() => ({}));
+    const errCode = initData.error?.code;
+    if (!initRes.ok || !initData.data?.publish_id || (errCode && errCode !== 'ok')) {
+        return json(502, { error: `TikTok rejected the upload${initData.error?.message ? `: ${initData.error.message}` : '.'}` });
+    }
+
+    return json(200, { success: true, message: 'Video sent to TikTok — it is processing and will appear on your profile shortly.', platformPostId: initData.data.publish_id });
+}
+
+// ── YouTube: resumable upload (Shorts or long-form) with SEO metadata ─────────
+
+const YOUTUBE_TITLE_MAX = 100;
+const YOUTUBE_DESCRIPTION_MAX = 5000;
+
+interface YoutubeUploadPayload {
+    videoUrl?: unknown;
+    mediaUrl?: unknown;
+    title?: unknown;
+    caption?: unknown;
+    description?: unknown;
+    tags?: unknown;
+    format?: unknown; // 'shorts' | 'longform'
+}
+
+async function handleYoutubeUploadVideo(db: Db, userId: number, organisationId: number, payload: YoutubeUploadPayload) {
+    const videoUrl = typeof payload.videoUrl === 'string' && payload.videoUrl.trim()
+        ? payload.videoUrl.trim()
+        : typeof payload.mediaUrl === 'string' ? payload.mediaUrl.trim() : '';
+    if (!/^https:\/\//.test(videoUrl)) return json(400, { error: 'The payload has no https video URL to upload.' });
+
+    const isShorts = String(payload.format ?? '').toLowerCase() === 'shorts';
+    let title = (typeof payload.title === 'string' && payload.title.trim()
+        ? payload.title.trim()
+        : typeof payload.caption === 'string' ? payload.caption.trim() : '') || 'New video';
+    // YouTube surfaces Shorts by the #Shorts marker in the title or description.
+    if (isShorts && !/#shorts/i.test(title)) title = `${title} #Shorts`.trim();
+    title = title.slice(0, YOUTUBE_TITLE_MAX);
+
+    const description = (typeof payload.description === 'string' ? payload.description.trim() : '').slice(0, YOUTUBE_DESCRIPTION_MAX);
+    const tags = (Array.isArray(payload.tags) ? payload.tags : String(payload.tags ?? '').split(','))
+        .map((t) => String(t).replace(/^#/, '').trim())
+        .filter(Boolean)
+        .slice(0, 30);
+
+    const { accessToken } = await getFreshAccessToken(db, organisationId, 'youtube');
+
+    // 1. Open the resumable upload session with the SEO metadata.
+    const initRes = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json; charset=UTF-8' },
+        body: JSON.stringify({
+            snippet: { title, description, tags, categoryId: '22' }, // 22 = People & Blogs (safe default)
+            status: { privacyStatus: 'public', selfDeclaredMadeForKids: false },
+        }),
+    });
+    await logApiCall(db, { userId, endpoint: 'googleapis.com/upload/youtube/v3/videos', httpStatus: initRes.status });
+    const uploadUrl = initRes.headers.get('location');
+    if (!initRes.ok || !uploadUrl) {
+        const err: { error?: { message?: string } } = await initRes.json().catch(() => ({}));
+        return json(502, { error: `YouTube rejected the upload session${err.error?.message ? `: ${err.error.message}` : '.'}` });
+    }
+
+    // 2. Stream the video bytes into the session.
+    const videoRes = await fetch(videoUrl);
+    if (!videoRes.ok) return json(502, { error: 'Could not fetch the video file from storage — try again or re-attach the video.' });
+    const videoBytes = Buffer.from(await videoRes.arrayBuffer());
+
+    const putRes = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': videoRes.headers.get('content-type') ?? 'video/mp4', 'Content-Length': String(videoBytes.byteLength) },
+        body: videoBytes,
+    });
+    await logApiCall(db, { userId, endpoint: 'googleapis.com/upload/youtube/v3/videos (bytes)', httpStatus: putRes.status });
+    const videoData: { id?: string; error?: { message?: string } } = await putRes.json().catch(() => ({}));
+    if (!putRes.ok || !videoData.id) {
+        return json(502, { error: `YouTube rejected the video upload${videoData.error?.message ? `: ${videoData.error.message}` : '.'}` });
+    }
+
+    return json(200, { success: true, message: `${isShorts ? 'Short' : 'Video'} "${title}" uploaded to YouTube.`, platformPostId: videoData.id });
+}
+
 // ── Handler ───────────────────────────────────────────────────────────────────
 
 export const handler: Handler = async (event) => {
@@ -662,6 +855,12 @@ export const handler: Handler = async (event) => {
                 return await handleIntercomAddNote(db, ctx.userId, ctx.organisationId, payload);
             case 'gmail_create_draft':
                 return await handleGmailCreateDraft(db, ctx.userId, ctx.organisationId, payload);
+            case 'threads_create_post':
+                return await handleThreadsCreatePost(db, ctx.userId, ctx.organisationId, payload);
+            case 'tiktok_upload_video':
+                return await handleTiktokUploadVideo(db, ctx.userId, ctx.organisationId, payload);
+            case 'youtube_upload_video':
+                return await handleYoutubeUploadVideo(db, ctx.userId, ctx.organisationId, payload);
             default:
                 return json(400, { error: `Unknown actionType "${body.actionType ?? ''}".` });
         }

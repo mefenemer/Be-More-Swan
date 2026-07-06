@@ -1,6 +1,7 @@
 // netlify/functions/oauth-integrations.ts
 // External Integrations: universal OAuth 2.0 router for HubSpot, Xero, Slack (Phase 1),
-// Salesforce, Zendesk, Notion (Phase 2) and QuickBooks, Intercom, Gmail (Phase 3).
+// Salesforce, Zendesk, Notion (Phase 2), QuickBooks, Intercom, Gmail (Phase 3) and
+// Threads, TikTok, YouTube (Phase 4 — Social Media Manager publishing).
 //
 // Routed via netlify.toml rewrites so the public URLs are:
 //   GET  /api/oauth/:provider/connect    → 302 to the provider's authorization URL
@@ -18,7 +19,12 @@
 // Client IDs/secrets come from env: HUBSPOT_CLIENT_ID/SECRET, XERO_CLIENT_ID/SECRET,
 // SLACK_CLIENT_ID/SECRET, SALESFORCE_CLIENT_ID/SECRET, ZENDESK_CLIENT_ID/SECRET,
 // NOTION_CLIENT_ID/SECRET, QUICKBOOKS_CLIENT_ID/SECRET, INTERCOM_CLIENT_ID/SECRET,
-// GMAIL_CLIENT_ID/SECRET.
+// GMAIL_CLIENT_ID/SECRET, THREADS_CLIENT_ID/SECRET, TIKTOK_CLIENT_ID/SECRET
+// (TikTok calls these client_key/client_secret), YOUTUBE_CLIENT_ID/SECRET.
+//
+// Threads special case: the code→token exchange yields a short-lived (1h) token that is
+// immediately swapped for a long-lived (~60 day) one; the long-lived token refreshes
+// with ITSELF (th_refresh_token grant), so it is stored in both vault slots.
 //
 // Zendesk special case: its OAuth endpoints live on the customer's own subdomain
 // (https://{subdomain}.zendesk.com), so /api/oauth/zendesk/connect requires a
@@ -61,6 +67,11 @@ const SCOPES: Record<IntegrationProvider, string> = {
     quickbooks: 'com.intuit.quickbooks.accounting',
     intercom: '', // Intercom has no scope param — permissions come from the app's configuration
     gmail: 'https://www.googleapis.com/auth/gmail.compose',
+    // Phase 4 actions: Threads post publishing, TikTok video uploads, YouTube video uploads.
+    threads: 'threads_basic,threads_content_publish',
+    tiktok: 'user.info.basic,video.upload',
+    // youtube.readonly is only for the channel label on the card; uploads need youtube.upload.
+    youtube: 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly',
 };
 
 /**
@@ -205,6 +216,14 @@ export const handler: Handler = async (event) => {
             // access_type=offline + prompt=consent forces Google to issue a refresh token
             // (it only does so on the first consent otherwise).
             authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.gmail)}&access_type=offline&prompt=consent&state=${state}`;
+        } else if (provider === 'threads') {
+            authUrl = `https://threads.net/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.threads)}&state=${state}`;
+        } else if (provider === 'tiktok') {
+            // TikTok for Business names the id param client_key (env still TIKTOK_CLIENT_ID).
+            authUrl = `https://www.tiktok.com/v2/auth/authorize/?response_type=code&client_key=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.tiktok)}&state=${state}`;
+        } else if (provider === 'youtube') {
+            // Same Google consent flow as Gmail — offline + consent forces a refresh token.
+            authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.youtube)}&access_type=offline&prompt=consent&state=${state}`;
         } else {
             authUrl = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=${encodeURIComponent(SCOPES.slack)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
         }
@@ -487,6 +506,124 @@ export const handler: Handler = async (event) => {
                     tenantId: emailAddress,
                     externalAccountName: emailAddress,
                     scopes: tokenData.scope ?? SCOPES.gmail,
+                });
+            } else if (provider === 'threads') {
+                // Step 1: code → short-lived (1h) token.
+                const tokenRes = await fetch('https://graph.threads.net/oauth/access_token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        grant_type: 'authorization_code',
+                        client_id: process.env.THREADS_CLIENT_ID ?? '',
+                        client_secret: process.env.THREADS_CLIENT_SECRET ?? '',
+                        redirect_uri: redirectUri,
+                        code,
+                    }),
+                });
+                const tokenData: { access_token?: string; user_id?: string | number } = await tokenRes.json().catch(() => ({}));
+                if (!tokenData.access_token) return redirect(`/integrations.html?oauth_error=token_exchange&provider=threads`);
+
+                // Step 2: swap for the long-lived (~60 day) token — the only kind worth
+                // vaulting, since the short-lived one dies within the hour.
+                const longRes = await fetch(`https://graph.threads.net/access_token?grant_type=th_exchange_token&client_secret=${encodeURIComponent(process.env.THREADS_CLIENT_SECRET ?? '')}&access_token=${encodeURIComponent(tokenData.access_token)}`);
+                const longData: { access_token?: string; expires_in?: number } = longRes.ok ? await longRes.json().catch(() => ({})) : {};
+                const accessToken = longData.access_token ?? tokenData.access_token;
+                const expiresInSec = longData.access_token ? (longData.expires_in ?? null) : 3600;
+
+                // Profile gives the @username for the card label (best-effort).
+                let username: string | null = null;
+                let threadsUserId: string | null = tokenData.user_id != null ? String(tokenData.user_id) : null;
+                try {
+                    const meRes = await fetch('https://graph.threads.net/v1.0/me?fields=id,username', {
+                        headers: { Authorization: `Bearer ${accessToken}` },
+                    });
+                    const me: { id?: string; username?: string } = meRes.ok ? await meRes.json() : {};
+                    username = me.username ?? null;
+                    threadsUserId = me.id ?? threadsUserId;
+                } catch { /* label only — connection still succeeds */ }
+
+                await saveIntegration(db, {
+                    organisationId, userId, provider: 'threads',
+                    accessToken,
+                    // The long-lived token refreshes with itself (th_refresh_token) —
+                    // store it in the refresh slot so getFreshAccessToken can rotate it.
+                    refreshToken: accessToken,
+                    expiresInSec,
+                    // The Threads user id roots the publish endpoints (/{id}/threads).
+                    tenantId: threadsUserId,
+                    externalAccountName: username ? `@${username}` : null,
+                    scopes: SCOPES.threads,
+                });
+            } else if (provider === 'tiktok') {
+                const tokenRes = await fetch('https://open.tiktokapis.com/v2/oauth/token/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        grant_type: 'authorization_code',
+                        client_key: process.env.TIKTOK_CLIENT_ID ?? '',
+                        client_secret: process.env.TIKTOK_CLIENT_SECRET ?? '',
+                        redirect_uri: redirectUri,
+                        code,
+                    }),
+                });
+                const tokenData: { access_token?: string; refresh_token?: string; expires_in?: number; open_id?: string; scope?: string } = await tokenRes.json().catch(() => ({}));
+                if (!tokenData.access_token) return redirect(`/integrations.html?oauth_error=token_exchange&provider=tiktok`);
+
+                // Display name for the card label (best-effort).
+                let displayName: string | null = null;
+                try {
+                    const infoRes = await fetch('https://open.tiktokapis.com/v2/user/info/?fields=open_id,display_name', {
+                        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+                    });
+                    const info: { data?: { user?: { display_name?: string } } } = infoRes.ok ? await infoRes.json() : {};
+                    displayName = info.data?.user?.display_name ?? null;
+                } catch { /* label only — connection still succeeds */ }
+
+                await saveIntegration(db, {
+                    organisationId, userId, provider: 'tiktok',
+                    accessToken: tokenData.access_token,
+                    refreshToken: tokenData.refresh_token ?? null,
+                    expiresInSec: tokenData.expires_in ?? null,
+                    // open_id identifies the authorised TikTok account on every API call.
+                    tenantId: tokenData.open_id ?? null,
+                    externalAccountName: displayName,
+                    scopes: tokenData.scope ?? SCOPES.tiktok,
+                });
+            } else if (provider === 'youtube') {
+                const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        grant_type: 'authorization_code',
+                        client_id: process.env.YOUTUBE_CLIENT_ID ?? '',
+                        client_secret: process.env.YOUTUBE_CLIENT_SECRET ?? '',
+                        redirect_uri: redirectUri,
+                        code,
+                    }),
+                });
+                const tokenData: { access_token?: string; refresh_token?: string; expires_in?: number; scope?: string } = await tokenRes.json().catch(() => ({}));
+                if (!tokenData.access_token) return redirect(`/integrations.html?oauth_error=token_exchange&provider=youtube`);
+
+                // The channel gives the title + id for the card label (best-effort).
+                let channelId: string | null = null;
+                let channelTitle: string | null = null;
+                try {
+                    const chanRes = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true', {
+                        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+                    });
+                    const chan: { items?: Array<{ id?: string; snippet?: { title?: string } }> } = chanRes.ok ? await chanRes.json() : {};
+                    channelId = chan.items?.[0]?.id ?? null;
+                    channelTitle = chan.items?.[0]?.snippet?.title ?? null;
+                } catch { /* label only — connection still succeeds */ }
+
+                await saveIntegration(db, {
+                    organisationId, userId, provider: 'youtube',
+                    accessToken: tokenData.access_token,
+                    refreshToken: tokenData.refresh_token ?? null,
+                    expiresInSec: tokenData.expires_in ?? null,
+                    tenantId: channelId,
+                    externalAccountName: channelTitle,
+                    scopes: tokenData.scope ?? SCOPES.youtube,
                 });
             } else {
                 const tokenRes = await fetch('https://slack.com/api/oauth.v2.access', {

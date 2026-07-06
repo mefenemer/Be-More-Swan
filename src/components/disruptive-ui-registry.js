@@ -695,6 +695,126 @@
   // Alias for callers/routes that use the PascalCase component name as the type key.
   register('ActionItemAssignmentCard', renderActionItemAssignmentCard);
 
+  // ── Built-in: Social Publish Card ───────────────────────────────────────────
+  // Renderer for the social-media-manager publish wire shape:
+  // { type: 'social_publish_card', platform, caption?, hashtags?, mediaUrl?,
+  //   title?, description?, tags?, format?, conversational? }
+  // Valid targets are all seven social platforms. threads/tiktok/youtube publish ON
+  // DEMAND here via /api/actions/sync (threads_create_post / tiktok_upload_video /
+  // youtube_upload_video — workspace OAuth token injected server-side); facebook/
+  // instagram/linkedin/x drafts are published by the scheduled publisher pipeline at
+  // the approved slot, so their card is informational (no direct-publish button).
+  const SOCIAL_PUBLISH_TARGETS = {
+    threads: {
+      label: 'Threads', emoji: '🧵',
+      action: 'threads_create_post',
+      payload: (ui) => ({
+        caption: ui.caption ?? null,
+        hashtags: ui.hashtags ?? null,
+        mediaUrl: ui.mediaUrl ?? null,
+        conversational: ui.conversational ?? null,
+      }),
+    },
+    tiktok: {
+      label: 'TikTok', emoji: '🎵',
+      action: 'tiktok_upload_video',
+      payload: (ui) => ({
+        videoUrl: ui.mediaUrl ?? null,
+        caption: ui.caption ?? null,
+        hashtags: ui.hashtags ?? null,
+      }),
+    },
+    youtube: {
+      label: 'YouTube', emoji: '▶️',
+      action: 'youtube_upload_video',
+      payload: (ui) => ({
+        videoUrl: ui.mediaUrl ?? null,
+        title: ui.title ?? null,
+        caption: ui.caption ?? null,
+        description: ui.description ?? null,
+        tags: ui.tags ?? null,
+        format: ui.format ?? null,
+      }),
+    },
+  };
+  const SOCIAL_SCHEDULED_PLATFORMS = { facebook: 'Facebook', instagram: 'Instagram', linkedin: 'LinkedIn', x: 'X (Twitter)', twitter: 'X (Twitter)' };
+
+  function renderSocialPublishCard(ui, esc) {
+    const platform = String(ui.platform || '').trim().toLowerCase();
+    const target = SOCIAL_PUBLISH_TARGETS[platform];
+    const scheduledLabel = SOCIAL_SCHEDULED_PLATFORMS[platform];
+    if (!target && !scheduledLabel) return null; // unknown platform — fall back to text-only
+
+    const label = target ? target.label : scheduledLabel;
+    const caption = typeof ui.caption === 'string' ? ui.caption : '';
+    const hashtags = typeof ui.hashtags === 'string' ? ui.hashtags : '';
+    const title = typeof ui.title === 'string' ? ui.title : '';
+    if (!caption && !title) return null; // nothing to publish — fall back to text-only
+
+    const el = document.createElement('div');
+    el.className = 'bg-white border border-gray-200 rounded-xl shadow-sm p-5 max-w-md';
+    el.innerHTML = `
+      <div class="flex items-start justify-between gap-3 mb-3">
+        <div class="flex items-center gap-3 min-w-0">
+          <div class="w-10 h-10 bg-emerald-100 rounded-lg flex items-center justify-center text-xl shrink-0">${target ? target.emoji : '📣'}</div>
+          <div class="min-w-0">
+            <p class="text-xs font-bold text-emerald-700 tracking-wider uppercase">Ready to publish</p>
+            <p class="font-bold text-gray-900 truncate">${esc(title) || `${esc(label)} post`}</p>
+          </div>
+        </div>
+        <span class="text-xs font-bold px-2 py-0.5 rounded-full border shrink-0 bg-gray-50 text-gray-600 border-gray-200">${esc(label)}</span>
+      </div>
+
+      ${caption ? `<p class="text-sm text-gray-700 whitespace-pre-line mb-2">${esc(caption)}</p>` : ''}
+      ${hashtags ? `<p class="text-xs font-semibold text-emerald-700 mb-2">${esc(hashtags)}</p>` : ''}
+      ${ui.mediaUrl ? `<p class="text-xs text-gray-400 mb-2">📎 Media attached</p>` : ''}
+
+      ${target ? `
+      <div class="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-gray-100">
+        <p class="text-xs text-gray-400" data-publish-status>Publishes this draft to ${esc(label)} now.</p>
+        <button type="button" data-publish-social
+          class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">
+          Publish to ${esc(label)}
+        </button>
+      </div>` : `
+      <div class="mt-3 pt-3 border-t border-gray-100">
+        <p class="text-xs text-gray-400">${esc(label)} posts go out automatically at their approved slot via the scheduled publisher.</p>
+      </div>`}
+    `;
+
+    // Live behaviour (threads/tiktok/youtube): dispatch the matching sync action.
+    if (target) {
+      const statusLine = el.querySelector('[data-publish-status]');
+      el.addEventListener('click', async (e) => {
+        const button = e.target.closest('[data-publish-social]');
+        if (!button || button.disabled) return;
+
+        button.disabled = true;
+        button.textContent = 'Publishing…';
+        statusLine.className = 'text-xs text-gray-400';
+        try {
+          const data = await postSyncAction(target.action, target.payload(ui));
+          button.textContent = 'Published ✓';
+          button.className = 'px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-bold rounded-lg cursor-default shrink-0 whitespace-nowrap';
+          statusLine.textContent = data.message || `Published to ${label}.`;
+          statusLine.className = 'text-xs font-semibold text-emerald-700';
+        } catch (err) {
+          button.disabled = false;
+          button.textContent = 'Retry publish';
+          button.className = 'px-4 py-2 bg-red-50 border border-red-200 text-red-700 hover:border-red-300 text-sm font-bold rounded-lg transition shrink-0 whitespace-nowrap';
+          statusLine.textContent = err.message || `Could not publish to ${label}.`;
+          statusLine.className = 'text-xs font-semibold text-red-600';
+        }
+      });
+    }
+
+    return el;
+  }
+
+  register('social_publish_card', renderSocialPublishCard);
+  // Alias for callers/routes that use the PascalCase component name as the type key.
+  register('SocialPublishCard', renderSocialPublishCard);
+
   // ── Built-in: Upgrade Required Card (paywall) ───────────────────────────────
   // Renderer for the orchestrator's 403 over-limit wire shape (chat-orchestrator.ts):
   // { type: 'upgrade_required', reason }

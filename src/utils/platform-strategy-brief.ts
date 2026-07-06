@@ -10,6 +10,9 @@ export interface PlatformStrategy {
   ig?: { tags?: string; format?: string; audio?: boolean };
   li?: { tags?: string; links_first_comment?: boolean; sliders?: boolean };
   x?: { tags?: string; length?: string; media?: boolean };
+  threads?: { conversational?: boolean };
+  tiktok?: { tags?: string; hooks?: boolean };
+  youtube?: { format?: string; seo?: boolean };
 }
 
 // Only Facebook exposes a hashtag "strategy" selector; for the other platforms a provided tag
@@ -86,6 +89,31 @@ export function formatPlatformStrategyBrief(
             ? 'Mix threads and single posts.'
             : null,
       ps.x.media ? 'Include placeholders for media in each post.' : null,
+    ]);
+  }
+  if (ps.threads) {
+    block('Threads', [
+      ps.threads.conversational
+        ? 'Write in a conversational, discussion-starting tone and do NOT use hashtags.'
+        : null,
+    ]);
+  }
+  if (ps.tiktok) {
+    block('TikTok', [
+      hashtagDirective(undefined, ps.tiktok.tags || '', sanitize),
+      ps.tiktok.hooks ? 'Auto-generate a scroll-stopping viral text hook for the opening seconds of each video.' : null,
+    ]);
+  }
+  if (ps.youtube) {
+    block('YouTube', [
+      ps.youtube.format === 'shorts'
+        ? 'Prioritise Shorts over long-form videos.'
+        : ps.youtube.format === 'longform'
+          ? 'Prioritise long-form videos for the main channel.'
+          : ps.youtube.format === 'mix'
+            ? 'Mix Shorts and long-form videos.'
+            : null,
+      ps.youtube.seo ? 'Optimise every video description for YouTube SEO (keywords, chapters, links).' : null,
     ]);
   }
 

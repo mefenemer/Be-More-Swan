@@ -1,7 +1,7 @@
 // src/utils/workspace-integrations.ts
 // External Integrations (Phase 1: HubSpot, Xero, Slack · Phase 2: Salesforce, Zendesk,
-// Notion · Phase 3: QuickBooks, Intercom, Gmail): the ONLY read/write path for
-// workspace_integrations rows and their token material.
+// Notion · Phase 3: QuickBooks, Intercom, Gmail · Phase 4: Threads, TikTok, YouTube):
+// the ONLY read/write path for workspace_integrations rows and their token material.
 //
 // Token custody follows the platform standard (US-DB-1.6.1): access/refresh tokens are
 // never stored in table columns — they live AES-256-GCM encrypted in vault_secrets under
@@ -20,9 +20,9 @@ import { storeSecret, getSecret, deleteSecret } from './vault';
 
 type Db = ReturnType<typeof getDb>;
 
-export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail';
+export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail' | 'threads' | 'tiktok' | 'youtube';
 
-export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail'];
+export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail', 'threads', 'tiktok', 'youtube'];
 
 export function isIntegrationProvider(value: unknown): value is IntegrationProvider {
     return typeof value === 'string' && (INTEGRATION_PROVIDERS as string[]).includes(value);
@@ -250,6 +250,51 @@ async function refreshProviderToken(provider: IntegrationProvider, refreshToken:
         return { accessToken: data.access_token, refreshToken: null, expiresInSec: data.expires_in ?? null };
     }
 
+    if (provider === 'threads') {
+        // Threads long-lived tokens (~60 days) refresh with the CURRENT token itself —
+        // there is no separate refresh_token, so the vault stores the long-lived token
+        // in both slots and this grant rotates them together. Refreshing only works
+        // while the token is still valid; once lapsed the user must reconnect.
+        const res = await fetch(`https://graph.threads.net/refresh_access_token?grant_type=th_refresh_token&access_token=${encodeURIComponent(refreshToken)}`);
+        const data: { access_token?: string; expires_in?: number } = await res.json().catch(() => ({}));
+        if (!res.ok || !data.access_token) throw new IntegrationError('refresh_failed', 'Threads token refresh was rejected.', 401);
+        return { accessToken: data.access_token, refreshToken: data.access_token, expiresInSec: data.expires_in ?? null };
+    }
+
+    if (provider === 'tiktok') {
+        const res = await fetch('https://open.tiktokapis.com/v2/oauth/token/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                grant_type: 'refresh_token',
+                client_key: process.env.TIKTOK_CLIENT_ID ?? '',
+                client_secret: process.env.TIKTOK_CLIENT_SECRET ?? '',
+                refresh_token: refreshToken,
+            }),
+        });
+        const data: { access_token?: string; refresh_token?: string; expires_in?: number } = await res.json().catch(() => ({}));
+        if (!res.ok || !data.access_token) throw new IntegrationError('refresh_failed', 'TikTok token refresh was rejected.', 401);
+        // TikTok rotates the refresh token — always persist the new one.
+        return { accessToken: data.access_token, refreshToken: data.refresh_token ?? null, expiresInSec: data.expires_in ?? null };
+    }
+
+    if (provider === 'youtube') {
+        const res = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                grant_type: 'refresh_token',
+                client_id: process.env.YOUTUBE_CLIENT_ID ?? '',
+                client_secret: process.env.YOUTUBE_CLIENT_SECRET ?? '',
+                refresh_token: refreshToken,
+            }),
+        });
+        const data: { access_token?: string; expires_in?: number } = await res.json().catch(() => ({}));
+        if (!res.ok || !data.access_token) throw new IntegrationError('refresh_failed', 'YouTube token refresh was rejected.', 401);
+        // Google does not rotate the refresh token on use — keep the stored one.
+        return { accessToken: data.access_token, refreshToken: null, expiresInSec: data.expires_in ?? null };
+    }
+
     // Slack: only used when token rotation is enabled on the app (otherwise bot tokens
     // never expire and this path is never reached — expiresAt stays null).
     const res = await fetch('https://slack.com/api/oauth.v2.access', {
@@ -328,6 +373,9 @@ const PROVIDER_LABELS: Record<IntegrationProvider, string> = {
     quickbooks: 'QuickBooks',
     intercom: 'Intercom',
     gmail: 'Gmail',
+    threads: 'Threads',
+    tiktok: 'TikTok',
+    youtube: 'YouTube',
 };
 
 export function providerLabel(provider: IntegrationProvider): string {

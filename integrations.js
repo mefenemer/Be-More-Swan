@@ -142,7 +142,7 @@ let _allowedServices = null; // null = no assistant scope → show all
 let _assistantScoped = false;
 let _assistantSelectedIds = new Set();
 // serviceName slug → short platform key stored in context.primary_platforms
-const PLATFORM_KEY_MAP = { facebook: 'fb', instagram: 'ig', linkedin: 'li', x: 'x', twitter: 'x', tiktok: 'tt', youtube: 'yt', pinterest: 'pin' };
+const PLATFORM_KEY_MAP = { facebook: 'fb', instagram: 'ig', linkedin: 'li', x: 'x', twitter: 'x', tiktok: 'tt', youtube: 'yt', threads: 'th', pinterest: 'pin' };
 
 // Match a stored connection serviceName (e.g. 'x', 'linkedin' — lowercase from the OAuth
 // callback) against a PLATFORMS id (e.g. 'X', 'LinkedIn' — capitalised). Case-insensitive,

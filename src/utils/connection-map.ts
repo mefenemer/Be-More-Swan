@@ -20,6 +20,9 @@ export const CONNECTOR_CATEGORY: Record<string, string> = {
     linkedin: 'social',
     x: 'social',
     twitter: 'social',
+    threads: 'social',
+    tiktok: 'social',
+    youtube: 'social',
 };
 
 // Assistant roleKey (aiAssistants.configuration.type) → allowed connection categories.

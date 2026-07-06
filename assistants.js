@@ -1405,8 +1405,9 @@ function _renderDisclosureHelp(data) {
     }
 }
 
-// Which of fb/ig/li/x this assistant actually uses. Platforms are stored inconsistently across
-// versions — context.primary_platforms as short codes (["fb","ig"]) OR configuration.inputs.platforms
+// Which of fb/ig/li/x/threads/tiktok/youtube this assistant actually uses. Platforms are
+// stored inconsistently across versions — context.primary_platforms as short codes
+// (["fb","ig"], with "th"/"tt"/"yt" for the newer platforms) OR configuration.inputs.platforms
 // as labels ("Facebook (https://…)") — so scan both and match on known tokens.
 function _platformCodes(data) {
     const ctx = data.context || {};
@@ -1420,6 +1421,9 @@ function _platformCodes(data) {
         if (p === 'ig' || p.includes('instagram')) codes.add('ig');
         if (p === 'li' || p.includes('linkedin')) codes.add('li');
         if (p === 'x' || p.includes('twitter') || /(^|\W)x(\W|$)/.test(p)) codes.add('x');
+        if (p === 'th' || p.includes('threads')) codes.add('threads');
+        if (p === 'tt' || p.includes('tiktok')) codes.add('tiktok');
+        if (p === 'yt' || p.includes('youtube')) codes.add('youtube');
     });
     return codes;
 }
@@ -1432,7 +1436,7 @@ function _hydratePlatformStrategy(data) {
     const emptyEl = document.getElementById('platform-strategy-empty');
     if (emptyEl) emptyEl.classList.toggle('hidden', codes.size > 0);
 
-    ['fb', 'ig', 'li', 'x'].forEach(p => {
+    ['fb', 'ig', 'li', 'x', 'threads', 'tiktok', 'youtube'].forEach(p => {
         const block = document.getElementById(`edit_algo_block_${p}`);
         if (block) block.classList.toggle('hidden', !codes.has(p));
         const s = ps[p] || {};
@@ -1443,6 +1447,9 @@ function _hydratePlatformStrategy(data) {
         if (p === 'ig') { set('edit_ig_opt_format', s.format || 'mix'); check('edit_ig_opt_audio', s.audio); }
         if (p === 'li') { check('edit_li_opt_links', s.links_first_comment); check('edit_li_opt_sliders', s.sliders); }
         if (p === 'x')  { set('edit_x_opt_length', s.length || 'mix'); check('edit_x_opt_media', s.media); }
+        if (p === 'threads') { check('edit_threads_opt_conversational', s.conversational); }
+        if (p === 'tiktok')  { check('edit_tiktok_opt_hooks', s.hooks); }
+        if (p === 'youtube') { set('edit_youtube_opt_format', s.format || 'mix'); check('edit_youtube_opt_seo', s.seo); }
     });
 }
 
@@ -1458,6 +1465,9 @@ function _collectPlatformStrategy(prior) {
     if (visible('ig')) out.ig = { tags: val('edit_algo_tags_ig'), format: val('edit_ig_opt_format'), audio: on('edit_ig_opt_audio') };
     if (visible('li')) out.li = { tags: val('edit_algo_tags_li'), links_first_comment: on('edit_li_opt_links'), sliders: on('edit_li_opt_sliders') };
     if (visible('x'))  out.x  = { tags: val('edit_algo_tags_x'), length: val('edit_x_opt_length'), media: on('edit_x_opt_media') };
+    if (visible('threads')) out.threads = { conversational: on('edit_threads_opt_conversational') };
+    if (visible('tiktok'))  out.tiktok  = { tags: val('edit_algo_tags_tiktok'), hooks: on('edit_tiktok_opt_hooks') };
+    if (visible('youtube')) out.youtube = { format: val('edit_youtube_opt_format'), seo: on('edit_youtube_opt_seo') };
     return out;
 }
 

@@ -27,6 +27,9 @@
     instagram: 2200,
     linkedin:  3000,
     facebook:  63206,
+    threads:   500,
+    tiktok:    2200,  // direct-post caption limit
+    youtube:   5000,  // description limit (titles are capped separately at 100)
   };
 
   // ── Aspect ratio rules per platform / format ────────────────────────────
@@ -39,6 +42,10 @@
     x:                 [16, 9,   '16:9'],
     linkedin:          [1.91, 1, '1.91:1'],
     facebook:          [1.91, 1, '1.91:1'],
+    threads:           [1, 1,    '1:1 (square)'],
+    tiktok:            [9, 16,   '9:16 (vertical video)'],
+    youtube_shorts:    [9, 16,   '9:16 (Short)'],
+    youtube:           [16, 9,   '16:9 (long-form)'],
   };
 
   // ── Fake profile fixtures (visual only) ─────────────────────────────────

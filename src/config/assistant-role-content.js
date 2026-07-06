@@ -33,7 +33,7 @@
         'Human-in-the-loop Review Queue',
         'Per-platform Hashtag & Format Strategy',
       ],
-      integrations: ['Facebook', 'Instagram', 'LinkedIn', 'X (Twitter)'],
+      integrations: ['Facebook', 'Instagram', 'LinkedIn', 'X (Twitter)', 'Threads', 'TikTok', 'YouTube'],
     },
 
     lead_qualifier: {
