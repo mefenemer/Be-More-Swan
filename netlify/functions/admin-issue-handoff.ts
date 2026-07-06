@@ -20,7 +20,7 @@
 // If DEV_HANDOFF_TOKEN is unset the endpoint is disabled (503) — the feature is opt-in.
 
 import { Handler } from '@netlify/functions';
-import { and, eq, asc } from 'drizzle-orm';
+import { and, eq, asc, lt } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { issueReports, issueReportMessages, users, devRunnerStatus } from '../../db/schema';
 import { ISSUE_STATUS_LABEL, maybeAdvanceToReadyToTest, triggerStagingDeployIfDrained } from '../../src/utils/issue-reports';
@@ -30,6 +30,14 @@ const json = (statusCode: number, body: unknown) => ({
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
 });
+
+// A claimed issue keeps its runner via a heartbeat POSTed every ~60s while the fix runs. If a
+// runner dies mid-fix (crash, power loss, killed terminal) the issue would otherwise sit in
+// 'in_progress' forever with no one working it. So when a runner asks for the next issue we
+// first re-queue any 'in_progress' issue whose heartbeat is older than this window — comfortably
+// more than the ~60s beat, so a runner busy on a long single fix is never reclaimed out from under
+// itself. The dead runner's next report is a no-op (the issue is no longer assigned to it).
+const FIX_RECLAIM_MS = Number(process.env.DEV_FIX_RECLAIM_MS) || 5 * 60_000;
 
 // Identity the runner sends about itself (default in the script is `${hostname}:${pid}`).
 // Purely informational — it's shown in the admin portal so you can tell which of several
@@ -63,6 +71,15 @@ export const handler: Handler = async (event) => {
 
     // ── Claim the next queued issue ──────────────────────────────────────────────
     if (event.httpMethod === 'GET' && action === 'claim') {
+        // Reclaim issues abandoned by a dead runner: an 'in_progress' row whose heartbeat has
+        // gone stale is put back in the queue (identity cleared) so it can be re-claimed below.
+        await db.update(issueReports)
+            .set({ devHandoffStatus: 'queued', devRunnerId: null, devRunnerHeartbeat: null, updatedAt: new Date() })
+            .where(and(
+                eq(issueReports.devHandoffStatus, 'in_progress'),
+                lt(issueReports.devRunnerHeartbeat, new Date(Date.now() - FIX_RECLAIM_MS)),
+            ));
+
         const [next] = await db
             .select({ id: issueReports.id })
             .from(issueReports)
@@ -467,6 +484,40 @@ export const handler: Handler = async (event) => {
             ok: true, state: ok ? 'ok' : 'session_limited',
             statusRecorded, ...(statusError ? { statusError } : {}),
         });
+    }
+
+    // ── Runner is alive and still working a claimed fix ──────────────────────────
+    // POSTed every ~60s while a Claude fix runs. Refreshes the issue's heartbeat so the reclaim
+    // sweep (in ?action=claim) doesn't hand this still-in-progress issue to another runner, and
+    // bumps the runner's liveness row. Ownership-guarded: a zombie runner whose issue was already
+    // reclaimed + re-assigned won't stamp a beat onto the new owner's row.
+    if (event.httpMethod === 'POST' && action === 'fix-heartbeat' && id) {
+        let body: any;
+        try { body = JSON.parse(event.body || '{}'); } catch { body = {}; }
+        const rid = runnerId(event) || 'unknown-runner';
+        const now = new Date();
+
+        const beat = await db.update(issueReports)
+            .set({ devRunnerHeartbeat: now, updatedAt: now })
+            .where(and(
+                eq(issueReports.id, id),
+                eq(issueReports.devHandoffStatus, 'in_progress'),
+                eq(issueReports.devRunnerId, rid),
+            ))
+            .returning({ id: issueReports.id });
+
+        // Best-effort liveness bump for the Runner panel — never fail the beat over it.
+        const activeAccount = (typeof body.activeAccount === 'string' ? body.activeAccount : '').trim().slice(0, 200) || null;
+        try {
+            await db.update(devRunnerStatus)
+                .set({ lastSeenAt: now, ...(activeAccount ? { activeAccount } : {}) })
+                .where(eq(devRunnerStatus.runnerId, rid));
+        } catch (e) {
+            console.error(`fix-heartbeat: dev_runner_status bump failed for runner ${rid}:`, e);
+        }
+
+        // beat empty → this runner no longer owns the issue (reclaimed/reassigned). Tell it to stop.
+        return json(200, { ok: true, owned: beat.length > 0 });
     }
 
     // ── Report the outcome of a fix attempt ──────────────────────────────────────

@@ -93,6 +93,25 @@ function run(cmd, args, opts = {}) {
     stderr: (r.stderr || '').trim() || (r.error ? String(r.error.message) : ''),
   };
 }
+// Async twin of run(): spawns instead of spawnSync so the event loop stays free while the
+// command runs. Used for the long Claude Code fix, where a background heartbeat timer must be
+// able to fire (spawnSync would block the whole thread and freeze the timer). Never rejects.
+function runAsync(cmd, args, opts = {}) {
+  const { input, encoding, maxBuffer, ...spawnOpts } = opts;
+  return new Promise((resolve) => {
+    let child;
+    try { child = spawn(cmd, args, spawnOpts); }
+    catch (e) { resolve({ ok: false, code: null, stdout: '', stderr: String(e?.message || e) }); return; }
+    let stdout = '', stderr = '';
+    child.stdout?.setEncoding('utf8'); child.stderr?.setEncoding('utf8');
+    child.stdout?.on('data', (d) => { stdout += d; });
+    child.stderr?.on('data', (d) => { stderr += d; });
+    child.on('error', (e) => { stderr += (stderr ? '\n' : '') + String(e?.message || e); });
+    child.on('close', (code) => resolve({ ok: code === 0, code, stdout: stdout.trim(), stderr: stderr.trim() }));
+    if (input !== undefined && child.stdin) { child.stdin.end(input); }
+  });
+}
+
 const git = (args, opts = {}) => run('git', ['-C', opts.cwd || REPO, ...args], opts);
 
 // Resilient JSON fetch to the handoff endpoint.
@@ -144,6 +163,21 @@ async function claimNext() {
   if (!res.ok) throw new Error(`claim failed: ${res.status} ${await res.text()}`);
   const data = await res.json();
   return data.issue || null;
+}
+
+// While a fix runs (minutes), ping the server so the issue's heartbeat and this runner's
+// liveness row stay fresh. That's what lets the server tell "busy on a long fix" from "died
+// mid-fix": a silent runner past the reclaim window gets its issue re-queued and its panel row
+// pruned. tries:1 so a slow beat never stacks; a missed beat is harmless (the next one covers).
+const FIX_HEARTBEAT_MS = Number(process.env.AURA_FIX_HEARTBEAT_MS || 60000);
+async function sendFixHeartbeat(id) {
+  try {
+    await apiFetch(`${ENDPOINT}?action=fix-heartbeat&id=${id}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-handoff-token': TOKEN, 'x-runner-id': RUNNER_ID },
+      body: JSON.stringify({ activeAccount: activeClaudeAccount() }),
+    }, { tries: 1, label: 'fix-heartbeat' });
+  } catch (e) { log(`#${id} heartbeat error: ${e.message}`); }
 }
 
 async function report(id, payload) {
@@ -584,10 +618,19 @@ async function processIssue(issue) {
     if (!wt.ok) throw new Error(`worktree add failed: ${wt.stderr}`);
 
     log(`#${id} running Claude Code…`);
-    const claude = run(CLAUDE_BIN, ['-p', '--permission-mode', 'acceptEdits'], {
-      cwd: worktree,
-      input: buildPrompt(issue),
-    });
+    // Heartbeat throughout the fix so the server knows this runner is alive (not stalled) —
+    // fire one immediately, then on an interval, and always clear it when the run ends.
+    sendFixHeartbeat(id);
+    const heartbeat = setInterval(() => sendFixHeartbeat(id), FIX_HEARTBEAT_MS);
+    let claude;
+    try {
+      claude = await runAsync(CLAUDE_BIN, ['-p', '--permission-mode', 'acceptEdits'], {
+        cwd: worktree,
+        input: buildPrompt(issue),
+      });
+    } finally {
+      clearInterval(heartbeat);
+    }
     const rawOut = claude.stdout || claude.stderr || 'No output from the AI runner.';
     if (!claude.ok) {
       const errText = `${claude.stderr || ''}\n${claude.stdout || ''}`;
