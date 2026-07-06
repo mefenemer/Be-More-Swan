@@ -1094,6 +1094,48 @@ function _renderOnboardingSummary(data) {
       </details>`;
 }
 
+// Role-specific "Quick Start Suggestions" for the Mandate tab — clickable bottleneck
+// prompts (parity with Social Media Manager onboarding). Sourced from
+// src/config/mandate-suggestions.js, keyed by roleKey with a social fallback. Clicking a
+// chip writes the text into #edit_problem and dispatches 'input' so the existing autogrow +
+// autosave handlers pick it up (persisting to onboardingContext.problem_statement, which the
+// "Your Onboarding Answers" summary surfaces as "Your Bottleneck").
+function _renderMandateSuggestions(data) {
+    const wrap = document.getElementById('mandate-suggestions');
+    const list = document.getElementById('mandate-suggestions-list');
+    if (!wrap || !list) return;
+
+    const registry = window.MandateSuggestions;
+    const suggestions = (registry && typeof registry.get === 'function')
+        ? registry.get(data && data.roleKey)
+        : null;
+    if (!Array.isArray(suggestions) || !suggestions.length) {
+        wrap.classList.add('hidden');
+        return;
+    }
+
+    const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    list.innerHTML = suggestions.map(s => `
+      <button type="button" title="${esc(s.text)}"
+        class="mandate-suggestion text-left text-sm bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg p-3 hover:bg-emerald-100 hover:border-emerald-300 transition shadow-sm cursor-pointer">
+        <span class="font-bold block mb-1">${esc(s.title)}</span>
+        <span class="line-clamp-2 text-emerald-700">${esc(s.text)}</span>
+      </button>`).join('');
+
+    list.querySelectorAll('.mandate-suggestion').forEach((btn, i) => {
+        btn.addEventListener('click', () => {
+            const el = document.getElementById('edit_problem');
+            if (!el) return;
+            el.value = suggestions[i].text;
+            _autoGrowField(el);
+            // Route through the standard input event so triggerAutoSave (attachAutoSave) persists it.
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.focus();
+        });
+    });
+    wrap.classList.remove('hidden');
+}
+
 // ── Role-aware dashboard (AssistantDashboardRegistry) ────────────
 // Injects the role's KPI card copy and toggles the social-only UI modules
 // declared in src/components/assistant-dashboard-registry.js. Unknown or
@@ -1887,6 +1929,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         // (must run before attachAutoSave so the role-answers editor inputs exist).
         _applyDashboardRegistry(currentData);
         _detailHydrate(currentData);
+        _renderMandateSuggestions(currentData);
         _renderOnboardingSummary(currentData);
         _renderRoleAnswersEditor(currentData);
         _renderMeetingsBrief(currentData);

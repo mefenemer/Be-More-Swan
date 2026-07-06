@@ -534,6 +534,13 @@
         <h3 class="text-lg font-bold text-gray-900">Mandate</h3>
         <p class="text-sm text-gray-500 mt-1">What bottleneck or time-drain were you trying to solve? This shapes everything your assistant prioritises.</p>
       </div>
+      <!-- Role-specific quick-start suggestions (populated by _renderMandateSuggestions() in
+           assistants.js from src/config/mandate-suggestions.js). Empty for legacy assistants only
+           if the config script fails to load — otherwise the social fallback set is shown. -->
+      <div id="mandate-suggestions" class="mb-6 hidden">
+        <p class="text-sm font-bold text-gray-700 mb-3">Quick Start Suggestions (click to apply):</p>
+        <div id="mandate-suggestions-list" class="flex flex-col gap-2"></div>
+      </div>
       <div>
         <div class="flex items-center justify-between mb-1">
           <label class="block text-sm font-bold text-gray-700">Your Bottleneck <span class="text-red-500">*</span></label>
