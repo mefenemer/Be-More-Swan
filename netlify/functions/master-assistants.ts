@@ -226,12 +226,13 @@ export const handler: Handler = async (event) => {
     try {
         const db = getDb();
 
-        // Fetch all active master assistants
+        // Fetch all active master assistants. Enabled (already-hireable) roles are
+        // ordered ahead of comingSoon ones so the catalog doesn't interleave them by id.
         const rows = await db
             .select()
             .from(masterAssistants)
             .where(eq(masterAssistants.isActive, true))
-            .orderBy(masterAssistants.id);
+            .orderBy(masterAssistants.comingSoon, masterAssistants.id);
 
         // Fetch waitlist entries for these assistants
         const waitlistRows = await db
