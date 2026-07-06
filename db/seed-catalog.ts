@@ -57,7 +57,7 @@ const CATALOG = [
         iconKey: 'globe',
         iconColor: 'teal',
         comingSoon: true,
-        isActive: true,
+        isActive: false,   // killed — booking liability (AI hallucinating a non-refundable flight) too high for v1
     },
     {
         roleKey: 'document_organizer',
@@ -151,7 +151,7 @@ const CATALOG = [
         iconKey: 'globe',
         iconColor: 'orange',
         comingSoon: true,
-        isActive: true,
+        isActive: false,   // delayed — deep Shopify/ERP integration needed before this can automate reorders confidently
     },
     {
         roleKey: 'inventory_tracker',
@@ -161,7 +161,7 @@ const CATALOG = [
         iconKey: 'chart',
         iconColor: 'blue',
         comingSoon: true,
-        isActive: true,
+        isActive: false,   // delayed — parked until there's a dedicated e-commerce user base demanding it
     },
     {
         roleKey: 'sop_writer',
@@ -215,7 +215,7 @@ const CATALOG = [
         iconKey: 'lightning',
         iconColor: 'purple',
         comingSoon: true,
-        isActive: true,
+        isActive: false,   // killed — Slack/Teams native workflow builders and Geekbot already own this cheaply
     },
     {
         roleKey: 'meeting_note_taker',
@@ -257,7 +257,7 @@ const CATALOG = [
         iconKey: 'document',
         iconColor: 'teal',
         comingSoon: true,
-        isActive: true,
+        isActive: false,   // delayed — Xero/QuickBooks already bundle strong native OCR categorization
     },
     {
         roleKey: 'sql_data_analyst',
