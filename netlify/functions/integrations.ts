@@ -4,7 +4,7 @@ import { eq, and, or, isNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { systemConnections, scheduledPosts, notifications, users, userOrganisations, auditLogs } from '../../db/schema';
 import { storeSecret, deleteSecret, buildRefKey } from '../../src/utils/vault';
-import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant } from '../../src/utils/connection-map';
+import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
 
@@ -85,7 +85,12 @@ export const handler: Handler = async (event) => {
                     ...relevantConnectorsForAssistant(assistant),
                     ...allowedServiceNames(assistant, merged.map(m => m.serviceName)),
                 ]));
-                return { statusCode: 200, body: JSON.stringify({ connections: visible, allowedServices }) };
+                // Supported external tools for this role — includes categories that
+                // have no live connector yet (available: false → "coming soon") so the
+                // Connections grid and onboarding summary can show what the assistant
+                // supports, not just what already has a connector.
+                const supportedTools = supportedToolsForAssistant(assistant);
+                return { statusCode: 200, body: JSON.stringify({ connections: visible, allowedServices, supportedTools }) };
             }
 
             return { statusCode: 200, body: JSON.stringify({ connections: merged }) };

@@ -1028,7 +1028,7 @@ function _renderOnboardingSummary(data) {
     // Operational Set-Up step (surfaced by schemaRows below), so drop the legacy inputs-based
     // rows for them to avoid showing each answer twice.
     const schemaFields = _roleSchemaFields(data && data.roleKey);
-    const hasSchemaOperational = schemaFields.some(f => _OPERATIONAL_SCHEMA_KEYS.has(f.key));
+    const hasSchemaOperational = _roleOperationalFields(data && data.roleKey).length > 0;
 
     const objectiveLabels = { brand_awareness: 'Brand Awareness', lead_generation: 'Lead Generation', direct_sales: 'Direct Sales', community_engagement: 'Community & Engagement' };
     const objective = clean(ctx.primary_objective || inputs.primary_objective);
@@ -1066,7 +1066,9 @@ function _renderOnboardingSummary(data) {
         .map(r => clean(r).replace(/^-\s*/, '')).filter(Boolean);
 
     if (!rows.length && !rules.length) {
-        host.innerHTML = '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 text-sm text-gray-500">No onboarding answers were captured for this assistant.</div>';
+        // Still surface the supported tools (Connections) even when no free-text answers
+        // were captured — the block is filled by _renderOnboardingConnections post-load.
+        host.innerHTML = '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6"><p class="text-sm text-gray-500">No onboarding answers were captured for this assistant.</p><div id="onboarding-connections-block"></div></div>';
         return;
     }
 
@@ -1079,7 +1081,7 @@ function _renderOnboardingSummary(data) {
             <p class="text-sm text-gray-500 mt-1">A read-only summary of everything you told us when setting up this assistant. Expand to review — you can edit any of it in the tabs below.</p>
           </div>
           <div class="flex items-center gap-3 shrink-0">
-            <span class="text-xs font-semibold text-gray-400">${fieldCount} item${fieldCount === 1 ? '' : 's'}</span>
+            <span id="onboarding-summary-count" data-base-count="${fieldCount}" class="text-xs font-semibold text-gray-400">${fieldCount} item${fieldCount === 1 ? '' : 's'}</span>
             <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
           </div>
         </summary>
@@ -1098,8 +1100,50 @@ function _renderOnboardingSummary(data) {
                 ${rules.map(r => `<li class="whitespace-pre-line">${esc(r)}</li>`).join('')}
               </ul>
             </div>` : ''}
+          <!-- Supported external tools — filled by _renderOnboardingConnections once the
+               Connections tab has loaded the server's supportedTools list. -->
+          <div id="onboarding-connections-block"></div>
         </div>
       </details>`;
+}
+
+// Fold the assistant's supported external tools (Connections) into the read-only
+// "Your Onboarding Answers" summary. Runs AFTER initAssistantConnections has loaded the
+// server-owned supportedTools list (connection-map.ts), so it reads that via the getters
+// integrations.js exposes rather than duplicating the role→category policy on the client.
+function _renderOnboardingConnections() {
+    const block = document.getElementById('onboarding-connections-block');
+    if (!block) return;
+    const tools = (typeof window._intGetSupportedTools === 'function') ? (window._intGetSupportedTools() || []) : [];
+    if (!tools.length) { block.innerHTML = ''; return; }
+
+    const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const connected = (typeof window._intGetConnectedServices === 'function') ? (window._intGetConnectedServices() || []) : [];
+    const connectedLabels = connected.map(s => ({ x: 'X (Twitter)', twitter: 'X (Twitter)', instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn' }[String(s).toLowerCase()] || s));
+
+    const pill = (label, cls) => `<span class="inline-flex items-center text-[11px] font-bold ${cls} px-2 py-0.5 rounded-full">${label}</span>`;
+    const items = tools.map(t => `
+        <li class="flex items-center justify-between gap-3 py-1.5">
+          <span class="text-sm text-gray-900">${esc(t.label)}</span>
+          ${t.available ? pill('Available', 'text-emerald-700 bg-emerald-50 border border-emerald-200')
+                        : pill('Coming soon', 'text-gray-500 bg-gray-100 border border-gray-200')}
+        </li>`).join('');
+
+    block.innerHTML = `
+        <div class="mt-6 pt-5 border-t border-gray-100">
+          <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Connections</p>
+          <p class="text-xs text-gray-500 mb-2">External tools this assistant can use. Manage them in the Connections tab below.</p>
+          <ul class="divide-y divide-gray-100">${items}</ul>
+          ${connectedLabels.length ? `<p class="text-xs text-gray-500 mt-3">Currently connected: <span class="font-semibold text-gray-700">${connectedLabels.map(esc).join(', ')}</span></p>` : ''}
+        </div>`;
+
+    // Keep the collapsed item count honest — add "Connections" as one more item.
+    const countEl = document.getElementById('onboarding-summary-count');
+    if (countEl) {
+        const base = parseInt(countEl.dataset.baseCount || '0', 10) || 0;
+        const total = base + 1;
+        countEl.textContent = `${total} item${total === 1 ? '' : 's'}`;
+    }
 }
 
 // Role-specific "Quick Start Suggestions" for the Mandate tab — clickable bottleneck
@@ -1247,19 +1291,34 @@ function _applyDashboardRegistry(data) {
     }
 }
 
-// Onboarding-schema keys for the shared Operational Set-Up step. Both are surfaced through
-// the dedicated "Operational Setup" tab rather than the generic Setup Answers editor, and
-// they replace the legacy configuration.inputs Trigger/Content Source rows in the summary.
-const _OPERATIONAL_SCHEMA_KEYS = new Set(['trigger_type', 'content_source']);
-
-// Flattened field list from the role's schema-driven onboarding definition
+// Steps from the role's schema-driven onboarding definition
 // (src/config/assistant-onboarding-schemas.js) — [] when the role has none
 // (social assistants use the hand-built drawer fields instead).
-function _roleSchemaFields(roleKey) {
+function _roleSchemaSteps(roleKey) {
     const schema = (window.AssistantOnboardingSchemas || {})[roleKey];
     if (!Array.isArray(schema) || !schema.length) return [];
-    const steps = schema.every(s => Array.isArray(s?.fields)) ? schema : [{ fields: schema }];
-    return steps.flatMap(s => (s.fields || []).filter(f => f && f.key && f.type));
+    return schema.every(s => Array.isArray(s?.fields)) ? schema : [{ fields: schema }];
+}
+
+// Flattened field list across all of a role's onboarding steps.
+function _roleSchemaFields(roleKey) {
+    return _roleSchemaSteps(roleKey).flatMap(s => (s.fields || []).filter(f => f && f.key && f.type));
+}
+
+// Fields from the role's operational step(s) (step.operational === true) — these render in
+// the profile's "Operational Setup" section (_renderOperationSection). [] for social/legacy.
+function _roleOperationalFields(roleKey) {
+    return _roleSchemaSteps(roleKey)
+        .filter(s => s.operational)
+        .flatMap(s => (s.fields || []).filter(f => f && f.key && f.type));
+}
+
+// Fields NOT in an operational step — these render in the "Setup Answers" card
+// (_renderRoleAnswersEditor), so operational settings aren't duplicated across both surfaces.
+function _roleNonOperationalFields(roleKey) {
+    return _roleSchemaSteps(roleKey)
+        .filter(s => !s.operational)
+        .flatMap(s => (s.fields || []).filter(f => f && f.key && f.type));
 }
 
 // Human-readable value for a schema answer (option label for radio/dropdown,
@@ -1274,49 +1333,60 @@ function _formatSchemaAnswer(field, value) {
     return String(value);
 }
 
+// Shared control renderer for schema-driven onboarding answers. Used by both the "Setup
+// Answers" card (idPrefix 'edit_onb_') and the Operational Setup section (idPrefix 'edit_op_').
+// Inputs get an id starting `edit_` (so the [id^="edit_"] autosave wiring picks them up) and
+// carry data-onboarding-key (so _detailCollect writes them back into onboardingContext under
+// their original keys). radio/dropdown render as a <select> for a compact edit surface.
+function _onboardingFieldControl(f, ctx, idPrefix) {
+    const esc = _escapeHtml;
+    const inputCls = 'w-full border border-gray-300 rounded-lg p-3 text-sm bg-white focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm';
+    const common = `id="${esc(idPrefix + f.key)}" data-onboarding-key="${esc(f.key)}"`;
+    const v = ctx[f.key];
+    switch (f.type) {
+        case 'textarea':
+            return `<textarea ${common} rows="3" placeholder="${esc(f.placeholder || '')}" class="${inputCls} resize-y">${esc(v ?? '')}</textarea>`;
+        case 'number':
+            return `<input type="number" ${common} data-onb-type="number" value="${esc(v ?? '')}"
+                ${f.min !== undefined ? `min="${esc(f.min)}"` : ''} ${f.max !== undefined ? `max="${esc(f.max)}"` : ''}
+                placeholder="${esc(f.placeholder || '')}" class="${inputCls}">`;
+        case 'dropdown':
+        case 'radio':
+            return `<select ${common} class="${inputCls}">
+                <option value="">${esc(f.placeholder || 'Please select…')}</option>
+                ${(f.options || []).map(o => `<option value="${esc(o.value)}" ${String(o.value) === String(v ?? '') ? 'selected' : ''}>${esc(o.label ?? o.value)}</option>`).join('')}
+            </select>`;
+        case 'toggle':
+            return `<label class="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+                <input type="checkbox" ${common} class="rounded text-emerald-700 focus:ring-emerald-700" ${v ? 'checked' : ''}> Enabled
+            </label>`;
+        default: // text
+            return `<input type="text" ${common} value="${esc(v ?? '')}" placeholder="${esc(f.placeholder || '')}" class="${inputCls}">`;
+    }
+}
+
+// Belt-and-braces: sync select values programmatically as well as via the `selected`
+// attribute, so stored answers always pre-select their option after innerHTML render.
+function _syncSchemaSelects(fields, ctx, idPrefix) {
+    fields.forEach(f => {
+        if (f.type !== 'dropdown' && f.type !== 'radio') return;
+        const sel = document.getElementById(idPrefix + f.key);
+        const v = ctx[f.key];
+        if (sel && v !== undefined && v !== null) sel.value = String(v);
+    });
+}
+
 // Editable role-specific onboarding answers (drawer home, #role-answers-editor).
-// Rendered for roles onboarded via the schema wizard (assistant-setup.html) so the
-// user can revise those answers here. Inputs get ids of the form `edit_onb_<key>` —
-// the existing [id^="edit_"] auto-save wiring picks them up — and carry
-// data-onboarding-key so _detailCollect writes them back into onboardingContext
-// under their original keys.
+// Rendered for roles onboarded via the schema wizard (assistant-setup.html) so the user can
+// revise those answers here. Only NON-operational fields appear — the operational ones live
+// in the dedicated Operational Setup section (_renderOperationSection) to avoid duplication.
 function _renderRoleAnswersEditor(data) {
     const host = document.getElementById('role-answers-editor');
     if (!host) return;
-    // Operational Set-Up answers (trigger_type / content_source) are edited in the dedicated
-    // "Operational Setup" tab, so keep them out of this generic Setup Answers card to avoid a
-    // duplicate editing surface.
-    const fields = _roleSchemaFields(data.roleKey).filter(f => !_OPERATIONAL_SCHEMA_KEYS.has(f.key));
+    const fields = _roleNonOperationalFields(data.roleKey);
     if (!fields.length) { host.innerHTML = ''; return; }
     const ctx = (data.context && typeof data.context === 'object') ? data.context : {};
     const esc = _escapeHtml;
-    const inputCls = 'w-full border border-gray-300 rounded-lg p-3 text-sm bg-white focus:ring-2 focus:ring-emerald-700 focus:border-emerald-700 transition shadow-sm';
-
-    const control = (f) => {
-        const id = `edit_onb_${f.key}`;
-        const common = `id="${esc(id)}" data-onboarding-key="${esc(f.key)}"`;
-        const v = ctx[f.key];
-        switch (f.type) {
-            case 'textarea':
-                return `<textarea ${common} rows="3" placeholder="${esc(f.placeholder || '')}" class="${inputCls} resize-y">${esc(v ?? '')}</textarea>`;
-            case 'number':
-                return `<input type="number" ${common} data-onb-type="number" value="${esc(v ?? '')}"
-                    ${f.min !== undefined ? `min="${esc(f.min)}"` : ''} ${f.max !== undefined ? `max="${esc(f.max)}"` : ''}
-                    placeholder="${esc(f.placeholder || '')}" class="${inputCls}">`;
-            case 'dropdown':
-            case 'radio':
-                return `<select ${common} class="${inputCls}">
-                    <option value="">${esc(f.placeholder || 'Please select…')}</option>
-                    ${(f.options || []).map(o => `<option value="${esc(o.value)}" ${String(o.value) === String(v ?? '') ? 'selected' : ''}>${esc(o.label ?? o.value)}</option>`).join('')}
-                </select>`;
-            case 'toggle':
-                return `<label class="inline-flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                    <input type="checkbox" ${common} class="rounded text-emerald-700 focus:ring-emerald-700" ${v ? 'checked' : ''}> Enabled
-                </label>`;
-            default: // text
-                return `<input type="text" ${common} value="${esc(v ?? '')}" placeholder="${esc(f.placeholder || '')}" class="${inputCls}">`;
-        }
-    };
 
     host.innerHTML = `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
@@ -1329,19 +1399,49 @@ function _renderRoleAnswersEditor(data) {
             <div>
               <label for="edit_onb_${esc(f.key)}" class="block text-sm font-bold text-gray-700 mb-1">${esc(f.label || f.key)}</label>
               ${f.helpText ? `<p class="text-xs text-gray-500 mb-2">${esc(f.helpText)}</p>` : ''}
-              ${control(f)}
+              ${_onboardingFieldControl(f, ctx, 'edit_onb_')}
             </div>`).join('')}
         </div>
       </div>`;
 
-    // Belt-and-braces: sync select values programmatically as well as via the
-    // `selected` attribute, so stored answers always pre-select their option.
-    fields.forEach(f => {
-        if (f.type !== 'dropdown' && f.type !== 'radio') return;
-        const sel = document.getElementById(`edit_onb_${f.key}`);
-        const v = ctx[f.key];
-        if (sel && v !== undefined && v !== null) sel.value = String(v);
-    });
+    _syncSchemaSelects(fields, ctx, 'edit_onb_');
+}
+
+// Role-specific Operational Setup section (profile ▸ Operational Setup tab). Schema-driven
+// roles render their operational-step fields into #operation-role-fields and hide the generic
+// Trigger/Content Source block (#operation-generic); social/legacy roles keep the generic block.
+function _renderOperationSection(data) {
+    const host = document.getElementById('operation-role-fields');
+    const generic = document.getElementById('operation-generic');
+    if (!host) return;
+    const fields = _roleOperationalFields(data.roleKey);
+    if (!fields.length) {
+        host.innerHTML = '';
+        if (generic) generic.classList.remove('hidden');
+        // Reset the intro in case a schema role was viewed earlier this session (the Operating
+        // File subtitle is reset per-load by _applyDashboardRegistry, so it's left alone here).
+        const intro0 = document.getElementById('operation-intro');
+        if (intro0) intro0.textContent = 'When does your assistant run, and where does it get its content from?';
+        return;
+    }
+    if (generic) generic.classList.add('hidden');
+    // Retitle the section + Operating File card away from the social "Trigger / content source"
+    // wording (_applyDashboardRegistry) now that role-specific operational questions show here.
+    const intro = document.getElementById('operation-intro');
+    if (intro) intro.textContent = 'The settings that control how this assistant runs — when it works, what it acts on, and how it hands off.';
+    const opSub = document.getElementById('opcard-operation-sub');
+    if (opSub) opSub.textContent = 'How this assistant runs day to day';
+    const ctx = (data.context && typeof data.context === 'object') ? data.context : {};
+    const esc = _escapeHtml;
+
+    host.innerHTML = fields.map(f => `
+        <div>
+          <label for="edit_op_${esc(f.key)}" class="block text-sm font-bold text-gray-700 mb-1">${esc(f.label || f.key)}</label>
+          ${f.helpText ? `<p class="text-xs text-gray-500 mb-2">${esc(f.helpText)}</p>` : ''}
+          ${_onboardingFieldControl(f, ctx, 'edit_op_')}
+        </div>`).join('');
+
+    _syncSchemaSelects(fields, ctx, 'edit_op_');
 }
 
 function _detailHydrate(data) {
@@ -1410,10 +1510,8 @@ function _detailHydrate(data) {
             if (r) { r.checked = true; return; }
         }
     };
-    // Candidates are tried in order: an in-tab edit (configuration.inputs) wins, then the
-    // original onboarding answer (onboardingContext) captured by the schema wizard.
-    _checkRadio('edit_trigger', inputs.trigger_type, inputs.triggerText, ctx.trigger_type);
-    _checkRadio('edit_source', inputs.content_source, inputs.sourceText, ctx.content_source);
+    _checkRadio('edit_trigger', inputs.trigger_type, inputs.triggerText);
+    _checkRadio('edit_source', inputs.content_source, inputs.sourceText);
 
     // Platforms are rendered dynamically in the Connections tab — see initAssistantConnections()
 
@@ -1639,17 +1737,13 @@ function _detailCollect(currentData) {
         reference_style_url: document.getElementById('edit_reference_url')?.value || '',
         platform_strategy: _collectPlatformStrategy(currentData.context?.platform_strategy),
         primary_platforms: platforms,
-        // Operational Set-Up — mirror the operation tab's radios back into onboardingContext
-        // (where the schema wizard first stored them) so "Your Onboarding Answers" stays in
-        // sync with in-tab edits. Preserve the existing answer when nothing is selected.
-        trigger_type: document.querySelector('input[name="edit_trigger"]:checked')?.value || currentData.context?.trigger_type || '',
-        content_source: document.querySelector('input[name="edit_source"]:checked')?.value || currentData.context?.content_source || '',
     };
 
-    // Role-specific onboarding answers (schema-driven roles) — the drawer's
-    // #role-answers-editor inputs carry data-onboarding-key; write each back under its
-    // original onboardingContext key so assistant-setup.html answers stay editable here.
-    document.querySelectorAll('#role-answers-editor [data-onboarding-key]').forEach(el => {
+    // Role-specific onboarding answers (schema-driven roles) — inputs in the Setup Answers
+    // card (#role-answers-editor) and the Operational Setup section (#operation-role-fields)
+    // both carry data-onboarding-key; write each back under its original onboardingContext key
+    // so assistant-setup.html answers stay editable here.
+    document.querySelectorAll('#role-answers-editor [data-onboarding-key], #operation-role-fields [data-onboarding-key]').forEach(el => {
         const key = el.dataset.onboardingKey;
         if (!key) return;
         if (el.type === 'checkbox') {
@@ -1955,6 +2049,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         _renderMandateSuggestions(currentData);
         _renderOnboardingSummary(currentData);
         _renderRoleAnswersEditor(currentData);
+        _renderOperationSection(currentData);
         _renderMeetingsBrief(currentData);
         _hydrateAutonomousToggle(currentData);
         attachAutoSave();
@@ -2119,6 +2214,8 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
 
     // ── Connections (full connect/manage UI, scoped to this assistant) ──
     await window.initAssistantConnections(assistantId, currentData);
+    // Now that supportedTools have loaded, fold them into "Your Onboarding Answers".
+    _renderOnboardingConnections();
 
     // ── Integrations ──────────────────────────────────────────────
     await window.fetchAndRenderIntegrations();
@@ -2880,16 +2977,23 @@ async function _fetchAndRenderWorkspaceDefaults(assistantId, currentData, trigge
 
         const catLabel = (c) => ({ tone_of_voice: 'Tone of Voice', logo: 'Brand Logo', product_info: 'Product Knowledge', general: 'General Context' }[c] || 'General Context');
 
-        if (!assets.length) {
-            knowledgeContainer.innerHTML = strictNote + `
-                <div class="flex flex-col items-center justify-center py-4 text-center gap-2">
-                    <p class="text-sm text-gray-500">No documents or links added yet.</p>
-                    <a href="#" onclick="window.loadView('assets')" class="text-sm font-bold text-emerald-600 hover:underline cursor-pointer">Add documents or links in Business Information →</a>
-                </div>`;
-        } else {
-            knowledgeContainer.innerHTML = strictNote + `
+        // Only assets the blueprint actually injects count as "applied": status ∈ {ready, confirmed}
+        // (mirrors assemble-blueprint § 11 in src/utils/blueprint.ts). Anything still processing or
+        // failed is shown separately so we don't claim it's an active strict rule when it isn't.
+        const APPLIED_STATUSES = ['ready', 'confirmed'];
+        const applied = assets.filter(a => APPLIED_STATUSES.includes(a.status));
+        const pending = assets.filter(a => !APPLIED_STATUSES.includes(a.status));
+
+        // Plain-language reason an asset isn't applied yet (mirrors STATUS_HINTS in assets.js).
+        const notAppliedHint = (s) => ({
+            processing: 'Still processing — will apply automatically once ready.',
+            pending:    "Upload didn't finish, so it isn't applied. Remove it and try again.",
+            failed:     "Upload failed, so it isn't applied. Remove it and try again.",
+        }[s] || 'Not applied yet.');
+
+        const appliedList = applied.length ? `
                 <ul class="divide-y divide-gray-100 border border-gray-100 rounded-xl overflow-hidden">
-                    ${assets.map(a => `
+                    ${applied.map(a => `
                         <li class="flex items-center justify-between gap-3 px-4 py-3">
                             <div class="min-w-0">
                                 <p class="text-sm font-semibold text-gray-800 truncate">${_escapeHtml(a.name)}</p>
@@ -2897,11 +3001,32 @@ async function _fetchAndRenderWorkspaceDefaults(assistantId, currentData, trigge
                             </div>
                             ${(a.externalUrl && !a.isFile) ? `<a href="${_escapeHtml(a.externalUrl)}" target="_blank" rel="noopener" class="text-xs font-bold text-emerald-700 hover:underline shrink-0">Open</a>` : ''}
                         </li>`).join('')}
-                </ul>
+                </ul>` : `
+                <div class="flex flex-col items-center justify-center py-4 text-center gap-2">
+                    <p class="text-sm text-gray-500">No documents or links applied yet.</p>
+                    <a href="#" onclick="window.loadView('assets')" class="text-sm font-bold text-emerald-600 hover:underline cursor-pointer">Add documents or links in Business Information →</a>
+                </div>`;
+
+        // Muted section for assets that exist but aren't feeding the assistant yet.
+        const pendingList = pending.length ? `
+                <div class="mt-4">
+                    <p class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">Not applied yet</p>
+                    <ul class="divide-y divide-gray-100 border border-dashed border-gray-200 rounded-xl overflow-hidden">
+                        ${pending.map(a => `
+                            <li class="flex items-center justify-between gap-3 px-4 py-3 bg-gray-50/50">
+                                <div class="min-w-0">
+                                    <p class="text-sm font-semibold text-gray-500 truncate">${_escapeHtml(a.name)}</p>
+                                    <p class="text-xs text-gray-400 mt-0.5">${a.isFile ? 'Document' : 'Link'} · ${_escapeHtml(catLabel(a.category))}</p>
+                                </div>
+                                <span class="text-xs font-medium text-gray-400 shrink-0" title="${_escapeHtml(notAppliedHint(a.status))}">${_escapeHtml(a.status)}</span>
+                            </li>`).join('')}
+                    </ul>
+                </div>` : '';
+
+        knowledgeContainer.innerHTML = strictNote + appliedList + pendingList + `
                 <div class="mt-3 text-right">
                     <a href="#" onclick="window.loadView('assets')" class="text-sm font-bold text-emerald-600 hover:underline cursor-pointer">Manage in Business Information →</a>
                 </div>`;
-        }
     }
 }
 

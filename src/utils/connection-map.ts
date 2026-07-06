@@ -56,6 +56,49 @@ export const ROLE_CONNECTIONS: Record<string, string[]> = {
     expense_categorizer:       ['accounting'],
 };
 
+// Human-facing catalogue for each connection category — the label + one-line
+// description shown in the Connections grid ("coming soon" cards) and the
+// "Your Onboarding Answers" summary. This is DISPLAY metadata only; the security
+// policy (which categories a role may use) stays in ROLE_CONNECTIONS above.
+export const CATEGORY_LABELS: Record<string, { label: string; description: string }> = {
+    social:         { label: 'Social Media',        description: 'Publish and manage posts across your social channels.' },
+    reviews:        { label: 'Reviews & Reputation', description: 'Monitor and respond to customer reviews.' },
+    email:          { label: 'Email',               description: 'Read, triage, and send email on your behalf.' },
+    calendar:       { label: 'Calendar',            description: 'Read availability and schedule events.' },
+    knowledge:      { label: 'Knowledge Base',      description: 'Read and organise documents and notes.' },
+    crm:            { label: 'CRM',                 description: 'Look up and update contacts and deals.' },
+    cms:            { label: 'Content / CMS',        description: 'Draft and publish website content.' },
+    search_console: { label: 'Search Console',      description: 'Pull search performance and indexing data.' },
+    inventory:      { label: 'Inventory',           description: 'Track stock levels and product data.' },
+    support:        { label: 'Support Desk',        description: 'Read and reply to support tickets.' },
+    chat:           { label: 'Team Chat',           description: 'Read and post messages in team chat.' },
+    esign:          { label: 'E-Signature',         description: 'Send and track documents for signature.' },
+    project_mgmt:   { label: 'Project Management',   description: 'Read and update tasks and project boards.' },
+    payments:       { label: 'Payments',            description: 'Reconcile and process payments.' },
+    accounting:     { label: 'Accounting',          description: 'Sync invoices, expenses, and ledgers.' },
+};
+
+export interface SupportedTool {
+    key: string;         // category key (e.g. 'email')
+    label: string;       // human label (e.g. 'Email')
+    description: string; // one-line description
+    available: boolean;  // true once at least one live connector exists for the category
+}
+
+// The external tools an assistant supports, for display in the Connections UI and
+// the onboarding summary. Includes categories that have no live connector yet
+// (available: false → "coming soon"). Available categories are listed first.
+export function supportedToolsForAssistant(a: AssistantRole | null | undefined): SupportedTool[] {
+    const cats = allowedCategoriesForAssistant(a);
+    // Unrestricted role (unknown/custom) → surface the whole catalogue.
+    const keys = cats ? Array.from(cats) : Object.keys(CATEGORY_LABELS);
+    const liveCategories = new Set(Object.values(CONNECTOR_CATEGORY));
+    return keys
+        .filter(k => CATEGORY_LABELS[k])
+        .map(k => ({ key: k, ...CATEGORY_LABELS[k], available: liveCategories.has(k) }))
+        .sort((x, y) => (Number(y.available) - Number(x.available)) || x.label.localeCompare(y.label));
+}
+
 export interface AssistantRole {
     roleKey?: string | null;
     role?: string | null; // display name, e.g. "The Social Media Manager"

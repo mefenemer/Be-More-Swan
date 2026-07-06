@@ -135,6 +135,14 @@ const _esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
 let _assistants = [];
 let _selectedAssistantId = null;
 let _allowedServices = null; // null = no assistant scope → show all
+// Supported external tools for the scoped assistant (from the server's connection-map).
+// Includes categories with no live connector yet (available:false → "coming soon").
+let _supportedTools = [];
+// Read by the assistant detail page to fold supported tools into "Your Onboarding Answers".
+window._intGetSupportedTools = () => _supportedTools;
+// Display names of connectors the workspace has actively connected (for the summary).
+window._intGetConnectedServices = () =>
+    _userConnections.filter(c => c.status === 'active').map(c => c.serviceName);
 
 // Per-assistant "Use for this assistant" toggle state (set when rendered inside the
 // assistant detail Connections tab via initAssistantConnections). Connections are a
@@ -322,13 +330,19 @@ async function _loadConnections() {
         _userConnections = (data.connections || []).filter(c => c.userId !== null);
         // Server-authoritative relevance allow-list (undefined when no assistant scope).
         _allowedServices = Array.isArray(data.allowedServices) ? data.allowedServices : null;
+        // Supported external tools for this assistant's role, incl. "coming soon" ones.
+        _supportedTools = Array.isArray(data.supportedTools) ? data.supportedTools : [];
     } catch (e) {
         console.warn('Could not load connections:', e);
     }
 
     grid.innerHTML = '';
     const platforms = _relevantPlatforms();
-    if (!platforms.length) {
+    // Categories the role supports that have no live connector yet — rendered as
+    // "coming soon" cards so every assistant shows the tools it's built to use.
+    const comingSoon = _supportedTools.filter(t => t && t.available === false);
+
+    if (!platforms.length && !comingSoon.length) {
         grid.innerHTML = '<div class="col-span-full bg-white border border-gray-200 rounded-2xl p-10 text-center text-sm text-gray-500">No connectors are relevant to this assistant yet. As we add more integrations (CRM, calendar, reviews), the right ones will appear here.</div>';
         return;
     }
@@ -336,8 +350,29 @@ async function _loadConnections() {
         const conn = _userConnections.find(c => _serviceMatchesPlatform(c.serviceName, platform.id));
         grid.insertAdjacentHTML('beforeend', _platformCard(platform, conn));
     });
+    comingSoon.forEach(tool => grid.insertAdjacentHTML('beforeend', _comingSoonCard(tool)));
 
     _queueConnectPermissionPrompts(platforms);
+}
+
+// Card for a supported tool category that has no live connector yet. Mirrors the
+// _platformCard shell (same grid cell size/rounding) but is non-interactive and
+// badged "Coming soon" — it advertises what the assistant is built to use.
+function _comingSoonCard(tool) {
+    return `
+      <div class="bg-white border border-gray-200 border-dashed rounded-2xl p-5 flex flex-col gap-3 opacity-90">
+        <div class="flex items-start justify-between gap-3">
+          <div class="flex items-center gap-3 min-w-0">
+            <div class="w-10 h-10 rounded-xl bg-gray-100 text-gray-400 flex items-center justify-center text-lg shrink-0">🔌</div>
+            <div class="min-w-0">
+              <p class="text-sm font-bold text-gray-900 truncate">${_esc(tool.label)}</p>
+              <p class="text-xs text-gray-500 mt-0.5">${_esc(tool.description || '')}</p>
+            </div>
+          </div>
+          <span class="inline-flex items-center gap-1.5 text-xs font-bold text-gray-500 bg-gray-100 border border-gray-200 px-2.5 py-1 rounded-full shrink-0"><span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span> Coming soon</span>
+        </div>
+        <button type="button" disabled class="mt-auto w-full text-sm font-bold text-gray-400 bg-gray-50 border border-gray-200 rounded-xl py-2.5 cursor-not-allowed">Not yet available</button>
+      </div>`;
 }
 
 // ── US-97: Proactively ask permission to connect platforms the user already ──

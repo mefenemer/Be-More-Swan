@@ -8,6 +8,14 @@
  * conversation's system prompt. Field `key`s here must therefore match the
  * onboardingValue() lookups in the orchestrator route for the same roleKey.
  *
+ * OPERATIONAL STEP: each role ends with one step flagged `operational: true` — the
+ * questions that govern HOW the assistant runs day to day (trigger/schedule, intake,
+ * routing, cadences, thresholds, destinations). The detail page renders those fields in
+ * the profile's "Operational Setup" section instead of the generic Social Media Manager
+ * trigger/source radios (assistants.js _renderOperationSection), while the remaining
+ * (non-operational) fields render in the "Setup Answers" card. Both surfaces read the flag
+ * via _roleOperationalFields / _roleNonOperationalFields.
+ *
  * Usage:
  *   const schema = window.AssistantOnboardingSchemas['lead_qualifier'];
  *   if (schema) AssistantOnboardingShell.mount({ container, assistantId, configurationSchema: schema });
@@ -17,7 +25,7 @@
 
   window.AssistantOnboardingSchemas = {
     // Tier 1, Batch 1 — Lead Qualifier. Captures the ideal customer profile the
-    // orchestrator scores every inbound lead against.
+    // orchestrator scores every inbound lead against, then how it runs operationally.
     lead_qualifier: [
       {
         title: 'Who is your ideal customer?',
@@ -58,10 +66,49 @@
           },
         ],
       },
+      {
+        title: 'Operational set-up',
+        description: 'How your Lead Qualifier runs day to day — when it scores leads, where they come from, and where the good ones go.',
+        operational: true,
+        fields: [
+          {
+            key: 'leadIntake',
+            label: 'Where do new leads arrive?',
+            type: 'dropdown',
+            required: true,
+            placeholder: 'Choose a source…',
+            options: [
+              { value: 'web_form', label: 'Web form' },
+              { value: 'shared_inbox', label: 'Shared inbox' },
+              { value: 'crm', label: 'CRM' },
+              { value: 'manual', label: 'Manual entry' },
+            ],
+          },
+          {
+            key: 'qualifyTrigger',
+            label: 'When should it qualify leads?',
+            type: 'radio',
+            required: true,
+            options: [
+              { value: 'on_arrival', label: 'Instantly on arrival', description: 'Every new lead is scored the moment it lands.' },
+              { value: 'scheduled', label: 'Scheduled batches', description: 'Leads are scored together on a regular schedule.' },
+              { value: 'on_demand', label: 'On demand', description: 'It scores leads only when I ask.' },
+            ],
+          },
+          {
+            key: 'qualifiedRouting',
+            label: 'Where should qualified leads go?',
+            type: 'text',
+            required: false,
+            placeholder: 'e.g. Notify sales@company.com, tag as Hot',
+            helpText: 'What should happen to a lead once it passes qualification.',
+          },
+        ],
+      },
     ],
 
-    // Tier 1, Batch 1 — Accounts Receivable Clerk. Captures the collections policy the
-    // orchestrator applies when reviewing aged receivables.
+    // Tier 1, Batch 1 — Accounts Receivable Clerk. Captures the platform, then the
+    // collections policy the orchestrator applies when reviewing aged receivables.
     accounts_receivable_clerk: [
       {
         title: 'Where do your invoices live?',
@@ -81,9 +128,21 @@
         ],
       },
       {
-        title: 'Set your chasing policy',
-        description: 'How often to follow up, and which invoices are worth the effort.',
+        title: 'Operational set-up',
+        description: 'How your AR Clerk runs — when it reviews receivables, which invoices are worth chasing, and how chasers go out.',
+        operational: true,
         fields: [
+          {
+            key: 'chaseTrigger',
+            label: 'When should it review receivables?',
+            type: 'radio',
+            required: true,
+            options: [
+              { value: 'when_overdue', label: 'Automatically when overdue', description: 'It reviews invoices the moment they pass their due date.' },
+              { value: 'scheduled', label: 'Scheduled', description: 'It reviews the ledger on a regular schedule.' },
+              { value: 'on_demand', label: 'On demand', description: 'It reviews only when I ask.' },
+            ],
+          },
           {
             key: 'followUpCadence',
             label: 'Follow-up cadence',
@@ -106,12 +165,22 @@
             helpText: 'Invoices below this amount are left alone — chasing them costs more than they are worth.',
             min: 0,
           },
+          {
+            key: 'sendMode',
+            label: 'How should chasers be sent?',
+            type: 'radio',
+            required: true,
+            options: [
+              { value: 'draft_for_approval', label: 'Draft for my approval', description: 'I review every chaser before it goes out.' },
+              { value: 'send_automatically', label: 'Send automatically', description: 'Chasers go out on cadence without me.' },
+            ],
+          },
         ],
       },
     ],
 
-    // Tier 1, Batch 2 — CRM Enricher. Captures which CRM to enrich, what data to hunt
-    // for, and whether existing field values may be overwritten.
+    // Tier 1, Batch 2 — CRM Enricher. Captures which CRM to enrich and what to hunt for,
+    // then how it runs: trigger, scope, and whether existing values may be overwritten.
     crm_enricher: [
       {
         title: 'Where does your customer data live?',
@@ -140,12 +209,34 @@
         ],
       },
       {
-        title: 'How should we handle existing data?',
-        description: 'Decide whether enrichment may replace values already in your CRM.',
+        title: 'Operational set-up',
+        description: 'How your CRM Enricher runs — when it enriches, which records it processes, and whether it may replace existing values.',
+        operational: true,
         fields: [
           {
+            key: 'enrichTrigger',
+            label: 'When should it enrich?',
+            type: 'radio',
+            required: true,
+            options: [
+              { value: 'on_create', label: 'On new record created', description: 'Each new company or contact is enriched as it appears.' },
+              { value: 'scheduled_sweep', label: 'Scheduled sweep', description: 'It works through records on a regular schedule.' },
+              { value: 'on_demand', label: 'On demand', description: 'It enriches only when I ask.' },
+            ],
+          },
+          {
+            key: 'enrichScope',
+            label: 'Which records should it process?',
+            type: 'radio',
+            required: true,
+            options: [
+              { value: 'new_only', label: 'New records only', description: 'Only records created from now on.' },
+              { value: 'new_and_backlog', label: 'New + existing backlog', description: 'Also work back through records already in the CRM.' },
+            ],
+          },
+          {
             key: 'overwriteLogic',
-            label: 'Overwrite behaviour',
+            label: 'How should existing data be handled?',
             type: 'radio',
             required: true,
             options: [
@@ -157,8 +248,8 @@
       },
     ],
 
-    // Tier 1, Batch 2 — Tier 1 Support Agent. Captures the helpdesk, the auto-resolve
-    // confidence bar, where escalations go, and the support voice.
+    // Tier 1, Batch 2 — Tier 1 Support Agent. Captures the helpdesk and support voice,
+    // then how it runs: trigger, reply autonomy, auto-resolve bar and where escalations go.
     // NOTE: roleKey is tier1_support_agent (no underscore after "tier") to match
     // masterAssistants.roleKey seeded by db/seed-catalog.ts.
     tier1_support_agent: [
@@ -181,9 +272,47 @@
         ],
       },
       {
-        title: 'Set your escalation policy',
-        description: 'When your agent is unsure — or a customer is upset — a human takes over.',
+        title: 'How should we sound?',
+        description: 'This sets the voice for every customer-facing reply.',
         fields: [
+          {
+            key: 'supportTone',
+            label: 'Support tone',
+            type: 'radio',
+            required: true,
+            options: [
+              { value: 'empathetic', label: 'Empathetic', description: 'Leads with understanding — suits sensitive or high-stakes products.' },
+              { value: 'professional', label: 'Professional', description: 'Courteous and to the point — suits B2B and regulated industries.' },
+              { value: 'energetic', label: 'Energetic', description: 'Upbeat and friendly — suits consumer brands with a playful voice.' },
+            ],
+          },
+        ],
+      },
+      {
+        title: 'Operational set-up',
+        description: 'How your Support Agent runs — when it engages, whether replies auto-send, and when to hand off to a human.',
+        operational: true,
+        fields: [
+          {
+            key: 'ticketTrigger',
+            label: 'When should it engage?',
+            type: 'radio',
+            required: true,
+            options: [
+              { value: 'real_time', label: 'Real-time on new ticket', description: 'It picks up every ticket as it arrives.' },
+              { value: 'on_demand', label: 'On demand', description: 'It works tickets only when I ask.' },
+            ],
+          },
+          {
+            key: 'replyMode',
+            label: 'How should replies be handled?',
+            type: 'radio',
+            required: true,
+            options: [
+              { value: 'auto_send', label: 'Auto-send confident replies', description: 'Replies above the confidence bar go out automatically.' },
+              { value: 'draft_for_review', label: 'Draft everything for review', description: 'I review every reply before it is sent.' },
+            ],
+          },
           {
             key: 'autoResolveThreshold',
             label: 'Auto-resolve confidence threshold (%)',
@@ -204,27 +333,10 @@
           },
         ],
       },
-      {
-        title: 'How should we sound?',
-        description: 'This sets the voice for every customer-facing reply.',
-        fields: [
-          {
-            key: 'supportTone',
-            label: 'Support tone',
-            type: 'radio',
-            required: true,
-            options: [
-              { value: 'empathetic', label: 'Empathetic', description: 'Leads with understanding — suits sensitive or high-stakes products.' },
-              { value: 'professional', label: 'Professional', description: 'Courteous and to the point — suits B2B and regulated industries.' },
-              { value: 'energetic', label: 'Energetic', description: 'Upbeat and friendly — suits consumer brands with a playful voice.' },
-            ],
-          },
-        ],
-      },
     ],
 
-    // Tier 1, Batch 3 — Meeting Note Taker. Captures where meetings happen, where
-    // extracted action items should be synced, and how summaries should read.
+    // Tier 1, Batch 3 — Meeting Note Taker. Captures where meetings happen and how
+    // summaries read, then how it runs: capture method, task destination, delivery timing.
     meeting_note_taker: [
       {
         title: 'Where do your meetings happen?',
@@ -245,25 +357,6 @@
         ],
       },
       {
-        title: 'Where should action items go?',
-        description: 'Every task extracted from a meeting is prepared for sync to this tool.',
-        fields: [
-          {
-            key: 'taskDestination',
-            label: 'Task destination',
-            type: 'dropdown',
-            required: true,
-            placeholder: 'Choose your tool…',
-            options: [
-              { value: 'notion', label: 'Notion' },
-              { value: 'jira', label: 'Jira' },
-              { value: 'asana', label: 'Asana' },
-              { value: 'monday', label: 'Monday.com' },
-            ],
-          },
-        ],
-      },
-      {
         title: 'How should summaries read?',
         description: 'This sets the shape of every meeting summary your Note Taker writes.',
         fields: [
@@ -279,49 +372,46 @@
           },
         ],
       },
-    ],
-  };
-
-  // ── Shared "Operational Set-Up" step ───────────────────────────────────────────
-  // Every role — like the Social Media Manager — captures WHEN it runs and WHERE its
-  // input comes from during onboarding. Appended as the final step of each role's schema
-  // below so the answers land in onboardingContext under trigger_type / content_source —
-  // the same keys the detail page's "Operational Setup" section and "Your Onboarding
-  // Answers" summary read (see assistants.js _detailHydrate / _renderOnboardingSummary).
-  const OPERATIONAL_SETUP_STEP = {
-    title: 'Operational set-up',
-    description: 'Tell us when this assistant should run and where its work comes from.',
-    fields: [
       {
-        key: 'trigger_type',
-        label: 'Trigger / Schedule',
-        type: 'radio',
-        required: true,
-        options: [
-          { value: 'on_demand', label: 'On Demand', description: 'I trigger it manually when I need it.' },
-          { value: 'reactive', label: 'Reactive', description: 'It runs automatically when a new brief or data arrives.' },
-          { value: 'scheduled', label: 'Scheduled', description: 'It runs on a fixed recurring schedule.' },
+        title: 'Operational set-up',
+        description: 'How your Note Taker runs — how it captures meetings, where action items sync, and when notes land.',
+        operational: true,
+        fields: [
+          {
+            key: 'captureMethod',
+            label: 'How should it capture meetings?',
+            type: 'radio',
+            required: true,
+            options: [
+              { value: 'auto_join', label: 'Auto-join my calls', description: 'It joins scheduled meetings and captures them live.' },
+              { value: 'upload', label: 'I upload recordings & transcripts', description: 'I provide the recording or transcript afterwards.' },
+            ],
+          },
+          {
+            key: 'taskDestination',
+            label: 'Where should action items go?',
+            type: 'dropdown',
+            required: true,
+            placeholder: 'Choose your tool…',
+            options: [
+              { value: 'notion', label: 'Notion' },
+              { value: 'jira', label: 'Jira' },
+              { value: 'asana', label: 'Asana' },
+              { value: 'monday', label: 'Monday.com' },
+            ],
+          },
+          {
+            key: 'deliveryTiming',
+            label: 'When should notes be delivered?',
+            type: 'radio',
+            required: true,
+            options: [
+              { value: 'immediately', label: 'Immediately after the meeting', description: 'Notes land as soon as the meeting ends.' },
+              { value: 'batched', label: 'Batched (end of day)', description: 'Notes are delivered together at the end of the day.' },
+            ],
+          },
         ],
       },
-      {
-        key: 'content_source',
-        label: 'Content Source',
-        type: 'radio',
-        required: true,
-        options: [
-          { value: 'client_provided', label: 'Client Provided', description: 'I supply the drafts, data or notes — the assistant processes it.' },
-          { value: 'assistant_generated', label: 'Assistant Generated', description: 'The assistant researches and produces everything independently.' },
-          { value: 'hybrid', label: 'Hybrid', description: 'A mix — I provide direction, the assistant fills the gaps.' },
-        ],
-      },
     ],
   };
-
-  // Append a fresh copy of the operational step to every role's schema (deep-cloned so the
-  // roles never share a mutable step object).
-  Object.keys(window.AssistantOnboardingSchemas).forEach((roleKey) => {
-    window.AssistantOnboardingSchemas[roleKey].push(
-      JSON.parse(JSON.stringify(OPERATIONAL_SETUP_STEP))
-    );
-  });
 })();

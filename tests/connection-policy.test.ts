@@ -12,7 +12,7 @@
 // Pure logic — no DB required.
 
 import assert from 'node:assert';
-import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant } from '../src/utils/connection-map';
+import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant, CATEGORY_LABELS, CONNECTOR_CATEGORY, ROLE_CONNECTIONS } from '../src/utils/connection-map';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -89,6 +89,55 @@ check('relevantConnectorsForAssistant excludes social for a CRM role', () => {
 check('relevantConnectorsForAssistant returns full catalog for unrestricted role', () => {
     const a = { roleKey: 'custom', role: 'My Bespoke Helper' };
     assert.deepEqual(relevantConnectorsForAssistant(a).sort(), ['facebook', 'instagram', 'linkedin', 'threads', 'tiktok', 'twitter', 'x', 'youtube']);
+});
+
+// ── supportedToolsForAssistant (Connections UI + onboarding summary) ──
+
+check('supportedToolsForAssistant marks Social Media as available for a social role', () => {
+    const a = { roleKey: 'social_media_manager', role: 'The Social Media Manager' };
+    const tools = supportedToolsForAssistant(a);
+    assert.deepEqual(tools.map(t => t.key), ['social']);
+    assert.equal(tools[0].available, true);
+    assert.equal(typeof tools[0].label, 'string');
+});
+
+check('supportedToolsForAssistant surfaces coming-soon tools for a non-social role', () => {
+    const a = { roleKey: 'inbox_manager', role: 'The Inbox Manager' };
+    const tools = supportedToolsForAssistant(a);
+    assert.deepEqual(tools.map(t => t.key), ['email']);
+    assert.equal(tools[0].available, false); // no live email connector yet
+});
+
+check('supportedToolsForAssistant lists available tools before coming-soon ones', () => {
+    const a = { roleKey: 'review_reputation_manager', role: 'The Review & Reputation Manager' };
+    const tools = supportedToolsForAssistant(a);
+    // reviews (coming soon) + social (available) → social sorts first.
+    assert.deepEqual(tools.map(t => t.key), ['social', 'reviews']);
+    assert.equal(tools[0].available, true);
+    assert.equal(tools[1].available, false);
+});
+
+check('supportedToolsForAssistant returns the whole catalogue for an unrestricted role', () => {
+    const a = { roleKey: 'custom', role: 'My Bespoke Helper' };
+    const tools = supportedToolsForAssistant(a);
+    assert.equal(tools.some(t => t.key === 'social' && t.available), true);
+    assert.equal(tools.some(t => t.key === 'crm' && !t.available), true);
+});
+
+// Guard against drift: every category the policy references must have display
+// metadata, otherwise supportedToolsForAssistant silently drops it from the UI.
+check('every ROLE_CONNECTIONS category has a CATEGORY_LABELS entry', () => {
+    const missing = new Set<string>();
+    for (const cats of Object.values(ROLE_CONNECTIONS)) {
+        for (const c of cats) if (!CATEGORY_LABELS[c]) missing.add(c);
+    }
+    assert.equal(missing.size, 0, `categories without a label: ${[...missing].join(', ')}`);
+});
+
+check('every live connector category (CONNECTOR_CATEGORY) has a CATEGORY_LABELS entry', () => {
+    const missing = new Set<string>();
+    for (const c of Object.values(CONNECTOR_CATEGORY)) if (!CATEGORY_LABELS[c]) missing.add(c);
+    assert.equal(missing.size, 0, `categories without a label: ${[...missing].join(', ')}`);
 });
 
 console.log(`\n${passed} checks passed.`);

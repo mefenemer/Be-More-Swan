@@ -561,9 +561,15 @@
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
       <div class="mb-6">
         <h3 class="text-lg font-bold text-gray-900">Operational Setup</h3>
-        <p class="text-sm text-gray-500 mt-1">When does your assistant run, and where does it get its content from?</p>
+        <p id="operation-intro" class="text-sm text-gray-500 mt-1">When does your assistant run, and where does it get its content from?</p>
       </div>
       <div class="space-y-6">
+        <!-- Role-specific operational fields (schema-driven roles) render here — see
+             _renderOperationSection() in assistants.js. When populated, #operation-generic
+             below is hidden so only the role's own operational questions show. -->
+        <div id="operation-role-fields" class="space-y-6"></div>
+        <!-- Generic Trigger / Content Source — Social Media Manager + legacy assistants only. -->
+        <div id="operation-generic" class="space-y-6">
         <div>
           <label class="block text-sm font-bold text-gray-700 mb-2">Trigger / Schedule</label>
           <div class="space-y-2">
@@ -598,6 +604,7 @@
             </label>
           </div>
         </div>
+        </div><!-- /#operation-generic -->
         <!-- ── Posting Schedule — social-only module, toggled by AssistantDashboardRegistry ── -->
         <div id="module-posting-schedule" class="pt-2 border-t border-gray-100">
           <h4 class="text-sm font-bold text-gray-900 mb-1">Posting Schedule</h4>
