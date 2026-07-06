@@ -121,6 +121,26 @@ const CATALOG = [
         comingSoon: true,
         isActive: true,
     },
+    {
+        roleKey: 'rfp_proposal_responder',
+        name: 'The RFP & Proposal Responder',
+        description: 'Uses RAG to search your past successful proposals and auto-drafts responses to new RFPs and security questionnaires — turns weeks of enterprise paperwork into a same-day turnaround.',
+        category: 'Marketing & Sales',
+        iconKey: 'document',
+        iconColor: 'purple',
+        comingSoon: true,
+        isActive: true,
+    },
+    {
+        roleKey: 'competitor_intel_analyst',
+        name: 'The Competitor Intel Analyst',
+        description: 'Scrapes competitor websites, pricing pages, and G2 reviews every week and compiles updated battle cards for your sales team — know exactly how you stack up, always.',
+        category: 'Marketing & Sales',
+        iconKey: 'globe',
+        iconColor: 'pink',
+        comingSoon: true,
+        isActive: true,
+    },
 
     // ── 3. Operations ────────────────────────────────────────────────────────
     {
@@ -235,6 +255,16 @@ const CATALOG = [
         description: 'Reads scanned receipts, extracts the vendor and amount, and matches them to the correct tax category — bookkeeping done before your accountant asks.',
         category: 'Finance & Bookkeeping',
         iconKey: 'document',
+        iconColor: 'teal',
+        comingSoon: true,
+        isActive: true,
+    },
+    {
+        roleKey: 'sql_data_analyst',
+        name: 'The SQL/Data Analyst',
+        description: 'Connects securely to Stripe or your database so you can ask plain-English questions like "What was our net revenue retention last month?" and get instant answers and charts.',
+        category: 'Finance & Bookkeeping',
+        iconKey: 'chart',
         iconColor: 'teal',
         comingSoon: true,
         isActive: true,
