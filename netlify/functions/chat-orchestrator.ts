@@ -253,7 +253,12 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EXACTL
     "score": <0-100>,
     "rating": "hot" | "warm" | "cold",
     "reasons": ["<short reason tied to the profile criteria>", ...],
-    "suggestedNextStep": "<one concrete action>"
+    "suggestedNextStep": "<one concrete action>",
+    "outreachDraft": {                // a ready-to-review outreach email for hot/warm leads; null for cold leads
+      "to": "<the lead's email address, only when the conversation gives one>" | null,
+      "subject": "<outreach email subject line>",
+      "body": "<the full outreach email body, personalised to the lead and written in the sales tone>"
+    } | null
   }
 }
 {
@@ -303,6 +308,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
   "uiElement": {                      // or null when there is no invoice data yet
     "type": "aging_invoices_table",
     "title": "<short heading, e.g. 'Overdue invoices — June'>",
+    "accountingProvider": ${JSON.stringify(platform ?? null)},
     "invoices": [
       { "clientName": "<client>", "daysPastDue": <number>, "amount": "<formatted amount incl. currency symbol>", "status": "reminder" | "overdue" | "final_notice" | "escalated" },
       ...
@@ -389,6 +395,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
   "uiElement": {                      // or null when there is no ticket to triage yet
     "type": "ticket_triage_view",
     "status": "Resolved" | "Escalated",
+    "helpdeskProvider": ${JSON.stringify(platform ?? null)},
     "ticketId": "<the helpdesk ticket number, digits only, when the query names one>" | null,
     "confidenceScore": <0-100>,
     "summary": "<one-sentence summary of the customer's issue>",

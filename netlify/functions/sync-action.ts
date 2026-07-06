@@ -18,6 +18,15 @@
 //                                → push a private (internal) comment onto the Zendesk ticket.
 //   notion_create_page         — action_item_assignment (meeting_note_taker, destination=notion)
 //                                → create a Notion page: summary paragraph + to_do blocks.
+//   qbo_log_note               — aging_invoices_table row (accounts_receivable_clerk,
+//                                accountingPlatform=quickbooks) → resolve the QBO invoice
+//                                and append a memo to its PrivateNote via sparse update.
+//   intercom_add_internal_note — ticket_triage_view (tier1_support_agent,
+//                                helpdeskPlatform=intercom) → post the triage summary as
+//                                an admin note on the Intercom conversation.
+//   gmail_create_draft         — lead_scoring_card / ticket_triage_view
+//                                → create a Gmail draft (to/subject/body) in the user's
+//                                outbox so they can review it before sending.
 //
 // Every path: requireTenant (org-scoped), token via getFreshAccessToken (which silently
 // refreshes an expired access token), and integration_api_calls audit rows (SC6 —
@@ -420,6 +429,204 @@ async function handleNotionCreatePage(db: Db, userId: number, organisationId: nu
     return json(200, { success: true, message: `Created "${title}" in Notion with ${tasks.length} action item${tasks.length === 1 ? '' : 's'}.` });
 }
 
+// ── QuickBooks: append a memo to an invoice's private note (sparse update) ─────
+
+// QBO has no invoice-history endpoint (unlike Xero) — the equivalent audit trail is the
+// invoice's PrivateNote (internal memo, max 4000 chars), updated via a sparse POST that
+// must carry the record's current SyncToken.
+const QBO_PRIVATE_NOTE_MAX = 4000;
+
+function qboApiBase(): string {
+    // QUICKBOOKS_API_BASE lets sandbox companies point at sandbox-quickbooks.api.intuit.com.
+    return (process.env.QUICKBOOKS_API_BASE ?? 'https://quickbooks.api.intuit.com').replace(/\/$/, '');
+}
+
+/** Escape a value for interpolation inside a single-quoted QBO query string literal. */
+function qboEscape(value: string): string {
+    return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+interface QboInvoiceRecord { Id?: string; SyncToken?: string; PrivateNote?: string; DocNumber?: string }
+
+async function qboQuery(db: Db, userId: number, realmId: string, headers: Record<string, string>, query: string): Promise<{ Invoice?: QboInvoiceRecord[]; Customer?: Array<{ Id?: string }> }> {
+    const res = await fetch(`${qboApiBase()}/v3/company/${encodeURIComponent(realmId)}/query?minorversion=70&query=${encodeURIComponent(query)}`, { headers });
+    await logApiCall(db, { userId, endpoint: 'quickbooks.api.intuit.com/v3/company/query', httpStatus: res.status });
+    const data: { QueryResponse?: { Invoice?: QboInvoiceRecord[]; Customer?: Array<{ Id?: string }> } } = res.ok ? await res.json().catch(() => ({})) : {};
+    return data.QueryResponse ?? {};
+}
+
+async function handleQboLogNote(db: Db, userId: number, organisationId: number, payload: XeroNotePayload) {
+    const clientName = typeof payload.clientName === 'string' ? payload.clientName.trim() : '';
+    const invoiceNumber = typeof payload.invoiceNumber === 'string' ? payload.invoiceNumber.trim() : '';
+    const invoiceId = typeof payload.invoiceId === 'string' ? payload.invoiceId.trim() : '';
+    if (!invoiceId && !invoiceNumber && !clientName) return json(400, { error: 'The payload identifies no invoice (needs invoiceId, invoiceNumber or clientName).' });
+
+    // tenantId carries the company realmId captured from the OAuth callback.
+    const { accessToken, tenantId: realmId } = await getFreshAccessToken(db, organisationId, 'quickbooks');
+    if (!realmId) return json(409, { error: 'QuickBooks is connected but no company is mapped — please reconnect it on the Integrations page.' });
+    const qboHeaders = { Authorization: `Bearer ${accessToken}`, Accept: 'application/json', 'Content-Type': 'application/json' };
+
+    // 1. Resolve the invoice — the sparse update needs its Id, current SyncToken and
+    // existing PrivateNote (LLM payloads rarely carry QBO ids).
+    let invoice: QboInvoiceRecord | undefined;
+    if (invoiceId) {
+        const { Invoice } = await qboQuery(db, userId, realmId, qboHeaders, `SELECT Id, SyncToken, PrivateNote, DocNumber FROM Invoice WHERE Id = '${qboEscape(invoiceId)}'`);
+        invoice = Invoice?.[0];
+    } else if (invoiceNumber) {
+        const { Invoice } = await qboQuery(db, userId, realmId, qboHeaders, `SELECT Id, SyncToken, PrivateNote, DocNumber FROM Invoice WHERE DocNumber = '${qboEscape(invoiceNumber)}'`);
+        invoice = Invoice?.[0];
+    } else {
+        // QBO queries can't filter invoices by customer NAME — resolve the Customer id first,
+        // then take the oldest-due open invoice for that customer.
+        const { Customer } = await qboQuery(db, userId, realmId, qboHeaders, `SELECT Id FROM Customer WHERE DisplayName = '${qboEscape(clientName)}'`);
+        const customerId = Customer?.[0]?.Id;
+        if (customerId) {
+            const { Invoice } = await qboQuery(db, userId, realmId, qboHeaders, `SELECT Id, SyncToken, PrivateNote, DocNumber FROM Invoice WHERE CustomerRef = '${qboEscape(customerId)}' AND Balance > '0' ORDERBY DueDate`);
+            invoice = Invoice?.[0];
+        }
+    }
+    if (!invoice?.Id || invoice.SyncToken === undefined) {
+        return json(404, { error: `No open QuickBooks invoice found for ${invoiceNumber ? `number "${invoiceNumber}"` : `"${clientName || invoiceId}"`}. Check the invoice exists and is awaiting payment.` });
+    }
+
+    // 2. Append the chasing note to the invoice's private memo (sparse update keeps
+    // every other field untouched).
+    const note = typeof payload.note === 'string' && payload.note.trim()
+        ? payload.note.trim()
+        : `Chasing update from Be More Swan — ${payload.status ?? 'overdue'}, ${payload.daysPastDue ?? '?'} days past due${payload.amount ? `, ${payload.amount} outstanding` : ''}.`;
+    const stamped = `[${new Date().toISOString().slice(0, 10)}] ${note}`;
+    const combined = invoice.PrivateNote ? `${invoice.PrivateNote}\n${stamped}` : stamped;
+    const updateRes = await fetch(`${qboApiBase()}/v3/company/${encodeURIComponent(realmId)}/invoice?minorversion=70`, {
+        method: 'POST',
+        headers: qboHeaders,
+        body: JSON.stringify({
+            Id: invoice.Id,
+            SyncToken: invoice.SyncToken,
+            sparse: true,
+            PrivateNote: combined.slice(-QBO_PRIVATE_NOTE_MAX),
+        }),
+    });
+    await logApiCall(db, { userId, endpoint: 'quickbooks.api.intuit.com/v3/company/invoice', httpStatus: updateRes.status });
+    if (!updateRes.ok) {
+        const err: { Fault?: { Error?: Array<{ Message?: string }> } } = await updateRes.json().catch(() => ({}));
+        const message = err.Fault?.Error?.[0]?.Message;
+        return json(502, { error: `QuickBooks rejected the note${message ? `: ${message}` : ' — the invoice may be locked or deleted.'}` });
+    }
+
+    const label = invoice.DocNumber ? `invoice ${invoice.DocNumber}` : (clientName ? `${clientName}'s invoice` : 'the invoice');
+    return json(200, { success: true, message: `Note logged against ${label} in QuickBooks.` });
+}
+
+// ── Intercom: add an internal (admin) note to a conversation ───────────────────
+
+const INTERCOM_VERSION = '2.11';
+
+interface IntercomNotePayload {
+    conversationId?: unknown;
+    ticketId?: unknown;
+    summary?: unknown;
+    status?: unknown;
+    confidenceScore?: unknown;
+    escalationReason?: unknown;
+}
+
+async function handleIntercomAddNote(db: Db, userId: number, organisationId: number, payload: IntercomNotePayload) {
+    const conversationId = String(payload.conversationId ?? payload.ticketId ?? '').trim();
+    if (!/^\d+$/.test(conversationId)) {
+        return json(400, { error: 'The payload has no Intercom conversation id — include the conversation number in the chat so the triage card can carry it.' });
+    }
+    const summary = typeof payload.summary === 'string' ? payload.summary.trim() : '';
+    if (!summary) return json(400, { error: 'Nothing to log — the payload has no summary.' });
+
+    const { accessToken } = await getFreshAccessToken(db, organisationId, 'intercom');
+    const intercomHeaders = { Authorization: `Bearer ${accessToken}`, 'Intercom-Version': INTERCOM_VERSION, Accept: 'application/json', 'Content-Type': 'application/json' };
+
+    // 1. Note replies must be authored by an admin — /me identifies the admin the
+    // workspace authorised at connect time.
+    const meRes = await fetch('https://api.intercom.io/me', { headers: intercomHeaders });
+    await logApiCall(db, { userId, endpoint: 'api.intercom.io/me', httpStatus: meRes.status });
+    const me: { id?: string } = meRes.ok ? await meRes.json().catch(() => ({})) : {};
+    if (!me.id) {
+        return json(502, { error: 'Intercom did not identify the connected admin — please reconnect it on the Integrations page.' });
+    }
+
+    // 2. message_type 'note' makes the reply an internal note — never shown to the customer.
+    const lines = [`Be More Swan triage summary: ${summary}`];
+    if (payload.status) lines.push(`Status: ${String(payload.status)}${Number.isFinite(Number(payload.confidenceScore)) ? ` (${Number(payload.confidenceScore)}% confident)` : ''}`);
+    if (typeof payload.escalationReason === 'string' && payload.escalationReason.trim()) lines.push(`Escalation reason: ${payload.escalationReason.trim()}`);
+
+    const noteRes = await fetch(`https://api.intercom.io/conversations/${conversationId}/reply`, {
+        method: 'POST',
+        headers: intercomHeaders,
+        body: JSON.stringify({
+            message_type: 'note',
+            type: 'admin',
+            admin_id: me.id,
+            body: lines.join('\n').slice(0, 5000),
+        }),
+    });
+    await logApiCall(db, { userId, endpoint: 'api.intercom.io/conversations/reply', httpStatus: noteRes.status });
+    if (noteRes.status === 404) {
+        return json(404, { error: `No Intercom conversation #${conversationId} found — check the conversation number and try again.` });
+    }
+    if (!noteRes.ok) {
+        const err: { errors?: Array<{ message?: string }> } = await noteRes.json().catch(() => ({}));
+        const message = err.errors?.[0]?.message;
+        return json(502, { error: `Intercom rejected the note${message ? `: ${message}` : '.'}` });
+    }
+
+    return json(200, { success: true, message: `Internal note added to Intercom conversation #${conversationId}.` });
+}
+
+// ── Gmail: create a draft in the user's outbox for review before sending ──────
+
+interface GmailDraftPayload {
+    to?: unknown;
+    subject?: unknown;
+    body?: unknown;
+}
+
+/** RFC 2047 B-encode a header value so non-ASCII subjects survive the MIME round trip. */
+function encodeMimeHeader(value: string): string {
+    // eslint-disable-next-line no-control-regex
+    return /^[\x20-\x7e]*$/.test(value) ? value : `=?UTF-8?B?${Buffer.from(value, 'utf8').toString('base64')}?=`;
+}
+
+async function handleGmailCreateDraft(db: Db, userId: number, organisationId: number, payload: GmailDraftPayload) {
+    // Strip CR/LF so payload values can never smuggle extra MIME headers.
+    const to = typeof payload.to === 'string' ? payload.to.replace(/[\r\n]+/g, ' ').trim() : '';
+    const subject = typeof payload.subject === 'string' ? payload.subject.replace(/[\r\n]+/g, ' ').trim() : '';
+    const body = typeof payload.body === 'string' ? payload.body.trim() : '';
+    if (!subject && !body) return json(400, { error: 'Nothing to draft — the payload has no subject or body.' });
+
+    const { accessToken } = await getFreshAccessToken(db, organisationId, 'gmail');
+
+    // Drafts API takes a full RFC 2822 message, base64url-encoded. A missing "to" is fine —
+    // Gmail happily stores recipient-less drafts for the user to complete.
+    const mime = [
+        ...(to ? [`To: ${to}`] : []),
+        `Subject: ${encodeMimeHeader(subject || '(no subject)')}`,
+        'MIME-Version: 1.0',
+        'Content-Type: text/plain; charset="UTF-8"',
+        'Content-Transfer-Encoding: base64',
+        '',
+        Buffer.from(body, 'utf8').toString('base64'),
+    ].join('\r\n');
+
+    const draftRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/drafts', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: { raw: Buffer.from(mime, 'utf8').toString('base64url') } }),
+    });
+    await logApiCall(db, { userId, endpoint: 'gmail.googleapis.com/gmail/v1/users/me/drafts', httpStatus: draftRes.status });
+    if (!draftRes.ok) {
+        const err: { error?: { message?: string } } = await draftRes.json().catch(() => ({}));
+        return json(502, { error: `Gmail rejected the draft${err.error?.message ? `: ${err.error.message}` : '.'}` });
+    }
+
+    return json(200, { success: true, message: `Draft${to ? ` to ${to}` : ''} created in Gmail — review it in your Drafts folder before sending.` });
+}
+
 // ── Handler ───────────────────────────────────────────────────────────────────
 
 export const handler: Handler = async (event) => {
@@ -449,6 +656,12 @@ export const handler: Handler = async (event) => {
                 return await handleZendeskAddNote(db, ctx.userId, ctx.organisationId, payload);
             case 'notion_create_page':
                 return await handleNotionCreatePage(db, ctx.userId, ctx.organisationId, payload);
+            case 'qbo_log_note':
+                return await handleQboLogNote(db, ctx.userId, ctx.organisationId, payload);
+            case 'intercom_add_internal_note':
+                return await handleIntercomAddNote(db, ctx.userId, ctx.organisationId, payload);
+            case 'gmail_create_draft':
+                return await handleGmailCreateDraft(db, ctx.userId, ctx.organisationId, payload);
             default:
                 return json(400, { error: `Unknown actionType "${body.actionType ?? ''}".` });
         }

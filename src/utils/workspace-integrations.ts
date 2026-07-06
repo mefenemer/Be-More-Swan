@@ -1,6 +1,7 @@
 // src/utils/workspace-integrations.ts
 // External Integrations (Phase 1: HubSpot, Xero, Slack · Phase 2: Salesforce, Zendesk,
-// Notion): the ONLY read/write path for workspace_integrations rows and their token material.
+// Notion · Phase 3: QuickBooks, Intercom, Gmail): the ONLY read/write path for
+// workspace_integrations rows and their token material.
 //
 // Token custody follows the platform standard (US-DB-1.6.1): access/refresh tokens are
 // never stored in table columns — they live AES-256-GCM encrypted in vault_secrets under
@@ -19,9 +20,9 @@ import { storeSecret, getSecret, deleteSecret } from './vault';
 
 type Db = ReturnType<typeof getDb>;
 
-export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion';
+export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail';
 
-export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion'];
+export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail'];
 
 export function isIntegrationProvider(value: unknown): value is IntegrationProvider {
     return typeof value === 'string' && (INTEGRATION_PROVIDERS as string[]).includes(value);
@@ -213,6 +214,42 @@ async function refreshProviderToken(provider: IntegrationProvider, refreshToken:
         throw new IntegrationError('refresh_failed', 'Notion tokens cannot be refreshed — please reconnect it on the Integrations page.', 401);
     }
 
+    if (provider === 'quickbooks') {
+        const credentials = Buffer.from(`${process.env.QUICKBOOKS_CLIENT_ID ?? ''}:${process.env.QUICKBOOKS_CLIENT_SECRET ?? ''}`).toString('base64');
+        const res = await fetch('https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json', Authorization: `Basic ${credentials}` },
+            body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken }),
+        });
+        const data: { access_token?: string; refresh_token?: string; expires_in?: number } = await res.json().catch(() => ({}));
+        if (!res.ok || !data.access_token) throw new IntegrationError('refresh_failed', 'QuickBooks token refresh was rejected.', 401);
+        // QuickBooks rotates the refresh token roughly every 24h — always persist the new one.
+        return { accessToken: data.access_token, refreshToken: data.refresh_token ?? null, expiresInSec: data.expires_in ?? null };
+    }
+
+    if (provider === 'intercom') {
+        // Intercom access tokens never expire and there is no refresh grant — reaching
+        // here means the row's expiresAt was set in error; force a reconnect.
+        throw new IntegrationError('refresh_failed', 'Intercom tokens cannot be refreshed — please reconnect it on the Integrations page.', 401);
+    }
+
+    if (provider === 'gmail') {
+        const res = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                grant_type: 'refresh_token',
+                client_id: process.env.GMAIL_CLIENT_ID ?? '',
+                client_secret: process.env.GMAIL_CLIENT_SECRET ?? '',
+                refresh_token: refreshToken,
+            }),
+        });
+        const data: { access_token?: string; expires_in?: number } = await res.json().catch(() => ({}));
+        if (!res.ok || !data.access_token) throw new IntegrationError('refresh_failed', 'Gmail token refresh was rejected.', 401);
+        // Google does not rotate the refresh token on use — keep the stored one.
+        return { accessToken: data.access_token, refreshToken: null, expiresInSec: data.expires_in ?? null };
+    }
+
     // Slack: only used when token rotation is enabled on the app (otherwise bot tokens
     // never expire and this path is never reached — expiresAt stays null).
     const res = await fetch('https://slack.com/api/oauth.v2.access', {
@@ -288,6 +325,9 @@ const PROVIDER_LABELS: Record<IntegrationProvider, string> = {
     salesforce: 'Salesforce',
     zendesk: 'Zendesk',
     notion: 'Notion',
+    quickbooks: 'QuickBooks',
+    intercom: 'Intercom',
+    gmail: 'Gmail',
 };
 
 export function providerLabel(provider: IntegrationProvider): string {

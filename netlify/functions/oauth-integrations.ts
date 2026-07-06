@@ -1,6 +1,6 @@
 // netlify/functions/oauth-integrations.ts
-// External Integrations: universal OAuth 2.0 router for HubSpot, Xero, Slack (Phase 1)
-// and Salesforce, Zendesk, Notion (Phase 2).
+// External Integrations: universal OAuth 2.0 router for HubSpot, Xero, Slack (Phase 1),
+// Salesforce, Zendesk, Notion (Phase 2) and QuickBooks, Intercom, Gmail (Phase 3).
 //
 // Routed via netlify.toml rewrites so the public URLs are:
 //   GET  /api/oauth/:provider/connect    → 302 to the provider's authorization URL
@@ -17,12 +17,17 @@
 //
 // Client IDs/secrets come from env: HUBSPOT_CLIENT_ID/SECRET, XERO_CLIENT_ID/SECRET,
 // SLACK_CLIENT_ID/SECRET, SALESFORCE_CLIENT_ID/SECRET, ZENDESK_CLIENT_ID/SECRET,
-// NOTION_CLIENT_ID/SECRET.
+// NOTION_CLIENT_ID/SECRET, QUICKBOOKS_CLIENT_ID/SECRET, INTERCOM_CLIENT_ID/SECRET,
+// GMAIL_CLIENT_ID/SECRET.
 //
 // Zendesk special case: its OAuth endpoints live on the customer's own subdomain
 // (https://{subdomain}.zendesk.com), so /api/oauth/zendesk/connect requires a
 // ?subdomain= query param. The subdomain rides in the server-side CSRF vault entry
 // (never in the client-visible state) and is persisted as the row's tenantId.
+//
+// QuickBooks special case: Intuit appends the connected company's realmId as a query
+// param on the callback redirect — every QBO API call is rooted at
+// /v3/company/{realmId}, so the realmId is persisted as the row's tenantId.
 
 import { Handler, HandlerEvent } from '@netlify/functions';
 import { randomBytes } from 'crypto';
@@ -52,6 +57,10 @@ const SCOPES: Record<IntegrationProvider, string> = {
     salesforce: 'api refresh_token',
     zendesk: 'read write',
     notion: '', // Notion has no scope param — access is granted per-page on the consent screen
+    // Phase 3 actions: QBO invoice notes, Intercom internal notes, Gmail draft creation.
+    quickbooks: 'com.intuit.quickbooks.accounting',
+    intercom: '', // Intercom has no scope param — permissions come from the app's configuration
+    gmail: 'https://www.googleapis.com/auth/gmail.compose',
 };
 
 /**
@@ -188,6 +197,14 @@ export const handler: Handler = async (event) => {
             authUrl = `https://${zendeskSubdomain}.zendesk.com/oauth/authorizations/new?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.zendesk)}&state=${state}`;
         } else if (provider === 'notion') {
             authUrl = `https://api.notion.com/v1/oauth/authorize?response_type=code&owner=user&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
+        } else if (provider === 'quickbooks') {
+            authUrl = `https://appcenter.intuit.com/connect/oauth2?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.quickbooks)}&state=${state}`;
+        } else if (provider === 'intercom') {
+            authUrl = `https://app.intercom.com/oauth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
+        } else if (provider === 'gmail') {
+            // access_type=offline + prompt=consent forces Google to issue a refresh token
+            // (it only does so on the first consent otherwise).
+            authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.gmail)}&access_type=offline&prompt=consent&state=${state}`;
         } else {
             authUrl = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=${encodeURIComponent(SCOPES.slack)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
         }
@@ -363,6 +380,113 @@ export const handler: Handler = async (event) => {
                     tenantId: tokenData.workspace_id ?? null,
                     externalAccountName: tokenData.workspace_name ?? null,
                     scopes: null,
+                });
+            } else if (provider === 'quickbooks') {
+                // Intuit appends the connected company's realmId to the callback URL — it is
+                // the company id every QBO API call is rooted at, so it becomes the tenantId.
+                const realmId = (event.queryStringParameters?.realmId ?? '').trim();
+                if (!realmId) return redirect(`/integrations.html?oauth_error=no_tenant&provider=quickbooks`);
+
+                const credentials = Buffer.from(`${process.env.QUICKBOOKS_CLIENT_ID ?? ''}:${process.env.QUICKBOOKS_CLIENT_SECRET ?? ''}`).toString('base64');
+                const tokenRes = await fetch('https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json', Authorization: `Basic ${credentials}` },
+                    body: new URLSearchParams({ grant_type: 'authorization_code', code, redirect_uri: redirectUri }),
+                });
+                const tokenData: { access_token?: string; refresh_token?: string; expires_in?: number } = await tokenRes.json().catch(() => ({}));
+                if (!tokenData.access_token) return redirect(`/integrations.html?oauth_error=token_exchange&provider=quickbooks`);
+
+                // CompanyInfo gives the company name for the card label (best-effort).
+                // QUICKBOOKS_API_BASE lets sandbox companies point at sandbox-quickbooks.api.intuit.com.
+                const apiBase = (process.env.QUICKBOOKS_API_BASE ?? 'https://quickbooks.api.intuit.com').replace(/\/$/, '');
+                let companyName: string | null = null;
+                try {
+                    const infoRes = await fetch(`${apiBase}/v3/company/${encodeURIComponent(realmId)}/companyinfo/${encodeURIComponent(realmId)}?minorversion=70`, {
+                        headers: { Authorization: `Bearer ${tokenData.access_token}`, Accept: 'application/json' },
+                    });
+                    const info: { CompanyInfo?: { CompanyName?: string } } = infoRes.ok ? await infoRes.json() : {};
+                    companyName = info.CompanyInfo?.CompanyName ?? null;
+                } catch { /* label only — connection still succeeds */ }
+
+                await saveIntegration(db, {
+                    organisationId, userId, provider: 'quickbooks',
+                    accessToken: tokenData.access_token,
+                    refreshToken: tokenData.refresh_token ?? null,
+                    expiresInSec: tokenData.expires_in ?? null,
+                    tenantId: realmId,
+                    externalAccountName: companyName,
+                    scopes: SCOPES.quickbooks,
+                });
+            } else if (provider === 'intercom') {
+                const tokenRes = await fetch('https://api.intercom.io/auth/eagle/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                    body: JSON.stringify({
+                        grant_type: 'authorization_code',
+                        code,
+                        client_id: process.env.INTERCOM_CLIENT_ID ?? '',
+                        client_secret: process.env.INTERCOM_CLIENT_SECRET ?? '',
+                    }),
+                });
+                const tokenData: { access_token?: string; token?: string } = await tokenRes.json().catch(() => ({}));
+                const accessToken = tokenData.access_token ?? tokenData.token;
+                if (!accessToken) return redirect(`/integrations.html?oauth_error=token_exchange&provider=intercom`);
+
+                // /me identifies the authorising admin + workspace (app) for the card label.
+                let workspaceId: string | null = null;
+                let accountName: string | null = null;
+                try {
+                    const meRes = await fetch('https://api.intercom.io/me', {
+                        headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+                    });
+                    const me: { app?: { id_code?: string; name?: string }; email?: string } = meRes.ok ? await meRes.json() : {};
+                    workspaceId = me.app?.id_code ?? null;
+                    accountName = me.app?.name ?? me.email ?? null;
+                } catch { /* label only — connection still succeeds */ }
+
+                await saveIntegration(db, {
+                    organisationId, userId, provider: 'intercom',
+                    accessToken,
+                    // Intercom tokens never expire and there is no refresh grant.
+                    refreshToken: null,
+                    expiresInSec: null,
+                    tenantId: workspaceId,
+                    externalAccountName: accountName,
+                    scopes: null,
+                });
+            } else if (provider === 'gmail') {
+                const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        grant_type: 'authorization_code',
+                        client_id: process.env.GMAIL_CLIENT_ID ?? '',
+                        client_secret: process.env.GMAIL_CLIENT_SECRET ?? '',
+                        redirect_uri: redirectUri,
+                        code,
+                    }),
+                });
+                const tokenData: { access_token?: string; refresh_token?: string; expires_in?: number; scope?: string } = await tokenRes.json().catch(() => ({}));
+                if (!tokenData.access_token) return redirect(`/integrations.html?oauth_error=token_exchange&provider=gmail`);
+
+                // The Gmail profile gives the mailbox address for the card label.
+                let emailAddress: string | null = null;
+                try {
+                    const profileRes = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
+                        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+                    });
+                    const profile: { emailAddress?: string } = profileRes.ok ? await profileRes.json() : {};
+                    emailAddress = profile.emailAddress ?? null;
+                } catch { /* label only — connection still succeeds */ }
+
+                await saveIntegration(db, {
+                    organisationId, userId, provider: 'gmail',
+                    accessToken: tokenData.access_token,
+                    refreshToken: tokenData.refresh_token ?? null,
+                    expiresInSec: tokenData.expires_in ?? null,
+                    tenantId: emailAddress,
+                    externalAccountName: emailAddress,
+                    scopes: tokenData.scope ?? SCOPES.gmail,
                 });
             } else {
                 const tokenRes = await fetch('https://slack.com/api/oauth.v2.access', {

@@ -9,6 +9,13 @@
       "autoPort": false
     },
     {
+      "name": "component-harness-phase3-integrations",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4182", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/73c5ea59-8530-4880-9e8d-8038d03ded3b/scratchpad/demo"],
+      "port": 4182,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-phase2-integrations",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "4181", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/9eea7ae4-3413-4501-921d-42a7e8bc538d/scratchpad/demo"],

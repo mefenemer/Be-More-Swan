@@ -56,9 +56,13 @@
   }
 
   // ── Built-in: Lead Scoring Card ─────────────────────────────────────────────
-  // Stub renderer for the lead-qualifier route's wire shape (chat-orchestrator.ts):
+  // Renderer for the lead-qualifier route's wire shape (chat-orchestrator.ts):
   // { type: 'lead_scoring_card', leadName, score: 0-100, rating: 'hot'|'warm'|'cold',
-  //   reasons: [...], suggestedNextStep }
+  //   reasons: [...], suggestedNextStep,
+  //   outreachDraft?: { to: string|null, subject, body } | null }
+  // When the LLM includes an outreachDraft, "Draft Outreach in Gmail" pushes it into
+  // the user's Gmail Drafts via /api/actions/sync (gmail_create_draft) so they can
+  // review and send it themselves.
   const RATING_STYLES = {
     hot: { chip: 'bg-emerald-50 text-emerald-800 border-emerald-200', bar: 'bg-emerald-700', label: 'Hot lead' },
     warm: { chip: 'bg-amber-50 text-amber-800 border-amber-200', bar: 'bg-amber-500', label: 'Warm lead' },
@@ -69,6 +73,11 @@
     const score = Math.max(0, Math.min(100, Number(ui.score) || 0));
     const rating = RATING_STYLES[ui.rating] || RATING_STYLES.cold;
     const reasons = Array.isArray(ui.reasons) ? ui.reasons.filter((r) => typeof r === 'string') : [];
+
+    // Outreach draft: only render the Gmail action when the LLM produced an email body.
+    const draft = (ui.outreachDraft && typeof ui.outreachDraft === 'object'
+      && typeof ui.outreachDraft.body === 'string' && ui.outreachDraft.body.trim())
+      ? ui.outreachDraft : null;
 
     const el = document.createElement('div');
     el.className = 'bg-white border border-gray-200 rounded-xl shadow-sm p-5 max-w-md';
@@ -104,7 +113,47 @@
         <div class="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-900">
           <span class="font-bold">Suggested next step:</span> ${esc(ui.suggestedNextStep)}
         </div>` : ''}
+
+      ${draft ? `
+      <div class="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-gray-100">
+        <p class="text-xs text-gray-400" data-gmail-status>Saves the outreach email to your Gmail Drafts for review before sending.</p>
+        <button type="button" data-draft-gmail
+          class="px-4 py-2 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">
+          Draft Outreach in Gmail
+        </button>
+      </div>` : ''}
     `;
+
+    // Live behaviour: push the LLM-drafted outreach email into Gmail Drafts.
+    if (draft) {
+      const gmailStatusLine = el.querySelector('[data-gmail-status]');
+      el.addEventListener('click', async (e) => {
+        const button = e.target.closest('[data-draft-gmail]');
+        if (!button || button.disabled) return;
+
+        button.disabled = true;
+        button.textContent = 'Drafting…';
+        gmailStatusLine.className = 'text-xs text-gray-400';
+        try {
+          const data = await postSyncAction('gmail_create_draft', {
+            to: typeof draft.to === 'string' ? draft.to : null,
+            subject: draft.subject ?? '',
+            body: draft.body,
+          });
+          button.textContent = 'Drafted ✓';
+          button.className = 'px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-bold rounded-lg cursor-default shrink-0 whitespace-nowrap';
+          gmailStatusLine.textContent = data.message || 'Draft created in Gmail.';
+          gmailStatusLine.className = 'text-xs font-semibold text-emerald-700';
+        } catch (err) {
+          button.disabled = false;
+          button.textContent = 'Retry draft';
+          button.className = 'px-4 py-2 bg-red-50 border border-red-200 text-red-700 hover:border-red-300 text-sm font-bold rounded-lg transition shrink-0 whitespace-nowrap';
+          gmailStatusLine.textContent = err.message || 'Could not create the Gmail draft.';
+          gmailStatusLine.className = 'text-xs font-semibold text-red-600';
+        }
+      });
+    }
+
     return el;
   }
 
@@ -130,12 +179,14 @@
 
   // ── Built-in: Aging Invoices Table Card ─────────────────────────────────────
   // Renderer for the accounts-receivable-clerk route's wire shape (chat-orchestrator.ts):
-  // { type: 'aging_invoices_table', title?, invoices: [{ clientName, daysPastDue,
-  //   amount, status: 'reminder'|'overdue'|'final_notice'|'escalated',
+  // { type: 'aging_invoices_table', title?, accountingProvider?, invoices: [{ clientName,
+  //   daysPastDue, amount, status: 'reminder'|'overdue'|'final_notice'|'escalated',
   //   invoiceNumber?: string|null }, ...] }
-  // "Log note" pushes a chasing note onto the matching Xero invoice via
-  // /api/actions/sync (xero_log_note). The "Pause chasing" toggle is still a
-  // client-side mock — it dims the row but does not persist anywhere yet.
+  // accountingProvider echoes the onboarding accountingPlatform: 'quickbooks' routes the
+  // "Log note" button to qbo_log_note (invoice private-memo update), anything else
+  // defaults to Xero (xero_log_note, invoice history note) — both via /api/actions/sync.
+  // The "Pause chasing" toggle is still a client-side mock — it dims the row but does
+  // not persist anywhere yet.
   const INVOICE_STATUS_STYLES = {
     reminder: { chip: 'bg-emerald-50 text-emerald-800 border-emerald-200', label: 'Reminder' },
     overdue: { chip: 'bg-amber-50 text-amber-800 border-amber-200', label: 'Overdue' },
@@ -147,6 +198,10 @@
     const invoices = (Array.isArray(ui.invoices) ? ui.invoices : [])
       .filter((inv) => inv && typeof inv === 'object');
     if (invoices.length === 0) return null; // nothing to tabulate — fall back to text-only
+
+    const isQuickBooks = /^(quickbooks|qbo)$/.test(String(ui.accountingProvider || '').trim().toLowerCase());
+    const acctLabel = isQuickBooks ? 'QuickBooks' : 'Xero';
+    const acctAction = isQuickBooks ? 'qbo_log_note' : 'xero_log_note';
 
     const el = document.createElement('div');
     el.className = 'bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden max-w-2xl';
@@ -167,7 +222,7 @@
               <th class="px-3 py-3 text-right">Amount</th>
               <th class="px-3 py-3">Status</th>
               <th class="px-3 py-3 text-right">Chasing</th>
-              <th class="px-5 py-3 text-right">Xero</th>
+              <th class="px-5 py-3 text-right">${acctLabel}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
@@ -198,7 +253,7 @@
           </tbody>
         </table>
       </div>
-      <p class="px-5 py-3 text-xs text-gray-400 border-t border-gray-100" data-table-status>Toggle off to pause chasing a client (visual only). "Log note" writes a chasing note to the invoice history in Xero.</p>
+      <p class="px-5 py-3 text-xs text-gray-400 border-t border-gray-100" data-table-status>Toggle off to pause chasing a client (visual only). "Log note" writes a chasing note against the invoice in ${acctLabel}.</p>
     `;
 
     // Mock behaviour: unticking "chasing" dims the row so the pause reads visually.
@@ -209,7 +264,8 @@
       if (row) row.classList.toggle('opacity-40', !toggle.checked);
     });
 
-    // Live behaviour: "Log note" pushes a history record onto the Xero invoice.
+    // Live behaviour: "Log note" pushes a chasing note onto the invoice in the
+    // configured accounting platform.
     const statusLine = el.querySelector('[data-table-status]');
     el.addEventListener('click', async (e) => {
       const button = e.target.closest('[data-log-note]');
@@ -221,7 +277,7 @@
       button.textContent = 'Logging…';
       statusLine.className = 'px-5 py-3 text-xs text-gray-400 border-t border-gray-100';
       try {
-        const data = await postSyncAction('xero_log_note', {
+        const data = await postSyncAction(acctAction, {
           title: ui.title ?? null,
           clientName: inv.clientName ?? null,
           invoiceNumber: inv.invoiceNumber ?? null,
@@ -232,13 +288,13 @@
         });
         button.textContent = 'Logged ✓';
         button.className = 'px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold rounded-lg cursor-default whitespace-nowrap';
-        statusLine.textContent = data.message || 'Note logged in Xero.';
+        statusLine.textContent = data.message || `Note logged in ${acctLabel}.`;
         statusLine.className = 'px-5 py-3 text-xs font-semibold text-emerald-700 border-t border-gray-100';
       } catch (err) {
         button.disabled = false;
         button.textContent = 'Retry note';
         button.className = 'px-3 py-1.5 bg-red-50 border border-red-200 text-red-700 hover:border-red-300 text-xs font-bold rounded-lg transition whitespace-nowrap';
-        statusLine.textContent = err.message || 'Could not log the note in Xero.';
+        statusLine.textContent = err.message || `Could not log the note in ${acctLabel}.`;
         statusLine.className = 'px-5 py-3 text-xs font-semibold text-red-600 border-t border-gray-100';
       }
     });
@@ -353,16 +409,22 @@
 
   // ── Built-in: Ticket Triage View Card ───────────────────────────────────────
   // Renderer for the tier1-support-agent route's wire shape (chat-orchestrator.ts):
-  // { type: 'ticket_triage_view', status: 'Resolved'|'Escalated', ticketId?: string|null,
-  //   confidenceScore: 0-100, summary, escalationReason: string|null,
-  //   escalationEmail?: string|null }
+  // { type: 'ticket_triage_view', status: 'Resolved'|'Escalated', helpdeskProvider?,
+  //   ticketId?: string|null, confidenceScore: 0-100, summary,
+  //   escalationReason: string|null, escalationEmail?: string|null }
   // Escalated tickets get an amber/red warning treatment naming the escalation inbox;
-  // resolved tickets get an emerald treatment. "Log to Zendesk" pushes the triage
-  // summary as an internal note on the ticket via /api/actions/sync
-  // (zendesk_add_internal_note) — the note is private, never requester-visible.
+  // resolved tickets get an emerald treatment. helpdeskProvider echoes the onboarding
+  // helpdeskPlatform: 'intercom' routes the log button to intercom_add_internal_note
+  // (admin note on the conversation), anything else defaults to Zendesk
+  // (zendesk_add_internal_note, private ticket comment) — both via /api/actions/sync
+  // and never requester-visible.
   function renderTicketTriageViewCard(ui, esc) {
     const escalated = String(ui.status).toLowerCase() === 'escalated';
     const confidence = Math.max(0, Math.min(100, Number(ui.confidenceScore) || 0));
+
+    const isIntercom = String(ui.helpdeskProvider || '').trim().toLowerCase() === 'intercom';
+    const deskLabel = isIntercom ? 'Intercom' : 'Zendesk';
+    const deskAction = isIntercom ? 'intercom_add_internal_note' : 'zendesk_add_internal_note';
 
     const el = document.createElement('div');
     el.className = `bg-white border-2 rounded-xl shadow-sm p-5 max-w-md ${escalated ? 'border-red-300' : 'border-emerald-300'}`;
@@ -397,26 +459,28 @@
         </div>`}
 
       <div class="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-gray-100">
-        <p class="text-xs text-gray-400" data-zendesk-status>Logs this triage summary as an internal note on the ticket.</p>
-        <button type="button" data-log-zendesk
+        <p class="text-xs text-gray-400" data-helpdesk-status>Logs this triage summary as an internal note on the ${isIntercom ? 'conversation' : 'ticket'}.</p>
+        <button type="button" data-log-helpdesk
           class="px-4 py-2 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">
-          Log to Zendesk
+          Log to ${deskLabel}
         </button>
       </div>
     `;
 
-    // Live behaviour: push the triage summary as a private Zendesk ticket comment.
-    const zendeskStatusLine = el.querySelector('[data-zendesk-status]');
+    // Live behaviour: push the triage summary as an internal note in the configured
+    // helpdesk (private Zendesk ticket comment / Intercom admin note).
+    const helpdeskStatusLine = el.querySelector('[data-helpdesk-status]');
     el.addEventListener('click', async (e) => {
-      const button = e.target.closest('[data-log-zendesk]');
+      const button = e.target.closest('[data-log-helpdesk]');
       if (!button || button.disabled) return;
 
       button.disabled = true;
       button.textContent = 'Logging…';
-      zendeskStatusLine.className = 'text-xs text-gray-400';
+      helpdeskStatusLine.className = 'text-xs text-gray-400';
       try {
-        const data = await postSyncAction('zendesk_add_internal_note', {
+        const data = await postSyncAction(deskAction, {
           ticketId: ui.ticketId ?? null,
+          conversationId: ui.ticketId ?? null,
           summary: ui.summary ?? null,
           status: ui.status ?? null,
           confidenceScore: ui.confidenceScore ?? null,
@@ -424,14 +488,14 @@
         });
         button.textContent = 'Logged ✓';
         button.className = 'px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-bold rounded-lg cursor-default shrink-0 whitespace-nowrap';
-        zendeskStatusLine.textContent = data.message || 'Internal note added in Zendesk.';
-        zendeskStatusLine.className = 'text-xs font-semibold text-emerald-700';
+        helpdeskStatusLine.textContent = data.message || `Internal note added in ${deskLabel}.`;
+        helpdeskStatusLine.className = 'text-xs font-semibold text-emerald-700';
       } catch (err) {
         button.disabled = false;
-        button.textContent = 'Retry Zendesk';
+        button.textContent = `Retry ${deskLabel}`;
         button.className = 'px-4 py-2 bg-red-50 border border-red-200 text-red-700 hover:border-red-300 text-sm font-bold rounded-lg transition shrink-0 whitespace-nowrap';
-        zendeskStatusLine.textContent = err.message || 'Could not add the note in Zendesk.';
-        zendeskStatusLine.className = 'text-xs font-semibold text-red-600';
+        helpdeskStatusLine.textContent = err.message || `Could not add the note in ${deskLabel}.`;
+        helpdeskStatusLine.className = 'text-xs font-semibold text-red-600';
       }
     });
 
