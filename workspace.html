@@ -4102,6 +4102,12 @@ function formatCurrency(amount, currency) {
 <!-- Role-aware post-hire dashboard config — assistant-detail.html KPI cards + module
      visibility, keyed by roleKey (consumed by _applyDashboardRegistry in assistants.js). -->
 <script src="/src/components/assistant-dashboard-registry.js"></script>
+<!-- Internal Data Hub (Golden Rule 2) — the role-specific Data Hub tab on
+     assistant-detail.html: Disruptive UI renderers reused for record detail,
+     CSV import (Spreadsheet Fallback), and the hub table itself. -->
+<script src="/src/components/disruptive-ui-registry.js"></script>
+<script src="/src/components/spreadsheet-import.js"></script>
+<script src="/src/components/assistant-data-hub.js"></script>
 <!-- Role-specific onboarding schemas — the catalogue's Hire Role buttons route any roleKey
      defined here to assistant-setup.html (schema-driven wizard) instead of onboarding.html. -->
 <script src="/src/config/assistant-onboarding-schemas.js"></script>

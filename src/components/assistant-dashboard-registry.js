@@ -11,6 +11,15 @@
  *   const cfg = window.AssistantDashboardRegistry.get(roleKey);
  *   cfg.kpis     // → [{ label, title, desc }, …4] injected into #kpi-N-label/-title/-desc
  *   cfg.modules  // → { hasReviewQueue, hasPostingSchedule, hasSocialStrategy }
+ *   cfg.hubTab   // → optional Internal Data Hub tab config (assistant-data-hub.js);
+ *                //   absent = no Data Hub tab for this role (e.g. social_media_manager)
+ *
+ * hubTab shape:
+ *   { id, label, recordType,            // recordType matches assistant_records.record_type
+ *     description,                      // one-liner under the tab heading
+ *     columns: [{ key, label }],        // table columns, key into record.data (or 'title'/'status'/'updatedAt')
+ *     importHint,                       // CSV-import helper copy (Spreadsheet Fallback)
+ *     importColumns: [ ... ] }          // suggested CSV headers, shown in the import panel
  *
  * Unknown or missing roleKeys fall back to the `social_media_manager` entry —
  * legacy assistants (hired before roleKey existed) are all Social Media
@@ -72,6 +81,21 @@
         },
       ],
       modules: { hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false },
+      hubTab: {
+        id: 'datahub',
+        label: 'Leads',
+        recordType: 'lead',
+        description: 'Every lead this assistant has scored — with its outreach draft — plus any lead lists you import.',
+        columns: [
+          { key: 'title', label: 'Lead' },
+          { key: 'score', label: 'Score' },
+          { key: 'status', label: 'Rating' },
+          { key: 'suggestedNextStep', label: 'Next step' },
+          { key: 'updatedAt', label: 'Updated' },
+        ],
+        importHint: 'Upload a CSV of inbound leads — one row per lead. Exporting from Excel or Google Sheets? Use File → Download → CSV.',
+        importColumns: ['name', 'company', 'email', 'website', 'industry', 'headcount', 'notes'],
+      },
     },
 
     accounts_receivable_clerk: {
@@ -98,6 +122,21 @@
         },
       ],
       modules: { hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false },
+      hubTab: {
+        id: 'datahub',
+        label: 'Ledger',
+        recordType: 'invoice',
+        description: 'Outstanding invoices this assistant is chasing — who has been emailed, when, and what stage each debt is at.',
+        columns: [
+          { key: 'title', label: 'Client' },
+          { key: 'invoices.0.daysPastDue', label: 'Days overdue' },
+          { key: 'invoices.0.amount', label: 'Amount' },
+          { key: 'status', label: 'Stage' },
+          { key: 'lastChasedAt', label: 'Last chased' },
+        ],
+        importHint: 'Upload a CSV of outstanding invoices — one row per invoice. Exporting from Excel or Google Sheets? Use File → Download → CSV.',
+        importColumns: ['client', 'amount', 'days overdue', 'invoice number', 'due date'],
+      },
     },
 
     tier1_support_agent: {
@@ -124,6 +163,20 @@
         },
       ],
       modules: { hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false },
+      hubTab: {
+        id: 'datahub',
+        label: 'Tickets',
+        recordType: 'ticket',
+        description: 'Triaged support queries with their drafted replies — forward your support@ emails into chat, or import a CSV of tickets.',
+        columns: [
+          { key: 'title', label: 'Ticket' },
+          { key: 'status', label: 'Status' },
+          { key: 'confidenceScore', label: 'Confidence' },
+          { key: 'updatedAt', label: 'Updated' },
+        ],
+        importHint: 'Upload a CSV of open tickets or customer emails — one row per query. Exporting from Excel or Google Sheets? Use File → Download → CSV.',
+        importColumns: ['subject', 'customer', 'email', 'message'],
+      },
     },
 
     crm_enricher: {
@@ -150,6 +203,21 @@
         },
       ],
       modules: { hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false },
+      hubTab: {
+        id: 'datahub',
+        label: 'Database',
+        recordType: 'enrichment',
+        description: 'Current vs. enriched diffs for every record this assistant has researched — apply them to your CRM or export as CSV.',
+        columns: [
+          { key: 'title', label: 'Record' },
+          { key: 'fields', label: 'Fields enriched' },
+          { key: 'crmProvider', label: 'CRM' },
+          { key: 'status', label: 'Status' },
+          { key: 'updatedAt', label: 'Updated' },
+        ],
+        importHint: 'Upload a CSV of accounts with missing fields — populated columns are kept as current values, blank ones get enriched. Exporting from Excel or Google Sheets? Use File → Download → CSV.',
+        importColumns: ['name', 'company', 'website', 'industry', 'company size', 'linkedin url'],
+      },
     },
 
     meeting_note_taker: {
@@ -176,6 +244,23 @@
         },
       ],
       modules: { hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false },
+      hubTab: {
+        id: 'datahub',
+        label: 'Meeting Notes',
+        recordType: 'meeting',
+        // NOT the same thing as the Progress Reviews tab (check-ins with this
+        // assistant) — this is a library of the user's own business meetings.
+        description: 'Notes from your business meetings — browse summaries and tick off action items. Check-ins with this assistant live in Progress Reviews.',
+        columns: [
+          { key: 'title', label: 'Meeting' },
+          { key: 'tasks', label: 'Action items' },
+          { key: 'targetDestination', label: 'Destination' },
+          { key: 'status', label: 'Status' },
+          { key: 'updatedAt', label: 'Updated' },
+        ],
+        importHint: 'Paste transcripts into chat for processing — or upload a CSV of past meetings (one row per meeting) to build your library.',
+        importColumns: ['meeting title', 'date', 'summary', 'action items'],
+      },
     },
   };
 

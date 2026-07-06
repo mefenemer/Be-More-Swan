@@ -2456,6 +2456,40 @@ export const chatMessages = pgTable("chat_messages", {
   check("chat_messages_role_check", sql`${t.role} IN ('user', 'assistant', 'system')`),
 ]);
 
+// ── Internal Data Hub (Golden Rule 2) ─────────────────────────────────────────
+// Tenant work products produced by the Tier 1 assistants — processed leads,
+// enrichment diffs, meeting notes, ledger invoices, triaged tickets. One table for
+// all five roles: `data` holds the exact uiElement wire shape the chat orchestrator
+// emitted (or a CSV-imported row mapped into that shape), so the Data Hub tab on
+// assistant-detail.html re-renders records with the same DisruptiveUIRegistry
+// renderers the chat transcript uses. NOT Be More Swan's own sales pipeline — that
+// is the `leads` table above.
+export const assistantRecords = pgTable("assistant_records", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  // The per-org assistant INSTANCE that produced/owns this record.
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  // 'lead' | 'enrichment' | 'meeting' | 'invoice' | 'ticket'
+  recordType: text("record_type").notNull(),
+  // Display name + dedupe key within (assistant, recordType): lead/company name,
+  // enriched record name, meeting title, invoice client, ticket subject.
+  title: text("title").notNull(),
+  // Freeform per-type lifecycle label ('hot', 'open', 'chased', 'Escalated', …) —
+  // rendered as a chip and filterable, not enum-constrained so roles can evolve.
+  status: text("status"),
+  // 'chat' | 'csv_import' | 'integration'
+  source: text("source").notNull().default("chat"),
+  // The serialised uiElement payload (see disruptive-ui-registry.js wire shapes).
+  data: jsonb("data").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  // Hot path: the Data Hub tab listing one assistant's records of one type.
+  index("assistant_records_org_assistant_type_idx").on(t.organisationId, t.aiAssistantId, t.recordType),
+  check("assistant_records_type_check", sql`${t.recordType} IN ('lead', 'enrichment', 'meeting', 'invoice', 'ticket')`),
+  check("assistant_records_source_check", sql`${t.source} IN ('chat', 'csv_import', 'integration')`),
+]);
+
 // Relational-query definitions for the chat tables live in db/relations.ts
 // (drizzle-orm v2 `defineRelations` API — this drizzle version has no per-table
 // `relations()` export).

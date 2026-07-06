@@ -597,6 +597,9 @@
   .-mt-2 {
     margin-top: calc(var(--spacing) * -2);
   }
+  .-mt-3 {
+    margin-top: calc(var(--spacing) * -3);
+  }
   .-mt-16 {
     margin-top: calc(var(--spacing) * -16);
   }
@@ -4498,6 +4501,11 @@
   .sm\:items-end {
     @media (width >= 40rem) {
       align-items: flex-end;
+    }
+  }
+  .sm\:items-start {
+    @media (width >= 40rem) {
+      align-items: flex-start;
     }
   }
   .sm\:gap-4 {

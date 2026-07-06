@@ -17,7 +17,7 @@ import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, chatMessages, chatSessions, masterAssistants, masterPlans, plans } from '../../db/schema';
+import { aiAssistants, assistantRecords, chatMessages, chatSessions, masterAssistants, masterPlans, plans } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { atomicCapCheck } from '../../src/utils/atomic-cap-check';
@@ -215,6 +215,109 @@ function onboardingValue(rc: RouteContext, key: string): unknown {
     return undefined;
 }
 
+// ── Spreadsheet Fallback (Golden Rule 1) ──────────────────────────────────────
+// Appended to every Tier 1 role prompt: the assistant must never treat an external
+// system (CRM/helpdesk/accounting/…) as a prerequisite. Users without one work via
+// CSV upload/export in the role's Data Hub tab on the assistant's dashboard page.
+function spreadsheetFallback(platform: unknown, tabLabel: string, subject: string): string {
+    const platformLabel = platform ? String(platform) : 'an external system';
+    return `SPREADSHEET FALLBACK — do not assume this business uses ${platformLabel}, and NEVER tell the user an external system is required. They can equally: paste ${subject} directly into this chat; upload a CSV of ${subject} in the "${tabLabel}" tab of your dashboard (Excel and Google Sheets users export via File → Download → CSV); and export everything you produce back out as CSV from that same tab. Every structured result you emit here is saved to the "${tabLabel}" tab automatically, so nothing is lost when the conversation ends. When the user asks how to get data in or out and has no integration connected, point them to the "${tabLabel}" tab.`;
+}
+
+// ── Internal Data Hub persistence (Golden Rule 2) ─────────────────────────────
+// Structured chat output flows into assistant_records automatically so the Data Hub
+// tab (assistant-detail.html) lists it. Each hub-type uiElement maps to one or more
+// records whose `data` is a renderable uiElement wire shape; upsert on
+// (assistant, recordType, title) so re-processing a record refreshes it.
+
+type HubRecord = { recordType: string; title: string; status: string | null; data: unknown };
+
+function hubRecordsFromUiElement(uiElement: unknown): HubRecord[] {
+    if (!uiElement || typeof uiElement !== 'object') return [];
+    const ui = uiElement as Record<string, unknown>;
+    const str = (v: unknown, max = 300) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null);
+
+    switch (ui.type) {
+        case 'lead_scoring_card': {
+            const title = str(ui.leadName);
+            return title ? [{ recordType: 'lead', title, status: str(ui.rating, 60) ?? 'scored', data: ui }] : [];
+        }
+        case 'data_diff_view': {
+            const title = str(ui.recordName);
+            return title ? [{ recordType: 'enrichment', title, status: 'proposed', data: ui }] : [];
+        }
+        case 'action_item_assignment': {
+            const title = str(ui.meetingTitle) ?? `Meeting notes — ${new Date().toISOString().slice(0, 10)}`;
+            const open = Array.isArray(ui.tasks) ? ui.tasks.length : 0;
+            return [{ recordType: 'meeting', title, status: open ? 'open' : 'no actions', data: ui }];
+        }
+        case 'aging_invoices_table': {
+            // One hub record per invoice row so "last chased" / pause state can be
+            // tracked per client; data stays a renderable one-row aging table.
+            const invoices = Array.isArray(ui.invoices) ? ui.invoices : [];
+            return invoices.flatMap((inv) => {
+                if (!inv || typeof inv !== 'object') return [];
+                const title = str((inv as Record<string, unknown>).clientName);
+                if (!title) return [];
+                return [{
+                    recordType: 'invoice',
+                    title,
+                    status: str((inv as Record<string, unknown>).status, 60) ?? 'overdue',
+                    data: { type: 'aging_invoices_table', title: ui.title ?? null, accountingProvider: ui.accountingProvider ?? null, invoices: [inv] },
+                }];
+            });
+        }
+        case 'ticket_triage_view': {
+            const title = str(ui.summary) ?? (ui.ticketId ? `Ticket #${str(ui.ticketId, 40)}` : null);
+            return title ? [{ recordType: 'ticket', title, status: str(ui.status, 60), data: ui }] : [];
+        }
+        default:
+            return [];
+    }
+}
+
+/** Best-effort upsert of a reply's hub records — a persistence failure never fails the turn. */
+async function persistHubRecords(
+    db: ReturnType<typeof getDb>,
+    orgId: number,
+    aiAssistantId: number,
+    uiElement: unknown,
+): Promise<void> {
+    const records = hubRecordsFromUiElement(uiElement);
+    if (records.length === 0) return;
+    try {
+        for (const rec of records) {
+            const [existing] = await db
+                .select({ id: assistantRecords.id })
+                .from(assistantRecords)
+                .where(and(
+                    eq(assistantRecords.organisationId, orgId),
+                    eq(assistantRecords.aiAssistantId, aiAssistantId),
+                    eq(assistantRecords.recordType, rec.recordType),
+                    eq(assistantRecords.title, rec.title),
+                ))
+                .limit(1);
+            if (existing) {
+                await db.update(assistantRecords)
+                    .set({ status: rec.status, data: rec.data, source: 'chat', updatedAt: new Date() })
+                    .where(eq(assistantRecords.id, existing.id));
+            } else {
+                await db.insert(assistantRecords).values({
+                    organisationId: orgId,
+                    aiAssistantId,
+                    recordType: rec.recordType,
+                    title: rec.title,
+                    status: rec.status,
+                    source: 'chat',
+                    data: rec.data,
+                });
+            }
+        }
+    } catch (err) {
+        console.error('[chat-orchestrator] hub record persistence failed:', err);
+    }
+}
+
 const ROUTES: Record<string, AssistantRoute> = {
     // Tier 1, Batch 1 — Lead Qualifier. Scores inbound leads against the ideal-customer
     // profile captured at hire time (targetIndustries / minHeadcount / salesTone, see
@@ -243,6 +346,10 @@ When the conversation contains enough detail to assess a lead, include the scori
 HANDOFF PROTOCOL — when you lack the firmographic data to score a named lead confidently against the profile (e.g. company size/headcount, industry, or revenue is unknown), do NOT output the lead_scoring_card yet. Instead propose a handoff to "The CRM Enricher": explain in your reply what is missing and that the enricher can fill the gaps, and emit the handoff_proposal uiElement below. Put everything the enricher needs in payloadToPass — the lead/company name, every detail already known from the conversation, and the fields you are missing. The user must approve the handoff before it runs.
 
 A later user turn may be marked "[Approved handoff result]" and contain enriched data from The CRM Enricher — when it does, treat that data as trusted CRM enrichment, complete your original scoring task, and emit the lead_scoring_card. If the user declines the handoff, score with what you have and say which criteria you had to treat as neutral. Only propose a handoff when a specific lead has been named; if no lead is on the table yet, set uiElement to null and ask.
+
+A user turn may also open with "[Imported records]" followed by rows from the user's Leads tab (CSV upload) — treat each row as an inbound lead to score. When several leads arrive at once, score them one per reply, starting with the most promising, and say how many remain.
+
+${spreadsheetFallback('a CRM like HubSpot', 'Leads', 'inbound leads')}
 
 Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EXACTLY ONE of the two shapes below, or null:
 {
@@ -300,7 +407,13 @@ Collections policy (from setup):
 - Follow-up cadence: ${cadence ?? 'weekly'} — recommend chasing on this rhythm.
 - Minimum invoice value to chase: ${minInvoiceValue ?? 'no threshold'} — do not recommend chasing invoices below this value; mention you are leaving them alone.
 
-When the conversation contains overdue-invoice details (from the user pasting a report, listing debtors, or asking you to review their aged receivables), include the aging table; otherwise set uiElement to null and ask for the aged-receivables detail you need. Sort invoices most-overdue first. status is your recommended chasing stage: "reminder" (gentle nudge), "overdue" (firm chase), "final_notice" (last warning before escalation), or "escalated" (recommend humans/legal take over).
+When the conversation contains overdue-invoice details (from the user pasting a report, uploading a CSV to the Ledger tab, listing debtors, or asking you to review their aged receivables), include the aging table; otherwise set uiElement to null and ask for the aged-receivables detail you need. Sort invoices most-overdue first. status is your recommended chasing stage: "reminder" (gentle nudge), "overdue" (firm chase), "final_notice" (last warning before escalation), or "escalated" (recommend humans/legal take over).
+
+For every invoice you recommend chasing (status other than "escalated"), write the actual chasing email in emailDraft. Match the tone to the age of the debt: ~7 days overdue = friendly nudge that assumes good faith; ~30 days = firm and specific about the amount and original due date; 60+ days / final_notice = formal, states the consequence of continued non-payment. Always reference the amount and how overdue it is. Set emailDraft to null only for "escalated" invoices (a human takes over) and for invoices below the minimum-value threshold.
+
+A user turn may open with "[Imported records]" followed by rows from the user's Ledger tab (CSV upload) — treat those as the aging report.
+
+${spreadsheetFallback(platform, 'Ledger', 'outstanding invoices or an aging report')}
 
 Return STRICT JSON (no markdown, no prose outside the JSON):
 {
@@ -310,7 +423,8 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
     "title": "<short heading, e.g. 'Overdue invoices — June'>",
     "accountingProvider": ${JSON.stringify(platform ?? null)},
     "invoices": [
-      { "clientName": "<client>", "daysPastDue": <number>, "amount": "<formatted amount incl. currency symbol>", "status": "reminder" | "overdue" | "final_notice" | "escalated" },
+      { "clientName": "<client>", "daysPastDue": <number>, "amount": "<formatted amount incl. currency symbol>", "status": "reminder" | "overdue" | "final_notice" | "escalated",
+        "emailDraft": { "subject": "<chasing email subject>", "body": "<the full chasing email, tone matched to how overdue it is>" } | null },
       ...
     ]
   }
@@ -343,6 +457,10 @@ Enrichment policy (from setup):
     : 'Only fill blank fields — NEVER propose changing a populated oldValue; only include rows where oldValue is null/blank, and mention any populated fields you left alone.'}
 
 Use any current values the user shares as oldValue; when a field's current value is unknown or blank, set oldValue to null. When the conversation names a record to enrich, include the diff view; otherwise set uiElement to null and ask which company or contact to enrich (and for their current field values if relevant).
+
+A user turn may open with "[Imported records]" followed by rows from the user's Database tab (CSV upload) — treat each row's populated columns as current values (oldValue) and its blank columns as the gaps to fill. When several records arrive at once, enrich them one per reply and say how many remain.
+
+${spreadsheetFallback(primaryCrm, 'Database', 'CRM records with missing fields')}
 
 Return STRICT JSON (no markdown, no prose outside the JSON):
 {
@@ -387,7 +505,13 @@ Support policy (from setup):
 
 MANDATORY escalation triggers — regardless of confidence, set status to "Escalated" when the query contains angry or abusive language, a refund demand, a request for a manager/human, or a legal/complaint threat. Set escalationReason to a short plain-English explanation of which trigger (or low confidence) fired; use null when the ticket is Resolved.
 
-Every triaged query MUST include the ticket triage view. Only set uiElement to null when there is no support query to triage yet — then ask for the ticket or customer message.
+Every triaged query MUST include the ticket triage view. Only set uiElement to null when there is no support query to triage yet — then ask for the ticket or customer message. Small businesses often forward their support@ emails here instead of using a helpdesk — treat a pasted or forwarded email exactly like a ticket.
+
+draftReply is the ready-to-send customer-facing response, written in the configured tone: for Resolved tickets it is the full answer; for Escalated tickets it is a short holding reply telling the customer a colleague will follow up (never promise outcomes on an escalated issue). The user copies it or sends it via their connected email, so it must stand alone — greeting, answer, sign-off, no placeholders you cannot fill.
+
+A user turn may open with "[Imported records]" followed by rows from the user's Tickets tab (CSV upload or forwarded emails) — triage them one per reply, most urgent first, and say how many remain.
+
+${spreadsheetFallback(platform, 'Tickets', 'support emails or tickets')}
 
 Return STRICT JSON (no markdown, no prose outside the JSON):
 {
@@ -400,7 +524,8 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
     "confidenceScore": <0-100>,
     "summary": "<one-sentence summary of the customer's issue>",
     "escalationReason": "<why it was escalated>" | null,
-    "escalationEmail": ${escalationEmail ? JSON.stringify(escalationEmail) : 'null'}
+    "escalationEmail": ${escalationEmail ? JSON.stringify(escalationEmail) : 'null'},
+    "draftReply": "<the full customer-facing reply, ready to copy or send>"
   }
 }`,
             ].join('\n\n');
@@ -436,13 +561,18 @@ Note-taking policy (from setup):
 
 Attribution rules: assignee is the person the meeting content implies owns the task ("I'll send the deck" → that speaker; "Sarah to chase legal" → Sarah). Use "Unassigned" when no owner is implied. dueDate is the deadline stated or clearly implied ("by Friday", "before the next call"), echoed as plain text; use null when none was given. Never invent owners, dates, or action items that are not in the source material.
 
-When the conversation contains meeting content to process, include the action item card; otherwise set uiElement to null and ask the user to paste their transcript or notes.
+When the conversation contains meeting content to process, include the action item card; otherwise set uiElement to null and ask the user to paste their transcript or notes. Long transcripts may arrive across several consecutive messages — wait until the user says the transcript is complete (or clearly stops pasting) before summarising, and say you are ready for the next chunk in the meantime.
+
+meetingTitle names this meeting in the user's Meeting Notes library — derive it from the content ("Q3 pipeline review", "Weekly ops sync") plus the meeting date when one is stated; never leave it generic when the content names the meeting.
+
+${spreadsheetFallback(meetingPlatform, 'Meeting Notes', 'a meeting transcript or rough notes')}
 
 Return STRICT JSON (no markdown, no prose outside the JSON):
 {
   "reply": "your conversational message to the user",
   "uiElement": {                      // or null when there is no meeting content yet
     "type": "action_item_assignment",
+    "meetingTitle": "<short name for this meeting, e.g. 'Q3 pipeline review — 4 Jul'>",
     "meetingSummary": "<the summary, in the configured format>",
     "targetDestination": ${JSON.stringify(destinationLabel)},
     "tasks": [
@@ -476,6 +606,9 @@ export const handler: Handler = async (event) => {
         aiAssistantId?: number;
         message?: string;
         approvedHandoff?: { targetRoleKey?: string; targetAssistantName?: string; payloadToPass?: unknown };
+        /** Data Hub rows to work on this turn — injected as context, exempt from the
+         *  message char cap (this is how "process my uploaded lead list" fits). */
+        recordIds?: number[];
     };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
@@ -581,6 +714,29 @@ export const handler: Handler = async (event) => {
         assistantRow.onboardingContext,
     );
 
+    // ── Data Hub context injection — load the referenced records (tenant- and
+    // assistant-scoped) and prepend them to this turn as an "[Imported records]" block.
+    // The block is derived state, so it is injected into the LLM window only, never
+    // persisted as part of the user's message.
+    let recordContext = '';
+    if (Array.isArray(body.recordIds) && body.recordIds.length > 0) {
+        const ids = body.recordIds.filter((n) => Number.isInteger(n)).slice(0, 50);
+        if (ids.length > 0) {
+            const rows = await db
+                .select({ title: assistantRecords.title, recordType: assistantRecords.recordType, status: assistantRecords.status, data: assistantRecords.data })
+                .from(assistantRecords)
+                .where(and(
+                    eq(assistantRecords.organisationId, orgId),
+                    eq(assistantRecords.aiAssistantId, session.aiAssistantId),
+                    inArray(assistantRecords.id, ids),
+                ));
+            if (rows.length > 0) {
+                recordContext = `[Imported records] The user has attached ${rows.length} record${rows.length === 1 ? '' : 's'} from their Data Hub tab:\n`
+                    + rows.map((r) => JSON.stringify({ title: r.title, status: r.status, ...(r.data && typeof r.data === 'object' ? r.data : {}) })).join('\n');
+            }
+        }
+    }
+
     // Only user/assistant turns go to the LLM ('system' rows are audit/injected notices),
     // capped to the most recent HISTORY_LIMIT.
     const llmMessages = [
@@ -588,7 +744,7 @@ export const handler: Handler = async (event) => {
             .filter((m): m is typeof m & { role: 'user' | 'assistant' } => m.role === 'user' || m.role === 'assistant')
             .slice(-HISTORY_LIMIT)
             .map((m) => ({ role: m.role, content: m.content })),
-        { role: 'user' as const, content: message },
+        { role: 'user' as const, content: recordContext ? `${recordContext}\n\n${message}` : message },
     ];
 
     try {
@@ -670,6 +826,10 @@ export const handler: Handler = async (event) => {
             const shadow = targetRoute.parseResponse(shadowRaw);
             handoffAudit = { roleKey: handoff.targetRoleKey, targetName, content: shadow.content, uiElement: shadow.uiElement };
 
+            // The shadow assistant's structured output lands in ITS Data Hub too — but
+            // only when the org has actually hired that role (no instance, no hub).
+            if (shadowRow) await persistHubRecords(db, orgId, shadowRow.id, shadow.uiElement);
+
             // The Context Injection + Resumption: append the shadow output as an extra
             // user turn so the active assistant completes its original task with it.
             // (Consecutive user turns are combined into one by the API.)
@@ -724,6 +884,9 @@ export const handler: Handler = async (event) => {
         });
 
         await db.update(chatSessions).set({ updatedAt: new Date() }).where(eq(chatSessions.id, session.id));
+
+        // Golden Rule 2: structured output flows into the Data Hub automatically.
+        await persistHubRecords(db, orgId, session.aiAssistantId, uiElement);
 
         return json(200, {
             chatSessionId: session.id,

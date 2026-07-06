@@ -122,6 +122,12 @@
       <button type="button" id="maintab-btn-review-queue" data-maintab="review-queue" class="main-tab-btn">Review Queue
         <span id="detail-rq-pending-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
+      <!-- Internal Data Hub — label + visibility come from the role's hubTab config
+           (assistant-dashboard-registry.js via _applyDashboardRegistry); hidden for
+           roles without one, e.g. Social Media Manager. -->
+      <button type="button" id="maintab-btn-datahub" data-maintab="datahub" class="main-tab-btn hidden">
+        <span id="datahub-tab-label">Data</span>
+      </button>
       <button type="button" data-maintab="goals"         class="main-tab-btn">Goals</button>
       <button type="button" data-maintab="automation"    class="main-tab-btn">Automation</button>
       <button type="button" data-maintab="meetings"      class="main-tab-btn" title="Progress Reviews: the Kick Off Meeting and your check-in history. Rules — including Learned Directives — live in the Assistant Profile.">Progress Reviews
@@ -376,6 +382,16 @@
     </div>
 
   </div><!-- /maintab-review-queue -->
+
+  <!-- ── MAIN TAB: Internal Data Hub ────────────────────────────────────
+       The role's lightweight local database (Golden Rule 2): processed leads /
+       enrichment diffs / meeting notes / ledger / tickets. Populated by
+       assistant-data-hub.js from the hubTab config; records live in
+       assistant_records (netlify/functions/assistant-records.ts). -->
+  <div id="maintab-datahub" class="main-tab-content hidden">
+    <div id="datahub-toolbar"></div>
+    <div id="datahub-table-host"></div>
+  </div><!-- /maintab-datahub -->
 
   <!-- ── Persona / config slide-over (Epic 1) ──────────────────────────
        Opened from the header "Assistant Profile" button (#btn-assistant-profile),

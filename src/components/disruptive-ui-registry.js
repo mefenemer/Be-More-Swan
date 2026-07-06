@@ -181,7 +181,10 @@
   // Renderer for the accounts-receivable-clerk route's wire shape (chat-orchestrator.ts):
   // { type: 'aging_invoices_table', title?, accountingProvider?, invoices: [{ clientName,
   //   daysPastDue, amount, status: 'reminder'|'overdue'|'final_notice'|'escalated',
-  //   invoiceNumber?: string|null }, ...] }
+  //   invoiceNumber?: string|null,
+  //   emailDraft?: { subject, body } | null }, ...] }
+  // emailDraft is the tone-matched chasing email (friendly at ~7 days, firm at 30+);
+  // drafts render as expandable blocks under the table with a copy action.
   // accountingProvider echoes the onboarding accountingPlatform: 'quickbooks' routes the
   // "Log note" button to qbo_log_note (invoice private-memo update), anything else
   // defaults to Xero (xero_log_note, invoice history note) — both via /api/actions/sync.
@@ -253,6 +256,28 @@
           </tbody>
         </table>
       </div>
+      ${invoices.some((inv) => inv.emailDraft && typeof inv.emailDraft === 'object' && inv.emailDraft.body) ? `
+      <div class="px-5 py-4 border-t border-gray-100 space-y-2">
+        <p class="text-xs font-bold text-gray-500 tracking-wider uppercase">Chasing emails — ready to send</p>
+        ${invoices.map((inv, i) => {
+          const draft = (inv.emailDraft && typeof inv.emailDraft === 'object' && inv.emailDraft.body) ? inv.emailDraft : null;
+          if (!draft) return '';
+          return `
+          <details class="group bg-gray-50 border border-gray-200 rounded-lg">
+            <summary class="flex items-center justify-between gap-3 px-4 py-2.5 cursor-pointer select-none list-none">
+              <span class="text-sm font-semibold text-gray-900 truncate">${esc(inv.clientName) || 'Unknown client'} <span class="font-normal text-gray-500">— ${esc(draft.subject) || 'chasing email'}</span></span>
+              <svg class="w-4 h-4 text-gray-400 shrink-0 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+            </summary>
+            <div class="px-4 pb-3">
+              <p class="text-sm text-gray-700 whitespace-pre-line">${esc(draft.body)}</p>
+              <button type="button" data-copy-chase="${i}"
+                class="mt-3 px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition">
+                Copy email
+              </button>
+            </div>
+          </details>`;
+        }).join('')}
+      </div>` : ''}
       <p class="px-5 py-3 text-xs text-gray-400 border-t border-gray-100" data-table-status>Toggle off to pause chasing a client (visual only). "Log note" writes a chasing note against the invoice in ${acctLabel}.</p>
     `;
 
@@ -262,6 +287,20 @@
       if (!toggle) return;
       const row = toggle.closest('[data-invoice-row]');
       if (row) row.classList.toggle('opacity-40', !toggle.checked);
+    });
+
+    // Copy a chasing email draft — the no-accounting-platform (spreadsheet fallback) path.
+    el.addEventListener('click', async (e) => {
+      const copyBtn = e.target.closest('[data-copy-chase]');
+      if (!copyBtn) return;
+      const draft = invoices[Number(copyBtn.getAttribute('data-copy-chase'))]?.emailDraft;
+      if (!draft) return;
+      try {
+        await navigator.clipboard.writeText(`Subject: ${draft.subject || ''}\n\n${draft.body || ''}`);
+        copyBtn.textContent = 'Copied ✓';
+      } catch {
+        copyBtn.textContent = 'Copy failed';
+      }
     });
 
     // Live behaviour: "Log note" pushes a chasing note onto the invoice in the
@@ -411,7 +450,10 @@
   // Renderer for the tier1-support-agent route's wire shape (chat-orchestrator.ts):
   // { type: 'ticket_triage_view', status: 'Resolved'|'Escalated', helpdeskProvider?,
   //   ticketId?: string|null, confidenceScore: 0-100, summary,
-  //   escalationReason: string|null, escalationEmail?: string|null }
+  //   escalationReason: string|null, escalationEmail?: string|null,
+  //   draftReply?: string }
+  // draftReply is the ready-to-send customer-facing response (Spreadsheet-fallback
+  // path: SMBs without a helpdesk copy it into their own inbox).
   // Escalated tickets get an amber/red warning treatment naming the escalation inbox;
   // resolved tickets get an emerald treatment. helpdeskProvider echoes the onboarding
   // helpdeskPlatform: 'intercom' routes the log button to intercom_add_internal_note
@@ -458,6 +500,21 @@
           <span class="font-bold">Handled automatically</span> — no human follow-up needed.
         </div>`}
 
+      ${typeof ui.draftReply === 'string' && ui.draftReply.trim() ? `
+      <details class="mt-4 group">
+        <summary class="flex items-center justify-between gap-3 cursor-pointer select-none list-none">
+          <span class="text-xs font-bold text-gray-500 tracking-wider uppercase">Drafted customer reply</span>
+          <svg class="w-4 h-4 text-gray-400 transition-transform group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </summary>
+        <div class="mt-2 bg-gray-50 border border-gray-200 rounded-lg px-4 py-3">
+          <p class="text-sm text-gray-700 whitespace-pre-line">${esc(ui.draftReply.trim())}</p>
+          <button type="button" data-copy-reply
+            class="mt-3 px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition">
+            Copy reply
+          </button>
+        </div>
+      </details>` : ''}
+
       <div class="flex items-center justify-between gap-3 mt-4 pt-3 border-t border-gray-100">
         <p class="text-xs text-gray-400" data-helpdesk-status>Logs this triage summary as an internal note on the ${isIntercom ? 'conversation' : 'ticket'}.</p>
         <button type="button" data-log-helpdesk
@@ -466,6 +523,18 @@
         </button>
       </div>
     `;
+
+    // Copy the drafted customer reply — the no-helpdesk (spreadsheet fallback) path.
+    el.addEventListener('click', async (e) => {
+      const copyBtn = e.target.closest('[data-copy-reply]');
+      if (!copyBtn) return;
+      try {
+        await navigator.clipboard.writeText(String(ui.draftReply).trim());
+        copyBtn.textContent = 'Copied ✓';
+      } catch {
+        copyBtn.textContent = 'Copy failed';
+      }
+    });
 
     // Live behaviour: push the triage summary as an internal note in the configured
     // helpdesk (private Zendesk ticket comment / Intercom admin note).
@@ -605,6 +674,10 @@
       ? ui.targetDestination.trim() : 'your task tracker';
     const isNotion = destination.toLowerCase() === 'notion';
     const syncActionType = isNotion ? 'notion_create_page' : 'slack_post_summary';
+    // Only Notion has a native create action today; every other destination (Jira,
+    // Asana, Monday, "your task tracker") is fulfilled by posting to Slack — the
+    // button must say what actually happens.
+    const syncLabel = isNotion ? 'Notion' : 'Slack';
 
     const el = document.createElement('div');
     el.className = 'bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden max-w-2xl';
@@ -647,10 +720,12 @@
       </div>` : ''}
 
       <div class="flex items-center justify-between gap-3 px-5 py-4 border-t border-gray-100">
-        <p class="text-xs text-gray-400" data-sync-status>Pushes ${tasks.length} action item${tasks.length === 1 ? '' : 's'} to ${esc(destination)}.</p>
+        <p class="text-xs text-gray-400" data-sync-status>${isNotion
+          ? `Pushes ${tasks.length} action item${tasks.length === 1 ? '' : 's'} to Notion.`
+          : `Posts the summary and ${tasks.length} action item${tasks.length === 1 ? '' : 's'} to Slack${destination.toLowerCase() !== 'slack' ? ` (direct ${esc(destination)} sync is coming — Slack is the delivery channel today)` : ''}.`}</p>
         <button type="button" data-sync-action
           class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed shrink-0 whitespace-nowrap">
-          Sync to ${esc(destination)}
+          ${isNotion ? 'Sync to Notion' : 'Post to Slack'}
         </button>
       </div>
     `;
@@ -677,13 +752,13 @@
         });
         button.textContent = 'Synced ✓';
         button.className = 'px-4 py-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm font-bold rounded-lg cursor-default shrink-0 whitespace-nowrap';
-        statusLine.textContent = data.message || `Synced to ${destination}.`;
+        statusLine.textContent = data.message || `Synced to ${syncLabel}.`;
         statusLine.className = 'text-xs font-semibold text-emerald-700';
       } catch (err) {
         button.disabled = false;
         button.textContent = 'Retry sync';
         button.className = 'px-4 py-2 bg-red-50 border border-red-200 text-red-700 hover:border-red-300 text-sm font-bold rounded-lg transition shrink-0 whitespace-nowrap';
-        statusLine.textContent = err.message || `Could not sync to ${destination}.`;
+        statusLine.textContent = err.message || `Could not sync to ${syncLabel}.`;
         statusLine.className = 'text-xs font-semibold text-red-600';
       }
     });

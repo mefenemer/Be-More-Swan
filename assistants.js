@@ -1119,6 +1119,16 @@ function _applyDashboardRegistry(data) {
     toggle('btn-review-pending', mods.hasReviewQueue !== false);
     toggle('module-posting-schedule', mods.hasPostingSchedule !== false);
     toggle('module-social-strategy', mods.hasSocialStrategy !== false);
+
+    // Internal Data Hub tab — role-specific local database (Leads / Ledger / …).
+    // No hubTab in the registry entry (e.g. social_media_manager, and therefore
+    // every legacy assistant via the fallback) = no tab.
+    const hub = cfg.hubTab;
+    toggle('maintab-btn-datahub', !!hub);
+    if (hub) {
+        setText('datahub-tab-label', hub.label);
+        window.AssistantDataHub?.init({ hub, assistantId: data.id });
+    }
 }
 
 // Flattened field list from the role's schema-driven onboarding definition
