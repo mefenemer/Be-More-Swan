@@ -275,8 +275,9 @@ export const handler: Handler = async (event) => {
         // The runner sends its currently-logged-in Claude account on every poll, so the
         // paused banner shows the live session while the admin switches logins.
         const account = (qs.account || '').toString().trim().slice(0, 200) || null;
-        // JSON array of accounts the runner can switch to ([{email,stored}]) — display only.
-        // Bounded and re-serialised so a rogue runner can't stuff arbitrary blobs in the row.
+        // JSON array of accounts the runner can switch to ([{email,stored,stale?}]) — display only.
+        // `stale` marks a stored account whose saved login expired (needs a one-time re-login on
+        // the runner). Bounded and re-serialised so a rogue runner can't stuff arbitrary blobs in.
         let knownAccounts: string | null = null;
         try {
             const parsed = JSON.parse((qs.accounts || '').toString());
@@ -284,6 +285,7 @@ export const handler: Handler = async (event) => {
                 knownAccounts = JSON.stringify(parsed.slice(0, 12).map((a: any) => ({
                     email: String(a?.email || '').slice(0, 200),
                     stored: a?.stored === true,
+                    ...(a?.stale === true ? { stale: true } : {}),
                 })).filter((a) => a.email)).slice(0, 4000);
             }
         } catch { /* absent or malformed — leave whatever the row already has */ }
@@ -349,6 +351,7 @@ export const handler: Handler = async (event) => {
                 knownAccounts = JSON.stringify(body.knownAccounts.slice(0, 12).map((a: any) => ({
                     email: String(a?.email || '').slice(0, 200),
                     stored: a?.stored === true,
+                    ...(a?.stale === true ? { stale: true } : {}),
                 })).filter((a: any) => a.email)).slice(0, 4000);
             }
         } catch { /* display only */ }

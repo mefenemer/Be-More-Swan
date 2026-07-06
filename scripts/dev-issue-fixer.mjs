@@ -56,6 +56,19 @@ const ENDPOINT = `${BASE_URL}/.netlify/functions/admin-issue-handoff`;
 const RESUME_POLL_MS = Number(process.env.RESUME_POLL_INTERVAL_MS || 10000);
 // The Claude Code CLI prints one of these when the account's usage/session limit is exhausted.
 const SESSION_LIMIT_RE = /session limit|usage limit|hit your (?:usage|session|rate) limit|rate limit/i;
+// A probe result that means the account's stored credential is no longer a valid login (its
+// OAuth token expired / was revoked) — distinct from a rate limit. Recovering needs a one-time
+// interactive `claude auth login` on this machine; no portal button can do it. Used to flag the
+// account as "login expired" in the portal instead of a Switch button that would just re-fail.
+const LOGGED_OUT_RE = /not logged in|please run\s*\/login|run\s+`?\/login|invalid api key|oauth token (?:has )?expired|refresh token (?:has )?expired/i;
+const isLoggedOut = (out) => LOGGED_OUT_RE.test(out || '');
+// How often the runner proactively "keeps warm" every stored-but-inactive account: switch to it,
+// probe (which refreshes its OAuth token), re-snapshot, switch back. Keeps rotation accounts from
+// going stale through disuse — the recurring reason a later switch would hit "Not logged in".
+const ACCOUNT_REFRESH_MS = Number(process.env.AURA_ACCOUNT_REFRESH_MS || 12 * 60 * 60 * 1000);
+// Emails whose most recent probe reported a dead login. Surfaced to the portal via
+// listKnownAccounts so the account renders as "login expired — re-login on runner".
+const staleAccounts = new Set();
 
 // Shared control flags. `stopping` is set on SIGINT (main + resume-wait loops watch it);
 // `paused` is set when a fix hits a Claude session limit so main pauses instead of claiming more.
@@ -279,7 +292,13 @@ function listKnownAccounts() {
   const live = (oauthAccountInfo()?.emailAddress || '').toLowerCase();
   if (live) stored.add(live); // live login is snapshotted on sight, treat as stored
   const all = new Set([...stored, ...EXPECTED_ACCOUNTS]);
-  return [...all].sort().map((email) => ({ email, stored: stored.has(email) }));
+  return [...all].sort().map((email) => ({
+    email,
+    stored: stored.has(email),
+    // A stored account whose last probe found a dead login: still snapshotted, but the snapshot
+    // no longer authenticates, so it needs a one-time re-login rather than a click-to-switch.
+    ...(staleAccounts.has(email) && email !== live ? { stale: true } : {}),
+  }));
 }
 
 // Save the live login under its own email so it can be switched back to later.
@@ -291,6 +310,7 @@ function snapshotActiveAccount() {
   try {
     const live = readLiveCredential();
     writeSnapshot(email, { credential: live.blob, acctAttr: live.acctAttr, oauthAccount: acct, savedAt: new Date().toISOString() });
+    staleAccounts.delete(email); // a fresh snapshot means this login is good again
     return email;
   } catch (e) {
     log(`⚠ could not snapshot the active Claude account (${email}): ${e.message}`);
@@ -411,17 +431,74 @@ async function handleSwitch(target) {
   }
   const probe = probeClaude();
   if (probe.ok) {
+    staleAccounts.delete(target.trim().toLowerCase());
     snapshotActiveAccount(); // freshen the switched-in account's snapshot too
     log(`✓ switched to ${target} — Claude login verified.`);
     await ackSwitch(true, `Switched the CLI to ${target} and verified the login.`).catch((ae) => log(`  switch-ack error: ${ae.message}`));
     return true;
   }
+  // A dead login (vs. a rate limit) can't be fixed by another switch — flag it so the portal
+  // shows "login expired — re-login on runner" instead of a Switch button that would re-fail.
+  if (isLoggedOut(probe.out)) staleAccounts.add(target.trim().toLowerCase());
   const why = probe.limited
     ? (probe.out.match(/[^\n]*(?:session|usage|rate)\s+limit[^\n]*/i) || [`${target} is also rate-limited.`])[0].trim()
-    : `probe call failed: ${probe.out.slice(0, 200) || 'no output'}`;
+    : isLoggedOut(probe.out)
+      ? `its saved login has expired — re-login once on the runner machine (claude auth login as ${target}).`
+      : `probe call failed: ${probe.out.slice(0, 200) || 'no output'}`;
   log(`✗ switched credentials to ${target}, but ${why}`);
   await ackSwitch(false, `Switched the CLI to ${target}, but ${why}`).catch((ae) => log(`  switch-ack error: ${ae.message}`));
   return false;
+}
+
+// Keep-warm pass: OAuth tokens die if an account sits unused, which is why a later "Switch CLI
+// to <acct>" can land on "Not logged in". To prevent that, periodically visit every stored account
+// that isn't the active one — switch to it, probe (which refreshes its token), re-snapshot the
+// refreshed credential — then return to the account we started on. Accounts that come back logged
+// out are flagged stale (they genuinely need a one-time re-login); rate-limited ones are left be.
+// Only runs when the runner is idle (called from the main loop's idle branch), never mid-fix.
+let _lastRefreshAt = 0;
+async function maybeRefreshStoredAccounts() {
+  if (Date.now() - _lastRefreshAt < ACCOUNT_REFRESH_MS) return;
+  _lastRefreshAt = Date.now(); // stamp up front so a failing pass doesn't retry in a tight loop
+  const originalActive = (oauthAccountInfo()?.emailAddress || '').toLowerCase();
+  const targets = listKnownAccounts()
+    .filter((a) => a.stored && a.email !== originalActive)
+    .map((a) => a.email);
+  if (!targets.length) return;
+  log(`♻ keep-warm: refreshing ${targets.length} stored Claude account(s) so they stay switchable…`);
+  snapshotActiveAccount(); // capture the active account first so we can return to it
+  for (const email of targets) {
+    if (stopping) break;
+    try {
+      switchClaudeAccount(email);
+    } catch (e) {
+      log(`  ⚠ ${email}: ${e.message}`);
+      continue;
+    }
+    const probe = probeClaude();
+    if (probe.ok) {
+      snapshotActiveAccount(); // re-snapshot with the freshly refreshed token
+      log(`  ✓ ${email} refreshed`);
+    } else if (probe.limited) {
+      log(`  • ${email} rate-limited — login still valid, left as is`);
+    } else if (isLoggedOut(probe.out)) {
+      staleAccounts.add(email);
+      log(`  ⚠ ${email} login expired — needs a one-time re-login on this machine (claude auth login)`);
+    } else {
+      log(`  ⚠ ${email} probe failed: ${probe.out.slice(0, 120) || 'no output'}`);
+    }
+  }
+  // Return to whatever account the runner was using before the pass.
+  if (originalActive) {
+    try {
+      switchClaudeAccount(originalActive);
+      const back = probeClaude();
+      if (back.ok) snapshotActiveAccount();
+      log(`♻ keep-warm done — active account restored to ${originalActive}`);
+    } catch (e) {
+      log(`  ✗ keep-warm could not restore the active account (${originalActive}): ${e.message}`);
+    }
+  }
 }
 
 const SQL_START = '---SQL-MIGRATION-START---';
@@ -700,6 +777,12 @@ async function main() {
     }
 
     if (ONCE) { log('nothing queued; exiting (ONCE).'); break; }
+
+    // Idle: keep the inactive rotation accounts' logins warm so switching to them keeps working.
+    // Non-fatal — a failed pass just means the next switch might still find a stale login.
+    try { await maybeRefreshStoredAccounts(); }
+    catch (e) { log(`keep-warm error: ${e.message}`); }
+
     await sleep(POLL_MS);
   }
 }

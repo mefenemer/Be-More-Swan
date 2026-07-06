@@ -3812,11 +3812,19 @@ function _irSwitchButtons(r, amber) {
     ? 'border border-amber-600 text-amber-700 hover:bg-amber-100'
     : 'border border-violet-400 text-violet-700 hover:bg-violet-50';
   const off = 'border border-gray-300 text-gray-400 cursor-not-allowed';
+  const expired = 'border border-rose-400 text-rose-700 bg-rose-50 cursor-not-allowed';
   const btns = accounts
     .filter((a) => a.email.toLowerCase() !== activeEmail)
-    .map((a) => a.stored
-      ? `<button onclick="switchRunnerAccount('${_esc(r.runnerId)}', '${_esc(a.email)}', this)" class="px-3 py-1.5 ${on} text-xs font-bold rounded-lg transition">⇄ Switch CLI to ${_esc(a.email)}</button>`
-      : `<button disabled title="Not available yet — log into this account once on the runner machine (claude auth login); it is snapshotted automatically and switchable from then on." class="px-3 py-1.5 ${off} text-xs font-bold rounded-lg">⇄ ${_esc(a.email)} (needs one-time login)</button>`)
+    .map((a) => {
+      // Stored but the saved login expired: no button would work — switching to it just re-fails
+      // with "Not logged in". Show what to do instead: a one-time re-login on the runner machine.
+      if (a.stored && a.stale) {
+        return `<button disabled title="This account's saved login on the runner has expired (its Claude token can no longer refresh). Re-login once on the runner machine — run: claude auth login — signed in as ${_esc(a.email)}. It is re-snapshotted automatically and switchable again from then on." class="px-3 py-1.5 ${expired} text-xs font-bold rounded-lg">⚠ ${_esc(a.email)} — login expired, re-login on runner</button>`;
+      }
+      return a.stored
+        ? `<button onclick="switchRunnerAccount('${_esc(r.runnerId)}', '${_esc(a.email)}', this)" class="px-3 py-1.5 ${on} text-xs font-bold rounded-lg transition">⇄ Switch CLI to ${_esc(a.email)}</button>`
+        : `<button disabled title="Not available yet — log into this account once on the runner machine (claude auth login); it is snapshotted automatically and switchable from then on." class="px-3 py-1.5 ${off} text-xs font-bold rounded-lg">⇄ ${_esc(a.email)} (needs one-time login)</button>`;
+    })
     .join('');
   return btns ? `<div class="mt-2 flex items-center gap-2 flex-wrap">${btns}</div>` : '';
 }
