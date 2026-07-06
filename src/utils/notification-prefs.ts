@@ -175,6 +175,37 @@ export function categoryForType(type: string): PrefCategory {
     return TYPE_TO_CATEGORY[type] ?? FALLBACK_CATEGORY;
 }
 
+// ── Role-aware applicability of scope:'assistant' categories ──────────────────
+// Some assistant-scope categories only make sense for roles that publish content.
+// Non-publishing roles (Lead Qualifier, AR Clerk, Tier-1 Support, CRM Enricher,
+// Meeting Note-Taker) never draft or publish posts, so those categories are hidden
+// in the UI and rejected on write. This is the single source of truth; the frontend
+// registry mirrors it via the `hasContentPublishing` module flag
+// (src/components/assistant-dashboard-registry.js). Keep the two in sync.
+export const PUBLISHING_ROLE_KEYS: ReadonlySet<string> = new Set(['social_media_manager']);
+
+// Assistant-scope categories that only apply to publishing roles, keyed by category key.
+const PUBLISHING_ONLY_CATEGORIES: ReadonlySet<string> = new Set(['content_calendar']);
+
+/** Is this category one whose applicability depends on the assistant's role? Cheap
+ *  check so callers can skip a role lookup for always-applicable categories. */
+export function isPublishingOnlyCategory(categoryKey: string): boolean {
+    return PUBLISHING_ONLY_CATEGORIES.has(categoryKey);
+}
+
+/**
+ * Does an assistant-scope preference category apply to an assistant of this role?
+ * Unknown/legacy roleKeys (null) are treated as social — the pre-registry default —
+ * so they keep every category. Non-publishing roles drop the publishing-only ones.
+ */
+export function assistantCategoryAppliesToRole(
+    categoryKey: string, roleKey: string | null | undefined,
+): boolean {
+    if (!PUBLISHING_ONLY_CATEGORIES.has(categoryKey)) return true;
+    if (!roleKey) return true; // legacy/unknown = social
+    return PUBLISHING_ROLE_KEYS.has(roleKey);
+}
+
 type PrefMap = Record<string, boolean> | null | undefined;
 
 // Per-assistant preference overrides (user_profiles.assistant_notif_prefs).

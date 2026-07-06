@@ -17,6 +17,7 @@ import {
     PREF_CATEGORIES, categoryForType, isInAppEnabled, isEmailEnabled,
     isInAppEnabledFor, isEmailEnabledFor, overrideFor,
     buildDefaults, resolveInAppPrefs,
+    isPublishingOnlyCategory, assistantCategoryAppliesToRole, PUBLISHING_ROLE_KEYS,
 } from '../src/utils/notification-prefs';
 import { categoryOf } from '../src/utils/notification-actions';
 
@@ -146,6 +147,33 @@ check('every critical_action type lives in an in-app-locked category (models in 
             assert.equal(cat.inApp.locked, true, `critical type "${t}" is in non-locked category "${cat.key}"`);
         }
     }
+});
+
+check('content_calendar is the only publishing-only assistant category', () => {
+    for (const cat of PREF_CATEGORIES) {
+        const expected = cat.key === 'content_calendar';
+        assert.equal(isPublishingOnlyCategory(cat.key), expected, `${cat.key} publishing-only mismatch`);
+    }
+});
+
+check('publishing-only categories apply only to publishing roles; legacy/unknown = social', () => {
+    // content_calendar: gated by role
+    assert.equal(assistantCategoryAppliesToRole('content_calendar', 'social_media_manager'), true);
+    assert.equal(assistantCategoryAppliesToRole('content_calendar', 'lead_qualifier'), false);
+    assert.equal(assistantCategoryAppliesToRole('content_calendar', 'accounts_receivable_clerk'), false);
+    assert.equal(assistantCategoryAppliesToRole('content_calendar', 'tier1_support_agent'), false);
+    assert.equal(assistantCategoryAppliesToRole('content_calendar', null), true);       // legacy
+    assert.equal(assistantCategoryAppliesToRole('content_calendar', undefined), true);  // unknown
+    // non-publishing-only categories always apply, regardless of role
+    for (const key of ['approvals', 'assistant_tasks', 'connections']) {
+        assert.equal(assistantCategoryAppliesToRole(key, 'lead_qualifier'), true, `${key} should always apply`);
+    }
+});
+
+check('every publishing roleKey is a real assistant-scope-bearing role', () => {
+    // Guardrail: PUBLISHING_ROLE_KEYS must be non-empty (else content_calendar is dead for all).
+    assert.ok(PUBLISHING_ROLE_KEYS.size >= 1);
+    assert.ok(PUBLISHING_ROLE_KEYS.has('social_media_manager'));
 });
 
 console.log(`\n${passed} checks passed.`);

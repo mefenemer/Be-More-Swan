@@ -23,11 +23,12 @@
 
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { userProfiles } from '../../db/schema';
+import { userProfiles, aiAssistants, masterAssistants } from '../../db/schema';
 import {
     PREF_CATEGORIES, buildDefaults, resolveInAppPrefs, overrideFor, CHANNEL_AVAILABILITY,
+    assistantCategoryAppliesToRole, isPublishingOnlyCategory,
     type PrefChannel, type AssistantOverrideMap,
 } from '../../src/utils/notification-prefs';
 
@@ -190,6 +191,24 @@ export const handler: Handler = async (event) => {
                 }
                 if (typeof body.value !== 'boolean' && body.value !== null) {
                     return { statusCode: 400, body: JSON.stringify({ error: 'value must be a boolean, or null to restore the workspace default.' }) };
+                }
+                // Role guard: publishing-only categories (Content & Publishing) don't apply to
+                // non-publishing roles, which never draft or publish posts. Only enforced when
+                // *setting* an override (value=boolean) — clearing (null) is always allowed so a
+                // stale override can be removed. Resolve the assistant's roleKey via its master
+                // role; if the assistant can't be found for this user, fail open (treat as social,
+                // matching the legacy/unknown default) rather than block a legitimate write.
+                if (body.value !== null && isPublishingOnlyCategory(cat.key)) {
+                    // Category is publishing-only — confirm the role actually publishes.
+                    const [asst] = await db
+                        .select({ roleKey: masterAssistants.roleKey })
+                        .from(aiAssistants)
+                        .leftJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
+                        .where(and(eq(aiAssistants.id, Number(aid)), eq(aiAssistants.userId, userId)))
+                        .limit(1);
+                    if (asst && !assistantCategoryAppliesToRole(cat.key, asst.roleKey)) {
+                        return { statusCode: 422, body: JSON.stringify({ error: `${cat.label} does not apply to this assistant's role.`, code: 'CATEGORY_NOT_APPLICABLE' }) };
+                    }
                 }
                 const forAssistant = { ...(overrides[aid] ?? {}) };
                 const forCat = { ...(forAssistant[cat.key] ?? {}) };

@@ -624,7 +624,17 @@ async function _initAssistantNotifPrefs() {
         const res = await fetch(`/.netlify/functions/notification-preferences?assistantId=${assistantId}`);
         if (!res.ok) throw new Error('Load failed');
         const { categories } = await res.json();
-        const rows = (categories || []).filter(c => c.scope === 'assistant');
+        // Role-aware: post/publishing alerts only apply to roles that actually publish
+        // content. Non-social roles (Lead Qualifier, AR Clerk, Support, …) never draft or
+        // publish posts, so the registry hides "Content & Publishing" for them — mirroring
+        // how the Review-alert cadence card is gated in _applyDashboardRegistry.
+        const registry = window.AssistantDashboardRegistry;
+        const roleMods = (registry && typeof registry.get === 'function'
+            ? registry.get(window._detailCurrentData && window._detailCurrentData.roleKey)
+            : null)?.modules || {};
+        const hiddenForRole = { content_calendar: roleMods.hasContentPublishing === false };
+        const rows = (categories || [])
+            .filter(c => c.scope === 'assistant' && !hiddenForRole[c.key]);
 
         const toggleHtml = (cat, channel, on) => `
             <label class="flex items-center gap-2">

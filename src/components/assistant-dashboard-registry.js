@@ -21,6 +21,8 @@
  *                //     hasContentAutomation    → the Automation main tab (post/media autonomy)
  *                //     hasEmptyLibraryFallback → Profile ▸ Brand Safety ▸ Empty-Library Draft card
  *                //     hasReviewCadence        → Profile ▸ Notifications ▸ Review-alert cadence card
+ *                //     hasContentPublishing    → Profile ▸ Notifications ▸ "Content & Publishing"
+ *                //                               preference (post/draft alerts — social-only)
  *   cfg.primaryAction // → Overview's primary button { label, kind }. kind: 'generate_post' opens the
  *                //   post sheet (social); 'chat' opens the assistant's chat intake (Data Hub roles).
  *   cfg.hubTab   // → optional Internal Data Hub tab config (assistant-data-hub.js);
@@ -99,6 +101,7 @@
         hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false,
         hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
         hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+        hasContentPublishing: false,
       },
       primaryAction: { label: 'Score New Leads', kind: 'chat' },
       hubTab: {
@@ -145,6 +148,7 @@
         hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false,
         hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
         hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+        hasContentPublishing: false,
       },
       primaryAction: { label: 'Chase an Invoice', kind: 'chat' },
       hubTab: {
@@ -191,6 +195,7 @@
         hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false,
         hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
         hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+        hasContentPublishing: false,
       },
       primaryAction: { label: 'Handle a Query', kind: 'chat' },
       hubTab: {
@@ -242,6 +247,7 @@
         hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false,
         hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
         hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+        hasContentPublishing: false,
       },
       primaryAction: { label: 'Enrich Records', kind: 'chat' },
       hubTab: {
@@ -288,6 +294,7 @@
         hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false,
         hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
         hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+        hasContentPublishing: false,
       },
       primaryAction: { label: 'Summarise a Meeting', kind: 'chat' },
       hubTab: {
