@@ -1193,7 +1193,8 @@ export const featureRoadmap = pgTable("feature_roadmap", {
 // and the SoT in src/utils/feature-requests.ts.
 export const featureRequests = pgTable("feature_requests", {
   id: serial("id").primaryKey(),
-  // Who raised it. NULL for purely admin/issue-originated items.
+  // Who raised it. The original reporter for issue-promoted items (so status-change
+  // notifications reach them); NULL only for purely admin/manual-originated items.
   submittedBy: integer("submitted_by").references(() => users.id, { onDelete: "set null" }),
   // Submitter's org for context (the board is global/cross-tenant).
   organisationId: integer("organisation_id").references(() => organisations.id, { onDelete: "set null" }),

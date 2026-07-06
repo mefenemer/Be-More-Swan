@@ -55,6 +55,10 @@ export async function nextTopSortOrder(db: Db): Promise<number> {
  * feature-requests-roadmap epic). Idempotent on issueId: re-promoting refreshes
  * title/description/priority rather than inserting a duplicate. Admin-originated, so it
  * skips 'pending_review' and lands as 'planned' (source='issue'). Returns the request id.
+ *
+ * submittedBy should be the ORIGINAL REPORTER's user id (issue_reports.user_id), not the
+ * promoting admin's — reviewedBy/createdBy already carries the admin, so status-change
+ * notifications (US06) reach the person who actually asked for it instead of going nowhere.
  */
 export async function createRoadmapItemFromIssue(
     db: Db,
@@ -64,21 +68,27 @@ export async function createRoadmapItemFromIssue(
         description?: string | null;
         priority?: RoadmapPriority;
         createdBy?: number | null;
+        submittedBy?: number | null;
     },
 ): Promise<number> {
     const priority: RoadmapPriority = isRoadmapPriority(opts.priority) ? opts.priority : 'medium';
     const title = (opts.title || '').trim().slice(0, 200) || `Feature request from issue #${opts.issueId}`;
     const description = opts.description ?? null;
+    const submittedBy = opts.submittedBy ?? null;
 
     const [existing] = await db
-        .select({ id: featureRequests.id })
+        .select({ id: featureRequests.id, submittedBy: featureRequests.submittedBy })
         .from(featureRequests)
         .where(eq(featureRequests.issueId, opts.issueId))
         .limit(1);
 
     if (existing) {
         await db.update(featureRequests)
-            .set({ title, description, priority, updatedAt: new Date() })
+            .set({
+                title, description, priority, updatedAt: new Date(),
+                // Backfill only — never clobber a value already set.
+                submittedBy: existing.submittedBy ?? submittedBy,
+            })
             .where(eq(featureRequests.id, existing.id));
         return existing.id;
     }
@@ -91,6 +101,7 @@ export async function createRoadmapItemFromIssue(
         status: 'planned',
         source: 'issue',
         issueId: opts.issueId,
+        submittedBy,
         sortOrder,
         reviewedBy: opts.createdBy ?? null,
         reviewedAt: new Date(),

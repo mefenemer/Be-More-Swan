@@ -169,3 +169,15 @@ BEGIN
     );
   END IF;
 END $$;
+
+-- Issue #160 — backfill: createRoadmapItemFromIssue used to leave submitted_by NULL for every
+-- issue-promoted item (it only meant to spare the PROMOTING ADMIN a spurious "you requested
+-- this" notice, but left the original reporter unlinked too, so US06 status-change/released
+-- notifications for these items had no recipient and never appeared in that reporter's feed).
+-- Link existing issue-sourced rows to their reporter. Safe to re-run: only touches NULL rows.
+UPDATE feature_requests fr
+SET submitted_by = ir.user_id
+FROM issue_reports ir
+WHERE fr.issue_id = ir.id
+  AND fr.source = 'issue'
+  AND fr.submitted_by IS NULL;
