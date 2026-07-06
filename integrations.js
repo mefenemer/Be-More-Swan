@@ -455,20 +455,28 @@ function _platformCard(platform, conn) {
     const hasHandle = !!_handleFor(platform);
 
     // US-SMM-4.1.1 / 4.1.2: OAuth platforms use redirect; manual token entry kept for non-OAuth
+    // Full-width primary CTA in the brand pink (emerald-700 is remapped to Neon Pink).
+    const connectIcon = `<svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.657l-3 3a4 4 0 01-5.657-5.657l1.5-1.5m6.828-6.829l3-3a4 4 0 015.657 5.657l-1.5 1.5"/></svg>`;
+    const primaryBtn = 'w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl shadow-sm hover:shadow transition cursor-pointer';
     const connectBtn = !hasHandle
-        ? `<div class="flex flex-col gap-1.5">
-               <button disabled class="px-4 py-2 bg-gray-100 text-gray-400 text-sm font-bold rounded-lg cursor-not-allowed self-start" type="button">Connect with ${platform.label}</button>
-               <button onclick="window.loadView && window.loadView('assets')" class="text-xs font-semibold text-emerald-700 hover:underline cursor-pointer self-start" type="button">Add your ${platform.label} handle in Business Information first →</button>
+        ? `<div class="flex flex-col gap-2">
+               <button disabled class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-gray-100 text-gray-400 text-sm font-bold rounded-xl cursor-not-allowed" type="button">${connectIcon} Connect ${platform.label}</button>
+               <button onclick="window.loadView && window.loadView('assets')" class="text-xs font-semibold text-emerald-700 hover:underline cursor-pointer text-center" type="button">Add your ${platform.label} handle in Business Information first →</button>
            </div>`
         : platform.oauthPlatform
         // _intStartOAuth routes platforms with a preConnect checklist (Meta) via the
         // setup modal before redirecting to OAuth.
-        ? `<button onclick="window._intStartOAuth('${platform.id}')" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer inline-block" type="button">Connect with ${platform.label}</button>`
-        : `<button onclick="window._intOpenModal('${platform.id}')" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-bold rounded-lg shadow transition cursor-pointer" type="button">Connect</button>`;
+        ? `<button onclick="window._intStartOAuth('${platform.id}')" class="${primaryBtn}" type="button">${connectIcon} Connect ${platform.label}</button>`
+        : `<button onclick="window._intOpenModal('${platform.id}')" class="${primaryBtn}" type="button">${connectIcon} Connect ${platform.label}</button>`;
 
+    // Ghost-pill styles keep the connected-card footer calm and consistent.
+    const ghostPill = 'inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
+    const neutralPill = `${ghostPill} text-gray-600 bg-gray-50 hover:bg-gray-100 border-gray-200`;
+    const brandPill = `${ghostPill} text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border-emerald-100`;
     const reconnectBtn = platform.oauthPlatform
-        ? `<button onclick="window._intStartOAuth('${platform.id}')" class="text-sm font-bold text-gray-500 hover:text-gray-800 transition cursor-pointer" type="button">Reconnect</button>`
-        : `<button onclick="window._intOpenModal('${platform.id}')" class="text-sm font-bold text-gray-500 hover:text-gray-800 transition cursor-pointer" type="button">Update token</button>`;
+        ? `<button onclick="window._intStartOAuth('${platform.id}')" class="${neutralPill}" type="button">Reconnect</button>`
+        : `<button onclick="window._intOpenModal('${platform.id}')" class="${neutralPill}" type="button">Update token</button>`;
+    const disconnectBtn = `<button onclick="window._intPromptDisconnect(${conn?.id})" class="${ghostPill} text-red-600 bg-white hover:bg-red-600 hover:text-white border-red-200 hover:border-red-600" type="button">Disconnect</button>`;
 
     // US-SMM-4.3.2: preflight audit status badge
     const meta = conn?.metadata ?? {};
@@ -509,57 +517,67 @@ function _platformCard(platform, conn) {
 
     // US-SMM-4.2.2 / 4.2.1: Sync Profile and Generate Auto-Responder for Meta/LinkedIn
     const syncBtn = (isConnected && (platform.id === 'Instagram' || platform.id === 'Facebook' || platform.id === 'LinkedIn'))
-        ? `<button onclick="window._intSyncProfile('${platform.id.toLowerCase()}')" class="text-xs font-bold text-blue-600 hover:text-blue-800 transition cursor-pointer" type="button">Sync Profile</button>`
+        ? `<button onclick="window._intSyncProfile('${platform.id.toLowerCase()}')" class="${brandPill}" type="button">Sync Profile</button>`
         : '';
     const autoRespBtn = (isConnected && (platform.id === 'Instagram' || platform.id === 'Facebook'))
-        ? `<button onclick="window._intGenerateAutoResponder()" class="text-xs font-bold text-purple-600 hover:text-purple-800 transition cursor-pointer" type="button">Auto-Responder</button>`
+        ? `<button onclick="window._intGenerateAutoResponder()" class="${brandPill}" type="button">Auto-Responder</button>`
         : '';
     // AC1: Generate Bio for the social profile platforms.
     const bioBtn = (isConnected && (platform.id === 'Instagram' || platform.id === 'Facebook' || platform.id === 'LinkedIn'))
-        ? `<button onclick="window._intGenerateBio()" class="text-xs font-bold text-emerald-600 hover:text-emerald-800 transition cursor-pointer" type="button">Generate Bio</button>`
+        ? `<button onclick="window._intGenerateBio()" class="${brandPill}" type="button">Generate Bio</button>`
         : '';
 
+    // Connected → footer of ghost-pill actions (value actions first, Disconnect pushed right).
+    // Disconnected → full-width primary CTA.
     const action = isConnected
-        ? `<div class="flex items-center gap-2 flex-wrap">
+        ? `<div class="mt-auto pt-4 border-t border-gray-100 flex items-center gap-2 flex-wrap">
                ${syncBtn}
                ${bioBtn}
                ${autoRespBtn}
                ${reconnectBtn}
-               <button onclick="window._intPromptDisconnect(${conn.id})" class="text-sm font-bold text-red-500 hover:text-red-700 transition cursor-pointer" type="button">Disconnect</button>
+               <span class="ml-auto">${disconnectBtn}</span>
            </div>`
-        : connectBtn;
+        : `<div class="mt-auto pt-4 border-t border-gray-100">${connectBtn}</div>`;
 
     // Per-assistant "Use for this assistant" toggle — only inside the assistant detail tab,
     // for live connections. Connections are a shared org pool; this controls whether THIS
     // assistant actually posts to it.
     const useToggle = (_assistantScoped && isConnected && conn.status === 'active')
-        ? `<div class="flex items-center justify-between gap-3 pt-3 border-t border-gray-100">
-               <span class="text-sm font-semibold text-gray-700">Use for this assistant</span>
-               <label class="flex items-center cursor-pointer relative shrink-0">
+        ? `<label class="flex items-center justify-between gap-3 rounded-xl bg-emerald-50 border border-emerald-100 px-3.5 py-3 cursor-pointer">
+               <span class="min-w-0">
+                   <span class="block text-sm font-bold text-gray-800">Use for this assistant</span>
+                   <span class="block text-xs text-gray-500 mt-0.5 leading-snug">Let this assistant post to ${platform.label}.</span>
+               </span>
+               <span class="relative shrink-0">
                    <input type="checkbox" class="sr-only peer" ${_assistantSelectedIds.has(conn.id) ? 'checked' : ''} onchange="window._intToggleUseForAssistant(${conn.id}, this.checked)">
-                   <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-600"></div>
-               </label>
+                   <span class="block w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-emerald-700 peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-200 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:shadow-sm after:transition-all peer-checked:after:translate-x-full peer-checked:after:border-white"></span>
+               </span>
+           </label>`
+        : '';
+
+    // Connected handle shown as a subtle chip so the tagline (what the tool does) stays visible too.
+    const handleChip = (isConnected && handle)
+        ? `<div class="flex items-center gap-1.5 w-fit max-w-full text-xs font-semibold text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-2.5 py-1.5">
+               <svg class="w-3.5 h-3.5 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+               <span class="truncate">${_esc(handle)}</span>
            </div>`
         : '';
 
     return `
-        <div class="bg-white rounded-2xl border ${isConnected ? 'border-emerald-200 shadow-md' : 'border-gray-200 shadow-sm'} p-6 flex flex-col gap-4">
-            <div class="flex items-center gap-4">
-                <div class="w-12 h-12 rounded-xl ${platform.iconBg} ${platform.iconText} flex items-center justify-center font-bold text-xl shadow-sm shrink-0">
+        <div class="relative bg-white rounded-2xl border ${isConnected ? 'border-emerald-200 shadow-md ring-1 ring-emerald-100' : 'border-gray-200 shadow-sm hover:border-gray-300 hover:shadow-md'} p-5 flex flex-col gap-3 transition">
+            <div class="flex items-start gap-3.5">
+                <div class="w-11 h-11 rounded-xl ${platform.iconBg} ${platform.iconText} flex items-center justify-center font-bold text-xl shadow-sm shrink-0">
                     ${platform.emoji}
                 </div>
                 <div class="flex-1 min-w-0">
-                    <h3 class="font-extrabold text-gray-900">${platform.label}</h3>
-                    <p class="text-sm text-gray-500 mt-0.5 truncate">${isConnected && handle ? handle : platform.tagline}</p>
+                    <h3 class="font-extrabold text-gray-900 leading-tight truncate">${platform.label}</h3>
+                    <p class="text-[13px] text-gray-500 mt-1 leading-snug line-clamp-2">${platform.tagline}</p>
                 </div>
+                <div class="shrink-0">${statusBadge}</div>
             </div>
-            <div class="flex items-center justify-between pt-3 border-t border-gray-100">
-                <div class="flex items-center gap-2 flex-wrap">
-                    ${statusBadge}
-                    ${preflightBadge}
-                </div>
-                ${action}
-            </div>
+            ${handleChip}
+            ${preflightBadge ? `<div>${preflightBadge}</div>` : ''}
+            ${action}
             ${useToggle}
             ${troubleshootingHtml}
         </div>`;
