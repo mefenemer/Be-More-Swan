@@ -16,6 +16,12 @@
 //          ok:false → marks the handoff 'failed' (visible status left as 'fix_in_progress')
 //                     and threads the failure reason for the admin.
 //
+//   GET  /admin-issue-handoff?action=claim-conflict-fix
+//        → atomically claims the oldest queued conflict fix (conflict_queued → conflict_resolving).
+//   POST /admin-issue-handoff?id=N&action=conflict-fix-result   { ok, outcome? }
+//        → ok:true  → dev_merge_status → 'merged', same advance-to-ready-to-test path as a merge.
+//          ok:false → dev_merge_status → 'failed' again, for another attempt.
+//
 // Auth: header `x-handoff-token: <DEV_HANDOFF_TOKEN>` or `Authorization: Bearer <token>`.
 // If DEV_HANDOFF_TOKEN is unset the endpoint is disabled (503) — the feature is opt-in.
 
@@ -211,6 +217,93 @@ export const handler: Handler = async (event) => {
 
         // A prior merge in this batch may have succeeded — drain check still applies so
         // it gets deployed even though this particular one failed.
+        await triggerStagingDeployIfDrained(db);
+        return json(200, { ok: true, devMergeStatus: 'failed' });
+    }
+
+    // ── Claim the next queued CONFLICT FIX ───────────────────────────────────────
+    // A super-admin pressed "Investigate & fix conflicts" on a failed merge
+    // (dev_merge_status='conflict_queued'); the runner claims it (conflict_queued →
+    // conflict_resolving), merges the base branch into the fix branch, resolves any
+    // conflicts with Claude Code, pushes, and retries `gh pr merge`, then reports back
+    // via ?action=conflict-fix-result.
+    if (event.httpMethod === 'GET' && action === 'claim-conflict-fix') {
+        const [next] = await db
+            .select({ id: issueReports.id })
+            .from(issueReports)
+            .where(eq(issueReports.devMergeStatus, 'conflict_queued'))
+            .orderBy(asc(issueReports.devHandoffAt))
+            .limit(1);
+        if (!next) return json(200, { issue: null });
+
+        const claimed = await db.update(issueReports)
+            .set({ devMergeStatus: 'conflict_resolving', devRunnerId: runnerId(event), devRunnerHeartbeat: new Date(), updatedAt: new Date() })
+            .where(and(eq(issueReports.id, next.id), eq(issueReports.devMergeStatus, 'conflict_queued')))
+            .returning({ id: issueReports.id });
+        if (claimed.length === 0) return json(200, { issue: null }); // lost the race
+
+        const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, next.id)).limit(1);
+        return json(200, {
+            issue: {
+                id: issue.id,
+                prUrl: issue.devPrUrl,
+                branch: issue.devBranch,
+                description: issue.description,
+                sourceLocation: issue.sourceLocation,
+            },
+        });
+    }
+
+    // ── Report the outcome of a conflict-resolution + merge attempt ──────────────
+    if (event.httpMethod === 'POST' && action === 'conflict-fix-result' && id) {
+        let body: any;
+        try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON.' }); }
+
+        const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
+        if (!issue) return json(404, { error: 'Issue not found.' });
+
+        const ok = body.ok !== false;
+        const outcome = (typeof body.outcome === 'string' ? body.outcome : '').trim();
+
+        if (ok) {
+            await db.update(issueReports).set({
+                devMergeStatus: 'merged',
+                devMergedAt: new Date(),
+                devMergeResult: outcome || 'Merge conflict resolved and merged to staging.',
+                devRunnerId: null,
+                devRunnerHeartbeat: null,
+                updatedAt: new Date(),
+            }).where(eq(issueReports.id, id));
+
+            await db.insert(issueReportMessages).values({
+                issueId: id,
+                authorType: 'admin',
+                authorId: null,
+                body: `🔧 Merge conflict investigated and resolved — pull request merged to staging.${outcome ? `\n\n${outcome}` : ''}`,
+                status: null,
+            });
+
+            const advanced = await maybeAdvanceToReadyToTest(db, id, event.headers);
+            await triggerStagingDeployIfDrained(db);
+            return json(200, { ok: true, devMergeStatus: 'merged', advanced });
+        }
+
+        await db.update(issueReports).set({
+            devMergeStatus: 'failed',
+            devMergeResult: outcome || 'The merge conflict could not be resolved automatically.',
+            devRunnerId: null,
+            devRunnerHeartbeat: null,
+            updatedAt: new Date(),
+        }).where(eq(issueReports.id, id));
+
+        await db.insert(issueReportMessages).values({
+            issueId: id,
+            authorType: 'admin',
+            authorId: null,
+            body: `⚠️ Could not automatically resolve the merge conflict.${outcome ? `\n\n${outcome}` : ''}\n\nResolve it manually, or try again.`,
+            status: null,
+        });
+
         await triggerStagingDeployIfDrained(db);
         return json(200, { ok: true, devMergeStatus: 'failed' });
     }

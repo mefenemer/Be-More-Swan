@@ -1132,6 +1132,8 @@ export const issueReports = pgTable("issue_reports", {
   // Merge of the fix PR to staging — requested from the ticket (super-admin) and performed
   // by the local watcher (gh pr merge). The issue only reaches 'fixed_ready_to_test' once
   // merged (and any migration applied). null | 'ready' | 'queued' | 'merging' | 'merged' | 'failed'
+  // | 'conflict_queued' | 'conflict_resolving' — the last two are a failed merge sent back to
+  // the AI developer to resolve conflicts and retry (see admin-issue-handoff's claim-conflict-fix).
   devMergeStatus: text("dev_merge_status"),
   devMergedAt: timestamp("dev_merged_at"),
   devMergeResult: text("dev_merge_result"),  // gh output / error from the merge attempt

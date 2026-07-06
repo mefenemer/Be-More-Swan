@@ -18,6 +18,11 @@
 // and reports back (?action=merge-result) — which is what finally flips the issue to
 // "Fixed & Ready to Test".
 //
+// It ALSO drains the conflict-fix queue: when a merge fails and a super-admin presses
+// "Investigate & fix conflicts", this watcher claims that request (?action=claim-conflict-fix),
+// merges the base branch into the fix branch, resolves any conflicts with Claude Code, pushes,
+// retries `gh pr merge`, and reports back (?action=conflict-fix-result).
+//
 // Claude account: the runner uses WHATEVER account the Claude Code CLI is logged into on this
 // machine — no switching, no rotation. If that account is rate-limited or logged out, the fix
 // just fails like any other failure and the admin can re-queue the issue later.
@@ -190,6 +195,25 @@ async function reportMerge(id, payload) {
     body: JSON.stringify(payload),
   }, { label: 'merge-result' });
   if (!res.ok) throw new Error(`merge-result failed: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+async function claimConflictFix() {
+  const res = await apiFetch(`${ENDPOINT}?action=claim-conflict-fix`, {
+    headers: { 'x-handoff-token': TOKEN, 'x-runner-id': RUNNER_ID },
+  }, { label: 'claim-conflict-fix' });
+  if (!res.ok) throw new Error(`claim-conflict-fix failed: ${res.status} ${await res.text()}`);
+  const data = await res.json();
+  return data.issue || null;
+}
+
+async function reportConflictFix(id, payload) {
+  const res = await apiFetch(`${ENDPOINT}?id=${id}&action=conflict-fix-result`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-handoff-token': TOKEN },
+    body: JSON.stringify(payload),
+  }, { label: 'conflict-fix-result' });
+  if (!res.ok) throw new Error(`conflict-fix-result failed: ${res.status} ${await res.text()}`);
   return res.json();
 }
 
@@ -383,6 +407,87 @@ async function processMerge(job) {
   }
 }
 
+// Investigate a failed merge: merge the base branch into the fix branch in an isolated
+// worktree, and if that leaves conflict markers, ask Claude Code to resolve them in place
+// (edits only — no git commands), then commit, push, and retry `gh pr merge`. Reports back
+// through the same success/failure shape as a normal merge.
+async function processConflictFix(job) {
+  const id = job.id;
+  const branch = job.branch;
+  let worktree = null;
+
+  try {
+    if (!branch) throw new Error('No branch recorded for this fix — cannot investigate the merge.');
+    log(`#${id} investigating merge conflict on ${branch}…`);
+    git(['fetch', 'origin', '--quiet']);
+
+    worktree = mkdtempSync(join(tmpdir(), `aura-issue-${id}-conflict-`));
+    const wt = git(['worktree', 'add', worktree, '-B', branch, `origin/${branch}`]);
+    if (!wt.ok) throw new Error(`worktree add failed: ${wt.stderr}`);
+
+    const baseRef = git(['rev-parse', '--verify', `origin/${BASE_BRANCH}`]).ok
+      ? `origin/${BASE_BRANCH}` : BASE_BRANCH;
+
+    log(`#${id} merging ${baseRef} into ${branch}…`);
+    const merge = git(['merge', baseRef, '--no-edit'], { cwd: worktree });
+
+    if (!merge.ok) {
+      const conflicted = git(['diff', '--name-only', '--diff-filter=U'], { cwd: worktree });
+      if (!conflicted.stdout) throw new Error(`git merge failed and left no conflicted files: ${merge.stderr}`);
+
+      log(`#${id} resolving conflicts in: ${conflicted.stdout.replace(/\n/g, ', ')}`);
+      const prompt = [
+        `You are an autonomous developer resolving a git merge conflict for the Aura / "Be More Swan" app.`,
+        `Merging ${baseRef} into the fix branch "${branch}" (for reported issue #${id}) left these files conflicted:`,
+        conflicted.stdout,
+        ``,
+        `Resolve every conflict marker (<<<<<<<, =======, >>>>>>>) by combining both sides correctly, preserving the intent of the original fix${job.description ? ` (issue #${id}: ${job.description})` : ''} as well as whatever changed on ${baseRef}.`,
+        `Do NOT run any git commands and do NOT commit — only edit the conflicted files. The harness stages and commits the resolution.`,
+        `When you are done, end your reply with a short summary of how each conflict was resolved.`,
+      ].filter(Boolean).join('\n');
+
+      const claude = await runAsync(CLAUDE_BIN, ['-p', '--permission-mode', 'acceptEdits'], { cwd: worktree, input: prompt });
+      if (!claude.ok) throw new Error(`Claude Code exited ${claude.code}: ${claude.stderr || claude.stdout}`);
+      const rawOut = claude.stdout || claude.stderr || 'No output from the AI runner.';
+
+      const stillConflicted = git(['diff', '--name-only', '--diff-filter=U'], { cwd: worktree });
+      if (stillConflicted.stdout) throw new Error(`Conflicts remain unresolved in: ${stillConflicted.stdout.replace(/\n/g, ', ')}`);
+
+      const add = git(['add', '-A'], { cwd: worktree });
+      if (!add.ok) throw new Error(`git add failed: ${add.stderr}`);
+      const commit = git(['commit', '--no-edit'], { cwd: worktree });
+      if (!commit.ok) throw new Error(`git commit failed: ${commit.stderr}`);
+      const push = git(['push', 'origin', branch], { cwd: worktree });
+      if (!push.ok) throw new Error(`git push failed: ${push.stderr}`);
+      log(`#${id} conflicts resolved and pushed — AI notes:\n${rawOut}`);
+    } else {
+      log(`#${id} merged cleanly with no conflicts — pushing…`);
+      const push = git(['push', 'origin', branch], { cwd: worktree });
+      if (!push.ok) throw new Error(`git push failed: ${push.stderr}`);
+    }
+
+    log(`#${id} retrying pull request merge…`);
+    const m = run('gh', ['pr', 'merge', job.prUrl || branch, '--merge'], { cwd: REPO });
+    const outcome = (m.stdout || m.stderr || '').trim();
+    if (!m.ok) throw new Error(outcome || 'gh pr merge failed after resolving conflicts');
+
+    git(['push', 'origin', '--delete', branch]); // best-effort cleanup
+
+    log(`#${id} ✓ conflict resolved and merged to ${BASE_BRANCH}`);
+    await reportConflictFix(id, { ok: true, outcome: `Resolved the merge conflict and merged to ${BASE_BRANCH}.\n\n${outcome}` });
+    log(`#${id} ✓ conflict-fix reported`);
+  } catch (e) {
+    log(`#${id} ✖ conflict fix failed: ${e.message}`);
+    await reportConflictFix(id, { ok: false, outcome: e.message })
+      .catch((re) => log(`#${id} ✖ could not report conflict-fix failure: ${re.message}`));
+  } finally {
+    if (worktree) {
+      git(['worktree', 'remove', '--force', worktree]);
+      try { rmSync(worktree, { recursive: true, force: true }); } catch {}
+    }
+  }
+}
+
 async function main() {
   log(`dev-issue-fixer watching ${ENDPOINT}`);
   log(`runner=${RUNNER_ID} repo=${REPO} base=${BASE_BRANCH} poll=${POLL_MS}ms${ONCE ? ' once' : ''}`);
@@ -406,6 +511,16 @@ async function main() {
     catch (e) { log(`merge poll error: ${e.message}`); }
     if (merge) {
       await processMerge(merge);
+      if (ONCE) break;
+      continue;
+    }
+
+    // 3) Otherwise, a failed merge queued for AI conflict investigation.
+    let conflictFix = null;
+    try { conflictFix = await claimConflictFix(); }
+    catch (e) { log(`conflict-fix poll error: ${e.message}`); }
+    if (conflictFix) {
+      await processConflictFix(conflictFix);
       if (ONCE) break;
       continue;
     }
