@@ -13,6 +13,8 @@
  *   cfg.modules  // → { hasReviewQueue, hasPostingSchedule, hasSocialStrategy }
  *   cfg.hubTab   // → optional Internal Data Hub tab config (assistant-data-hub.js);
  *                //   absent = no Data Hub tab for this role (e.g. social_media_manager)
+ *   cfg.kbTab    // → optional Knowledge Base tab config (assistant-knowledge-base.js);
+ *                //   only tier1_support_agent has one — { label, description }
  *
  * hubTab shape:
  *   { id, label, recordType,            // recordType matches assistant_records.record_type
@@ -176,6 +178,12 @@
         ],
         importHint: 'Upload a CSV of open tickets or customer emails — one row per query. Exporting from Excel or Google Sheets? Use File → Download → CSV.',
         importColumns: ['subject', 'customer', 'email', 'message'],
+      },
+      // Knowledge Base tab (assistant-knowledge-base.js) — the support articles this
+      // assistant grounds its Resolved answers in (kb_articles via kb-articles.ts).
+      kbTab: {
+        label: 'Knowledge Base',
+        description: 'The support articles your assistant answers from — returns policies, pricing, product guides. Questions your Knowledge Base can\'t answer are escalated to you instead of guessed at.',
       },
     },
 

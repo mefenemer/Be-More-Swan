@@ -15,6 +15,7 @@ import {
   check,
   uuid,
   date,
+  vector,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -1753,6 +1754,48 @@ export const vectorEmbeddings = pgTable("vector_embeddings", {
   // US-DB-1.1.1: Org-level and user-level embedding lookups + GDPR erasure queries
   index("vector_embeddings_org_idx").on(t.organisationId),
   index("vector_embeddings_user_idx").on(t.userId),
+]);
+
+// ── Knowledge Base Articles — Tier 1 Support Agent KB phase ─────────────────
+// User-managed support knowledge for an assistant (netlify/functions/kb-articles.ts,
+// Knowledge Base tab on assistant-detail.html). Articles are chunked + embedded into
+// kb_chunks; tier1_support_agent retrieval grounds Resolved answers in these rows.
+// Migration: db/kb-articles.sql (manual apply — pgvector column + tsvector fallback).
+export const kbArticles = pgTable("kb_articles", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  title: text().notNull(),
+  content: text().notNull(),
+  source: text().notNull().default("manual"),            // 'manual' | 'file_upload'
+  // 'pending' → not yet chunked; 'embedded' → vectors written; 'keyword_only' →
+  // no embedding provider configured, full-text fallback only; 'failed' → provider error.
+  embeddingStatus: text("embedding_status").notNull().default("pending"),
+  chunkCount: integer("chunk_count").notNull().default(0),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("kb_articles_org_idx").on(t.organisationId),
+  index("kb_articles_assistant_idx").on(t.aiAssistantId),
+]);
+
+// One retrieval unit per article chunk. `embedding` is NULL when no embedding
+// provider is configured — retrieval then falls back to Postgres full-text search
+// over `content` (content_tsv generated column lives in the SQL migration only).
+// GDPR: every embedded chunk gets a vectorEmbeddings map row (sourceType 'kb_article').
+export const kbChunks = pgTable("kb_chunks", {
+  id: serial().primaryKey(),
+  kbArticleId: integer("kb_article_id").notNull().references(() => kbArticles.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  chunkIndex: integer("chunk_index").notNull(),
+  content: text().notNull(),
+  embedding: vector("embedding", { dimensions: 1024 }),  // voyage-3.5-lite output dim
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("kb_chunks_article_idx").on(t.kbArticleId),
+  index("kb_chunks_assistant_idx").on(t.aiAssistantId, t.organisationId),
 ]);
 
 // ── Data Export Requests — US-GAP-2.2.1 SC5 ─────────────────────────────────

@@ -1129,6 +1129,15 @@ function _applyDashboardRegistry(data) {
         setText('datahub-tab-label', hub.label);
         window.AssistantDataHub?.init({ hub, assistantId: data.id });
     }
+
+    // Knowledge Base tab — only roles with a kbTab config (tier1_support_agent):
+    // the articles that ground the assistant's Resolved answers (KB phase).
+    const kb = cfg.kbTab;
+    toggle('maintab-btn-kb', !!kb);
+    if (kb) {
+        setText('kb-tab-label', kb.label);
+        window.AssistantKnowledgeBase?.init({ kb, assistantId: data.id });
+    }
 }
 
 // Flattened field list from the role's schema-driven onboarding definition

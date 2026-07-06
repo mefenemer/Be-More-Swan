@@ -9,6 +9,13 @@
       "autoPort": false
     },
     {
+      "name": "component-harness-kb",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4184", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/8b539a26-5eb5-4a76-b740-448bd863303b/scratchpad/demo"],
+      "port": 4184,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-datahub",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "4183", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/86e867d3-4a0d-44df-89ec-af482e88b86c/scratchpad/demo"],

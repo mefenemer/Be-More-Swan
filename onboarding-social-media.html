@@ -562,6 +562,48 @@
                 <div class="handle-feedback"></div>
               </div>
             </div>
+
+            <div>
+              <label class="flex items-center cursor-pointer">
+                <input type="checkbox" id="chk_threads" value="Threads" class="h-4 w-4 text-emerald-700 rounded border-gray-300" onchange="toggleHandleInput('threads_handle_container', this.checked)">
+                <span class="ml-2 text-sm text-gray-800">Threads</span>
+              </label>
+              <div id="threads_handle_container" class="hidden mt-2 ml-6 relative">
+                <input type="url" id="threads_handle"
+                       class="w-full sm:w-2/3 border border-emerald-200 rounded-md p-2 text-sm focus:ring-2 focus:ring-emerald-700"
+                       value="https://threads.net/@"
+                       placeholder="https://threads.net/@yourhandle">
+                <div class="handle-feedback"></div>
+              </div>
+            </div>
+
+            <div>
+              <label class="flex items-center cursor-pointer">
+                <input type="checkbox" id="chk_tiktok" value="TikTok" class="h-4 w-4 text-emerald-700 rounded border-gray-300" onchange="toggleHandleInput('tiktok_handle_container', this.checked)">
+                <span class="ml-2 text-sm text-gray-800">TikTok</span>
+              </label>
+              <div id="tiktok_handle_container" class="hidden mt-2 ml-6 relative">
+                <input type="url" id="tiktok_handle"
+                       class="w-full sm:w-2/3 border border-emerald-200 rounded-md p-2 text-sm focus:ring-2 focus:ring-emerald-700"
+                       value="https://tiktok.com/@"
+                       placeholder="https://tiktok.com/@yourhandle">
+                <div class="handle-feedback"></div>
+              </div>
+            </div>
+
+            <div>
+              <label class="flex items-center cursor-pointer">
+                <input type="checkbox" id="chk_youtube" value="YouTube" class="h-4 w-4 text-emerald-700 rounded border-gray-300" onchange="toggleHandleInput('youtube_handle_container', this.checked)">
+                <span class="ml-2 text-sm text-gray-800">YouTube</span>
+              </label>
+              <div id="youtube_handle_container" class="hidden mt-2 ml-6 relative">
+                <input type="url" id="youtube_handle"
+                       class="w-full sm:w-2/3 border border-emerald-200 rounded-md p-2 text-sm focus:ring-2 focus:ring-emerald-700"
+                       value="https://youtube.com/@"
+                       placeholder="https://youtube.com/@yourchannel">
+                <div class="handle-feedback"></div>
+              </div>
+            </div>
           </div>
 
           <div id="algorithm_helpers_container" class="hidden mt-8 border-t border-gray-200 pt-6">
@@ -606,6 +648,27 @@
                 <option value="mix">Mix of Threads and Single Posts</option>
               </select>
               <label class="flex items-center cursor-pointer hover:text-emerald-800 transition gated-feature" data-feature="x_opt_media"><input type="checkbox" id="x_opt_media" class="h-4 w-4 text-emerald-700 rounded"><span class="ml-2 text-sm text-gray-700" data-explain="media-placeholders">Include placeholders for media</span></label>
+            </div>
+
+            <div id="algo_block_threads" class="hidden algo-block space-y-3 mb-4 bg-white border border-gray-200 p-4 rounded-lg shadow-sm">
+              <h4 class="font-bold text-gray-800 text-sm mb-2">Threads Strategy</h4>
+              <label class="flex items-center cursor-pointer hover:text-emerald-800 transition"><input type="checkbox" id="threads_opt_conversational" class="h-4 w-4 text-emerald-700 rounded border-gray-300"><span class="ml-2 text-sm text-gray-700">Conversational tone (No hashtags)</span></label>
+            </div>
+
+            <div id="algo_block_tiktok" class="hidden algo-block space-y-3 mb-4 bg-white border border-gray-200 p-4 rounded-lg shadow-sm">
+              <h4 class="font-bold text-gray-800 text-sm mb-2">TikTok Strategy</h4>
+              <input type="text" id="algo_custom_tags_tiktok" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 transition" placeholder="e.g., #FYP #SmallBusiness">
+              <label class="flex items-center cursor-pointer hover:text-emerald-800 transition gated-feature" data-feature="tiktok_opt_hooks"><input type="checkbox" id="tiktok_opt_hooks" class="h-4 w-4 text-emerald-700 rounded border-gray-300"><span class="ml-2 text-sm text-gray-700">Auto-generate viral text hooks for the video</span></label>
+            </div>
+
+            <div id="algo_block_youtube" class="hidden algo-block space-y-3 mb-4 bg-white border border-gray-200 p-4 rounded-lg shadow-sm">
+              <h4 class="font-bold text-gray-800 text-sm mb-2">YouTube Strategy</h4>
+              <select id="youtube_opt_format" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 transition">
+                <option value="mix">Mix of Shorts and Long-form</option>
+                <option value="shorts">Prioritize Shorts</option>
+                <option value="longform">Prioritize Long-form</option>
+              </select>
+              <label class="flex items-center cursor-pointer hover:text-emerald-800 transition gated-feature" data-feature="youtube_opt_seo"><input type="checkbox" id="youtube_opt_seo" class="h-4 w-4 text-emerald-700 rounded border-gray-300"><span class="ml-2 text-sm text-gray-700">Optimize description for YouTube SEO</span></label>
             </div>
           </div>
         </div>
@@ -806,8 +869,15 @@
     'fb': { regex: /^(https?:\/\/)?(www\.)?facebook\.com\/[\w.-]+$/, example: "https://facebook.com/yourpage" },
     'ig': { regex: /^@?[a-zA-Z0-9._]{1,30}$/, example: "@yourbrand" },
     'li': { regex: /^(https?:\/\/)?(www\.)?linkedin\.com\/(in|company)\/[\w-]+\/?$/, example: "https://linkedin.com/in/yourprofile" },
-    'x':  { regex: /^@?[a-zA-Z0-9_]{1,15}$/, example: "@yourhandle" }
+    'x':  { regex: /^@?[a-zA-Z0-9_]{1,15}$/, example: "@yourhandle" },
+    'threads': { regex: /^@?[a-zA-Z0-9._]{1,30}$/, example: "@yourbrand" },
+    'tiktok':  { regex: /^@?[a-zA-Z0-9._]{2,24}$/, example: "@yourbrand" },
+    'youtube': { regex: /^@?[a-zA-Z0-9._-]{3,30}$/, example: "@yourchannel" }
   };
+
+  // Platform short codes — must stay in sync with the chk_* checkboxes in step 5, the
+  // algo_block_* helpers and _platformCodes/_hydratePlatformStrategy in assistants.js.
+  const PLATFORM_CODES = ['fb', 'ig', 'li', 'x', 'threads', 'tiktok', 'youtube'];
 
   // --- 2. DOM INITIALIZATION & HYDRATION ---
   document.addEventListener("DOMContentLoaded", async () => {
@@ -1043,7 +1113,7 @@
           // 4. Retrigger UI specific toggles based on hydrated values
           toggleScheduleDetails();
           toggleContentSourceDetails();
-          ['fb', 'ig', 'li', 'x'].forEach(p => {
+          PLATFORM_CODES.forEach(p => {
             const chk = document.getElementById(`chk_${p}`);
             if(chk) toggleHandleInput(`${p}_handle_container`, chk.checked);
           });
@@ -1086,6 +1156,9 @@
             .replace(/^https?:\/\/(www\.)?linkedin\.com\/(in|company)\//i, '')
             .replace(/^https?:\/\/(www\.)?twitter\.com\//i, '')
             .replace(/^https?:\/\/(www\.)?x\.com\//i, '')
+            .replace(/^https?:\/\/(www\.)?threads\.(net|com)\//i, '')
+            .replace(/^https?:\/\/(www\.)?tiktok\.com\//i, '')
+            .replace(/^https?:\/\/(www\.)?youtube\.com\//i, '')
             .replace('@', '')
             .replace(/\/$/, '');
 
@@ -1189,7 +1262,7 @@
       let hasPlatform = false, allHandlesValid = true;
       const prefixes = { 'fb': 'https://facebook.com/', 'li': 'https://linkedin.com/' };
 
-      for (const p of ['fb', 'ig', 'li', 'x']) {
+      for (const p of PLATFORM_CODES) {
         const chk = document.getElementById(`chk_${p}`);
         if (chk?.checked) {
           hasPlatform = true;
@@ -1231,7 +1304,7 @@
     if (algoBlock) algoBlock.classList.toggle('hidden', !isChecked);
 
     // Toggle master container
-    const hasPlatform = ['fb', 'ig', 'li', 'x'].some(p => document.getElementById(`chk_${p}`)?.checked);
+    const hasPlatform = PLATFORM_CODES.some(p => document.getElementById(`chk_${p}`)?.checked);
     document.getElementById('algorithm_helpers_container').classList.toggle('hidden', !hasPlatform);
   }
 
@@ -1245,6 +1318,9 @@
       linkedin:  { p: 'li', base: 'https://linkedin.com/in/' },
       x:         { p: 'x',  base: 'https://x.com/' },
       twitter:   { p: 'x',  base: 'https://x.com/' },
+      threads:   { p: 'threads', base: 'https://threads.net/@' },
+      tiktok:    { p: 'tiktok',  base: 'https://tiktok.com/@' },
+      youtube:   { p: 'youtube', base: 'https://youtube.com/@' },
     };
     try {
       const res = await fetch('/.netlify/functions/integrations');
@@ -1318,7 +1394,7 @@
     const sourceText = document.querySelector('input[name="content_source"]:checked')?.nextElementSibling.querySelector('span').innerText || missingFallback;
 
     let platforms = [];
-    ['fb', 'ig', 'li', 'x'].forEach(p => {
+    PLATFORM_CODES.forEach(p => {
       const chk = document.getElementById(`chk_${p}`);
       if (chk && chk.checked) {
         platforms.push(`${chk.value} (${document.getElementById(`${p}_handle`)?.value || missingFallback})`);
@@ -1346,7 +1422,7 @@
     // Per-platform hashtag/algorithm choices are no longer flattened into strict rules here — they
     // flow through as the structured rawInputs.platform_strategy object below and the server renders
     // them as a dedicated PLATFORM ALGORITHM STRATEGY brief section (formatPlatformStrategyBrief).
-    const extractedPlatformCodes = ['fb', 'ig', 'li', 'x'].filter(p => document.getElementById(`chk_${p}`)?.checked);
+    const extractedPlatformCodes = PLATFORM_CODES.filter(p => document.getElementById(`chk_${p}`)?.checked);
     const platformStrategy = collectOnboardingPlatformStrategy(extractedPlatformCodes);
 
     const userRules = document.getElementById('acceptance_criteria_rules')?.value;
@@ -1493,7 +1569,7 @@
     // Extract exact values for the specific Social Media Manager requirements
     // 1. Extract exact values
     const extractedPlatforms = [];
-    ['fb', 'ig', 'li', 'x'].forEach(p => {
+    PLATFORM_CODES.forEach(p => {
       if (document.getElementById(`chk_${p}`)?.checked) extractedPlatforms.push(p);
     });
 
@@ -1628,6 +1704,9 @@
       if (p === 'ig') ps.ig = { tags: val('algo_custom_tags_ig'), format: val('ig_opt_format') || 'mix', audio: on('ig_opt_audio') };
       if (p === 'li') ps.li = { tags: '', links_first_comment: on('li_opt_links'), sliders: on('li_opt_sliders') };
       if (p === 'x')  ps.x  = { tags: '', length: val('x_opt_length') || 'mix', media: on('x_opt_media') };
+      if (p === 'threads') ps.threads = { conversational: on('threads_opt_conversational') };
+      if (p === 'tiktok')  ps.tiktok  = { tags: val('algo_custom_tags_tiktok'), hooks: on('tiktok_opt_hooks') };
+      if (p === 'youtube') ps.youtube = { format: val('youtube_opt_format') || 'mix', seo: on('youtube_opt_seo') };
     });
     return ps;
   }
@@ -1653,6 +1732,8 @@
     ig_opt_audio:   { tier: 'saver', name: 'Trending audio suggestions', desc: 'AI analyses TikTok/Instagram trends to recommend viral audio tracks for your reels.' },
     li_opt_sliders: { tier: 'saver', name: 'PDF carousel outlines',      desc: 'Generates multi-slide PDF carousel outlines that boost LinkedIn dwell time and engagement.' },
     x_opt_media:    { tier: 'saver', name: 'Media placeholders',         desc: 'Inserts smart media placeholders so every post ships with eye-catching visuals.' },
+    tiktok_opt_hooks: { tier: 'saver', name: 'Viral text hooks',         desc: 'Auto-generates scroll-stopping text hooks for the opening seconds of each TikTok video.' },
+    youtube_opt_seo:  { tier: 'saver', name: 'YouTube SEO optimisation', desc: 'Optimises every video description for YouTube search — keywords, chapters and links.' },
   };
   let _gatingTier = currentTierKey;   // AC1.1 — refined from check-capacity on load
   let _pendingUnlock = null;          // { featureKey, tier }

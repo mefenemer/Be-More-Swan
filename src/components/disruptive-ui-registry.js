@@ -451,7 +451,9 @@
   // { type: 'ticket_triage_view', status: 'Resolved'|'Escalated', helpdeskProvider?,
   //   ticketId?: string|null, confidenceScore: 0-100, summary,
   //   escalationReason: string|null, escalationEmail?: string|null,
-  //   draftReply?: string }
+  //   kbCitations?: string[]|null, draftReply?: string }
+  // kbCitations names the Knowledge Base articles that ground a Resolved answer
+  // (KB phase — kb_articles via the Knowledge Base tab); null/absent = ungrounded.
   // draftReply is the ready-to-send customer-facing response (Spreadsheet-fallback
   // path: SMBs without a helpdesk copy it into their own inbox).
   // Escalated tickets get an amber/red warning treatment naming the escalation inbox;
@@ -499,6 +501,12 @@
         <div class="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-900">
           <span class="font-bold">Handled automatically</span> — no human follow-up needed.
         </div>`}
+
+      ${!escalated && Array.isArray(ui.kbCitations) && ui.kbCitations.length ? `
+        <div class="mt-3 text-xs text-gray-500">
+          <span class="font-bold text-gray-600">📚 Grounded in your Knowledge Base:</span>
+          ${ui.kbCitations.map((c) => `<span class="inline-block bg-gray-50 border border-gray-200 rounded-full px-2 py-0.5 font-semibold text-gray-600 ml-1 mt-1">${esc(c)}</span>`).join('')}
+        </div>` : ''}
 
       ${typeof ui.draftReply === 'string' && ui.draftReply.trim() ? `
       <details class="mt-4 group">

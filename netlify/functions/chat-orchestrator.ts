@@ -15,12 +15,13 @@
 
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, assistantRecords, chatMessages, chatSessions, masterAssistants, masterPlans, plans } from '../../db/schema';
+import { aiAssistants, assistantRecords, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, masterPlans, plans } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { atomicCapCheck } from '../../src/utils/atomic-cap-check';
+import { embedTexts } from '../../src/utils/kb-embeddings';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
@@ -95,6 +96,14 @@ async function consumeTaskCredit(db: ReturnType<typeof getDb>, organisationId: n
 // "Disruptive UI" block (Lead Scoring Card, Action Item table, …) persisted to
 // chatMessages.uiElementJson so transcripts re-hydrate exactly as first rendered.
 
+/** Per-turn Knowledge Base retrieval result (retrieveKnowledgeBase). */
+interface KnowledgeBaseContext {
+    /** How many KB articles this assistant has — 0 = the KB hasn't been set up yet. */
+    articleCount: number;
+    /** Formatted top-matching excerpts for this turn; null when nothing matched. */
+    excerpts: string | null;
+}
+
 interface RouteContext {
     assistantName: string;
     jobRole: string | null;
@@ -102,11 +111,17 @@ interface RouteContext {
     baseSystemPrompt: string | null;
     /** Role-specific onboarding answers captured at hire time (aiAssistants.onboardingContext). */
     onboardingContext: unknown;
+    /** KB retrieval for this turn — only populated for routes with usesKnowledgeBase.
+     *  null/undefined (e.g. shadow handoff calls) renders the "no KB yet" prompt path. */
+    knowledgeBase?: KnowledgeBaseContext | null;
 }
 
 interface AssistantRoute {
     model: string;
     maxTokens: number;
+    /** When true the handler runs KB retrieval on the user's message and passes the
+     *  result into buildRolePrompt via rc.knowledgeBase (kb_articles / kb_chunks). */
+    usesKnowledgeBase?: boolean;
     /** Role-specific prompt body. buildSystemPrompt() appends the hardened
      *  <strict_configuration> block to this before every API call. */
     buildRolePrompt(rc: RouteContext): string;
@@ -318,6 +333,85 @@ async function persistHubRecords(
     }
 }
 
+// ── Knowledge Base retrieval (tier1_support_agent) ────────────────────────────
+// Grounds "Resolved" answers in the business's own KB articles (kb_articles /
+// kb_chunks, managed via the Knowledge Base tab → netlify/functions/kb-articles.ts).
+// Vector search first (Voyage query embedding + pgvector cosine over kb_chunks);
+// falls back to Postgres full-text search when no embedding provider is configured,
+// the query embedding fails, or nothing lands within the distance ceiling. Any
+// retrieval failure degrades to "no KB" — the turn must never 500 because of RAG.
+
+const KB_TOP_K = 5;
+// Cosine distance ceiling — beyond this a chunk is noise, not support. Voyage
+// cosine similarities for on-topic support matches typically sit well above 0.45.
+const KB_MAX_DISTANCE = 0.55;
+// Cap on chars per injected excerpt and on the query text sent for embedding.
+const KB_EXCERPT_MAX_CHARS = 1600;
+const KB_QUERY_MAX_CHARS = 2000;
+
+async function retrieveKnowledgeBase(
+    db: ReturnType<typeof getDb>,
+    orgId: number,
+    aiAssistantId: number,
+    query: string,
+): Promise<KnowledgeBaseContext> {
+    try {
+        const scope = and(eq(kbChunks.organisationId, orgId), eq(kbChunks.aiAssistantId, aiAssistantId));
+
+        const [counted] = await db
+            .select({ count: sql<number>`count(*)::int` })
+            .from(kbArticles)
+            .where(and(eq(kbArticles.organisationId, orgId), eq(kbArticles.aiAssistantId, aiAssistantId)));
+        const articleCount = counted?.count ?? 0;
+        if (articleCount === 0) return { articleCount: 0, excerpts: null };
+
+        const q = query.slice(0, KB_QUERY_MAX_CHARS);
+        let rows: { title: string; content: string }[] = [];
+
+        // Semantic pass — embed the query and rank chunks by cosine distance.
+        const vectors = await embedTexts([q], 'query').catch((err) => {
+            console.error('[chat-orchestrator] KB query embedding failed:', err);
+            return null;
+        });
+        if (vectors && vectors[0]) {
+            const queryVector = `[${vectors[0].join(',')}]`;
+            rows = await db
+                .select({ title: kbArticles.title, content: kbChunks.content })
+                .from(kbChunks)
+                .innerJoin(kbArticles, eq(kbChunks.kbArticleId, kbArticles.id))
+                .where(and(
+                    scope,
+                    sql`${kbChunks.embedding} IS NOT NULL`,
+                    sql`${kbChunks.embedding} <=> ${queryVector}::vector < ${KB_MAX_DISTANCE}`,
+                ))
+                .orderBy(sql`${kbChunks.embedding} <=> ${queryVector}::vector`)
+                .limit(KB_TOP_K);
+        }
+
+        // Keyword pass — full-text fallback over content_tsv (db/kb-articles.sql).
+        if (rows.length === 0) {
+            rows = await db
+                .select({ title: kbArticles.title, content: kbChunks.content })
+                .from(kbChunks)
+                .innerJoin(kbArticles, eq(kbChunks.kbArticleId, kbArticles.id))
+                .where(and(scope, sql`content_tsv @@ websearch_to_tsquery('english', ${q})`))
+                .orderBy(sql`ts_rank(content_tsv, websearch_to_tsquery('english', ${q})) DESC`)
+                .limit(KB_TOP_K);
+        }
+
+        if (rows.length === 0) return { articleCount, excerpts: null };
+        const excerpts = rows
+            .map((r, i) => `[KB ${i + 1}] From article "${r.title}":\n${r.content.slice(0, KB_EXCERPT_MAX_CHARS)}`)
+            .join('\n\n');
+        return { articleCount, excerpts };
+    } catch (err) {
+        // Missing tables (migration not applied) or any other retrieval failure:
+        // behave as if no KB exists rather than failing the chat turn.
+        console.error('[chat-orchestrator] KB retrieval failed:', err);
+        return { articleCount: 0, excerpts: null };
+    }
+}
+
 const ROUTES: Record<string, AssistantRoute> = {
     // Tier 1, Batch 1 — Lead Qualifier. Scores inbound leads against the ideal-customer
     // profile captured at hire time (targetIndustries / minHeadcount / salesTone, see
@@ -488,11 +582,35 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
     tier1_support_agent: {
         model: DEFAULT_MODEL,
         maxTokens: 1024,
+        usesKnowledgeBase: true,
         buildRolePrompt: (rc) => {
             const platform = onboardingValue(rc, 'helpdeskPlatform');
             const threshold = onboardingValue(rc, 'autoResolveThreshold');
             const escalationEmail = onboardingValue(rc, 'escalationEmail');
             const supportTone = onboardingValue(rc, 'supportTone');
+
+            // KB grounding — three states: excerpts retrieved for this turn (answers
+            // must be grounded in them), a KB exists but nothing matched (escalate:
+            // no coverage), or no KB yet (general knowledge allowed, business-specific
+            // facts lower confidence). The confidence-threshold escalation behaviour
+            // stays intact in all three — ungrounded answers score low and escalate.
+            const kb = rc.knowledgeBase ?? null;
+            let kbSection: string;
+            if (kb && kb.excerpts) {
+                kbSection = `KNOWLEDGE BASE GROUNDING — this business maintains its own Knowledge Base of support articles; the excerpts below were retrieved for the current query. They are your ONLY source of truth for business-specific facts (policies, pricing, product behaviour, procedures):
+- Mark a ticket Resolved ONLY when the answer in draftReply is supported by these excerpts, and list the titles of the supporting articles in kbCitations.
+- Do NOT answer business-specific questions from general knowledge. If the excerpts do not actually answer the customer's question, there is no KB support: set confidenceScore below ${threshold ?? 75}, set status to "Escalated", set kbCitations to null, and set escalationReason to something like "No knowledge base coverage for this question."
+- Generic conversational content (greetings, empathy, sign-offs) needs no citation — only the substance of the answer must be grounded.
+
+<knowledge_base>
+${kb.excerpts}
+</knowledge_base>`;
+            } else if (kb && kb.articleCount > 0) {
+                kbSection = `KNOWLEDGE BASE GROUNDING — this business maintains a Knowledge Base of ${kb.articleCount} support article${kb.articleCount === 1 ? '' : 's'}, but NO excerpt matched the current query. That means there is no KB support for a business-specific answer: do not answer such questions from general knowledge. Set confidenceScore below ${threshold ?? 75}, set status to "Escalated", set kbCitations to null, and set escalationReason to something like "No knowledge base coverage for this question." Purely generic queries that need no business-specific facts at all may still be Resolved.`;
+            } else {
+                kbSection = `KNOWLEDGE BASE — this business has not added any Knowledge Base articles yet, so there is nothing to ground business-specific answers in. You may resolve routine, generic queries, but any answer that depends on business-specific facts you cannot verify (their policies, pricing, product behaviour) must carry a LOW confidenceScore — below ${threshold ?? 75} — and therefore escalate. Set kbCitations to null. When it comes up naturally, remind the user (in reply, not draftReply) that adding articles in the Knowledge Base tab of your dashboard lets you answer from their own documentation.`;
+            }
+
             return [
                 sharedContextBlock(rc),
                 `You are a Tier 1 customer support agent handling front-line queries for this business. Write every customer-facing reply in the configured tone. Live helpdesk connections are not wired up yet, so triage the query the user pastes or describes as if it were a ticket.
@@ -504,6 +622,8 @@ Support policy (from setup):
 - Support tone: ${supportTone ?? 'professional'}.
 
 MANDATORY escalation triggers — regardless of confidence, set status to "Escalated" when the query contains angry or abusive language, a refund demand, a request for a manager/human, or a legal/complaint threat. Set escalationReason to a short plain-English explanation of which trigger (or low confidence) fired; use null when the ticket is Resolved.
+
+${kbSection}
 
 Every triaged query MUST include the ticket triage view. Only set uiElement to null when there is no support query to triage yet — then ask for the ticket or customer message. Small businesses often forward their support@ emails here instead of using a helpdesk — treat a pasted or forwarded email exactly like a ticket.
 
@@ -525,6 +645,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
     "summary": "<one-sentence summary of the customer's issue>",
     "escalationReason": "<why it was escalated>" | null,
     "escalationEmail": ${escalationEmail ? JSON.stringify(escalationEmail) : 'null'},
+    "kbCitations": ["<title of each Knowledge Base article that supports the answer>", ...] | null,
     "draftReply": "<the full customer-facing reply, ready to copy or send>"
   }
 }`,
@@ -704,12 +825,21 @@ export const handler: Handler = async (event) => {
         .returning({ id: chatMessages.id, createdAt: chatMessages.createdAt });
 
     const route = (assistantRow.roleKey && ROUTES[assistantRow.roleKey]) || defaultRoute;
+
+    // Knowledge Base retrieval — per-turn RAG for routes that ground answers in the
+    // business's own KB (tier1_support_agent). Failures degrade to "no KB" inside
+    // retrieveKnowledgeBase, so this never blocks the turn.
+    const knowledgeBase = route.usesKnowledgeBase
+        ? await retrieveKnowledgeBase(db, orgId, session.aiAssistantId, message)
+        : null;
+
     const system = buildSystemPrompt(
         route.buildRolePrompt({
             assistantName: assistantRow.name,
             jobRole: assistantRow.jobRole,
             baseSystemPrompt: assistantRow.systemPrompt,
             onboardingContext: assistantRow.onboardingContext,
+            knowledgeBase,
         }),
         assistantRow.onboardingContext,
     );

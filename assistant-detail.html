@@ -128,6 +128,12 @@
       <button type="button" id="maintab-btn-datahub" data-maintab="datahub" class="main-tab-btn hidden">
         <span id="datahub-tab-label">Data</span>
       </button>
+      <!-- Knowledge Base — visibility comes from the role's kbTab config (only
+           tier1_support_agent); the tab manages the KB articles that ground the
+           assistant's answers (assistant-knowledge-base.js → kb-articles.ts). -->
+      <button type="button" id="maintab-btn-kb" data-maintab="kb" class="main-tab-btn hidden">
+        <span id="kb-tab-label">Knowledge Base</span>
+      </button>
       <button type="button" data-maintab="goals"         class="main-tab-btn">Goals</button>
       <button type="button" data-maintab="automation"    class="main-tab-btn">Automation</button>
       <button type="button" data-maintab="meetings"      class="main-tab-btn" title="Progress Reviews: the Kick Off Meeting and your check-in history. Rules — including Learned Directives — live in the Assistant Profile.">Progress Reviews
@@ -392,6 +398,16 @@
     <div id="datahub-toolbar"></div>
     <div id="datahub-table-host"></div>
   </div><!-- /maintab-datahub -->
+
+  <!-- ── MAIN TAB: Knowledge Base ───────────────────────────────────────
+       Support articles grounding the tier1_support_agent's Resolved answers
+       (KB phase). Populated by assistant-knowledge-base.js from the kbTab
+       config; articles live in kb_articles (netlify/functions/kb-articles.ts). -->
+  <div id="maintab-kb" class="main-tab-content hidden">
+    <div id="kb-toolbar"></div>
+    <div id="kb-editor-host"></div>
+    <div id="kb-list-host"></div>
+  </div><!-- /maintab-kb -->
 
   <!-- ── Persona / config slide-over (Epic 1) ──────────────────────────
        Opened from the header "Assistant Profile" button (#btn-assistant-profile),
