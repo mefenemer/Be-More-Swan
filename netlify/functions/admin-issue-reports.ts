@@ -13,9 +13,9 @@
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import postgres from 'postgres';
-import { and, eq, ne, lt, desc, asc, sql, or, isNull, isNotNull, inArray, notInArray } from 'drizzle-orm';
+import { and, eq, ne, desc, asc, sql, or, isNull, isNotNull, inArray, notInArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { issueReports, issueReportMessages, users, devRunnerStatus } from '../../db/schema';
+import { issueReports, issueReportMessages, users } from '../../db/schema';
 import { isAdminRole, hasPermission } from '../../src/utils/rbac';
 import { ISSUE_STATUS_LABEL, isIssueStatus, notifyIssueUser, maybeAdvanceToReadyToTest, type IssueStatus } from '../../src/utils/issue-reports';
 import { createRoadmapItemFromIssue, isRoadmapPriority, type RoadmapPriority } from '../../src/utils/feature-roadmap';
@@ -293,123 +293,6 @@ export const handler: Handler = async (event) => {
     // triggerStagingDeployIfDrained(), called from admin-issue-handoff's merge-result
     // handler. There is no separate manual "deploy" step to request here anymore.
 
-    // ── GET ?action=runner-status: AI auto-fix runner health ─────────────────────
-    // Powers the "runner paused — Claude session limit" prompt + Resume button. Returns every
-    // runner's current state so the portal can surface a block and show how to recover it.
-    if (event.httpMethod === 'GET' && action === 'runner-status') {
-        // Prune dead runners first. Identities are host:pid, so a paused runner that died
-        // before consuming its restart/resume request orphans its row — it would sit in the
-        // portal as "restart requested — waiting…" forever. Live runners heartbeat every
-        // 10-15s (and re-create their row on the next poll if we ever over-prune), so
-        // anything silent for 10+ minutes is a dead process, not a slow one.
-        const STALE_RUNNER_MS = 10 * 60 * 1000;
-        await db.delete(devRunnerStatus)
-            .where(lt(devRunnerStatus.lastSeenAt, new Date(Date.now() - STALE_RUNNER_MS)));
-
-        const rows = await db.select().from(devRunnerStatus).orderBy(desc(devRunnerStatus.updatedAt));
-        const runners = rows.map((r) => ({
-            runnerId: r.runnerId,
-            state: r.state,
-            message: r.message,
-            resetHint: r.resetHint,
-            blockedIssueId: r.blockedIssueId,
-            resumeRequested: r.resumeRequested,
-            lastProbeResult: r.lastProbeResult,
-            activeAccount: r.activeAccount,
-            restartRequested: r.restartRequested,
-            switchAccountRequested: r.switchAccountRequested,
-            knownAccounts: r.knownAccounts,
-            blockedAt: r.blockedAt,
-            lastSeenAt: r.lastSeenAt,
-        }));
-        return json(200, { runners, blocked: runners.filter((r) => r.state === 'session_limited') });
-    }
-
-    // ── POST ?action=resume-runner: ask a paused runner to re-verify + resume ─────
-    // Super-admin only. The admin logs into a funded Claude account ON THE RUNNER MACHINE, then
-    // presses Resume. This only flags resume_requested — the runner (the sole thing that can
-    // reach the CLI) verifies the new login with a probe and flips itself back to 'ok'. Optionally
-    // scope to one runnerId; default resumes every currently-blocked runner.
-    if (event.httpMethod === 'POST' && action === 'resume-runner') {
-        if (admin.role !== 'super_admin') {
-            return json(403, { error: 'Resuming the runner requires super-admin privilege.' });
-        }
-        let body: any = {};
-        try { body = JSON.parse(event.body || '{}'); } catch { /* empty body is fine */ }
-        const rid = typeof body.runnerId === 'string' && body.runnerId.trim() ? body.runnerId.trim() : null;
-
-        const whereBlocked = rid
-            ? and(eq(devRunnerStatus.runnerId, rid), eq(devRunnerStatus.state, 'session_limited'))
-            : eq(devRunnerStatus.state, 'session_limited');
-
-        const updated = await db.update(devRunnerStatus)
-            .set({ resumeRequested: true, lastProbeResult: null, updatedAt: new Date() })
-            .where(whereBlocked)
-            .returning({ runnerId: devRunnerStatus.runnerId });
-
-        if (updated.length === 0) {
-            return json(200, { ok: true, resumed: 0, message: 'No paused runner to resume. Make sure the runner process is running and has reported a session limit.' });
-        }
-        return json(200, { ok: true, resumed: updated.length, runners: updated.map((u) => u.runnerId) });
-    }
-
-    // ── POST ?action=restart-runner: ask a paused runner to restart itself ────────
-    // Super-admin only. Sets restart_requested; the paused runner consumes it on its next
-    // resume-check poll (~10s) and restarts (exit under launchd KeepAlive, or re-spawn when
-    // run manually). Only works while the runner process is alive and polling — a dead
-    // process can't be restarted remotely. Optionally scope to one runnerId; default is
-    // every currently-blocked runner.
-    if (event.httpMethod === 'POST' && action === 'restart-runner') {
-        if (admin.role !== 'super_admin') {
-            return json(403, { error: 'Restarting the runner requires super-admin privilege.' });
-        }
-        let body: any = {};
-        try { body = JSON.parse(event.body || '{}'); } catch { /* empty body is fine */ }
-        const rid = typeof body.runnerId === 'string' && body.runnerId.trim() ? body.runnerId.trim() : null;
-
-        const whereBlocked = rid
-            ? and(eq(devRunnerStatus.runnerId, rid), eq(devRunnerStatus.state, 'session_limited'))
-            : eq(devRunnerStatus.state, 'session_limited');
-
-        const updated = await db.update(devRunnerStatus)
-            .set({ restartRequested: true, updatedAt: new Date() })
-            .where(whereBlocked)
-            .returning({ runnerId: devRunnerStatus.runnerId });
-
-        if (updated.length === 0) {
-            return json(200, { ok: true, requested: 0, message: 'No paused runner to restart. Make sure the runner process is running and has reported a session limit.' });
-        }
-        return json(200, { ok: true, requested: updated.length, runners: updated.map((u) => u.runnerId) });
-    }
-
-    // ── POST ?action=switch-account: swap the runner's Claude CLI login ───────────
-    // Super-admin only. Sets switch_account_requested; the runner consumes it on its next poll
-    // (~10-15s), swaps its LOCAL credential snapshot to that account, verifies with a probe, and
-    // reports back via switch-ack. Works whether the runner is healthy (proactive rotation) or
-    // paused on a session limit (a verified switch doubles as the Resume). No credential ever
-    // travels through here — only the account label. Requires the runner process to be alive
-    // and the target account to have been logged into once on the runner machine (stored:true
-    // in known_accounts); otherwise the runner acks failure and says so.
-    if (event.httpMethod === 'POST' && action === 'switch-account') {
-        if (admin.role !== 'super_admin') {
-            return json(403, { error: 'Switching the runner\'s Claude account requires super-admin privilege.' });
-        }
-        let body: any = {};
-        try { body = JSON.parse(event.body || '{}'); } catch { /* empty body is fine */ }
-        const rid = typeof body.runnerId === 'string' && body.runnerId.trim() ? body.runnerId.trim() : null;
-        const account = (typeof body.account === 'string' ? body.account : '').trim().slice(0, 200);
-        if (!rid || !account) return json(400, { error: 'runnerId and account are required.' });
-
-        const updated = await db.update(devRunnerStatus)
-            .set({ switchAccountRequested: account, lastProbeResult: null, updatedAt: new Date() })
-            .where(eq(devRunnerStatus.runnerId, rid))
-            .returning({ runnerId: devRunnerStatus.runnerId });
-
-        if (updated.length === 0) {
-            return json(200, { ok: true, requested: 0, message: 'That runner is not reporting in — make sure the runner process is running, then try again.' });
-        }
-        return json(200, { ok: true, requested: updated.length, account });
-    }
 
     // ── GET single issue (with thread + screenshot) ──────────────────────────────
     if (event.httpMethod === 'GET' && id) {

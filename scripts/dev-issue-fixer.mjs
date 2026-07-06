@@ -18,6 +18,10 @@
 // and reports back (?action=merge-result) — which is what finally flips the issue to
 // "Fixed & Ready to Test".
 //
+// Claude account: the runner uses WHATEVER account the Claude Code CLI is logged into on this
+// machine — no switching, no rotation. If that account is rate-limited or logged out, the fix
+// just fails like any other failure and the admin can re-queue the issue later.
+//
 // Nothing here touches your current working tree — all edits happen in a throwaway
 // worktree under the OS temp dir, which is removed when the issue is done.
 //
@@ -34,8 +38,8 @@
 // Run:  npm run dev:issue-fixer
 
 import { spawnSync, spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, mkdirSync, chmodSync } from 'node:fs';
-import { tmpdir, hostname, homedir, userInfo } from 'node:os';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { tmpdir, hostname, homedir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -52,28 +56,9 @@ const ONCE = process.env.ONCE === '1';
 const RUNNER_ID = (process.env.RUNNER_ID || `${hostname()}:${process.pid}`).slice(0, 120);
 
 const ENDPOINT = `${BASE_URL}/.netlify/functions/admin-issue-handoff`;
-// Idle cadence while paused on a session limit, waiting for the admin to press "Resume runner".
-const RESUME_POLL_MS = Number(process.env.RESUME_POLL_INTERVAL_MS || 10000);
-// The Claude Code CLI prints one of these when the account's usage/session limit is exhausted.
-const SESSION_LIMIT_RE = /session limit|usage limit|hit your (?:usage|session|rate) limit|rate limit/i;
-// A probe result that means the account's stored credential is no longer a valid login (its
-// OAuth token expired / was revoked) — distinct from a rate limit. Recovering needs a one-time
-// interactive `claude auth login` on this machine; no portal button can do it. Used to flag the
-// account as "login expired" in the portal instead of a Switch button that would just re-fail.
-const LOGGED_OUT_RE = /not logged in|please run\s*\/login|run\s+`?\/login|invalid api key|oauth token (?:has )?expired|refresh token (?:has )?expired/i;
-const isLoggedOut = (out) => LOGGED_OUT_RE.test(out || '');
-// How often the runner proactively "keeps warm" every stored-but-inactive account: switch to it,
-// probe (which refreshes its OAuth token), re-snapshot, switch back. Keeps rotation accounts from
-// going stale through disuse — the recurring reason a later switch would hit "Not logged in".
-const ACCOUNT_REFRESH_MS = Number(process.env.AURA_ACCOUNT_REFRESH_MS || 12 * 60 * 60 * 1000);
-// Emails whose most recent probe reported a dead login. Surfaced to the portal via
-// listKnownAccounts so the account renders as "login expired — re-login on runner".
-const staleAccounts = new Set();
 
-// Shared control flags. `stopping` is set on SIGINT (main + resume-wait loops watch it);
-// `paused` is set when a fix hits a Claude session limit so main pauses instead of claiming more.
+// Set on SIGINT so the main loop exits cleanly between iterations.
 let stopping = false;
-let paused = false;
 
 if (!BASE_URL || !TOKEN) {
   console.error('✖ AURA_BASE_URL and DEV_HANDOFF_TOKEN are required.');
@@ -165,17 +150,16 @@ async function claimNext() {
   return data.issue || null;
 }
 
-// While a fix runs (minutes), ping the server so the issue's heartbeat and this runner's
-// liveness row stay fresh. That's what lets the server tell "busy on a long fix" from "died
-// mid-fix": a silent runner past the reclaim window gets its issue re-queued and its panel row
-// pruned. tries:1 so a slow beat never stacks; a missed beat is harmless (the next one covers).
+// While a fix runs (minutes), ping the server so the issue's heartbeat stays fresh. That's what
+// lets the server tell "busy on a long fix" from "died mid-fix": a silent runner past the reclaim
+// window gets its issue re-queued. tries:1 so a slow beat never stacks; a missed beat is harmless.
 const FIX_HEARTBEAT_MS = Number(process.env.AURA_FIX_HEARTBEAT_MS || 60000);
 async function sendFixHeartbeat(id) {
   try {
     await apiFetch(`${ENDPOINT}?action=fix-heartbeat&id=${id}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-handoff-token': TOKEN, 'x-runner-id': RUNNER_ID },
-      body: JSON.stringify({ activeAccount: activeClaudeAccount() }),
+      body: '{}',
     }, { tries: 1, label: 'fix-heartbeat' });
   } catch (e) { log(`#${id} heartbeat error: ${e.message}`); }
 }
@@ -209,8 +193,8 @@ async function reportMerge(id, payload) {
   return res.json();
 }
 
-// ── Session-limit block / resume protocol ────────────────────────────────────
-// The raw oauthAccount object from the CLI's own config (~/.claude.json) — there is no
+// Which Claude account the CLI is logged into on THIS machine, for the startup log only.
+// The raw oauthAccount object lives in the CLI's own config (~/.claude.json); there is no
 // non-interactive `claude` command that prints it. Best-effort: null when unreadable.
 function oauthAccountInfo() {
   try {
@@ -218,10 +202,6 @@ function oauthAccountInfo() {
     return cfg?.oauthAccount || null;
   } catch { return null; }
 }
-
-// Which Claude account the CLI is logged into on THIS machine right now, as a display label.
-// Sent with block/resume traffic so the portal can show the admin whether the re-login (or
-// portal-requested account switch) actually took effect. Best-effort: null when unreadable.
 function activeClaudeAccount() {
   const acct = oauthAccountInfo();
   if (!acct) return null;
@@ -229,310 +209,6 @@ function activeClaudeAccount() {
   const org = acct.organizationName || null;
   const label = email ? (org && org !== email ? `${email} (${org})` : email) : org;
   return label ? String(label).slice(0, 200) : null;
-}
-
-// ── Claude CLI credential snapshots (portal-driven account switching) ─────────
-// The portal's "Switch CLI to <account>" button can't run an interactive OAuth login, so the
-// runner keeps a per-account snapshot of the CLI's stored credential, taken automatically
-// whenever an account is seen logged in. Switching = save the live credential back to its
-// snapshot, restore the target's snapshot, patch ~/.claude.json's oauthAccount, then verify
-// with a probe call. Each account therefore needs ONE ordinary `claude auth login` on this
-// machine ever; after that it can be switched to with a click.
-//
-// Storage matches what the CLI itself uses: on macOS the login lives in the user Keychain
-// (service "Claude Code-credentials"), so snapshots are stored as sibling Keychain items —
-// same protection as the CLI's own copy. Elsewhere the CLI uses ~/.claude/.credentials.json,
-// and snapshots are 0600 files next to it. Only account *labels* are ever sent to the portal.
-const CLAUDE_KEYCHAIN_SERVICE = 'Claude Code-credentials';
-const SNAPSHOT_KEYCHAIN_SERVICE = 'Claude Code-credentials.aura-snapshot';
-const CREDS_FILE = join(homedir(), '.claude', '.credentials.json');
-const SNAPSHOT_DIR = join(homedir(), '.claude', 'aura-account-snapshots');
-const SNAPSHOT_INDEX = join(SNAPSHOT_DIR, 'index.json'); // emails only — never credentials
-// Accounts the admin rotates between (comma-separated emails). Optional: purely additive —
-// it lets the portal show not-yet-seeded accounts greyed out so the admin knows a one-time
-// login is still needed. Accounts NOT listed here still work once they've been seen once.
-const EXPECTED_ACCOUNTS = (process.env.AURA_CLAUDE_ACCOUNTS || '')
-  .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-
-const useKeychain = process.platform === 'darwin' && !existsSync(CREDS_FILE);
-const security = (args, input) => run('security', args, input !== undefined ? { input } : {});
-
-// The live CLI credential. Returns { blob, acctAttr } or throws with a readable reason.
-function readLiveCredential() {
-  if (useKeychain) {
-    const r = security(['find-generic-password', '-s', CLAUDE_KEYCHAIN_SERVICE, '-w']);
-    if (!r.ok) throw new Error(`could not read the CLI credential from the Keychain: ${r.stderr || 'not found'}`);
-    // The item's account attribute (usually the macOS username) — reused when writing so we
-    // update the CLI's item in place instead of creating a second one.
-    const meta = security(['find-generic-password', '-s', CLAUDE_KEYCHAIN_SERVICE]);
-    const acctAttr = (meta.stdout.match(/"acct"<blob>="([^"]*)"/) || [])[1] || userInfo().username;
-    return { blob: r.stdout, acctAttr };
-  }
-  if (!existsSync(CREDS_FILE)) throw new Error(`no CLI credential found (${CREDS_FILE} missing — is the CLI logged in?)`);
-  return { blob: readFileSync(CREDS_FILE, 'utf8'), acctAttr: null };
-}
-
-function writeLiveCredential(blob, acctAttr) {
-  if (useKeychain) {
-    const r = security(['add-generic-password', '-U',
-      '-a', acctAttr || userInfo().username, '-s', CLAUDE_KEYCHAIN_SERVICE, '-w', blob]);
-    if (!r.ok) throw new Error(`could not write the CLI credential to the Keychain: ${r.stderr}`);
-    return;
-  }
-  writeFileSync(CREDS_FILE, blob);
-  chmodSync(CREDS_FILE, 0o600);
-}
-
-const snapshotFile = (email) => join(SNAPSHOT_DIR, `${email.replace(/[^a-z0-9@._+-]/gi, '_')}.json`);
-
-function readSnapshot(email) {
-  if (useKeychain) {
-    const r = security(['find-generic-password', '-s', SNAPSHOT_KEYCHAIN_SERVICE, '-a', email, '-w']);
-    if (!r.ok) return null;
-    try { return JSON.parse(r.stdout); } catch { return null; }
-  }
-  try { return JSON.parse(readFileSync(snapshotFile(email), 'utf8')); } catch { return null; }
-}
-
-function writeSnapshot(email, snap) {
-  const blob = JSON.stringify(snap);
-  if (useKeychain) {
-    const r = security(['add-generic-password', '-U', '-a', email, '-s', SNAPSHOT_KEYCHAIN_SERVICE, '-w', blob]);
-    if (!r.ok) throw new Error(`could not store the credential snapshot for ${email}: ${r.stderr}`);
-  } else {
-    mkdirSync(SNAPSHOT_DIR, { recursive: true });
-    writeFileSync(snapshotFile(email), blob);
-    chmodSync(snapshotFile(email), 0o600);
-  }
-  // Track which accounts have snapshots (emails only) so we can enumerate without
-  // dumping the keychain. Best-effort — a lost index just means re-seeding the list.
-  try {
-    mkdirSync(SNAPSHOT_DIR, { recursive: true });
-    const idx = new Set(storedAccountEmails());
-    idx.add(email.toLowerCase());
-    writeFileSync(SNAPSHOT_INDEX, JSON.stringify({ emails: [...idx].sort() }, null, 2));
-  } catch (e) { log(`⚠ could not update the snapshot index: ${e.message}`); }
-}
-
-function storedAccountEmails() {
-  try { return (JSON.parse(readFileSync(SNAPSHOT_INDEX, 'utf8')).emails || []).map((e) => String(e).toLowerCase()); }
-  catch { return []; }
-}
-
-// [{email, stored}] for the portal: every account we hold a snapshot for, plus any expected
-// (AURA_CLAUDE_ACCOUNTS) account that hasn't been seeded yet, plus whatever is live right now.
-function listKnownAccounts() {
-  const stored = new Set(storedAccountEmails());
-  const live = (oauthAccountInfo()?.emailAddress || '').toLowerCase();
-  if (live) stored.add(live); // live login is snapshotted on sight, treat as stored
-  const all = new Set([...stored, ...EXPECTED_ACCOUNTS]);
-  return [...all].sort().map((email) => ({
-    email,
-    stored: stored.has(email),
-    // A stored account whose last probe found a dead login: still snapshotted, but the snapshot
-    // no longer authenticates, so it needs a one-time re-login rather than a click-to-switch.
-    ...(staleAccounts.has(email) && email !== live ? { stale: true } : {}),
-  }));
-}
-
-// Save the live login under its own email so it can be switched back to later.
-// Called on startup, after successful probes, and before every switch-away.
-function snapshotActiveAccount() {
-  const acct = oauthAccountInfo();
-  const email = (acct?.emailAddress || '').toLowerCase();
-  if (!email) return null;
-  try {
-    const live = readLiveCredential();
-    writeSnapshot(email, { credential: live.blob, acctAttr: live.acctAttr, oauthAccount: acct, savedAt: new Date().toISOString() });
-    staleAccounts.delete(email); // a fresh snapshot means this login is good again
-    return email;
-  } catch (e) {
-    log(`⚠ could not snapshot the active Claude account (${email}): ${e.message}`);
-    return null;
-  }
-}
-
-// Swap the CLI's stored login to `target` (an email). Throws with a portal-friendly message
-// when the target has never been seeded. Does NOT probe — the caller verifies and acks.
-function switchClaudeAccount(target) {
-  const email = target.trim().toLowerCase();
-  const snap = readSnapshot(email);
-  if (!snap || !snap.credential) {
-    throw new Error(`No stored login for ${email} on the runner machine. Log into it once there (claude auth login) — it is snapshotted automatically and switchable from then on.`);
-  }
-  snapshotActiveAccount(); // keep the outgoing account's freshest tokens
-  writeLiveCredential(snap.credential, snap.acctAttr);
-  // Point the CLI's config at the switched-in account so it doesn't mix identities.
-  if (snap.oauthAccount) {
-    const cfgPath = join(homedir(), '.claude.json');
-    const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
-    cfg.oauthAccount = snap.oauthAccount;
-    writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
-  }
-}
-
-// Tell the portal this runner is rate-limited (it re-queues the issue + prompts the admin).
-async function reportBlocked(id, payload) {
-  const res = await apiFetch(`${ENDPOINT}?action=report-blocked&id=${id}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-handoff-token': TOKEN, 'x-runner-id': RUNNER_ID },
-    body: JSON.stringify(payload),
-  }, { label: 'report-blocked' });
-  if (!res.ok) throw new Error(`report-blocked failed: ${res.status} ${await res.text()}`);
-  return res.json();
-}
-
-// Control poll: while paused it asks whether an admin pressed "Resume runner" / "Restart
-// runner"; on every healthy main-loop pass it doubles as the liveness heartbeat that keeps the
-// portal's Runner panel (active account + switchable accounts) current. Also delivers a pending
-// "Switch CLI to <account>" request. Returns { resume, restart, switchAccount }.
-let _lastSnapshottedEmail = null;
-async function checkResume() {
-  // A different account logged in since we last looked (e.g. the admin just seeded one of
-  // the rotation accounts by hand) — snapshot it immediately so it becomes switchable
-  // without waiting for a probe or restart.
-  const liveEmail = (oauthAccountInfo()?.emailAddress || '').toLowerCase();
-  if (liveEmail && liveEmail !== _lastSnapshottedEmail) {
-    if (snapshotActiveAccount()) log(`📸 snapshotted Claude account ${liveEmail} — now switchable from the portal.`);
-    _lastSnapshottedEmail = liveEmail;
-  }
-  const acct = activeClaudeAccount();
-  const accounts = encodeURIComponent(JSON.stringify(listKnownAccounts()));
-  const res = await apiFetch(`${ENDPOINT}?action=resume-check${acct ? `&account=${encodeURIComponent(acct)}` : ''}&accounts=${accounts}`, {
-    headers: { 'x-handoff-token': TOKEN, 'x-runner-id': RUNNER_ID },
-  }, { label: 'resume-check' });
-  if (!res.ok) throw new Error(`resume-check failed: ${res.status} ${await res.text()}`);
-  const data = await res.json();
-  return {
-    resume: data.resume === true,
-    restart: data.restart === true,
-    switchAccount: typeof data.switchAccount === 'string' && data.switchAccount.trim() ? data.switchAccount.trim() : null,
-  };
-}
-
-// Admin pressed "Restart runner" in the portal. Under launchd (KeepAlive) simply exiting is
-// the restart — launchd relaunches the service within its ThrottleInterval. When run by hand
-// in a terminal there is no supervisor, so spawn a detached fresh copy of ourselves first.
-// The server already deleted our status row; the new process re-reports if still blocked.
-function restartSelf() {
-  log('🔄 restart requested from the admin portal.');
-  if (process.env.AURA_RUNNER_SUPERVISED === '1') {
-    log('  supervised by launchd — exiting; KeepAlive relaunches a fresh process (~30s).');
-    process.exit(0);
-  }
-  log('  not supervised — re-spawning a fresh copy of this script…');
-  const child = spawn(process.argv[0], process.argv.slice(1), {
-    detached: true, stdio: 'inherit', cwd: process.cwd(), env: process.env,
-  });
-  child.unref();
-  process.exit(0);
-}
-
-// Report the result of the post-Resume login probe: ok:true clears the block server-side.
-async function ackResume(ok, message) {
-  const res = await apiFetch(`${ENDPOINT}?action=resume-ack`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-handoff-token': TOKEN, 'x-runner-id': RUNNER_ID },
-    body: JSON.stringify({ ok, message, activeAccount: activeClaudeAccount() }),
-  }, { label: 'resume-ack' });
-  if (!res.ok) throw new Error(`resume-ack failed: ${res.status} ${await res.text()}`);
-  return res.json();
-}
-
-// Report the result of a portal-requested account switch. ok:true also clears a
-// session-limit block server-side (a verified switch doubles as a successful Resume).
-async function ackSwitch(ok, message) {
-  const res = await apiFetch(`${ENDPOINT}?action=switch-ack`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-handoff-token': TOKEN, 'x-runner-id': RUNNER_ID },
-    body: JSON.stringify({ ok, message, activeAccount: activeClaudeAccount(), knownAccounts: listKnownAccounts() }),
-  }, { label: 'switch-ack' });
-  if (!res.ok) throw new Error(`switch-ack failed: ${res.status} ${await res.text()}`);
-  return res.json();
-}
-
-// Execute a "Switch CLI to <account>" request end-to-end: swap the stored credential,
-// verify with a probe, report the outcome. Returns true when the switch produced a
-// working login (which also means any session-limit pause is over).
-async function handleSwitch(target) {
-  log(`🔁 portal requested a Claude account switch → ${target}`);
-  try {
-    switchClaudeAccount(target);
-  } catch (e) {
-    log(`✗ switch failed before probing: ${e.message}`);
-    await ackSwitch(false, e.message).catch((ae) => log(`  switch-ack error: ${ae.message}`));
-    return false;
-  }
-  const probe = probeClaude();
-  if (probe.ok) {
-    staleAccounts.delete(target.trim().toLowerCase());
-    snapshotActiveAccount(); // freshen the switched-in account's snapshot too
-    log(`✓ switched to ${target} — Claude login verified.`);
-    await ackSwitch(true, `Switched the CLI to ${target} and verified the login.`).catch((ae) => log(`  switch-ack error: ${ae.message}`));
-    return true;
-  }
-  // A dead login (vs. a rate limit) can't be fixed by another switch — flag it so the portal
-  // shows "login expired — re-login on runner" instead of a Switch button that would re-fail.
-  if (isLoggedOut(probe.out)) staleAccounts.add(target.trim().toLowerCase());
-  const why = probe.limited
-    ? (probe.out.match(/[^\n]*(?:session|usage|rate)\s+limit[^\n]*/i) || [`${target} is also rate-limited.`])[0].trim()
-    : isLoggedOut(probe.out)
-      ? `its saved login has expired — re-login once on the runner machine (claude auth login as ${target}).`
-      : `probe call failed: ${probe.out.slice(0, 200) || 'no output'}`;
-  log(`✗ switched credentials to ${target}, but ${why}`);
-  await ackSwitch(false, `Switched the CLI to ${target}, but ${why}`).catch((ae) => log(`  switch-ack error: ${ae.message}`));
-  return false;
-}
-
-// Keep-warm pass: OAuth tokens die if an account sits unused, which is why a later "Switch CLI
-// to <acct>" can land on "Not logged in". To prevent that, periodically visit every stored account
-// that isn't the active one — switch to it, probe (which refreshes its token), re-snapshot the
-// refreshed credential — then return to the account we started on. Accounts that come back logged
-// out are flagged stale (they genuinely need a one-time re-login); rate-limited ones are left be.
-// Only runs when the runner is idle (called from the main loop's idle branch), never mid-fix.
-let _lastRefreshAt = 0;
-async function maybeRefreshStoredAccounts() {
-  if (Date.now() - _lastRefreshAt < ACCOUNT_REFRESH_MS) return;
-  _lastRefreshAt = Date.now(); // stamp up front so a failing pass doesn't retry in a tight loop
-  const originalActive = (oauthAccountInfo()?.emailAddress || '').toLowerCase();
-  const targets = listKnownAccounts()
-    .filter((a) => a.stored && a.email !== originalActive)
-    .map((a) => a.email);
-  if (!targets.length) return;
-  log(`♻ keep-warm: refreshing ${targets.length} stored Claude account(s) so they stay switchable…`);
-  snapshotActiveAccount(); // capture the active account first so we can return to it
-  for (const email of targets) {
-    if (stopping) break;
-    try {
-      switchClaudeAccount(email);
-    } catch (e) {
-      log(`  ⚠ ${email}: ${e.message}`);
-      continue;
-    }
-    const probe = probeClaude();
-    if (probe.ok) {
-      snapshotActiveAccount(); // re-snapshot with the freshly refreshed token
-      log(`  ✓ ${email} refreshed`);
-    } else if (probe.limited) {
-      log(`  • ${email} rate-limited — login still valid, left as is`);
-    } else if (isLoggedOut(probe.out)) {
-      staleAccounts.add(email);
-      log(`  ⚠ ${email} login expired — needs a one-time re-login on this machine (claude auth login)`);
-    } else {
-      log(`  ⚠ ${email} probe failed: ${probe.out.slice(0, 120) || 'no output'}`);
-    }
-  }
-  // Return to whatever account the runner was using before the pass.
-  if (originalActive) {
-    try {
-      switchClaudeAccount(originalActive);
-      const back = probeClaude();
-      if (back.ok) snapshotActiveAccount();
-      log(`♻ keep-warm done — active account restored to ${originalActive}`);
-    } catch (e) {
-      log(`  ✗ keep-warm could not restore the active account (${originalActive}): ${e.message}`);
-    }
-  }
 }
 
 const SQL_START = '---SQL-MIGRATION-START---';
@@ -633,18 +309,9 @@ async function processIssue(issue) {
     }
     const rawOut = claude.stdout || claude.stderr || 'No output from the AI runner.';
     if (!claude.ok) {
-      const errText = `${claude.stderr || ''}\n${claude.stdout || ''}`;
-      // A session/usage limit isn't this issue's fault — EVERY fix will fail until a Claude
-      // account with credit is logged in. Park the whole runner and let the admin resume it,
-      // rather than burning the issue as a normal failure (which just re-fails on re-queue).
-      if (SESSION_LIMIT_RE.test(errText)) {
-        const resetHint = (errText.match(/resets?\s+([^\n·]+?(?:\([^)]*\))?)\s*(?:[·\n]|$)/i) || [])[1]?.trim() || null;
-        const message = (errText.match(/[^\n]*(?:session|usage|rate)\s+limit[^\n]*/i) || [errText.trim()])[0].trim().slice(0, 500);
-        log(`#${id} ⏸ Claude session limit hit — pausing runner${resetHint ? ` (resets ${resetHint})` : ''}`);
-        await reportBlocked(id, { message, resetHint, activeAccount: activeClaudeAccount() }).catch((e) => log(`#${id} ✖ could not report block: ${e.message}`));
-        paused = true;
-        return; // the finally block cleans up the worktree; the issue was re-queued server-side
-      }
+      // Any non-zero exit — including a Claude usage/session limit or a logged-out CLI — is a
+      // plain failure: report it so the issue is marked 'failed'. Re-queue it from the portal
+      // once the account has credit / is logged in again.
       throw new Error(`Claude Code exited ${claude.code}: ${claude.stderr || claude.stdout}`);
     }
 
@@ -716,95 +383,19 @@ async function processMerge(job) {
   }
 }
 
-// Run a cheap Claude call to confirm the CLI is authenticated to an account with credit.
-// Uses a throwaway cwd so the model can't touch the repo. Returns { ok, out, limited }.
-function probeClaude() {
-  const dir = mkdtempSync(join(tmpdir(), 'aura-claude-probe-'));
-  try {
-    const r = run(CLAUDE_BIN, ['-p', '--permission-mode', 'acceptEdits'], {
-      cwd: dir,
-      input: 'Reply with exactly the two characters: ok',
-    });
-    const out = `${r.stdout || ''}\n${r.stderr || ''}`.trim();
-    const limited = SESSION_LIMIT_RE.test(out);
-    return { ok: r.ok && !limited, out, limited };
-  } finally {
-    try { rmSync(dir, { recursive: true, force: true }); } catch {}
-  }
-}
-
-// Paused after a session limit: poll the portal until an admin presses "Resume runner", then
-// verify the (hopefully re-logged-in) Claude account with a probe. Only a passing probe ends
-// the pause; a still-limited probe reports back and keeps waiting for the next Resume.
-async function waitForResume() {
-  log('⏸ runner paused — Claude session limit. Log into an account with credit on THIS machine, then press "Resume runner" in the admin portal.');
-  while (!stopping) {
-    await sleep(RESUME_POLL_MS);
-    let status;
-    try { status = await checkResume(); }
-    catch (e) { log(`  resume-check error: ${e.message}`); continue; }
-    if (status.restart) restartSelf(); // does not return
-    // "Switch CLI to <account>" pressed while paused: a verified switch IS the resume —
-    // no separate Resume press needed. A failed one reports why and keeps waiting.
-    if (status.switchAccount) {
-      if (await handleSwitch(status.switchAccount)) {
-        log('✓ account switch cleared the session-limit block — resuming normal operation.');
-        return;
-      }
-      continue;
-    }
-    if (!status.resume) continue;
-
-    log('▶ resume requested — verifying the Claude login…');
-    const probe = probeClaude();
-    if (probe.ok) {
-      snapshotActiveAccount(); // the admin logged in by hand — capture it for future switches
-      log('✓ Claude login verified — resuming normal operation.');
-      await ackResume(true, 'Claude login verified; runner resumed.').catch((e) => log(`  resume-ack error: ${e.message}`));
-      return;
-    }
-    const why = probe.limited
-      ? (probe.out.match(/[^\n]*(?:session|usage|rate)\s+limit[^\n]*/i) || ['The Claude account is still rate-limited.'])[0].trim()
-      : `Probe call failed: ${probe.out.slice(0, 200) || 'no output'}`;
-    log(`✗ still not usable — ${why}. Waiting for another Resume.`);
-    await ackResume(false, why).catch((e) => log(`  resume-ack error: ${e.message}`));
-  }
-}
-
 async function main() {
   log(`dev-issue-fixer watching ${ENDPOINT}`);
   log(`runner=${RUNNER_ID} repo=${REPO} base=${BASE_BRANCH} poll=${POLL_MS}ms${ONCE ? ' once' : ''}`);
+  log(`claude account: ${activeClaudeAccount() || 'unknown (CLI not logged in?)'}`);
   process.on('SIGINT', () => { log('shutting down…'); stopping = true; });
 
-  // Seed/refresh the live account's credential snapshot so it stays switchable-back-to.
-  const seeded = snapshotActiveAccount();
-  const known = listKnownAccounts();
-  log(`claude account: ${activeClaudeAccount() || 'unknown'}${seeded ? ' (snapshot saved)' : ''}`);
-  log(`switchable accounts: ${known.filter((a) => a.stored).map((a) => a.email).join(', ') || 'none yet'}${known.some((a) => !a.stored) ? ` · awaiting one-time login: ${known.filter((a) => !a.stored).map((a) => a.email).join(', ')}` : ''}`);
-
   while (!stopping) {
-    // 0) Heartbeat + control signals (restart / account switch), even while healthy —
-    //    this is what keeps the Runner panel live and its Switch buttons working
-    //    without waiting for a session limit. Failures are non-fatal.
-    try {
-      const ctl = await checkResume();
-      if (ctl.restart) restartSelf(); // does not return
-      if (ctl.switchAccount) await handleSwitch(ctl.switchAccount);
-    } catch (e) { log(`heartbeat error: ${e.message}`); }
-
     // 1) A fix to produce takes priority.
     let issue = null;
     try { issue = await claimNext(); }
     catch (e) { log(`poll error: ${e.message}`); }
     if (issue) {
       await processIssue(issue);
-      // A session limit during the fix pauses the whole runner: no point claiming more work
-      // while the CLI is rate-limited. Wait for the admin to re-login and press Resume.
-      if (paused) {
-        if (ONCE) { log('paused on session limit; exiting (ONCE).'); break; }
-        await waitForResume();
-        paused = false;
-      }
       if (ONCE) break;
       continue; // immediately check for more
     }
@@ -820,11 +411,6 @@ async function main() {
     }
 
     if (ONCE) { log('nothing queued; exiting (ONCE).'); break; }
-
-    // Idle: keep the inactive rotation accounts' logins warm so switching to them keeps working.
-    // Non-fatal — a failed pass just means the next switch might still find a stale login.
-    try { await maybeRefreshStoredAccounts(); }
-    catch (e) { log(`keep-warm error: ${e.message}`); }
 
     await sleep(POLL_MS);
   }

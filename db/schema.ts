@@ -1159,41 +1159,6 @@ export const issueReportMessages = pgTable("issue_report_messages", {
   index("issue_report_messages_issue_idx").on(t.issueId, t.createdAt),
 ]);
 
-// AI auto-fix runner health (see db/issue-reports.sql, scripts/dev-issue-fixer.mjs).
-// One row per runner. When a runner's Claude Code CLI hits its usage/session limit it can't
-// produce fixes, so it parks here as 'session_limited', re-queues the issue it was on, and
-// stops claiming. The admin portal shows a "log into a Claude account with credit on the
-// runner machine, then resume" prompt; pressing Resume sets resumeRequested, the runner
-// verifies the new login with a probe call and — only if it succeeds — flips back to 'ok'
-// and resumes. Nothing here can authenticate Claude; this row is coordination only.
-export const devRunnerStatus = pgTable("dev_runner_status", {
-  runnerId: text("runner_id").primaryKey(),
-  // 'ok' | 'session_limited'
-  state: text("state").notNull().default("ok"),
-  message: text("message"),                 // raw CLI error, e.g. "You've hit your session limit · resets 12:30pm"
-  resetHint: text("reset_hint"),            // parsed reset time for display, e.g. "12:30pm (Europe/London)"
-  blockedIssueId: integer("blocked_issue_id").references(() => issueReports.id, { onDelete: "set null" }),
-  resumeRequested: boolean("resume_requested").notNull().default(false),
-  lastProbeResult: text("last_probe_result"), // outcome of the last verification probe after a Resume
-  // Claude account currently logged into the CLI on the runner machine (e.g. "dev@x.com").
-  // Self-reported by the runner on block / resume-check / resume-ack; display only — lets the
-  // admin see whether the re-login actually took effect before pressing Resume.
-  activeAccount: text("active_account"),
-  // Admin pressed "Restart runner". Consumed by the runner's next resume-check poll: the row
-  // is deleted and the runner exits (launchd KeepAlive relaunches it) or re-spawns itself.
-  restartRequested: boolean("restart_requested").notNull().default(false),
-  // Admin pressed "Switch CLI to <account>": the requested account email. Consumed (cleared)
-  // when the runner's next poll delivers it; the runner swaps its local credential snapshot,
-  // probes, and reports via switch-ack. Only the label travels — never a credential.
-  switchAccountRequested: text("switch_account_requested"),
-  // JSON array self-reported by the runner: accounts it can switch to,
-  // e.g. [{"email":"a@x.com","stored":true}]. Display only.
-  knownAccounts: text("known_accounts"),
-  blockedAt: timestamp("blocked_at"),
-  lastSeenAt: timestamp("last_seen_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
-
 // Feature Roadmap Table — admin-only delivery backlog (see db/feature-roadmap.sql).
 // Items are created when a feature-request issue is promoted (source='issue', issue_id set)
 // or added directly by an admin (source='manual'). Prioritised by `priority` + manual drag

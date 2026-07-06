@@ -1511,92 +1511,7 @@
             <button onclick="moveAllToBacklog()" id="ir-backlog-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-slate-600 text-white rounded-lg hover:bg-slate-700 transition disabled:opacity-60 disabled:cursor-not-allowed">📥 Move all to Backlog</button>
             <button onclick="moveBacklogAllToDeveloper()" id="ir-backlog-dev-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🤖 Move All to a Developer</button>
             <button onclick="requestMergeAll()" id="ir-merge-all-btn" class="hidden px-3 py-2 text-sm font-bold bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-not-allowed">🔀 Merge all to staging</button>
-            <button onclick="openRunnerModal()" id="ir-runner-btn" class="px-3 py-2 text-sm font-semibold border border-violet-300 text-violet-700 bg-violet-50 rounded-lg hover:bg-violet-100 transition flex items-center gap-1.5">🤖 <span id="ir-runner-btn-label">Runner</span></button>
             <button onclick="loadIssueReports()" class="px-3 py-2 text-sm font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition">↻ Refresh</button>
-          </div>
-        </div>
-
-        <!-- Runner paused (Claude session limit) alert — populated by loadRunnerStatus() -->
-        <div id="ir-runner-alert" class="hidden mb-5 space-y-3"></div>
-
-        <!-- Runner modal -->
-        <!-- Collapsible-section chrome: hide the native disclosure triangle and rotate our own
-             chevron when a <details> is open. Scoped to this modal so it can't leak elsewhere. -->
-        <style>
-          #ir-runner-modal details > summary { list-style: none; }
-          #ir-runner-modal details > summary::-webkit-details-marker { display: none; }
-          #ir-runner-modal details[open] > summary .ir-chev { transform: rotate(180deg); }
-          #ir-runner-modal .ir-chev { transition: transform .15s ease; }
-        </style>
-        <div id="ir-runner-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
-          <div class="bg-white rounded-2xl shadow-2xl w-full max-w-lg flex flex-col overflow-hidden" style="max-height:90vh" onclick="event.stopPropagation()">
-            <!-- Header stays put while the sections below scroll -->
-            <div class="flex items-center justify-between gap-3 p-6 pb-4 border-b border-gray-100 shrink-0">
-              <div>
-                <h3 class="text-base font-extrabold text-gray-900">AI Auto-Fix Runners</h3>
-                <p class="text-xs text-gray-500 mt-0.5">Each runner is a local process on a developer machine. Start several — they share the queue and never grab the same issue.</p>
-              </div>
-              <button onclick="closeRunnerModal()" class="text-gray-400 hover:text-gray-600 text-xl leading-none shrink-0">✕</button>
-            </div>
-
-            <!-- Scrollable body — each section collapses so the modal never outgrows the screen -->
-            <div class="flex-1 overflow-y-auto p-4 space-y-2.5">
-
-              <details open class="group border border-gray-200 rounded-xl overflow-hidden">
-                <summary class="flex items-center justify-between cursor-pointer select-none px-3.5 py-2.5 bg-gray-50 hover:bg-gray-100 transition text-xs font-bold uppercase tracking-wide text-gray-500">
-                  <span>Queue status</span>
-                  <span class="ir-chev text-gray-400">▾</span>
-                </summary>
-                <div class="p-3">
-                  <div id="ir-runner-queue-status" class="rounded-xl border p-3 text-sm"></div>
-                </div>
-              </details>
-
-              <details open class="group border border-gray-200 rounded-xl overflow-hidden">
-                <summary class="flex items-center justify-between cursor-pointer select-none px-3.5 py-2.5 bg-gray-50 hover:bg-gray-100 transition text-xs font-bold uppercase tracking-wide text-gray-500">
-                  <span>Runner state &amp; account</span>
-                  <span class="ir-chev text-gray-400">▾</span>
-                </summary>
-                <div class="p-3">
-                  <!-- Paused runner (Claude session limit) — populated by loadRunnerStatus() -->
-                  <div id="ir-runner-paused" class="hidden space-y-3"></div>
-                </div>
-              </details>
-
-              <details class="group border border-gray-200 rounded-xl overflow-hidden">
-                <summary class="flex items-center justify-between cursor-pointer select-none px-3.5 py-2.5 bg-gray-50 hover:bg-gray-100 transition text-xs font-bold uppercase tracking-wide text-gray-500">
-                  <span>Start the runner</span>
-                  <span class="ir-chev text-gray-400">▾</span>
-                </summary>
-                <div class="p-3 space-y-2">
-                  <p class="text-xs text-gray-500">Paste in your terminal on the developer machine.</p>
-                  <div class="relative">
-                    <pre id="ir-runner-cmd" class="bg-gray-900 text-emerald-300 text-xs rounded-xl p-4 pr-20 overflow-x-auto whitespace-pre-wrap break-all leading-relaxed"></pre>
-                    <button onclick="copyRunnerCmd()" id="ir-runner-copy-btn" class="absolute top-2 right-2 px-2.5 py-1 bg-white/10 hover:bg-white/20 text-white text-xs font-bold rounded-lg transition">Copy</button>
-                  </div>
-                </div>
-              </details>
-
-              <details class="group border border-gray-200 rounded-xl overflow-hidden">
-                <summary class="flex items-center justify-between cursor-pointer select-none px-3.5 py-2.5 bg-gray-50 hover:bg-gray-100 transition text-xs font-bold uppercase tracking-wide text-gray-500">
-                  <span>Required env vars</span>
-                  <span class="ir-chev text-gray-400">▾</span>
-                </summary>
-                <div class="p-3">
-                  <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-800 space-y-1">
-                    <p><code class="font-mono">AURA_BASE_URL</code> — staging URL, e.g. <code class="font-mono">https://staging--bemoreswan.netlify.app</code></p>
-                    <p><code class="font-mono">DEV_HANDOFF_TOKEN</code> — must match the Netlify env var of the same name</p>
-                    <p><code class="font-mono">RUNNER_ID</code> <span class="text-amber-700/70">(optional)</span> — a name for this runner shown against the issue it's fixing; defaults to <code class="font-mono">host:pid</code></p>
-                  </div>
-                </div>
-              </details>
-
-            </div>
-
-            <!-- Footer stays put too -->
-            <div class="p-4 pt-3 border-t border-gray-100 shrink-0">
-              <button onclick="closeRunnerModal()" class="w-full py-2.5 text-sm font-bold bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl transition">Close</button>
-            </div>
           </div>
         </div>
 
@@ -3536,12 +3451,10 @@ async function loadIssueReports() {
     if (filters) filters.innerHTML = chip('', 'All', total) + IR_STATUSES.map(s => chip(s, IR_STATUS_LABEL[s], counts[s] || 0)).join('');
 
     const issues = d.issues || [];
-    _updateRunnerBtnBadge(issues);
     _updatePassAllBtn(issues);
     _updateMoveAllToBacklogBtn(issues);
     _updateMoveAllToDeveloperBtn(issues);
     _updateMergeAllBtns(issues);
-    loadRunnerStatus();
     if (tbody) tbody.innerHTML = issues.map(i => `
       <tr class="border-t border-gray-50 hover:bg-gray-50 transition">
         <td class="px-5 py-3 font-mono text-xs text-gray-500">#${i.id}</td>
@@ -3565,9 +3478,6 @@ async function openIssuePanel(id) {
   body.innerHTML = '<div class="text-gray-400 animate-pulse">Loading…</div>';
   try {
     const d = await api(`${IR_API}?id=${id}`);
-    // Refresh runner-blocked state so the handoff buttons render disabled if a runner is
-    // paused (the panel covers the Resume banner, so re-queuing here would just re-fail).
-    await loadRunnerStatus();
     const i = d.issue;
     document.getElementById('ir-panel-title').textContent = `Issue #${i.id}`;
     const messages = (d.messages || []).map(m => `
@@ -3679,12 +3589,8 @@ async function submitIssueDescription(id) {
 function _esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
 function _irHandoffCard(i) {
   const s = i.devHandoffStatus || null;
-  const passBtn = (label) => _irRunnerBlocked
-    ? `<div class="w-full px-4 py-2.5 bg-violet-100 text-violet-400 text-sm font-bold rounded-lg flex items-center justify-center gap-2 cursor-not-allowed select-none" aria-disabled="true">
-         <span>🤖</span> ${label}
-       </div>
-       <p class="text-xs text-amber-700 mt-1.5">⏸️ The AI developer runner is paused (Claude session limit). Close this panel and use the <b>“Resume runner”</b> banner at the top of the Issues list, then try again.</p>`
-    : `<button onclick="passToDeveloper(${i.id})" class="w-full px-4 py-2.5 bg-violet-600 text-white text-sm font-bold rounded-lg hover:bg-violet-700 transition flex items-center justify-center gap-2">
+  const passBtn = (label) =>
+    `<button onclick="passToDeveloper(${i.id})" class="w-full px-4 py-2.5 bg-violet-600 text-white text-sm font-bold rounded-lg hover:bg-violet-700 transition flex items-center justify-center gap-2">
        <span>🤖</span> ${label}
      </button>`;
   const resultBlock = i.devResult
@@ -3729,327 +3635,6 @@ function _irHandoffCard(i) {
     </div>`;
 }
 
-// ── Runner modal ─────────────────────────────────────────────────────────────
-function openRunnerModal() {
-  const modal = document.getElementById('ir-runner-modal');
-  modal.classList.remove('hidden');
-
-  // Build the command
-  const origin = window.location.origin;
-  const baseUrl = origin.includes('localhost') ? origin : 'https://staging--bemoreswan.netlify.app';
-  const cmd = `AURA_BASE_URL="${baseUrl}" \\\nDEV_HANDOFF_TOKEN="<your-token>" \\\nnpm run dev:issue-fixer`;
-  document.getElementById('ir-runner-cmd').textContent = cmd;
-
-  // Queue status from already-loaded issue data (count queued devHandoffStatus)
-  _updateRunnerQueueStatus();
-  // Paused-runner state (Claude session limit) + Resume button, mirrored inside the modal
-  loadRunnerStatus();
-}
-
-function closeRunnerModal() {
-  document.getElementById('ir-runner-modal').classList.add('hidden');
-}
-
-function _updateRunnerQueueStatus() {
-  const el = document.getElementById('ir-runner-queue-status');
-  if (!el) return;
-  // Count rows in table with the violet "queued" badge
-  const rows = document.querySelectorAll('#ir-tbody tr');
-  // Re-fetch a fresh count from the API
-  fetch(IR_API)
-    .then(r => r.json())
-    .then(d => {
-      const issues = d.issues || [];
-      const queued = issues.filter(i => i.devHandoffStatus === 'queued').length;
-      const active = issues.filter(_irRunnerActive);
-      const inProg = active.length;
-      // One line per distinct runner that's currently holding an issue.
-      const byRunner = {};
-      active.forEach(i => { (byRunner[i.devRunnerId] = byRunner[i.devRunnerId] || []).push(i); });
-      const runnerLines = Object.keys(byRunner).sort().map(rid => {
-        const list = byRunner[rid];
-        const ids = list.map(i => `#${i.id}`).join(', ');
-        const stalled = list.some(_irRunnerStalled);
-        return `<div class="flex items-center gap-1.5 mt-1${stalled ? ' text-red-700' : ''}">🖥 <b>${_esc(rid)}</b> — ${ids}${stalled ? ' ⚠ possibly stalled' : ''}</div>`;
-      }).join('');
-      if (queued > 0) {
-        el.className = 'rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800';
-        el.innerHTML = `<span class="font-bold">⚠️ ${queued} issue${queued > 1 ? 's' : ''} queued</span> — waiting for a runner to pick ${queued > 1 ? 'them' : 'it'} up. Start a runner below to process ${queued > 1 ? 'them' : 'it'}.${runnerLines ? `<div class="mt-2 pt-2 border-t border-amber-200/60 text-xs">Currently working:${runnerLines}</div>` : ''}`;
-      } else if (inProg > 0) {
-        el.className = 'rounded-xl border border-violet-200 bg-violet-50 p-3 text-sm text-violet-800';
-        el.innerHTML = `<span class="animate-pulse font-bold">●</span> <span class="font-bold">${inProg} issue${inProg > 1 ? 's' : ''} in progress</span> across ${Object.keys(byRunner).length} runner${Object.keys(byRunner).length > 1 ? 's' : ''}.<div class="mt-1 text-xs">${runnerLines}</div>`;
-      } else {
-        el.className = 'rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800';
-        el.innerHTML = `<span class="font-bold">✓ No issues queued</span> — nothing waiting for the runner right now.`;
-      }
-    })
-    .catch(() => {
-      el.className = 'rounded-xl border border-gray-200 bg-gray-50 p-3 text-sm text-gray-500';
-      el.innerHTML = 'Could not load queue status.';
-    });
-}
-
-async function copyRunnerCmd() {
-  const cmd = document.getElementById('ir-runner-cmd').textContent;
-  try {
-    await navigator.clipboard.writeText(cmd);
-    const btn = document.getElementById('ir-runner-copy-btn');
-    btn.textContent = 'Copied!';
-    setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
-  } catch { alert('Copy failed — select the text manually.'); }
-}
-
-// Update the Runner button label with a live queued count when the issue list loads
-function _updateRunnerBtnBadge(issues) {
-  const queued = (issues || []).filter(i => i.devHandoffStatus === 'queued').length;
-  const lbl = document.getElementById('ir-runner-btn-label');
-  const btn = document.getElementById('ir-runner-btn');
-  if (!lbl || !btn) return;
-  if (queued > 0) {
-    lbl.textContent = `Runner (${queued} queued)`;
-    btn.classList.add('border-amber-400', 'bg-amber-50', 'text-amber-800');
-    btn.classList.remove('border-violet-300', 'bg-violet-50', 'text-violet-700');
-  } else {
-    lbl.textContent = 'Runner';
-    btn.classList.remove('border-amber-400', 'bg-amber-50', 'text-amber-800');
-    btn.classList.add('border-violet-300', 'bg-violet-50', 'text-violet-700');
-  }
-}
-
-// ── Runner session-limit recovery ────────────────────────────────────────────
-// When a runner's Claude account hits its usage limit the runner pauses and reports it.
-// Show a prominent banner with the reset time and a Resume button: the admin logs into a
-// funded Claude account ON THE RUNNER MACHINE, presses Resume, and the runner verifies the
-// new login and continues. Re-queued issues are then picked up automatically.
-let _irRunnerStatusTimer = null;
-// True while any runner is paused (session limit). Consumed by _irHandoffCard so the
-// "Pass to Developer" / "Try again" buttons disable and point at the Resume banner —
-// the open detail panel covers the banner, so re-queuing from here would just re-fail.
-let _irRunnerBlocked = false;
-// Runner IDs the admin has dismissed the top-of-list banner for. Pruned to currently-blocked
-// runners on every poll, so a dismissal only lasts until that pause resolves — if the same
-// runner pauses again later it reappears rather than staying silenced forever.
-let _irDismissedRunnerAlerts = new Set();
-function dismissRunnerAlert(runnerId) {
-  _irDismissedRunnerAlerts.add(runnerId);
-  loadRunnerStatus();
-}
-
-// The switchable Claude accounts a runner reported ([{email, stored}]), defensively parsed.
-function _irRunnerAccounts(r) {
-  try {
-    const a = JSON.parse(r.knownAccounts || '[]');
-    return Array.isArray(a) ? a.filter((x) => x && x.email) : [];
-  } catch { return []; }
-}
-
-// "Switch CLI to <account>" buttons for a runner. Stored accounts are clickable; accounts that
-// still need their one-time login on the runner machine are greyed with an explanatory title.
-// The active account is skipped (nothing to switch). Super-admin only — mirrors Resume/Restart.
-function _irSwitchButtons(r, amber) {
-  if (!((typeof _adminRole !== 'undefined') && _adminRole === 'super_admin')) return '';
-  const accounts = _irRunnerAccounts(r);
-  if (!accounts.length) return '';
-  const activeEmail = ((r.activeAccount || '').match(/^[^\s(]+/) || [''])[0].toLowerCase();
-  if (r.switchAccountRequested) {
-    return `<span class="inline-flex items-center gap-1.5 text-xs font-semibold ${amber ? 'text-amber-700' : 'text-violet-700'}"><span class="animate-pulse">●</span> switching the CLI to <b class="font-mono">${_esc(r.switchAccountRequested)}</b> — the runner picks this up within ~15s…</span>`;
-  }
-  const on = amber
-    ? 'border border-amber-600 text-amber-700 hover:bg-amber-100'
-    : 'border border-violet-400 text-violet-700 hover:bg-violet-50';
-  const off = 'border border-gray-300 text-gray-400 cursor-not-allowed';
-  const expired = 'border border-rose-400 text-rose-700 bg-rose-50 cursor-not-allowed';
-  const btns = accounts
-    .filter((a) => a.email.toLowerCase() !== activeEmail)
-    .map((a) => {
-      // Stored but the saved login expired: no button would work — switching to it just re-fails
-      // with "Not logged in". Show what to do instead: a one-time re-login on the runner machine.
-      if (a.stored && a.stale) {
-        return `<button disabled title="This account's saved login on the runner has expired (its Claude token can no longer refresh). Re-login once on the runner machine — run: claude auth login — signed in as ${_esc(a.email)}. It is re-snapshotted automatically and switchable again from then on." class="px-3 py-1.5 ${expired} text-xs font-bold rounded-lg">⚠ ${_esc(a.email)} — login expired, re-login on runner</button>`;
-      }
-      return a.stored
-        ? `<button onclick="switchRunnerAccount('${_esc(r.runnerId)}', '${_esc(a.email)}', this)" class="px-3 py-1.5 ${on} text-xs font-bold rounded-lg transition">⇄ Switch CLI to ${_esc(a.email)}</button>`
-        : `<button disabled title="Not available yet — log into this account once on the runner machine (claude auth login); it is snapshotted automatically and switchable from then on." class="px-3 py-1.5 ${off} text-xs font-bold rounded-lg">⇄ ${_esc(a.email)} (needs one-time login)</button>`;
-    })
-    .join('');
-  return btns ? `<div class="mt-2 flex items-center gap-2 flex-wrap">${btns}</div>` : '';
-}
-
-// One paused-runner card (reset hint + last probe result + Resume button). Rendered both in
-// the banner at the top of the Issues list and inside the 🤖 Runner modal. `dismissible` adds
-// a ✕ button — only used for the banner; the modal card has no way to hide itself since it's
-// the one place admins can always find the runner state.
-function _irRunnerPausedCard(r, dismissible) {
-  const canResume = (typeof _adminRole !== 'undefined') && _adminRole === 'super_admin';
-  const reset = r.resetHint ? ` — resets <b>${_esc(r.resetHint)}</b>` : '';
-  // Refreshed by the runner on every resume-check poll (~10s) while paused, so this shows
-  // the login the admin just switched to — not the one that ran out.
-  const acct = r.activeAccount
-    ? `<div class="mt-2 text-xs text-amber-900/90">Active Claude session on the runner: <b class="font-mono">${_esc(r.activeAccount)}</b></div>`
-    : `<div class="mt-2 text-xs text-amber-900/60">Active Claude session on the runner: not reported yet</div>`;
-  const probe = r.lastProbeResult
-    ? `<div class="mt-2 text-xs text-amber-900/80 bg-amber-100/60 rounded-lg p-2">Last resume attempt: ${_esc(r.lastProbeResult)}</div>` : '';
-  let action;
-  if (r.restartRequested) {
-    action = `<span class="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700"><span class="animate-pulse">●</span> restart requested — waiting for the runner to pick it up and restart…</span>`;
-  } else if (r.resumeRequested) {
-    action = `<span class="inline-flex items-center gap-1.5 text-xs font-semibold text-amber-700"><span class="animate-pulse">●</span> verifying the new login on the runner…</span>`;
-  } else if (canResume) {
-    action = `<button onclick="resumeRunner('${_esc(r.runnerId)}', this)" class="px-3 py-1.5 bg-amber-600 text-white text-xs font-bold rounded-lg hover:bg-amber-700 transition">I've logged in — Resume runner</button>`;
-  } else {
-    action = `<span class="text-xs text-amber-700 font-semibold">A super-admin must resume the runner.</span>`;
-  }
-  // Escape hatch: restart the runner process remotely. Shown even while "verifying…" is
-  // stuck, but not once a restart is already pending. Only works while the process is
-  // alive and polling — a dead process can't be restarted from here.
-  const restartBtn = canResume && !r.restartRequested
-    ? `<button onclick="restartRunner('${_esc(r.runnerId)}', this)" class="px-3 py-1.5 border border-amber-600 text-amber-700 text-xs font-bold rounded-lg hover:bg-amber-100 transition">↻ Restart runner</button>` : '';
-  const dismissBtn = dismissible
-    ? `<button onclick="dismissRunnerAlert('${_esc(r.runnerId)}')" title="Dismiss" class="text-amber-500 hover:text-amber-700 text-lg leading-none">✕</button>` : '';
-  return `<div class="border border-amber-300 bg-amber-50 rounded-xl p-4">
-    <div class="flex items-start gap-3">
-      <span class="text-xl leading-none">⏸️</span>
-      <div class="flex-1 min-w-0">
-        <div class="flex items-start justify-between gap-2">
-          <p class="text-sm font-bold text-amber-900">AI auto-fix runner paused — Claude session limit${reset}</p>
-          ${dismissBtn}
-        </div>
-        <p class="text-xs text-amber-800 mt-1">Runner <b class="font-mono">${_esc(r.runnerId)}</b> ran out of Claude usage. Switch it to another stored account below (no login needed — a verified switch resumes automatically), or log in by hand on the runner machine and press Resume. Queued issues are retried automatically once it resumes — you don't need to re-submit them.</p>
-        ${acct}
-        ${_irSwitchButtons(r, true)}
-        ${probe}
-        <div class="mt-3 flex items-center gap-2 flex-wrap">${action}${restartBtn}</div>
-      </div>
-    </div>
-  </div>`;
-}
-
-function _irRunnerLastSeen(r) {
-  if (!r.lastSeenAt) return '';
-  const mins = Math.floor((Date.now() - new Date(r.lastSeenAt).getTime()) / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const h = Math.floor(mins / 60);
-  return h < 48 ? `${h}h ago` : `${Math.floor(h / 24)}d ago`;
-}
-
-// The modal's runner-state section never hides: when nothing is paused it explains why
-// there's no Resume button (it only exists while a runner reports a Claude session limit),
-// so an admin looking for it isn't left staring at nothing.
-function _irRunnerModalStatus(runners, blocked) {
-  const cards = blocked.map((r) => _irRunnerPausedCard(r)).join('');
-  const others = runners.filter((r) => r.state !== 'session_limited');
-  const otherLines = others.map((r) => {
-    const seen = _irRunnerLastSeen(r);
-    const acct = r.activeAccount
-      ? `<div class="mt-1 text-xs text-gray-600">Active Claude account: <b class="font-mono">${_esc(r.activeAccount)}</b></div>` : '';
-    // Healthy runners get the same Switch buttons as the paused banner — that's how you
-    // rotate the CLI to a fresh account BEFORE the current one runs out.
-    return `<div class="rounded-lg border border-gray-200 bg-white p-2.5">
-      <div class="flex items-center gap-1.5 text-xs text-gray-600">🖥 <b class="font-mono">${_esc(r.runnerId)}</b> — <span class="text-emerald-700 font-semibold">✓ ${_esc(r.state || 'ok')}</span>${seen ? ` · last seen ${seen}` : ''}</div>
-      ${acct}
-      ${_irSwitchButtons(r, false)}
-      ${r.lastProbeResult ? `<div class="mt-1.5 text-xs text-gray-500 bg-gray-50 rounded p-1.5">Last switch/resume: ${_esc(r.lastProbeResult)}</div>` : ''}
-    </div>`;
-  }).join('');
-  const note = blocked.length ? '' : `<div class="rounded-xl border border-gray-200 bg-gray-50 p-3 text-xs text-gray-500">
-      ${others.length ? otherLines + '<div class="mt-2 pt-2 border-t border-gray-200">' : ''}
-      No runner is paused right now — the <b>“Resume runner”</b> button only appears here (and as a banner above the Issues list) while a runner reports a Claude session limit. If your runner hit its limit but nothing shows, the runner process is no longer running: restart it with the command below.
-      ${others.length ? '</div>' : ''}
-    </div>`;
-  return cards + note;
-}
-
-async function loadRunnerStatus() {
-  const banner = document.getElementById('ir-runner-alert');
-  const modalEl = document.getElementById('ir-runner-paused');
-  if (!banner && !modalEl) return;
-  let runners = [], blocked = [];
-  try {
-    const d = await api(`${IR_API}?action=runner-status`);
-    runners = d.runners || [];
-    blocked = d.blocked || [];
-  } catch { runners = []; blocked = []; }
-  _irRunnerBlocked = blocked.length > 0;
-
-  // Drop dismissals for runners that are no longer blocked, so a *new* pause on the same
-  // runner (after it resumed) shows the banner again instead of staying silenced forever.
-  const blockedIds = new Set(blocked.map((r) => r.runnerId));
-  for (const id of _irDismissedRunnerAlerts) {
-    if (!blockedIds.has(id)) _irDismissedRunnerAlerts.delete(id);
-  }
-
-  // Banner above the Issues list: only while something is actually paused and not dismissed.
-  if (banner) {
-    const visible = blocked.filter((r) => !_irDismissedRunnerAlerts.has(r.runnerId));
-    banner.classList.toggle('hidden', !visible.length);
-    banner.innerHTML = visible.map((r) => _irRunnerPausedCard(r, true)).join('');
-  }
-  // Runner modal: always shows runner state (dismissing the banner doesn't hide it here),
-  // with an explanation when nothing is paused.
-  if (modalEl) {
-    modalEl.classList.remove('hidden');
-    modalEl.innerHTML = _irRunnerModalStatus(runners, blocked);
-  }
-
-  // Keep refreshing while anything is in flight — a paused runner, or an account switch
-  // pending on a healthy one — so "switching…"/"verifying…" clears and the probe result
-  // appears without a manual reload.
-  const busy = blocked.length > 0 || runners.some((r) => r.switchAccountRequested);
-  if (!busy) {
-    if (_irRunnerStatusTimer) { clearInterval(_irRunnerStatusTimer); _irRunnerStatusTimer = null; }
-    return;
-  }
-  if (!_irRunnerStatusTimer) _irRunnerStatusTimer = setInterval(loadRunnerStatus, 5000);
-}
-
-async function resumeRunner(runnerId, btn) {
-  if (btn) { btn.disabled = true; btn.textContent = 'Requesting…'; }
-  try {
-    const d = await api(`${IR_API}?action=resume-runner`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ runnerId }),
-    });
-    if (!d.resumed) alert(d.message || 'No paused runner to resume — check the runner process is running.');
-  } catch (e) {
-    alert(e.message);
-    if (btn) { btn.disabled = false; btn.textContent = "I've logged in — Resume runner"; }
-  } finally { await loadRunnerStatus(); }
-}
-
-async function restartRunner(runnerId, btn) {
-  if (!confirm('Restart this runner process on its machine? It exits and starts fresh (launchd relaunches it in ~30s; a terminal-run copy re-spawns itself). If the new process is still rate-limited it will report in again. Only works while the runner process is alive.')) return;
-  if (btn) { btn.disabled = true; btn.textContent = 'Requesting…'; }
-  try {
-    const d = await api(`${IR_API}?action=restart-runner`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ runnerId }),
-    });
-    if (!d.requested) alert(d.message || 'No paused runner to restart — check the runner process is running.');
-  } catch (e) {
-    alert(e.message);
-    if (btn) { btn.disabled = false; btn.textContent = '↻ Restart runner'; }
-  } finally { await loadRunnerStatus(); }
-}
-
-// "Switch CLI to <account>" — swaps the runner machine's Claude Code login to a stored
-// account snapshot. The runner picks the request up on its next poll (~15s healthy, ~10s
-// paused), swaps credentials locally, verifies with a probe call, and reports back; if it
-// was paused on a session limit, a verified switch resumes it automatically.
-async function switchRunnerAccount(runnerId, account, btn) {
-  if (btn) { btn.disabled = true; btn.textContent = 'Requesting…'; }
-  try {
-    const d = await api(`${IR_API}?action=switch-account`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ runnerId, account }),
-    });
-    if (!d.requested) alert(d.message || 'That runner is not reporting in — check the runner process is running.');
-  } catch (e) {
-    alert(e.message);
-    if (btn) { btn.disabled = false; btn.textContent = `⇄ Switch CLI to ${account}`; }
-  } finally { await loadRunnerStatus(); }
-}
-
 // "Pass all to Developer" — shown on the Reported tab when there are issues that
 // haven't been handed off yet (not already queued or being fixed).
 function _updatePassAllBtn(issues) {
@@ -4070,10 +3655,6 @@ function _updatePassAllBtn(issues) {
 async function passAllToDeveloper() {
   const btn = document.getElementById('ir-pass-all-btn');
   const n = Number(btn?.dataset.count || 0);
-  if (_irRunnerBlocked) {
-    alert('The AI developer runner is paused (Claude session limit). Use the "Resume runner" banner at the top of the Issues list, then try again.');
-    return;
-  }
   if (!confirm(`Pass all ${n} reported issue${n === 1 ? '' : 's'} to the AI developer? Each will be fixed on its own branch with a pull request opened for review.`)) return;
   if (btn) { btn.disabled = true; btn.textContent = '🤖 Queuing…'; }
   try {
@@ -4133,10 +3714,6 @@ function _updateMoveAllToDeveloperBtn(issues) {
 async function moveBacklogAllToDeveloper() {
   const btn = document.getElementById('ir-backlog-dev-all-btn');
   const n = Number(btn?.dataset.count || 0);
-  if (_irRunnerBlocked) {
-    alert('The AI developer runner is paused (Claude session limit). Use the "Resume runner" banner at the top of the Issues list, then try again.');
-    return;
-  }
   if (!confirm(`Pass all ${n} backlog issue${n === 1 ? '' : 's'} to the AI developer? Each will be fixed on its own branch with a pull request opened for review.`)) return;
   if (btn) { btn.disabled = true; btn.textContent = '🤖 Queuing…'; }
   try {
