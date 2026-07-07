@@ -4,6 +4,7 @@ import {
   text,
   timestamp,
   integer,
+  bigint,
   boolean,
   numeric,
   decimal,
@@ -2502,6 +2503,115 @@ export const assistantRecords = pgTable("assistant_records", {
   index("assistant_records_org_assistant_type_idx").on(t.organisationId, t.aiAssistantId, t.recordType),
   check("assistant_records_type_check", sql`${t.recordType} IN ('lead', 'enrichment', 'meeting', 'invoice', 'ticket')`),
   check("assistant_records_source_check", sql`${t.source} IN ('chat', 'csv_import', 'integration')`),
+]);
+
+// ────────────────────────────────────────────────────────────────────────────
+// Autonomous Content Engine — Phase 0 blog content model.
+// SQL: db/blog-posts.sql, db/widget-configs.sql (apply manually — no drizzle-kit push).
+// Design: docs/content-engine-epic-plan.md §8–§11.
+// blog_posts is the long-form Markdown counterpart to scheduledPosts (which stays social-only);
+// it reuses contentAssets, contentProvenance, contentGenerationJobs, aiBlueprints, pendingActions.
+// ────────────────────────────────────────────────────────────────────────────
+export const blogPosts = pgTable("blog_posts", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  assistantId: integer("assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }), // set for autonomous drafts
+  ownerId: integer("owner_id").references(() => users.id, { onDelete: "set null" }),
+  ownerLabel: text("owner_label"),                          // "AI: Marketing Mike" | "Jane Smith"
+
+  // Body
+  title: text("title").notNull(),
+  bodyMarkdown: text("body_markdown").notNull().default(""), // editable source of truth (US 1.2)
+  publishedPayload: jsonb("published_payload"),              // sanitised HTML + meta snapshot served by the widget (US 3.1)
+
+  // SEO metadata (US 1.3)
+  slug: text("slug"),                                        // unique per org (partial unique index, slug not null)
+  metaTitle: text("meta_title"),
+  metaDescription: text("meta_description"),
+  tags: jsonb("tags").notNull().default([]),
+  canonicalUrl: text("canonical_url"),
+
+  // Hero / feature graphic
+  featureAssetId: integer("feature_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
+
+  // A/B hook testing (US 5.2) — hookVariants: [{ id:'A', h1, intro }, ...]
+  hookVariants: jsonb("hook_variants").notNull().default([]),
+  winningVariant: text("winning_variant"),                  // null until resolve-ab-tests decides
+  abState: text("ab_state").notNull().default("off"),       // off|testing|decided
+
+  // Distribution (per-target status): { widget, substack, medium, rss }
+  destinations: jsonb("destinations").notNull().default({}),
+
+  // Workflow & governance
+  status: text("status").notNull().default("draft"),
+  publishDate: timestamp("publish_date"),
+  publishedAt: timestamp("published_at"),
+  isAutonomous: boolean("is_autonomous").notNull().default(false),
+  generationReason: text("generation_reason"),
+
+  // Provenance & AI linkage (reused infra)
+  provenanceContentId: text("provenance_content_id"),       // → contentProvenance.contentId
+  confidenceScore: text("confidence_score"),                // 'green' | 'amber' | 'red' | null
+  factualClaims: jsonb("factual_claims"),
+  jobId: text("job_id"),                                    // → contentGenerationJobs.jobId
+  blueprintId: integer("blueprint_id").references(() => aiBlueprints.id, { onDelete: "set null" }),
+
+  // Content-decay detection (US 5.1)
+  trafficBaseline: integer("traffic_baseline"),
+  lastMetricsAt: timestamp("last_metrics_at"),
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("blog_posts_org_status_idx").on(t.organisationId, t.status),
+  index("blog_posts_assistant_idx").on(t.assistantId),
+  index("blog_posts_publish_date_idx").on(t.publishDate),
+  uniqueIndex("blog_posts_org_slug_unique").on(t.organisationId, t.slug).where(sql`${t.slug} IS NOT NULL`),
+  check("blog_posts_status_check", sql`${t.status} IN ('draft','pending_approval','in_review','approved','scheduled','publishing','published','paused','failed','rejected','archived')`),
+  check("blog_posts_ab_state_check", sql`${t.abState} IN ('off','testing','decided')`),
+]);
+
+// Ordered media junction — mirrors scheduledPostAssets.
+export const blogPostAssets = pgTable("blog_post_assets", {
+  blogPostId: integer("blog_post_id").notNull().references(() => blogPosts.id, { onDelete: "cascade" }),
+  contentAssetId: integer("content_asset_id").notNull().references(() => contentAssets.id, { onDelete: "cascade" }),
+  position: integer("position").notNull().default(0),
+}, (t) => [
+  unique("blog_post_assets_pk").on(t.blogPostId, t.contentAssetId),
+  index("blog_post_assets_post_idx").on(t.blogPostId),
+]);
+
+// Native BMS widget config (US 3.1). public_key is baked into the embed <script data-bms-key>.
+export const widgetConfigs = pgTable("widget_configs", {
+  id: serial("id").primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  publicKey: text("public_key").notNull().unique(),         // 'wgt_<nanoid>' — rotatable
+  name: text("name").notNull().default("Default"),
+  theme: jsonb("theme").notNull().default({}),              // { accent, fontFamily, layout, customCss, badge }
+  allowedOrigins: text("allowed_origins").array(),          // optional origin allowlist; null = any (public read)
+  badgeEnabled: boolean("badge_enabled").notNull().default(true), // AI Transparency Badge (US 6.1 AC2)
+  status: text("status").notNull().default("active"),       // active | disabled
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("widget_configs_org_idx").on(t.organisationId),
+  check("widget_configs_status_check", sql`${t.status} IN ('active','disabled')`),
+]);
+
+// A/B engagement aggregates per (blog_post, variant) — upserted by widget-ab-beacon (US 5.2).
+export const blogAbStats = pgTable("blog_ab_stats", {
+  blogPostId: integer("blog_post_id").notNull().references(() => blogPosts.id, { onDelete: "cascade" }),
+  variantId: text("variant_id").notNull(),                  // 'A' | 'B' | 'C'
+  impressions: integer("impressions").notNull().default(0),
+  engagedCount: integer("engaged_count").notNull().default(0),
+  sumDwellMs: bigint("sum_dwell_ms", { mode: "number" }).notNull().default(0),
+  sumScrollPct: bigint("sum_scroll_pct", { mode: "number" }).notNull().default(0),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  unique("blog_ab_stats_pk").on(t.blogPostId, t.variantId),
+  index("blog_ab_stats_post_idx").on(t.blogPostId),
 ]);
 
 // Relational-query definitions for the chat tables live in db/relations.ts

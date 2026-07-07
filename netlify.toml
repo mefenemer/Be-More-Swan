@@ -43,6 +43,13 @@
   to = "/.netlify/functions/sync-action"
   status = 200
 
+# Autonomous Content Engine (US 3.1): public, read-only native-widget API. Rewrite (status 200) —
+# the original /api/widget/:key/:resource path survives in event.rawUrl, which widget-api.ts parses.
+[[redirects]]
+  from = "/api/widget/*"
+  to = "/.netlify/functions/widget-api"
+  status = 200
+
 [build]
   # Rebuild the Tailwind stylesheet from input.css on every deploy so style.css can never
   # drift from the markup (a stale committed style.css silently drops classes and breaks layouts).
