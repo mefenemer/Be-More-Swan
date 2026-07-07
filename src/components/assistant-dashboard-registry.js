@@ -220,6 +220,14 @@
         title: 'Lead Ideas',
         description: 'Ideas for where to find your next customers. Approve one and the Lead Generator finds matching companies, scores them into your Leads tab, and suggests the next best action for each.',
       },
+      // Overview "Find New Leads" button (assistant-discovery-campaigns.js) — the outbound
+      // discovery engine: author an Idea/Blueprint + cadence + guardrails; a background run
+      // searches the web, scores what it finds, and files leads for approval. Backed by
+      // discovery-campaigns.ts. Design: docs/lead-generator-discovery-plan.md.
+      discoveryCampaigns: {
+        label: 'Find New Leads',
+        title: 'Find New Leads',
+      },
     },
 
     accounts_receivable_clerk: {

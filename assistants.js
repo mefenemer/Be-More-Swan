@@ -1573,6 +1573,13 @@ function _applyDashboardRegistry(data) {
         setText('lead-ideas-label', ideas.label || 'Review Lead Ideas');
         window.AssistantLeadIdeas?.init({ assistantId: data.id, cfg: ideas });
     }
+    // Lead Generator "Find New Leads" — outbound discovery campaigns (assistant-discovery-campaigns.js).
+    const discovery = cfg.discoveryCampaigns;
+    toggleBtn('btn-discovery-campaigns', !!discovery);
+    if (discovery) {
+        setText('discovery-campaigns-label', discovery.label || 'Find New Leads');
+        window.AssistantDiscoveryCampaigns?.init({ assistantId: data.id, cfg: discovery });
+    }
     toggle('module-posting-schedule', mods.hasPostingSchedule !== false);
     toggle('module-social-strategy', mods.hasSocialStrategy !== false);
 
