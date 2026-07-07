@@ -212,7 +212,9 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
                     signals: { snippet: c.snippet },
                     status: 'discovered' as const,
                 })))
-                .onConflictDoNothing({ target: [discoveredLeads.campaignId, discoveredLeads.domain] })
+                // Match the PARTIAL unique index (…) WHERE domain IS NOT NULL — Postgres won't
+                // infer a partial index from a bare ON CONFLICT target, so the predicate is required.
+                .onConflictDoNothing({ target: [discoveredLeads.campaignId, discoveredLeads.domain], where: sql`${discoveredLeads.domain} IS NOT NULL` })
                 .returning({ id: discoveredLeads.id, companyName: discoveredLeads.companyName, domain: discoveredLeads.domain, snippet: sql<string>`(${discoveredLeads.signals} ->> 'snippet')` });
 
             if (inserted.length === 0) continue;
