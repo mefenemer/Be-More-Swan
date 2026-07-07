@@ -28,8 +28,10 @@ import { logAiUsage } from '../../src/utils/ai-usage';
 type Db = ReturnType<typeof getDb>;
 
 const BACKOFF_SECS = [10, 30, 90];
-// Queries processed per tick — keep small so one slice stays well under the function timeout.
-const QUERIES_PER_SLICE = 3;
+// Queries processed per tick — ONE search + one scoring call per slice keeps a tick well
+// under Netlify's ~10s function limit (3/tick was hitting 504 Inactivity Timeouts). The
+// cursor resumes the next query on the next tick, so total coverage is unchanged.
+const QUERIES_PER_SLICE = 1;
 const RESULTS_PER_QUERY = 10;
 
 type JobRow = {
@@ -89,8 +91,10 @@ export const handler: Handler = async () => {
 // ── One bounded slice of one job ───────────────────────────────────────────────
 
 async function processJob(db: Db, job: JobRow): Promise<void> {
+    // Claim the slice. NOTE: attempt is bumped only on failure (handleFailure), not per slice —
+    // a legit run spans many slices and must not exhaust its retry budget just by making progress.
     await db.execute(
-        `UPDATE discovery_jobs SET status = 'processing', attempt = attempt + 1, updated_at = now() WHERE id = ${job.id}`
+        `UPDATE discovery_jobs SET status = 'processing', updated_at = now() WHERE id = ${job.id}`
     );
 
     try {
@@ -248,7 +252,7 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
             await db.update(discoveryJobs)
                 .set({
                     cursor: { flat: cursor.flat, queryIndex: nextIndex } satisfies Cursor,
-                    status: 'queued', stage: 'searching',
+                    status: 'queued', stage: 'searching', errorMessage: null,
                     leadsFound, searchCallsMade, tokensUsed, costGbp: String(costGbp), updatedAt: new Date(),
                 })
                 .where(eq(discoveryJobs.id, job.id));
@@ -349,13 +353,13 @@ async function finishJob(db: Db, jobId: number, status: 'completed' | 'failed', 
 async function handleFailure(db: Db, job: JobRow, err: unknown): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     console.error(`[process-discovery-jobs] job ${job.job_id} slice failed:`, message);
-    // attempt was already incremented at slice start.
-    if (job.attempt + 1 >= job.max_attempts) {
-        await db.update(discoveryJobs).set({ status: 'failed', errorMessage: message, updatedAt: new Date() }).where(eq(discoveryJobs.id, job.id));
+    const newAttempt = job.attempt + 1;
+    if (newAttempt >= job.max_attempts) {
+        await db.update(discoveryJobs).set({ status: 'failed', attempt: newAttempt, errorMessage: message, updatedAt: new Date() }).where(eq(discoveryJobs.id, job.id));
     } else {
         const backoff = BACKOFF_SECS[Math.min(job.attempt, BACKOFF_SECS.length - 1)];
         await db.update(discoveryJobs)
-            .set({ status: 'queued', errorMessage: message, nextRetryAt: new Date(Date.now() + backoff * 1000), updatedAt: new Date() })
+            .set({ status: 'queued', attempt: newAttempt, errorMessage: message, nextRetryAt: new Date(Date.now() + backoff * 1000), updatedAt: new Date() })
             .where(eq(discoveryJobs.id, job.id));
     }
 }
