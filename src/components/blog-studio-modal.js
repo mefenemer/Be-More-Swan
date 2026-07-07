@@ -86,7 +86,11 @@
     + '.bs-media-picker{margin-top:12px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-height:260px;overflow:auto;}'
     + '.bs-media-picker img{width:100%;height:72px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid transparent;}'
     + '.bs-media-picker img:hover{border-color:#ec4899;}'
-    + '.bs-media-empty{grid-column:1 / -1;font-size:12px;color:#6b7280;text-align:center;padding:12px;}';
+    + '.bs-media-empty{grid-column:1 / -1;font-size:12px;color:#6b7280;text-align:center;padding:12px;}'
+    + '.bs-synd-row{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;}'
+    + '.bs-synd-form{flex-basis:100%;margin-top:8px;}'
+    + '.bs-linkbtn{background:none;border:0;color:#6b7280;font-size:12px;cursor:pointer;text-decoration:underline;padding:0;}'
+    + '.bs-linkbtn:hover{color:#ec4899;}';
 
   // Author is always the user (no "Written by"); the brief is Topic + Keywords + Voice + Notes.
   var MARKUP = ''
@@ -154,6 +158,13 @@
     + '          <button id="bs-pexels-go" class="bs-btn bs-btn-ghost" style="margin-top:8px;">Search</button></div>'
     + '        <div id="bs-media-picker" class="bs-media-picker bs-hidden"></div>'
     + '        <span id="bs-media-status" class="bs-status"></span>'
+    + '      </div>'
+    + '      <div class="bs-panel" style="margin-top:16px;">'
+    + '        <h3>Syndicate</h3>'
+    + '        <div id="bs-synd-list" class="bs-status">Loading destinations…</div>'
+    + '        <button id="bs-synd-publish" class="bs-btn bs-btn-ghost bs-hidden" style="margin-top:10px;">Publish to selected</button>'
+    + '        <span id="bs-synd-status" class="bs-status" style="display:block;margin-top:6px;"></span>'
+    + '        <div class="bs-status" style="font-size:11px;margin-top:4px;">Publish to your site first, then push to connected blogs.</div>'
     + '      </div>'
     + '    </div>'
     + '    <div>'
@@ -244,6 +255,7 @@
     });
     loadWidget();
     loadFeature();
+    loadSyndication();
     return state.editor;
   }
 
@@ -419,6 +431,85 @@
     return isNaN(d.getTime()) ? null : d.toISOString();
   }
 
+  // ── Syndication: external blog connectors (US 3.2 — Dev.to, Hashnode) ──────────────────────────
+  function loadSyndication() {
+    var listEl = el('bs-synd-list');
+    if (!listEl) return;
+    listEl.textContent = 'Loading destinations…';
+    setStatus('bs-synd-status', '');
+    api('connect-blog-destination', { method: 'GET' }).then(function (res) {
+      if (!res.ok) { listEl.textContent = 'Could not load destinations.'; return; }
+      renderSyndication(res.body.destinations || []);
+    }).catch(function () { listEl.textContent = 'Could not load destinations.'; });
+  }
+
+  function renderSyndication(destinations) {
+    var listEl = el('bs-synd-list');
+    listEl.innerHTML = '';
+    if (!destinations.length) { listEl.textContent = 'No destinations available.'; el('bs-synd-publish').classList.add('bs-hidden'); return; }
+    var anyConnected = false;
+    destinations.forEach(function (d) {
+      var row = document.createElement('div');
+      row.className = 'bs-synd-row';
+      if (d.connected) {
+        anyConnected = true;
+        var lbl = document.createElement('label');
+        lbl.style.display = 'flex'; lbl.style.alignItems = 'center'; lbl.style.gap = '6px';
+        var cb = document.createElement('input');
+        cb.type = 'checkbox'; cb.className = 'bs-synd-check'; cb.value = d.id; cb.checked = true;
+        lbl.appendChild(cb);
+        lbl.appendChild(document.createTextNode(d.label + (d.accountLabel ? ' (' + d.accountLabel + ')' : '')));
+        row.appendChild(lbl);
+        var disc = document.createElement('button');
+        disc.type = 'button'; disc.className = 'bs-linkbtn'; disc.textContent = 'Disconnect';
+        disc.addEventListener('click', function () { disconnectDest(d.id); });
+        row.appendChild(disc);
+      } else {
+        var connectBtn = document.createElement('button');
+        connectBtn.type = 'button'; connectBtn.className = 'bs-btn bs-btn-ghost'; connectBtn.textContent = 'Connect ' + d.label;
+        connectBtn.addEventListener('click', function () { toggleConnectForm(row, d); });
+        row.appendChild(connectBtn);
+      }
+      listEl.appendChild(row);
+    });
+    el('bs-synd-publish').classList.toggle('bs-hidden', !anyConnected);
+  }
+
+  function toggleConnectForm(row, d) {
+    var open = row.querySelector('.bs-synd-form');
+    if (open) { open.parentNode.removeChild(open); return; }
+    var form = document.createElement('div');
+    form.className = 'bs-synd-form';
+    var inputs = {};
+    d.credFields.forEach(function (f) {
+      var wrap = document.createElement('div'); wrap.className = 'bs-field';
+      var lab = document.createElement('label'); lab.textContent = f.label + (f.help ? ' — ' + f.help : '');
+      var inp = document.createElement('input'); inp.type = f.secret ? 'password' : 'text';
+      inputs[f.key] = inp;
+      wrap.appendChild(lab); wrap.appendChild(inp); form.appendChild(wrap);
+    });
+    var save = document.createElement('button');
+    save.type = 'button'; save.className = 'bs-btn bs-btn-primary'; save.textContent = 'Connect';
+    var msg = document.createElement('span'); msg.className = 'bs-status'; msg.style.marginLeft = '8px';
+    save.addEventListener('click', function () {
+      var creds = {};
+      Object.keys(inputs).forEach(function (k) { creds[k] = inputs[k].value.trim(); });
+      msg.textContent = 'Connecting…';
+      api('connect-blog-destination', { method: 'POST', body: JSON.stringify({ action: 'connect', provider: d.id, creds: creds }) })
+        .then(function (res) {
+          if (res.ok) loadSyndication();
+          else msg.textContent = (res.body && res.body.error) || 'Connection failed.';
+        }).catch(function () { msg.textContent = 'Connection failed.'; });
+    });
+    form.appendChild(save); form.appendChild(msg);
+    row.appendChild(form);
+  }
+
+  function disconnectDest(id) {
+    api('connect-blog-destination', { method: 'POST', body: JSON.stringify({ action: 'disconnect', provider: id }) })
+      .then(function () { loadSyndication(); });
+  }
+
   // ── Wire all events once, after markup injection ───────────────────────────────────────────────
   function wireEvents() {
     Array.prototype.forEach.call(document.querySelectorAll('#bs-brief [data-path]'), function (btn) {
@@ -440,6 +531,25 @@
       setStatus('bs-publish-status', 'Publishing…');
       api('publish-blog', { method: 'POST', body: JSON.stringify({ id: state.postId }) }).then(function (res) {
         setStatus('bs-publish-status', res.ok ? 'Published ✓ (' + res.body.post.slug + ')' : (res.body.error || 'Failed'));
+      });
+    });
+
+    // Syndicate the published post to the selected external blogs (Dev.to, Hashnode).
+    el('bs-synd-publish').addEventListener('click', function () {
+      if (!state.postId) return;
+      var targets = Array.prototype.map.call(document.querySelectorAll('.bs-synd-check:checked'), function (c) { return c.value; });
+      if (!targets.length) { setStatus('bs-synd-status', 'Select at least one destination.'); return; }
+      setStatus('bs-synd-status', 'Publishing…');
+      api('publish-blog-destinations', { method: 'POST', body: JSON.stringify({ postId: state.postId, targets: targets }) }).then(function (res) {
+        if (!res.ok) { setStatus('bs-synd-status', (res.body && res.body.error) || 'Failed'); return; }
+        var results = res.body.results || {};
+        var parts = Object.keys(results).map(function (k) {
+          var r = results[k];
+          if (r.status === 'published' || r.status === 'draft') return k + ' ✓';
+          if (r.status === 'not_connected') return k + ' (not connected)';
+          return k + ' ✗';
+        });
+        setStatus('bs-synd-status', parts.join(' · '));
       });
     });
 
@@ -599,7 +709,7 @@
     state.postId = null;
     ['bs-topic', 'bs-keywords', 'bs-notes', 'bs-tone'].forEach(function (id) { var e = el(id); if (e) e.value = ''; });
     var st = el('bs-save-tone'); if (st) st.checked = false;
-    ['bs-save-status', 'bs-publish-status', 'bs-schedule-status', 'bs-media-status'].forEach(function (id) { setStatus(id, ''); });
+    ['bs-save-status', 'bs-publish-status', 'bs-schedule-status', 'bs-media-status', 'bs-synd-status'].forEach(function (id) { setStatus(id, ''); });
     el('bs-workspace').classList.add('bs-hidden');
     el('bs-brief').classList.remove('bs-hidden');
     el('bs-unschedule').classList.add('bs-hidden');
