@@ -14,7 +14,8 @@
 import { HandlerEvent } from '@netlify/functions';
 import { and, desc, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { widgetConfigs, blogPosts } from '../../db/schema';
+import { widgetConfigs, blogPosts, contentAssets } from '../../db/schema';
+import { resolveAssetDisplayUrl } from '../../src/utils/social-publish';
 
 const CORS = {
     'Access-Control-Allow-Origin': '*',
@@ -109,11 +110,28 @@ export const handler = async (event: HandlerEvent) => {
             ))
             .limit(1);
         if (!post) return json(404, { error: 'Post not found.' });
+
+        // Resolve a fresh feature-image URL from the snapshotted assetId (presigned R2 URLs expire,
+        // so we never store one in the immutable payload). A deleted asset degrades to no image.
+        const payload = (post.publishedPayload as Record<string, any> | null) || null;
+        const featureAssetId = payload?.featureImage?.assetId;
+        if (payload && Number.isFinite(featureAssetId)) {
+            const [a] = await db
+                .select({
+                    assetType: contentAssets.assetType, storageUrl: contentAssets.storageUrl,
+                    storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl,
+                })
+                .from(contentAssets)
+                .where(and(eq(contentAssets.id, featureAssetId), eq(contentAssets.organisationId, orgId)))
+                .limit(1);
+            payload.featureImage = { ...payload.featureImage, url: a ? await resolveAssetDisplayUrl(a) : null };
+        }
+
         return json(200, {
             post: {
                 title: post.title,
                 slug: post.slug,
-                payload: post.publishedPayload,
+                payload,
                 metaTitle: post.metaTitle,
                 metaDescription: post.metaDescription,
                 tags: post.tags,

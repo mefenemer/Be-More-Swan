@@ -15,7 +15,7 @@ import { HandlerEvent } from '@netlify/functions';
 import { createHash, createHmac, randomUUID } from 'crypto';
 import { and, eq, ne } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { blogPosts, contentProvenance } from '../../db/schema';
+import { blogPosts, contentAssets, contentProvenance } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { renderMarkdown, excerpt } from '../../src/utils/markdown-render';
 
@@ -69,6 +69,18 @@ export const handler = async (event: HandlerEvent) => {
         .limit(1);
     if (clash) slug = `${slug}-${id}`;
 
+    // Snapshot the hero/feature graphic as a STABLE reference (assetId, not a URL): presigned R2
+    // URLs expire, so widget-api resolves a fresh URL from this assetId at read time (US 2.1).
+    let featureImage: { assetId: number; alt: string; attribution: string | null } | null = null;
+    if (post.featureAssetId) {
+        const [asset] = await db
+            .select({ id: contentAssets.id, name: contentAssets.name, attributionName: contentAssets.attributionName })
+            .from(contentAssets)
+            .where(and(eq(contentAssets.id, post.featureAssetId), eq(contentAssets.organisationId, ctx.organisationId)))
+            .limit(1);
+        if (asset) featureImage = { assetId: asset.id, alt: asset.name || post.title, attribution: asset.attributionName };
+    }
+
     // Render the immutable, embed-safe snapshot.
     const html = renderMarkdown(post.bodyMarkdown);
     const publishedPayload = {
@@ -76,6 +88,7 @@ export const handler = async (event: HandlerEvent) => {
         title: post.metaTitle || post.title,
         description: post.metaDescription || excerpt(post.bodyMarkdown, 200),
         tags: post.tags,
+        featureImage,
         renderedAt: new Date().toISOString(),
     };
 

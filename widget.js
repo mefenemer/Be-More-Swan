@@ -102,6 +102,8 @@
       '.bms a{color:' + accent + ';}' +
       '.bms h1,.bms h2,.bms h3{line-height:1.25;}' +
       '.bms img{max-width:100%;height:auto;border-radius:8px;}' +
+      '.bms .bms-hero{width:100%;object-fit:cover;margin:8px 0 16px;}' +
+      '.bms .bms-credit{font-size:12px;color:#6b7280;margin:-8px 0 16px;}' +
       '.bms .bms-card{padding:16px 0;border-bottom:1px solid #e5e7eb;cursor:pointer;}' +
       '.bms .bms-badge{display:inline-block;margin-top:24px;padding:4px 10px;border-radius:999px;' +
         'background:#f3f4f6;color:#6b7280;font-size:12px;}' +
@@ -150,8 +152,14 @@
         var payload = post.payload || {};
         var h1 = variant && variant.h1 ? variant.h1 : (post.metaTitle || post.title);
         var intro = variant && variant.intro ? '<p>' + esc(variant.intro) + '</p>' : '';
+        var fi = payload.featureImage;
+        var hero = (fi && fi.url)
+          ? '<img class="bms-hero" src="' + esc(fi.url) + '" alt="' + esc(fi.alt || '') + '">' +
+            (fi.attribution ? '<p class="bms-credit">' + esc(fi.attribution) + '</p>' : '')
+          : '';
         view.innerHTML =
           '<button class="bms-back">← All posts</button>' +
+          hero +
           '<h1>' + esc(h1) + '</h1>' + intro +
           (payload.html || '') +
           badgeHtml(post, config.badgeEnabled);

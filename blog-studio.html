@@ -27,6 +27,12 @@
       padding: 12px; border-radius: 8px; white-space: pre-wrap; word-break: break-all; }
     .bs-status { font-size: 12px; color: #6b7280; }
     .bs-hidden { display: none !important; }
+    .bs-feature-empty { font-size: 12px; color: #6b7280; border: 1px dashed #d1d5db; border-radius: 8px; padding: 20px; text-align: center; }
+    .bs-feature-preview img { width: 100%; border-radius: 8px; display: block; }
+    .bs-media-picker { margin-top: 12px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; max-height: 260px; overflow: auto; }
+    .bs-media-picker img { width: 100%; height: 72px; object-fit: cover; border-radius: 6px; cursor: pointer; border: 2px solid transparent; }
+    .bs-media-picker img:hover { border-color: #ec4899; }
+    .bs-media-empty { grid-column: 1 / -1; font-size: 12px; color: #6b7280; text-align: center; padding: 12px; }
   </style>
 </head>
 <body class="bg-gray-50">
@@ -90,6 +96,23 @@
             <label class="bs-status">Embed snippet</label>
             <div id="bs-snippet" class="bs-snippet">Create a widget to get your embed code.</div>
           </div>
+        </div>
+
+        <!-- Feature image (US 2.1): reuses the content-assets library + AI image generation. -->
+        <div class="bs-panel">
+          <h3>Feature image</h3>
+          <div id="bs-feature-preview" class="bs-feature-empty">No feature image yet.</div>
+          <div class="bs-row" style="margin-top: 12px;">
+            <button id="bs-feature-library" class="bs-btn bs-btn-ghost">Choose from Library</button>
+            <button id="bs-feature-ai" class="bs-btn bs-btn-ghost">AI generate</button>
+            <button id="bs-feature-remove" class="bs-btn bs-btn-ghost bs-hidden">Remove</button>
+          </div>
+          <div id="bs-ai-form" class="bs-field bs-hidden" style="margin-top: 12px;">
+            <input id="bs-ai-prompt" placeholder="Describe the image…">
+            <button id="bs-ai-go" class="bs-btn bs-btn-ghost" style="margin-top: 8px;">Generate</button>
+          </div>
+          <div id="bs-media-picker" class="bs-media-picker bs-hidden"></div>
+          <span id="bs-media-status" class="bs-status"></span>
         </div>
       </div>
 
@@ -210,6 +233,7 @@
           onChange: function () { setStatus('bs-save-status', 'Saving…'); setTimeout(function () { setStatus('bs-save-status', 'Saved'); }, 1400); },
         });
         loadWidget();
+        loadFeature();
 
         // AI generate: draft the full post server-side (in the resolved voice), then swap it in.
         if (path === 'generate') {
@@ -300,6 +324,116 @@
       api('save-widget-config', { method: 'POST', body: JSON.stringify({
         action: 'update', theme: theme, badgeEnabled: document.getElementById('bs-badge').checked,
       }) }).then(function (res) { alert(res.ok ? 'Theme saved.' : (res.body.error || 'Failed')); });
+    });
+
+    // --- Feature image (US 2.1): reuses content-assets library + generate-ai-image ---
+    var mediaEls = {
+      preview: document.getElementById('bs-feature-preview'),
+      library: document.getElementById('bs-feature-library'),
+      ai: document.getElementById('bs-feature-ai'),
+      remove: document.getElementById('bs-feature-remove'),
+      aiForm: document.getElementById('bs-ai-form'),
+      aiPrompt: document.getElementById('bs-ai-prompt'),
+      aiGo: document.getElementById('bs-ai-go'),
+      picker: document.getElementById('bs-media-picker'),
+    };
+
+    function renderFeature(feature) {
+      if (feature && feature.url) {
+        mediaEls.preview.className = 'bs-feature-preview';
+        mediaEls.preview.innerHTML = '<img src="' + feature.url + '" alt="">';
+        mediaEls.remove.classList.remove('bs-hidden');
+      } else {
+        mediaEls.preview.className = 'bs-feature-empty';
+        mediaEls.preview.textContent = 'No feature image yet.';
+        mediaEls.remove.classList.add('bs-hidden');
+      }
+    }
+
+    function loadFeature() {
+      if (!state.postId) return;
+      api('blog-media?blogPostId=' + state.postId, { method: 'GET' }).then(function (res) {
+        if (res.ok) renderFeature(res.body.feature);
+      });
+    }
+
+    function hidePicker() {
+      mediaEls.picker.classList.add('bs-hidden');
+      mediaEls.picker.innerHTML = '';
+      mediaEls.aiForm.classList.add('bs-hidden');
+    }
+
+    function attachFeature(assetId) {
+      setStatus('bs-media-status', 'Attaching…');
+      api('blog-media', { method: 'POST', body: JSON.stringify({ blogPostId: state.postId, action: 'attach', role: 'feature', assetId: assetId }) })
+        .then(function (res) {
+          if (res.ok) { renderFeature(res.body.feature); hidePicker(); setStatus('bs-media-status', ''); }
+          else setStatus('bs-media-status', (res.body && res.body.error) || 'Failed');
+        });
+    }
+
+    mediaEls.remove.addEventListener('click', function () {
+      if (!state.postId) return;
+      api('blog-media', { method: 'POST', body: JSON.stringify({ blogPostId: state.postId, action: 'detach', role: 'feature' }) })
+        .then(function (res) { if (res.ok) renderFeature(res.body.feature); });
+    });
+
+    // Choose from the existing My Content image library.
+    mediaEls.library.addEventListener('click', function () {
+      if (!state.postId) return;
+      mediaEls.aiForm.classList.add('bs-hidden');
+      mediaEls.picker.classList.remove('bs-hidden');
+      mediaEls.picker.innerHTML = '<div class="bs-media-empty">Loading…</div>';
+      api('content-assets', { method: 'GET' }).then(function (res) {
+        if (!res.ok) { mediaEls.picker.innerHTML = '<div class="bs-media-empty">Could not load library.</div>'; return; }
+        var groups = res.body.assets || {};
+        var all = [].concat(groups.pending || [], groups.scheduled || [], groups.posted || []);
+        var images = all.filter(function (a) { return a.assetType === 'image' && (a.storageUrl || a.externalUrl); });
+        if (!images.length) { mediaEls.picker.innerHTML = '<div class="bs-media-empty">No images in your library yet.</div>'; return; }
+        mediaEls.picker.innerHTML = '';
+        images.forEach(function (a) {
+          var img = document.createElement('img');
+          img.src = a.storageUrl || a.externalUrl;
+          img.alt = a.name || '';
+          img.addEventListener('click', function () { attachFeature(a.id); });
+          mediaEls.picker.appendChild(img);
+        });
+      });
+    });
+
+    // Generate a custom feature graphic (existing credit-metered image endpoint).
+    mediaEls.ai.addEventListener('click', function () {
+      mediaEls.picker.classList.add('bs-hidden');
+      mediaEls.aiForm.classList.toggle('bs-hidden');
+      if (!mediaEls.aiForm.classList.contains('bs-hidden')) mediaEls.aiPrompt.focus();
+    });
+
+    mediaEls.aiGo.addEventListener('click', function () {
+      var prompt = mediaEls.aiPrompt.value.trim();
+      if (!prompt || !state.postId) return;
+      setStatus('bs-media-status', 'Generating…');
+      mediaEls.picker.classList.remove('bs-hidden');
+      mediaEls.picker.innerHTML = '<div class="bs-media-empty">Generating…</div>';
+      api('generate-ai-image', { method: 'POST', body: JSON.stringify({ prompt: prompt, aspectRatio: '16:9' }) })
+        .then(function (res) {
+          if (!res.ok) { setStatus('bs-media-status', (res.body && res.body.error) || 'Generation failed'); mediaEls.picker.innerHTML = ''; return; }
+          setStatus('bs-media-status', 'Pick a variation');
+          var jobId = res.body.jobId;
+          mediaEls.picker.innerHTML = '';
+          (res.body.images || []).forEach(function (im) {
+            var img = document.createElement('img');
+            img.src = im.url;
+            img.addEventListener('click', function () {
+              setStatus('bs-media-status', 'Saving…');
+              api('generate-ai-image', { method: 'POST', body: JSON.stringify({ action: 'select', jobId: jobId, index: im.index }) })
+                .then(function (sel) {
+                  if (sel.ok && sel.body.assetId) attachFeature(sel.body.assetId);
+                  else setStatus('bs-media-status', (sel.body && sel.body.error) || 'Could not save image');
+                });
+            });
+            mediaEls.picker.appendChild(img);
+          });
+        });
     });
   })();
   </script>
