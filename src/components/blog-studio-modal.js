@@ -166,6 +166,15 @@
     + '        <span id="bs-synd-status" class="bs-status" style="display:block;margin-top:6px;"></span>'
     + '        <div class="bs-status" style="font-size:11px;margin-top:4px;">Publish to your site first, then push to connected blogs.</div>'
     + '      </div>'
+    + '      <div class="bs-panel" style="margin-top:16px;">'
+    + '        <h3>Search performance</h3>'
+    + '        <div id="bs-gsc-status" class="bs-status">Checking&hellip;</div>'
+    + '        <div class="bs-row" style="margin-top:10px;">'
+    + '          <button id="bs-gsc-connect" class="bs-btn bs-btn-ghost bs-hidden" type="button">Connect Google Search Console</button>'
+    + '          <button id="bs-gsc-disconnect" class="bs-linkbtn bs-hidden" type="button">Disconnect</button>'
+    + '        </div>'
+    + '        <div class="bs-status" style="font-size:11px;margin-top:4px;">Lets your Blog Writer spot posts losing search traffic and flag them for a refresh.</div>'
+    + '      </div>'
     + '    </div>'
     + '    <div>'
     + '      <input id="bs-title" class="bs-title-input" placeholder="Post title">'
@@ -256,6 +265,7 @@
     loadWidget();
     loadFeature();
     loadSyndication();
+    loadSearchConsole();
     return state.editor;
   }
 
@@ -515,6 +525,25 @@
       .then(function () { loadSyndication(); });
   }
 
+  // ── Search Console (US 5.1 content-decay loop) — connect status ────────────────────────────────
+  function loadSearchConsole() {
+    var statusEl = el('bs-gsc-status');
+    if (!statusEl) return;
+    statusEl.textContent = 'Checking…';
+    el('bs-gsc-connect').classList.add('bs-hidden');
+    el('bs-gsc-disconnect').classList.add('bs-hidden');
+    api('oauth-integrations?action=status', { method: 'GET' }).then(function (res) {
+      var p = res.ok && res.body.providers ? res.body.providers.searchconsole : null;
+      if (p && p.connected) {
+        statusEl.textContent = 'Connected' + (p.accountName ? ' · ' + p.accountName : '');
+        el('bs-gsc-disconnect').classList.remove('bs-hidden');
+      } else {
+        statusEl.textContent = 'Not connected.';
+        el('bs-gsc-connect').classList.remove('bs-hidden');
+      }
+    }).catch(function () { statusEl.textContent = 'Could not check status.'; });
+  }
+
   // ── Wire all events once, after markup injection ───────────────────────────────────────────────
   function wireEvents() {
     Array.prototype.forEach.call(document.querySelectorAll('#bs-brief [data-path]'), function (btn) {
@@ -537,6 +566,14 @@
       api('publish-blog', { method: 'POST', body: JSON.stringify({ id: state.postId }) }).then(function (res) {
         setStatus('bs-publish-status', res.ok ? 'Published ✓ (' + res.body.post.slug + ')' : (res.body.error || 'Failed'));
       });
+    });
+
+    // Search Console connect (OAuth redirect) / disconnect for the content-decay loop.
+    el('bs-gsc-connect').addEventListener('click', function () {
+      window.location.href = '/.netlify/functions/oauth-integrations?provider=searchconsole&action=connect';
+    });
+    el('bs-gsc-disconnect').addEventListener('click', function () {
+      api('oauth-integrations?provider=searchconsole&action=disconnect', { method: 'POST' }).then(function () { loadSearchConsole(); });
     });
 
     // Syndicate the published post to the selected external blogs (Dev.to, Hashnode).

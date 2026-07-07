@@ -20,9 +20,9 @@ import { storeSecret, getSecret, deleteSecret } from './vault';
 
 type Db = ReturnType<typeof getDb>;
 
-export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail' | 'threads' | 'tiktok' | 'youtube' | 'wordpresscom';
+export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail' | 'threads' | 'tiktok' | 'youtube' | 'wordpresscom' | 'searchconsole';
 
-export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail', 'threads', 'tiktok', 'youtube', 'wordpresscom'];
+export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail', 'threads', 'tiktok', 'youtube', 'wordpresscom', 'searchconsole'];
 
 export function isIntegrationProvider(value: unknown): value is IntegrationProvider {
     return typeof value === 'string' && (INTEGRATION_PROVIDERS as string[]).includes(value);
@@ -301,6 +301,23 @@ async function refreshProviderToken(provider: IntegrationProvider, refreshToken:
         return { accessToken: data.access_token, refreshToken: null, expiresInSec: data.expires_in ?? null };
     }
 
+    if (provider === 'searchconsole') {
+        const res = await fetch('https://oauth2.googleapis.com/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                grant_type: 'refresh_token',
+                client_id: process.env.SEARCHCONSOLE_CLIENT_ID ?? '',
+                client_secret: process.env.SEARCHCONSOLE_CLIENT_SECRET ?? '',
+                refresh_token: refreshToken,
+            }),
+        });
+        const data: { access_token?: string; expires_in?: number } = await res.json().catch(() => ({}));
+        if (!res.ok || !data.access_token) throw new IntegrationError('refresh_failed', 'Google Search Console token refresh was rejected.', 401);
+        // Google does not rotate the refresh token on use — keep the stored one.
+        return { accessToken: data.access_token, refreshToken: null, expiresInSec: data.expires_in ?? null };
+    }
+
     // Slack: only used when token rotation is enabled on the app (otherwise bot tokens
     // never expire and this path is never reached — expiresAt stays null).
     const res = await fetch('https://slack.com/api/oauth.v2.access', {
@@ -383,6 +400,7 @@ const PROVIDER_LABELS: Record<IntegrationProvider, string> = {
     tiktok: 'TikTok',
     youtube: 'YouTube',
     wordpresscom: 'WordPress.com',
+    searchconsole: 'Google Search Console',
 };
 
 export function providerLabel(provider: IntegrationProvider): string {

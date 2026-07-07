@@ -75,6 +75,8 @@ const SCOPES: Record<IntegrationProvider, string> = {
     // WordPress.com: no scope param → the consent screen shows a site picker and the token is
     // scoped to the chosen blog (its blog_id comes back in the token response).
     wordpresscom: '',
+    // Google Search Console: read-only search analytics for the content-decay loop (US 5.1).
+    searchconsole: 'https://www.googleapis.com/auth/webmasters.readonly',
 };
 
 /**
@@ -230,6 +232,9 @@ export const handler: Handler = async (event) => {
         } else if (provider === 'wordpresscom') {
             // No scope param → the consent screen lets the user pick which blog to authorise.
             authUrl = `https://public-api.wordpress.com/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
+        } else if (provider === 'searchconsole') {
+            // Google consent — offline + consent forces a refresh token for the daily ingest cron.
+            authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.searchconsole)}&access_type=offline&prompt=consent&state=${state}`;
         } else {
             authUrl = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=${encodeURIComponent(SCOPES.slack)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
         }
@@ -657,6 +662,42 @@ export const handler: Handler = async (event) => {
                     externalAccountName: tokenData.blog_url ?? null,
                     scopes: null,
                 });
+            } else if (provider === 'searchconsole') {
+                const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        grant_type: 'authorization_code',
+                        client_id: process.env.SEARCHCONSOLE_CLIENT_ID ?? '',
+                        client_secret: process.env.SEARCHCONSOLE_CLIENT_SECRET ?? '',
+                        redirect_uri: redirectUri,
+                        code,
+                    }),
+                });
+                const tokenData: { access_token?: string; refresh_token?: string; expires_in?: number; scope?: string } = await tokenRes.json().catch(() => ({}));
+                if (!tokenData.access_token) return redirect(`/integrations.html?oauth_error=token_exchange&provider=searchconsole`);
+
+                // A verified property makes a friendly card label (best-effort); the ingest cron
+                // re-lists properties itself, so this is display-only.
+                let siteLabel: string | null = null;
+                try {
+                    const sitesRes = await fetch('https://www.googleapis.com/webmasters/v3/sites', {
+                        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+                    });
+                    const sites: { siteEntry?: { siteUrl?: string; permissionLevel?: string }[] } = sitesRes.ok ? await sitesRes.json() : {};
+                    const verified = (sites.siteEntry ?? []).filter((s) => s.permissionLevel && s.permissionLevel !== 'siteUnverifiedUser');
+                    siteLabel = verified[0]?.siteUrl ?? null;
+                } catch { /* label only — connection still succeeds */ }
+
+                await saveIntegration(db, {
+                    organisationId, userId, provider: 'searchconsole',
+                    accessToken: tokenData.access_token,
+                    refreshToken: tokenData.refresh_token ?? null,
+                    expiresInSec: tokenData.expires_in ?? null,
+                    tenantId: null,
+                    externalAccountName: siteLabel,
+                    scopes: tokenData.scope ?? SCOPES.searchconsole,
+                });
             } else {
                 const tokenRes = await fetch('https://slack.com/api/oauth.v2.access', {
                     method: 'POST',
@@ -691,9 +732,10 @@ export const handler: Handler = async (event) => {
             return redirect(`/integrations.html?oauth_error=token_exchange&provider=${provider}`);
         }
 
-        // WordPress.com is managed from the Blog Studio syndicate panel (no integrations.html
-        // card), so send the user back there; every other provider lands on the integrations page.
-        return redirect(provider === 'wordpresscom' ? '/blog-studio.html?connected=wordpresscom' : `/integrations.html?connected=${provider}`);
+        // The blog connectors (WordPress.com, Search Console) are managed from Blog Studio, not
+        // integrations.html, so send the user back there; every other provider lands on integrations.
+        const blogProvider = provider === 'wordpresscom' || provider === 'searchconsole';
+        return redirect(blogProvider ? `/blog-studio.html?connected=${provider}` : `/integrations.html?connected=${provider}`);
     }
 
     return json(400, { error: `Unknown action for ${providerLabel(provider)} integration.` });

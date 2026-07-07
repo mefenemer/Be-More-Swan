@@ -113,6 +113,10 @@ node_bundler = "esbuild"
 [functions.publish-blog-posts]
   schedule = "*/5 * * * *"
 
+# US 5.1: ingest Search Console metrics + flag decayed blog posts — 06:00 UTC every day
+[functions.ingest-gsc-metrics]
+  schedule = "0 6 * * *"
+
 # US-ADM-2.3.1: Stripe↔DB nightly billing reconciliation — 02:00 UTC every day
 [functions.reconcile-billing]
   schedule = "0 2 * * *"
