@@ -1,6 +1,8 @@
 # Autonomous Content Engine & Publishing Assistant — Plan & Assessment
 
-Status: **planning / assessment only — no code written.** Last updated 2026-07-07.
+Status: **Phases 0–3 built** (blog model, editor, widget, publish, scheduling, A/B beacon, blog-as-assistant).
+**Both gating product decisions resolved (§7).** Remaining: connector layer (§4), GSC decay (US 5.1),
+C2PA image signing (US 6.1). Last updated 2026-07-07.
 
 Maps the "Autonomous Content Engine & Publishing Assistant" epic onto the existing BMS
 (`aura`) codebase, records verified external-connector findings, and proposes a phased build order.
@@ -15,8 +17,9 @@ media). The epic is a **long-form blog engine** (Markdown, Substack/Medium/nativ
 ~60% of the *infrastructure* the epic needs already exists and is reusable: AI generation, media
 pipeline, Pexels sourcing, scheduling, HITL approval, C2PA provenance, AI credits, audit logs.
 Net-new work concentrates in three areas: a **Markdown/blog content type**, the **native
-embeddable widget** (greenfield), and the **blog-platform connectors** — one of which
-(long-form push to Substack/Medium) has no viable official path for a new SaaS.
+embeddable widget** (greenfield), and the **blog-platform connectors**. Substack/Medium were
+dropped (no official long-form-push API); the connector set is now **WordPress, Ghost, Hashnode,
+Dev.to** — all of which expose an official long-form write API (see §4).
 
 ## 2. Already exists and directly reusable
 
@@ -45,40 +48,49 @@ embeddable widget** (greenfield), and the **blog-platform connectors** — one o
 | 1.3 SEO metadata | Net-new (`urlSlug`/`metaDescription` = 0 hits) | JSON extraction endpoint + storage columns |
 | 2.1 Media | Mostly done | Only "AI Generate custom feature graphic" prompt UI wiring is thin |
 | 3.1 Native widget + theming | **Net-new (greenfield, largest)** | Public JSON API, per-workspace `<script>` embed, client widget bundle, theming panel, published-payload store |
-| 3.2 Substack/Medium | Net-new + feasibility limits | See §4 |
+| 3.2 Blog connectors (WordPress/Ghost/Hashnode/Dev.to) | Net-new | `BlogDestination` adapter + per-platform adapters + RSS. See §4 |
 | 4.1 Queue/cadence | Mostly done | Extend calendar/queue to blog posts |
 | 5.1 Content decay | Net-new | Google Search Console OAuth + ingestion; decay threshold → "Update Ticket" (reuse `pending_actions`) |
 | 5.2 A/B hook testing | Net-new | Variant storage, widget-side random serving, scroll/time tracking, auto-promote logic |
 
-## 4. External connectors — VERIFIED (probed live 2026-07-07)
+## 4. External connectors — DECIDED (verified 2026-07-07)
 
-| Connector | Official? | Auth | Write long-form? | Verdict (new BMS integration) |
+**Substack/Medium DROPPED** (neither offers an official long-form-push API for a new SaaS — Substack's
+only write scope is `notes.write`; Medium's API has been closed to new integrations since 1 Jan 2025).
+Replaced with four platforms that each expose an **official long-form write API**. **Beehiiv was
+evaluated and dropped** — it's a newsletter tool where "publish" emails the subscriber list, not a
+blog destination.
+
+| Connector | Official write? | Auth | Body format | Tier |
 |---|---|---|---|---|
-| Google Search Console (US 5.1) | Yes | OAuth2 + refresh, PKCE S256 | n/a (read) | **Fully viable.** Best-supported. |
-| Substack (US 3.2) | Yes (new) | OAuth2 + refresh, PKCE, dynamic client reg | No — Notes only | Connect+read+Notes viable; long-form only via email-to-Substack |
-| Medium (US 3.2) | Frozen | Legacy token | Token works, but… | **Not viable for new users** — API closed to new integrations since 1 Jan 2025 |
+| Google Search Console (US 5.1) | n/a (read) | OAuth2 + refresh, PKCE S256 | — | **Decay ingest** |
+| WordPress (self-hosted) | ✅ `POST /wp/v2/posts` | Application Password (HTTP Basic) + site URL | HTML | **1** (no OAuth) |
+| Ghost | ✅ `POST /admin/posts/` | Admin API key `id:secret` → JWT + site URL (paste) | HTML / Lexical | **1** (no OAuth) |
+| Hashnode | ✅ `publishPost` GraphQL mutation | Personal Access Token (raw `Authorization`, not Bearer) | **Markdown** (`contentMarkdown`) | **1** (no OAuth) |
+| Dev.to (Forem) | ✅ `POST /articles` (v1) | `api-key` header | **Markdown** (`body_markdown`) | **1** (no OAuth) |
+| WordPress.com | ✅ `POST /wp/v2/posts` | OAuth2 | HTML | **2** (OAuth) |
 
 ### Evidence
-- **Substack** — `https://mcp.substack.com/api/v1/mcp` returns `401` + `WWW-Authenticate: Bearer realm="substack"`.
-  AS `https://substack.com` advertises `authorization_code`+`refresh_token`, PKCE S256, dynamic registration,
-  scopes `openid profile email mcp:read offline_access notes.read notes.write`. **Only write scope is
-  `notes.write`** (short-form Notes, no draft state). No `posts.write`/`drafts.write`. MCP resource is
-  `mcp:read` (read-only) today.
-- **Medium** — `api.medium.com/v1` alive (`401`, `x-powered-by: Medium`) but Medium closed the API to
-  all new integrations as of 1 Jan 2025 (no new tokens/OAuth apps). Legacy tokens still work → paste-in only.
+- **WordPress** — REST API `POST /wp/v2/posts` (content = HTML). Self-hosted authenticates via Application
+  Passwords (HTTP Basic, WP ≥5.6, the recommended machine-to-machine path); WordPress.com uses OAuth2.
+- **Ghost** — Admin API `POST /admin/posts/`; auth is a JWT signed from a Custom Integration's Admin API
+  key (`id:secret`), sent in the `Authorization` header. Accepts HTML (`?source=html`) or Lexical.
+- **Hashnode** — GraphQL `https://gql.hashnode.com`, `publishPost(input: PublishPostInput!)` mutation with
+  `contentMarkdown`; auth = Personal Access Token as the raw `Authorization` header (NOT `Bearer`). Markdown-native.
+- **Dev.to** — Forem API v1 `POST /articles`; `body_markdown`; `api-key` header + `Accept: application/vnd.forem.api-v1+json`. Markdown-native.
 - **GSC** — Google standard OAuth2; `searchconsole.googleapis.com` live (`401 Bearer`); discovery doc scopes
   `webmasters` / `webmasters.readonly`, resources incl. `searchanalytics` (clicks/impressions/CTR/position).
   Overhead: Google OAuth app verification for the sensitive scope (timeline, not a blocker).
 
-### Headline consequence
-Neither Substack nor Medium offers an official path for a **new** SaaS to push an approved
-**long-form** blog draft/post → **US 3.2 AC2's core promise is not cleanly deliverable via
-official APIs.** Therefore:
-- The **Native BMS Widget (US 3.1)** is the real, fully-controlled distribution primitive.
-- Recommended bridge to platforms: emit an **RSS feed** off the widget's published payload;
-  Substack/Medium import via *their own* tools — official, durable, no scraping.
-- Position external pushes as best-effort add-ons: Substack (OAuth read/Notes/email-draft),
-  Medium (legacy-token paste-in only).
+### Consequence / approach
+- The **Native BMS Widget (US 3.1)** stays the core, fully-controlled distribution primitive; **RSS** off
+  the published payload is the universal fallback for anything off this list.
+- The four blog connectors are real long-form pushes (unlike the abandoned Substack/Medium). Both content
+  representations already exist: `body_markdown` → Hashnode/Dev.to unchanged; sanitized `published_payload`
+  HTML → WordPress/Ghost. **No new rendering work.**
+- One `BlogDestination` adapter interface (`publish(payload) → { externalId, url, status }`) with one adapter
+  per platform, dispatched off `blog_posts.destinations jsonb` (§9). Build Tier 1 (paste-token: WordPress
+  self-hosted, Ghost, Hashnode, Dev.to) first; Tier 2 = WordPress.com OAuth (reuses `oauth-integrations.ts`).
 
 ## 5. Other risks / feasibility flags
 1. **A/B testing (US 5.2) vs. static payload (US 3.1 AC3)** — randomized variant serving + beacons
@@ -94,14 +106,19 @@ official APIs.** Therefore:
 - **Phase 1 — Authoring (F1):** Markdown editor, sectional rewrite (1.2), SEO metadata (1.3). Media (F2) mostly reuse.
 - **Phase 2 — Native widget (F3.1) + compliance (F6):** public JSON API, embed script, theming, transparency badge, RSS output. F6 nearly free here.
 - **Phase 3 — Scheduling (F4):** extend calendar/queue to blogs. Low effort.
-- **Phase 4 — Connectors:** GSC (for Phase 5), Substack OAuth (read/Notes/email-draft). Medium legacy-token only.
+- **Phase 4 — Connectors:** GSC (for Phase 5); blog push via `BlogDestination` adapters — Tier 1 paste-token
+  (WordPress self-hosted, Ghost, Hashnode, Dev.to) then Tier 2 WordPress.com OAuth; RSS fallback.
 - **Phase 5 — Autonomy (F5):** GSC ingestion + decay tickets, then widget A/B testing (depends on Phase 2).
 
 ## 7. Open product decisions
-1. Substack/Medium long-form — accept email-to-Substack + RSS-import as the answer, or drop direct push from v1?
+1. Substack/Medium long-form — **RESOLVED (2026-07-07): DROP both** (no official long-form-push API).
+   Native Widget + RSS is the core primitive; connector set = **WordPress, Ghost, Hashnode, Dev.to**
+   (all have official long-form write APIs). Beehiiv evaluated and dropped (newsletter, not a blog). See §4.
 2. New `blog_posts` table vs. extend `scheduled_posts`? — **RESOLVED: new table.** See §9.
 3. Widget rendering — static published JSON (cacheable) vs. dynamic (needed for A/B)? — **RESOLVED: static snapshot + client-side variant pick.** See §8.
-4. Decay analytics source — GSC only, or also GA4?
+4. Decay analytics source — **RESOLVED (2026-07-07): GSC only for v1.** GA4 is a possible additive
+   fast-follow; keep the decay detector reading `traffic_baseline`/`last_metrics_at` generically so a
+   GA4 ingester can write the same columns later.
 
 ---
 
@@ -329,9 +346,9 @@ z-test on engaged-rate) is a fast-follow, not v1.
 | 1.1 Brief + 3 paths | `ai_blueprints` + `assemble-blueprint` + `generate-post`; "Improve Draft" seeds the §10 editor with tracked-changes; Rough-Notes textarea → blueprint context | Blog brief form + 3-path router UI | — |
 | 1.3 SEO metadata | one-shot Anthropic → structured JSON | `generate-seo.ts` (metaTitle/metaDescription/urlSlug/tags), slug-uniqueness/org, store on `blog_posts`; trigger on approval | — |
 | 2.1 Media | Pexels (`pexels-search`), `generate-ai-image`, upload, `process-media-job-background` all exist | Wire editor drag-drop + "AI Source"/"AI Generate" buttons to existing endpoints; attach via `blog_post_assets` | — |
-| 3.2 Substack/Medium | `oauth-integrations` + `workspace_integrations` provider rows; `widget-rss.ts` off published payload | Substack OAuth (read/Notes/email-draft), Medium legacy-token paste, RSS feed | §7 #1 decision |
+| 3.2 Blog connectors | `oauth-integrations` + `workspace_integrations` + `vault_secrets` for creds; `widget-rss.ts` off published payload; existing `body_markdown` + sanitized `published_payload` HTML feed the adapters | `BlogDestination` iface + 4 adapters (WordPress/Ghost/Hashnode/Dev.to), WordPress.com OAuth, RSS feed | — (§7 #1 resolved) |
 | 4.1 Queue/cadence | `calendar.js` UI + publish cron already do Fill-Queue/drag-drop for social | Point the same UI + cron at `blog_posts` (`publish_date`) | — |
-| 5.1 Content decay | GSC connector (§4) + `pending_actions` for the Update Ticket + `rewrite`/`generate` for the revision | `ingest-gsc-metrics.ts` (cron) → `traffic_baseline`; threshold → AI-drafted revision needing approval | §7 #4 decision |
+| 5.1 Content decay | GSC connector (§4) + `pending_actions` for the Update Ticket + `rewrite`/`generate` for the revision | `ingest-gsc-metrics.ts` (cron) → `traffic_baseline`; threshold → AI-drafted revision needing approval | — (§7 #4 resolved: GSC only) |
 | 6.1 Compliance | ~80% exists: `content_provenance`, AI disclosure, `audit_logs` | **C2PA image signing** (needs signing lib + cert — the one heavier item), widget badge (§8), edit-log (§10) | — |
 
 **Design track complete.** Greenfield critical path (§8 widget, §9 blog model, §10 editor, §11 A/B)

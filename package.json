@@ -18,6 +18,7 @@
     "test:goal-metrics": "tsx tests/goal-metrics.test.ts",
     "test:goal-progress": "tsx tests/goal-progress.test.ts",
     "test:roi-period": "tsx tests/roi-period.test.ts",
+    "test:blog-destinations": "tsx tests/blog-destinations.test.ts",
     "db:push": "drizzle-kit push",
     "db:seed": "npx tsx seed/cli.ts",
     "db:seed:sandbox": "npx tsx seed/cli.ts --sandbox",
