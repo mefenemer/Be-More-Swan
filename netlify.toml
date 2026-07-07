@@ -105,6 +105,10 @@ node_bundler = "esbuild"
 [functions.task-volume-check]
   schedule = "0 8 * * *"
 
+# US 5.2: resolve widget A/B hook tests (promote the winning variant) — hourly
+[functions.resolve-ab-tests]
+  schedule = "0 * * * *"
+
 # US-ADM-2.3.1: Stripe↔DB nightly billing reconciliation — 02:00 UTC every day
 [functions.reconcile-billing]
   schedule = "0 2 * * *"

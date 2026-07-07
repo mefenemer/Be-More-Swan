@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blog Studio — Be More Swan</title>
+  <link href="./style.css" rel="stylesheet">
+  <!-- Markdown rendering for the editor (same libs/versions as workspace.html) -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <style>
+    .bs-wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
+    .bs-grid { display: grid; grid-template-columns: 260px 1fr; gap: 24px; }
+    .bs-panel { border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; background: #fff; }
+    .bs-panel h3 { margin: 0 0 12px; font-size: 14px; font-weight: 600; }
+    .bs-field { margin-bottom: 12px; }
+    .bs-field label { display: block; font-size: 12px; color: #6b7280; margin-bottom: 4px; }
+    .bs-field input, .bs-field select, .bs-field textarea {
+      width: 100%; padding: 8px; border: 1px solid #d1d5db; border-radius: 8px; font: inherit; }
+    .bs-btn { padding: 8px 14px; border-radius: 8px; border: 0; cursor: pointer; font-size: 14px; }
+    .bs-btn-primary { background: #ec4899; color: #fff; }
+    .bs-btn-ghost { background: #f3f4f6; color: #111827; }
+    .bs-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .bs-title-input { width: 100%; font-size: 26px; font-weight: 700; border: 0; outline: 0; padding: 8px 0; }
+    .bs-editor { min-height: 320px; border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; background: #fff; }
+    .bs-snippet { font-family: ui-monospace, monospace; font-size: 12px; background: #111827; color: #e5e7eb;
+      padding: 12px; border-radius: 8px; white-space: pre-wrap; word-break: break-all; }
+    .bs-status { font-size: 12px; color: #6b7280; }
+    .bs-hidden { display: none; }
+  </style>
+</head>
+<body class="bg-gray-50">
+  <div class="bs-wrap">
+    <div class="bs-row" style="justify-content: space-between; margin-bottom: 16px;">
+      <h1 style="font-size: 20px; font-weight: 700;">Blog Studio</h1>
+      <span id="bs-save-status" class="bs-status"></span>
+    </div>
+
+    <!-- Step 1: brief + 3-path start (US 1.1) -->
+    <div id="bs-brief" class="bs-panel" style="margin-bottom: 24px;">
+      <h3>Start a new post</h3>
+      <div class="bs-grid" style="grid-template-columns: 1fr 1fr 1fr;">
+        <div class="bs-field"><label>Topic</label><input id="bs-topic" placeholder="e.g. AI for small teams"></div>
+        <div class="bs-field"><label>Keywords</label><input id="bs-keywords" placeholder="comma,separated"></div>
+        <div class="bs-field"><label>Tone</label>
+          <select id="bs-tone">
+            <option>Professional</option><option>Casual</option><option>Confident</option><option>Friendly</option>
+          </select>
+        </div>
+      </div>
+      <div class="bs-field"><label>Rough notes / transcript (optional)</label><textarea id="bs-notes" rows="3"></textarea></div>
+      <div class="bs-row">
+        <button class="bs-btn bs-btn-ghost" data-path="blank">Start blank</button>
+        <button class="bs-btn bs-btn-ghost" data-path="improve">Improve draft</button>
+        <button class="bs-btn bs-btn-primary" data-path="generate">AI generate</button>
+      </div>
+    </div>
+
+    <!-- Step 2: editor + theming -->
+    <div id="bs-workspace" class="bs-grid bs-hidden">
+      <div>
+        <div class="bs-panel" style="margin-bottom: 16px;">
+          <h3>Widget</h3>
+          <div class="bs-field"><label>Accent colour</label><input id="bs-accent" type="color" value="#ec4899"></div>
+          <div class="bs-field"><label>Font family</label>
+            <select id="bs-font">
+              <option value="system-ui, sans-serif">System</option>
+              <option value="Georgia, serif">Serif</option>
+              <option value="'Inter', sans-serif">Inter</option>
+            </select>
+          </div>
+          <div class="bs-field"><label><input id="bs-badge" type="checkbox" checked> Show AI transparency badge</label></div>
+          <button id="bs-save-theme" class="bs-btn bs-btn-ghost">Save theme</button>
+          <div style="margin-top: 12px;">
+            <label class="bs-status">Embed snippet</label>
+            <div id="bs-snippet" class="bs-snippet">Create a widget to get your embed code.</div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <input id="bs-title" class="bs-title-input" placeholder="Post title">
+        <div id="bs-editor" class="bs-editor"></div>
+        <div class="bs-row" style="margin-top: 16px;">
+          <button id="bs-generate-hooks" class="bs-btn bs-btn-ghost">Generate A/B hooks</button>
+          <button id="bs-publish" class="bs-btn bs-btn-primary">Publish</button>
+          <span id="bs-publish-status" class="bs-status"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="./src/components/markdown-editor.js"></script>
+  <script>
+  (function () {
+    'use strict';
+    var api = function (path, opts) {
+      return fetch('/.netlify/functions/' + path, Object.assign({
+        credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+      }, opts)).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); });
+    };
+
+    var state = { postId: null, editor: null };
+
+    function setStatus(id, msg) { var el = document.getElementById(id); if (el) el.textContent = msg; }
+
+    // --- Brief / 3-path start ---
+    Array.prototype.forEach.call(document.querySelectorAll('#bs-brief [data-path]'), function (btn) {
+      btn.addEventListener('click', function () { startPost(btn.getAttribute('data-path')); });
+    });
+
+    function seedMarkdown(path) {
+      var topic = document.getElementById('bs-topic').value.trim();
+      var notes = document.getElementById('bs-notes').value.trim();
+      if (path === 'improve' && notes) return notes;
+      if (path === 'generate') return '# ' + (topic || 'New post') + '\n\n_Drafting…_\n\n' + (notes || '');
+      return '# ' + (topic || 'New post') + '\n\nStart writing here.';
+    }
+
+    function startPost(path) {
+      var title = document.getElementById('bs-topic').value.trim() || 'Untitled draft';
+      api('blog-posts', { method: 'POST', body: JSON.stringify({ title: title }) }).then(function (res) {
+        if (!res.ok) { alert('Could not create post: ' + (res.body.error || '')); return; }
+        state.postId = res.body.post.id;
+        document.getElementById('bs-brief').classList.add('bs-hidden');
+        document.getElementById('bs-workspace').classList.remove('bs-hidden');
+        document.getElementById('bs-title').value = title;
+
+        var md = seedMarkdown(path);
+        state.editor = window.MarkdownEditor.mount({
+          container: document.getElementById('bs-editor'),
+          blogPostId: state.postId,
+          initialMarkdown: md,
+          title: title,
+          onChange: function () { setStatus('bs-save-status', 'Saving…'); setTimeout(function () { setStatus('bs-save-status', 'Saved'); }, 1400); },
+        });
+        loadWidget();
+      });
+    }
+
+    // --- Title autosave ---
+    document.getElementById('bs-title').addEventListener('blur', function () {
+      if (!state.postId) return;
+      api('save-blog-draft', { method: 'POST', body: JSON.stringify({ id: state.postId, title: this.value }) });
+    });
+
+    // --- Publish ---
+    document.getElementById('bs-publish').addEventListener('click', function () {
+      if (!state.postId) return;
+      setStatus('bs-publish-status', 'Publishing…');
+      api('publish-blog', { method: 'POST', body: JSON.stringify({ id: state.postId }) }).then(function (res) {
+        setStatus('bs-publish-status', res.ok ? 'Published ✓ (' + res.body.post.slug + ')' : (res.body.error || 'Failed'));
+      });
+    });
+
+    // --- A/B hooks ---
+    document.getElementById('bs-generate-hooks').addEventListener('click', function () {
+      if (!state.postId) return;
+      setStatus('bs-publish-status', 'Generating hooks…');
+      api('generate-hooks', { method: 'POST', body: JSON.stringify({ blogPostId: state.postId }) }).then(function (res) {
+        setStatus('bs-publish-status', res.ok ? (res.body.hookVariants.length + ' hook variants ready') : (res.body.error || 'Failed'));
+      });
+    });
+
+    // --- Widget config / theming ---
+    function renderSnippet(key) {
+      document.getElementById('bs-snippet').textContent =
+        '<script async src="' + location.origin + '/widget.js"\n        data-bms-key="' + key + '" data-bms-mount="#bms-blog"><\/script>';
+    }
+
+    function loadWidget() {
+      api('save-widget-config', { method: 'GET' }).then(function (res) {
+        var cfg = res.body.config;
+        if (!cfg) {
+          return api('save-widget-config', { method: 'POST', body: JSON.stringify({ action: 'create' }) })
+            .then(function (r) { if (r.ok) applyWidget(r.body.config); });
+        }
+        applyWidget(cfg);
+      });
+    }
+
+    function applyWidget(cfg) {
+      renderSnippet(cfg.publicKey);
+      var theme = cfg.theme || {};
+      if (theme.accent) document.getElementById('bs-accent').value = theme.accent;
+      if (theme.fontFamily) document.getElementById('bs-font').value = theme.fontFamily;
+      document.getElementById('bs-badge').checked = cfg.badgeEnabled !== false;
+    }
+
+    document.getElementById('bs-save-theme').addEventListener('click', function () {
+      var theme = {
+        accent: document.getElementById('bs-accent').value,
+        fontFamily: document.getElementById('bs-font').value,
+      };
+      api('save-widget-config', { method: 'POST', body: JSON.stringify({
+        action: 'update', theme: theme, badgeEnabled: document.getElementById('bs-badge').checked,
+      }) }).then(function (res) { alert(res.ok ? 'Theme saved.' : (res.body.error || 'Failed')); });
+    });
+  })();
+  </script>
+</body>
+</html>
