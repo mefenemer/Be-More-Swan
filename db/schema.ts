@@ -1207,12 +1207,15 @@ export const featureRequests = pgTable("feature_requests", {
   category: text("category").notNull().default("app_core"),
   // CATALOGUE ROLE slug when category='existing_assistant' (not a tenant instance).
   assistantRef: text("assistant_ref"),
-  // pending_review | under_review | open | planned | in_progress | released | declined | duplicate
+  // pending_review | under_review | open | planned | brief_ready | in_progress | released | declined | duplicate
   status: text("status").notNull().default("pending_review"),
   // 'critical' | 'high' | 'medium' | 'low'
   priority: text("priority").notNull().default("medium"),
   // Gantt placement, e.g. '2026-Q3'.
   targetQuarter: text("target_quarter"),
+  // The execution brief for Claude to build from (status='brief_ready' and later). Optionally
+  // AI-drafted from title/description via ?action=draft-brief.
+  brief: text("brief"),
   // Manual drag-rank within the admin board; lower sorts higher.
   sortOrder: integer("sort_order").notNull().default(0),
   // Denormalised vote tally (feature_request_votes is the source of truth).

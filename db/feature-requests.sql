@@ -8,9 +8,11 @@
 --
 -- Lifecycle (status):
 --   pending_review (default for USER submissions) — visible only to the submitter + admins
---   under_review                                  — an admin is triaging it
+--   under_review                                  — an admin is triaging it (may polish wording with AI)
 --   open                                          — approved + public; on the board, not yet scheduled
 --   planned                                       — scheduled onto a quarter (appears on the roadmap)
+--   brief_ready                                   — an execution brief has been written (optionally
+--                                                    AI-drafted, `brief` column) for Claude to build from
 --   in_progress                                   — being built (appears on the roadmap)
 --   released                                      — shipped (released_at set; powers avg-wait metric)
 --   declined                                      — rejected by an admin
@@ -51,6 +53,11 @@ CREATE TABLE IF NOT EXISTS feature_requests (
   -- Gantt placement, e.g. '2026-Q3'. Set when an admin drags the card onto a quarter.
   target_quarter        TEXT,
 
+  -- The execution brief for Claude to build from (status='brief_ready' and later). Admin-written,
+  -- optionally AI-drafted from title/description via ?action=draft-brief (same pattern as
+  -- "Enhance with AI" on description).
+  brief                 TEXT,
+
   -- Manual drag-rank within the admin board; lower sorts higher.
   sort_order            INTEGER NOT NULL DEFAULT 0,
 
@@ -90,14 +97,14 @@ BEGIN
   END IF;
 END $$;
 
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'feature_requests_status_check') THEN
-    ALTER TABLE feature_requests ADD CONSTRAINT feature_requests_status_check
-      CHECK (status IN ('pending_review', 'under_review', 'open', 'planned',
-                        'in_progress', 'released', 'declined', 'duplicate'));
-  END IF;
-END $$;
+-- Dropped + recreated (not the guarded IF-NOT-EXISTS pattern used elsewhere in this file) so that
+-- adding 'brief_ready' below actually takes effect when re-run against a DB that already has the
+-- older version of this constraint.
+ALTER TABLE feature_requests DROP CONSTRAINT IF EXISTS feature_requests_status_check;
+ALTER TABLE feature_requests
+  ADD CONSTRAINT feature_requests_status_check
+  CHECK (status IN ('pending_review', 'under_review', 'open', 'planned', 'brief_ready',
+                    'in_progress', 'released', 'declined', 'duplicate'));
 
 DO $$
 BEGIN
