@@ -202,12 +202,17 @@ export async function searchUniqueImages(
     db: Db,
     orgId: number,
     context: string,
-    { limit = 5 }: { limit?: number } = {},
+    { limit = 5, dedup = true }: { limit?: number; dedup?: boolean } = {},
 ): Promise<SearchResult> {
     const keywords = await generateImageKeywords(context);
     if (!keywords) return { keywords, candidates: [] };
 
-    let unique = await filterUnique(db, orgId, await cachedSearch<PexelsCandidate>(db, 'photo', keywords, 1));
+    const page1 = await cachedSearch<PexelsCandidate>(db, 'photo', keywords, 1);
+    // The never-reuse rule is a social-feed guarantee (posted_assets). Callers that don't share
+    // that feed — e.g. blog hero images — opt out and draw from the full stock pool.
+    if (!dedup) return { keywords, candidates: page1.slice(0, limit) };
+
+    let unique = await filterUnique(db, orgId, page1);
     if (unique.length === 0) {
         // US2 AC2.4: first page was all duplicates — automatically request page 2.
         unique = await filterUnique(db, orgId, await cachedSearch<PexelsCandidate>(db, 'photo', keywords, 2));
@@ -220,12 +225,15 @@ export async function searchUniqueVideos(
     db: Db,
     orgId: number,
     context: string,
-    { limit = 5 }: { limit?: number } = {},
+    { limit = 5, dedup = true }: { limit?: number; dedup?: boolean } = {},
 ): Promise<VideoSearchResult> {
     const keywords = await generateImageKeywords(context);
     if (!keywords) return { keywords, candidates: [] };
 
-    let unique = await filterUnique(db, orgId, await cachedSearch<PexelsVideoCandidate>(db, 'video', keywords, 1));
+    const page1 = await cachedSearch<PexelsVideoCandidate>(db, 'video', keywords, 1);
+    if (!dedup) return { keywords, candidates: page1.slice(0, limit) };
+
+    let unique = await filterUnique(db, orgId, page1);
     if (unique.length === 0) {
         unique = await filterUnique(db, orgId, await cachedSearch<PexelsVideoCandidate>(db, 'video', keywords, 2));
     }

@@ -47,10 +47,13 @@ export const handler: Handler = async (event) => {
     if (!user) return { statusCode: 403, body: JSON.stringify({ error: 'User not found.' }) };
     const orgId = user.organisationId;
 
-    let body: { action?: string; topic?: string; postId?: number; candidate?: PexelsCandidate | PexelsVideoCandidate; mediaType?: string };
+    let body: { action?: string; topic?: string; postId?: number; candidate?: PexelsCandidate | PexelsVideoCandidate; mediaType?: string; dedup?: boolean };
     try { body = JSON.parse(event.body || '{}'); } catch { body = {}; }
 
     const mediaType: 'image' | 'video' = body.mediaType === 'video' ? 'video' : 'image';
+    // Dedup against posted_assets is on by default (social-feed never-reuse rule). Non-feed callers
+    // (blog hero images) pass dedup:false to draw from the full stock pool.
+    const dedup = body.dedup !== false;
 
     try {
         // ── SELECT: attach a chosen candidate to the post draft ───────────────
@@ -103,8 +106,8 @@ export const handler: Handler = async (event) => {
         if (!context) return { statusCode: 400, body: JSON.stringify({ error: 'A topic or postId with content is required.' }) };
 
         const { keywords, candidates } = mediaType === 'video'
-            ? await searchUniqueVideos(db, orgId, context)
-            : await searchUniqueImages(db, orgId, context);
+            ? await searchUniqueVideos(db, orgId, context, { dedup })
+            : await searchUniqueImages(db, orgId, context, { dedup });
         return { statusCode: 200, body: JSON.stringify({ keywords, candidates, mediaType }) };
 
     } catch (err) {

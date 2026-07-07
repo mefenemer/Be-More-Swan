@@ -104,12 +104,17 @@
           <div id="bs-feature-preview" class="bs-feature-empty">No feature image yet.</div>
           <div class="bs-row" style="margin-top: 12px;">
             <button id="bs-feature-library" class="bs-btn bs-btn-ghost">Choose from Library</button>
+            <button id="bs-feature-pexels" class="bs-btn bs-btn-ghost">Stock photo</button>
             <button id="bs-feature-ai" class="bs-btn bs-btn-ghost">AI generate</button>
             <button id="bs-feature-remove" class="bs-btn bs-btn-ghost bs-hidden">Remove</button>
           </div>
           <div id="bs-ai-form" class="bs-field bs-hidden" style="margin-top: 12px;">
             <input id="bs-ai-prompt" placeholder="Describe the image…">
             <button id="bs-ai-go" class="bs-btn bs-btn-ghost" style="margin-top: 8px;">Generate</button>
+          </div>
+          <div id="bs-pexels-form" class="bs-field bs-hidden" style="margin-top: 12px;">
+            <input id="bs-pexels-query" placeholder="Search stock photos…">
+            <button id="bs-pexels-go" class="bs-btn bs-btn-ghost" style="margin-top: 8px;">Search</button>
           </div>
           <div id="bs-media-picker" class="bs-media-picker bs-hidden"></div>
           <span id="bs-media-status" class="bs-status"></span>
@@ -372,11 +377,15 @@
     var mediaEls = {
       preview: document.getElementById('bs-feature-preview'),
       library: document.getElementById('bs-feature-library'),
+      pexels: document.getElementById('bs-feature-pexels'),
       ai: document.getElementById('bs-feature-ai'),
       remove: document.getElementById('bs-feature-remove'),
       aiForm: document.getElementById('bs-ai-form'),
       aiPrompt: document.getElementById('bs-ai-prompt'),
       aiGo: document.getElementById('bs-ai-go'),
+      pexelsForm: document.getElementById('bs-pexels-form'),
+      pexelsQuery: document.getElementById('bs-pexels-query'),
+      pexelsGo: document.getElementById('bs-pexels-go'),
       picker: document.getElementById('bs-media-picker'),
     };
 
@@ -403,6 +412,7 @@
       mediaEls.picker.classList.add('bs-hidden');
       mediaEls.picker.innerHTML = '';
       mediaEls.aiForm.classList.add('bs-hidden');
+      mediaEls.pexelsForm.classList.add('bs-hidden');
     }
 
     function attachFeature(assetId) {
@@ -424,6 +434,7 @@
     mediaEls.library.addEventListener('click', function () {
       if (!state.postId) return;
       mediaEls.aiForm.classList.add('bs-hidden');
+      mediaEls.pexelsForm.classList.add('bs-hidden');
       mediaEls.picker.classList.remove('bs-hidden');
       mediaEls.picker.innerHTML = '<div class="bs-media-empty">Loading…</div>';
       api('content-assets', { method: 'GET' }).then(function (res) {
@@ -446,6 +457,7 @@
     // Generate a custom feature graphic (existing credit-metered image endpoint).
     mediaEls.ai.addEventListener('click', function () {
       mediaEls.picker.classList.add('bs-hidden');
+      mediaEls.pexelsForm.classList.add('bs-hidden');
       mediaEls.aiForm.classList.toggle('bs-hidden');
       if (!mediaEls.aiForm.classList.contains('bs-hidden')) mediaEls.aiPrompt.focus();
     });
@@ -473,6 +485,51 @@
                   else setStatus('bs-media-status', (sel.body && sel.body.error) || 'Could not save image');
                 });
             });
+            mediaEls.picker.appendChild(img);
+          });
+        });
+    });
+
+    // Source a hero image from Pexels stock (US 2.1): reuses the pexels-search endpoint for
+    // candidates, then blog-media mints + attaches the chosen one (with photographer attribution).
+    function attachPexelsCandidate(candidate) {
+      setStatus('bs-media-status', 'Attaching…');
+      api('blog-media', { method: 'POST', body: JSON.stringify({ blogPostId: state.postId, action: 'attach', role: 'feature', pexelsCandidate: candidate }) })
+        .then(function (res) {
+          if (res.ok) { renderFeature(res.body.feature); hidePicker(); setStatus('bs-media-status', ''); }
+          else setStatus('bs-media-status', (res.body && res.body.error) || 'Failed');
+        });
+    }
+
+    mediaEls.pexels.addEventListener('click', function () {
+      mediaEls.picker.classList.add('bs-hidden');
+      mediaEls.aiForm.classList.add('bs-hidden');
+      mediaEls.pexelsForm.classList.toggle('bs-hidden');
+      if (!mediaEls.pexelsForm.classList.contains('bs-hidden')) {
+        if (!mediaEls.pexelsQuery.value.trim()) mediaEls.pexelsQuery.value = (document.getElementById('bs-title').value || '').trim();
+        mediaEls.pexelsQuery.focus();
+      }
+    });
+
+    mediaEls.pexelsGo.addEventListener('click', function () {
+      var topic = mediaEls.pexelsQuery.value.trim();
+      if (!topic || !state.postId) return;
+      setStatus('bs-media-status', 'Searching…');
+      mediaEls.picker.classList.remove('bs-hidden');
+      mediaEls.picker.innerHTML = '<div class="bs-media-empty">Searching…</div>';
+      api('pexels-search', { method: 'POST', body: JSON.stringify({ topic: topic, dedup: false }) })
+        .then(function (res) {
+          if (!res.ok) { setStatus('bs-media-status', (res.body && res.body.error) || 'Search failed'); mediaEls.picker.innerHTML = ''; return; }
+          var candidates = (res.body && res.body.candidates) || [];
+          if (!candidates.length) { mediaEls.picker.innerHTML = '<div class="bs-media-empty">No matches — try a different search.</div>'; setStatus('bs-media-status', ''); return; }
+          setStatus('bs-media-status', 'Pick a photo');
+          mediaEls.picker.innerHTML = '';
+          candidates.forEach(function (c) {
+            var img = document.createElement('img');
+            img.src = c.url;
+            img.alt = c.title || '';
+            img.title = c.photographer ? ('Photo by ' + c.photographer + ' on Pexels') : '';
+            img.addEventListener('click', function () { attachPexelsCandidate(c); });
             mediaEls.picker.appendChild(img);
           });
         });

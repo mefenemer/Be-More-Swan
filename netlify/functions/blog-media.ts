@@ -9,6 +9,9 @@
 // GET  ?blogPostId=n                                             → { feature, inline[] } (URLs resolved)
 // POST { blogPostId, action:'attach'|'detach', role, assetId? }  → { feature, inline[] }
 //   role: 'feature' | 'inline'
+//   attach may pass a `pexelsCandidate` instead of `assetId`: we mint a hotlinked content_asset
+//   from it (createPexelsAsset — no scheduledPosts coupling) and attach that. Candidates come from
+//   the existing pexels-search endpoint; attribution rides on contentAssets.attributionName.
 
 import { HandlerEvent } from '@netlify/functions';
 import { and, asc, eq } from 'drizzle-orm';
@@ -16,6 +19,7 @@ import { getDb } from '../../db/client';
 import { blogPosts, blogPostAssets, contentAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { resolveAssetDisplayUrl } from '../../src/utils/social-publish';
+import { createPexelsAsset, type PexelsCandidate } from '../../src/utils/pexels';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -104,9 +108,21 @@ export const handler = async (event: HandlerEvent) => {
         return { statusCode: 200, body: JSON.stringify(await loadMedia(db, orgId, blogPostId, role === 'feature' ? null : post.featureAssetId)) };
     }
 
-    // action === 'attach' — the asset must belong to this org and be a usable visual.
-    const assetId = Number(body.assetId);
-    if (!Number.isFinite(assetId)) return { statusCode: 400, body: JSON.stringify({ error: 'assetId is required.' }) };
+    // action === 'attach'. Either an existing library asset (assetId) or a Pexels candidate to mint.
+    let assetId: number;
+    if (body.pexelsCandidate) {
+        const c = body.pexelsCandidate as PexelsCandidate;
+        if (!c.providerAssetId || !c.url) {
+            return { statusCode: 400, body: JSON.stringify({ error: 'A valid pexelsCandidate is required.' }) };
+        }
+        // Pexels images only — the blog hero/inline media pipeline expects an image asset.
+        assetId = await createPexelsAsset(db, { userId: ctx.userId, orgId, candidate: c, assetType: 'image' });
+    } else {
+        assetId = Number(body.assetId);
+        if (!Number.isFinite(assetId)) return { statusCode: 400, body: JSON.stringify({ error: 'assetId is required.' }) };
+    }
+
+    // The asset must belong to this org and be a usable visual.
     const [asset] = await db
         .select({ id: contentAssets.id, assetType: contentAssets.assetType })
         .from(contentAssets)
