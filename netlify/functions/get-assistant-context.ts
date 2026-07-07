@@ -75,6 +75,9 @@ export const handler: Handler = async (event) => {
         // prompt — the thing that suffix protected — is aiAssistants.systemPrompt, not this
         // display payload, and is never returned here.)
         return { statusCode: 200, body: JSON.stringify({
+                // Assistant id — the detail page passes this to the Data Hub / Knowledge Base
+                // tabs (init bails without it) and the role's primary-action chat link.
+                id: row.id,
                 context: row.onboardingContext ?? {},
                 configuration: row.configuration,
                 draftHorizonDays: row.draftHorizonDays ?? 7,
