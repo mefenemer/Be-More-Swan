@@ -165,11 +165,15 @@
     + '        <button id="bs-publish" class="bs-btn bs-btn-primary">Publish</button>'
     + '        <span id="bs-publish-status" class="bs-status"></span>'
     + '      </div>'
+    + '      <div class="bs-row" style="margin-top:16px;">'
+    + '        <button id="bs-approve" class="bs-btn bs-btn-primary">Approve &amp; Schedule</button>'
+    + '        <span id="bs-schedule-status" class="bs-status"></span>'
+    + '      </div>'
     + '      <div class="bs-row" style="margin-top:8px;">'
+    + '        <span class="bs-status">Or set a specific time:</span>'
     + '        <input id="bs-schedule-at" type="datetime-local" style="width:auto;">'
     + '        <button id="bs-schedule" class="bs-btn bs-btn-ghost">Schedule</button>'
     + '        <button id="bs-unschedule" class="bs-btn bs-btn-ghost bs-hidden">Unschedule</button>'
-    + '        <span id="bs-schedule-status" class="bs-status"></span>'
     + '      </div>'
     + '    </div>'
     + '  </div>'
@@ -436,6 +440,18 @@
       setStatus('bs-publish-status', 'Publishing…');
       api('publish-blog', { method: 'POST', body: JSON.stringify({ id: state.postId }) }).then(function (res) {
         setStatus('bs-publish-status', res.ok ? 'Published ✓ (' + res.body.post.slug + ')' : (res.body.error || 'Failed'));
+      });
+    });
+
+    // Approve & schedule — the assistant picks the next free cadence slot (no manual date).
+    el('bs-approve').addEventListener('click', function () {
+      if (!state.postId) return;
+      setStatus('bs-schedule-status', 'Scheduling…');
+      api('schedule-blog', { method: 'POST', body: JSON.stringify({ id: state.postId, action: 'approve' }) }).then(function (res) {
+        if (res.ok && res.body.post) {
+          setStatus('bs-schedule-status', 'Approved — scheduled for ' + new Date(res.body.post.publishDate).toLocaleString());
+          el('bs-unschedule').classList.remove('bs-hidden');
+        } else setStatus('bs-schedule-status', (res.body && res.body.error) || 'Failed');
       });
     });
 

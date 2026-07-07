@@ -4178,8 +4178,20 @@ const RQ_GROUPS = [
     { key: 'posts', label: 'Posts', empty: 'No posts here.',  emptyReview: 'No posts awaiting review.' },
 ];
 
+// Content Engine — blog posts share the same lifecycle columns, shown as their own group only when
+// the org has an active Blog Writer assistant. These statuses map onto the blog_posts lifecycle.
+const RQ_BLOG_STATUSES = {
+    review:    ['draft', 'pending_approval', 'in_review'],
+    approved:  ['approved'],
+    scheduled: ['scheduled', 'publishing'],
+    posted:    ['published'],
+    archived:  ['rejected', 'archived', 'paused', 'failed'],
+};
+const RQ_BLOG_GROUP = { key: 'blog', label: 'Blog posts', empty: 'No blog posts here.', emptyReview: 'No blog posts awaiting review.' };
+let _rqBlogWriterActive = false;
+
 let _rqCurrentStatus = 'review';
-const _rqGroupOpen = { ideas: true, posts: true };
+const _rqGroupOpen = { ideas: true, posts: true, blog: true };
 
 // Back-compat shim: several callers (gen-post success, modal refresh) still call rqLoadItems()/rqSetTab().
 function rqLoadItems() { rqRenderGroups(_rqCurrentStatus); }
@@ -4211,14 +4223,25 @@ async function rqRenderGroups(statusKey) {
     if (!container) return;
     container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Loading…</p>';
 
-    let posts = [], ideas = [];
+    // One-time gate: does the org have an active Blog Writer? (drives the Blog posts group).
+    if (!_rqBlogWriterActive && typeof window.resolveBlogWriter === 'function') {
+        try { _rqBlogWriterActive = !!(await window.resolveBlogWriter()); } catch { /* non-blocking */ }
+    }
+
+    let posts = [], ideas = [], blogPosts = [];
     try {
-        const [pRes, iRes] = await Promise.all([
+        const [pRes, iRes, bRes] = await Promise.all([
             fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}`),
             fetch('/.netlify/functions/get-post-ideas'),
+            _rqBlogWriterActive ? fetch('/.netlify/functions/blog-posts') : Promise.resolve(null),
         ]);
         if (pRes.ok) posts = (await pRes.json()).drafts || [];
         if (iRes.ok) ideas = ((await iRes.json()).ideas || []).filter(col.ideaFilter);
+        if (bRes && bRes.ok) {
+            const allBlog = (await bRes.json()).posts || [];
+            const wanted = RQ_BLOG_STATUSES[statusKey] || [];
+            blogPosts = allBlog.filter(p => wanted.includes(p.status));
+        }
     } catch {
         container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">Failed to load.</p>';
         return;
@@ -4234,9 +4257,55 @@ async function rqRenderGroups(statusKey) {
         });
     }
 
-    const itemsByGroup = { ideas, posts };
-    const renderByGroup = { ideas: rqRenderIdeaCard, posts: rqRenderSocialCard };
-    container.innerHTML = RQ_GROUPS.map(g => rqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey)).join('');
+    const groups = _rqBlogWriterActive ? [...RQ_GROUPS, RQ_BLOG_GROUP] : RQ_GROUPS;
+    const itemsByGroup = { ideas, posts, blog: blogPosts };
+    const renderByGroup = { ideas: rqRenderIdeaCard, posts: rqRenderSocialCard, blog: rqRenderBlogCard };
+    container.innerHTML = groups.map(g => rqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey)).join('');
+}
+
+// A blog post row in the Review Queue. Open jumps into the Blog Studio modal; in the Review column
+// (draft / pending) the user can Approve & Schedule — the assistant picks the next cadence slot.
+function rqRenderBlogCard(post) {
+    const title = _rqEsc(post.title || 'Untitled draft');
+    const when = post.publishedAt || post.publishDate;
+    const meta = when ? new Date(when).toLocaleString() : (post.updatedAt ? 'Updated ' + rqTimeAgo(post.updatedAt) : '');
+    const inReview = (RQ_BLOG_STATUSES.review || []).includes(post.status);
+    const approveBtn = inReview
+        ? `<button onclick="event.stopPropagation();_rqApproveBlog(${post.id},this)" class="px-3 py-1.5 text-xs font-bold bg-pink-600 hover:bg-pink-700 text-white rounded-lg transition cursor-pointer">Approve &amp; Schedule</button>`
+        : '';
+    return `<div onclick="window.openBlogStudio&&window.openBlogStudio({postId:${post.id}})"
+        class="flex items-center gap-3 py-3 cursor-pointer hover:bg-gray-50 -mx-2 px-2 rounded-lg">
+        <span class="w-8 h-8 shrink-0 rounded-lg bg-pink-50 text-pink-600 flex items-center justify-center">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+        </span>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-semibold text-gray-900 truncate">${title}</p>
+          <p class="text-xs text-gray-500 truncate">${_rqEsc(post.status)}${meta ? ' · ' + _rqEsc(meta) : ''}</p>
+        </div>
+        ${approveBtn}
+      </div>`;
+}
+
+// Approve & schedule a blog post from the queue → cadence slot, then refresh the current column.
+async function _rqApproveBlog(id, btn) {
+    if (btn) { btn.disabled = true; btn.textContent = 'Scheduling…'; }
+    try {
+        const res = await fetch('/.netlify/functions/schedule-blog', {
+            method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, action: 'approve' }),
+        });
+        if (!res.ok) throw new Error('approve failed');
+        if (window.showToast) window.showToast('Blog post approved & scheduled.', { icon: '✅' });
+    } catch {
+        if (btn) { btn.disabled = false; btn.textContent = 'Approve & Schedule'; }
+        if (window.showToast) window.showToast('Could not schedule the post.', { icon: '⚠️' });
+        return;
+    }
+    rqRenderGroups(_rqCurrentStatus);
+}
+
+function _rqEsc(s) {
+    return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function rqGroupSection(g, items, render, statusKey) {

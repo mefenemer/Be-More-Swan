@@ -24,9 +24,9 @@
   'use strict';
 
   window.AssistantOnboardingSchemas = {
-    // Content Engine — Blog Writer. Minimal Phase A schema (topics + brand voice) so the role is
-    // hireable via the schema-driven setup (assistant-setup.html). Phase B adds the publishing
-    // cadence + horizon fields that drive assistant-scheduled "Approve & Schedule".
+    // Content Engine — Blog Writer. Topics + brand voice, then the publishing cadence that drives
+    // assistant-scheduled "Approve & Schedule" (posting_frequency + draft_horizon_days are read by
+    // src/config/posting-cadence.ts via schedule-blog's approve path).
     blog_writer: [
       {
         title: 'What should your Blog Writer cover?',
@@ -51,6 +51,42 @@
               { value: 'Casual', label: 'Casual', description: 'Friendly and conversational.' },
               { value: 'Confident', label: 'Confident', description: 'Bold and direct.' },
               { value: 'Friendly', label: 'Friendly', description: 'Warm and approachable.' },
+            ],
+          },
+        ],
+      },
+      {
+        title: 'How often should it publish?',
+        description: 'When you approve a post, your Blog Writer schedules it into the next free slot of this cadence — you never pick a date by hand.',
+        operational: true,
+        fields: [
+          {
+            // Stored as posting_frequency — POSTING_CADENCES labels, parsed by postsPerWeekFor().
+            key: 'posting_frequency',
+            label: 'Publishing frequency',
+            type: 'dropdown',
+            required: true,
+            placeholder: 'Choose a cadence…',
+            options: [
+              { value: 'Daily', label: 'Daily' },
+              { value: '3 times a week', label: '3 times a week' },
+              { value: '2 times a week', label: '2 times a week' },
+              { value: 'Weekly', label: 'Weekly' },
+              { value: 'On demand', label: 'On demand (I schedule each one)' },
+            ],
+          },
+          {
+            // How far ahead approvals may be scheduled. Stored as draft_horizon_days (clamped 1–30
+            // by computeScheduleSlots); the approve path finds the next free slot within it.
+            key: 'draft_horizon_days',
+            label: 'How far ahead to schedule',
+            type: 'dropdown',
+            required: true,
+            placeholder: 'Choose a window…',
+            options: [
+              { value: '7', label: '1 week ahead' },
+              { value: '14', label: '2 weeks ahead' },
+              { value: '30', label: '1 month ahead' },
             ],
           },
         ],
