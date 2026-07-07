@@ -216,6 +216,24 @@
       return '# ' + (topic || 'New post') + '\n\nStart writing here.';
     }
 
+    // Reveal the editor workspace for a post (new or existing): mount the editor + side panels.
+    function openWorkspace(postId, title, md) {
+      state.postId = postId;
+      document.getElementById('bs-brief').classList.add('bs-hidden');
+      document.getElementById('bs-workspace').classList.remove('bs-hidden');
+      document.getElementById('bs-title').value = title;
+      state.editor = window.MarkdownEditor.mount({
+        container: document.getElementById('bs-editor'),
+        blogPostId: postId,
+        initialMarkdown: md,
+        title: title,
+        onChange: function () { setStatus('bs-save-status', 'Saving…'); setTimeout(function () { setStatus('bs-save-status', 'Saved'); }, 1400); },
+      });
+      loadWidget();
+      loadFeature();
+      return state.editor;
+    }
+
     function startPost(path) {
       var title = document.getElementById('bs-topic').value.trim() || 'Untitled draft';
       var voice = resolveVoice();
@@ -226,21 +244,7 @@
       }
       api('blog-posts', { method: 'POST', body: JSON.stringify({ title: title, assistantId: voice.assistantId }) }).then(function (res) {
         if (!res.ok) { alert('Could not create post: ' + (res.body.error || '')); return; }
-        state.postId = res.body.post.id;
-        document.getElementById('bs-brief').classList.add('bs-hidden');
-        document.getElementById('bs-workspace').classList.remove('bs-hidden');
-        document.getElementById('bs-title').value = title;
-
-        var md = seedMarkdown(path, voice.tone);
-        state.editor = window.MarkdownEditor.mount({
-          container: document.getElementById('bs-editor'),
-          blogPostId: state.postId,
-          initialMarkdown: md,
-          title: title,
-          onChange: function () { setStatus('bs-save-status', 'Saving…'); setTimeout(function () { setStatus('bs-save-status', 'Saved'); }, 1400); },
-        });
-        loadWidget();
-        loadFeature();
+        openWorkspace(res.body.post.id, title, seedMarkdown(path, voice.tone));
 
         // AI generate: draft the full post server-side (in the resolved voice), then swap it in.
         if (path === 'generate') {
@@ -473,6 +477,28 @@
           });
         });
     });
+
+    // --- Deep-link: /blog-studio.html?postId=<id> opens an existing post in the editor ---
+    // (Used by the content calendar's blog chips — window._calOpenBlog passes ?postId.)
+    function loadExistingPost(id) {
+      setStatus('bs-save-status', 'Loading…');
+      api('blog-posts?id=' + encodeURIComponent(id), { method: 'GET' }).then(function (res) {
+        if (!res.ok || !res.body.post) {
+          // Unknown/forbidden id — fall back to the new-post brief rather than a dead screen.
+          setStatus('bs-save-status', '');
+          return;
+        }
+        var post = res.body.post;
+        openWorkspace(post.id, post.title || 'Untitled draft', post.bodyMarkdown || '');
+        setStatus('bs-save-status', 'Saved');
+        if (post.status) setStatus('bs-publish-status', 'Status: ' + post.status);
+      }).catch(function () { setStatus('bs-save-status', ''); });
+    }
+
+    (function () {
+      var m = (location.search || '').match(/[?&]postId=(\d+)/);
+      if (m) loadExistingPost(Number(m[1]));
+    })();
   })();
   </script>
 </body>
