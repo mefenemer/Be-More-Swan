@@ -1596,6 +1596,14 @@
               </div>
             </div>
           </div>
+          <div id="fr-form-brief-wrap" class="hidden">
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-xs font-bold uppercase text-gray-400">Brief (for Claude to execute)</label>
+              <button id="fr-draft-brief-btn" onclick="frDraftBrief()" class="text-xs font-semibold text-violet-600 hover:text-violet-800 inline-flex items-center gap-1">✨ Draft brief with AI</button>
+            </div>
+            <textarea id="fr-form-brief" rows="5" placeholder="What should be built, key considerations, and acceptance criteria…" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 resize-y focus:ring-2 focus:ring-emerald-500 focus:outline-none"></textarea>
+            <p class="text-[11px] text-gray-400 mt-1">Set status to "Brief Ready" once this is approved and ready to hand off.</p>
+          </div>
           <div class="grid grid-cols-3 gap-3">
             <div>
               <label class="block text-xs font-bold uppercase text-gray-400 mb-1">Category</label>
@@ -1626,6 +1634,7 @@
               <option value="under_review">Under Review</option>
               <option value="open">Open</option>
               <option value="planned">Planned</option>
+              <option value="brief_ready">Brief Ready</option>
               <option value="in_progress">In Progress</option>
               <option value="released">Released</option>
               <option value="declined">Declined</option>
@@ -3949,14 +3958,15 @@ const FR_PRIORITY_CLS = {
   medium: 'bg-amber-100 text-amber-800', low: 'bg-gray-100 text-gray-600',
 };
 // Full lifecycle (KEEP IN SYNC with src/utils/feature-requests.ts).
-const FR_STATUSES = ['pending_review','under_review','open','planned','in_progress','released','declined','duplicate'];
+const FR_STATUSES = ['pending_review','under_review','open','planned','brief_ready','in_progress','released','declined','duplicate'];
 const FR_STATUS_LABEL = {
   pending_review: 'Pending Review', under_review: 'Under Review', open: 'Open', planned: 'Planned',
-  in_progress: 'In Progress', released: 'Released', declined: 'Declined', duplicate: 'Duplicate',
+  brief_ready: 'Brief Ready', in_progress: 'In Progress', released: 'Released', declined: 'Declined', duplicate: 'Duplicate',
 };
 const FR_STATUS_CLS = {
   pending_review: 'bg-amber-100 text-amber-800', under_review: 'bg-amber-100 text-amber-700',
   open: 'bg-gray-100 text-gray-600', planned: 'bg-blue-100 text-blue-700',
+  brief_ready: 'bg-violet-100 text-violet-700',
   in_progress: 'bg-amber-100 text-amber-700', released: 'bg-emerald-100 text-emerald-700',
   declined: 'bg-red-100 text-red-600', duplicate: 'bg-gray-200 text-gray-500',
 };
@@ -4068,9 +4078,11 @@ function openRoadmapAdd() {
   document.getElementById('fr-form-title').textContent = 'Add request';
   document.getElementById('fr-form-title-input').value = '';
   document.getElementById('fr-form-desc').value = '';
+  document.getElementById('fr-form-brief').value = '';
   _frFillSelect(document.getElementById('fr-form-category'), FR_CATEGORIES, FR_CATEGORY_LABEL, 'app_core');
   _frFillSelect(document.getElementById('fr-form-priority'), FR_PRIORITIES, FR_PRIORITY_LABEL, 'medium');
   document.getElementById('fr-form-status-wrap').classList.add('hidden');
+  document.getElementById('fr-form-brief-wrap').classList.add('hidden');
   _frResetEnhance();
   document.getElementById('fr-form').classList.remove('hidden');
   document.getElementById('fr-form-title-input').focus();
@@ -4082,10 +4094,12 @@ function openRoadmapEdit(id) {
   document.getElementById('fr-form-title').textContent = `Edit request #${id}`;
   document.getElementById('fr-form-title-input').value = it.title || '';
   document.getElementById('fr-form-desc').value = it.description || '';
+  document.getElementById('fr-form-brief').value = it.brief || '';
   _frFillSelect(document.getElementById('fr-form-category'), FR_CATEGORIES, FR_CATEGORY_LABEL, it.category);
   _frFillSelect(document.getElementById('fr-form-priority'), FR_PRIORITIES, FR_PRIORITY_LABEL, it.priority);
   _frFillSelect(document.getElementById('fr-form-status'), FR_STATUSES, FR_STATUS_LABEL, it.status);
   document.getElementById('fr-form-status-wrap').classList.remove('hidden');
+  document.getElementById('fr-form-brief-wrap').classList.remove('hidden');
   _frResetEnhance();
   document.getElementById('fr-form').classList.remove('hidden');
   document.getElementById('fr-form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -4114,6 +4128,23 @@ function frAcceptEnhance() {
 }
 function frRejectEnhance() { _frResetEnhance(); }
 
+// ── Brief drafting (for Claude to execute) ──────────────────────────────────
+async function frDraftBrief() {
+  const title = document.getElementById('fr-form-title-input').value.trim();
+  if (!title) { alert('Add a title first.'); return; }
+  const description = document.getElementById('fr-form-desc').value.trim();
+  const btn = document.getElementById('fr-draft-brief-btn');
+  const prev = btn.textContent; btn.textContent = '✨ Drafting…'; btn.disabled = true;
+  try {
+    const d = await api(`${FR_API}?action=draft-brief`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, description }),
+    });
+    document.getElementById('fr-form-brief').value = d.brief || '';
+  } catch (e) { alert(e.message); }
+  finally { btn.textContent = prev; btn.disabled = false; }
+}
+
 async function submitRoadmapForm() {
   const id = document.getElementById('fr-form-id').value;
   const title = document.getElementById('fr-form-title-input').value.trim();
@@ -4124,9 +4155,10 @@ async function submitRoadmapForm() {
   try {
     if (id) {
       const status = document.getElementById('fr-form-status').value;
+      const brief = document.getElementById('fr-form-brief').value.trim();
       await api(`${FR_API}?id=${id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, description, category, priority, status }),
+        body: JSON.stringify({ title, description, category, priority, status, brief }),
       });
     } else {
       await api(FR_API, {

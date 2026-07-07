@@ -107,6 +107,44 @@ export const handler: Handler = async (event) => {
         }
     }
 
+    // ── POST ?action=draft-brief: LLM-drafted execution brief for Claude to build from ───────────
+    if (event.httpMethod === 'POST' && action === 'draft-brief') {
+        if (await isGlobalAiDisabled()) {
+            return json(503, { error: 'AI services are temporarily unavailable. Please try again later.' });
+        }
+        let body: any;
+        try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON.' }); }
+        const title = typeof body.title === 'string' ? body.title.trim() : '';
+        const description = typeof body.description === 'string' ? body.description.trim() : '';
+        if (!title) return json(400, { error: 'Provide a title to draft a brief from.' });
+
+        try {
+            const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+            const response = await anthropic.messages.create({
+                model: MODEL,
+                max_tokens: 768,
+                messages: [{
+                    role: 'user',
+                    content: `You are a senior engineer writing an implementation brief for an AI coding agent (Claude) that will build this feature request end-to-end in a web app codebase. Based on the title and description below, write a clear, actionable brief covering: what to build, key considerations or edge cases, and acceptance criteria. Do not invent specific file paths, table names, or technical details you cannot know from the request alone. Keep it concise (a short paragraph plus a few bullet points). Return ONLY the brief text, no preamble or markdown headers.\n\nTitle: "${title}"\nDescription: "${description || '(none provided)'}"`,
+                }],
+            });
+            const brief = ((response.content[0] as { text: string })?.text || '').trim();
+            if (!brief) throw new Error('Empty LLM response.');
+
+            void logAiUsage({
+                userId: admin.id,
+                workspaceId: null,
+                model: MODEL,
+                inputTokens: response.usage?.input_tokens ?? 0,
+                outputTokens: response.usage?.output_tokens ?? 0,
+            });
+            return json(200, { brief });
+        } catch (err) {
+            console.error('[admin-feature-requests] draft-brief failed:', err);
+            return json(500, { error: 'Could not draft the brief right now.' });
+        }
+    }
+
     // ── POST ?action=merge: fold source into target, combine votes (US04) ────────
     if (event.httpMethod === 'POST' && action === 'merge') {
         let body: any;
@@ -193,6 +231,7 @@ export const handler: Handler = async (event) => {
             set.title = t.slice(0, 200);
         }
         if (typeof body.description === 'string') set.description = body.description.trim() || null;
+        if (typeof body.brief === 'string') set.brief = body.brief.trim() || null;
         if (body.category !== undefined) {
             if (!isFeatureCategory(body.category)) return json(400, { error: 'Invalid category.' });
             set.category = body.category;
@@ -266,6 +305,7 @@ export const handler: Handler = async (event) => {
                 title: featureRequests.title,
                 description: featureRequests.description,
                 submitterDescription: featureRequests.submitterDescription,
+                brief: featureRequests.brief,
                 category: featureRequests.category,
                 assistantRef: featureRequests.assistantRef,
                 status: featureRequests.status,

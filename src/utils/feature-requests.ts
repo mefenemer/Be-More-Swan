@@ -26,7 +26,7 @@ export const isFeatureCategory = (v: unknown): v is FeatureCategory =>
 
 // ── Status ────────────────────────────────────────────────────────────────────
 export const FR_STATUSES = [
-    'pending_review', 'under_review', 'open', 'planned',
+    'pending_review', 'under_review', 'open', 'planned', 'brief_ready',
     'in_progress', 'released', 'declined', 'duplicate',
 ] as const;
 export type FeatureStatus = (typeof FR_STATUSES)[number];
@@ -36,6 +36,7 @@ export const FR_STATUS_LABEL: Record<FeatureStatus, string> = {
     under_review: 'Under Review',
     open: 'Open',
     planned: 'Planned',
+    brief_ready: 'Brief Ready',
     in_progress: 'In Progress',
     released: 'Released',
     declined: 'Declined',
@@ -46,9 +47,9 @@ export const isFeatureStatus = (v: unknown): v is FeatureStatus =>
     typeof v === 'string' && (FR_STATUSES as readonly string[]).includes(v);
 
 // Statuses that appear on the PUBLIC board (US02): approved/visible to everyone.
-export const PUBLIC_STATUSES: readonly FeatureStatus[] = ['open', 'planned', 'in_progress', 'released'];
+export const PUBLIC_STATUSES: readonly FeatureStatus[] = ['open', 'planned', 'brief_ready', 'in_progress', 'released'];
 // Statuses that appear on the read-only ROADMAP / Gantt (US03/US05).
-export const ROADMAP_STATUSES: readonly FeatureStatus[] = ['planned', 'in_progress'];
+export const ROADMAP_STATUSES: readonly FeatureStatus[] = ['planned', 'brief_ready', 'in_progress'];
 
 export const isPublicStatus = (s: string): boolean => (PUBLIC_STATUSES as readonly string[]).includes(s);
 
