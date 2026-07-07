@@ -12,6 +12,7 @@ const PLATFORM_LOGOS = {
     threads:   `<svg viewBox="0 0 24 24" fill="currentColor" class="w-full h-full"><path d="M12.186 24h-.007c-3.581-.024-6.334-1.205-8.184-3.509C2.35 18.44 1.5 15.586 1.472 12.01v-.017c.03-3.579.879-6.43 2.525-8.482C5.845 1.205 8.6.024 12.18 0h.014c2.746.02 5.043.725 6.826 2.098 1.677 1.29 2.858 3.13 3.509 5.467l-2.04.569c-1.104-3.96-3.898-5.984-8.304-6.015-2.91.022-5.11.936-6.54 2.717C4.307 6.504 3.616 8.914 3.589 12c.027 3.086.718 5.496 2.057 7.164 1.43 1.783 3.631 2.698 6.54 2.717 2.623-.02 4.358-.631 5.8-2.045 1.647-1.613 1.618-3.593 1.09-4.798-.31-.71-.873-1.3-1.634-1.75-.192 1.352-.622 2.446-1.284 3.272-.886 1.102-2.14 1.704-3.73 1.79-1.202.065-2.361-.218-3.259-.801-1.063-.689-1.685-1.74-1.752-2.964-.065-1.19.408-2.285 1.33-3.082.88-.76 2.119-1.207 3.583-1.291a13.853 13.853 0 013.02.142c-.126-.742-.375-1.332-.75-1.757-.513-.586-1.308-.883-2.359-.89h-.029c-.844 0-1.992.232-2.721 1.32L7.734 7.847c.98-1.454 2.568-2.256 4.478-2.256h.044c3.194.02 5.097 1.975 5.287 5.388.108.046.216.094.321.142 1.49.7 2.58 1.761 3.154 3.07.797 1.82.871 4.79-1.548 7.158-1.85 1.81-4.094 2.628-7.277 2.65zm1.003-11.69c-.242 0-.487.007-.739.021-1.836.103-2.98.946-2.916 2.143.067 1.256 1.452 1.839 2.784 1.767 1.224-.065 2.818-.543 3.086-3.71a10.5 10.5 0 00-2.215-.221z"/></svg>`,
     tiktok:    `<svg viewBox="0 0 24 24" fill="currentColor" class="w-full h-full"><path d="M12.53.02C13.84 0 15.14.01 16.44 0c.08 1.53.63 3.09 1.75 4.17 1.12 1.11 2.7 1.62 4.24 1.79v4.03c-1.44-.05-2.89-.35-4.2-.97-.57-.26-1.1-.59-1.62-.93-.01 2.92.01 5.84-.02 8.75-.08 1.4-.54 2.79-1.35 3.94-1.31 1.92-3.58 3.17-5.91 3.21-1.43.08-2.86-.31-4.08-1.03-2.02-1.19-3.44-3.37-3.65-5.71-.02-.5-.03-1-.01-1.49.18-1.9 1.12-3.72 2.58-4.96 1.66-1.44 3.98-2.13 6.15-1.72.02 1.48-.04 2.96-.04 4.44-.99-.32-2.15-.23-3.02.37-.63.41-1.11 1.04-1.36 1.75-.21.51-.15 1.07-.14 1.61.24 1.64 1.82 3.02 3.5 2.87 1.12-.01 2.19-.66 2.77-1.61.19-.33.4-.67.41-1.06.1-1.79.06-3.57.07-5.36.01-4.03-.01-8.05.02-12.07z"/></svg>`,
     youtube:   `<svg viewBox="0 0 24 24" fill="currentColor" class="w-full h-full"><path d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>`,
+    blog:      `<svg viewBox="0 0 24 24" fill="currentColor" class="w-full h-full"><path d="M5 3h11a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2zm2 4v2h7V7H7zm0 4v2h7v-2H7zm0 4v2h5v-2H7z"/></svg>`,
 };
 
 const PLATFORM_META = {
@@ -22,6 +23,7 @@ const PLATFORM_META = {
     threads:   { label: 'Threads',     bg: '#000000', text: 'text-white' },
     tiktok:    { label: 'TikTok',      bg: '#010101', text: 'text-white' },
     youtube:   { label: 'YouTube',     bg: '#FF0000', text: 'text-white' },
+    blog:      { label: 'Blog',        bg: '#7c3aed', text: 'text-white' },
 };
 
 // Returns a circular platform avatar (logo on brand bg) for list/panel use.
@@ -66,7 +68,8 @@ const MONTH_NAMES = ['January','February','March','April','May','June','July','A
 let _view = 'month';             // 'month' | 'week' | 'list'
 let _anchor = new Date();        // date anchor for current view
 _anchor.setHours(0, 0, 0, 0);
-let _posts = [];                 // all loaded posts
+let _posts = [];                 // all loaded posts (social — scheduled_posts)
+let _blogPosts = [];             // long-form blog posts (blog_posts) surfaced read-only on the calendar
 let _openPostId = null;          // currently open panel post id
 let _editMode = false;           // panel edit mode
 let _dragPostId = null;          // drag source
@@ -143,10 +146,11 @@ async function _loadAndRender() {
     try {
         const { from, to } = _getDateRange();
         // Posts, completed assistant activity, and the assistant list (for colours/filter) in parallel.
-        const [postsRes, actRes, asstRes] = await Promise.all([
+        const [postsRes, actRes, asstRes, blogRes] = await Promise.all([
             fetch(`/.netlify/functions/scheduled-posts?from=${from.toISOString()}&to=${to.toISOString()}`),
             fetch(`/.netlify/functions/get-calendar-activity?from=${from.toISOString()}&to=${to.toISOString()}`),
             _assistants.length ? Promise.resolve(null) : fetch('/.netlify/functions/get-assistants'),
+            fetch(`/.netlify/functions/blog-posts?from=${from.toISOString()}&to=${to.toISOString()}`),
         ]);
 
         if (postsRes.ok) {
@@ -162,6 +166,7 @@ async function _loadAndRender() {
 
         if (actRes && actRes.ok) _activities = (await actRes.json()).activities || [];
         if (asstRes && asstRes.ok) _assistants = (await asstRes.json()).assistants || [];
+        if (blogRes && blogRes.ok) _blogPosts = (await blogRes.json()).posts || [];
     } catch (e) { console.warn('Calendar load error:', e); }
     // Always (re)populate the toolbar controls — the calendar.html fragment (and its fresh
     // <select>) is re-injected on every view entry, even though _assistants is cached here.
@@ -275,7 +280,8 @@ function _renderMonth() {
             <span class="${isToday ? 'w-6 h-6 bg-emerald-600 text-white rounded-full flex items-center justify-center text-xs font-extrabold' : 'text-xs font-bold text-gray-500 px-1'}">${day}</span>
         </div>`;
         const dayActs = _activitiesOnDate(date);
-        html += `<div class="space-y-1">${dayPosts.map(p => _postChip(p, 'month')).join('')}${dayActs.map(a => _activityChip(a, 'month')).join('')}</div>`;
+        const dayBlogs = _blogPostsOnDate(date);
+        html += `<div class="space-y-1">${dayPosts.map(p => _postChip(p, 'month')).join('')}${dayBlogs.map(_blogChip).join('')}${dayActs.map(a => _activityChip(a, 'month')).join('')}</div>`;
         html += `</div>`;
     }
 
@@ -309,7 +315,7 @@ function _renderWeek() {
             ondragover="window._calDragOver(event, '${dateKey}')"
             ondragleave="window._calDragLeave(event)"
             ondrop="window._calDrop(event, '${dateKey}')">
-            ${dayPosts.map(p => _postChip(p, 'week')).join('')}${_activitiesOnDate(d).map(a => _activityChip(a, 'week')).join('')}
+            ${dayPosts.map(p => _postChip(p, 'week')).join('')}${_blogPostsOnDate(d).map(_blogChip).join('')}${_activitiesOnDate(d).map(a => _activityChip(a, 'week')).join('')}
         </div>`;
     }
     html += `</div>`;
@@ -351,8 +357,12 @@ function _renderList() {
     for (let d = 1; d <= daysInMonth; d++) {
         const date = new Date(year, month, d);
         let posts = _postsOnDate(date);
-        if (allowedStatuses) posts = posts.filter(p => allowedStatuses.has(p.status));
-        if (posts.length > 0) groups.push({ date, posts });
+        let blogs = _blogPostsOnDate(date);
+        if (allowedStatuses) {
+            posts = posts.filter(p => allowedStatuses.has(p.status));
+            blogs = blogs.filter(p => allowedStatuses.has(p.status));
+        }
+        if (posts.length > 0 || blogs.length > 0) groups.push({ date, posts, blogs });
     }
 
     if (groups.length === 0) {
@@ -364,7 +374,7 @@ function _renderList() {
     }
 
     html += `<div class="max-w-3xl mx-auto px-4 py-6 space-y-8">`;
-    groups.forEach(({ date, posts }) => {
+    groups.forEach(({ date, posts, blogs }) => {
         const today = new Date(); today.setHours(0,0,0,0);
         const isToday = _dateKey(date) === _dateKey(today);
         html += `<div>
@@ -375,7 +385,7 @@ function _renderList() {
                 </span>
                 <div class="flex-1 h-px bg-gray-200"></div>
             </div>
-            <div class="space-y-2">${posts.map(p => _listRow(p)).join('')}</div>
+            <div class="space-y-2">${posts.map(p => _listRow(p)).join('')}${(blogs || []).map(_blogChip).join('')}</div>
         </div>`;
     });
     html += `</div>`;
@@ -1363,6 +1373,53 @@ function _activitiesOnDate(date) {
 function _dateKey(date) {
     return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
 }
+
+// Blog posts bucketed to a day: published shows on publishedAt, scheduled on publishDate.
+// Respects the assistant filter and the 'blog' platform filter (hidden when a social platform is picked).
+function _blogPostsOnDate(date) {
+    const key = _dateKey(date);
+    if (!_matchesPlatformFilter('blog')) return [];
+    return _blogPosts.filter(p => {
+        const when = p.status === 'published' ? (p.publishedAt || p.publishDate) : p.publishDate;
+        if (!when) return false;
+        if (!_matchesAssistantFilter(p.assistantId)) return false;
+        return _dateKey(new Date(when)) === key;
+    });
+}
+
+// Read-only blog chip (month/week/list). Blog posts are managed in Blog Studio, so — unlike social
+// chips — these aren't draggable and don't open the social governance panel; clicking opens the studio.
+function _blogChip(post) {
+    const sm = STATUS_META[post.status] || STATUS_META.draft;
+    const posted = post.status === 'published';
+    const when = posted ? (post.publishedAt || post.publishDate) : post.publishDate;
+    const time = new Date(when).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    const chipBg = posted ? 'bg-emerald-50 hover:bg-emerald-100' : 'bg-violet-50 hover:bg-violet-100';
+    const timeColor = posted ? 'text-emerald-700' : 'text-violet-700';
+    const marker = posted
+        ? `<span class="text-emerald-600 text-xs font-extrabold shrink-0" title="Published ${time}">✓</span>`
+        : `<span class="w-1.5 h-1.5 rounded-full ${sm.dot} shrink-0" title="${sm.label}"></span>`;
+    const title = post.title || 'Untitled';
+    return `<div
+        onclick="window._calOpenBlog(${post.id})"
+        data-blog-id="${post.id}"
+        class="group flex items-center gap-1.5 px-2 py-1 rounded-lg ${chipBg} shadow-sm cursor-pointer transition select-none text-left w-full"
+        style="border-left:3px solid #7c3aed"
+        aria-label="Blog · ${_escHtml(title)}">
+        ${_platAvatar('blog', 16)}
+        <div class="flex-1 min-w-0">
+            <p class="text-[11px] font-bold ${timeColor} truncate">${time}</p>
+            <p class="text-[11px] text-gray-500 truncate leading-tight">${_escHtml(title.substring(0, 40))}</p>
+        </div>
+        ${marker}
+    </div>`;
+}
+
+// Blog Studio doesn't yet load an existing post by id; open it in a new tab (visibility-first).
+// The postId is passed through so it "just works" once the studio supports deep-linking.
+window._calOpenBlog = function (id) {
+    window.open('/blog-studio.html?postId=' + encodeURIComponent(id), '_blank');
+};
 
 function _weekStart(date) {
     const d = new Date(date);

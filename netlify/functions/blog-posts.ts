@@ -6,7 +6,7 @@
 // POST /.netlify/functions/blog-posts            → create a draft { title }  → { post }
 
 import { HandlerEvent } from '@netlify/functions';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lte, or } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, blogPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
@@ -19,6 +19,39 @@ export const handler = async (event: HandlerEvent) => {
     // ---- Read ----
     if (event.httpMethod === 'GET') {
         const idParam = event.queryStringParameters?.id;
+        const fromParam = event.queryStringParameters?.from;
+        const toParam = event.queryStringParameters?.to;
+
+        // Calendar feed (US 4.1 calendar view): scheduled/published posts whose date falls in range.
+        if (fromParam && toParam) {
+            const fromD = new Date(fromParam);
+            const toD = new Date(toParam);
+            if (Number.isNaN(fromD.getTime()) || Number.isNaN(toD.getTime())) {
+                return { statusCode: 400, body: JSON.stringify({ error: 'Invalid from/to.' }) };
+            }
+            const rows = await db
+                .select({
+                    id: blogPosts.id,
+                    title: blogPosts.title,
+                    slug: blogPosts.slug,
+                    status: blogPosts.status,
+                    assistantId: blogPosts.assistantId,
+                    publishDate: blogPosts.publishDate,
+                    publishedAt: blogPosts.publishedAt,
+                })
+                .from(blogPosts)
+                .where(and(
+                    eq(blogPosts.organisationId, ctx.organisationId),
+                    inArray(blogPosts.status, ['scheduled', 'published']),
+                    or(
+                        and(gte(blogPosts.publishDate, fromD), lte(blogPosts.publishDate, toD)),
+                        and(gte(blogPosts.publishedAt, fromD), lte(blogPosts.publishedAt, toD)),
+                    ),
+                ))
+                .orderBy(blogPosts.publishDate)
+                .limit(500);
+            return { statusCode: 200, body: JSON.stringify({ posts: rows }) };
+        }
 
         if (idParam) {
             const [post] = await db
