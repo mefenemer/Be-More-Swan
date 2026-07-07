@@ -267,8 +267,12 @@
       }});
     }
 
-    // Leads: the outreach draft, without re-opening the chat.
+    // Leads: edit the lead's details, and copy the outreach draft without re-opening the chat.
     if (state.hub.recordType === 'lead') {
+      buttons.push({ label: 'Edit', async run(btn) {
+        btn.disabled = false;           // opening a modal shouldn't leave the button stuck disabled
+        openEditLeadModal(record);
+      }});
       const draft = record.data?.outreachDraft;
       if (draft && draft.body) {
         buttons.push({ label: 'Copy outreach draft', async run(btn) {
@@ -613,6 +617,90 @@
 
     document.body.appendChild(overlay);
     overlay.querySelector('input[name="name"]')?.focus();
+  }
+
+  // ── Edit an existing lead (lead hubs) ───────────────────────────────────────
+  // In-place editing of a filed lead's core details, PATCHed back to assistant_records.
+  const EDIT_LEAD_FIELDS = [
+    { key: 'title', label: 'Company', envelope: true, ph: 'Acme Ltd' },
+    { key: 'contactName', label: 'Contact name', ph: 'Jane Doe' },
+    { key: 'contactEmail', label: 'Email', ph: 'jane@acme.com', type: 'email' },
+    { key: 'status', label: 'Status', envelope: true, ph: 'hot / warm / cold' },
+    { key: 'notes', label: 'Notes', ph: 'Context, next step…', textarea: true },
+  ];
+
+  function openEditLeadModal(record) {
+    const data = record.data && typeof record.data === 'object' ? record.data : {};
+    const cur = (f) => f.key === 'title' ? (record.title ?? '') : f.key === 'status' ? (record.status ?? '') : (data[f.key] ?? '');
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 bg-gray-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm';
+    overlay.innerHTML = `
+      <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div class="flex items-start justify-between gap-4 p-5 border-b border-gray-100">
+          <h3 class="text-lg font-bold text-gray-900">Edit lead</h3>
+          <button type="button" data-edit-close class="text-gray-400 hover:text-gray-600 text-2xl leading-none cursor-pointer">&times;</button>
+        </div>
+        <form data-edit-form class="p-5 space-y-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            ${EDIT_LEAD_FIELDS.map((f) => `
+              <label class="block ${f.textarea ? 'sm:col-span-2' : ''}">
+                <span class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">${esc(f.label)}</span>
+                ${f.textarea
+                  ? `<textarea name="${f.key}" rows="2" placeholder="${esc(f.ph)}" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-emerald-400">${esc(cur(f))}</textarea>`
+                  : `<input type="${f.type || 'text'}" name="${f.key}" value="${esc(cur(f))}" placeholder="${esc(f.ph)}" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-emerald-400">`}
+              </label>`).join('')}
+          </div>
+          <p class="hidden text-xs font-semibold" data-edit-status></p>
+          <div class="flex items-center justify-end gap-2 pt-1">
+            <button type="button" data-edit-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 rounded-lg cursor-pointer">Cancel</button>
+            <button type="submit" data-edit-submit class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Save changes</button>
+          </div>
+        </form>
+      </div>`;
+
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelectorAll('[data-edit-close]').forEach((b) => b.addEventListener('click', close));
+
+    const form = overlay.querySelector('[data-edit-form]');
+    const status = overlay.querySelector('[data-edit-status]');
+    const submit = overlay.querySelector('[data-edit-submit]');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const title = form.elements.title?.value?.trim();
+      if (!title) {
+        status.textContent = 'Company (the lead title) can’t be empty.';
+        status.className = 'block text-xs font-semibold text-red-600';
+        return;
+      }
+      const nextData = { ...data };
+      for (const f of EDIT_LEAD_FIELDS) {
+        if (f.envelope) continue;
+        const v = form.elements[f.key]?.value?.trim();
+        if (v) nextData[f.key] = v; else delete nextData[f.key];
+      }
+      const nextStatus = form.elements.status?.value?.trim() || null;
+      submit.disabled = true;
+      status.textContent = 'Saving…';
+      status.className = 'block text-xs font-semibold text-gray-500';
+      try {
+        await patchRecord(record.id, { title, status: nextStatus, data: nextData });
+        record.title = title;
+        record.status = nextStatus;
+        record.data = nextData;
+        close();
+        renderTable();
+        window.showToast?.('Lead updated.');
+      } catch (err) {
+        submit.disabled = false;
+        status.textContent = err.message || 'Could not update the lead.';
+        status.className = 'block text-xs font-semibold text-red-600';
+      }
+    });
+
+    document.body.appendChild(overlay);
+    overlay.querySelector('input[name="title"]')?.focus();
   }
 
   async function init({ hub, assistantId }) {

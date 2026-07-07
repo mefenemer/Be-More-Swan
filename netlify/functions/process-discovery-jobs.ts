@@ -187,6 +187,10 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
 
         // ── STAGE searching: process the next slice of queries ──────────────────
         const slice = cursor.flat.slice(cursor.queryIndex, cursor.queryIndex + QUERIES_PER_SLICE);
+        // Each qualified lead is mirrored into the Leads tab AS IT'S FOUND (not just in the
+        // end-of-run promoting stage), so the tab fills live during a run. The promoting stage
+        // below stays as a safety net for any lead whose inline promotion failed.
+        const approvalStatus = guardrails.requireHumanApproval ? 'pending_approval' : 'approved';
         let stopped = false;
 
         for (const { query, strategy } of slice) {
@@ -249,6 +253,11 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
                 await db.update(discoveredLeads)
                     .set({ score: card.score, rating: card.rating, scoringCard: card, status: 'qualified', updatedAt: new Date() })
                     .where(eq(discoveredLeads.id, inserted[i].id));
+                // Mirror into the Leads tab immediately (item 4). promoteOne flips the row to
+                // 'promoted' + links the assistant_record, so the promoting stage skips it later.
+                await promoteOne(db, job.organisation_id, campaign.aiAssistantId, {
+                    id: inserted[i].id, companyName: inserted[i].companyName, rating: card.rating, scoringCard: card,
+                }, approvalStatus);
             }
             leadsFound += inserted.length;
         }

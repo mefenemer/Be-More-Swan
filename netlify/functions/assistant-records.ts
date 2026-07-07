@@ -224,12 +224,16 @@ export const handler: Handler = async (event) => {
         }
 
         if (event.httpMethod === 'PATCH') {
-            let body: { id?: number; status?: unknown; data?: unknown; approvalStatus?: unknown; scheduledFor?: unknown };
+            let body: { id?: number; title?: unknown; status?: unknown; data?: unknown; approvalStatus?: unknown; scheduledFor?: unknown };
             try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
             const id = Number(body.id);
             if (!Number.isInteger(id)) return json(400, { error: 'id is required.' });
 
             const patch: Record<string, unknown> = { updatedAt: new Date() };
+            if (body.title !== undefined) {
+                if (typeof body.title !== 'string' || !body.title.trim()) return json(400, { error: 'title must be a non-empty string.' });
+                patch.title = body.title.trim().slice(0, 300);
+            }
             if (body.status !== undefined) {
                 if (body.status !== null && typeof body.status !== 'string') return json(400, { error: 'status must be a string or null.' });
                 patch.status = body.status === null ? null : String(body.status).trim().slice(0, 60);
@@ -262,6 +266,7 @@ export const handler: Handler = async (event) => {
                 .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
                 .returning({
                     id: assistantRecords.id,
+                    title: assistantRecords.title,
                     status: assistantRecords.status,
                     approvalStatus: assistantRecords.approvalStatus,
                     scheduledFor: assistantRecords.scheduledFor,

@@ -111,17 +111,29 @@
     const chip = STATUS_CHIP[c.latestJobStatus] || 'bg-gray-50 text-gray-500 border-gray-200';
     const statusLabel = c.latestJobStatus ? esc(c.latestJobStatus) : 'no runs yet';
     const running = c.latestJobStatus === 'queued' || c.latestJobStatus === 'processing';
+    const paused = c.status === 'paused';
+    const ghost = 'px-2.5 py-1 bg-white border border-gray-200 text-gray-600 hover:border-gray-300 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed';
+    // Primary action: Cancel while a run is in flight, else Run now (blocked while paused).
+    const primaryBtn = running
+      ? `<button type="button" data-dc-cancel="${c.id}" class="px-3 py-1.5 bg-white border border-gray-200 text-red-600 hover:border-red-300 hover:bg-red-50 text-xs font-bold rounded-lg transition">Cancel run</button>`
+      : `<button type="button" data-dc-run="${c.id}" class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed" ${paused ? 'disabled title="Resume this campaign to run it"' : ''}>Run now</button>`;
     return `
-      <div class="border border-gray-200 rounded-xl p-4" data-campaign="${c.id}">
+      <div class="border border-gray-200 rounded-xl p-4 ${paused ? 'opacity-70' : ''}" data-campaign="${c.id}" data-dc-idea-val="${esc(c.idea)}"
+           data-dc-maxleads-val="${esc(c.maxLeadsPerRun ?? 50)}" data-dc-budget-val="${esc(c.maxCostGbpPerRun ?? 2)}"
+           data-dc-negatives-val="${esc(Array.isArray(c.negativeKeywords) ? c.negativeKeywords.join(', ') : '')}"
+           data-dc-approval-val="${c.requireHumanApproval === false ? '0' : '1'}">
         <div class="flex items-start justify-between gap-3">
           <p class="font-semibold text-gray-900 text-sm min-w-0">${esc(c.idea)}</p>
-          <span class="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border ${chip}">${statusLabel}</span>
+          <span class="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border ${paused ? 'bg-gray-100 text-gray-500 border-gray-200' : chip}">${paused ? 'paused' : statusLabel}</span>
         </div>
         <p class="text-xs text-gray-500 mt-1">${Number(c.leadsFound || 0)} lead${Number(c.leadsFound) === 1 ? '' : 's'} found</p>
-        <div class="flex items-center gap-2 mt-3 pt-3 border-t border-gray-100">
-          <button type="button" data-dc-run="${c.id}" class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition disabled:opacity-60" ${running ? 'disabled' : ''}>${running ? 'Running…' : 'Run now'}</button>
+        <div class="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-100">
+          ${primaryBtn}
           <button type="button" data-dc-view="${c.id}" class="px-3 py-1.5 bg-white border border-gray-200 text-gray-600 hover:border-gray-300 text-xs font-bold rounded-lg transition">View leads</button>
-          <span class="hidden text-xs font-semibold text-red-600" data-dc-cerror></span>
+          <button type="button" data-dc-edit="${c.id}" class="${ghost}">Edit</button>
+          <button type="button" data-dc-toggle="${c.id}" data-paused="${paused ? '1' : '0'}" class="${ghost}">${paused ? 'Resume' : 'Pause'}</button>
+          <button type="button" data-dc-archive="${c.id}" class="${ghost} text-gray-400 hover:text-red-600 hover:border-red-300 ml-auto">Archive</button>
+          <span class="hidden text-xs font-semibold text-red-600 w-full" data-dc-cerror></span>
         </div>
         <div data-dc-leads></div>
       </div>`;
@@ -228,12 +240,126 @@
     }
   }
 
+  function cardErr(el, msg) {
+    const e = el.closest('[data-campaign]')?.querySelector('[data-dc-cerror]');
+    if (e) { e.textContent = msg; e.classList.remove('hidden'); }
+  }
+
+  async function cancelRun(btn) {
+    const id = Number(btn.getAttribute('data-dc-cancel'));
+    btn.disabled = true; btn.textContent = 'Cancelling…';
+    try {
+      const data = await call('cancel_run', { campaignId: id });
+      window.showToast?.(data.cancelled ? 'Run cancelled.' : 'No active run to cancel.');
+      await refresh();
+    } catch (err) { btn.disabled = false; btn.textContent = 'Cancel run'; cardErr(btn, err.message); }
+  }
+
+  async function togglePause(btn) {
+    const id = Number(btn.getAttribute('data-dc-toggle'));
+    const paused = btn.getAttribute('data-paused') === '1';
+    btn.disabled = true;
+    try {
+      await call(paused ? 'resume' : 'pause', { campaignId: id });
+      window.showToast?.(paused ? 'Campaign resumed.' : 'Campaign paused.');
+      await refresh();
+    } catch (err) { btn.disabled = false; cardErr(btn, err.message); }
+  }
+
+  async function archiveCampaign(btn) {
+    const id = Number(btn.getAttribute('data-dc-archive'));
+    if (!window.confirm('Archive this campaign? It stops running and leaves this list. Leads already found stay in your Leads tab.')) return;
+    btn.disabled = true;
+    try {
+      await call('archive', { campaignId: id });
+      window.showToast?.('Campaign archived.');
+      await refresh();
+    } catch (err) { btn.disabled = false; cardErr(btn, err.message); }
+  }
+
+  // Edit an existing campaign's idea + guardrails, prefilled from the card's data-* snapshot.
+  function openEditModal(cardEl, id) {
+    if (!cardEl) return;
+    const g = (a, d) => cardEl.getAttribute(a) ?? d;
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 bg-gray-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm';
+    overlay.innerHTML = `
+      <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div class="flex items-start justify-between gap-4 p-5 border-b border-gray-100">
+          <h3 class="text-lg font-bold text-gray-900">Edit campaign</h3>
+          <button type="button" data-edit-close class="text-gray-400 hover:text-gray-600 text-2xl leading-none cursor-pointer">&times;</button>
+        </div>
+        <div class="p-5 space-y-3">
+          <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Who to find</label>
+            <textarea data-edit-idea rows="3" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">${esc(g('data-dc-idea-val', ''))}</textarea>
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Max leads / run</label>
+              <input data-edit-maxleads type="number" min="1" value="${esc(g('data-dc-maxleads-val', '50'))}" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Max spend / run (£)</label>
+              <input data-edit-budget type="number" min="0" step="0.5" value="${esc(g('data-dc-budget-val', '2'))}" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Exclude (comma-sep)</label>
+            <input data-edit-negatives type="text" value="${esc(g('data-dc-negatives-val', ''))}" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm" placeholder="competitor.com, acme">
+          </div>
+          <label class="flex items-center gap-2 text-sm text-gray-700">
+            <input data-edit-approval type="checkbox" ${g('data-dc-approval-val', '1') === '0' ? '' : 'checked'} class="rounded border-gray-300 text-emerald-700 focus:ring-emerald-700">
+            Review found leads before any outreach (recommended)
+          </label>
+          <p class="hidden text-xs font-semibold text-red-600" data-edit-error></p>
+          <div class="flex items-center justify-end gap-2 pt-1">
+            <button type="button" data-edit-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 rounded-lg cursor-pointer">Cancel</button>
+            <button type="button" data-edit-save class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Save changes</button>
+          </div>
+        </div>
+      </div>`;
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelectorAll('[data-edit-close]').forEach((b) => b.addEventListener('click', close));
+    const saveBtn = overlay.querySelector('[data-edit-save]');
+    const errEl = overlay.querySelector('[data-edit-error]');
+    saveBtn.addEventListener('click', async () => {
+      const idea = overlay.querySelector('[data-edit-idea]').value.trim();
+      if (!idea) { errEl.textContent = 'Describe who you want to find.'; errEl.classList.remove('hidden'); return; }
+      errEl.classList.add('hidden');
+      const negatives = (overlay.querySelector('[data-edit-negatives]').value || '').split(',').map((s) => s.trim()).filter(Boolean);
+      saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
+      try {
+        await call('edit', {
+          campaignId: id,
+          idea,
+          guardrails: {
+            maxLeadsPerRun: Number(overlay.querySelector('[data-edit-maxleads]').value) || undefined,
+            maxCostGbpPerRun: Number(overlay.querySelector('[data-edit-budget]').value) || undefined,
+            negativeKeywords: negatives,
+            requireHumanApproval: !!overlay.querySelector('[data-edit-approval]').checked,
+          },
+        });
+        window.showToast?.('Campaign updated.');
+        close();
+        await refresh();
+      } catch (err) { saveBtn.disabled = false; saveBtn.textContent = 'Save changes'; errEl.textContent = err.message; errEl.classList.remove('hidden'); }
+    });
+    document.body.appendChild(overlay);
+    overlay.querySelector('[data-edit-idea]')?.focus();
+  }
+
   function wire() {
     const b = body();
     if (!b) return;
     b.querySelector('[data-dc-create]')?.addEventListener('click', (e) => create(e.currentTarget));
     b.querySelectorAll('[data-dc-run]').forEach((el) => el.addEventListener('click', () => runNow(el)));
     b.querySelectorAll('[data-dc-view]').forEach((el) => el.addEventListener('click', () => viewLeads(el)));
+    b.querySelectorAll('[data-dc-cancel]').forEach((el) => el.addEventListener('click', () => cancelRun(el)));
+    b.querySelectorAll('[data-dc-toggle]').forEach((el) => el.addEventListener('click', () => togglePause(el)));
+    b.querySelectorAll('[data-dc-archive]').forEach((el) => el.addEventListener('click', () => archiveCampaign(el)));
+    b.querySelectorAll('[data-dc-edit]').forEach((el) => el.addEventListener('click', () => openEditModal(el.closest('[data-campaign]'), Number(el.getAttribute('data-dc-edit')))));
   }
 
   function open() {

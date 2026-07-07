@@ -593,6 +593,16 @@ function _detailRqGroupSection(g, items, render, statusKey) {
 // Schedule, or Reject before anything acts on them. Lifecycle columns map to approval states.
 const _RQ_RECORD_STATE = { review: 'pending_approval', approved: 'approved', scheduled: 'scheduled', posted: null, archived: 'rejected' };
 
+// Default chase reminder for an approved lead: 3 days out at 09:00 local, nudged off weekends.
+function _rqChaseDate() {
+    const d = new Date();
+    d.setDate(d.getDate() + 3);
+    d.setHours(9, 0, 0, 0);
+    if (d.getDay() === 6) d.setDate(d.getDate() + 2);      // Sat → Mon
+    else if (d.getDay() === 0) d.setDate(d.getDate() + 1); // Sun → Mon
+    return d;
+}
+
 function _rqEsc(v) {
     return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
@@ -606,14 +616,22 @@ function _rqRecordActions(r, statusKey) {
     const secondary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 transition cursor-pointer';
     const primary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white transition cursor-pointer';
     const btn = (label, act, cls) => `<button type="button" onclick="_detailRqRecordAct(this,'${act}')" class="${cls}">${label}</button>`;
+    const reject = `<button type="button" onclick="_detailRqRecordAct(this,'reject')" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-gray-200 text-red-600 hover:border-red-300 hover:bg-red-50 transition cursor-pointer ml-auto">Reject</button>`;
+    // Leads follow a simpler lifecycle than posts: Approve just accepts the lead (no "Approve &
+    // Schedule"). The chase reminder (a scheduled_for that surfaces on the Calendar) is set later,
+    // once the first outreach has gone out — via "Mark outreach sent" in the Approved column.
+    const isLead = r.recordType === 'lead';
     let buttons = '';
     if (statusKey === 'review') {
-        buttons = btn('Approve', 'approve', primary) + btn('Approve &amp; Schedule', 'showSchedule', secondary) +
-            `<button type="button" onclick="_detailRqRecordAct(this,'reject')" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-gray-200 text-red-600 hover:border-red-300 hover:bg-red-50 transition cursor-pointer ml-auto">Reject</button>`;
+        buttons = isLead
+            ? btn('Approve', 'approve', primary) + reject
+            : btn('Approve', 'approve', primary) + btn('Approve &amp; Schedule', 'showSchedule', secondary) + reject;
     } else if (statusKey === 'approved') {
-        buttons = btn('Schedule', 'showSchedule', primary) + btn('Send back to review', 'review', secondary);
+        buttons = isLead
+            ? btn('Mark outreach sent', 'outreachSent', primary) + btn('Send back to review', 'review', secondary)
+            : btn('Schedule', 'showSchedule', primary) + btn('Send back to review', 'review', secondary);
     } else if (statusKey === 'scheduled') {
-        buttons = btn('Unschedule', 'unschedule', secondary);
+        buttons = btn(isLead ? 'Clear chase reminder' : 'Unschedule', 'unschedule', secondary);
     } else if (statusKey === 'archived') {
         buttons = btn('Restore to review', 'review', secondary);
     }
@@ -629,7 +647,8 @@ function _rqRecordActions(r, statusKey) {
 
 function _detailRqRecordCard(r, statusKey) {
     const snippet = _rqRecordSnippet(r);
-    const sched = r.scheduledFor ? ` · scheduled ${new Date(r.scheduledFor).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : '';
+    const schedVerb = r.recordType === 'lead' ? 'chase by' : 'scheduled';
+    const sched = r.scheduledFor ? ` · ${schedVerb} ${new Date(r.scheduledFor).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : '';
     return `<div class="py-4" data-rq-record="${r.id}">
       <div class="min-w-0">
         <p class="text-sm font-bold text-gray-900 truncate">${_rqEsc(r.title)}</p>
@@ -688,7 +707,15 @@ window._detailRqRecordAct = async function (btn, action) {
     if (action === 'showSchedule') { card.querySelector('.rq-sched-row')?.classList.remove('hidden'); return; }
 
     const patch = { id: Number(card.getAttribute('data-rq-record')) };
+    let chaseWhen = null;
     if (action === 'approve') patch.approvalStatus = 'approved';
+    else if (action === 'outreachSent') {
+        // First outreach has gone out → move the approved lead to a chase reminder (default 3
+        // days out, 09:00) that lands on the Calendar.
+        chaseWhen = _rqChaseDate();
+        patch.approvalStatus = 'scheduled';
+        patch.scheduledFor = chaseWhen.toISOString();
+    }
     else if (action === 'reject') patch.approvalStatus = 'rejected';
     else if (action === 'review') patch.approvalStatus = 'pending_approval';
     else if (action === 'unschedule') patch.approvalStatus = 'approved';
@@ -706,7 +733,11 @@ window._detailRqRecordAct = async function (btn, action) {
             method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
         });
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Update failed.');
-        window.showToast?.(action === 'schedule' ? 'Scheduled — it’s on the Calendar now.' : action === 'reject' ? 'Rejected.' : 'Updated.');
+        const toast = action === 'outreachSent'
+            ? `First outreach logged — chase reminder set for ${chaseWhen.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}. See the Calendar.`
+            : action === 'schedule' ? 'Scheduled — it’s on the Calendar now.'
+            : action === 'reject' ? 'Rejected.' : 'Updated.';
+        window.showToast?.(toast);
         _detailRqRenderGroups(_detailRqCurrentStatus);
         // A newly scheduled/approved record changes the Calendar + Data Hub — force them to reload
         // next time they're opened (both are cached once per detail mount).

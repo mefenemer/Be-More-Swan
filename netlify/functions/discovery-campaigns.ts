@@ -14,9 +14,9 @@
 
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
-import { and, desc, eq, sql } from 'drizzle-orm';
+import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, discoveryCampaigns, discoveryJobs, discoveredLeads } from '../../db/schema';
+import { aiAssistants, discoveryCampaigns, discoveryGuardrails, discoverySchedules, discoveryJobs, discoveredLeads } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { createDiscoveryRun } from '../../src/utils/discovery';
 import { isSearchConfigured } from '../../src/lib/discovery-search';
@@ -92,9 +92,19 @@ export const handler: Handler = async (event) => {
                     SELECT COALESCE(SUM(j.leads_found), 0)::int FROM discovery_jobs j
                     WHERE j.campaign_id = ${discoveryCampaigns.id}
                 )`,
+                // Guardrail snapshot so the Edit form can prefill without a second round-trip.
+                maxLeadsPerRun: discoveryGuardrails.maxLeadsPerRun,
+                maxCostGbpPerRun: discoveryGuardrails.maxCostGbpPerRun,
+                negativeKeywords: discoveryGuardrails.negativeKeywords,
+                requireHumanApproval: discoveryGuardrails.requireHumanApproval,
             })
             .from(discoveryCampaigns)
-            .where(and(eq(discoveryCampaigns.organisationId, orgId), eq(discoveryCampaigns.aiAssistantId, assistantId)))
+            .leftJoin(discoveryGuardrails, eq(discoveryGuardrails.campaignId, discoveryCampaigns.id))
+            .where(and(
+                eq(discoveryCampaigns.organisationId, orgId),
+                eq(discoveryCampaigns.aiAssistantId, assistantId),
+                ne(discoveryCampaigns.status, 'archived'),
+            ))
             .orderBy(desc(discoveryCampaigns.createdAt));
         return json(200, { campaigns, searchConfigured: isSearchConfigured() });
     }
@@ -139,6 +149,81 @@ export const handler: Handler = async (event) => {
             .where(and(eq(discoveredLeads.organisationId, orgId), eq(discoveredLeads.campaignId, campaignId)))
             .orderBy(desc(discoveredLeads.score));
         return json(200, { leads });
+    }
+
+    // ── pause / resume / archive a campaign ─────────────────────────────────────
+    if (action === 'pause' || action === 'resume' || action === 'archive') {
+        const campaignId = Number(body.campaignId);
+        const [campaign] = await db.select({ id: discoveryCampaigns.id })
+            .from(discoveryCampaigns)
+            .where(and(eq(discoveryCampaigns.id, campaignId), eq(discoveryCampaigns.organisationId, orgId)))
+            .limit(1);
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+
+        const nextStatus = action === 'pause' ? 'paused' : action === 'archive' ? 'archived' : 'active';
+        await db.update(discoveryCampaigns)
+            .set({ status: nextStatus, updatedAt: new Date() })
+            .where(eq(discoveryCampaigns.id, campaignId));
+
+        // Keep the schedule in lock-step: paused/archived campaigns stop dispatching; resuming
+        // re-enables recurring cadences (one_off campaigns have no recurring schedule to run).
+        await db.update(discoverySchedules)
+            .set({
+                isEnabled: action === 'resume' ? sql`${discoverySchedules.cadence} <> 'one_off'` : sql`false`,
+                updatedAt: new Date(),
+            })
+            .where(eq(discoverySchedules.campaignId, campaignId));
+
+        // Pausing/archiving also drops any not-yet-finished run from the queue (see cancel_run).
+        if (action !== 'resume') {
+            await db.delete(discoveryJobs)
+                .where(and(eq(discoveryJobs.campaignId, campaignId), sql`${discoveryJobs.status} IN ('queued','processing')`));
+        }
+        return json(200, { status: nextStatus });
+    }
+
+    // ── cancel the in-flight run, leaving the campaign active ───────────────────
+    if (action === 'cancel_run') {
+        const campaignId = Number(body.campaignId);
+        const [campaign] = await db.select({ id: discoveryCampaigns.id })
+            .from(discoveryCampaigns)
+            .where(and(eq(discoveryCampaigns.id, campaignId), eq(discoveryCampaigns.organisationId, orgId)))
+            .limit(1);
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+        // Delete queued AND processing jobs. A processing job's worker runs each slice as a
+        // separate statement, so a mid-slice delete removes the row and its next update no-ops.
+        const cancelled = await db.delete(discoveryJobs)
+            .where(and(eq(discoveryJobs.campaignId, campaignId), sql`${discoveryJobs.status} IN ('queued','processing')`))
+            .returning({ id: discoveryJobs.id });
+        return json(200, { cancelled: cancelled.length });
+    }
+
+    // ── edit a campaign's idea + guardrails ─────────────────────────────────────
+    if (action === 'edit') {
+        const campaignId = Number(body.campaignId);
+        const [campaign] = await db.select({ id: discoveryCampaigns.id })
+            .from(discoveryCampaigns)
+            .where(and(eq(discoveryCampaigns.id, campaignId), eq(discoveryCampaigns.organisationId, orgId)))
+            .limit(1);
+        if (!campaign) return json(404, { error: 'Campaign not found.' });
+
+        const idea = str(body.idea, 1000);
+        if (idea) {
+            await db.update(discoveryCampaigns).set({ idea, updatedAt: new Date() }).where(eq(discoveryCampaigns.id, campaignId));
+        }
+
+        const g = (body.guardrails && typeof body.guardrails === 'object') ? body.guardrails as Record<string, unknown> : null;
+        if (g) {
+            const patch: Record<string, unknown> = { updatedAt: new Date() };
+            if (typeof g.maxLeadsPerRun === 'number') patch.maxLeadsPerRun = g.maxLeadsPerRun;
+            if (typeof g.maxCostGbpPerRun === 'number') patch.maxCostGbpPerRun = String(g.maxCostGbpPerRun);
+            if (Array.isArray(g.negativeKeywords)) patch.negativeKeywords = (g.negativeKeywords as unknown[]).filter((x): x is string => typeof x === 'string');
+            if (typeof g.requireHumanApproval === 'boolean') patch.requireHumanApproval = g.requireHumanApproval;
+            if (Object.keys(patch).length > 1) {
+                await db.update(discoveryGuardrails).set(patch).where(eq(discoveryGuardrails.campaignId, campaignId));
+            }
+        }
+        return json(200, { ok: true });
     }
 
     return json(400, { error: `Unknown action "${action}".` });
