@@ -391,11 +391,14 @@ function _renderList() {
         const date = new Date(year, month, d);
         let posts = _postsOnDate(date);
         let blogs = _blogPostsOnDate(date);
+        // Scheduled Data Hub records are approval_status='scheduled', so they only
+        // belong under the "All" and "Approved & Scheduled" filters.
+        let records = (_listFilter === 'all' || _listFilter === 'approved') ? _scheduledRecordsOnDate(date) : [];
         if (allowedStatuses) {
             posts = posts.filter(p => allowedStatuses.has(p.status));
             blogs = blogs.filter(p => allowedStatuses.has(p.status));
         }
-        if (posts.length > 0 || blogs.length > 0) groups.push({ date, posts, blogs });
+        if (posts.length > 0 || blogs.length > 0 || records.length > 0) groups.push({ date, posts, blogs, records });
     }
 
     if (groups.length === 0) {
@@ -407,7 +410,7 @@ function _renderList() {
     }
 
     html += `<div class="max-w-3xl mx-auto px-4 py-6 space-y-8">`;
-    groups.forEach(({ date, posts, blogs }) => {
+    groups.forEach(({ date, posts, blogs, records }) => {
         const today = new Date(); today.setHours(0,0,0,0);
         const isToday = _dateKey(date) === _dateKey(today);
         html += `<div>
@@ -418,7 +421,7 @@ function _renderList() {
                 </span>
                 <div class="flex-1 h-px bg-gray-200"></div>
             </div>
-            <div class="space-y-2">${posts.map(p => _listRow(p)).join('')}${(blogs || []).map(_blogChip).join('')}</div>
+            <div class="space-y-2">${posts.map(p => _listRow(p)).join('')}${(blogs || []).map(_blogChip).join('')}${(records || []).map(_listRecordRow).join('')}</div>
         </div>`;
     });
     html += `</div>`;
@@ -639,6 +642,27 @@ function _recordChip(rec, viewType) {
             <p class="text-[11px] font-semibold text-gray-600 truncate">🗓 ${_escHtml(rec.title || rec.recordType || 'Scheduled')}</p>
             ${viewType === 'week' ? `<p class="text-[10px] text-gray-400 truncate leading-tight">${time} · scheduled</p>` : ''}
         </div>
+    </div>`;
+}
+
+// Scheduled Data Hub record as a full-width list row (assistant Calendar list view).
+// Mirrors _listRow's layout but tinted yellow like _recordChip so it reads as
+// "scheduled work", not a social post. Non-interactive — records open from the Data Hub.
+function _listRecordRow(rec) {
+    const color = _assistantColor(_assistantFilter === 'all' ? null : Number(_assistantFilter));
+    const time = new Date(rec.scheduledFor).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    return `<div
+        class="flex items-start gap-4 bg-yellow-50 border border-yellow-200 rounded-xl px-5 py-4"
+        style="border-left:3px solid ${color}">
+        <span class="w-9 h-9 rounded-full bg-yellow-100 flex items-center justify-center text-base shrink-0">🗓</span>
+        <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 mb-1">
+                <span class="text-sm font-extrabold text-gray-900 truncate">${_escHtml(rec.title || rec.recordType || 'Scheduled')}</span>
+                <span class="text-xs font-bold text-gray-400">${time}</span>
+            </div>
+            ${rec.recordType ? `<p class="text-xs text-gray-500 capitalize">${_escHtml(rec.recordType)}</p>` : ''}
+        </div>
+        <span class="text-xs font-bold px-2.5 py-1 rounded-full border bg-yellow-100 text-yellow-700 border-yellow-300 shrink-0 mt-1">Scheduled</span>
     </div>`;
 }
 
