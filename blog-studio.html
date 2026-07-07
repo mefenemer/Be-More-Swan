@@ -108,6 +108,14 @@
             <button id="bs-feature-ai" class="bs-btn bs-btn-ghost">AI generate</button>
             <button id="bs-feature-remove" class="bs-btn bs-btn-ghost bs-hidden">Remove</button>
           </div>
+          <!-- Inline body images (US 2.1): inserts ![alt](asset://N) into the editor; widget-api
+               resolves a fresh URL at read time, so it survives the private-R2 presign expiry. -->
+          <div style="margin-top: 14px; font-size: 12px; color: #6b7280;">Inline body image</div>
+          <div class="bs-row" style="margin-top: 6px;">
+            <button id="bs-inline-library" class="bs-btn bs-btn-ghost">Library</button>
+            <button id="bs-inline-pexels" class="bs-btn bs-btn-ghost">Stock</button>
+            <button id="bs-inline-ai" class="bs-btn bs-btn-ghost">AI</button>
+          </div>
           <div id="bs-ai-form" class="bs-field bs-hidden" style="margin-top: 12px;">
             <input id="bs-ai-prompt" placeholder="Describe the image…">
             <button id="bs-ai-go" class="bs-btn bs-btn-ghost" style="margin-top: 8px;">Generate</button>
@@ -151,7 +159,7 @@
       }, opts)).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); });
     };
 
-    var state = { postId: null, editor: null, assistants: {} };
+    var state = { postId: null, editor: null, assistants: {}, mediaTarget: 'feature' };
 
     function setStatus(id, msg) { var el = document.getElementById(id); if (el) el.textContent = msg; }
 
@@ -387,6 +395,9 @@
       pexelsQuery: document.getElementById('bs-pexels-query'),
       pexelsGo: document.getElementById('bs-pexels-go'),
       picker: document.getElementById('bs-media-picker'),
+      inlineLibrary: document.getElementById('bs-inline-library'),
+      inlinePexels: document.getElementById('bs-inline-pexels'),
+      inlineAi: document.getElementById('bs-inline-ai'),
     };
 
     function renderFeature(feature) {
@@ -404,7 +415,12 @@
     function loadFeature() {
       if (!state.postId) return;
       api('blog-media?blogPostId=' + state.postId, { method: 'GET' }).then(function (res) {
-        if (res.ok) renderFeature(res.body.feature);
+        if (!res.ok) return;
+        renderFeature(res.body.feature);
+        // Hydrate the editor with display URLs for any inline asset:// refs already in the body.
+        var map = {};
+        (res.body.inline || []).forEach(function (m) { if (m.url) map[m.assetId] = m.url; });
+        if (state.editor && state.editor.setAssetUrls) state.editor.setAssetUrls(map);
       });
     }
 
@@ -424,14 +440,40 @@
         });
     }
 
+    // Attach an image as inline body media, then insert an asset:// block into the editor. `body` is
+    // either { assetId } (library / AI) or { pexelsCandidate } (stock). Inline attach appends, so the
+    // freshly-added asset is the last item of the returned inline[].
+    function attachInline(body) {
+      if (!state.postId || !state.editor) return;
+      setStatus('bs-media-status', 'Adding…');
+      api('blog-media', { method: 'POST', body: JSON.stringify(Object.assign({ blogPostId: state.postId, action: 'attach', role: 'inline' }, body)) })
+        .then(function (res) {
+          if (!res.ok) { setStatus('bs-media-status', (res.body && res.body.error) || 'Failed'); return; }
+          var inline = (res.body && res.body.inline) || [];
+          var item = body.assetId != null
+            ? (inline.filter(function (m) { return m.assetId === body.assetId; })[0] || inline[inline.length - 1])
+            : inline[inline.length - 1];
+          if (item) state.editor.insertImage({ assetId: item.assetId, url: item.url, alt: item.name || '' });
+          hidePicker(); setStatus('bs-media-status', '');
+        });
+    }
+
+    // Route a chosen image to the current target (hero vs. inline body). Set by whichever source
+    // button was clicked (feature buttons → 'feature', inline buttons → 'inline').
+    function routeImage(body) {
+      if (state.mediaTarget === 'inline') return attachInline(body);
+      if (body.pexelsCandidate) return attachFeatureCandidate(body.pexelsCandidate);
+      return attachFeature(body.assetId);
+    }
+
     mediaEls.remove.addEventListener('click', function () {
       if (!state.postId) return;
       api('blog-media', { method: 'POST', body: JSON.stringify({ blogPostId: state.postId, action: 'detach', role: 'feature' }) })
         .then(function (res) { if (res.ok) renderFeature(res.body.feature); });
     });
 
-    // Choose from the existing My Content image library.
-    mediaEls.library.addEventListener('click', function () {
+    // Choose from the existing My Content image library (shared by the hero + inline buttons).
+    function openLibrary() {
       if (!state.postId) return;
       mediaEls.aiForm.classList.add('bs-hidden');
       mediaEls.pexelsForm.classList.add('bs-hidden');
@@ -448,19 +490,23 @@
           var img = document.createElement('img');
           img.src = a.storageUrl || a.externalUrl;
           img.alt = a.name || '';
-          img.addEventListener('click', function () { attachFeature(a.id); });
+          img.addEventListener('click', function () { routeImage({ assetId: a.id }); });
           mediaEls.picker.appendChild(img);
         });
       });
-    });
+    }
+    mediaEls.library.addEventListener('click', function () { state.mediaTarget = 'feature'; openLibrary(); });
+    mediaEls.inlineLibrary.addEventListener('click', function () { state.mediaTarget = 'inline'; openLibrary(); });
 
-    // Generate a custom feature graphic (existing credit-metered image endpoint).
-    mediaEls.ai.addEventListener('click', function () {
+    // Generate a custom graphic via the existing credit-metered image endpoint (hero + inline).
+    function openAiForm() {
       mediaEls.picker.classList.add('bs-hidden');
       mediaEls.pexelsForm.classList.add('bs-hidden');
-      mediaEls.aiForm.classList.toggle('bs-hidden');
-      if (!mediaEls.aiForm.classList.contains('bs-hidden')) mediaEls.aiPrompt.focus();
-    });
+      mediaEls.aiForm.classList.remove('bs-hidden');
+      mediaEls.aiPrompt.focus();
+    }
+    mediaEls.ai.addEventListener('click', function () { state.mediaTarget = 'feature'; openAiForm(); });
+    mediaEls.inlineAi.addEventListener('click', function () { state.mediaTarget = 'inline'; openAiForm(); });
 
     mediaEls.aiGo.addEventListener('click', function () {
       var prompt = mediaEls.aiPrompt.value.trim();
@@ -481,7 +527,7 @@
               setStatus('bs-media-status', 'Saving…');
               api('generate-ai-image', { method: 'POST', body: JSON.stringify({ action: 'select', jobId: jobId, index: im.index }) })
                 .then(function (sel) {
-                  if (sel.ok && sel.body.assetId) attachFeature(sel.body.assetId);
+                  if (sel.ok && sel.body.assetId) routeImage({ assetId: sel.body.assetId });
                   else setStatus('bs-media-status', (sel.body && sel.body.error) || 'Could not save image');
                 });
             });
@@ -490,9 +536,9 @@
         });
     });
 
-    // Source a hero image from Pexels stock (US 2.1): reuses the pexels-search endpoint for
-    // candidates, then blog-media mints + attaches the chosen one (with photographer attribution).
-    function attachPexelsCandidate(candidate) {
+    // Source from Pexels stock (US 2.1): reuses the pexels-search endpoint for candidates, then
+    // blog-media mints + attaches the chosen one (with photographer attribution). Hero + inline.
+    function attachFeatureCandidate(candidate) {
       setStatus('bs-media-status', 'Attaching…');
       api('blog-media', { method: 'POST', body: JSON.stringify({ blogPostId: state.postId, action: 'attach', role: 'feature', pexelsCandidate: candidate }) })
         .then(function (res) {
@@ -501,15 +547,15 @@
         });
     }
 
-    mediaEls.pexels.addEventListener('click', function () {
+    function openPexelsForm() {
       mediaEls.picker.classList.add('bs-hidden');
       mediaEls.aiForm.classList.add('bs-hidden');
-      mediaEls.pexelsForm.classList.toggle('bs-hidden');
-      if (!mediaEls.pexelsForm.classList.contains('bs-hidden')) {
-        if (!mediaEls.pexelsQuery.value.trim()) mediaEls.pexelsQuery.value = (document.getElementById('bs-title').value || '').trim();
-        mediaEls.pexelsQuery.focus();
-      }
-    });
+      mediaEls.pexelsForm.classList.remove('bs-hidden');
+      if (!mediaEls.pexelsQuery.value.trim()) mediaEls.pexelsQuery.value = (document.getElementById('bs-title').value || '').trim();
+      mediaEls.pexelsQuery.focus();
+    }
+    mediaEls.pexels.addEventListener('click', function () { state.mediaTarget = 'feature'; openPexelsForm(); });
+    mediaEls.inlinePexels.addEventListener('click', function () { state.mediaTarget = 'inline'; openPexelsForm(); });
 
     mediaEls.pexelsGo.addEventListener('click', function () {
       var topic = mediaEls.pexelsQuery.value.trim();
@@ -529,7 +575,7 @@
             img.src = c.url;
             img.alt = c.title || '';
             img.title = c.photographer ? ('Photo by ' + c.photographer + ' on Pexels') : '';
-            img.addEventListener('click', function () { attachPexelsCandidate(c); });
+            img.addEventListener('click', function () { routeImage({ pexelsCandidate: c }); });
             mediaEls.picker.appendChild(img);
           });
         });

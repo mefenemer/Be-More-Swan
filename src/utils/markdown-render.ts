@@ -24,7 +24,10 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
     allowedTags: ALLOWED_TAGS,
     allowedAttributes: {
         a: ['href', 'title', 'rel', 'target'],
-        img: ['src', 'alt', 'title', 'width', 'height', 'loading'],
+        // data-bms-asset: a stable ref to a content_asset for inline media. We never bake a
+        // (short-lived, presigned) URL into this snapshot — widget-api resolves a fresh src at
+        // read time. See transformTags.img below and the widget-api inline resolver.
+        img: ['src', 'alt', 'title', 'width', 'height', 'loading', 'data-bms-asset'],
         code: ['class'], // language-* hints for client-side highlighting
         th: ['scope'],
     },
@@ -34,6 +37,17 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
     // Force external links to open safely from the customer's page.
     transformTags: {
         a: sanitizeHtml.simpleTransform('a', { rel: 'noopener noreferrer nofollow' }, true),
+        // Inline media authored as ![alt](asset://N) arrives here as <img src="asset://N">.
+        // Rewrite it to a src-less <img data-bms-asset="N"> so the expiring URL is resolved
+        // fresh at read time rather than frozen into the cached payload. Real http(s) images
+        // (e.g. Pexels hotlinks) pass through unchanged.
+        img: (tagName, attribs) => {
+            const m = /^asset:\/\/(\d+)$/.exec((attribs.src || '').trim());
+            if (!m) return { tagName, attribs };
+            const next: Record<string, string> = { 'data-bms-asset': m[1], alt: attribs.alt || '' };
+            if (attribs.title) next.title = attribs.title;
+            return { tagName: 'img', attribs: next };
+        },
     },
 };
 

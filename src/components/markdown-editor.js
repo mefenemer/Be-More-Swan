@@ -142,6 +142,13 @@
     let blocks = splitBlocks(initialMarkdown).map((raw) => ({ id: uid(), raw }));
     let saveTimer = null;
     let destroyed = false;
+    // assetId → display URL, for previewing inline images stored as ![alt](asset://N). The raw
+    // Markdown keeps the stable asset:// ref (the source of truth); widget-api resolves a fresh
+    // URL at publish/read time. Here we swap in the known URL so the author sees the real image.
+    const assetUrls = Object.create(null);
+    Object.assign(assetUrls, opts.assetUrls || {});
+    const applyAssetUrls = (raw) =>
+        String(raw).replace(/asset:\/\/(\d+)/g, (m, id) => (assetUrls[id] != null ? assetUrls[id] : m));
 
     const root = document.createElement('div');
     root.className = 'bmsme-root';
@@ -165,7 +172,7 @@
         const el = document.createElement('div');
         el.className = 'bmsme-block';
         el.setAttribute('data-block-id', b.id);
-        el.innerHTML = renderBlock(b.raw);
+        el.innerHTML = renderBlock(applyAssetUrls(b.raw));
         root.appendChild(el);
       }
     }
@@ -173,7 +180,7 @@
     function renderOneBlock(blockId) {
       const b = blocks.find((x) => x.id === blockId);
       const el = root.querySelector('.bmsme-block[data-block-id="' + blockId + '"]');
-      if (b && el) el.innerHTML = renderBlock(b.raw);
+      if (b && el) el.innerHTML = renderBlock(applyAssetUrls(b.raw));
     }
 
     function scheduleSave() {
@@ -296,7 +303,7 @@
       // Show the diff with Accept / Reject before committing.
       if (blockEl) {
         blockEl.classList.remove('bmsme-busy');
-        blockEl.innerHTML = renderBlock(block.raw);
+        blockEl.innerHTML = renderBlock(applyAssetUrls(block.raw));
         const diff = document.createElement('div');
         diff.className = 'bmsme-diff';
         diff.innerHTML = diffHtml(rawSelected, rewrittenText) +
@@ -324,6 +331,26 @@
     return {
       getMarkdown,
       setMarkdown(md) { blocks = splitBlocks(md).map((raw) => ({ id: uid(), raw })); renderAll(); },
+      // Register/refresh display URLs for inline asset:// refs (e.g. after loading an existing post).
+      setAssetUrls(map) {
+        if (!map) return;
+        Object.keys(map).forEach((id) => { assetUrls[id] = map[id]; });
+        renderAll();
+      },
+      // Append an inline image as its own block. The stable asset:// ref is the source of truth;
+      // `url` is only for immediate preview. Inserts after the last-selected block when known.
+      insertImage(img) {
+        if (!img || img.assetId == null) return;
+        if (img.url != null) assetUrls[img.assetId] = img.url;
+        const alt = String(img.alt || '').replace(/[[\]]/g, '');
+        const block = { id: uid(), raw: '![' + alt + '](asset://' + img.assetId + ')' };
+        const anchorId = currentSel && currentSel.blockId;
+        const at = anchorId ? blocks.findIndex((b) => b.id === anchorId) : -1;
+        if (at >= 0) blocks.splice(at + 1, 0, block); else blocks.push(block);
+        currentSel = null;
+        renderAll();
+        scheduleSave();
+      },
       destroy() {
         destroyed = true;
         if (saveTimer) clearTimeout(saveTimer);
