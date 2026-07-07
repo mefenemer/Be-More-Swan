@@ -6,13 +6,15 @@
 // (Dev.to, Hashnode) take body_markdown directly; HTML platforms (WordPress, Ghost — later) take the
 // sanitised published_payload HTML. No new rendering.
 
-export type BlogDestinationId = 'devto' | 'hashnode';
+export type BlogDestinationId = 'devto' | 'hashnode' | 'wordpress' | 'ghost';
 
 /** The published blog data an adapter needs, projected from a blog_posts row + its snapshot. */
 export interface BlogDestinationPost {
     title: string;
-    /** Source of truth. Markdown-native platforms publish this verbatim. */
+    /** Source of truth. Markdown-native platforms (Dev.to, Hashnode) publish this verbatim. */
     bodyMarkdown: string;
+    /** Sanitised HTML snapshot (published_payload.html). HTML platforms (WordPress, Ghost) use this. */
+    bodyHtml: string | null;
     /** Canonical URL of the native/widget copy, so cross-posts don't compete in search. Null = none. */
     canonicalUrl: string | null;
     tags: string[];
@@ -52,7 +54,18 @@ export interface HashnodeCreds {
     publicationId: string;
 }
 
-export type BlogDestinationCreds = DevtoCreds | HashnodeCreds;
+export interface WordpressCreds {
+    siteUrl: string;
+    username: string;
+    appPassword: string;
+}
+
+export interface GhostCreds {
+    apiUrl: string;
+    adminApiKey: string;
+}
+
+export type BlogDestinationCreds = DevtoCreds | HashnodeCreds | WordpressCreds | GhostCreds;
 
 export interface BlogDestinationAdapter<C extends BlogDestinationCreds = BlogDestinationCreds> {
     id: BlogDestinationId;

@@ -53,9 +53,15 @@ export const handler = async (event: HandlerEvent) => {
     if (post.status !== 'published') return json(409, { error: 'Publish the post to your site before syndicating it.' });
     if (!post.bodyMarkdown?.trim()) return json(422, { error: 'This post has no body to publish.' });
 
+    const payloadHtml =
+        post.publishedPayload && typeof post.publishedPayload === 'object' && 'html' in post.publishedPayload
+            ? String((post.publishedPayload as { html?: unknown }).html ?? '') || null
+            : null;
+
     const projected: BlogDestinationPost = {
         title: post.title,
         bodyMarkdown: post.bodyMarkdown,
+        bodyHtml: payloadHtml,
         canonicalUrl: post.canonicalUrl ?? null,
         tags: Array.isArray(post.tags) ? (post.tags as unknown[]).map(String) : [],
         // Private-R2 heroes are presigned/expiring, so we never hand an external platform a URL that
