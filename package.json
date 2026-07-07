@@ -20,6 +20,7 @@
     "test:roi-period": "tsx tests/roi-period.test.ts",
     "test:blog-destinations": "tsx tests/blog-destinations.test.ts",
     "test:gsc-decay": "tsx tests/gsc-decay.test.ts",
+    "test:c2pa-sign": "tsx tests/c2pa-sign.test.ts",
     "db:push": "drizzle-kit push",
     "db:seed": "npx tsx seed/cli.ts",
     "db:seed:sandbox": "npx tsx seed/cli.ts --sandbox",

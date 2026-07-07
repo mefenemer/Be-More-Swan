@@ -10,6 +10,7 @@ import { createHash, createHmac, randomUUID } from 'crypto';
 import { and, eq, ne } from 'drizzle-orm';
 import { blogPosts, contentAssets, contentProvenance } from '../../db/schema';
 import { renderMarkdown, excerpt } from './markdown-render';
+import { isC2paSigningEnabled, signStoredImageAsset, type ManifestSummary } from './c2pa-sign';
 
 const jwtSecret = process.env.JWT_SECRET || 'fallback';
 const C2PA_SCHEMA_VERSION = '1.0';
@@ -68,9 +69,31 @@ export async function publishBlogPost(db: any, post: BlogPostRow, organisationId
     const aiAssisted = !!(post.jobId || post.blueprintId || post.isAutonomous);
     const contentId = post.provenanceContentId || randomUUID();
     const now = new Date();
+
+    // US 6.1 — C2PA image-byte signing. OFF by default: isC2paSigningEnabled() is false until a
+    // signing cert is provisioned, so this block is inert in production today. When enabled, embed a
+    // signed manifest into the feature image bytes (in place) and stamp the summary onto provenance.
+    let imageManifest: ManifestSummary | null = null;
+    if (featureImage && isC2paSigningEnabled()) {
+        imageManifest = await signStoredImageAsset(db, {
+            assetId: featureImage.assetId,
+            organisationId,
+            claims: {
+                title: post.title,
+                aiGenerated: aiAssisted,
+                modelHint: aiAssisted ? 'ai-generated' : 'human-authored',
+                contentId,
+                authorLabel: post.ownerLabel ?? undefined,
+            },
+        });
+    }
+    const imageProvenance = imageManifest
+        ? { imageManifest, imageSigner: imageManifest.signer, imageSignedAt: new Date(imageManifest.signedAt) }
+        : {};
+
     if (post.provenanceContentId) {
         await db.update(contentProvenance)
-            .set({ publishedAt: now, hitlReviewed: true, hitlReviewedAt: now })
+            .set({ publishedAt: now, hitlReviewed: true, hitlReviewedAt: now, ...imageProvenance })
             .where(eq(contentProvenance.contentId, contentId));
     } else {
         await db.insert(contentProvenance).values({
@@ -83,6 +106,7 @@ export async function publishBlogPost(db: any, post: BlogPostRow, organisationId
             hitlReviewedAt: now,
             publishedAt: now,
             c2paSchemaVersion: C2PA_SCHEMA_VERSION,
+            ...imageProvenance,
         });
     }
 

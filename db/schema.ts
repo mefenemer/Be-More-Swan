@@ -2275,6 +2275,11 @@ export const contentProvenance = pgTable("content_provenance", {
   generatedAt: timestamp("generated_at").notNull().defaultNow(),
   publishedAt: timestamp("published_at"),
   c2paSchemaVersion: text("c2pa_schema_version").notNull().default("1.0"),
+  // US 6.1 — C2PA image-byte signing (scaffold; NULL until a signing cert is provisioned and
+  // C2PA_SIGN_CERT/C2PA_SIGN_KEY are set — see src/utils/c2pa-sign.ts + db/c2pa-image-signing.sql).
+  imageManifest: jsonb("image_manifest"),   // ManifestSummary: signer, urn, algorithm, claims
+  imageSigner: text("image_signer"),        // signer identity (cert subject / configured label)
+  imageSignedAt: timestamp("image_signed_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
   index("content_provenance_org_idx").on(t.organisationId),
