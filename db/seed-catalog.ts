@@ -102,6 +102,16 @@ const CATALOG = [
         isActive: true,
     },
     {
+        roleKey: 'blog_writer',
+        name: 'The Blog Writer',
+        description: 'Researches, drafts, and schedules long-form blog posts in your brand voice — then publishes them to your site via the native widget on a cadence you set. Review and approve; it handles the rest.',
+        category: 'Marketing & Sales',
+        iconKey: 'document',
+        iconColor: 'pink',
+        comingSoon: false,   // ← Live: powers the Blog Studio (Content Engine)
+        isActive: true,
+    },
+    {
         roleKey: 'crm_enricher',
         name: 'The CRM Enricher',
         description: 'Scours the web to fill in missing contact details — LinkedIn profiles, company size, funding stage — for every new lead in your database.',

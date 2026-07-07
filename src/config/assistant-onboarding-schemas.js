@@ -24,6 +24,38 @@
   'use strict';
 
   window.AssistantOnboardingSchemas = {
+    // Content Engine — Blog Writer. Minimal Phase A schema (topics + brand voice) so the role is
+    // hireable via the schema-driven setup (assistant-setup.html). Phase B adds the publishing
+    // cadence + horizon fields that drive assistant-scheduled "Approve & Schedule".
+    blog_writer: [
+      {
+        title: 'What should your Blog Writer cover?',
+        description: 'Your Blog Writer drafts long-form posts in your brand voice — you review and approve each one before it publishes.',
+        fields: [
+          {
+            key: 'blogTopics',
+            label: 'Topics & themes',
+            type: 'text',
+            required: true,
+            placeholder: 'e.g. AI for small teams, productivity, remote work',
+            helpText: 'Comma-separate the subjects you want to publish about.',
+          },
+          {
+            // Stored to onboardingContext.tone_of_voice — the field blog-tone.ts + generate-blog read.
+            key: 'tone_of_voice',
+            label: 'Writing voice',
+            type: 'radio',
+            required: true,
+            options: [
+              { value: 'Professional', label: 'Professional', description: 'Polished and authoritative.' },
+              { value: 'Casual', label: 'Casual', description: 'Friendly and conversational.' },
+              { value: 'Confident', label: 'Confident', description: 'Bold and direct.' },
+              { value: 'Friendly', label: 'Friendly', description: 'Warm and approachable.' },
+            ],
+          },
+        ],
+      },
+    ],
     // Tier 1, Batch 1 — Lead Qualifier. Captures the ideal customer profile the
     // orchestrator scores every inbound lead against, then how it runs operationally.
     lead_qualifier: [

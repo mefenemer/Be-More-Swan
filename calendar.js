@@ -1415,10 +1415,11 @@ function _blogChip(post) {
     </div>`;
 }
 
-// Blog Studio doesn't yet load an existing post by id; open it in a new tab (visibility-first).
-// The postId is passed through so it "just works" once the studio supports deep-linking.
+// Open the clicked blog post in the native Blog Studio modal (falls back to the standalone page
+// only if the modal module didn't load).
 window._calOpenBlog = function (id) {
-    window.open('/blog-studio.html?postId=' + encodeURIComponent(id), '_blank');
+    if (typeof window.openBlogStudio === 'function') window.openBlogStudio({ postId: id });
+    else window.open('/blog-studio.html?postId=' + encodeURIComponent(id), '_blank');
 };
 
 function _weekStart(date) {

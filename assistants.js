@@ -1324,17 +1324,21 @@ function _applyDashboardRegistry(data) {
     }
 
     // Overview primary action — relabel + rebind by role. 'chat' opens the assistant's chat intake
-    // (how Data Hub roles receive work); anything else keeps the post-generation sheet.
+    // (how Data Hub roles receive work); the Blog Writer opens the Blog Studio modal (authored as
+    // the user, this assistant supporting); anything else keeps the post-generation sheet.
     const pa = cfg.primaryAction;
-    if (pa) {
-        const label = document.getElementById('primary-action-label');
-        if (label) label.textContent = pa.label || 'Assign New Task';
-        const btn = document.getElementById('btn-primary-action');
-        if (btn) {
+    const paBtn = document.getElementById('btn-primary-action');
+    const paLabel = document.getElementById('primary-action-label');
+    if (data.roleKey === 'blog_writer') {
+        if (paLabel) paLabel.textContent = 'Write Blog Post';
+        if (paBtn) paBtn.onclick = () => { if (window.openBlogStudio) window.openBlogStudio({ assistantId: data.id }); };
+    } else if (pa) {
+        if (paLabel) paLabel.textContent = pa.label || 'Assign New Task';
+        if (paBtn) {
             if (pa.kind === 'chat') {
-                btn.onclick = () => { window.location.href = `assistant-chat.html?assistantId=${data.id}`; };
+                paBtn.onclick = () => { window.location.href = `assistant-chat.html?assistantId=${data.id}`; };
             } else {
-                btn.onclick = () => { if (window.openGeneratePostSheet) window.openGeneratePostSheet(); };
+                paBtn.onclick = () => { if (window.openGeneratePostSheet) window.openGeneratePostSheet(); };
             }
         }
     }
