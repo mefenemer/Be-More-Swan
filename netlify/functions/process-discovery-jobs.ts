@@ -33,6 +33,9 @@ const BACKOFF_SECS = [10, 30, 90];
 // cursor resumes the next query on the next tick, so total coverage is unchanged.
 const QUERIES_PER_SLICE = 1;
 const RESULTS_PER_QUERY = 10;
+// Leads promoted into assistant_records per tick — bounded so promotion can't exceed the
+// function timeout even when a run discovered dozens of leads.
+const PROMOTE_BATCH = 20;
 
 type JobRow = {
     id: number; job_id: string; organisation_id: number; campaign_id: number;
@@ -124,6 +127,7 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
         const [state] = await db
             .select({
                 cursor: discoveryJobs.cursor,
+                stage: discoveryJobs.stage,
                 leadsFound: discoveryJobs.leadsFound,
                 searchCallsMade: discoveryJobs.searchCallsMade,
                 tokensUsed: discoveryJobs.tokensUsed,
@@ -163,6 +167,13 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
             return; // resume on the next tick in the searching stage
         }
 
+        // ── STAGE promoting: mirror qualified leads into the Leads tab, a BOUNDED batch
+        // per tick (promoting 60+ leads in one slice was itself blowing the function timeout). ──
+        if (state?.stage === 'promoting') {
+            await promoteBatch(db, job, campaign.aiAssistantId, guardrails, { leadsFound, searchCallsMade, tokensUsed, costGbp });
+            return;
+        }
+
         // ── Monthly volume cap (across all this campaign's runs this month) ──────
         const [{ monthTotal } = { monthTotal: 0 }] = await db.execute<{ monthTotal: number }>(
             `SELECT COALESCE(SUM(leads_found), 0)::int AS "monthTotal"
@@ -170,7 +181,7 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
              WHERE campaign_id = ${job.campaign_id} AND created_at >= date_trunc('month', now())`
         );
         if (monthTotal >= guardrails.maxLeadsPerMonth) {
-            await promoteAndComplete(db, job, campaign.aiAssistantId, guardrails, leadsFound, searchCallsMade, tokensUsed, costGbp, 'Monthly lead cap reached.');
+            await enterPromoting(db, job.id, { leadsFound, searchCallsMade, tokensUsed, costGbp });
             return;
         }
 
@@ -246,7 +257,8 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
         const done = stopped || nextIndex >= cursor.flat.length;
 
         if (done) {
-            await promoteAndComplete(db, job, campaign.aiAssistantId, guardrails, leadsFound, searchCallsMade, tokensUsed, costGbp, null);
+            // Searching finished — hand off to the resumable promoting stage.
+            await enterPromoting(db, job.id, { leadsFound, searchCallsMade, tokensUsed, costGbp });
         } else {
             // Persist progress and resume next tick.
             await db.update(discoveryJobs)
@@ -263,63 +275,88 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
 }
 
 // ── Promotion: mirror qualified discovered_leads into assistant_records ─────────
+// Bounded + resumable: each tick promotes at most PROMOTE_BATCH leads, then either stays
+// in the promoting stage (more remain) or marks the job completed. This keeps promotion
+// within the function timeout even for runs that discovered many leads.
 
-async function promoteAndComplete(
-    db: Db, job: JobRow, assistantId: number, guardrails: Guardrails,
-    leadsFound: number, searchCallsMade: number, tokensUsed: number, costGbp: number,
-    note: string | null,
-): Promise<void> {
-    const qualified = await db
+type Counters = { leadsFound: number; searchCallsMade: number; tokensUsed: number; costGbp: number };
+
+function counterCols(c: Counters) {
+    return { leadsFound: c.leadsFound, searchCallsMade: c.searchCallsMade, tokensUsed: c.tokensUsed, costGbp: String(c.costGbp) };
+}
+
+/** Flip a finished searching run into the promoting stage; the next tick promotes. */
+async function enterPromoting(db: Db, jobId: number, counters: Counters): Promise<void> {
+    await db.update(discoveryJobs)
+        .set({ status: 'queued', stage: 'promoting', errorMessage: null, ...counterCols(counters), updatedAt: new Date() })
+        .where(eq(discoveryJobs.id, jobId));
+}
+
+async function promoteBatch(db: Db, job: JobRow, assistantId: number, guardrails: Guardrails, counters: Counters): Promise<void> {
+    const batch = await db
         .select({ id: discoveredLeads.id, companyName: discoveredLeads.companyName, rating: discoveredLeads.rating, scoringCard: discoveredLeads.scoringCard })
         .from(discoveredLeads)
         .where(and(
             eq(discoveredLeads.campaignId, job.campaign_id),
             eq(discoveredLeads.status, 'qualified'),
             isNull(discoveredLeads.assistantRecordId),
-        ));
+        ))
+        .limit(PROMOTE_BATCH);
 
     const approvalStatus = guardrails.requireHumanApproval ? 'pending_approval' : 'approved';
-
-    for (const lead of qualified) {
-        // Upsert on (org, assistant, recordType 'lead', title) — same rule the chat route uses.
-        const [existing] = await db
-            .select({ id: assistantRecords.id })
-            .from(assistantRecords)
-            .where(and(
-                eq(assistantRecords.organisationId, job.organisation_id),
-                eq(assistantRecords.aiAssistantId, assistantId),
-                eq(assistantRecords.recordType, 'lead'),
-                eq(assistantRecords.title, lead.companyName),
-            ))
-            .limit(1);
-
-        let recordId: number;
-        if (existing) {
-            await db.update(assistantRecords)
-                .set({ status: lead.rating, data: lead.scoringCard as object, source: 'integration', updatedAt: new Date() })
-                .where(eq(assistantRecords.id, existing.id));
-            recordId = existing.id;
-        } else {
-            const [created] = await db.insert(assistantRecords)
-                .values({
-                    organisationId: job.organisation_id, aiAssistantId: assistantId,
-                    recordType: 'lead', title: lead.companyName, status: lead.rating,
-                    source: 'integration', approvalStatus, data: lead.scoringCard as object,
-                })
-                .returning({ id: assistantRecords.id });
-            recordId = created.id;
-        }
-        await db.update(discoveredLeads)
-            .set({ status: 'promoted', assistantRecordId: recordId, updatedAt: new Date() })
-            .where(eq(discoveredLeads.id, lead.id));
+    for (const lead of batch) {
+        await promoteOne(db, job.organisation_id, assistantId, lead, approvalStatus);
     }
 
+    // Anything left to promote? If so, stay in the promoting stage; else the job is done.
+    const [{ remaining } = { remaining: 0 }] = await db.execute<{ remaining: number }>(
+        `SELECT count(*)::int AS remaining FROM discovered_leads
+         WHERE campaign_id = ${job.campaign_id} AND status = 'qualified' AND assistant_record_id IS NULL`
+    );
     await db.update(discoveryJobs)
         .set({
-            status: 'completed', stage: 'promoting', errorMessage: note,
-            leadsFound, searchCallsMade, tokensUsed, costGbp: String(costGbp), updatedAt: new Date(),
+            status: remaining > 0 ? 'queued' : 'completed', stage: 'promoting', errorMessage: null,
+            ...counterCols(counters), updatedAt: new Date(),
         })
         .where(eq(discoveryJobs.id, job.id));
+}
+
+/** Upsert one qualified lead into assistant_records on (org, assistant, 'lead', title). */
+async function promoteOne(
+    db: Db, organisationId: number, assistantId: number,
+    lead: { id: number; companyName: string; rating: string | null; scoringCard: unknown },
+    approvalStatus: string,
+): Promise<void> {
+    const [existing] = await db
+        .select({ id: assistantRecords.id })
+        .from(assistantRecords)
+        .where(and(
+            eq(assistantRecords.organisationId, organisationId),
+            eq(assistantRecords.aiAssistantId, assistantId),
+            eq(assistantRecords.recordType, 'lead'),
+            eq(assistantRecords.title, lead.companyName),
+        ))
+        .limit(1);
+
+    let recordId: number;
+    if (existing) {
+        await db.update(assistantRecords)
+            .set({ status: lead.rating, data: lead.scoringCard as object, source: 'integration', updatedAt: new Date() })
+            .where(eq(assistantRecords.id, existing.id));
+        recordId = existing.id;
+    } else {
+        const [created] = await db.insert(assistantRecords)
+            .values({
+                organisationId, aiAssistantId: assistantId,
+                recordType: 'lead', title: lead.companyName, status: lead.rating,
+                source: 'integration', approvalStatus, data: lead.scoringCard as object,
+            })
+            .returning({ id: assistantRecords.id });
+        recordId = created.id;
+    }
+    await db.update(discoveredLeads)
+        .set({ status: 'promoted', assistantRecordId: recordId, updatedAt: new Date() })
+        .where(eq(discoveredLeads.id, lead.id));
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
