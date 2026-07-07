@@ -525,6 +525,9 @@ async function _detailRqRenderGroups(statusKey) {
     // Records-backed Review Queue (data-hub roles): assistant_records gated by approval_status,
     // rather than the social posts/ideas lifecycle below.
     if ((window._detailReviewQueue || {}).kind === 'records') return _detailRqRenderRecords(statusKey);
+    // Blog Writer: long-form drafts live in blog_posts (not scheduled_posts). The queue lists them
+    // and routes into Blog Studio (where blog review/editing lives) + schedules via schedule-blog.
+    if ((window._detailReviewQueue || {}).source === 'blog_posts') return _detailRqRenderBlog(statusKey);
 
     const col = _DETAIL_RQ_COLUMNS[statusKey] || _DETAIL_RQ_COLUMNS.review;
     const container = document.getElementById('detail-rq-groups');
@@ -707,6 +710,119 @@ window._detailRqRecordAct = async function (btn, action) {
         _detailRqRenderGroups(_detailRqCurrentStatus);
         // A newly scheduled/approved record changes the Calendar + Data Hub — force them to reload
         // next time they're opened (both are cached once per detail mount).
+        const calHost = document.getElementById('assistant-calendar-host');
+        if (calHost) calHost.dataset.ready = '';
+    } catch (e) {
+        buttons.forEach((b) => { b.disabled = false; });
+        showErr(e.message || 'Something went wrong.');
+    }
+};
+
+// ── Blog Writer Review Queue (kind 'posts', source 'blog_posts') ─────────────
+// Long-form drafts (blog_posts). Review/editing happens in Blog Studio, so the queue lists
+// drafts per lifecycle column and routes into the studio; scheduling uses schedule-blog.ts.
+// Autonomous + manual drafts default to 'draft'; there's no rejected/archived blog state.
+const _RQ_BLOG_STATUS = {
+    review: ['draft', 'pending_approval', 'in_review'],
+    approved: ['approved'],
+    scheduled: ['scheduled'],
+    posted: ['published'],
+    archived: [],
+};
+
+function _rqBlogActions(p, statusKey) {
+    const primary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white transition cursor-pointer';
+    const secondary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 transition cursor-pointer';
+    const open = `<button type="button" onclick="_detailRqBlogAct(this,'open')" class="${statusKey === 'review' ? primary : secondary}">Open in Blog Studio</button>`;
+    let extra = '';
+    if (statusKey === 'review' || statusKey === 'approved') extra = `<button type="button" onclick="_detailRqBlogAct(this,'showSchedule')" class="${secondary}">Schedule</button>`;
+    else if (statusKey === 'scheduled') extra = `<button type="button" onclick="_detailRqBlogAct(this,'unschedule')" class="${secondary}">Unschedule</button>`;
+    return `<div class="flex flex-wrap items-center gap-2 mt-3">
+        ${open}${extra}
+        <div class="rq-sched-row hidden w-full flex items-center gap-2 mt-2">
+          <input type="datetime-local" class="rq-sched-input border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
+          <button type="button" onclick="_detailRqBlogAct(this,'schedule')" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-yellow-500 hover:bg-yellow-600 text-white cursor-pointer">Confirm schedule</button>
+        </div>
+        <p class="rq-rec-err hidden w-full text-xs font-semibold text-red-600 mt-1"></p>
+    </div>`;
+}
+
+function _detailRqBlogCard(p, statusKey) {
+    const when = p.publishDate
+        ? `scheduled ${new Date(p.publishDate).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}`
+        : (p.updatedAt ? `updated ${new Date(p.updatedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}` : '');
+    return `<div class="py-4" data-rq-blog="${p.id}">
+      <div class="min-w-0">
+        <p class="text-sm font-bold text-gray-900 truncate">${_rqEsc(p.title || '(untitled draft)')}</p>
+        <div class="flex items-center gap-2 mt-2">
+          <span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">${_rqEsc(p.status)}</span>
+          ${when ? `<span class="text-[11px] font-semibold text-gray-400">${_rqEsc(when)}</span>` : ''}
+        </div>
+      </div>
+      ${_rqBlogActions(p, statusKey)}
+    </div>`;
+}
+
+async function _detailRqRenderBlog(statusKey) {
+    const container = document.getElementById('detail-rq-groups');
+    if (!container) return;
+    const aid = window._currentAssistantId;
+    const wanted = _RQ_BLOG_STATUS[statusKey] || [];
+
+    container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Loading…</p>';
+    if (!aid) { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">No assistant selected.</p>'; return; }
+    if (!wanted.length) { container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Blog posts don’t have this state.</p>'; return; }
+
+    let posts = [];
+    try {
+        const res = await fetch(`/.netlify/functions/blog-posts?assistantId=${aid}`);
+        if (!res.ok) throw new Error();
+        posts = ((await res.json()).posts || []).filter((p) => wanted.includes(p.status));
+    } catch { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">Failed to load.</p>'; return; }
+
+    if (statusKey === 'review') {
+        const colBadge = document.getElementById('detail-rq-col-count-review');
+        if (colBadge) { colBadge.textContent = posts.length || ''; colBadge.classList.toggle('hidden', !posts.length); }
+        const tabBadge = document.getElementById('detail-rq-pending-badge');
+        if (tabBadge) { tabBadge.textContent = posts.length || ''; tabBadge.classList.toggle('hidden', !posts.length); }
+        window._setReviewPendingBadge?.(posts.length);
+        window._updateOpSignals?.({ pendingReview: posts.length });
+    }
+
+    container.innerHTML = posts.length
+        ? `<div class="divide-y divide-gray-100">${posts.map((p) => _detailRqBlogCard(p, statusKey)).join('')}</div>`
+        : `<p class="text-sm text-gray-400 py-10 text-center">${statusKey === 'review' ? 'No blog drafts awaiting review.' : 'Nothing here yet.'}</p>`;
+}
+
+// Open in Blog Studio / schedule / unschedule a blog draft from the Review Queue.
+window._detailRqBlogAct = async function (btn, action) {
+    const card = btn.closest('[data-rq-blog]');
+    if (!card) return;
+    const id = Number(card.getAttribute('data-rq-blog'));
+    const errEl = card.querySelector('.rq-rec-err');
+    const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); } };
+    if (errEl) errEl.classList.add('hidden');
+
+    if (action === 'open') { window.openBlogStudio?.({ assistantId: window._currentAssistantId, postId: id }); return; }
+    if (action === 'showSchedule') { card.querySelector('.rq-sched-row')?.classList.remove('hidden'); return; }
+
+    let payload;
+    if (action === 'unschedule') payload = { id, action: 'unschedule' };
+    else if (action === 'schedule') {
+        const val = card.querySelector('.rq-sched-input')?.value;
+        if (!val) { showErr('Pick a date and time first.'); return; }
+        payload = { id, publishDate: new Date(val).toISOString() };
+    } else { return; }
+
+    const buttons = card.querySelectorAll('button');
+    buttons.forEach((b) => { b.disabled = true; });
+    try {
+        const res = await fetch('/.netlify/functions/schedule-blog', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Update failed.');
+        window.showToast?.(action === 'schedule' ? 'Scheduled — it’s on the Calendar now.' : 'Unscheduled.');
+        _detailRqRenderGroups(_detailRqCurrentStatus);
         const calHost = document.getElementById('assistant-calendar-host');
         if (calHost) calHost.dataset.ready = '';
     } catch (e) {
@@ -1433,11 +1549,20 @@ function _applyDashboardRegistry(data) {
     // Review Queue tab header/columns adapt to the queue kind. Records queues (data-hub roles)
     // approve/schedule records — there's no "Posted" state and no post-generation button here.
     const rqIsRecords = window._detailReviewQueue.kind === 'records';
+    const rqIsBlog = window._detailReviewQueue.source === 'blog_posts';
     setText('detail-rq-subtitle', rqIsRecords
         ? 'Records this assistant produced, awaiting your approval — approve, schedule or reject before anything acts on them.'
-        : 'Items awaiting your review — approve, edit or reject before anything is scheduled.');
+        : rqIsBlog
+            ? 'Long-form drafts awaiting your review — open in Blog Studio to edit and approve, then schedule.'
+            : 'Items awaiting your review — approve, edit or reject before anything is scheduled.');
+    // Records queues have no post-generation button; blog re-points it at Blog Studio.
     toggleBtn('detail-rq-primary-btn', !rqIsRecords);
     toggle('detail-rq-col-posted', !rqIsRecords);
+    if (rqIsBlog) {
+        setText('detail-rq-primary-label', 'Write Blog Post');
+        const rqBtn = document.getElementById('detail-rq-primary-btn');
+        if (rqBtn) rqBtn.onclick = () => { window.openBlogStudio?.({ assistantId: data.id }); };
+    }
 
     // Role-specific Overview secondary action — the Lead Generator's "Review Lead Ideas"
     // replaces the (hidden) social "Review Pending Items" button. Shown + wired from the
@@ -2497,6 +2622,12 @@ async function _prefetchDetailRqBadge(assistantId) {
             const res = await fetch(`/.netlify/functions/assistant-records?assistantId=${assistantId}&recordType=${encodeURIComponent(rq.recordType)}&approvalStatus=pending_approval`);
             if (!res.ok) return;
             count = ((await res.json()).records || []).length;
+        } else if (rq.source === 'blog_posts') {
+            // Blog Writer: count long-form drafts awaiting review.
+            const res = await fetch(`/.netlify/functions/blog-posts?assistantId=${assistantId}`);
+            if (!res.ok) return;
+            const wanted = new Set(['draft', 'pending_approval', 'in_review']);
+            count = ((await res.json()).posts || []).filter((p) => wanted.has(p.status)).length;
         } else {
             const res = await fetch(`/.netlify/functions/get-social-drafts?status=pending_approval&assistantId=${assistantId}`);
             if (!res.ok) return;

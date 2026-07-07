@@ -21,6 +21,10 @@ export const handler = async (event: HandlerEvent) => {
         const idParam = event.queryStringParameters?.id;
         const fromParam = event.queryStringParameters?.from;
         const toParam = event.queryStringParameters?.to;
+        // Scope the list to one authoring assistant (assistant-detail Data Hub / Review Queue tabs).
+        const assistantIdParam = event.queryStringParameters?.assistantId;
+        const assistantIdFilter = assistantIdParam != null && assistantIdParam !== '' && Number.isFinite(Number(assistantIdParam))
+            ? Number(assistantIdParam) : null;
 
         // Calendar feed (US 4.1 calendar view): scheduled/published posts whose date falls in range.
         if (fromParam && toParam) {
@@ -69,12 +73,16 @@ export const handler = async (event: HandlerEvent) => {
                 title: blogPosts.title,
                 status: blogPosts.status,
                 slug: blogPosts.slug,
+                assistantId: blogPosts.assistantId,
                 publishDate: blogPosts.publishDate,
                 publishedAt: blogPosts.publishedAt,
                 updatedAt: blogPosts.updatedAt,
             })
             .from(blogPosts)
-            .where(eq(blogPosts.organisationId, ctx.organisationId))
+            .where(and(
+                eq(blogPosts.organisationId, ctx.organisationId),
+                ...(assistantIdFilter != null ? [eq(blogPosts.assistantId, assistantIdFilter)] : []),
+            ))
             .orderBy(desc(blogPosts.updatedAt))
             .limit(200);
         return { statusCode: 200, body: JSON.stringify({ posts }) };

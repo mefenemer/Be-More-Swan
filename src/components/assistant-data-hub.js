@@ -100,14 +100,11 @@
 
   async function fetchContentLibrary() {
     if (state.hub.source === 'blog_posts') {
-      const res = await fetch('/.netlify/functions/blog-posts');
+      // blog-posts.ts now scopes the list by assistantId server-side.
+      const res = await fetch(`/.netlify/functions/blog-posts?assistantId=${state.assistantId}`);
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'Could not load posts.');
-      const posts = (data.posts || []).filter((b) => {
-        const owner = b.aiAssistantId ?? b.assistantId;
-        return state.assistantId == null || owner == null || Number(owner) === Number(state.assistantId);
-      });
-      return posts.map(blogToRecord);
+      return (data.posts || []).map(blogToRecord);
     }
     // social_drafts: get-social-drafts filters by a single status, so fetch the lifecycle set
     // in parallel and merge (dedupe by id — a post is only ever in one status).
