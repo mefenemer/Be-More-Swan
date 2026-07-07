@@ -42,6 +42,11 @@
       'Summarize my last meeting as a short executive briefing.',
       'Turn my rough meeting notes into structured minutes.',
     ],
+    blog_writer: [
+      'Draft a blog post on a topic I’ll give you.',
+      'Suggest a few article ideas that fit my audience and niche.',
+      'Which of my published posts are losing search traffic and need a refresh?',
+    ],
     default: [
       'What can you help me with?',
       'What information do you need from me to get started?',

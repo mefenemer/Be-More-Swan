@@ -10,6 +10,10 @@ already exist in the applied schema (`db/blog-posts.sql:44,61-62`, `db/schema.ts
 Order of attack: **A → B → C.** A is the just-decided piece and unblocks user value fastest; C needs a
 signing cert procured before code is worth writing.
 
+**Progress (2026-07-07):** A ✅ built, B ✅ built (incl. GSC connect panel), C ✅ scaffolded and
+cert-gated (see §C). The codeable surface of the epic is complete; C's activation is external
+(cert + `c2pa-node`).
+
 ---
 
 ## A. Blog connector layer (US 3.2) — WordPress, Ghost, Hashnode, Dev.to + RSS
@@ -99,20 +103,35 @@ export interface BlogDestination {
 
 ---
 
-## C. C2PA image signing (US 6.1) — decision-free but ops-heavy
+## C. C2PA image signing (US 6.1) — SCAFFOLDED, cert-gated
 
 - Text provenance, AI disclosure, and the audit edit-log are already built. Missing piece = **signing image
   bytes**: embed a C2PA manifest into feature/inline images at generation/publish time.
 - Needs (a) a signing library (`c2pa-node` or the Rust `c2pa` CLI in a build step) and (b) a **signing
   certificate** — this cert procurement/management is the real gate, not the code.
-- Store the manifest + signer info alongside existing `content_provenance`. Do this **last** — no product
-  decision blocks it, but nothing ships until the cert exists.
+- Store the manifest + signer info alongside existing `content_provenance`.
+
+**Status (2026-07-07): scaffold built and dormant.** Everything reachable without a cert is done and tested:
+- `src/utils/c2pa-sign.ts` — `isC2paSigningEnabled()` gate (OFF until `C2PA_SIGN_CERT` + `C2PA_SIGN_KEY`
+  are set), `buildManifest()`, `signImageBytes()` (identity passthrough when disabled), and
+  `signStoredImageAsset()` (R2 fetch → sign → write back in place). `c2pa-node` is lazy-loaded via a
+  computed specifier so the missing optional dep never breaks build/typecheck.
+- `content_provenance.image_manifest / image_signer / image_signed_at` — schema (`db/schema.ts`) +
+  `db/c2pa-image-signing.sql` **applied to Staging 2026-07-07**.
+- Guarded hook in `src/utils/blog-publish.ts` (inert while the gate is false → publish path byte-for-byte
+  unchanged). Unit test `tests/c2pa-sign.test.ts` (`npm run test:c2pa-sign`).
+
+**Remaining, both external — no code change to go live:**
+1. Provision a signing certificate → set `C2PA_SIGN_CERT` / `C2PA_SIGN_KEY` (+ optional `C2PA_TSA_URL`,
+   `C2PA_SIGNER_LABEL`).
+2. `npm i c2pa-node` and confirm the UNVERIFIED native call in `c2pa-sign.ts` against the pinned version.
 
 ---
 
 ## Gated / operational notes
-- **No new DB migration for A or B** (columns already exist). If C adds provenance fields, that SQL is
-  manual-apply, DB-owner, idempotent (no `drizzle-kit push` — preserves RLS). DB access is gated — ask the user.
+- **No new DB migration for A or B** (columns already exist). C added `content_provenance` provenance
+  fields via `db/c2pa-image-signing.sql` — manual-apply, DB-owner, idempotent (no `drizzle-kit push` —
+  preserves RLS); **applied to Staging 2026-07-07.**
 - New OAuth providers (`search_console`, `wordpress.com`) need client-id/secret env vars + redirect URIs
   registered with Google / WordPress.com.
 - Tenant isolation: every connector read/write is org-scoped via `workspace_integrations.organisation_id`,

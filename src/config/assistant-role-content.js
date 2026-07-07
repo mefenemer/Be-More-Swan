@@ -36,6 +36,21 @@
       integrations: ['Facebook', 'Instagram', 'LinkedIn', 'X (Twitter)', 'Threads', 'TikTok', 'YouTube'],
     },
 
+    blog_writer: {
+      name: 'The Blog Writer',
+      category: 'Marketing & Sales',
+      iconKey: 'document',
+      iconColor: 'pink',
+      tagline: 'Long-form content in your voice — researched, written, and published on a cadence you set.',
+      description: 'Researches, drafts, and schedules long-form blog posts in your brand voice, then publishes them to your site via the native widget — or straight to WordPress, Ghost, Hashnode and Dev.to. You review and approve each one; it handles the rest.',
+      keyFeatures: [
+        'Long-form Drafting in Your Brand Voice',
+        'Human-in-the-loop Review & Approval',
+        'Native Site Widget + One-Click Publishing',
+      ],
+      integrations: ['Native Widget', 'WordPress', 'Ghost', 'Hashnode', 'Dev.to', 'Google Search Console'],
+    },
+
     lead_qualifier: {
       name: 'The Lead Qualifier',
       category: 'Marketing & Sales',

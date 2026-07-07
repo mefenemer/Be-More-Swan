@@ -74,6 +74,45 @@
       primaryAction: { label: 'Assign New Task', kind: 'generate_post' },
     },
 
+    // Content Engine — Blog Writer. Uses assistant-detail.html, but its primary action is
+    // special-cased in assistants.js to open the Blog Studio modal ("Write Blog Post") rather
+    // than the social post sheet. Long-form drafts live in blog_posts (surfaced via Blog Studio),
+    // NOT assistant_records — so no hubTab. All social-only modules are off (it has its own
+    // review/approval + scheduling inside Blog Studio, not the social Review Queue / Posting Schedule).
+    blog_writer: {
+      kpis: [
+        {
+          label: 'Publishing Consistency',
+          title: 'Posts Published',
+          desc: 'Long-form posts drafted, approved and published on the cadence you set.',
+        },
+        {
+          label: 'Search Visibility',
+          title: 'Organic Traffic',
+          desc: 'Readers arriving from search as your library compounds over time.',
+        },
+        {
+          label: 'Hours Reclaimed',
+          title: 'Time Saved',
+          desc: 'Research, drafting and formatting hours this assistant has taken off your plate.',
+        },
+        {
+          label: 'Needs You',
+          title: 'Awaiting Approval',
+          desc: 'Drafts sitting in review, waiting for your sign-off before they schedule.',
+        },
+      ],
+      modules: {
+        hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false,
+        hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
+        hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
+        hasContentPublishing: false,
+      },
+      // Ignored for blog_writer (assistants.js special-cases the button to open Blog Studio),
+      // but kept coherent for any generic reader of the registry.
+      primaryAction: { label: 'Write Blog Post', kind: 'chat' },
+    },
+
     lead_qualifier: {
       kpis: [
         {

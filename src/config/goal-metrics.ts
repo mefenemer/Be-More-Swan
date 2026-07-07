@@ -237,6 +237,20 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         // No sensible daily ceiling on £ recovered — depends entirely on invoice sizes.
         realism: { maxDailyGrowthPct: 5 },
     },
+    {
+        // Blog Writer's content lives in blog_posts (NOT assistant_records), so this is counted
+        // from published blog_posts by poll-goal-telemetry.ts, mirroring 'content_published' for social.
+        key: 'posts_published',
+        label: 'Posts Published',
+        unit: 'posts',
+        source: 'internal',
+        direction: 'increase',
+        objective: 'outcome',
+        roles: ['blog_writer'],
+        description: 'Long-form blog posts this assistant has drafted, had approved, and published.',
+        available: true,
+        realism: { maxDailyDelta: 100 },
+    },
 ];
 
 // Proper-cased display names for the services a metric can be backed by — used in user-facing copy

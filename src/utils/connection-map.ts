@@ -43,6 +43,7 @@ export const ROLE_CONNECTIONS: Record<string, string[]> = {
     lead_qualifier:            ['crm', 'email'],
     crm_enricher:              ['crm'],
     seo_content_strategist:    ['cms', 'search_console', 'knowledge'],
+    blog_writer:               ['cms', 'search_console', 'knowledge'],
     newsletter_editor:         ['email', 'cms'],
     vendor_communications_rep: ['email'],
     inventory_tracker:         ['inventory'],

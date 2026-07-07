@@ -16,7 +16,7 @@ import { and, eq, sql, inArray, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     goals, goalTelemetry, aiAssistants, systemConnections,
-    scheduledPosts, leads, plans, masterPlans, notifications, assistantRecords,
+    scheduledPosts, leads, plans, masterPlans, notifications, assistantRecords, blogPosts,
 } from '../../db/schema';
 import { getSecret } from '../../src/utils/vault';
 import { connectionDisplayName, getGoalMetric, pollCadenceHours, RUN_RATE_THRESHOLDS } from '../../src/config/goal-metrics';
@@ -162,6 +162,14 @@ async function fetchMetric(
                 .select({ v: sql<number>`count(*)::int` })
                 .from(scheduledPosts)
                 .where(and(eq(scheduledPosts.assistantId, goal.assistantId), eq(scheduledPosts.status, 'published')));
+            return { value: Number(row?.v ?? 0), disconnected: false };
+        }
+        case 'posts_published': {
+            // Blog Writer outcome — published long-form posts (blog_posts), mirroring 'content_published'.
+            const [row] = await db
+                .select({ v: sql<number>`count(*)::int` })
+                .from(blogPosts)
+                .where(and(eq(blogPosts.assistantId, goal.assistantId), eq(blogPosts.status, 'published')));
             return { value: Number(row?.v ?? 0), disconnected: false };
         }
 

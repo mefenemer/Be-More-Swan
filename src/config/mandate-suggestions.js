@@ -34,6 +34,13 @@
       { title: 'The Cold Start & Growth Grind', text: "I need to rapidly test different value propositions and engage with niche communities to build our initial audience from scratch, but I don't have the bandwidth." },
     ],
 
+    blog_writer: [
+      { title: 'The Blank-Page Bottleneck', text: 'I know we should be publishing long-form content regularly, but every post means hours of research, drafting and editing that I never find time for.' },
+      { title: 'The Inconsistent Cadence', text: 'I want to publish on a steady schedule to build search traffic, but posts come in fits and starts and then dry up for weeks.' },
+      { title: 'The Off-Brand Draft', text: 'When I do outsource writing, it comes back sounding generic and nothing like our voice, so I end up rewriting most of it myself.' },
+      { title: 'The Publishing Faff', text: 'Even once a post is written, formatting it, adding images and getting it live on our site is a fiddly manual job I keep putting off.' },
+    ],
+
     lead_qualifier: [
       { title: 'The Cold-Lead Time Sink', text: 'I spend hours every week researching inbound leads and manually deciding which ones are actually worth my sales team’s time.' },
       { title: 'The Inconsistent Scoring Problem', text: 'Every lead gets qualified differently depending on who picks it up, so good prospects slip through and weak ones eat up our calendar.' },
