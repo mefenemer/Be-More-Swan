@@ -467,7 +467,12 @@
       } else {
         var connectBtn = document.createElement('button');
         connectBtn.type = 'button'; connectBtn.className = 'bs-btn bs-btn-ghost'; connectBtn.textContent = 'Connect ' + d.label;
-        connectBtn.addEventListener('click', function () { toggleConnectForm(row, d); });
+        if (d.oauth) {
+          // OAuth destinations (e.g. WordPress.com) connect via a full-page redirect, not a paste form.
+          connectBtn.addEventListener('click', function () { if (d.connectUrl) window.location.href = d.connectUrl; });
+        } else {
+          connectBtn.addEventListener('click', function () { toggleConnectForm(row, d); });
+        }
         row.appendChild(connectBtn);
       }
       listEl.appendChild(row);

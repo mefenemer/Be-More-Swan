@@ -7,6 +7,7 @@ import { and, eq } from 'drizzle-orm';
 import type { getDb } from '../../../db/client';
 import { workspaceIntegrations } from '../../../db/schema';
 import { storeSecret, getSecret, deleteSecret } from '../vault';
+import { getFreshAccessToken, deleteIntegration, type IntegrationProvider } from '../workspace-integrations';
 import { getBlogAdapter, BLOG_DESTINATION_IDS } from './index';
 import type { BlogDestinationCreds, BlogDestinationId } from './types';
 
@@ -64,8 +65,36 @@ export async function getBlogDestinationCreds<C extends BlogDestinationCreds = B
     return (secret as C) ?? null;
 }
 
-/** Remove the connection and its vault secret. */
+/**
+ * Resolve ready-to-use creds for a destination, uniformly across auth kinds: paste-token creds come
+ * from the vault; OAuth creds ({ accessToken, siteId }) come from the OAuth integration. Returns null
+ * when not connected (the dispatcher records that as 'not_connected').
+ */
+export async function resolveDestinationCreds(
+    db: Db,
+    organisationId: number,
+    id: BlogDestinationId,
+): Promise<BlogDestinationCreds | null> {
+    const adapter = getBlogAdapter(id);
+    if (adapter.authKind === 'oauth' && adapter.oauthProvider) {
+        try {
+            const fresh = await getFreshAccessToken(db, organisationId, adapter.oauthProvider as IntegrationProvider);
+            if (!fresh.tenantId) return null; // no site id → connection is unusable
+            return { accessToken: fresh.accessToken, siteId: fresh.tenantId } as BlogDestinationCreds;
+        } catch {
+            return null; // not_connected / expired → reconnect needed
+        }
+    }
+    return getBlogDestinationCreds(db, organisationId, id);
+}
+
+/** Remove the connection and its vault secret (or the OAuth integration for OAuth destinations). */
 export async function deleteBlogDestination(db: Db, organisationId: number, id: BlogDestinationId): Promise<void> {
+    const adapter = getBlogAdapter(id);
+    if (adapter.authKind === 'oauth' && adapter.oauthProvider) {
+        await deleteIntegration(db, organisationId, adapter.oauthProvider as IntegrationProvider);
+        return;
+    }
     await deleteSecret(db, refKeyFor(organisationId, id)).catch(() => {});
     await db
         .delete(workspaceIntegrations)
@@ -78,6 +107,10 @@ export interface BlogDestinationStatus {
     connected: boolean;
     accountLabel: string | null;
     credFields: { key: string; label: string; secret: boolean; help?: string }[];
+    /** True when this destination connects via OAuth (redirect) rather than a paste form. */
+    oauth: boolean;
+    /** For OAuth destinations: where the "Connect" button should redirect. */
+    connectUrl?: string;
 }
 
 /** Connection state for every adapter, for the integrations/settings UI. */
@@ -89,13 +122,18 @@ export async function listBlogDestinations(db: Db, organisationId: number): Prom
     const byProvider = new Map(rows.map((r) => [r.provider, r]));
     return BLOG_DESTINATION_IDS.map((id) => {
         const adapter = getBlogAdapter(id);
-        const row = byProvider.get(providerFor(id));
+        const isOAuth = adapter.authKind === 'oauth' && !!adapter.oauthProvider;
+        // OAuth destinations live under their oauthProvider row; paste ones under `blog_<id>`.
+        const row = byProvider.get(isOAuth ? adapter.oauthProvider! : providerFor(id));
+        const connected = !!row && (isOAuth ? row.status === 'active' : row.status !== 'revoked');
         return {
             id,
             label: adapter.label,
-            connected: !!row && row.status !== 'revoked',
+            connected,
             accountLabel: row?.name ?? null,
             credFields: adapter.credFields,
+            oauth: isOAuth,
+            connectUrl: isOAuth ? `/api/oauth/${adapter.oauthProvider}/connect` : undefined,
         };
     });
 }

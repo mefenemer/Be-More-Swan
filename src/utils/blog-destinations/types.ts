@@ -6,7 +6,7 @@
 // (Dev.to, Hashnode) take body_markdown directly; HTML platforms (WordPress, Ghost — later) take the
 // sanitised published_payload HTML. No new rendering.
 
-export type BlogDestinationId = 'devto' | 'hashnode' | 'wordpress' | 'ghost';
+export type BlogDestinationId = 'devto' | 'hashnode' | 'wordpress' | 'ghost' | 'wordpresscom';
 
 /** The published blog data an adapter needs, projected from a blog_posts row + its snapshot. */
 export interface BlogDestinationPost {
@@ -65,12 +65,27 @@ export interface GhostCreds {
     adminApiKey: string;
 }
 
-export type BlogDestinationCreds = DevtoCreds | HashnodeCreds | WordpressCreds | GhostCreds;
+/** WordPress.com is OAuth-backed: creds come from the OAuth integration, not a paste form. */
+export interface WordpresscomCreds {
+    accessToken: string;
+    /** The authorised blog id — roots every /sites/{siteId}/... REST call. */
+    siteId: string;
+}
+
+export type BlogDestinationCreds = DevtoCreds | HashnodeCreds | WordpressCreds | GhostCreds | WordpresscomCreds;
 
 export interface BlogDestinationAdapter<C extends BlogDestinationCreds = BlogDestinationCreds> {
     id: BlogDestinationId;
     label: string;
-    /** Fields the connect form collects; the secret ones are encrypted into the vault. */
+    /**
+     * How the workspace connects this destination. 'paste' (default) collects `credFields` and
+     * stores them in the vault; 'oauth' connects via the shared /api/oauth flow, and creds are
+     * resolved from the OAuth integration instead.
+     */
+    authKind?: 'paste' | 'oauth';
+    /** For authKind 'oauth': the IntegrationProvider the creds live under. */
+    oauthProvider?: string;
+    /** Fields the connect form collects (paste only); the secret ones are encrypted into the vault. */
     credFields: CredField[];
     /** Narrow an untyped `{ [k]: string }` form body into this adapter's cred shape, or return an error. */
     parseCreds(input: Record<string, unknown>): { ok: true; creds: C } | { ok: false; error: string };

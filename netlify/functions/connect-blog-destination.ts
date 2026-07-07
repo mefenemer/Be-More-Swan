@@ -43,6 +43,9 @@ export const handler = async (event: HandlerEvent) => {
     }
 
     if (body.action === 'connect') {
+        if (adapter.authKind === 'oauth' && adapter.oauthProvider) {
+            return json(400, { error: `${adapter.label} connects via OAuth.`, connectUrl: `/api/oauth/${adapter.oauthProvider}/connect` });
+        }
         const parsed = adapter.parseCreds(body.creds || {});
         if (!parsed.ok) return json(400, { error: parsed.error });
 

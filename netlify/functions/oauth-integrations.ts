@@ -72,6 +72,9 @@ const SCOPES: Record<IntegrationProvider, string> = {
     tiktok: 'user.info.basic,video.upload',
     // youtube.readonly is only for the channel label on the card; uploads need youtube.upload.
     youtube: 'https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly',
+    // WordPress.com: no scope param → the consent screen shows a site picker and the token is
+    // scoped to the chosen blog (its blog_id comes back in the token response).
+    wordpresscom: '',
 };
 
 /**
@@ -224,6 +227,9 @@ export const handler: Handler = async (event) => {
         } else if (provider === 'youtube') {
             // Same Google consent flow as Gmail — offline + consent forces a refresh token.
             authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.youtube)}&access_type=offline&prompt=consent&state=${state}`;
+        } else if (provider === 'wordpresscom') {
+            // No scope param → the consent screen lets the user pick which blog to authorise.
+            authUrl = `https://public-api.wordpress.com/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
         } else {
             authUrl = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=${encodeURIComponent(SCOPES.slack)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
         }
@@ -625,6 +631,32 @@ export const handler: Handler = async (event) => {
                     externalAccountName: channelTitle,
                     scopes: tokenData.scope ?? SCOPES.youtube,
                 });
+            } else if (provider === 'wordpresscom') {
+                const tokenRes = await fetch('https://public-api.wordpress.com/oauth2/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        grant_type: 'authorization_code',
+                        client_id: process.env.WORDPRESSCOM_CLIENT_ID ?? '',
+                        client_secret: process.env.WORDPRESSCOM_CLIENT_SECRET ?? '',
+                        redirect_uri: redirectUri,
+                        code,
+                    }),
+                });
+                const tokenData: { access_token?: string; blog_id?: string | number; blog_url?: string } = await tokenRes.json().catch(() => ({}));
+                if (!tokenData.access_token || tokenData.blog_id == null) return redirect(`/integrations.html?oauth_error=token_exchange&provider=wordpresscom`);
+
+                await saveIntegration(db, {
+                    organisationId, userId, provider: 'wordpresscom',
+                    accessToken: tokenData.access_token,
+                    // WordPress.com tokens never expire and there is no refresh grant.
+                    refreshToken: null,
+                    expiresInSec: null,
+                    // The authorised blog id roots every WP.com REST call (/sites/{blog_id}/...).
+                    tenantId: String(tokenData.blog_id),
+                    externalAccountName: tokenData.blog_url ?? null,
+                    scopes: null,
+                });
             } else {
                 const tokenRes = await fetch('https://slack.com/api/oauth.v2.access', {
                     method: 'POST',
@@ -659,7 +691,9 @@ export const handler: Handler = async (event) => {
             return redirect(`/integrations.html?oauth_error=token_exchange&provider=${provider}`);
         }
 
-        return redirect(`/integrations.html?connected=${provider}`);
+        // WordPress.com is managed from the Blog Studio syndicate panel (no integrations.html
+        // card), so send the user back there; every other provider lands on the integrations page.
+        return redirect(provider === 'wordpresscom' ? '/blog-studio.html?connected=wordpresscom' : `/integrations.html?connected=${provider}`);
     }
 
     return json(400, { error: `Unknown action for ${providerLabel(provider)} integration.` });

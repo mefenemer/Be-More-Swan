@@ -9,6 +9,7 @@ import { buildDevtoArticle, normaliseDevtoTags } from '../src/utils/blog-destina
 import { buildHashnodeInput, buildHashnodeTags } from '../src/utils/blog-destinations/hashnode';
 import { buildWordpressPost, normaliseSiteUrl } from '../src/utils/blog-destinations/wordpress';
 import { buildGhostPost, ghostAdminBase, signGhostToken } from '../src/utils/blog-destinations/ghost';
+import { buildWordpresscomPost } from '../src/utils/blog-destinations/wordpresscom';
 import type { BlogDestinationPost } from '../src/utils/blog-destinations/types';
 
 let passed = 0;
@@ -131,6 +132,21 @@ check('signGhostToken signs an HS256 JWT with kid + /admin/ audience', () => {
     assert.equal(decoded.header.kid, 'abc123');
     assert.equal(decoded.header.alg, 'HS256');
     assert.equal(decoded.payload.aud, '/admin/');
+});
+
+// ── WordPress.com (OAuth) ───────────────────────────────────────────────────
+check('wordpress.com uses HTML body, publish status, comma-joined tag names', () => {
+    const body = buildWordpresscomPost(post, { publish: true });
+    assert.equal(body.content, post.bodyHtml, 'HTML body, not markdown');
+    assert.equal(body.status, 'publish');
+    assert.equal(body.tags, 'Web Dev,type-script,AI,Web Dev,node.js,extra', 'v1.1 takes comma-separated names');
+    assert.equal(body.excerpt, 'A short intro.');
+});
+
+check('wordpress.com omits tags when none; draft flag', () => {
+    const body = buildWordpresscomPost({ ...post, tags: [] }, { publish: false });
+    assert.ok(!('tags' in body));
+    assert.equal(body.status, 'draft');
 });
 
 console.log(`\n${passed} checks passed.`);

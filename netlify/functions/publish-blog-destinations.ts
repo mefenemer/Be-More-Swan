@@ -13,7 +13,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { logAuditEvent } from '../../src/utils/audit';
 import { getBlogAdapter, isBlogDestinationId } from '../../src/utils/blog-destinations';
 import type { BlogDestinationId, BlogDestinationPost } from '../../src/utils/blog-destinations';
-import { getBlogDestinationCreds } from '../../src/utils/blog-destinations/store';
+import { resolveDestinationCreds } from '../../src/utils/blog-destinations/store';
 
 const json = (statusCode: number, body: unknown) => ({ statusCode, body: JSON.stringify(body) });
 
@@ -76,7 +76,7 @@ export const handler = async (event: HandlerEvent) => {
     for (const target of targets as BlogDestinationId[]) {
         const adapter = getBlogAdapter(target);
         try {
-            const creds = await getBlogDestinationCreds(db, ctx.organisationId, target);
+            const creds = await resolveDestinationCreds(db, ctx.organisationId, target);
             if (!creds) {
                 results[target] = { status: 'not_connected' };
                 continue;

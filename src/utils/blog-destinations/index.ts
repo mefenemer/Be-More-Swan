@@ -7,12 +7,14 @@ import { devtoAdapter } from './devto';
 import { hashnodeAdapter } from './hashnode';
 import { wordpressAdapter } from './wordpress';
 import { ghostAdapter } from './ghost';
+import { wordpresscomAdapter } from './wordpresscom';
 
 const ADAPTERS: Record<BlogDestinationId, BlogDestinationAdapter> = {
     devto: devtoAdapter as BlogDestinationAdapter,
     hashnode: hashnodeAdapter as BlogDestinationAdapter,
     wordpress: wordpressAdapter as BlogDestinationAdapter,
     ghost: ghostAdapter as BlogDestinationAdapter,
+    wordpresscom: wordpresscomAdapter as BlogDestinationAdapter,
 };
 
 export const BLOG_DESTINATION_IDS = Object.keys(ADAPTERS) as BlogDestinationId[];

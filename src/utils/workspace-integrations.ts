@@ -20,9 +20,9 @@ import { storeSecret, getSecret, deleteSecret } from './vault';
 
 type Db = ReturnType<typeof getDb>;
 
-export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail' | 'threads' | 'tiktok' | 'youtube';
+export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail' | 'threads' | 'tiktok' | 'youtube' | 'wordpresscom';
 
-export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail', 'threads', 'tiktok', 'youtube'];
+export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail', 'threads', 'tiktok', 'youtube', 'wordpresscom'];
 
 export function isIntegrationProvider(value: unknown): value is IntegrationProvider {
     return typeof value === 'string' && (INTEGRATION_PROVIDERS as string[]).includes(value);
@@ -233,6 +233,12 @@ async function refreshProviderToken(provider: IntegrationProvider, refreshToken:
         throw new IntegrationError('refresh_failed', 'Intercom tokens cannot be refreshed — please reconnect it on the Integrations page.', 401);
     }
 
+    if (provider === 'wordpresscom') {
+        // WordPress.com access tokens never expire and there is no refresh grant — reaching
+        // here means the row's expiresAt was set in error; force a reconnect.
+        throw new IntegrationError('refresh_failed', 'WordPress.com tokens cannot be refreshed — please reconnect it.', 401);
+    }
+
     if (provider === 'gmail') {
         const res = await fetch('https://oauth2.googleapis.com/token', {
             method: 'POST',
@@ -376,6 +382,7 @@ const PROVIDER_LABELS: Record<IntegrationProvider, string> = {
     threads: 'Threads',
     tiktok: 'TikTok',
     youtube: 'YouTube',
+    wordpresscom: 'WordPress.com',
 };
 
 export function providerLabel(provider: IntegrationProvider): string {
