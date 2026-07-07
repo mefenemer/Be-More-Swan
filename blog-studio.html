@@ -26,7 +26,7 @@
     .bs-snippet { font-family: ui-monospace, monospace; font-size: 12px; background: #111827; color: #e5e7eb;
       padding: 12px; border-radius: 8px; white-space: pre-wrap; word-break: break-all; }
     .bs-status { font-size: 12px; color: #6b7280; }
-    .bs-hidden { display: none; }
+    .bs-hidden { display: none !important; }
   </style>
 </head>
 <body class="bg-gray-50">
@@ -42,12 +42,27 @@
       <div class="bs-grid" style="grid-template-columns: 1fr 1fr 1fr;">
         <div class="bs-field"><label>Topic</label><input id="bs-topic" placeholder="e.g. AI for small teams"></div>
         <div class="bs-field"><label>Keywords</label><input id="bs-keywords" placeholder="comma,separated"></div>
-        <div class="bs-field"><label>Tone</label>
-          <select id="bs-tone">
-            <option>Professional</option><option>Casual</option><option>Confident</option><option>Friendly</option>
-          </select>
+        <div class="bs-field"><label>Written by</label>
+          <select id="bs-assistant"><option value="">Just me</option></select>
         </div>
       </div>
+
+      <!-- Voice: sourced from the assistant's profile; author-supplied when the assistant has none. -->
+      <div class="bs-field bs-hidden" id="bs-voice-from">
+        <label>Voice (from profile)</label>
+        <div id="bs-voice-display" class="bs-status"></div>
+      </div>
+      <div class="bs-field" id="bs-voice-manual">
+        <label>Tone</label>
+        <input id="bs-tone" list="bs-tone-presets" placeholder="e.g. friendly and professional">
+        <datalist id="bs-tone-presets">
+          <option>Professional</option><option>Casual</option><option>Confident</option><option>Friendly</option>
+        </datalist>
+        <label id="bs-save-tone-wrap" class="bs-status bs-hidden" style="margin-top: 6px;">
+          <input id="bs-save-tone" type="checkbox"> Save this as <span id="bs-save-tone-name"></span>'s voice
+        </label>
+      </div>
+
       <div class="bs-field"><label>Rough notes / transcript (optional)</label><textarea id="bs-notes" rows="3"></textarea></div>
       <div class="bs-row">
         <button class="bs-btn bs-btn-ghost" data-path="blank">Start blank</button>
@@ -83,6 +98,7 @@
         <div id="bs-editor" class="bs-editor"></div>
         <div class="bs-row" style="margin-top: 16px;">
           <button id="bs-generate-hooks" class="bs-btn bs-btn-ghost">Generate A/B hooks</button>
+          <button id="bs-generate-seo" class="bs-btn bs-btn-ghost">Generate SEO</button>
           <button id="bs-publish" class="bs-btn bs-btn-primary">Publish</button>
           <span id="bs-publish-status" class="bs-status"></span>
         </div>
@@ -100,33 +116,92 @@
       }, opts)).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); });
     };
 
-    var state = { postId: null, editor: null };
+    var state = { postId: null, editor: null, assistants: {} };
 
     function setStatus(id, msg) { var el = document.getElementById(id); if (el) el.textContent = msg; }
+
+    // --- Voice / tone: source from the selected assistant's profile, else author-supplied ---
+    var assistantSel = document.getElementById('bs-assistant');
+
+    (function loadAssistants() {
+      api('blog-tone', { method: 'GET' }).then(function (res) {
+        if (!res.ok || !Array.isArray(res.body.assistants)) return;
+        res.body.assistants.forEach(function (a) {
+          state.assistants[a.id] = a;
+          var opt = document.createElement('option');
+          opt.value = a.id;
+          opt.textContent = a.name;
+          assistantSel.appendChild(opt);
+        });
+      });
+    })();
+
+    // Selected assistant record, or null for "Just me".
+    function selectedAssistant() {
+      var id = assistantSel.value;
+      return id ? state.assistants[id] : null;
+    }
+
+    function syncVoiceControls() {
+      var a = selectedAssistant();
+      var hasProfileTone = a && a.tone;
+      // When the assistant already has a voice, show it read-only; otherwise let the author enter one.
+      document.getElementById('bs-voice-from').classList.toggle('bs-hidden', !hasProfileTone);
+      document.getElementById('bs-voice-manual').classList.toggle('bs-hidden', !!hasProfileTone);
+      if (hasProfileTone) {
+        document.getElementById('bs-voice-display').textContent = '“' + a.tone + '” — from ' + a.name + '’s profile';
+      }
+      // Offer to save an author-supplied tone back to the assistant that lacks one.
+      var offerSave = !!a && !hasProfileTone;
+      document.getElementById('bs-save-tone-wrap').classList.toggle('bs-hidden', !offerSave);
+      if (offerSave) document.getElementById('bs-save-tone-name').textContent = a.name;
+    }
+    assistantSel.addEventListener('change', syncVoiceControls);
+
+    // Resolve the voice for this post: { assistantId, tone, saveToProfile }.
+    function resolveVoice() {
+      var a = selectedAssistant();
+      if (a && a.tone) return { assistantId: a.id, tone: a.tone, saveToProfile: false };
+      var manual = document.getElementById('bs-tone').value.trim();
+      return {
+        assistantId: a ? a.id : null,
+        tone: manual,
+        saveToProfile: !!(a && manual && document.getElementById('bs-save-tone').checked),
+      };
+    }
 
     // --- Brief / 3-path start ---
     Array.prototype.forEach.call(document.querySelectorAll('#bs-brief [data-path]'), function (btn) {
       btn.addEventListener('click', function () { startPost(btn.getAttribute('data-path')); });
     });
 
-    function seedMarkdown(path) {
+    function seedMarkdown(path, tone) {
       var topic = document.getElementById('bs-topic').value.trim();
       var notes = document.getElementById('bs-notes').value.trim();
       if (path === 'improve' && notes) return notes;
-      if (path === 'generate') return '# ' + (topic || 'New post') + '\n\n_Drafting…_\n\n' + (notes || '');
+      if (path === 'generate') {
+        var voice = tone ? ' in a ' + tone + ' tone' : '';
+        return '# ' + (topic || 'New post') + '\n\n_Drafting' + voice + '…_\n\n' + (notes || '');
+      }
       return '# ' + (topic || 'New post') + '\n\nStart writing here.';
     }
 
     function startPost(path) {
       var title = document.getElementById('bs-topic').value.trim() || 'Untitled draft';
-      api('blog-posts', { method: 'POST', body: JSON.stringify({ title: title }) }).then(function (res) {
+      var voice = resolveVoice();
+      state.voice = voice;
+      // Persist an author-supplied tone back to the assistant's profile so it's sourced next time.
+      if (voice.saveToProfile) {
+        api('blog-tone', { method: 'POST', body: JSON.stringify({ assistantId: voice.assistantId, tone: voice.tone }) });
+      }
+      api('blog-posts', { method: 'POST', body: JSON.stringify({ title: title, assistantId: voice.assistantId }) }).then(function (res) {
         if (!res.ok) { alert('Could not create post: ' + (res.body.error || '')); return; }
         state.postId = res.body.post.id;
         document.getElementById('bs-brief').classList.add('bs-hidden');
         document.getElementById('bs-workspace').classList.remove('bs-hidden');
         document.getElementById('bs-title').value = title;
 
-        var md = seedMarkdown(path);
+        var md = seedMarkdown(path, voice.tone);
         state.editor = window.MarkdownEditor.mount({
           container: document.getElementById('bs-editor'),
           blogPostId: state.postId,
@@ -135,6 +210,25 @@
           onChange: function () { setStatus('bs-save-status', 'Saving…'); setTimeout(function () { setStatus('bs-save-status', 'Saved'); }, 1400); },
         });
         loadWidget();
+
+        // AI generate: draft the full post server-side (in the resolved voice), then swap it in.
+        if (path === 'generate') {
+          setStatus('bs-save-status', 'Drafting…');
+          api('generate-blog', { method: 'POST', body: JSON.stringify({
+            blogPostId: state.postId,
+            topic: document.getElementById('bs-topic').value.trim(),
+            keywords: document.getElementById('bs-keywords').value.trim(),
+            notes: document.getElementById('bs-notes').value.trim(),
+            tone: voice.tone,
+          }) }).then(function (gen) {
+            if (gen.ok && gen.body.bodyMarkdown) {
+              state.editor.setMarkdown(gen.body.bodyMarkdown);
+              setStatus('bs-save-status', 'Draft ready');
+            } else {
+              setStatus('bs-save-status', (gen.body && gen.body.error) || 'Draft failed');
+            }
+          });
+        }
       });
     }
 
@@ -159,6 +253,17 @@
       setStatus('bs-publish-status', 'Generating hooks…');
       api('generate-hooks', { method: 'POST', body: JSON.stringify({ blogPostId: state.postId }) }).then(function (res) {
         setStatus('bs-publish-status', res.ok ? (res.body.hookVariants.length + ' hook variants ready') : (res.body.error || 'Failed'));
+      });
+    });
+
+    // --- SEO metadata ---
+    document.getElementById('bs-generate-seo').addEventListener('click', function () {
+      if (!state.postId) return;
+      setStatus('bs-publish-status', 'Generating SEO…');
+      api('generate-seo', { method: 'POST', body: JSON.stringify({ blogPostId: state.postId }) }).then(function (res) {
+        if (!res.ok) { setStatus('bs-publish-status', res.body.error || 'Failed'); return; }
+        var slugPart = res.body.urlSlug ? ('/' + res.body.urlSlug + ' · ') : '';
+        setStatus('bs-publish-status', 'SEO ready — ' + slugPart + res.body.tags.length + ' tags');
       });
     });
 

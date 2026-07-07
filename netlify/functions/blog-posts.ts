@@ -8,7 +8,7 @@
 import { HandlerEvent } from '@netlify/functions';
 import { and, desc, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { blogPosts } from '../../db/schema';
+import { aiAssistants, blogPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 
 export const handler = async (event: HandlerEvent) => {
@@ -57,12 +57,27 @@ export const handler = async (event: HandlerEvent) => {
         }
         const title = typeof body.title === 'string' && body.title.trim() ? body.title.trim() : 'Untitled draft';
 
+        // Optional authoring assistant — the post inherits its voice (blog-tone.ts). Validate org ownership.
+        let assistantId: number | null = null;
+        if (body.assistantId != null && body.assistantId !== '') {
+            const parsed = Number(body.assistantId);
+            if (!Number.isFinite(parsed)) return { statusCode: 400, body: JSON.stringify({ error: 'Invalid assistantId.' }) };
+            const [assistant] = await db
+                .select({ id: aiAssistants.id })
+                .from(aiAssistants)
+                .where(and(eq(aiAssistants.id, parsed), eq(aiAssistants.organisationId, ctx.organisationId)))
+                .limit(1);
+            if (!assistant) return { statusCode: 400, body: JSON.stringify({ error: 'Assistant not found.' }) };
+            assistantId = assistant.id;
+        }
+
         const [post] = await db
             .insert(blogPosts)
             .values({
                 organisationId: ctx.organisationId,
                 userId: ctx.userId,
                 ownerId: ctx.userId,
+                assistantId,
                 title,
             })
             .returning();
