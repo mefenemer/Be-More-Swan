@@ -479,8 +479,11 @@ window._activateMainTab = function(name) {
     document.querySelectorAll('.main-tab-content').forEach(c => c.classList.toggle('hidden', c.id !== 'maintab-' + name));
     // Recompute auto-grow heights now panels are visible (scrollHeight was 0 while hidden).
     _resizeBriefAutoGrow();
-    // Load the assistant-scoped review queue when the tab is first opened.
+    // Load the assistant-scoped review queue when the tab is first opened. detailRqOpenStatus
+    // branches on window._detailReviewQueue.kind (posts vs records) internally.
     if (name === 'review-queue') detailRqOpenStatus('review');
+    // Render the per-assistant Calendar on first open (component scopes calendar.js to this assistant).
+    if (name === 'calendar') window.AssistantCalendar?.show();
 };
 
 // ── Assistant-detail scoped Review Queue ─────────────────────────────────────
@@ -519,6 +522,10 @@ window.detailRqRefresh = function() {
 };
 
 async function _detailRqRenderGroups(statusKey) {
+    // Records-backed Review Queue (data-hub roles): assistant_records gated by approval_status,
+    // rather than the social posts/ideas lifecycle below.
+    if ((window._detailReviewQueue || {}).kind === 'records') return _detailRqRenderRecords(statusKey);
+
     const col = _DETAIL_RQ_COLUMNS[statusKey] || _DETAIL_RQ_COLUMNS.review;
     const container = document.getElementById('detail-rq-groups');
     if (!container) return;
@@ -576,6 +583,137 @@ function _detailRqGroupSection(g, items, render, statusKey) {
       <div class="detail-rq-group-body-${g.key} ${open ? '' : 'hidden'} pb-1">${body}</div>
     </section>`;
 }
+
+// ── Records-backed Review Queue (data-hub roles) ─────────────────────────────
+// The human-in-the-loop gate for Leads / Ledger / Tickets / … : assistant_records enter
+// approval_status='pending_approval' and surface here for the user to Approve, Approve &
+// Schedule, or Reject before anything acts on them. Lifecycle columns map to approval states.
+const _RQ_RECORD_STATE = { review: 'pending_approval', approved: 'approved', scheduled: 'scheduled', posted: null, archived: 'rejected' };
+
+function _rqEsc(v) {
+    return String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function _rqRecordSnippet(r) {
+    const d = r.data || {};
+    return d.summary || d.rationale || d.reason || (d.outreachDraft && d.outreachDraft.body) || d.draftReply || d.meetingSummary || '';
+}
+
+function _rqRecordActions(r, statusKey) {
+    const secondary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 transition cursor-pointer';
+    const primary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white transition cursor-pointer';
+    const btn = (label, act, cls) => `<button type="button" onclick="_detailRqRecordAct(this,'${act}')" class="${cls}">${label}</button>`;
+    let buttons = '';
+    if (statusKey === 'review') {
+        buttons = btn('Approve', 'approve', primary) + btn('Approve &amp; Schedule', 'showSchedule', secondary) +
+            `<button type="button" onclick="_detailRqRecordAct(this,'reject')" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-gray-200 text-red-600 hover:border-red-300 hover:bg-red-50 transition cursor-pointer ml-auto">Reject</button>`;
+    } else if (statusKey === 'approved') {
+        buttons = btn('Schedule', 'showSchedule', primary) + btn('Send back to review', 'review', secondary);
+    } else if (statusKey === 'scheduled') {
+        buttons = btn('Unschedule', 'unschedule', secondary);
+    } else if (statusKey === 'archived') {
+        buttons = btn('Restore to review', 'review', secondary);
+    }
+    return `<div class="flex flex-wrap items-center gap-2 mt-3">
+        ${buttons}
+        <div class="rq-sched-row hidden w-full flex items-center gap-2 mt-2">
+          <input type="datetime-local" class="rq-sched-input border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
+          <button type="button" onclick="_detailRqRecordAct(this,'schedule')" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-yellow-500 hover:bg-yellow-600 text-white cursor-pointer">Confirm schedule</button>
+        </div>
+        <p class="rq-rec-err hidden w-full text-xs font-semibold text-red-600 mt-1"></p>
+    </div>`;
+}
+
+function _detailRqRecordCard(r, statusKey) {
+    const snippet = _rqRecordSnippet(r);
+    const sched = r.scheduledFor ? ` · scheduled ${new Date(r.scheduledFor).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : '';
+    return `<div class="py-4" data-rq-record="${r.id}">
+      <div class="min-w-0">
+        <p class="text-sm font-bold text-gray-900 truncate">${_rqEsc(r.title)}</p>
+        ${snippet ? `<p class="text-xs text-gray-500 mt-0.5 line-clamp-2">${_rqEsc(snippet)}</p>` : ''}
+        <div class="flex items-center gap-2 mt-2">
+          ${r.status ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">${_rqEsc(r.status)}</span>` : ''}
+          ${sched ? `<span class="text-[11px] font-semibold text-yellow-700">${_rqEsc(sched)}</span>` : ''}
+        </div>
+      </div>
+      ${_rqRecordActions(r, statusKey)}
+    </div>`;
+}
+
+async function _detailRqRenderRecords(statusKey) {
+    const container = document.getElementById('detail-rq-groups');
+    if (!container) return;
+    const rq = window._detailReviewQueue || {};
+    const recordType = rq.recordType;
+    const approval = _RQ_RECORD_STATE[statusKey];
+    const aid = window._currentAssistantId;
+
+    container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Loading…</p>';
+    if (!aid || !recordType) { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">No assistant selected.</p>'; return; }
+    if (approval === null) { container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">These records don’t have a published state — see the Approved and Scheduled columns.</p>'; return; }
+
+    let records = [];
+    try {
+        const res = await fetch(`/.netlify/functions/assistant-records?assistantId=${aid}&recordType=${encodeURIComponent(recordType)}&approvalStatus=${approval}`);
+        if (!res.ok) throw new Error();
+        records = (await res.json()).records || [];
+    } catch { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">Failed to load.</p>'; return; }
+
+    // Keep the Review column badge + tab badge + Overview shortcut in sync.
+    if (statusKey === 'review') {
+        const colBadge = document.getElementById('detail-rq-col-count-review');
+        if (colBadge) { colBadge.textContent = records.length || ''; colBadge.classList.toggle('hidden', !records.length); }
+        const tabBadge = document.getElementById('detail-rq-pending-badge');
+        if (tabBadge) { tabBadge.textContent = records.length || ''; tabBadge.classList.toggle('hidden', !records.length); }
+        window._setReviewPendingBadge?.(records.length);
+        window._updateOpSignals?.({ pendingReview: records.length });
+    }
+
+    container.innerHTML = records.length
+        ? `<div class="divide-y divide-gray-100">${records.map((r) => _detailRqRecordCard(r, statusKey)).join('')}</div>`
+        : `<p class="text-sm text-gray-400 py-10 text-center">${statusKey === 'review' ? 'Nothing awaiting your review.' : 'Nothing here yet.'}</p>`;
+}
+
+// Approve / reject / schedule a record from the Review Queue (PATCH assistant-records).
+window._detailRqRecordAct = async function (btn, action) {
+    const card = btn.closest('[data-rq-record]');
+    if (!card) return;
+    const errEl = card.querySelector('.rq-rec-err');
+    const showErr = (msg) => { if (errEl) { errEl.textContent = msg; errEl.classList.remove('hidden'); } };
+    if (errEl) errEl.classList.add('hidden');
+
+    if (action === 'showSchedule') { card.querySelector('.rq-sched-row')?.classList.remove('hidden'); return; }
+
+    const patch = { id: Number(card.getAttribute('data-rq-record')) };
+    if (action === 'approve') patch.approvalStatus = 'approved';
+    else if (action === 'reject') patch.approvalStatus = 'rejected';
+    else if (action === 'review') patch.approvalStatus = 'pending_approval';
+    else if (action === 'unschedule') patch.approvalStatus = 'approved';
+    else if (action === 'schedule') {
+        const val = card.querySelector('.rq-sched-input')?.value;
+        if (!val) { showErr('Pick a date and time first.'); return; }
+        patch.approvalStatus = 'scheduled';
+        patch.scheduledFor = new Date(val).toISOString();
+    } else { return; }
+
+    const buttons = card.querySelectorAll('button');
+    buttons.forEach((b) => { b.disabled = true; });
+    try {
+        const res = await fetch('/.netlify/functions/assistant-records', {
+            method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Update failed.');
+        window.showToast?.(action === 'schedule' ? 'Scheduled — it’s on the Calendar now.' : action === 'reject' ? 'Rejected.' : 'Updated.');
+        _detailRqRenderGroups(_detailRqCurrentStatus);
+        // A newly scheduled/approved record changes the Calendar + Data Hub — force them to reload
+        // next time they're opened (both are cached once per detail mount).
+        const calHost = document.getElementById('assistant-calendar-host');
+        if (calHost) calHost.dataset.ready = '';
+    } catch (e) {
+        buttons.forEach((b) => { b.disabled = false; });
+        showErr(e.message || 'Something went wrong.');
+    }
+};
 
 window._detailRqToggleGroup = function(key) {
     const wasOpen = _detailRqGroupOpen[key] !== false;
@@ -1276,9 +1414,40 @@ function _applyDashboardRegistry(data) {
 
     const mods = cfg.modules || {};
     const toggle = (id, show) => { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', !show); };
-    // Review Queue = the main tab plus the Overview shortcut that opens it.
-    toggle('maintab-btn-review-queue', mods.hasReviewQueue !== false);
-    toggle('btn-review-pending', mods.hasReviewQueue !== false);
+    // Action-bar buttons use `inline-flex`, which the compiled style.css orders AFTER
+    // `.hidden` — so the `hidden` class alone does NOT hide them. Force it with an inline
+    // display override (cleared when shown so the class layout wins again).
+    const toggleBtn = (id, show) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.classList.toggle('hidden', !show);
+        el.style.display = show ? '' : 'none';
+    };
+    // Review Queue is a CORE tab on every assistant — the human-in-the-loop approval gate — so
+    // it (and the Overview shortcut that opens it) is always shown. Its data model comes from
+    // cfg.reviewQueue { kind: 'posts' | 'records', recordType? } and is read by _detailRq* and
+    // _activateMainTab. Default to posts for any legacy/unknown role.
+    window._detailReviewQueue = cfg.reviewQueue || { kind: 'posts' };
+    toggle('maintab-btn-review-queue', true);
+    toggleBtn('btn-review-pending', true);
+    // Review Queue tab header/columns adapt to the queue kind. Records queues (data-hub roles)
+    // approve/schedule records — there's no "Posted" state and no post-generation button here.
+    const rqIsRecords = window._detailReviewQueue.kind === 'records';
+    setText('detail-rq-subtitle', rqIsRecords
+        ? 'Records this assistant produced, awaiting your approval — approve, schedule or reject before anything acts on them.'
+        : 'Items awaiting your review — approve, edit or reject before anything is scheduled.');
+    toggleBtn('detail-rq-primary-btn', !rqIsRecords);
+    toggle('detail-rq-col-posted', !rqIsRecords);
+
+    // Role-specific Overview secondary action — the Lead Generator's "Review Lead Ideas"
+    // replaces the (hidden) social "Review Pending Items" button. Shown + wired from the
+    // registry's ideasReview config; the component (assistant-lead-ideas.js) drives the modal.
+    const ideas = cfg.ideasReview;
+    toggleBtn('btn-lead-ideas', !!ideas);
+    if (ideas) {
+        setText('lead-ideas-label', ideas.label || 'Review Lead Ideas');
+        window.AssistantLeadIdeas?.init({ assistantId: data.id, cfg: ideas });
+    }
     toggle('module-posting-schedule', mods.hasPostingSchedule !== false);
     toggle('module-social-strategy', mods.hasSocialStrategy !== false);
 
@@ -1343,15 +1512,19 @@ function _applyDashboardRegistry(data) {
         }
     }
 
-    // Internal Data Hub tab — role-specific local database (Leads / Ledger / …).
-    // No hubTab in the registry entry (e.g. social_media_manager, and therefore
-    // every legacy assistant via the fallback) = no tab.
+    // Data Hub tab — a CORE tab on every assistant (its workspace/database). Every role now has
+    // a hubTab: records (Leads / Ledger / …) for data-hub roles, or a content library
+    // (kind:'content_library') for social/blog. Always shown; label + data model come from hub.
     const hub = cfg.hubTab;
-    toggle('maintab-btn-datahub', !!hub);
+    toggle('maintab-btn-datahub', true);
     if (hub) {
         setText('datahub-tab-label', hub.label);
         window.AssistantDataHub?.init({ hub, assistantId: data.id });
     }
+
+    // Calendar tab — a CORE tab on every assistant, scoped to just this assistant. Registered
+    // here with the assistant id; rendered lazily on first _activateMainTab('calendar').
+    window.AssistantCalendar?.register({ assistantId: data.id, roleKey: data.roleKey });
 
     // Knowledge Base tab — only roles with a kbTab config (tier1_support_agent):
     // the articles that ground the assistant's Resolved answers (KB phase).
@@ -2316,11 +2489,19 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
 };
 
 async function _prefetchDetailRqBadge(assistantId) {
+    const rq = window._detailReviewQueue || {};
     try {
-        const res = await fetch(`/.netlify/functions/get-social-drafts?status=pending_approval&assistantId=${assistantId}`);
-        if (!res.ok) return;
-        const { drafts } = await res.json();
-        const count = (drafts || []).length;
+        let count = 0;
+        if (rq.kind === 'records' && rq.recordType) {
+            // Records-backed queue (data-hub roles): count assistant_records awaiting approval.
+            const res = await fetch(`/.netlify/functions/assistant-records?assistantId=${assistantId}&recordType=${encodeURIComponent(rq.recordType)}&approvalStatus=pending_approval`);
+            if (!res.ok) return;
+            count = ((await res.json()).records || []).length;
+        } else {
+            const res = await fetch(`/.netlify/functions/get-social-drafts?status=pending_approval&assistantId=${assistantId}`);
+            if (!res.ok) return;
+            count = ((await res.json()).drafts || []).length;
+        }
         const tabBadge = document.getElementById('detail-rq-pending-badge');
         if (tabBadge) { tabBadge.textContent = count || ''; tabBadge.classList.toggle('hidden', !count); }
         // Action bar (Epic 2.1): "Review Pending Items" count badge — amber when there's work waiting.

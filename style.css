@@ -576,6 +576,9 @@
   .-m-1 {
     margin: calc(var(--spacing) * -1);
   }
+  .-mx-2 {
+    margin-inline: calc(var(--spacing) * -2);
+  }
   .-mx-4 {
     margin-inline: calc(var(--spacing) * -4);
   }
@@ -3817,6 +3820,13 @@
       }
     }
   }
+  .hover\:bg-violet-100 {
+    &:hover {
+      @media (hover: hover) {
+        background-color: var(--color-violet-100);
+      }
+    }
+  }
   .hover\:bg-violet-700 {
     &:hover {
       @media (hover: hover) {
@@ -3845,6 +3855,13 @@
     &:hover {
       @media (hover: hover) {
         background-color: var(--color-yellow-50);
+      }
+    }
+  }
+  .hover\:bg-yellow-600 {
+    &:hover {
+      @media (hover: hover) {
+        background-color: var(--color-yellow-600);
       }
     }
   }
@@ -4113,6 +4130,11 @@
           background-color: var(--color-amber-100);
         }
       }
+    }
+  }
+  .focus\:border-emerald-400 {
+    &:focus {
+      border-color: var(--color-emerald-400);
     }
   }
   .focus\:border-emerald-500 {

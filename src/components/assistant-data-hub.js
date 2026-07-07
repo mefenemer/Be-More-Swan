@@ -63,10 +63,66 @@
   const state = { hub: null, assistantId: null, records: [] };
 
   async function fetchRecords() {
+    // Content Library (social/blog Data Hub) reads posts, not assistant_records.
+    if (state.hub.kind === 'content_library') { state.records = await fetchContentLibrary(); return; }
     const res = await fetch(`${API}?assistantId=${state.assistantId}&recordType=${encodeURIComponent(state.hub.recordType)}`);
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || 'Could not load records.');
     state.records = data.records || [];
+  }
+
+  // ── Content Library (kind: 'content_library') ───────────────────────────────
+  // The social/blog Data Hub: every post this assistant has produced, across the whole
+  // lifecycle. Mapped into the same record envelope the table renders, so no table changes
+  // are needed. Approval/scheduling are NOT done here — they live in the Review Queue / Calendar.
+  const LIBRARY_STATUSES = ['draft', 'pending_approval', 'approved', 'scheduled', 'published', 'failed', 'rejected'];
+
+  function postToRecord(p) {
+    return {
+      id: p.id,
+      title: String(p.caption || '').trim().slice(0, 80) || '(untitled post)',
+      status: p.status,
+      updatedAt: p.publishedAt || p.publishDate || p.generatedAt,
+      // cellValue resolves the 'platform' column via record.data.platform.
+      data: { ...p },
+    };
+  }
+
+  function blogToRecord(b) {
+    return {
+      id: b.id,
+      title: b.title || '(untitled post)',
+      status: b.status,
+      updatedAt: b.updatedAt || b.scheduledFor || b.publishedAt || b.createdAt,
+      data: { ...b },
+    };
+  }
+
+  async function fetchContentLibrary() {
+    if (state.hub.source === 'blog_posts') {
+      const res = await fetch('/.netlify/functions/blog-posts');
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not load posts.');
+      const posts = (data.posts || []).filter((b) => {
+        const owner = b.aiAssistantId ?? b.assistantId;
+        return state.assistantId == null || owner == null || Number(owner) === Number(state.assistantId);
+      });
+      return posts.map(blogToRecord);
+    }
+    // social_drafts: get-social-drafts filters by a single status, so fetch the lifecycle set
+    // in parallel and merge (dedupe by id — a post is only ever in one status).
+    const batches = await Promise.all(LIBRARY_STATUSES.map(async (s) => {
+      try {
+        const res = await fetch(`/.netlify/functions/get-social-drafts?status=${s}&assistantId=${state.assistantId}`);
+        if (!res.ok) return [];
+        return (await res.json()).drafts || [];
+      } catch { return []; }
+    }));
+    const byId = new Map();
+    for (const arr of batches) for (const p of arr) byId.set(p.id, p);
+    return [...byId.values()]
+      .sort((a, b) => new Date(b.generatedAt || 0) - new Date(a.generatedAt || 0))
+      .map(postToRecord);
   }
 
   async function patchRecord(id, patch) {
@@ -262,9 +318,30 @@
     return bar;
   }
 
+  // Content Library row detail — the post content, read-only. Approval/scheduling actions
+  // deliberately live in the Review Queue / Calendar, so this stays a browse-only view.
+  function libraryDetail(record) {
+    const p = record.data || {};
+    const wrap = document.createElement('div');
+    const body = p.caption || p.excerpt || p.summary || p.subtitle || '';
+    const tags = Array.isArray(p.hashtags) ? p.hashtags.join(' ') : (p.hashtags || '');
+    wrap.innerHTML = `
+      ${body ? `<p class="text-sm text-gray-800 whitespace-pre-line">${esc(body)}</p>` : '<p class="text-sm text-gray-500">No content yet.</p>'}
+      ${tags ? `<p class="text-xs text-emerald-700 mt-3">${esc(tags)}</p>` : ''}
+      <p class="text-xs text-gray-400 mt-4 pt-3 border-t border-gray-100">Approve or reject this in the <span class="font-semibold text-gray-600">Review Queue</span>; scheduled posts appear on the <span class="font-semibold text-gray-600">Calendar</span>.</p>
+    `;
+    return wrap;
+  }
+
   function detailPanel(record) {
     const panel = document.createElement('div');
     panel.className = 'px-5 py-4 bg-gray-50/70';
+
+    // Content Library: read-only post view, no record actions.
+    if (state.hub.kind === 'content_library') {
+      panel.appendChild(libraryDetail(record));
+      return panel;
+    }
 
     let body = null;
     if (state.hub.recordType === 'meeting') {
@@ -306,11 +383,14 @@
     const hub = state.hub;
 
     if (state.records.length === 0) {
+      const emptyMsg = hub.kind === 'content_library'
+        ? 'Posts this assistant drafts will appear here across their whole lifecycle — from draft through scheduled to published. Review and approve them in the Review Queue.'
+        : `Work your assistant produces in chat lands here automatically — or import a CSV to get started. ${esc(hub.importHint)}`;
       host.innerHTML = `
         <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-10 text-center">
           <p class="text-4xl mb-3">🗂️</p>
           <p class="font-bold text-gray-900 mb-1">Nothing in ${esc(hub.label)} yet</p>
-          <p class="text-sm text-gray-500 max-w-md mx-auto">Work your assistant produces in chat lands here automatically — or import a CSV to get started. ${esc(hub.importHint)}</p>
+          <p class="text-sm text-gray-500 max-w-md mx-auto">${emptyMsg}</p>
         </div>`;
       return;
     }
@@ -357,7 +437,23 @@
     }
   }
 
+  // Content Library toolbar — browse-only (posts are created via Assign Task / Blog Studio and
+  // approved in the Review Queue), so no CSV import/export or manual add.
+  function renderLibraryToolbar() {
+    const host = document.getElementById('datahub-toolbar');
+    if (!host) return;
+    const hub = state.hub;
+    host.innerHTML = `
+      <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-6">
+        <div class="min-w-0">
+          <h3 class="text-lg font-bold text-gray-900">${esc(hub.label)}</h3>
+          <p class="text-sm text-gray-500 mt-1 max-w-2xl">${esc(hub.description)}</p>
+        </div>
+      </div>`;
+  }
+
   function renderToolbar() {
+    if (state.hub.kind === 'content_library') { renderLibraryToolbar(); return; }
     const host = document.getElementById('datahub-toolbar');
     if (!host) return;
     const hub = state.hub;
@@ -368,9 +464,17 @@
           <p class="text-sm text-gray-500 mt-1 max-w-2xl">${esc(hub.description)}</p>
         </div>
         <div class="flex items-center gap-2 shrink-0">
+          ${hub.manualAdd ? `
+          <button type="button" data-hub-add
+            class="inline-flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            Add Lead
+          </button>` : ''}
           <input type="file" accept=".csv" class="hidden" data-hub-file>
           <button type="button" data-hub-import
-            class="inline-flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap">
+            class="inline-flex items-center gap-2 px-4 py-2 ${hub.manualAdd
+              ? 'bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800'
+              : 'bg-emerald-700 hover:bg-emerald-800 text-white'} text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M12 4v12m0-12l-4 4m4-4l4 4"/></svg>
             Import CSV
           </button>
@@ -414,6 +518,104 @@
     host.querySelector('[data-hub-export]').addEventListener('click', () => {
       window.location.href = `${API}?assistantId=${state.assistantId}&recordType=${encodeURIComponent(hub.recordType)}&format=csv`;
     });
+
+    const addBtn = host.querySelector('[data-hub-add]');
+    if (addBtn) addBtn.addEventListener('click', () => openAddLeadModal(status));
+  }
+
+  // ── Manual "Add Lead" (lead hubs only) ──────────────────────────────────────
+  // A single hand-typed lead, scored on submit by netlify/functions/lead-generation.ts
+  // (score_lead) so it lands in the Leads tab exactly like a chat-produced lead.
+  const ADD_LEAD_FIELDS = [
+    { key: 'name', label: 'Contact name', ph: 'Jane Doe' },
+    { key: 'company', label: 'Company', ph: 'Acme Ltd' },
+    { key: 'email', label: 'Email', ph: 'jane@acme.com', type: 'email' },
+    { key: 'website', label: 'Website', ph: 'acme.com' },
+    { key: 'industry', label: 'Industry', ph: 'SaaS' },
+    { key: 'headcount', label: 'Headcount', ph: '50' },
+    { key: 'notes', label: 'Notes', ph: 'Where they came from, what they want…', textarea: true },
+  ];
+
+  function openAddLeadModal(toolbarStatus) {
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 bg-gray-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm';
+    overlay.innerHTML = `
+      <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div class="flex items-start justify-between gap-4 p-5 border-b border-gray-100">
+          <div>
+            <h3 class="text-lg font-bold text-gray-900">Add a lead</h3>
+            <p class="text-sm text-gray-500 mt-0.5">The Lead Generator scores it against your ideal customer profile as it's saved.</p>
+          </div>
+          <button type="button" data-add-close class="text-gray-400 hover:text-gray-600 text-2xl leading-none cursor-pointer">&times;</button>
+        </div>
+        <form data-add-form class="p-5 space-y-4">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            ${ADD_LEAD_FIELDS.map((f) => `
+              <label class="block ${f.textarea ? 'sm:col-span-2' : ''}">
+                <span class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">${esc(f.label)}</span>
+                ${f.textarea
+                  ? `<textarea name="${f.key}" rows="2" placeholder="${esc(f.ph)}" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-emerald-400"></textarea>`
+                  : `<input type="${f.type || 'text'}" name="${f.key}" placeholder="${esc(f.ph)}" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-emerald-400">`}
+              </label>`).join('')}
+          </div>
+          <p class="hidden text-xs font-semibold" data-add-status></p>
+          <div class="flex items-center justify-end gap-2 pt-1">
+            <button type="button" data-add-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 rounded-lg cursor-pointer">Cancel</button>
+            <button type="submit" data-add-submit
+              class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Add &amp; score lead</button>
+          </div>
+        </form>
+      </div>`;
+
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelectorAll('[data-add-close]').forEach((b) => b.addEventListener('click', close));
+
+    const form = overlay.querySelector('[data-add-form]');
+    const status = overlay.querySelector('[data-add-status]');
+    const submit = overlay.querySelector('[data-add-submit]');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const lead = {};
+      for (const f of ADD_LEAD_FIELDS) {
+        const v = form.elements[f.key]?.value?.trim();
+        if (v) lead[f.key] = v;
+      }
+      if (!lead.name && !lead.company) {
+        status.textContent = 'Enter at least a contact name or a company.';
+        status.className = 'block text-xs font-semibold text-red-600';
+        return;
+      }
+      submit.disabled = true;
+      status.textContent = 'Scoring the lead…';
+      status.className = 'block text-xs font-semibold text-gray-500';
+      try {
+        const res = await fetch('/.netlify/functions/lead-generation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'score_lead', assistantId: state.assistantId, lead }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not score the lead.');
+        close();
+        await fetchRecords();
+        renderTable();
+        const card = data.record?.data || {};
+        window.showToast?.(`Lead scored ${card.score ?? ''}/100 — ${card.rating || 'added'}. It's in your Leads tab.`);
+        if (toolbarStatus) {
+          toolbarStatus.textContent = `Added and scored “${data.record?.title || 'lead'}”.`;
+          toolbarStatus.className = 'block -mt-3 mb-5 text-xs font-semibold text-emerald-700';
+        }
+      } catch (err) {
+        submit.disabled = false;
+        status.textContent = err.message || 'Something went wrong.';
+        status.className = 'block text-xs font-semibold text-red-600';
+      }
+    });
+
+    document.body.appendChild(overlay);
+    overlay.querySelector('input[name="name"]')?.focus();
   }
 
   async function init({ hub, assistantId }) {

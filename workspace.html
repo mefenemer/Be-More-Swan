@@ -4104,6 +4104,9 @@ function formatCurrency(amount, currency) {
 <script src="/src/components/disruptive-ui-registry.js"></script>
 <script src="/src/components/spreadsheet-import.js"></script>
 <script src="/src/components/assistant-data-hub.js"></script>
+<!-- Lead Generator (lead_qualifier) "Review Lead Ideas" flow — Overview button + modal;
+     proposes/approves lead ideas and files scored leads via lead-generation.ts. -->
+<script src="/src/components/assistant-lead-ideas.js"></script>
 <!-- Knowledge Base tab (tier1_support_agent) — the support articles grounding the
      assistant's Resolved answers; articles live in kb_articles via kb-articles.ts. -->
 <script src="/src/components/assistant-knowledge-base.js"></script>
@@ -4121,6 +4124,9 @@ function formatCurrency(amount, currency) {
 <script src="/src/components/markdown-editor.js"></script>
 <script src="/src/components/blog-studio-modal.js"></script>
 <script src="/calendar.js?v=20260625-approve-gate"></script>
+<!-- Per-assistant Calendar tab on assistant-detail.html — reuses calendar.js rendering
+     scoped to the current assistant (scheduled posts + records with scheduled_for + task runs). -->
+<script src="/src/components/assistant-calendar.js"></script>
 <script src="/billing.js"></script>
 <script src="/swan-cursor.js"></script>
 <script src="/tour.js"></script>

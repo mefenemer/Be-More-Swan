@@ -25,10 +25,24 @@
  *                //                               preference (post/draft alerts — social-only)
  *   cfg.primaryAction // → Overview's primary button { label, kind }. kind: 'generate_post' opens the
  *                //   post sheet (social); 'chat' opens the assistant's chat intake (Data Hub roles).
- *   cfg.hubTab   // → optional Internal Data Hub tab config (assistant-data-hub.js);
- *                //   absent = no Data Hub tab for this role (e.g. social_media_manager)
+ *   cfg.reviewQueue // → the Review Queue tab's data model (ALWAYS present — every assistant has a
+ *                //   review/approve gate). Shape: { kind: 'posts' | 'records', recordType? }.
+ *                //   'posts'   → scheduled_posts lifecycle (social/blog), rendered by _detailRq*.
+ *                //   'records' → assistant_records awaiting approval (approval_status), recordType
+ *                //               matches hubTab.recordType.
+ *   cfg.hubTab   // → the Data Hub tab config (ALWAYS present — every assistant has a workspace).
+ *                //   kind: 'records' (default) → assistant_records table (Leads/Ledger/Tickets/…);
+ *                //   kind: 'content_library'   → the social/blog post library, with source:
+ *                //   'social_drafts' (scheduled_posts) | 'blog_posts'. See assistant-data-hub.js.
  *   cfg.kbTab    // → optional Knowledge Base tab config (assistant-knowledge-base.js);
  *                //   only tier1_support_agent has one — { label, description }
+ *
+ * UNIFORM TEMPLATE: every role exposes the same four core tabs in the same order —
+ *   Overview · Data Hub · Review Queue · Calendar — so the layout builds user muscle
+ *   memory. Only labels/content differ per role (via hubTab/reviewQueue). Calendar needs
+ *   no registry config (assistant-calendar.js scopes the global calendar to this assistant).
+ *   Secondary tabs (Goals, Automation, Progress Reviews, Activity, KB) follow the core four
+ *   and stay role-gated via `modules` (Automation) / `kbTab` (Knowledge Base).
  *
  * hubTab shape:
  *   { id, label, recordType,            // recordType matches assistant_records.record_type
@@ -72,6 +86,24 @@
       ],
       modules: { hasReviewQueue: true, hasPostingSchedule: true, hasSocialStrategy: true },
       primaryAction: { label: 'Assign New Task', kind: 'generate_post' },
+      reviewQueue: { kind: 'posts' },
+      // Data Hub = the content library: every post this assistant has drafted, across the
+      // whole lifecycle (draft → scheduled → published). Backed by scheduled_posts via
+      // get-social-drafts (assistant-data-hub.js content_library kind), not assistant_records.
+      hubTab: {
+        id: 'datahub',
+        kind: 'content_library',
+        source: 'social_drafts',
+        label: 'Content Library',
+        recordType: null,
+        description: 'Every post this assistant has drafted — browse the full library across drafts, scheduled and published.',
+        columns: [
+          { key: 'title', label: 'Post' },
+          { key: 'platform', label: 'Platform' },
+          { key: 'status', label: 'Status' },
+          { key: 'updatedAt', label: 'Updated' },
+        ],
+      },
     },
 
     // Content Engine — Blog Writer. Uses assistant-detail.html, but its primary action is
@@ -111,6 +143,23 @@
       // Ignored for blog_writer (assistants.js special-cases the button to open Blog Studio),
       // but kept coherent for any generic reader of the registry.
       primaryAction: { label: 'Write Blog Post', kind: 'chat' },
+      // Review/approval still happens inside Blog Studio, but the standard Review Queue + Data
+      // Hub tabs are surfaced for consistency: both read blog_posts (blog-posts.ts) rather than
+      // scheduled_posts. The Calendar reads blog-posts.ts's from/to range feed.
+      reviewQueue: { kind: 'posts', source: 'blog_posts' },
+      hubTab: {
+        id: 'datahub',
+        kind: 'content_library',
+        source: 'blog_posts',
+        label: 'Content Library',
+        recordType: null,
+        description: 'Every long-form post this assistant has written — drafts, scheduled and published.',
+        columns: [
+          { key: 'title', label: 'Post' },
+          { key: 'status', label: 'Status' },
+          { key: 'updatedAt', label: 'Updated' },
+        ],
+      },
     },
 
     lead_qualifier: {
@@ -143,11 +192,15 @@
         hasContentPublishing: false,
       },
       primaryAction: { label: 'Score New Leads', kind: 'chat' },
+      reviewQueue: { kind: 'records', recordType: 'lead' },
       hubTab: {
         id: 'datahub',
         label: 'Leads',
         recordType: 'lead',
         description: 'Every lead this assistant has scored — with its outreach draft — plus any lead lists you import.',
+        // Manual entry: the Data Hub shows an "Add Lead" button (assistant-data-hub.js) that
+        // scores a single hand-typed lead via netlify/functions/lead-generation.ts (score_lead).
+        manualAdd: true,
         columns: [
           { key: 'title', label: 'Lead' },
           { key: 'score', label: 'Score' },
@@ -157,6 +210,15 @@
         ],
         importHint: 'Upload a CSV of inbound leads — one row per lead. Exporting from Excel or Google Sheets? Use File → Download → CSV.',
         importColumns: ['name', 'company', 'email', 'website', 'industry', 'headcount', 'notes'],
+      },
+      // Overview "Review Lead Ideas" button (assistant-lead-ideas.js) — replaces the social
+      // "Review Pending Items" shortcut (hidden here via hasReviewQueue:false). The assistant
+      // proposes lead-generation ideas; on approval it finds, scores and files leads and tags
+      // a next-best-action owner (handled here vs handed off). Backed by lead-generation.ts.
+      ideasReview: {
+        label: 'Review Lead Ideas',
+        title: 'Lead Ideas',
+        description: 'Ideas for where to find your next customers. Approve one and the Lead Generator finds matching companies, scores them into your Leads tab, and suggests the next best action for each.',
       },
     },
 
@@ -190,6 +252,7 @@
         hasContentPublishing: false,
       },
       primaryAction: { label: 'Chase an Invoice', kind: 'chat' },
+      reviewQueue: { kind: 'records', recordType: 'invoice' },
       hubTab: {
         id: 'datahub',
         label: 'Ledger',
@@ -237,6 +300,7 @@
         hasContentPublishing: false,
       },
       primaryAction: { label: 'Handle a Query', kind: 'chat' },
+      reviewQueue: { kind: 'records', recordType: 'ticket' },
       hubTab: {
         id: 'datahub',
         label: 'Tickets',
@@ -289,6 +353,7 @@
         hasContentPublishing: false,
       },
       primaryAction: { label: 'Enrich Records', kind: 'chat' },
+      reviewQueue: { kind: 'records', recordType: 'enrichment' },
       hubTab: {
         id: 'datahub',
         label: 'Database',
@@ -336,6 +401,7 @@
         hasContentPublishing: false,
       },
       primaryAction: { label: 'Summarise a Meeting', kind: 'chat' },
+      reviewQueue: { kind: 'records', recordType: 'meeting' },
       hubTab: {
         id: 'datahub',
         label: 'Meeting Notes',

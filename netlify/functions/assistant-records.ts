@@ -13,7 +13,7 @@
 // query is tenant-scoped and the assistant is ownership-checked (IDOR guard).
 
 import { Handler } from '@netlify/functions';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, gte, lte } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, assistantRecords } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
@@ -55,9 +55,43 @@ export const handler: Handler = async (event) => {
     try {
         if (event.httpMethod === 'GET') {
             const assistantId = Number(event.queryStringParameters?.assistantId);
+
+            // Scheduled-work feed for the assistant Calendar tab: every scheduled record for this
+            // assistant (across record types), optionally within a from/to window. No recordType.
+            if (event.queryStringParameters?.scheduled) {
+                if (!(await ownsAssistant(assistantId))) return json(404, { error: 'Assistant not found.' });
+                const fromParam = event.queryStringParameters?.from;
+                const toParam = event.queryStringParameters?.to;
+                const from = fromParam ? new Date(fromParam) : null;
+                const to = toParam ? new Date(toParam) : null;
+                const scheduled = await db
+                    .select({
+                        id: assistantRecords.id,
+                        recordType: assistantRecords.recordType,
+                        title: assistantRecords.title,
+                        status: assistantRecords.status,
+                        scheduledFor: assistantRecords.scheduledFor,
+                    })
+                    .from(assistantRecords)
+                    .where(and(
+                        eq(assistantRecords.organisationId, orgId),
+                        eq(assistantRecords.aiAssistantId, assistantId),
+                        eq(assistantRecords.approvalStatus, 'scheduled'),
+                        ...(from && !isNaN(from.getTime()) ? [gte(assistantRecords.scheduledFor, from)] : []),
+                        ...(to && !isNaN(to.getTime()) ? [lte(assistantRecords.scheduledFor, to)] : []),
+                    ))
+                    .orderBy(desc(assistantRecords.scheduledFor));
+                return json(200, { records: scheduled });
+            }
+
             const recordType = String(event.queryStringParameters?.recordType || '');
             if (!RECORD_TYPES.has(recordType)) return json(400, { error: 'recordType must be one of lead, enrichment, meeting, invoice, ticket.' });
             if (!(await ownsAssistant(assistantId))) return json(404, { error: 'Assistant not found.' });
+
+            // Optional approval-gate filter — the Review Queue tab passes ?approvalStatus=pending_approval;
+            // the Data Hub tab omits it (shows everything).
+            const approvalFilter = event.queryStringParameters?.approvalStatus;
+            const APPROVAL_STATES = new Set(['pending_approval', 'approved', 'scheduled', 'rejected']);
 
             const records = await db
                 .select({
@@ -65,6 +99,8 @@ export const handler: Handler = async (event) => {
                     recordType: assistantRecords.recordType,
                     title: assistantRecords.title,
                     status: assistantRecords.status,
+                    approvalStatus: assistantRecords.approvalStatus,
+                    scheduledFor: assistantRecords.scheduledFor,
                     source: assistantRecords.source,
                     data: assistantRecords.data,
                     createdAt: assistantRecords.createdAt,
@@ -75,6 +111,7 @@ export const handler: Handler = async (event) => {
                     eq(assistantRecords.organisationId, orgId),
                     eq(assistantRecords.aiAssistantId, assistantId),
                     eq(assistantRecords.recordType, recordType),
+                    ...(approvalFilter && APPROVAL_STATES.has(approvalFilter) ? [eq(assistantRecords.approvalStatus, approvalFilter)] : []),
                 ))
                 .orderBy(desc(assistantRecords.updatedAt));
 
@@ -172,6 +209,9 @@ export const handler: Handler = async (event) => {
                             recordType,
                             title: rec.title,
                             status: rec.status,
+                            // CSV imports are user-supplied → no AI review gate needed. AI-produced
+                            // records (source 'chat'/'integration') inherit the pending_approval default.
+                            approvalStatus: source === 'csv_import' ? 'approved' : 'pending_approval',
                             source,
                             data: rec.data,
                         });
@@ -184,7 +224,7 @@ export const handler: Handler = async (event) => {
         }
 
         if (event.httpMethod === 'PATCH') {
-            let body: { id?: number; status?: unknown; data?: unknown };
+            let body: { id?: number; status?: unknown; data?: unknown; approvalStatus?: unknown; scheduledFor?: unknown };
             try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
             const id = Number(body.id);
             if (!Number.isInteger(id)) return json(400, { error: 'id is required.' });
@@ -199,11 +239,34 @@ export const handler: Handler = async (event) => {
                 if (JSON.stringify(body.data).length > MAX_DATA_CHARS) return json(400, { error: 'data payload too large.' });
                 patch.data = body.data;
             }
+            // Approval-gate transitions (Review Queue): approve / reject / schedule. Scheduling a
+            // record requires a scheduled_for and implies approval (so "Approve & Schedule" is one PATCH).
+            if (body.approvalStatus !== undefined) {
+                const next = String(body.approvalStatus);
+                if (!['pending_approval', 'approved', 'scheduled', 'rejected'].includes(next)) {
+                    return json(400, { error: 'approvalStatus must be pending_approval, approved, scheduled or rejected.' });
+                }
+                patch.approvalStatus = next;
+                if (next === 'scheduled') {
+                    const when = body.scheduledFor ? new Date(String(body.scheduledFor)) : null;
+                    if (!when || isNaN(when.getTime())) return json(400, { error: 'scheduledFor (a valid date) is required to schedule a record.' });
+                    patch.scheduledFor = when;
+                } else if (next !== 'approved') {
+                    // Leaving the scheduled state clears the due date (rejected / sent back to review).
+                    patch.scheduledFor = null;
+                }
+            }
 
             const [row] = await db.update(assistantRecords)
                 .set(patch)
                 .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
-                .returning({ id: assistantRecords.id, status: assistantRecords.status, updatedAt: assistantRecords.updatedAt });
+                .returning({
+                    id: assistantRecords.id,
+                    status: assistantRecords.status,
+                    approvalStatus: assistantRecords.approvalStatus,
+                    scheduledFor: assistantRecords.scheduledFor,
+                    updatedAt: assistantRecords.updatedAt,
+                });
             if (!row) return json(404, { error: 'Record not found.' });
             return json(200, { record: row });
         }
@@ -222,9 +285,10 @@ export const handler: Handler = async (event) => {
 
         return { statusCode: 405, body: 'Method Not Allowed' };
     } catch (err) {
-        // Table not migrated yet (npm run db:push) — an empty hub beats a 500 on GET.
+        // Not migrated yet (missing table, or the approval_status/scheduled_for columns before
+        // db/assistant-records-approval.sql is applied) — an empty hub beats a 500 on GET.
         const msg = err instanceof Error ? err.message : '';
-        if (event.httpMethod === 'GET' && msg.includes('relation') && msg.includes('does not exist')) {
+        if (event.httpMethod === 'GET' && msg.includes('does not exist') && (msg.includes('relation') || msg.includes('column'))) {
             return json(200, { records: [] });
         }
         console.error('[assistant-records]', err);

@@ -2497,6 +2497,15 @@ export const assistantRecords = pgTable("assistant_records", {
   // Freeform per-type lifecycle label ('hot', 'open', 'chased', 'Escalated', …) —
   // rendered as a chip and filterable, not enum-constrained so roles can evolve.
   status: text("status"),
+  // Human-in-the-loop approval gate (separate from the freeform domain `status` above):
+  // every AI-produced record enters 'pending_approval' and surfaces in the assistant's Review
+  // Queue; the user approves/rejects, and 'approved' → 'scheduled' (with scheduled_for) puts it
+  // on the Calendar. Nothing should execute against a record until it is approved/scheduled.
+  // 'pending_approval' | 'approved' | 'scheduled' | 'rejected'. CSV-imported rows (user-supplied,
+  // not AI-generated) are created 'approved'.
+  approvalStatus: text("approval_status").notNull().default("pending_approval"),
+  // When approvalStatus='scheduled', the moment the work is due — read by the assistant Calendar.
+  scheduledFor: timestamp("scheduled_for"),
   // 'chat' | 'csv_import' | 'integration'
   source: text("source").notNull().default("chat"),
   // The serialised uiElement payload (see disruptive-ui-registry.js wire shapes).
@@ -2506,8 +2515,11 @@ export const assistantRecords = pgTable("assistant_records", {
 }, (t) => [
   // Hot path: the Data Hub tab listing one assistant's records of one type.
   index("assistant_records_org_assistant_type_idx").on(t.organisationId, t.aiAssistantId, t.recordType),
+  // Hot path for the Review Queue tab: one assistant's records of one type filtered by approval gate.
+  index("assistant_records_approval_idx").on(t.organisationId, t.aiAssistantId, t.recordType, t.approvalStatus),
   check("assistant_records_type_check", sql`${t.recordType} IN ('lead', 'enrichment', 'meeting', 'invoice', 'ticket')`),
   check("assistant_records_source_check", sql`${t.source} IN ('chat', 'csv_import', 'integration')`),
+  check("assistant_records_approval_check", sql`${t.approvalStatus} IN ('pending_approval', 'approved', 'scheduled', 'rejected')`),
 ]);
 
 // ────────────────────────────────────────────────────────────────────────────

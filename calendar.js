@@ -82,6 +82,12 @@ let _activities = [];            // completed task runs (get-calendar-activity)
 let _assistants = [];            // org assistants for names + colour assignment
 let _assistantFilter = 'all';    // 'all' | <assistantId>
 let _platformFilter  = 'all';    // 'all' | 'facebook' | 'instagram' | 'linkedin' | 'x'
+// When the calendar is embedded in the assistant-detail Calendar tab it is LOCKED to one
+// assistant: the assistant filter is preset + hidden, and the colour legend is suppressed.
+let _lockedAssistant = false;
+// Scheduled Data Hub records (leads/invoices/tickets/… with approval_status='scheduled') for the
+// locked assistant — only fetched in the assistant Calendar tab, rendered as timeline chips.
+let _scheduledRecords = [];
 
 // Stable colour palette assigned to assistants by load order (inline styles → no Tailwind
 // arbitrary-class compile issues). Null/unknown assistant → neutral grey.
@@ -105,7 +111,16 @@ function _matchesPlatformFilter(platform) {
 }
 
 // ── Init ──────────────────────────────────────────────────────────
-window.initCalendar = async function () {
+// opts.assistantId (optional) — scope the calendar to a single assistant (the assistant-detail
+// Calendar tab). Omitted → the global, all-assistants Content Calendar page.
+window.initCalendar = async function (opts = {}) {
+    if (opts.assistantId != null) {
+        _assistantFilter = String(opts.assistantId);
+        _lockedAssistant = true;
+    } else {
+        _assistantFilter = 'all';
+        _lockedAssistant = false;
+    }
     document.getElementById('cal-btn-prev')?.addEventListener('click', _navPrev);
     document.getElementById('cal-btn-next')?.addEventListener('click', _navNext);
     document.getElementById('cal-btn-today')?.addEventListener('click', _navToday);
@@ -167,6 +182,17 @@ async function _loadAndRender() {
         if (actRes && actRes.ok) _activities = (await actRes.json()).activities || [];
         if (asstRes && asstRes.ok) _assistants = (await asstRes.json()).assistants || [];
         if (blogRes && blogRes.ok) _blogPosts = (await blogRes.json()).posts || [];
+
+        // Assistant Calendar tab only: overlay this assistant's scheduled Data Hub records so
+        // "Approve & Schedule" in the Review Queue shows up here as scheduled work.
+        if (_lockedAssistant && _assistantFilter !== 'all') {
+            try {
+                const rr = await fetch(`/.netlify/functions/assistant-records?scheduled=1&assistantId=${_assistantFilter}&from=${from.toISOString()}&to=${to.toISOString()}`);
+                _scheduledRecords = rr.ok ? ((await rr.json()).records || []) : [];
+            } catch { _scheduledRecords = []; }
+        } else {
+            _scheduledRecords = [];
+        }
     } catch (e) { console.warn('Calendar load error:', e); }
     // Always (re)populate the toolbar controls — the calendar.html fragment (and its fresh
     // <select>) is re-injected on every view entry, even though _assistants is cached here.
@@ -178,12 +204,18 @@ async function _loadAndRender() {
 function _renderAssistantControls() {
     const sel = document.getElementById('cal-assistant-filter');
     if (sel) {
-        sel.innerHTML = `<option value="all">All assistants</option>` +
-            _assistants.map(a => `<option value="${a.id}">${_escHtml(a.name || ('Assistant #' + a.id))}</option>`).join('');
-        sel.value = String(_assistantFilter);
-        if (!sel.dataset.bound) {
-            sel.dataset.bound = '1';
-            sel.addEventListener('change', () => { _assistantFilter = sel.value; _render(); });
+        // Locked to one assistant (detail Calendar tab): hide the picker, keep the preset filter.
+        if (_lockedAssistant) {
+            sel.classList.add('hidden');
+        } else {
+            sel.classList.remove('hidden');
+            sel.innerHTML = `<option value="all">All assistants</option>` +
+                _assistants.map(a => `<option value="${a.id}">${_escHtml(a.name || ('Assistant #' + a.id))}</option>`).join('');
+            sel.value = String(_assistantFilter);
+            if (!sel.dataset.bound) {
+                sel.dataset.bound = '1';
+                sel.addEventListener('change', () => { _assistantFilter = sel.value; _render(); });
+            }
         }
     }
 
@@ -200,7 +232,7 @@ function _renderAssistantControls() {
             `<span class="inline-flex items-center gap-1.5 text-xs text-gray-500">
                 <span class="w-2.5 h-2.5 rounded-full" style="background:${_assistantColor(a.id)}"></span>${_escHtml(a.name || ('Assistant #' + a.id))}
             </span>`).join('');
-        legend.classList.toggle('hidden', _assistants.length === 0);
+        legend.classList.toggle('hidden', _lockedAssistant || _assistants.length === 0);
     }
 }
 
@@ -281,7 +313,8 @@ function _renderMonth() {
         </div>`;
         const dayActs = _activitiesOnDate(date);
         const dayBlogs = _blogPostsOnDate(date);
-        html += `<div class="space-y-1">${dayPosts.map(p => _postChip(p, 'month')).join('')}${dayBlogs.map(_blogChip).join('')}${dayActs.map(a => _activityChip(a, 'month')).join('')}</div>`;
+        const dayRecords = _scheduledRecordsOnDate(date);
+        html += `<div class="space-y-1">${dayPosts.map(p => _postChip(p, 'month')).join('')}${dayBlogs.map(_blogChip).join('')}${dayRecords.map(r => _recordChip(r, 'month')).join('')}${dayActs.map(a => _activityChip(a, 'month')).join('')}</div>`;
         html += `</div>`;
     }
 
@@ -315,7 +348,7 @@ function _renderWeek() {
             ondragover="window._calDragOver(event, '${dateKey}')"
             ondragleave="window._calDragLeave(event)"
             ondrop="window._calDrop(event, '${dateKey}')">
-            ${dayPosts.map(p => _postChip(p, 'week')).join('')}${_blogPostsOnDate(d).map(_blogChip).join('')}${_activitiesOnDate(d).map(a => _activityChip(a, 'week')).join('')}
+            ${dayPosts.map(p => _postChip(p, 'week')).join('')}${_blogPostsOnDate(d).map(_blogChip).join('')}${_scheduledRecordsOnDate(d).map(r => _recordChip(r, 'week')).join('')}${_activitiesOnDate(d).map(a => _activityChip(a, 'week')).join('')}
         </div>`;
     }
     html += `</div>`;
@@ -584,6 +617,27 @@ function _activityChip(act, viewType) {
         <div class="flex-1 min-w-0">
             <p class="text-[11px] font-semibold text-gray-600 truncate">✓ ${_escHtml(name)}</p>
             ${viewType === 'week' ? `<p class="text-[10px] text-gray-400 truncate leading-tight">${time} · task done</p>` : ''}
+        </div>
+    </div>`;
+}
+
+// Scheduled Data Hub record chip (assistant Calendar tab) — future work, not a completed run,
+// so it reads "🗓 scheduled" rather than the activity "✓ done" chip.
+function _scheduledRecordsOnDate(date) {
+    const key = _dateKey(date);
+    return _scheduledRecords.filter(r => r.scheduledFor && _dateKey(new Date(r.scheduledFor)) === key);
+}
+function _recordChip(rec, viewType) {
+    const color = _assistantColor(_assistantFilter === 'all' ? null : Number(_assistantFilter));
+    const time = new Date(rec.scheduledFor).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+    return `<div
+        class="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-yellow-50 text-left w-full select-none"
+        style="border-left:3px solid ${color}"
+        title="${_escHtml(rec.title || '')} — scheduled ${time} · ${_escHtml(rec.recordType || '')}">
+        <span class="w-1.5 h-1.5 rounded-full shrink-0 bg-yellow-500"></span>
+        <div class="flex-1 min-w-0">
+            <p class="text-[11px] font-semibold text-gray-600 truncate">🗓 ${_escHtml(rec.title || rec.recordType || 'Scheduled')}</p>
+            ${viewType === 'week' ? `<p class="text-[10px] text-gray-400 truncate leading-tight">${time} · scheduled</p>` : ''}
         </div>
     </div>`;
 }

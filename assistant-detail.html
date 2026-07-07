@@ -118,28 +118,37 @@
        Top-level sections. Configuration nests the existing child tab control. -->
   <div class="mb-8 border-b border-gray-200 overflow-x-auto">
     <nav class="-mb-px flex gap-x-8" aria-label="Assistant sections">
+      <!-- ── Core four — the unified template, same order on every assistant ──
+           Overview · Data Hub · Review Queue · Calendar. All four are ALWAYS shown
+           (assistant-dashboard-registry.js gives every role a hubTab + reviewQueue);
+           only their labels/content differ per role. -->
       <button type="button" data-maintab="overview"      class="main-tab-btn active-tab">Overview</button>
+      <!-- Data Hub — the assistant's workspace/database. Label comes from the role's hubTab
+           (Content Library for social/blog; Leads / Ledger / Tickets / … for data-hub roles). -->
+      <button type="button" id="maintab-btn-datahub" data-maintab="datahub" class="main-tab-btn">
+        <span id="datahub-tab-label">Data Hub</span>
+      </button>
+      <!-- Review Queue — items awaiting the human's approval (posts pending_approval, or records
+           with approval_status='pending_approval'). The core human-in-the-loop gate. -->
       <button type="button" id="maintab-btn-review-queue" data-maintab="review-queue" class="main-tab-btn">Review Queue
         <span id="detail-rq-pending-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
-      <!-- Internal Data Hub — label + visibility come from the role's hubTab config
-           (assistant-dashboard-registry.js via _applyDashboardRegistry); hidden for
-           roles without one, e.g. Social Media Manager. -->
-      <button type="button" id="maintab-btn-datahub" data-maintab="datahub" class="main-tab-btn hidden">
-        <span id="datahub-tab-label">Data</span>
-      </button>
-      <!-- Knowledge Base — visibility comes from the role's kbTab config (only
-           tier1_support_agent); the tab manages the KB articles that ground the
-           assistant's answers (assistant-knowledge-base.js → kb-articles.ts). -->
-      <button type="button" id="maintab-btn-kb" data-maintab="kb" class="main-tab-btn hidden">
-        <span id="kb-tab-label">Knowledge Base</span>
-      </button>
+      <!-- Calendar — this assistant's scheduled work / timeline (assistant-calendar.js scopes
+           the global calendar to this assistant). Always shown. -->
+      <button type="button" id="maintab-btn-calendar" data-maintab="calendar" class="main-tab-btn">Calendar</button>
+      <!-- ── Secondary tabs — role-gated, after the core four ── -->
       <button type="button" data-maintab="goals"         class="main-tab-btn">Goals</button>
       <button type="button" id="maintab-btn-automation" data-maintab="automation" class="main-tab-btn">Automation</button>
       <button type="button" data-maintab="meetings"      class="main-tab-btn" title="Progress Reviews: the Kick Off Meeting and your check-in history. Rules — including Learned Directives — live in the Assistant Profile.">Progress Reviews
         <span id="meetings-kickoff-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-blue-100 text-blue-700 text-[10px] font-black rounded-full inline-flex items-center justify-center">!</span>
       </button>
       <button type="button" data-maintab="activity"      class="main-tab-btn">Activity</button>
+      <!-- Knowledge Base — support-only (kbTab, tier1_support_agent); manages the KB articles
+           that ground the assistant's answers (assistant-knowledge-base.js → kb-articles.ts).
+           Placed last; hidden by default, shown by _applyDashboardRegistry when a kbTab exists. -->
+      <button type="button" id="maintab-btn-kb" data-maintab="kb" class="main-tab-btn hidden">
+        <span id="kb-tab-label">Knowledge Base</span>
+      </button>
     </nav>
   </div>
 
@@ -160,6 +169,13 @@
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
       Review Pending Items
       <span id="review-pending-count" class="hidden ml-0.5 min-w-[1.5rem] h-6 px-1.5 inline-flex items-center justify-center rounded-full text-xs font-black bg-amber-100 text-amber-700"></span>
+    </button>
+    <!-- Role-specific secondary action — Lead Generator's "Review Lead Ideas" (assistant-lead-ideas.js).
+         Hidden by default; shown + wired per role by _applyDashboardRegistry from registry.ideasReview. -->
+    <button type="button" id="btn-lead-ideas"
+      class="hidden flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-extrabold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-2xl shadow-sm transition-colors cursor-pointer">
+      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+      <span id="lead-ideas-label">Review Lead Ideas</span>
     </button>
   </div>
 
@@ -360,11 +376,13 @@
     <div class="flex flex-wrap items-start justify-between gap-4 mb-6">
       <div>
         <h2 class="text-lg font-extrabold text-gray-900">Review Queue</h2>
-        <p class="text-sm text-gray-500 mt-1">Posts for this assistant — follow each one from draft through to published.</p>
+        <!-- Subtitle + primary button copy adapt to the role's reviewQueue kind (posts vs records)
+             in _applyDashboardRegistry. -->
+        <p id="detail-rq-subtitle" class="text-sm text-gray-500 mt-1">Items awaiting your review — approve, edit or reject before anything is scheduled.</p>
       </div>
-      <button onclick="openGeneratePostSheet()" class="px-4 py-2 text-sm font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg transition cursor-pointer flex items-center gap-1.5">
+      <button id="detail-rq-primary-btn" onclick="openGeneratePostSheet()" class="px-4 py-2 text-sm font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg transition cursor-pointer flex items-center gap-1.5">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-        Assign Task
+        <span id="detail-rq-primary-label">Assign Task</span>
       </button>
     </div>
 
@@ -380,7 +398,7 @@
           data-status="approved" onclick="detailRqOpenStatus('approved', this)">Approved</button>
         <button class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
           data-status="scheduled" onclick="detailRqOpenStatus('scheduled', this)">Scheduled</button>
-        <button class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
+        <button id="detail-rq-col-posted" class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
           data-status="posted" onclick="detailRqOpenStatus('posted', this)">Posted</button>
         <button class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
           data-status="archived" onclick="detailRqOpenStatus('archived', this)">Archived</button>
@@ -400,6 +418,15 @@
     <div id="datahub-toolbar"></div>
     <div id="datahub-table-host"></div>
   </div><!-- /maintab-datahub -->
+
+  <!-- ── MAIN TAB: Calendar ─────────────────────────────────────────────
+       This assistant's scheduled work / timeline only. assistant-calendar.js
+       renders the global calendar (calendar.js) scoped to _currentAssistantId:
+       scheduled posts (get-social-drafts), records with scheduled_for
+       (assistant-records) and completed task runs (get-calendar-activity). -->
+  <div id="maintab-calendar" class="main-tab-content hidden">
+    <div id="assistant-calendar-host"></div>
+  </div><!-- /maintab-calendar -->
 
   <!-- ── MAIN TAB: Knowledge Base ───────────────────────────────────────
        Support articles grounding the tier1_support_agent's Resolved answers
