@@ -30,19 +30,11 @@ import { getDb } from '../../db/client';
 import { aiAssistants, assistantRecords, masterAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
+import { createDiscoveryRun } from '../../src/utils/discovery';
+import { isSearchConfigured } from '../../src/lib/discovery-search';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-haiku-4-5-20251001';
-
-// Assistants that a next-best-action can be handed off to, keyed by roleKey. `lead_qualifier`
-// itself means "the Lead Generator handles this" (no handoff). Names match db/seed-catalog.ts.
-const HANDOFF_TARGETS: Record<string, string> = {
-    lead_qualifier: 'The Lead Generator',
-    crm_enricher: 'The CRM Enricher',
-    accounts_receivable_clerk: 'The Accounts Receivable Clerk',
-    social_media_manager: 'The Social Media Manager',
-    tier1_support_agent: 'The Support Agent',
-};
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -272,7 +264,11 @@ Return STRICT JSON only (no markdown), an array of exactly 3 objects:
             return json(200, { ideas: saved });
         }
 
-        // ── Approve an idea → find, score & file example leads ───────────────────
+        // ── Approve an idea → launch a REAL outbound discovery run ───────────────
+        // Previously this asked the LLM to "produce 3-4 realistic example companies" — i.e.
+        // it fabricated leads. It now promotes the idea into a discovery_campaign and enqueues
+        // a background run that searches the public web, dedupes, scores, and files genuine
+        // leads into the Leads tab (pending approval). Design: docs/lead-generator-discovery-plan.md.
         if (action === 'approve_idea') {
             const ideaId = Number(body.ideaId);
             const [idea] = await db
@@ -287,71 +283,36 @@ Return STRICT JSON only (no markdown), an array of exactly 3 objects:
                 .limit(1);
             if (!idea) return json(404, { error: 'Idea not found.' });
 
-            const ownerList = Object.entries(HANDOFF_TARGETS).map(([k, v]) => `"${k}" (${v})`).join(', ');
-            const system =
-`You find and score lead opportunities for "${assistant.name}", a business using Be More Swan, based on an approved lead-generation idea. Produce 3-4 realistic example companies that fit the idea and the ideal customer profile. Score each against the profile and set a concrete next best action.
+            // Compose the search hypothesis from the stored idea fields.
+            const d = (idea.data && typeof idea.data === 'object' ? idea.data : {}) as Record<string, unknown>;
+            const parts = [d.title, d.demographic, d.industrySector, d.companySizeBand, d.rationale]
+                .map((v) => (typeof v === 'string' ? v.trim() : '')).filter(Boolean);
+            const ideaText = parts.join(' — ') || String(idea.title);
 
-For each lead also pick who should own the next action: "lead_qualifier" means the Lead Generator handles it itself; otherwise hand off to the assistant best suited to it. Owner must be one of: ${ownerList}. Aim for a realistic mix — most owned by lead_qualifier, one or two handed off (e.g. missing firmographics → crm_enricher).
-
-Ideal customer profile (from setup):
-${icp}
-
-Approved idea:
-${JSON.stringify(idea.data)}
-
-${SCORING_BANDS}
-
-Return STRICT JSON only (no markdown), an array of 3-4 objects:
-[
-  {
-    "leadName": "<company or contact>",
-    "score": <0-100>,
-    "rating": "hot" | "warm" | "cold",
-    "reasons": ["<reason tied to a profile criterion>", ...],
-    "suggestedNextStep": "<one concrete action>",
-    "outreachDraft": { "to": null, "subject": "<subject>", "body": "<personalised outreach>" } | null,
-    "nextActionOwner": "<one of the roleKeys above>",
-    "nextActionOwnerName": "<the matching display name>"
-  }
-]`;
-
-            const resp = await anthropic.messages.create({
-                model: MODEL,
-                max_tokens: 2048,
-                system,
-                messages: [{ role: 'user', content: `Find and score leads for this idea: ${idea.title}` }],
+            const { campaignId, jobId } = await createDiscoveryRun({
+                db, organisationId: orgId, userId, aiAssistantId: assistant.id,
+                idea: ideaText,
+                targetPersona: {
+                    demographic: d.demographic ?? null,
+                    industrySector: d.industrySector ?? null,
+                    companySizeBand: d.companySizeBand ?? null,
+                },
+                cadence: 'one_off',
             });
-            logUsage(resp, 'approve_idea');
-            const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
-            const parsed = parseJson<unknown[]>(raw);
-            const list = Array.isArray(parsed) ? parsed : [];
 
-            const leads: { id: number; owner: string; ownerName: string; data: Record<string, unknown> }[] = [];
-            for (const item of list.slice(0, 4)) {
-                if (!item || typeof item !== 'object') continue;
-                const it = item as Record<string, unknown>;
-                const card = normaliseLeadCard(it, 'Lead opportunity');
-                const owner = HANDOFF_TARGETS[String(it.nextActionOwner)] ? String(it.nextActionOwner) : 'lead_qualifier';
-                const ownerName = HANDOFF_TARGETS[owner];
-                // Keep the owner on the stored card so the Data Hub row carries the handoff context too.
-                card.nextActionOwner = owner;
-                card.nextActionOwnerName = ownerName;
-                const id = await upsertRecord('lead', String(card.leadName), String(card.rating), card, 'agent');
-                leads.push({ id, owner, ownerName, data: card });
-            }
-
-            const status = leads.length ? `approved · ${leads.length} lead${leads.length === 1 ? '' : 's'}` : 'approved';
             await db.update(assistantRecords)
-                .set({ status, updatedAt: new Date() })
+                .set({ status: 'approved · discovery running', updatedAt: new Date() })
                 .where(eq(assistantRecords.id, idea.id));
 
-            if (leads.length === 0) return json(502, { error: 'Approved, but no leads came back — try approving again.' });
             return json(200, {
                 ideaId: idea.id,
-                status,
-                leads,
-                handledHere: leads.filter((l) => l.owner === 'lead_qualifier'),
-                handoffs: leads.filter((l) => l.owner !== 'lead_qualifier'),
+                runStarted: true,
+                campaignId,
+                jobId,
+                searchConfigured: isSearchConfigured(),
+                message: isSearchConfigured()
+                    ? 'Discovery run started — found leads will appear in your Leads tab for approval shortly.'
+                    : 'Idea approved, but no web search provider is connected yet — connect one to start discovering real leads.',
             });
         }
 

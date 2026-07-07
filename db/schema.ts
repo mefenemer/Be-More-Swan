@@ -2631,6 +2631,141 @@ export const blogAbStats = pgTable("blog_ab_stats", {
   index("blog_ab_stats_post_idx").on(t.blogPostId),
 ]);
 
+// ────────────────────────────────────────────────────────────────────────────
+// Lead Generator — Outbound Discovery Layer
+// Design: docs/lead-generator-discovery-plan.md. SQL: db/lead-discovery.sql
+// (apply manually — no drizzle-kit push). Turns the inbound Lead Qualifier
+// (roleKey `lead_qualifier`) into a proactive outbound discovery engine.
+//
+// NOTE: distinct from the `leads` table above (that is Be More Swan's OWN
+// trial/upgrade sales pipeline). Qualified `discovered_leads` are mirrored into
+// `assistant_records` (recordType 'lead', approvalStatus 'pending_approval') so
+// the existing Data Hub / Review Queue / Calendar UI renders them unchanged.
+// ────────────────────────────────────────────────────────────────────────────
+
+// The user-authored "Idea / Campaign Blueprint" — the Phase-1 hypothesis that
+// drives a discovery run. Supersedes the LLM-generated `lead_idea` records.
+export const discoveryCampaigns = pgTable("discovery_campaigns", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  // The user's business hypothesis, e.g. "Boutique hotels in Southern Europe with no booking app".
+  idea: text("idea").notNull(),
+  // { demographics, industries: string[], painSignals: string[], sizeBand }.
+  targetPersona: jsonb("target_persona"),
+  // draft → active (runs on schedule) → paused → archived.
+  status: text("status").notNull().default("draft"),
+  // ICP snapshot taken at activation so a run is reproducible if onboarding changes later.
+  icpSnapshot: jsonb("icp_snapshot"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("discovery_campaigns_assistant_idx").on(t.organisationId, t.aiAssistantId, t.status),
+  check("discovery_campaigns_status_check", sql`${t.status} IN ('draft','active','paused','archived')`),
+]);
+
+// Declarative cadence per campaign. The dispatcher reads these — we never register
+// per-campaign Netlify crons.
+export const discoverySchedules = pgTable("discovery_schedules", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  campaignId: integer("campaign_id").notNull().references(() => discoveryCampaigns.id, { onDelete: "cascade" }),
+  cadence: text("cadence").notNull().default("weekly"),          // 'one_off' | 'daily' | 'weekly'
+  daysOfWeek: jsonb("days_of_week"),                             // [1] = Monday, for weekly cadence
+  runAtHourUtc: integer("run_at_hour_utc").notNull().default(8), // 08:00 batch
+  timezone: text("timezone").notNull().default("UTC"),
+  isEnabled: boolean("is_enabled").notNull().default(true),
+  lastRunAt: timestamp("last_run_at"),
+  nextRunAt: timestamp("next_run_at"),                           // the dispatcher's claim key
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("discovery_schedules_due_idx").on(t.isEnabled, t.nextRunAt),
+  uniqueIndex("discovery_schedules_campaign_uidx").on(t.campaignId),
+  check("discovery_schedules_cadence_check", sql`${t.cadence} IN ('one_off','daily','weekly')`),
+]);
+
+// Per-campaign cost ceilings + brand-safety lists. Counters are enforced inside the
+// worker before each search/scrape/LLM call.
+export const discoveryGuardrails = pgTable("discovery_guardrails", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  campaignId: integer("campaign_id").notNull().references(() => discoveryCampaigns.id, { onDelete: "cascade" }),
+  maxLeadsPerRun: integer("max_leads_per_run").notNull().default(50),
+  maxLeadsPerMonth: integer("max_leads_per_month").notNull().default(500),
+  maxSearchCallsPerRun: integer("max_search_calls_per_run").notNull().default(100),
+  maxTokensPerRun: integer("max_tokens_per_run").notNull().default(200000),
+  maxCostGbpPerRun: decimal("max_cost_gbp_per_run", { precision: 10, scale: 2 }).notNull().default("2.00"),
+  negativeKeywords: jsonb("negative_keywords"),                  // hard-exclude terms (competitors, sensitive)
+  excludedDomains: jsonb("excluded_domains"),                    // hard-exclude domains
+  requireHumanApproval: boolean("require_human_approval").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("discovery_guardrails_campaign_uidx").on(t.campaignId),
+]);
+
+// The job queue — drained by process-discovery-jobs.ts using FOR UPDATE SKIP LOCKED,
+// mirroring content_generation_jobs. `cursor` makes a run resumable across the
+// per-tick wall-clock budget so a logical run survives function timeouts.
+export const discoveryJobs = pgTable("discovery_jobs", {
+  id: serial().primaryKey(),
+  jobId: text("job_id").notNull().unique(),                      // UUID assigned at enqueue time
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  campaignId: integer("campaign_id").notNull().references(() => discoveryCampaigns.id, { onDelete: "cascade" }),
+  status: text("status").notNull().default("queued"),            // queued | processing | completed | failed
+  stage: text("stage"),                                          // query_gen | searching | scoring | promoting
+  attempt: integer("attempt").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(3),
+  nextRetryAt: timestamp("next_retry_at"),
+  errorMessage: text("error_message"),
+  triggerType: text("trigger_type").notNull().default("scheduled"), // 'scheduled' | 'on_demand'
+  // Resumable cursor: { queries, queryIndex, leadsFound, tokensUsed, costGbp }.
+  cursor: jsonb("cursor"),
+  leadsFound: integer("leads_found").notNull().default(0),
+  searchCallsMade: integer("search_calls_made").notNull().default(0),
+  tokensUsed: integer("tokens_used").notNull().default(0),
+  costGbp: decimal("cost_gbp", { precision: 10, scale: 4 }).notNull().default("0"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("discovery_jobs_status_idx").on(t.status, t.nextRetryAt),
+  index("discovery_jobs_campaign_idx").on(t.campaignId, t.status),
+  check("discovery_jobs_status_values_check", sql`${t.status} IN ('queued','processing','completed','failed')`),
+]);
+
+// Raw discovery output with provenance. Dedupe key is (campaign, normalised domain).
+// Qualified rows are mirrored into assistant_records via assistantRecordId.
+export const discoveredLeads = pgTable("discovered_leads", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  campaignId: integer("campaign_id").notNull().references(() => discoveryCampaigns.id, { onDelete: "cascade" }),
+  jobId: integer("job_id").references(() => discoveryJobs.id, { onDelete: "set null" }), // run that found it
+  companyName: text("company_name").notNull(),
+  domain: text("domain"),                                        // normalised (lowercased, no www) — dedupe key
+  contactName: text("contact_name"),
+  contactEmail: text("contact_email"),
+  // Provenance — why/where this was surfaced.
+  sourceUrl: text("source_url"),
+  discoveredVia: text("discovered_via"),                         // 'niche_scrape' | 'intent_signal' | 'footprint'
+  matchedQuery: text("matched_query"),                           // the exact query that surfaced it
+  signals: jsonb("signals"),                                     // { hiring, techStack: string[], pressMentions: string[] }
+  // Qualification (reuses the lead_scoring_card shape).
+  score: integer("score"),
+  rating: text("rating"),                                        // 'hot' | 'warm' | 'cold'
+  scoringCard: jsonb("scoring_card"),
+  // Discovery-side lifecycle, distinct from the assistant_records approval gate.
+  status: text("status").notNull().default("discovered"),        // discovered → qualified → promoted → discarded
+  assistantRecordId: integer("assistant_record_id").references(() => assistantRecords.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("discovered_leads_campaign_domain_uidx").on(t.campaignId, t.domain).where(sql`domain IS NOT NULL`),
+  index("discovered_leads_campaign_status_idx").on(t.campaignId, t.status),
+  check("discovered_leads_status_check", sql`${t.status} IN ('discovered','qualified','promoted','discarded')`),
+]);
+
 // Relational-query definitions for the chat tables live in db/relations.ts
 // (drizzle-orm v2 `defineRelations` API — this drizzle version has no per-table
 // `relations()` export).

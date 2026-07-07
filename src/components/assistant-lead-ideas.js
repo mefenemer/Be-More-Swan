@@ -184,10 +184,22 @@
     if (statusEl) statusEl.classList.add('hidden');
     try {
       const data = await call('approve_idea', { ideaId });
-      // Collapse the actions row and show the grouped results in place.
+      // Approval now launches a background discovery run (real web search) rather than
+      // returning fabricated leads synchronously. Show a "run started" state in place.
       btn.parentElement?.remove();
-      if (results) renderResults(results, data);
-      window.showToast?.(`Added ${data.leads.length} scored lead${data.leads.length === 1 ? '' : 's'} to your Leads tab.`);
+      const configured = data.searchConfigured !== false;
+      if (results) {
+        results.innerHTML = `
+          <div class="mt-3 pt-3 border-t border-gray-100">
+            <p class="text-sm font-semibold ${configured ? 'text-emerald-800' : 'text-amber-800'}">
+              ${configured ? '🔍 Discovery run started' : '⚠️ Search provider not connected'}
+            </p>
+            <p class="text-xs text-gray-600 mt-1">${esc(data.message || 'Found leads will appear in your Leads tab for approval shortly.')}</p>
+          </div>`;
+      }
+      window.showToast?.(configured
+        ? 'Discovery run started — leads will appear in your Leads tab shortly.'
+        : 'Idea approved. Connect a web search provider to start discovering leads.');
       window._leadIdeasDidAddLeads = true;
     } catch (err) {
       btn.disabled = false;

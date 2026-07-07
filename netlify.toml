@@ -124,6 +124,14 @@ node_bundler = "esbuild"
 # US-SALES-1.1 Part 4: Nightly lead identification — 03:00 UTC every day
 [functions.identify-leads]
   schedule = "0 3 * * *"
+
+# Lead Generator outbound discovery — hourly dispatcher enqueues due campaign runs,
+# and the worker drains the queue every minute (bounded slices, resumable via cursor).
+# docs/lead-generator-discovery-plan.md. Staging drives these via run-discovery-jobs.ts.
+[functions.dispatch-discovery-runs]
+  schedule = "0 * * * *"
+[functions.process-discovery-jobs]
+  schedule = "* * * * *"
 # US-GOV-2.1.1: Daily digest for stale pending HITL actions — 09:00 UTC every day
 [functions.pending-actions-digest]
   schedule = "0 9 * * *"
