@@ -4,6 +4,64 @@
 window.activeAssistantId = null;
 window.cachedContext = {};
 
+// ── Magic Wand click sound — synthesized "magical whoosh" (Web Audio API, no
+// binary asset needed) played whenever the Swan & Wand icon is clicked, on
+// every page it appears on (delegated listener, so drawer/detail content
+// injected later is covered too). ──────────────────────────────────────────
+window._playMagicWandSound = function () {
+    try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        const ctx = window._wandAudioCtx || (window._wandAudioCtx = new Ctx());
+        if (ctx.state === 'suspended') ctx.resume();
+        const now = ctx.currentTime;
+
+        // Whoosh: band-pass filtered noise sweeping up then settling back down.
+        const noiseBuffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * 0.5), ctx.sampleRate);
+        const data = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+        const noise = ctx.createBufferSource();
+        noise.buffer = noiseBuffer;
+
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.Q.value = 0.8;
+        filter.frequency.setValueAtTime(300, now);
+        filter.frequency.exponentialRampToValueAtTime(3200, now + 0.22);
+        filter.frequency.exponentialRampToValueAtTime(500, now + 0.5);
+
+        const noiseGain = ctx.createGain();
+        noiseGain.gain.setValueAtTime(0.0001, now);
+        noiseGain.gain.exponentialRampToValueAtTime(0.3, now + 0.15);
+        noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.5);
+
+        noise.connect(filter).connect(noiseGain).connect(ctx.destination);
+        noise.start(now);
+        noise.stop(now + 0.5);
+
+        // Sparkle: a few high chimes shimmering near the top of the sweep.
+        [1760, 2349, 3136].forEach((freq, i) => {
+            const osc = ctx.createOscillator();
+            osc.type = 'sine';
+            osc.frequency.value = freq;
+            const gain = ctx.createGain();
+            const start = now + 0.16 + i * 0.05;
+            gain.gain.setValueAtTime(0.0001, start);
+            gain.gain.exponentialRampToValueAtTime(0.1, start + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.0001, start + 0.35);
+            osc.connect(gain).connect(ctx.destination);
+            osc.start(start);
+            osc.stop(start + 0.4);
+        });
+    } catch { /* audio is a nice-to-have; never block the click it's attached to */ }
+};
+
+document.addEventListener('click', (e) => {
+    const onWand = e.target.closest('.ai-wand-img') ||
+        e.target.closest('button, a, [role="button"]')?.querySelector?.('.ai-wand-img');
+    if (onWand) window._playMagicWandSound();
+});
+
 // ==========================================
 // 1. SHARED CARD GENERATOR (Dashboard & Directory)
 // ==========================================
