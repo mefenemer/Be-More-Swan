@@ -430,6 +430,9 @@ function _platformCard(platform, conn) {
     // utilities aren't in the prebuilt CSS, so the fills are set inline.)
     const connectedPill = `<span class="inline-flex items-center gap-1.5 text-xs font-bold text-pink-700 border border-pink-200 px-2.5 py-1 rounded-full" style="background-color:#fce7f3"><span class="w-1.5 h-1.5 rounded-full" style="background-color:#ec4899"></span> Connected</span>`;
     let statusBadge;
+    // connProblem: the connection exists but its token needs attention (expiring/disconnected).
+    // Used by the assistant-scoped capability card to surface a secondary health pill.
+    let connProblem = false;
     // Connections that carry an offline refresh token (e.g. X) are renewed silently by
     // the refresh-social-tokens cron, so their short-lived expiry shouldn't alarm the user.
     const autoRenews = isConnected && typeof conn.scopes === 'string' && conn.scopes.includes('offline.access');
@@ -437,14 +440,17 @@ function _platformCard(platform, conn) {
         statusBadge = `<span class="inline-flex items-center gap-1.5 text-xs font-bold text-gray-500 bg-gray-100 border border-gray-200 px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span> Not connected</span>`;
     } else if (conn.status === 'expired' || conn.status === 'failed' || conn.status === 'revoked' || conn.status === 'token_refresh_failed') {
         statusBadge = `<span class="inline-flex items-center gap-1.5 text-xs font-bold text-red-700 bg-red-50 border border-red-200 px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span> Disconnected</span>`;
+        connProblem = true;
     } else if (autoRenews) {
         statusBadge = connectedPill;
     } else if (conn.tokenExpiresAt) {
         const daysLeft = Math.ceil((new Date(conn.tokenExpiresAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000));
         if (daysLeft <= 7 && daysLeft > 0) {
             statusBadge = `<span class="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span> Expiring in ${daysLeft}d</span>`;
+            connProblem = true;
         } else if (daysLeft <= 0) {
             statusBadge = `<span class="inline-flex items-center gap-1.5 text-xs font-bold text-red-700 bg-red-50 border border-red-200 px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span> Disconnected</span>`;
+            connProblem = true;
         } else {
             statusBadge = connectedPill;
         }
@@ -452,6 +458,7 @@ function _platformCard(platform, conn) {
         statusBadge = conn.status === 'active'
             ? connectedPill
             : `<span class="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span> Needs attention</span>`;
+        if (conn.status !== 'active') connProblem = true;
     }
 
     // A platform can only be connected once its handle has been entered on Business
@@ -567,6 +574,55 @@ function _platformCard(platform, conn) {
                <span class="truncate">${_esc(handle)}</span>
            </div>`
         : '';
+
+    // ── Assistant-scoped capability card ─────────────────────────────
+    // Inside an assistant's Connections tab, render social platforms in the SAME recipe-card
+    // language as the "Synced actions" list (assistant-integrations.js) so the area reads as
+    // one consistent set of enable-able actions. This drives the real Connect + per-assistant
+    // "Use for this assistant" flow — publishing itself is handled by the existing social
+    // pipeline (approve-post → publish-*), not the scenario engine, so there's nothing new to
+    // fire here. Rich management (reconnect/disconnect/sync/bio/auto-responder/troubleshooting)
+    // is preserved behind a "Manage connection" disclosure. The standalone hub keeps the full
+    // card below.
+    if (_assistantScoped) {
+        const isActive = isConnected && conn.status === 'active';
+        const inUse = isActive && _assistantSelectedIds.has(conn.id);
+        // Recipe-vocabulary status pill: Connect → Not enabled → Enabled.
+        const capPill = !isActive
+            ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">⚠ Connect ${_esc(platform.label)}</span>`
+            : inUse
+            ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">✓ Enabled</span>`
+            : `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-500 border-gray-200">Not enabled</span>`;
+        // Keep a health pill visible only when the token needs attention (expiring/disconnected).
+        const healthPill = (isConnected && connProblem) ? statusBadge : '';
+        // Primary CTA mirrors the recipe cards: Connect-first gate, then Enable, then the
+        // enabled toggle. Enable = "use this connection for this assistant" (real state).
+        const primary = !isActive
+            ? connectBtn
+            : inUse
+            ? `<button type="button" onclick="window._intToggleUseForAssistant(${conn.id}, false)" class="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm font-bold text-gray-700 cursor-pointer"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> Enabled</button>`
+            : `<button type="button" onclick="window._intToggleUseForAssistant(${conn.id}, true)" class="w-full px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition cursor-pointer">Enable</button>`;
+        const manage = isConnected
+            ? `<details class="mt-1">
+                   <summary class="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 select-none">Manage connection</summary>
+                   <div>${action}${troubleshootingHtml}</div>
+               </details>`
+            : '';
+        return `
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
+            <div class="flex items-start justify-between gap-2">
+                <div class="flex items-center gap-2 flex-wrap">${capPill}${healthPill}<span class="text-xs font-semibold text-gray-400">→ out</span></div>
+                <span class="text-xs font-semibold text-gray-400">${_esc(platform.label)}</span>
+            </div>
+            <div class="grow">
+                <p class="font-bold text-gray-900">Publish approved posts to ${_esc(platform.label)}</p>
+                <p class="text-sm text-gray-500 mt-1">${_esc(platform.tagline)}</p>
+                ${handleChip}
+            </div>
+            ${primary}
+            ${manage}
+        </div>`;
+    }
 
     return `
         <div class="relative bg-white rounded-2xl border ${isConnected ? 'border-emerald-200 shadow-md ring-1 ring-emerald-100' : 'border-gray-200 shadow-sm hover:border-gray-300 hover:shadow-md'} p-5 flex flex-col gap-3 transition">
