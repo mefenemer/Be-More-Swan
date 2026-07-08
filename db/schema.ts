@@ -2641,6 +2641,37 @@ export const assistantRecords = pgTable("assistant_records", {
   check("assistant_records_approval_check", sql`${t.approvalStatus} IN ('pending_approval', 'approved', 'scheduled', 'rejected')`),
 ]);
 
+// Meeting Note Taker Phase 3 — normalized action_items (per-task PM sync ledger).
+// SQL: db/action-items.sql (apply manually — no drizzle-kit push).
+// Design: docs/meeting-note-taker-phase3-plan.md. One row per approved meeting action item,
+// child of the meeting assistant_records row. Materialized at approval time from
+// data.tasks; the create_tasks handlers sync each into Jira/Asana and stamp per-row state so
+// partial syncs + retries are idempotent ("5 of 8 synced"). The data JSON blob stays the
+// render/edit source of truth; this table is the sync ledger only.
+export const actionItems = pgTable("action_items", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  meetingRecordId: integer("meeting_record_id").notNull().references(() => assistantRecords.id, { onDelete: "cascade" }),
+  description: text("description").notNull(),
+  assignee: text("assignee"),                              // free-text owner, may be 'Unassigned'
+  dueDate: text("due_date"),                               // echoed as the LLM produced it ('by Friday')
+  syncStatus: text("sync_status").notNull().default("pending"), // pending | synced | failed | skipped
+  provider: text("provider"),                              // 'jira' | 'asana' | null until first sync
+  externalTicketId: text("external_ticket_id"),
+  externalUrl: text("external_url"),
+  errorMessage: text("error_message"),
+  syncedAt: timestamp("synced_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("action_items_meeting_idx").on(t.meetingRecordId),
+  index("action_items_org_status_idx").on(t.organisationId, t.syncStatus),
+  // Idempotent materialization: re-approving/editing a meeting upserts rather than duplicating.
+  uniqueIndex("action_items_meeting_desc_uidx").on(t.meetingRecordId, t.description),
+  check("action_items_sync_status_check", sql`${t.syncStatus} IN ('pending','synced','failed','skipped')`),
+]);
+
 // ────────────────────────────────────────────────────────────────────────────
 // Autonomous Content Engine — Phase 0 blog content model.
 // SQL: db/blog-posts.sql, db/widget-configs.sql (apply manually — no drizzle-kit push).

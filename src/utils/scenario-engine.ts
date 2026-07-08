@@ -173,6 +173,12 @@ const SUMMARY_ACTIONS = new Set(['slack_post_summary', 'notion_create_page']);
 // than a diff or a summary. The meeting follow-up recipe targets this.
 const EMAIL_ACTIONS = new Set(['email_meeting_followup']);
 
+// Action handlers that create one PM ticket per approved action item (Jira / Asana). Their
+// payload carries the meeting record id + the recipe's target config; the tasks themselves are
+// read from the action_items ledger inside the handler (not passed here) so it always syncs
+// live DB state and retries are exact. See docs/meeting-note-taker-phase3-plan.md.
+const TASK_ACTIONS = new Set(['jira_create_tasks', 'asana_create_tasks']);
+
 interface SummaryTask { description?: unknown; assignee?: unknown; dueDate?: unknown }
 
 /**
@@ -233,9 +239,29 @@ export function buildEmailPayload(
 }
 
 /**
+ * Build the payload the create_tasks handlers (jira/asana) consume: the meeting record id the
+ * action_items ledger is keyed by, plus the recipe's stored target config (which project / issue
+ * type to file into). The task rows are NOT included — the handler reads them from action_items.
+ */
+export function buildTasksPayload(
+    subject: TriggerSubject,
+    fieldMappings: Record<string, unknown>,
+): Record<string, unknown> {
+    const m = fieldMappings ?? {};
+    return {
+        meetingRecordId: subject.recordId ?? null,
+        // Jira: the project key + issue type to file into. Asana: the destination project gid.
+        projectKey: typeof m.projectKey === 'string' ? m.projectKey : undefined,
+        issueType: typeof m.issueType === 'string' ? m.issueType : undefined,
+        asanaProjectGid: typeof m.asanaProjectGid === 'string' ? m.asanaProjectGid : undefined,
+    };
+}
+
+/**
  * Resolve the payload an ACTION_HANDLERS entry expects. Summary actions get the meeting
- * summary shape; email actions get the recipients+subject+body shape; everything else (CRM
- * record updates) gets the field-mapped diff shape.
+ * summary shape; email actions get the recipients+subject+body shape; task actions get the
+ * meeting-record + target-config shape; everything else (CRM record updates) gets the
+ * field-mapped diff shape.
  */
 export function buildActionPayload(
     actionType: string,
@@ -243,6 +269,7 @@ export function buildActionPayload(
     fieldMappings: Record<string, unknown>,
 ): Record<string, unknown> {
     if (EMAIL_ACTIONS.has(actionType)) return buildEmailPayload(subject, fieldMappings);
+    if (TASK_ACTIONS.has(actionType)) return buildTasksPayload(subject, fieldMappings);
     return SUMMARY_ACTIONS.has(actionType)
         ? buildSummaryPayload(subject, fieldMappings)
         : buildDiffPayload(subject, fieldMappings);

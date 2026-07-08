@@ -77,6 +77,11 @@ const SCOPES: Record<IntegrationProvider, string> = {
     wordpresscom: '',
     // Google Search Console: read-only search analytics for the content-decay loop (US 5.1).
     searchconsole: 'https://www.googleapis.com/auth/webmasters.readonly',
+    // Meeting Note Taker Phase 3: Jira/Asana ticket creation from approved action items. The
+    // authUrl + callback token-exchange for these are wired in step 3 — these scope strings are
+    // declared now so the provider union stays complete. offline_access → a refresh token.
+    jira: 'write:jira-work read:jira-work read:jira-user offline_access',
+    asana: 'default',
 };
 
 /**

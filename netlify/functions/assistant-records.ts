@@ -13,9 +13,9 @@
 // query is tenant-scoped and the assistant is ownership-checked (IDOR guard).
 
 import { Handler } from '@netlify/functions';
-import { and, desc, eq, gte, lte } from 'drizzle-orm';
+import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, assistantRecords, discoveredLeads } from '../../db/schema';
+import { actionItems, aiAssistants, assistantRecords, discoveredLeads } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { enqueueScenarioTrigger, type TriggerSubject } from '../../src/utils/scenario-engine';
 
@@ -41,6 +41,53 @@ type Db = ReturnType<typeof getDb>;
 // Approval states that count as "live" — a record already in one of these has already
 // fired its handoff, so re-approving/editing it must not fire again.
 const LIVE_APPROVAL = new Set(['approved', 'scheduled']);
+
+// Meeting Note Taker Phase 3 — materialise the normalized action_items ledger from a meeting's
+// data.tasks when it first goes live, so the create_tasks recipes have per-task rows to sync
+// into Jira/Asana. Idempotent (upsert on meeting_record_id + description) and best-effort: a
+// failure here never fails the approval. The sync-state columns are deliberately NOT reset on
+// re-approval, so an already-synced task is never re-created. Design:
+// docs/meeting-note-taker-phase3-plan.md.
+async function materialiseActionItems(
+    db: Db,
+    orgId: number,
+    record: { id: number; recordType: string; aiAssistantId: number; data: unknown },
+): Promise<void> {
+    if (record.recordType !== 'meeting') return;
+    try {
+        const data = (record.data && typeof record.data === 'object') ? record.data as Record<string, unknown> : {};
+        const rawTasks = Array.isArray(data.tasks) ? data.tasks
+            : Array.isArray(data.actionItems) ? data.actionItems : [];
+        const rows = (rawTasks as unknown[])
+            .filter((t): t is Record<string, unknown> =>
+                !!t && typeof t === 'object' && typeof (t as Record<string, unknown>).description === 'string'
+                && String((t as Record<string, unknown>).description).trim() !== '')
+            .map((t) => ({
+                organisationId: orgId,
+                aiAssistantId: record.aiAssistantId,
+                meetingRecordId: record.id,
+                description: String(t.description).trim().slice(0, 2000),
+                assignee: typeof t.assignee === 'string' ? t.assignee.slice(0, 200) : null,
+                dueDate: typeof t.dueDate === 'string' ? t.dueDate.slice(0, 200) : null,
+            }));
+        for (const row of rows) {
+            await db.insert(actionItems).values(row).onConflictDoUpdate({
+                target: [actionItems.meetingRecordId, actionItems.description],
+                // Re-approving refreshes owner/date and revives a task the user previously left
+                // unsynced ('skipped') back to 'pending'; already 'synced'/'failed' rows keep
+                // their state (failed auto-retries through the scenario-job queue).
+                set: {
+                    assignee: row.assignee,
+                    dueDate: row.dueDate,
+                    syncStatus: sql`CASE WHEN ${actionItems.syncStatus} = 'skipped' THEN 'pending' ELSE ${actionItems.syncStatus} END`,
+                    updatedAt: new Date(),
+                },
+            });
+        }
+    } catch (err) {
+        console.error('[assistant-records] materialiseActionItems failed (non-fatal):', err);
+    }
+}
 
 // Integration Scenario Library — fire the outbound "Handoff" push (Scenario Type A) when a
 // Review Queue record first goes live. lead → QUALIFIED, meeting → MEETING_BOOKED; the
@@ -393,12 +440,16 @@ export const handler: Handler = async (event) => {
             // Fire the outbound handoff after the approval commits. Uses the latest data (the
             // PATCH may have edited it in the same request).
             if (handoffRecord) {
-                await enqueueHandoffOnApproval(db, orgId, {
+                const liveRecord = {
                     ...handoffRecord,
                     title: (patch.title as string | undefined) ?? handoffRecord.title,
                     status: (patch.status as string | null | undefined) !== undefined ? (patch.status as string | null) : handoffRecord.status,
                     data: patch.data !== undefined ? patch.data : handoffRecord.data,
-                });
+                };
+                // Phase 3: normalise the meeting's action items BEFORE the handoff enqueues, so the
+                // create_tasks recipes have the per-task ledger rows to sync.
+                await materialiseActionItems(db, orgId, liveRecord);
+                await enqueueHandoffOnApproval(db, orgId, liveRecord);
             }
             return json(200, { record: row });
         }

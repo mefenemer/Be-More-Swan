@@ -20,9 +20,9 @@ import { storeSecret, getSecret, deleteSecret } from './vault';
 
 type Db = ReturnType<typeof getDb>;
 
-export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail' | 'threads' | 'tiktok' | 'youtube' | 'wordpresscom' | 'searchconsole';
+export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail' | 'threads' | 'tiktok' | 'youtube' | 'wordpresscom' | 'searchconsole' | 'jira' | 'asana';
 
-export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail', 'threads', 'tiktok', 'youtube', 'wordpresscom', 'searchconsole'];
+export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail', 'threads', 'tiktok', 'youtube', 'wordpresscom', 'searchconsole', 'jira', 'asana'];
 
 export function isIntegrationProvider(value: unknown): value is IntegrationProvider {
     return typeof value === 'string' && (INTEGRATION_PROVIDERS as string[]).includes(value);
@@ -318,6 +318,14 @@ async function refreshProviderToken(provider: IntegrationProvider, refreshToken:
         return { accessToken: data.access_token, refreshToken: null, expiresInSec: data.expires_in ?? null };
     }
 
+    if (provider === 'jira' || provider === 'asana') {
+        // Meeting Note Taker Phase 3: the OAuth refresh grant is wired in step 3 (Jira/Asana
+        // provider work). Until then no token can exist for these providers, so a refresh here
+        // means the row was created out of band — force a reconnect rather than silently
+        // falling through to the Slack grant below.
+        throw new IntegrationError('refresh_failed', `${providerLabel(provider)} token refresh is not available yet — please reconnect it.`, 401);
+    }
+
     // Slack: only used when token rotation is enabled on the app (otherwise bot tokens
     // never expire and this path is never reached — expiresAt stays null).
     const res = await fetch('https://slack.com/api/oauth.v2.access', {
@@ -401,6 +409,8 @@ const PROVIDER_LABELS: Record<IntegrationProvider, string> = {
     youtube: 'YouTube',
     wordpresscom: 'WordPress.com',
     searchconsole: 'Google Search Console',
+    jira: 'Jira',
+    asana: 'Asana',
 };
 
 export function providerLabel(provider: IntegrationProvider): string {

@@ -46,11 +46,13 @@
 // endpoint paths only, no query params or payloads).
 
 import { Handler } from '@netlify/functions';
+import { and, eq, inArray } from 'drizzle-orm';
 import { Resend } from 'resend';
 import { getDb } from '../../db/client';
+import { actionItems } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logApiCall } from '../../src/utils/vault';
-import { getFreshAccessToken, IntegrationError } from '../../src/utils/workspace-integrations';
+import { getFreshAccessToken, IntegrationError, providerLabel } from '../../src/utils/workspace-integrations';
 import { sendGmailMessage } from '../../src/utils/gmail';
 import { injectAiFooter } from '../../src/utils/ai-email-footer';
 
@@ -890,6 +892,78 @@ async function handleEmailMeetingFollowup(db: Db, userId: number, organisationId
     return json(200, { success: true, message: `Follow-up sent to ${recipients.length} attendee${plural} from Be More Swan.`, platformPostId: emailId });
 }
 
+// ── PM task push: create one Jira/Asana ticket per approved action item ─────────
+// Reads the meeting's action_items ledger (materialised at approval) and files one ticket per
+// row still needing sync, stamping per-row status so partial syncs + retries are idempotent
+// ("5 of 8 synced"). The tasks come from the DB, not the payload, so a retry always reflects
+// live state. The provider-specific create call is wired in Phase 3 steps 3–4; until the
+// provider is connected, getFreshAccessToken throws not_connected and the batch is marked
+// 'skipped' (re-approving the meeting revives skipped rows — see materialiseActionItems).
+// Design: docs/meeting-note-taker-phase3-plan.md.
+
+interface CreateTasksPayload {
+    meetingRecordId?: unknown;
+    projectKey?: unknown;
+    issueType?: unknown;
+    asanaProjectGid?: unknown;
+}
+
+// Ledger states that still need a sync attempt. 'synced' is terminal; 'skipped' is revived only
+// by a re-approval, never auto-retried, so it is excluded here.
+const SYNCABLE_STATUSES = ['pending', 'failed'];
+
+async function handleCreateTasks(
+    db: Db,
+    userId: number,
+    organisationId: number,
+    payload: CreateTasksPayload,
+    provider: 'jira' | 'asana',
+) {
+    const meetingRecordId = Number(payload.meetingRecordId);
+    if (!Number.isInteger(meetingRecordId)) {
+        return json(400, { error: 'A meeting record id is required to sync its action items.' });
+    }
+
+    // Load the ledger rows that still need syncing for this meeting (org-scoped).
+    const rows = await db
+        .select({ id: actionItems.id, description: actionItems.description, assignee: actionItems.assignee, dueDate: actionItems.dueDate })
+        .from(actionItems)
+        .where(and(
+            eq(actionItems.organisationId, organisationId),
+            eq(actionItems.meetingRecordId, meetingRecordId),
+            inArray(actionItems.syncStatus, SYNCABLE_STATUSES),
+        ));
+    if (rows.length === 0) {
+        return json(200, { success: true, synced: 0, failed: 0, skipped: 0, total: 0, message: 'No action items awaiting sync.' });
+    }
+
+    // Resolve the provider token. Not connected → mark the batch skipped. Tier-1 activation
+    // requires the connection, so this only trips on a disconnect between activation and drain.
+    try {
+        await getFreshAccessToken(db, organisationId, provider);
+    } catch (err) {
+        if (err instanceof IntegrationError) {
+            await db.update(actionItems)
+                .set({ syncStatus: 'skipped', provider, errorMessage: `${provider} not connected at sync time.`, updatedAt: new Date() })
+                .where(and(
+                    eq(actionItems.meetingRecordId, meetingRecordId),
+                    inArray(actionItems.syncStatus, SYNCABLE_STATUSES),
+                ));
+            return json(200, {
+                success: true, synced: 0, failed: 0, skipped: rows.length, total: rows.length,
+                message: `${providerLabel(provider)} isn't connected — ${rows.length} action item${rows.length === 1 ? '' : 's'} left unsynced.`,
+            });
+        }
+        throw err;
+    }
+
+    // Provider IS connected — the per-provider ticket create is wired in Phase 3 steps 3–4.
+    // Until then this path is unreachable (no OAuth connect route yet); fail loudly rather than
+    // silently no-op if it is somehow reached. `userId` is used by the audit log once wired.
+    void userId;
+    return json(501, { error: `${providerLabel(provider)} task creation is not implemented yet.` });
+}
+
 // ── Action registry ────────────────────────────────────────────────────────────
 // One entry per outbound integration action, keyed by actionType. This is the
 // "ADAPTERS library" the Integration Scenario Library dispatches through: adding a
@@ -918,6 +992,9 @@ export const ACTION_HANDLERS: Record<string, ActionHandler> = {
     intercom_add_internal_note: handleIntercomAddNote,
     gmail_create_draft: handleGmailCreateDraft,
     email_meeting_followup: handleEmailMeetingFollowup,
+    // Two registry keys, one shared impl — keeps per-provider recipe wiring + audit logs clean.
+    jira_create_tasks: (db, userId, orgId, payload) => handleCreateTasks(db, userId, orgId, payload, 'jira'),
+    asana_create_tasks: (db, userId, orgId, payload) => handleCreateTasks(db, userId, orgId, payload, 'asana'),
     threads_create_post: handleThreadsCreatePost,
     tiktok_upload_video: handleTiktokUploadVideo,
     youtube_upload_video: handleYoutubeUploadVideo,
