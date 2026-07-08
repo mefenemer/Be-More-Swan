@@ -52,7 +52,7 @@ import { getDb } from '../../db/client';
 import { actionItems } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logApiCall } from '../../src/utils/vault';
-import { getFreshAccessToken, IntegrationError, providerLabel } from '../../src/utils/workspace-integrations';
+import { getFreshAccessToken, getIntegration, IntegrationError, providerLabel } from '../../src/utils/workspace-integrations';
 import { sendGmailMessage } from '../../src/utils/gmail';
 import { injectAiFooter } from '../../src/utils/ai-email-footer';
 
@@ -908,9 +908,75 @@ interface CreateTasksPayload {
     asanaProjectGid?: unknown;
 }
 
+interface LedgerRow { id: number; description: string; assignee: string | null; dueDate: string | null }
+
 // Ledger states that still need a sync attempt. 'synced' is terminal; 'skipped' is revived only
 // by a re-approval, never auto-retried, so it is excluded here.
 const SYNCABLE_STATUSES = ['pending', 'failed'];
+
+/** Minimal Atlassian Document Format doc — one paragraph per line (empty line → blank para). */
+function adfDoc(lines: string[]): Record<string, unknown> {
+    return {
+        type: 'doc',
+        version: 1,
+        content: lines.map((line) => line
+            ? { type: 'paragraph', content: [{ type: 'text', text: line }] }
+            : { type: 'paragraph', content: [] }),
+    };
+}
+
+/** Best-effort parse of a free-text due date to YYYY-MM-DD. Returns null for unparseable
+ *  phrases ("by Friday") — we never guess a date the meeting didn't state. ISO strings are taken
+ *  verbatim and non-ISO values formatted from local parts, so the calendar date never shifts by
+ *  a timezone (new Date() parses ISO as UTC but slash/word dates as local). */
+function parseDueDate(raw: string | null): string | null {
+    if (!raw) return null;
+    const s = raw.trim();
+    const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+    const d = new Date(s);
+    if (isNaN(d.getTime())) return null;
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Create one Jira issue for an action item; returns the issue key. Throws with a readable
+ *  message on rejection so the caller can stamp it onto the ledger row. */
+async function createJiraIssue(accessToken: string, cloudId: string | null, payload: CreateTasksPayload, row: LedgerRow): Promise<string> {
+    if (!cloudId) throw new Error('Jira site is missing — reconnect Jira.');
+    const projectKey = typeof payload.projectKey === 'string' ? payload.projectKey.trim() : '';
+    if (!projectKey) throw new Error('No Jira project key is configured for this recipe.');
+    const issueType = typeof payload.issueType === 'string' && payload.issueType.trim() ? payload.issueType.trim() : 'Task';
+
+    // Assignees are free-text meeting names, not Jira account ids — surface the owner in the
+    // description and leave the ticket unassigned (plan §8). Due date is best-effort.
+    const owner = row.assignee && row.assignee.toLowerCase() !== 'unassigned' ? row.assignee : null;
+    const description = adfDoc([
+        ...(owner ? [`Owner (from meeting): ${owner}`] : []),
+        ...(row.dueDate ? [`Due (as stated): ${row.dueDate}`] : []),
+        '',
+        'Created by Be More Swan from an approved meeting action item.',
+    ]);
+    const fields: Record<string, unknown> = {
+        project: { key: projectKey },
+        summary: row.description.slice(0, 250),
+        issuetype: { name: issueType },
+        description,
+    };
+    const due = parseDueDate(row.dueDate);
+    if (due) fields.duedate = due;
+
+    const res = await fetch(`https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/issue`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ fields }),
+    });
+    const data: { key?: string; errorMessages?: string[]; errors?: Record<string, string> } = await res.json().catch(() => ({}));
+    if (!res.ok || !data.key) {
+        const detail = data.errorMessages?.join('; ') || (data.errors ? Object.values(data.errors).join('; ') : '') || `Jira returned ${res.status}`;
+        throw new Error(detail);
+    }
+    return data.key;
+}
 
 async function handleCreateTasks(
     db: Db,
@@ -939,8 +1005,9 @@ async function handleCreateTasks(
 
     // Resolve the provider token. Not connected → mark the batch skipped. Tier-1 activation
     // requires the connection, so this only trips on a disconnect between activation and drain.
+    let token;
     try {
-        await getFreshAccessToken(db, organisationId, provider);
+        token = await getFreshAccessToken(db, organisationId, provider);
     } catch (err) {
         if (err instanceof IntegrationError) {
             await db.update(actionItems)
@@ -957,11 +1024,42 @@ async function handleCreateTasks(
         throw err;
     }
 
-    // Provider IS connected — the per-provider ticket create is wired in Phase 3 steps 3–4.
-    // Until then this path is unreachable (no OAuth connect route yet); fail loudly rather than
-    // silently no-op if it is somehow reached. `userId` is used by the audit log once wired.
-    void userId;
-    return json(501, { error: `${providerLabel(provider)} task creation is not implemented yet.` });
+    if (provider === 'asana') {
+        // Asana ticket creation is wired in Phase 3 step 4.
+        return json(501, { error: 'Asana task creation is not implemented yet.' });
+    }
+
+    // Jira — the connected site URL (stored as the connection label) roots ticket browse links.
+    const jiraInt = await getIntegration(db, organisationId, 'jira');
+    const siteUrl = (jiraInt?.externalAccountName ?? '').replace(/\/+$/, '');
+
+    // File one ticket per action item. A single bad task never blocks the rest: its row is
+    // stamped 'failed' (auto-retries on the next job attempt) while the others sync.
+    let synced = 0, failed = 0;
+    for (const row of rows) {
+        try {
+            const key = await createJiraIssue(token.accessToken, token.tenantId, payload, row);
+            await db.update(actionItems).set({
+                syncStatus: 'synced', provider, externalTicketId: key,
+                externalUrl: siteUrl ? `${siteUrl}/browse/${key}` : null,
+                errorMessage: null, syncedAt: new Date(), updatedAt: new Date(),
+            }).where(eq(actionItems.id, row.id));
+            await logApiCall(db, { userId, integrationId: token.integrationId, endpoint: 'api.atlassian.com/ex/jira/rest/api/3/issue', httpStatus: 200 });
+            synced++;
+        } catch (e) {
+            await db.update(actionItems).set({
+                syncStatus: 'failed', provider,
+                errorMessage: String((e as Error)?.message ?? 'Jira rejected the ticket.').slice(0, 500),
+                updatedAt: new Date(),
+            }).where(eq(actionItems.id, row.id));
+            await logApiCall(db, { userId, integrationId: token.integrationId, endpoint: 'api.atlassian.com/ex/jira/rest/api/3/issue', httpStatus: 502 });
+            failed++;
+        }
+    }
+
+    const message = `${synced} of ${rows.length} action item${rows.length === 1 ? '' : 's'} filed to ${providerLabel(provider)}${failed ? `, ${failed} failed` : ''}.`;
+    // Job-level: succeed if anything synced; total failure surfaces as 502 so the job retries.
+    return json(synced === 0 && failed > 0 ? 502 : 200, { success: synced > 0, synced, failed, skipped: 0, total: rows.length, message });
 }
 
 // ── Action registry ────────────────────────────────────────────────────────────

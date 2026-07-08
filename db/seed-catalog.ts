@@ -296,6 +296,8 @@ const PROVIDERS = [
     // Connection-optional: sends from a connected Gmail if present, else from the Be More Swan
     // outbound domain — so its recipes activate with no setup (see integration-scenarios.ts).
     { providerKey: 'email', displayName: 'Email Follow-Up', category: 'comms', authType: 'builtin', logoKey: 'email' },
+    // Project management — meeting action items → tickets. Asana follows in Phase 3 step 4.
+    { providerKey: 'jira', displayName: 'Jira', category: 'pm', authType: 'oauth2', logoKey: 'jira' },
 ];
 
 // Field maps the FieldMapper renders. bmsField = the canonical BMS lead field the engine
@@ -326,6 +328,14 @@ const MEETING_SUMMARY_FIELDS = [
     { bmsField: 'tasks', label: 'Action items', required: false, defaultTarget: 'tasks' },
 ];
 
+
+// Meeting handoff → PM tickets (Jira/Asana). The create_tasks handler reads the approved
+// action_items ledger; these two config values are stored in the recipe's field map and tell it
+// which project (+ Jira issue type) to file into.
+const MEETING_TASKS_FIELDS = [
+    { bmsField: 'projectKey', label: 'Jira project key', required: true, defaultTarget: '' },
+    { bmsField: 'issueType', label: 'Issue type', required: false, defaultTarget: 'Task' },
+];
 
 // tier 1 native | 2 universal webhook | 3 roadmap (greyed + upvotable).
 const SCENARIOS = [
@@ -404,6 +414,14 @@ const SCENARIOS = [
         description: 'When you approve a meeting, email the reviewed summary and action items to every attendee — from your connected Gmail, or from Be More Swan when no inbox is connected.',
         triggerConfig: { on: 'lead.status_changed', when: ['MEETING_BOOKED'] },
         actionType: 'email_meeting_followup', fieldSchema: [], status: 'available', sortOrder: 43,
+    },
+    {
+        scenarioKey: 'jira_create_tasks', providerKey: 'jira', tier: 1,
+        direction: 'outbound', scenarioType: 'meeting_handoff',
+        title: 'Create Jira Tickets from Action Items',
+        description: 'When you approve a meeting, create one Jira ticket per action item in your chosen project, with the owner and due date captured from the notes.',
+        triggerConfig: { on: 'lead.status_changed', when: ['MEETING_BOOKED'] },
+        actionType: 'jira_create_tasks', fieldSchema: MEETING_TASKS_FIELDS, status: 'available', sortOrder: 44,
     },
     // ── Tier 3: Roadmap (greyed, upvotable) ──
     {

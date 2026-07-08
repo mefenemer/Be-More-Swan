@@ -240,8 +240,15 @@ export const handler: Handler = async (event) => {
         } else if (provider === 'searchconsole') {
             // Google consent — offline + consent forces a refresh token for the daily ingest cron.
             authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.searchconsole)}&access_type=offline&prompt=consent&state=${state}`;
-        } else {
+        } else if (provider === 'jira') {
+            // Atlassian 3LO (api.atlassian.com). offline_access (in SCOPES) yields a refresh
+            // token; prompt=consent guarantees it is re-issued on re-auth.
+            authUrl = `https://auth.atlassian.com/authorize?audience=api.atlassian.com&client_id=${clientId}&scope=${encodeURIComponent(SCOPES.jira)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&response_type=code&prompt=consent`;
+        } else if (provider === 'slack') {
             authUrl = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=${encodeURIComponent(SCOPES.slack)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
+        } else {
+            // Provider is in the union but its OAuth flow isn't wired yet (e.g. asana → step 4).
+            return redirect(`/integrations.html?oauth_error=not_configured&provider=${provider}`);
         }
         return redirect(authUrl);
     }
@@ -703,7 +710,46 @@ export const handler: Handler = async (event) => {
                     externalAccountName: siteLabel,
                     scopes: tokenData.scope ?? SCOPES.searchconsole,
                 });
-            } else {
+            } else if (provider === 'jira') {
+                const tokenRes = await fetch('https://auth.atlassian.com/oauth/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        grant_type: 'authorization_code',
+                        client_id: process.env.JIRA_CLIENT_ID ?? '',
+                        client_secret: process.env.JIRA_CLIENT_SECRET ?? '',
+                        code,
+                        redirect_uri: redirectUri,
+                    }),
+                });
+                const tokenData: { access_token?: string; refresh_token?: string; expires_in?: number; scope?: string } = await tokenRes.json().catch(() => ({}));
+                if (!tokenData.access_token) return redirect(`/integrations.html?oauth_error=token_exchange&provider=jira`);
+
+                // Resolve the Jira Cloud site (cloudId) this token can reach — every REST call
+                // roots at https://api.atlassian.com/ex/jira/{cloudId}/…. Stored as tenantId (like
+                // Xero's tenant); the site URL doubles as the card label + ticket browse root.
+                let cloudId: string | null = null;
+                let siteUrl: string | null = null;
+                try {
+                    const resourcesRes = await fetch('https://api.atlassian.com/oauth/token/accessible-resources', {
+                        headers: { Authorization: `Bearer ${tokenData.access_token}`, Accept: 'application/json' },
+                    });
+                    const resources: Array<{ id?: string; name?: string; url?: string }> = resourcesRes.ok ? await resourcesRes.json() : [];
+                    cloudId = resources[0]?.id ?? null;
+                    siteUrl = resources[0]?.url ?? resources[0]?.name ?? null;
+                } catch { /* resolved by the guard below */ }
+                if (!cloudId) return redirect(`/integrations.html?oauth_error=no_tenant&provider=jira`);
+
+                await saveIntegration(db, {
+                    organisationId, userId, provider: 'jira',
+                    accessToken: tokenData.access_token,
+                    refreshToken: tokenData.refresh_token ?? null,
+                    expiresInSec: tokenData.expires_in ?? null,
+                    tenantId: cloudId,
+                    externalAccountName: siteUrl,
+                    scopes: tokenData.scope ?? SCOPES.jira,
+                });
+            } else if (provider === 'slack') {
                 const tokenRes = await fetch('https://slack.com/api/oauth.v2.access', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -731,6 +777,9 @@ export const handler: Handler = async (event) => {
                     externalAccountName: tokenData.team?.name ?? null,
                     scopes: tokenData.scope ?? SCOPES.slack,
                 });
+            } else {
+                // Provider is in the union but its callback isn't wired yet (e.g. asana → step 4).
+                return redirect(`/integrations.html?oauth_error=not_configured&provider=${provider}`);
             }
         } catch (err) {
             console.error(`[oauth-integrations] ${provider} callback failed:`, err);
