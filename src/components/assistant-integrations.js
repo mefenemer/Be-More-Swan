@@ -81,17 +81,27 @@
     '</div>';
   }
 
+  // Category of each recipe provider, so the connector grid can suppress a "coming soon"
+  // card for a capability that already appears here as an enable-able recipe.
+  const PROVIDER_CATEGORY = { hubspot: 'crm', salesforce: 'crm', pipedrive: 'crm', zoho: 'crm', asana: 'project_mgmt', jira: 'project_mgmt', slack: 'chat', notion: 'knowledge', email: 'email' };
+
+  // Publish the capabilities covered by enable-able recipes, then re-render the connector
+  // grid so it can drop duplicate "coming soon" cards. One-way: the grid never calls back.
+  function publishCoveredCategories(list) {
+    window._syncedActionCategories = new Set(list.map((s) => PROVIDER_CATEGORY[s.providerKey]).filter(Boolean));
+    if (typeof window._intLoadConnections === 'function') window._intLoadConnections();
+  }
+
   function render() {
     const h = host();
     if (!h) return;
     const list = relevantScenarios();
+    publishCoveredCategories(list);
     if (!list.length) { h.innerHTML = ''; h.classList.add('hidden'); return; }
     h.classList.remove('hidden');
+    // No heading here — the unified "Synced actions" heading lives in assistant-detail.html
+    // above this host, so these enable-able recipe cards read as part of that one section.
     h.innerHTML =
-      '<div class="mb-3">' +
-        '<h3 class="text-lg font-bold text-gray-900">Synced actions</h3>' +
-        '<p class="text-sm text-gray-500 mt-1">Prebuilt recipes that push this assistant’s work into your tools when you approve it. Connect the tool, then enable the recipe.</p>' +
-      '</div>' +
       '<div class="grid grid-cols-1 sm:grid-cols-2 gap-5 items-start">' + list.map(card).join('') + '</div>';
   }
 

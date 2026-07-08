@@ -340,10 +340,17 @@ async function _loadConnections() {
     const platforms = _relevantPlatforms();
     // Categories the role supports that have no live connector yet — rendered as
     // "coming soon" cards so every assistant shows the tools it's built to use.
-    const comingSoon = _supportedTools.filter(t => t && t.available === false);
+    // Exclude any category already covered by an enable-able "Synced actions" recipe
+    // (published by assistant-integrations.js) so a capability never appears as both an
+    // enable-able recipe and a "coming soon" card.
+    const covered = window._syncedActionCategories || new Set();
+    const comingSoon = _supportedTools.filter(t => t && t.available === false && !covered.has(t.key));
 
     if (!platforms.length && !comingSoon.length) {
-        grid.innerHTML = '<div class="col-span-full bg-white border border-gray-200 rounded-2xl p-10 text-center text-sm text-gray-500">No connectors are relevant to this assistant yet. As we add more integrations (CRM, calendar, reviews), the right ones will appear here.</div>';
+        // Nothing to connect and nothing "coming soon" here — but the assistant may still
+        // have enable-able recipes rendered by the Synced actions list above, so only show
+        // the empty state when there are no recipes either.
+        grid.innerHTML = covered.size ? '' : '<div class="col-span-full bg-white border border-gray-200 rounded-2xl p-10 text-center text-sm text-gray-500">No connectors are relevant to this assistant yet. As we add more integrations (CRM, calendar, reviews), the right ones will appear here.</div>';
         return;
     }
     platforms.forEach(platform => {
@@ -361,16 +368,14 @@ async function _loadConnections() {
 function _comingSoonCard(tool) {
     return `
       <div class="bg-white border border-gray-200 border-dashed rounded-2xl p-5 flex flex-col gap-3 opacity-90">
-        <div class="flex items-start justify-between gap-3">
-          <div class="flex items-center gap-3 min-w-0">
-            <div class="w-10 h-10 rounded-xl bg-gray-100 text-gray-400 flex items-center justify-center text-lg shrink-0">🔌</div>
-            <div class="min-w-0">
-              <p class="text-sm font-bold text-gray-900 truncate">${_esc(tool.label)}</p>
-              <p class="text-xs text-gray-500 mt-0.5">${_esc(tool.description || '')}</p>
-            </div>
+        <div class="flex items-center gap-3">
+          <div class="w-10 h-10 rounded-xl bg-gray-100 text-gray-400 flex items-center justify-center text-lg shrink-0">🔌</div>
+          <div class="min-w-0">
+            <p class="text-sm font-bold text-gray-900">${_esc(tool.label)}</p>
+            <span class="inline-flex items-center gap-1.5 text-xs font-bold text-gray-500 mt-0.5"><span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span> Coming soon</span>
           </div>
-          <span class="inline-flex items-center gap-1.5 text-xs font-bold text-gray-500 bg-gray-100 border border-gray-200 px-2.5 py-1 rounded-full shrink-0"><span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span> Coming soon</span>
         </div>
+        <p class="text-xs text-gray-500">${_esc(tool.description || '')}</p>
         <button type="button" disabled class="mt-auto w-full text-sm font-bold text-gray-400 bg-gray-50 border border-gray-200 rounded-xl py-2.5 cursor-not-allowed">Not yet available</button>
       </div>`;
 }
