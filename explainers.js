@@ -248,7 +248,7 @@
       example: 'e.g. "Get 30 discovery-call bookings by the end of Q3."'
     },
     'review-queue': {
-      term: 'Review Queue',
+      term: 'Review',
       emoji: '✅',
       plain: "Your inbox of posts the assistant has drafted and is waiting on your thumbs-up. Nothing goes live without you — skim, tweak if needed, and approve.",
       example: 'e.g. "5 posts ready for Monday — approve the batch in one click."'

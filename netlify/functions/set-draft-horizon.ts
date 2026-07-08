@@ -122,7 +122,7 @@ export default withLambda(async (event) => {
                 userId,
                 type: 'draft_horizon_expanded',
                 title: 'Draft horizon extended',
-                message: `${assistant.name} is generating ${gapFillEnqueued} new draft${gapFillEnqueued === 1 ? '' : 's'} to cover through ${toDate}. They'll appear in your Review Queue shortly.`,
+                message: `${assistant.name} is generating ${gapFillEnqueued} new draft${gapFillEnqueued === 1 ? '' : 's'} to cover through ${toDate}. They'll appear in your Review shortly.`,
                 metadata: { assistantId },
             }).catch(() => {});
         }
