@@ -138,6 +138,7 @@
       <button type="button" id="maintab-btn-calendar" data-maintab="calendar" class="main-tab-btn">Calendar</button>
       <!-- ── Secondary tabs — role-gated, after the core four ── -->
       <button type="button" data-maintab="goals"         class="main-tab-btn">Goals</button>
+      <button type="button" data-maintab="workflow"      class="main-tab-btn">Workflow</button>
       <button type="button" id="maintab-btn-automation" data-maintab="automation" class="main-tab-btn">Automation</button>
       <button type="button" data-maintab="meetings"      class="main-tab-btn" title="Progress Reviews: the Kick Off Meeting and your check-in history. Rules — including Learned Directives — live in the Assistant Profile.">Progress Reviews
         <span id="meetings-kickoff-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-blue-100 text-blue-700 text-[10px] font-black rounded-full inline-flex items-center justify-center">!</span>
@@ -319,21 +320,6 @@
     </div>
     <!-- Value wins: posts that converted on saves/shares regardless of reach (AC8) -->
     <p id="metric-value-wins" class="hidden text-xs text-emerald-700 font-medium mt-3"></p>
-  </div>
-
-  <!-- Active Workflows (Epic 4.2) — Orchestrations has no runtime consumer yet (see netlify/functions/orchestrations.ts),
-       so this card is disabled and shows a "Coming soon" state rather than linking into the hub. -->
-  <div id="active-workflows-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6 hidden">
-    <div class="flex items-center justify-between gap-3 mb-4">
-      <div>
-        <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Active Workflows</h3>
-        <p class="text-xs text-gray-400 mt-1">How this assistant connects to the rest of your team.</p>
-      </div>
-      <button type="button" disabled class="shrink-0 text-xs font-bold text-gray-400 cursor-not-allowed">Manage in Orchestrations →</button>
-    </div>
-    <div id="active-workflows-list" class="space-y-2">
-      <p class="text-sm text-gray-400 text-center py-3">Coming soon</p>
-    </div>
   </div>
 
   <!-- Goals section is relocated here (directly under Recent Activity) by initAssistantDetail;
@@ -1265,6 +1251,26 @@
   </div>
 
   </div><!-- /maintab-goals -->
+
+  <!-- ── MAIN TAB: Workflow ────────────────────────────────────────── -->
+  <div id="maintab-workflow" class="main-tab-content hidden">
+
+  <!-- Active Workflows (Epic 4.2) — Orchestrations has no runtime consumer yet (see netlify/functions/orchestrations.ts),
+       so this card is disabled and shows a "Coming soon" state rather than linking into the hub. -->
+  <div id="active-workflows-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6 hidden">
+    <div class="flex items-center justify-between gap-3 mb-4">
+      <div>
+        <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Active Workflows</h3>
+        <p class="text-xs text-gray-400 mt-1">How this assistant connects to the rest of your team.</p>
+      </div>
+      <button type="button" disabled class="shrink-0 text-xs font-bold text-gray-400 cursor-not-allowed">Manage in Orchestrations →</button>
+    </div>
+    <div id="active-workflows-list" class="space-y-2">
+      <p class="text-sm text-gray-400 text-center py-3">Coming soon</p>
+    </div>
+  </div>
+
+  </div><!-- /maintab-workflow -->
 
   <!-- ── MAIN TAB: Automation ──────────────────────────────────────── -->
   <div id="maintab-automation" class="main-tab-content hidden">
