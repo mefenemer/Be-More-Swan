@@ -13,7 +13,7 @@
 // query is tenant-scoped and the assistant is ownership-checked (IDOR guard).
 
 import { Handler } from '@netlify/functions';
-import { and, desc, eq, gte, lte, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lte, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { actionItems, aiAssistants, assistantRecords, discoveredLeads } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
@@ -86,6 +86,59 @@ async function materialiseActionItems(
         }
     } catch (err) {
         console.error('[assistant-records] materialiseActionItems failed (non-fatal):', err);
+    }
+}
+
+// Meeting Note Taker Phase 3 (step 5) — attach the per-task sync ledger to meeting records so the
+// Inbox card can surface "5 of 8 synced" + per-task ✓/⚠ pills. The action_items ledger only exists
+// once a meeting has been approved+materialised, so review-column meetings carry no syncState (they
+// haven't fired create_tasks yet). Best-effort: if the table isn't applied yet the meetings just
+// render without sync state. Design: docs/meeting-note-taker-phase3-plan.md.
+async function attachActionItemSync<T extends { id: number; recordType: string }>(
+    db: Db,
+    orgId: number,
+    records: T[],
+): Promise<(T & { actionItemSync?: unknown })[]> {
+    const meetingIds = records.filter((r) => r.recordType === 'meeting').map((r) => r.id);
+    if (meetingIds.length === 0) return records;
+    try {
+        const items = await db.select({
+            meetingRecordId: actionItems.meetingRecordId,
+            description: actionItems.description,
+            assignee: actionItems.assignee,
+            dueDate: actionItems.dueDate,
+            syncStatus: actionItems.syncStatus,
+            provider: actionItems.provider,
+            externalUrl: actionItems.externalUrl,
+            errorMessage: actionItems.errorMessage,
+            syncedAt: actionItems.syncedAt,
+        }).from(actionItems)
+            .where(and(eq(actionItems.organisationId, orgId), inArray(actionItems.meetingRecordId, meetingIds)))
+            .orderBy(actionItems.id);
+        const byMeeting = new Map<number, typeof items>();
+        for (const it of items) {
+            const arr = byMeeting.get(it.meetingRecordId);
+            if (arr) arr.push(it); else byMeeting.set(it.meetingRecordId, [it]);
+        }
+        return records.map((r) => {
+            const its = byMeeting.get(r.id);
+            if (!its || its.length === 0) return r;
+            const count = (s: string) => its.filter((i) => i.syncStatus === s).length;
+            return {
+                ...r,
+                actionItemSync: {
+                    total: its.length,
+                    synced: count('synced'),
+                    failed: count('failed'),
+                    pending: count('pending'),
+                    skipped: count('skipped'),
+                    items: its,
+                },
+            };
+        });
+    } catch {
+        // Ledger table not applied yet — degrade to no sync state rather than 500 the whole hub.
+        return records;
     }
 }
 
@@ -291,7 +344,9 @@ export const handler: Handler = async (event) => {
                 };
             }
 
-            return json(200, { records });
+            // Meetings carry their per-task sync ledger so the Inbox card can show "N of M synced".
+            const enriched = await attachActionItemSync(db, orgId, records);
+            return json(200, { records: enriched });
         }
 
         if (event.httpMethod === 'POST') {

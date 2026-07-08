@@ -645,18 +645,53 @@ function _rqRecordActions(r, statusKey) {
     </div>`;
 }
 
+// Meeting Note Taker Phase 3 (step 5) — surface the per-task PM-sync ledger on the Inbox card.
+// The action_items sync state (attached to meeting records by assistant-records GET) becomes a
+// "N of M synced" summary chip + one ✓/⚠ pill per action item, so a partial Jira/Asana sync is
+// visible at a glance. Returns { summary, pills } as HTML strings (both '' when no ledger yet).
+function _rqMeetingSync(r) {
+    const s = r && r.actionItemSync;
+    if (!s || !s.total) return { summary: '', pills: '' };
+    const summaryCls = s.failed
+        ? 'bg-red-50 text-red-700 border-red-200'
+        : s.synced === s.total
+            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+            : 'bg-gray-100 text-gray-600 border-gray-200';
+    const summary = `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border ${summaryCls}">${s.synced} of ${s.total} synced${s.failed ? ` · ${s.failed} failed` : ''}</span>`;
+    const pills = s.items.map((it) => {
+        const st = it.syncStatus;
+        const icon = st === 'synced' ? '✓' : st === 'failed' ? '⚠' : st === 'skipped' ? '–' : '⋯';
+        const cls = st === 'synced' ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+            : st === 'failed' ? 'bg-red-50 text-red-700 border-red-200'
+            : 'bg-gray-50 text-gray-500 border-gray-200';
+        const desc = String(it.description || '');
+        const label = _rqEsc(desc.length > 44 ? desc.slice(0, 44) + '…' : desc);
+        // Tooltip: the failure reason, otherwise the provider it (would) land in.
+        const tip = st === 'failed' && it.errorMessage ? `Failed: ${it.errorMessage}`
+            : st === 'skipped' ? 'No task tool connected yet'
+            : st === 'pending' ? 'Queued to sync'
+            : it.provider ? `Synced to ${it.provider}` : '';
+        const inner = `<span class="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border ${cls}"${tip ? ` title="${_rqEsc(tip)}"` : ''}>${icon} ${label}</span>`;
+        return it.externalUrl ? `<a href="${_rqEsc(it.externalUrl)}" target="_blank" rel="noopener">${inner}</a>` : inner;
+    }).join('');
+    return { summary, pills: `<div class="flex flex-wrap gap-1 mt-2">${pills}</div>` };
+}
+
 function _detailRqRecordCard(r, statusKey) {
     const snippet = _rqRecordSnippet(r);
     const schedVerb = r.recordType === 'lead' ? 'chase by' : 'scheduled';
     const sched = r.scheduledFor ? ` · ${schedVerb} ${new Date(r.scheduledFor).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : '';
+    const sync = r.recordType === 'meeting' ? _rqMeetingSync(r) : { summary: '', pills: '' };
     return `<div class="py-4" data-rq-record="${r.id}">
       <div class="min-w-0">
         <p class="text-sm font-bold text-gray-900 truncate">${_rqEsc(r.title)}</p>
         ${snippet ? `<p class="text-xs text-gray-500 mt-0.5 line-clamp-2">${_rqEsc(snippet)}</p>` : ''}
-        <div class="flex items-center gap-2 mt-2">
+        <div class="flex flex-wrap items-center gap-2 mt-2">
           ${r.status ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">${_rqEsc(r.status)}</span>` : ''}
+          ${sync.summary}
           ${sched ? `<span class="text-[11px] font-semibold text-yellow-700">${_rqEsc(sched)}</span>` : ''}
         </div>
+        ${sync.pills}
       </div>
       ${_rqRecordActions(r, statusKey)}
     </div>`;
