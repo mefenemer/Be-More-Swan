@@ -430,8 +430,10 @@
         '<button type="button" data-remove="' + s.active.id + '" class="px-3 py-2 text-gray-400 hover:text-red-600 text-sm font-bold rounded-lg" title="Remove">✕</button>' +
       '</div>';
     }
-    // Tier 2 webhook needs no OAuth; Tier 1 needs the provider connected first.
-    if (s.tier !== 2 && !s.connection) {
+    // Tier 2 webhook needs no OAuth; connection-optional providers (e.g. email) send via a
+    // connected inbox if present or a built-in fallback, so they enable directly; every other
+    // Tier 1 recipe needs the provider connected first.
+    if (s.tier !== 2 && !s.connection && !s.connectionOptional) {
       return '<a href="/api/oauth/' + esc(s.providerKey) + '/connect" class="block w-full text-center px-4 py-2 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-sm font-bold rounded-lg transition">Connect ' + esc(s.providerName) + ' first</a>';
     }
     return '<button type="button" data-config="' + s.id + '" class="w-full px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition">Enable</button>';

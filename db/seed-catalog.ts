@@ -293,6 +293,9 @@ const PROVIDERS = [
     { providerKey: 'notion', displayName: 'Notion', category: 'productivity', authType: 'oauth2', logoKey: 'notion' },
     { providerKey: 'pipedrive', displayName: 'Pipedrive', category: 'crm', authType: 'oauth2', logoKey: 'pipedrive' },
     { providerKey: 'zoho', displayName: 'Zoho CRM', category: 'crm', authType: 'oauth2', logoKey: 'zoho' },
+    // Connection-optional: sends from a connected Gmail if present, else from the Be More Swan
+    // outbound domain — so its recipes activate with no setup (see integration-scenarios.ts).
+    { providerKey: 'email', displayName: 'Email Follow-Up', category: 'comms', authType: 'builtin', logoKey: 'email' },
 ];
 
 // Field maps the FieldMapper renders. bmsField = the canonical BMS lead field the engine
@@ -322,6 +325,7 @@ const MEETING_SUMMARY_FIELDS = [
     { bmsField: 'meetingTime', label: 'Meeting time', required: false, defaultTarget: 'time' },
     { bmsField: 'tasks', label: 'Action items', required: false, defaultTarget: 'tasks' },
 ];
+
 
 // tier 1 native | 2 universal webhook | 3 roadmap (greyed + upvotable).
 const SCENARIOS = [
@@ -392,6 +396,14 @@ const SCENARIOS = [
         description: 'POST the booked-meeting payload to any URL (Zapier / Make / your own endpoint).',
         triggerConfig: { on: 'lead.status_changed', when: ['MEETING_BOOKED'] },
         actionType: null, fieldSchema: MEETING_CRM_FIELDS, status: 'available', sortOrder: 42,
+    },
+    {
+        scenarioKey: 'email_meeting_followup', providerKey: 'email', tier: 1,
+        direction: 'outbound', scenarioType: 'meeting_handoff',
+        title: 'Email a Follow-Up to Attendees',
+        description: 'When you approve a meeting, email the reviewed summary and action items to every attendee — from your connected Gmail, or from Be More Swan when no inbox is connected.',
+        triggerConfig: { on: 'lead.status_changed', when: ['MEETING_BOOKED'] },
+        actionType: 'email_meeting_followup', fieldSchema: [], status: 'available', sortOrder: 43,
     },
     // ── Tier 3: Roadmap (greyed, upvotable) ──
     {

@@ -46,12 +46,20 @@
 // endpoint paths only, no query params or payloads).
 
 import { Handler } from '@netlify/functions';
+import { Resend } from 'resend';
 import { getDb } from '../../db/client';
 import { requireTenant } from '../../src/utils/tenant';
 import { logApiCall } from '../../src/utils/vault';
 import { getFreshAccessToken, IntegrationError } from '../../src/utils/workspace-integrations';
+import { sendGmailMessage } from '../../src/utils/gmail';
+import { injectAiFooter } from '../../src/utils/ai-email-footer';
 
 type Db = ReturnType<typeof getDb>;
+
+// Resend is the no-inbox fallback for email_meeting_followup (guarded: resend v6 throws at
+// construction when the key is missing, which would crash this module at import).
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+const FROM_DOMAIN = process.env.OUTBOUND_EMAIL_DOMAIN || 'outbound.bemoreswan.com';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -820,6 +828,68 @@ async function handleYoutubeUploadVideo(db: Db, userId: number, organisationId: 
     return json(200, { success: true, message: `${isShorts ? 'Short' : 'Video'} "${title}" uploaded to YouTube.`, platformPostId: videoData.id });
 }
 
+// ── Email: send a meeting follow-up to attendees from the user's inbox ─────────
+// Primary path is the org's connected Gmail (sendGmailMessage — the user's own inbox);
+// when no inbox is connected it falls back to the Be More Swan outbound domain via Resend,
+// so approving a meeting always sends. Both paths inject the mandatory AI disclosure footer
+// (US-GOV-3.1.2). Recipients + reviewed subject/body are built by scenario-engine.buildEmailPayload.
+
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+interface EmailFollowupPayload {
+    to?: unknown;            // string[] of attendee email addresses
+    subject?: unknown;
+    body?: unknown;
+    assistantName?: unknown; // for the disclosure footer + fallback From line
+}
+
+async function handleEmailMeetingFollowup(db: Db, userId: number, organisationId: number, payload: EmailFollowupPayload) {
+    const recipients = (Array.isArray(payload.to) ? payload.to : [])
+        .map((r) => (typeof r === 'string' ? r.replace(/[\r\n]+/g, ' ').trim() : ''))
+        .filter((r) => EMAIL_RE.test(r));
+    if (recipients.length === 0) {
+        return json(400, { error: 'No attendee email addresses to send the follow-up to — add at least one attendee email in the inbox first.' });
+    }
+
+    const subject = typeof payload.subject === 'string' && payload.subject.trim() ? payload.subject.trim() : 'Meeting follow-up';
+    const rawBody = typeof payload.body === 'string' ? payload.body.trim() : '';
+    if (!rawBody) return json(400, { error: 'The follow-up email has no body to send.' });
+
+    const assistantName = typeof payload.assistantName === 'string' && payload.assistantName.trim()
+        ? payload.assistantName.trim() : 'Your Be More Swan assistant';
+    const finalBody = injectAiFooter(rawBody, assistantName, null, false);
+    const plural = recipients.length === 1 ? '' : 's';
+
+    // Primary: send from the org's connected Gmail (the user's own inbox). One message to all
+    // attendees — they were in the meeting together, so a shared To line is expected.
+    try {
+        const sent = await sendGmailMessage(db, organisationId, { to: recipients.join(', '), subject, body: finalBody });
+        await logApiCall(db, { userId, endpoint: 'gmail.googleapis.com/gmail/v1/users/me/messages/send', httpStatus: 200 });
+        return json(200, { success: true, message: `Follow-up sent to ${recipients.length} attendee${plural} from your Gmail.`, platformPostId: sent.id });
+    } catch (err) {
+        if (!(err instanceof IntegrationError)) throw err;
+        // Gmail isn't connected — fall through to the Resend fallback.
+    }
+
+    // Fallback: send from the Be More Swan outbound domain via Resend (no inbox connected).
+    if (!resend) {
+        console.log(`[DEV] email_meeting_followup to ${recipients.join(', ')}: subject="${subject}" (no Gmail, no RESEND_API_KEY)`);
+        await logApiCall(db, { userId, endpoint: 'resend.com/emails (dev)', httpStatus: 200 });
+        return json(200, { success: true, message: `Follow-up prepared for ${recipients.length} attendee${plural} (dev mode — not actually sent).` });
+    }
+    const result = await resend.emails.send({
+        from: `${assistantName} via Be More Swan <assistant@${FROM_DOMAIN}>`,
+        to: recipients,
+        subject,
+        text: finalBody,
+    });
+    const sendError = (result as { error?: { message?: string } })?.error;
+    await logApiCall(db, { userId, endpoint: 'resend.com/emails', httpStatus: sendError ? 502 : 200 });
+    if (sendError) return json(502, { error: `The follow-up email could not be sent${sendError.message ? `: ${sendError.message}` : '.'}` });
+    const emailId = (result as { data?: { id?: string } })?.data?.id ?? null;
+    return json(200, { success: true, message: `Follow-up sent to ${recipients.length} attendee${plural} from Be More Swan.`, platformPostId: emailId });
+}
+
 // ── Action registry ────────────────────────────────────────────────────────────
 // One entry per outbound integration action, keyed by actionType. This is the
 // "ADAPTERS library" the Integration Scenario Library dispatches through: adding a
@@ -847,6 +917,7 @@ export const ACTION_HANDLERS: Record<string, ActionHandler> = {
     qbo_log_note: handleQboLogNote,
     intercom_add_internal_note: handleIntercomAddNote,
     gmail_create_draft: handleGmailCreateDraft,
+    email_meeting_followup: handleEmailMeetingFollowup,
     threads_create_post: handleThreadsCreatePost,
     tiktok_upload_video: handleTiktokUploadVideo,
     youtube_upload_video: handleYoutubeUploadVideo,

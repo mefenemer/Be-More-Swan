@@ -23,6 +23,11 @@ function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
+// Providers whose Tier-1 recipes activate without a connected integration: they resolve a
+// connection at run time if one exists (e.g. Gmail) and otherwise use a built-in fallback,
+// so the library must not gate them behind a "Connect first" step.
+const CONNECTION_OPTIONAL_PROVIDERS = new Set(['email']);
+
 /** Last path segment of the original /api/integrations/:resource URL. */
 function resourceOf(event: { rawUrl?: string; path?: string }): string {
     const raw = event.rawUrl || event.path || '';
@@ -71,6 +76,7 @@ export const handler: Handler = async (event) => {
                     providerCategory: provider?.category ?? null,
                     roadmapVotes: roadmapVotes ?? null,
                     connection: connectedByProvider.get(scenario.providerKey) ?? null,
+                    connectionOptional: CONNECTION_OPTIONAL_PROVIDERS.has(scenario.providerKey),
                     active: activeByScenario.get(scenario.id) ?? null,
                 })),
             });
@@ -114,9 +120,11 @@ export const handler: Handler = async (event) => {
             const fieldMappings = (body.fieldMappings && typeof body.fieldMappings === 'object') ? body.fieldMappings as Record<string, unknown> : {};
 
             // Tier-1 native recipes need a connected OAuth grant; Tier-2 needs a webhook URL.
+            // Connection-optional providers (e.g. email) activate with neither — they resolve a
+            // connection at run time or fall back to a built-in sender.
             if (scenario.tier === 2) {
                 if (!webhookUrl) return json(400, { error: 'A webhook URL is required for this scenario.' });
-            } else if (!integrationId) {
+            } else if (!integrationId && !CONNECTION_OPTIONAL_PROVIDERS.has(scenario.providerKey)) {
                 return json(400, { error: `Connect ${scenario.providerKey} first, then activate this scenario.` });
             }
 

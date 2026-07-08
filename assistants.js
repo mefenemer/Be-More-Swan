@@ -1672,6 +1672,12 @@ function _applyDashboardRegistry(data) {
     window._detailReviewQueue = cfg.reviewQueue || { kind: 'posts' };
     toggle('maintab-btn-review-queue', true);
     toggleBtn('btn-review-pending', true);
+    // Per-role tab label override (e.g. meeting note-taker → "Inbox"); defaults to "Review Queue".
+    // The tab button's badge span must survive, so only its leading text node is rewritten.
+    const rqLabel = window._detailReviewQueue.label || 'Review Queue';
+    setText('detail-rq-heading', rqLabel);
+    const rqTabBtn = document.getElementById('maintab-btn-review-queue');
+    if (rqTabBtn && rqTabBtn.firstChild && rqTabBtn.firstChild.nodeType === 3) rqTabBtn.firstChild.nodeValue = rqLabel + ' ';
     // Review Queue tab header/columns adapt to the queue kind. Records queues (data-hub roles)
     // approve/schedule records — there's no "Posted" state and no post-generation button here.
     const rqIsRecords = window._detailReviewQueue.kind === 'records';

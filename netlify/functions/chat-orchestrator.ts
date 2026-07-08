@@ -660,7 +660,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
     // matching the ActionItemAssignmentCard renderer in disruptive-ui-registry.js.
     meeting_note_taker: {
         model: DEFAULT_MODEL,
-        maxTokens: 1536,
+        maxTokens: 2048,
         buildRolePrompt: (rc) => {
             const meetingPlatform = onboardingValue(rc, 'meetingPlatform');
             const taskDestination = onboardingValue(rc, 'taskDestination');
@@ -688,6 +688,10 @@ When the conversation contains meeting content to process, include the action it
 
 meetingTitle names this meeting in the user's Meeting Notes library — derive it from the content ("Q3 pipeline review", "Weekly ops sync") plus the meeting date when one is stated; never leave it generic when the content names the meeting.
 
+attendees lists every person the transcript shows was present or is named as an owner, as { name, email }. Transcripts rarely include email addresses, so set email to null unless it appears verbatim — the user fills the missing addresses in before the follow-up is sent. Return an empty array when no people are named.
+
+followupEmail is a ready-to-review recap the user can send to the attendees: a warm one-line opener, the key decisions, and the action items with their owners and due dates, in the configured summary tone. Keep it under ~180 words, no placeholders or brackets. Set followupEmail to null only when there is no meeting content yet.
+
 ${spreadsheetFallback(meetingPlatform, 'Meeting Notes', 'a meeting transcript or rough notes')}
 
 Return STRICT JSON (no markdown, no prose outside the JSON):
@@ -700,6 +704,11 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
     "decisionsMade": ["<a firm decision the meeting reached>", ...],   // [] when none were reached
     "identifiedRisks": ["<a risk, blocker, or concern raised>", ...],  // [] when none surfaced
     "targetDestination": ${JSON.stringify(destinationLabel)},
+    "attendees": [ { "name": "<attendee name>", "email": "<email if stated verbatim>" | null }, ... ],  // [] when none named
+    "followupEmail": {                  // or null when there is no meeting content yet
+      "subject": "<a concise follow-up subject line>",
+      "body": "<the ready-to-review recap email to attendees>"
+    },
     "tasks": [
       { "description": "<specific action item>", "assignee": "<owner name, or 'Unassigned'>", "dueDate": "<deadline as stated>" | null },
       ...

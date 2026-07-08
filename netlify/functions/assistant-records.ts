@@ -61,8 +61,18 @@ async function enqueueHandoffOnApproval(
 
     if (record.recordType === 'meeting') {
         // Meeting handoff — its own field set (summary, time, link, action items). Consumed by
-        // CRM record-update recipes (mapped to properties) or Slack/Notion summary recipes.
+        // CRM record-update recipes (mapped to properties), Slack/Notion summary recipes, or the
+        // email_meeting_followup recipe (attendees + the reviewed draft email).
         const summary = data.summary ?? data.meetingSummary ?? data.notes;
+        // Assistant display name — used by the follow-up email's AI disclosure footer + From line.
+        // Best-effort: the footer falls back to a generic label if the lookup fails.
+        let assistantName: string | undefined;
+        try {
+            const [a] = await db.select({ name: aiAssistants.name }).from(aiAssistants)
+                .where(and(eq(aiAssistants.id, record.aiAssistantId), eq(aiAssistants.organisationId, orgId)))
+                .limit(1);
+            assistantName = a?.name;
+        } catch { /* name is best-effort — the email footer degrades to a generic label */ }
         fields = {
             company: data.company ?? record.title ?? undefined,
             contactName: data.contactName ?? data.attendee ?? data.with,
@@ -75,6 +85,9 @@ async function enqueueHandoffOnApproval(
             meetingTime: data.meetingTime ?? data.startTime ?? data.scheduledFor ?? data.when ?? data.date,
             meetingLink: data.meetingLink ?? data.link ?? data.joinUrl ?? data.location,
             tasks: data.tasks ?? data.actionItems,
+            attendees: data.attendees, // [{name,email}] — emails filled in on the inbox card
+            followupEmail: data.followupEmail, // { subject, body } — the reviewed draft
+            assistantName,
             attribution: 'Be More Swan',
         };
     } else {

@@ -668,6 +668,8 @@
   // Renderer for the meeting-note-taker route's wire shape (chat-orchestrator.ts):
   // { type: 'action_item_assignment', meetingSummary, decisionsMade?: string[],
   //   identifiedRisks?: string[], targetDestination, channel?,
+  //   attendees?: [{ name, email: string|null }, ...],
+  //   followupEmail?: { subject, body } | null,
   //   tasks: [{ description, assignee, dueDate: string|null }, ...] }
   // targetDestination echoes the onboarding taskDestination label and picks the sync
   // route: 'Notion' creates a page (summary paragraph + to_do blocks) via
@@ -681,6 +683,12 @@
       .filter((d) => typeof d === 'string' && d.trim());
     const risks = (Array.isArray(ui.identifiedRisks) ? ui.identifiedRisks : [])
       .filter((r) => typeof r === 'string' && r.trim());
+    const attendees = (Array.isArray(ui.attendees) ? ui.attendees : [])
+      .map((a) => (a && typeof a === 'object'
+        ? { name: typeof a.name === 'string' ? a.name : '', email: typeof a.email === 'string' ? a.email : '' }
+        : null))
+      .filter((a) => a && (a.name || a.email));
+    const followup = (ui.followupEmail && typeof ui.followupEmail === 'object') ? ui.followupEmail : null;
     if (!ui.meetingSummary && !decisions.length && !risks.length && tasks.length === 0) return null; // nothing extracted — fall back to text-only
 
     const destination = typeof ui.targetDestination === 'string' && ui.targetDestination.trim()
@@ -712,6 +720,28 @@
         <ul class="space-y-1">
           ${risks.map((r) => `<li class="text-sm text-gray-700 flex gap-2"><span class="text-amber-500 shrink-0">⚠</span><span>${esc(r)}</span></li>`).join('')}
         </ul>`);
+    }
+    if (attendees.length) {
+      bodySections.push(`
+        <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Attendees</p>
+        <div class="flex flex-wrap gap-2">
+          ${attendees.map((a) => {
+            const nameHtml = a.name ? `<span class="font-semibold text-gray-700">${esc(a.name)}</span>` : '';
+            const emailHtml = a.email
+              ? `<span class="text-gray-500">${esc(a.email)}</span>`
+              : `<span class="text-gray-400 italic">email needed</span>`;
+            const sep = a.name ? `<span class="text-gray-300">·</span>` : '';
+            return `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 bg-gray-50 border border-gray-200 rounded-full text-xs">${nameHtml}${sep}${emailHtml}</span>`;
+          }).join('')}
+        </div>`);
+    }
+    if (followup && (followup.subject || followup.body)) {
+      bodySections.push(`
+        <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Follow-up email <span class="font-normal normal-case text-gray-400">— review &amp; edit in your inbox before it sends</span></p>
+        <div class="rounded-lg border border-gray-200 bg-gray-50 overflow-hidden">
+          ${followup.subject ? `<p class="px-3 py-2 text-sm font-semibold text-gray-800 border-b border-gray-200">${esc(followup.subject)}</p>` : ''}
+          ${followup.body ? `<p class="px-3 py-2 text-sm text-gray-600 whitespace-pre-line">${esc(followup.body)}</p>` : ''}
+        </div>`);
     }
     const bodyHtml = bodySections.map((section, i) => {
       const needsBorder = tasks.length > 0 || i < bodySections.length - 1;

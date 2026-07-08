@@ -169,6 +169,10 @@ export function buildWebhookPayload(
 // record-update diff. Meeting handoff recipes can target these instead of a CRM.
 const SUMMARY_ACTIONS = new Set(['slack_post_summary', 'notion_create_page']);
 
+// Action handlers whose payload is an outbound email (recipients + subject + body) rather
+// than a diff or a summary. The meeting follow-up recipe targets this.
+const EMAIL_ACTIONS = new Set(['email_meeting_followup']);
+
 interface SummaryTask { description?: unknown; assignee?: unknown; dueDate?: unknown }
 
 /**
@@ -191,15 +195,54 @@ export function buildSummaryPayload(
     };
 }
 
+interface AttendeeIn { name?: unknown; email?: unknown }
+
+/**
+ * Build the outbound-email payload the email_meeting_followup handler consumes: the attendee
+ * recipient list, the reviewed subject/body draft, and the assistant's display name (for the
+ * mandatory AI disclosure footer). Recipients come from the meeting's `attendees[{name,email}]`
+ * (emails the user filled in on the inbox card); a single `contactEmail` is the fallback.
+ */
+export function buildEmailPayload(
+    subject: TriggerSubject,
+    _fieldMappings: Record<string, unknown>,
+): Record<string, unknown> {
+    const f = subject.fields ?? {};
+    const attendees = Array.isArray(f.attendees) ? (f.attendees as AttendeeIn[]) : [];
+    const recipients = attendees
+        .map((a) => (a && typeof a === 'object' && typeof a.email === 'string' ? a.email.trim() : ''))
+        .filter((e) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e));
+    if (recipients.length === 0 && typeof f.contactEmail === 'string' && f.contactEmail.includes('@')) {
+        recipients.push(f.contactEmail.trim());
+    }
+
+    const draft = (f.followupEmail && typeof f.followupEmail === 'object') ? f.followupEmail as Record<string, unknown> : {};
+    const draftSubject = typeof draft.subject === 'string' ? draft.subject.trim() : '';
+    const meetingTitle = typeof f.meetingTitle === 'string' ? f.meetingTitle.trim() : '';
+    const emailSubject = draftSubject || (meetingTitle ? `Follow-up: ${meetingTitle}` : 'Meeting follow-up');
+    const body = typeof draft.body === 'string' && draft.body.trim()
+        ? draft.body
+        : (typeof f.meetingSummary === 'string' ? f.meetingSummary : '');
+
+    return {
+        to: recipients,
+        subject: emailSubject,
+        body,
+        assistantName: typeof f.assistantName === 'string' ? f.assistantName : '',
+    };
+}
+
 /**
  * Resolve the payload an ACTION_HANDLERS entry expects. Summary actions get the meeting
- * summary shape; everything else (CRM record updates) gets the field-mapped diff shape.
+ * summary shape; email actions get the recipients+subject+body shape; everything else (CRM
+ * record updates) gets the field-mapped diff shape.
  */
 export function buildActionPayload(
     actionType: string,
     subject: TriggerSubject,
     fieldMappings: Record<string, unknown>,
 ): Record<string, unknown> {
+    if (EMAIL_ACTIONS.has(actionType)) return buildEmailPayload(subject, fieldMappings);
     return SUMMARY_ACTIONS.has(actionType)
         ? buildSummaryPayload(subject, fieldMappings)
         : buildDiffPayload(subject, fieldMappings);

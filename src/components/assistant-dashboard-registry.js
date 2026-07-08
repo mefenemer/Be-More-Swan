@@ -409,7 +409,9 @@
         hasContentPublishing: false,
       },
       primaryAction: { label: 'Summarise a Meeting', kind: 'chat' },
-      reviewQueue: { kind: 'records', recordType: 'meeting' },
+      // Per-role tab label ("Inbox") — the brief forbids heavy "Review Queue" terminology for
+      // the note-taker; other roles keep the default. Applied in _applyDashboardRegistry.
+      reviewQueue: { kind: 'records', recordType: 'meeting', label: 'Inbox' },
       hubTab: {
         id: 'datahub',
         label: 'Meeting Notes',
