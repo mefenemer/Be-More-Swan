@@ -1804,6 +1804,9 @@ function _applyDashboardRegistry(data) {
     const pa = cfg.primaryAction;
     const paBtn = document.getElementById('btn-primary-action');
     const paLabel = document.getElementById('primary-action-label');
+    // Issue #177: the button starts hidden in markup (its label/onclick are the SMM defaults) —
+    // reveal it only now that the role-specific label/handler below are actually being applied.
+    toggleBtn('btn-primary-action', true);
     if (data.roleKey === 'blog_writer') {
         if (paLabel) paLabel.textContent = 'Write Blog Post';
         if (paBtn) paBtn.onclick = () => { if (window.openBlogStudio) window.openBlogStudio({ assistantId: data.id }); };

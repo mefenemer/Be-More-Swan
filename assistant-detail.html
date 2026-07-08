@@ -138,7 +138,9 @@
       <button type="button" id="maintab-btn-calendar" data-maintab="calendar" class="main-tab-btn">Calendar</button>
       <!-- ── Secondary tabs — role-gated, after the core four ── -->
       <button type="button" data-maintab="goals"         class="main-tab-btn">Goals</button>
-      <button type="button" id="maintab-btn-automation" data-maintab="automation" class="main-tab-btn">Automation</button>
+      <!-- Issue #177: hidden by default (like the KB tab below) — hasContentAutomation is a
+           social-only module, so this tab must not appear before _applyDashboardRegistry decides. -->
+      <button type="button" id="maintab-btn-automation" data-maintab="automation" class="main-tab-btn hidden">Automation</button>
       <button type="button" data-maintab="meetings"      class="main-tab-btn" title="Progress Reviews: the Kick Off Meeting and your check-in history. Rules — including Learned Directives — live in the Assistant Profile.">Progress Reviews
         <span id="meetings-kickoff-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-blue-100 text-blue-700 text-[10px] font-black rounded-full inline-flex items-center justify-center">!</span>
       </button>
@@ -158,9 +160,11 @@
   <!-- Primary action bar (Epic 2.1) — the two most common intents, front and centre. -->
   <div class="flex flex-col sm:flex-row gap-3 mb-6">
     <!-- Primary action — label + handler set per role by _applyDashboardRegistry (generate_post
-         opens the post sheet for social; chat opens the assistant's chat intake for Data Hub roles). -->
+         opens the post sheet for social; chat opens the assistant's chat intake for Data Hub roles).
+         Issue #177: starts hidden — the label/onclick below are the Social Media Manager defaults,
+         so showing this before the registry resolves flashes SMM content on every other role. -->
     <button type="button" id="btn-primary-action" onclick="window.openGeneratePostSheet && window.openGeneratePostSheet()"
-      class="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-extrabold text-white bg-emerald-600 hover:bg-emerald-700 rounded-2xl shadow-md transition-colors cursor-pointer">
+      class="hidden flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-extrabold text-white bg-emerald-600 hover:bg-emerald-700 rounded-2xl shadow-md transition-colors cursor-pointer">
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
       <span id="primary-action-label">Assign New Task</span>
     </button>
