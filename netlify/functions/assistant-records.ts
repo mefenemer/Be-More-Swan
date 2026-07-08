@@ -70,6 +70,8 @@ async function enqueueHandoffOnApproval(
             meetingTitle: record.title ?? undefined,
             meetingSummary: summary,
             aiSummary: summary, // alias so CRM recipes can map the same text to a notes field
+            decisionsMade: data.decisionsMade ?? data.decisions,
+            identifiedRisks: data.identifiedRisks ?? data.risks,
             meetingTime: data.meetingTime ?? data.startTime ?? data.scheduledFor ?? data.when ?? data.date,
             meetingLink: data.meetingLink ?? data.link ?? data.joinUrl ?? data.location,
             tasks: data.tasks ?? data.actionItems,

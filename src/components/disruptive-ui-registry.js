@@ -666,8 +666,9 @@
 
   // ── Built-in: Action Item Assignment Card ───────────────────────────────────
   // Renderer for the meeting-note-taker route's wire shape (chat-orchestrator.ts):
-  // { type: 'action_item_assignment', meetingSummary, targetDestination,
-  //   channel?, tasks: [{ description, assignee, dueDate: string|null }, ...] }
+  // { type: 'action_item_assignment', meetingSummary, decisionsMade?: string[],
+  //   identifiedRisks?: string[], targetDestination, channel?,
+  //   tasks: [{ description, assignee, dueDate: string|null }, ...] }
   // targetDestination echoes the onboarding taskDestination label and picks the sync
   // route: 'Notion' creates a page (summary paragraph + to_do blocks) via
   // /api/actions/sync (notion_create_page); anything else posts the summary + tasks
@@ -676,7 +677,11 @@
   function renderActionItemAssignmentCard(ui, esc) {
     const tasks = (Array.isArray(ui.tasks) ? ui.tasks : [])
       .filter((t) => t && typeof t === 'object' && t.description);
-    if (!ui.meetingSummary && tasks.length === 0) return null; // nothing extracted — fall back to text-only
+    const decisions = (Array.isArray(ui.decisionsMade) ? ui.decisionsMade : [])
+      .filter((d) => typeof d === 'string' && d.trim());
+    const risks = (Array.isArray(ui.identifiedRisks) ? ui.identifiedRisks : [])
+      .filter((r) => typeof r === 'string' && r.trim());
+    if (!ui.meetingSummary && !decisions.length && !risks.length && tasks.length === 0) return null; // nothing extracted — fall back to text-only
 
     const destination = typeof ui.targetDestination === 'string' && ui.targetDestination.trim()
       ? ui.targetDestination.trim() : 'your task tracker';
@@ -686,6 +691,32 @@
     // Asana, Monday, "your task tracker") is fulfilled by posting to Slack — the
     // button must say what actually happens.
     const syncLabel = isNotion ? 'Notion' : 'Slack';
+
+    // Summary / Decisions / Risks stack above the action-item table. Each section
+    // carries a bottom divider unless it is the last thing before the footer (the
+    // footer already draws its own top border), so the borders never double up.
+    const bodySections = [];
+    if (ui.meetingSummary) {
+      bodySections.push(`<p class="text-sm text-gray-700 whitespace-pre-line">${esc(ui.meetingSummary)}</p>`);
+    }
+    if (decisions.length) {
+      bodySections.push(`
+        <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Decisions</p>
+        <ul class="space-y-1">
+          ${decisions.map((d) => `<li class="text-sm text-gray-700 flex gap-2"><span class="text-emerald-600 shrink-0">✓</span><span>${esc(d)}</span></li>`).join('')}
+        </ul>`);
+    }
+    if (risks.length) {
+      bodySections.push(`
+        <p class="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Risks &amp; blockers</p>
+        <ul class="space-y-1">
+          ${risks.map((r) => `<li class="text-sm text-gray-700 flex gap-2"><span class="text-amber-500 shrink-0">⚠</span><span>${esc(r)}</span></li>`).join('')}
+        </ul>`);
+    }
+    const bodyHtml = bodySections.map((section, i) => {
+      const needsBorder = tasks.length > 0 || i < bodySections.length - 1;
+      return `<div class="px-5 py-4 ${needsBorder ? 'border-b border-gray-100' : ''}">${section}</div>`;
+    }).join('');
 
     const el = document.createElement('div');
     el.className = 'bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden max-w-2xl';
@@ -698,10 +729,7 @@
         </div>
       </div>
 
-      ${ui.meetingSummary ? `
-        <div class="px-5 py-4 ${tasks.length ? 'border-b border-gray-100' : ''}">
-          <p class="text-sm text-gray-700 whitespace-pre-line">${esc(ui.meetingSummary)}</p>
-        </div>` : ''}
+      ${bodyHtml}
 
       ${tasks.length ? `
       <div class="overflow-x-auto">
@@ -750,6 +778,8 @@
       try {
         const data = await postSyncAction(syncActionType, {
           meetingSummary: ui.meetingSummary ?? null,
+          decisionsMade: decisions,
+          identifiedRisks: risks,
           targetDestination: ui.targetDestination ?? null,
           channel: ui.channel ?? null,
           tasks: tasks.map((t) => ({

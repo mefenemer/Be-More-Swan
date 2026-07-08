@@ -1526,6 +1526,74 @@ function _renderOnboardingConnections() {
     }
 }
 
+// Lead Generator email-connect CTA. When the user chose to send outreach from their own inbox
+// (onboardingContext.outreachEmailProvider) but the account isn't connected, surface a prominent
+// Connect card above the onboarding summary. Google uses the existing OAuth (a plain link, same
+// as integrations.html); Microsoft is a fast-follow (informational only for now).
+async function _renderOutreachEmailConnect(data) {
+    const anchor = document.getElementById('onboarding-summary');
+    if (!anchor || !anchor.parentNode) return;
+    const ID = 'outreach-email-connect-card';
+    const existing = document.getElementById(ID);
+    const provider = (data && data.context && typeof data.context === 'object')
+        ? String(data.context.outreachEmailProvider || '') : '';
+
+    // Only relevant when the user opted into sending outreach from their own inbox.
+    if (provider !== 'google' && provider !== 'microsoft') { if (existing) existing.remove(); return; }
+
+    const esc = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const card = existing || document.createElement('div');
+    card.id = ID;
+    card.className = 'mb-4';
+    if (!existing) anchor.parentNode.insertBefore(card, anchor);
+
+    if (provider === 'microsoft') {
+        card.innerHTML = `
+          <div class="bg-amber-50 border border-amber-200 rounded-2xl p-5 flex items-start gap-3">
+            <span class="text-xl shrink-0">📧</span>
+            <div>
+              <p class="font-bold text-gray-900 text-sm">Microsoft email — coming soon</p>
+              <p class="text-sm text-gray-600 mt-0.5">You chose to send outreach from Outlook / Microsoft 365. That connection is on the way — until then, approved leads get a ready-to-send draft you send yourself.</p>
+            </div>
+          </div>`;
+        return;
+    }
+
+    // provider === 'google' → check the live connection status, then render connect vs confirmed.
+    card.innerHTML = '<div class="bg-white border border-gray-200 rounded-2xl p-5 text-sm text-gray-400">Checking your Google connection…</div>';
+    let connected = false, accountName = null;
+    try {
+        const res = await fetch('/api/oauth/status');
+        if (res.ok) {
+            const g = ((await res.json()) || {}).providers?.gmail;
+            connected = !!(g && g.connected);
+            accountName = g && g.accountName;
+        }
+    } catch { /* treat as not connected → show the Connect CTA */ }
+
+    // Guard against a stale re-render having replaced the node while we awaited.
+    if (document.getElementById(ID) !== card) return;
+
+    card.innerHTML = connected
+        ? `<div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex items-start gap-3">
+             <span class="text-xl shrink-0">✅</span>
+             <div>
+               <p class="font-bold text-gray-900 text-sm">Google connected — outreach sends automatically</p>
+               <p class="text-sm text-gray-600 mt-0.5">Approving a lead emails your outreach from ${accountName ? `<span class="font-semibold text-gray-800">${esc(accountName)}</span>` : 'your connected Google account'} and sets a chase reminder on the Calendar.</p>
+             </div>
+           </div>`
+        : `<div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+             <div class="flex items-start gap-3">
+               <span class="text-xl shrink-0">📧</span>
+               <div>
+                 <p class="font-bold text-gray-900 text-sm">Connect your Google account to send outreach</p>
+                 <p class="text-sm text-gray-600 mt-0.5">You chose to send outreach emails from your own inbox. Connect Gmail / Google Workspace and approved leads are emailed automatically, with a chase reminder set for you.</p>
+               </div>
+             </div>
+             <a href="/api/oauth/gmail/connect" class="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition whitespace-nowrap">Connect Gmail</a>
+           </div>`;
+}
+
 // Role-specific "Quick Start Suggestions" for the Mandate tab — clickable bottleneck
 // prompts (parity with Social Media Manager onboarding). Sourced from
 // src/config/mandate-suggestions.js, keyed by roleKey with a social fallback. Clicking a
@@ -2483,6 +2551,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         _detailHydrate(currentData);
         _renderMandateSuggestions(currentData);
         _renderOnboardingSummary(currentData);
+        _renderOutreachEmailConnect(currentData);
         _renderRoleAnswersEditor(currentData);
         _renderOperationSection(currentData);
         _renderMeetingsBrief(currentData);
