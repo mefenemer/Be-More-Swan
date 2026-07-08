@@ -18,7 +18,8 @@ const jwtSecret = process.env.JWT_SECRET;
 
 // Allow-list of widget keys the client may persist. Keep in sync with the catalog in
 // dashboard-content.html. Unknown keys are dropped so junk can't be stored.
-const ALLOWED_KEYS = ['quick-actions', 'roi-mini', 'team-status', 'notifications', 'tips', 'referral'];
+// 'quick-actions' removed (issue #178) — those shortcuts now live on each assistant card.
+const ALLOWED_KEYS = ['roi-mini', 'team-status', 'notifications', 'tips', 'referral'];
 
 export default withLambda(async (event: HandlerEvent) => {
     if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server configuration error.' }) };
