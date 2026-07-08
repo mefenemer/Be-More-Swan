@@ -172,8 +172,27 @@
         if (card) row.appendChild(card);
       }
 
+      // Issue #180: when a turn produced a Data Hub record (chat-orchestrator.ts
+      // stamps a hubLink onto uiElement), surface a jump-off link to the exact
+      // Assistant Detail tab it landed in — the chat previously had no path there.
+      const hubLink = uiElement && typeof uiElement === 'object' ? uiElement.hubLink : null;
+      const hubLinkEl = renderHubLink(hubLink);
+      if (hubLinkEl) row.appendChild(hubLinkEl);
+
       scrollEl.appendChild(row);
       scrollToBottom();
+    }
+
+    /** "View in Review Queue" style jump-off link — see appendMessage's hubLink handling. */
+    function renderHubLink(hubLink) {
+      if (!hubLink || typeof hubLink !== 'object' || typeof hubLink.tab !== 'string' || assistantId == null) return null;
+      const params = new URLSearchParams({ view: 'assistant-detail', assistantId: String(assistantId), tab: hubLink.tab });
+      const a = document.createElement('a');
+      a.href = `workspace.html?${params.toString()}`;
+      a.className = 'inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 transition w-fit';
+      const label = typeof hubLink.label === 'string' && hubLink.label.trim() ? hubLink.label.trim() : 'View in Review Queue';
+      a.textContent = `${label} →`;
+      return a;
     }
 
     /**
