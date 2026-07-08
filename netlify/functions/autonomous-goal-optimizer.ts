@@ -18,10 +18,11 @@ import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { tierAllows, AUTONOMOUS_TUNABLE_FIELDS, funnelDiagnosticFor } from '../../src/config/goal-metrics';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BATCH = 50;
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     if (await isGlobalAiDisabled()) return { statusCode: 200, body: JSON.stringify({ skipped: 'ai_disabled' }) };
     const db = getDb();
 
@@ -119,4 +120,4 @@ export const handler: Handler = async () => {
     }
 
     return { statusCode: 200, body: JSON.stringify({ candidates: candidates.length, adjusted }) };
-};
+});

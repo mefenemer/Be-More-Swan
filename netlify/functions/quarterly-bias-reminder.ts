@@ -7,6 +7,7 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, notifications } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const CHECKLIST = [
     'Demographic proxy language (e.g. gendered terms, nationality assumptions)',
@@ -53,4 +54,4 @@ const handler = async () => {
     return { statusCode: 200 };
 };
 
-export { handler };
+export default withLambda(handler);

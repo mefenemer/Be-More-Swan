@@ -14,6 +14,7 @@ import { getDb, withUpdatedAt } from '../../db/client';
 import { users, userReferrals, plans, organisations, masterPlans, aiAssistants, userOrganisations, referralInvites } from '../../db/schema';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { getReferralTokenState, FREE_ASSISTANT_THRESHOLD, CREDIT_GBP } from '../../src/utils/referral-tokens';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const REWARD_GBP = 10;
@@ -33,7 +34,7 @@ function generateCode(): string {
     return code;
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const callerId = getAuth(event);
     if (!callerId) return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized.' }) };
 
@@ -227,4 +228,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 405, body: 'Method Not Allowed' };
-};
+});

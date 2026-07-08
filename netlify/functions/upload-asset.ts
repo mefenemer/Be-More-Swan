@@ -6,6 +6,7 @@ import { workspaceAssets } from '../../db/schema';
 import { logAuditEvent } from '../../src/utils/audit';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const parseMultipartForm = (event: HandlerEvent): Promise<any> => {
     return new Promise((resolve, reject) => {
@@ -36,7 +37,7 @@ const parseMultipartForm = (event: HandlerEvent): Promise<any> => {
     });
 };
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -106,4 +107,4 @@ export const handler = async (event: HandlerEvent) => {
         console.error('Upload Asset Error:', error);
         return { statusCode: 500, body: JSON.stringify({ error: 'Failed to upload asset.' }) };
     }
-};
+});

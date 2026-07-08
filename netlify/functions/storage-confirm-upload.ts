@@ -16,6 +16,7 @@ import { getDb } from '../../db/client';
 import { users, userOrganisations, workspaceAssets, storageUsage, organisations, plans, masterPlans } from '../../db/schema';
 import { sendMagicLinkEmail } from '../../src/utils/email';
 import { resolveBaseUrl } from '../../src/utils/base-url';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 // Fire-and-forget the AI extraction job so the assistant learns from uploaded brand docs.
 function triggerExtraction(headers: Record<string, string | undefined>, assetId: number): void {
@@ -120,7 +121,7 @@ async function _maybeWarnQuota(orgId: number, addedBytes: number): Promise<void>
     });
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
     if (!JWT_SECRET) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
 
@@ -212,4 +213,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ assetId, assetType: asset.assetType, fileSizeBytes: asset.fileSizeBytes }),
     };
-};
+});

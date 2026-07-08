@@ -21,10 +21,11 @@ import jwt from 'jsonwebtoken';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { contentRules, aiAssistants } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -118,4 +119,4 @@ Respond with ONLY valid JSON: { "directive": "the instruction" }`;
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ rule, directive }),
     };
-};
+});

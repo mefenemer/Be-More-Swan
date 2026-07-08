@@ -5,6 +5,7 @@ import { eq, and } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
 import { organisations, users, plans, masterPlans, referralAttribution, userOrganisations } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -60,7 +61,7 @@ async function isAgencyEligible(orgId: number): Promise<boolean> {
     }
 }
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     const db = getDb();
     const path = event.path || '';
 
@@ -171,4 +172,4 @@ export const handler = async (event: HandlerEvent) => {
     }
 
     return { statusCode: 405, body: 'Method Not Allowed' };
-};
+});

@@ -8,6 +8,7 @@ import jwt from 'jsonwebtoken';
 import { eq, desc, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, securityIncidents } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -53,7 +54,7 @@ function buildTimeline(incident: any, now: Date) {
     };
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -108,4 +109,4 @@ export const handler: Handler = async (event) => {
             incidents: incidents.map((i: any) => ({ ...i, timeline: buildTimeline(i, now) })),
         }),
     };
-};
+});

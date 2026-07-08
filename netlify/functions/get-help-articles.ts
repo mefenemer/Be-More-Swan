@@ -6,6 +6,7 @@ import { Handler } from '@netlify/functions';
 import { eq, asc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { helpArticles } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const HEADERS: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -13,7 +14,7 @@ const HEADERS: Record<string, string> = {
     'Cache-Control': 'public, max-age=300',
 };
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') {
         return { statusCode: 405, headers: HEADERS, body: 'Method Not Allowed' };
     }
@@ -46,4 +47,4 @@ export const handler: Handler = async (event) => {
             body: JSON.stringify({ error: 'Failed to load help articles.' }),
         };
     }
-};
+});

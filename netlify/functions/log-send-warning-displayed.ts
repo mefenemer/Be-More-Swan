@@ -10,10 +10,11 @@ import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
 import { adminAuditLog } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -55,4 +56,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 200, body: JSON.stringify({ logged: true }) };
-};
+});

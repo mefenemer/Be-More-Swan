@@ -20,6 +20,7 @@ import jwt from 'jsonwebtoken';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, notifications, platformConfig, taskRuns } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -66,7 +67,7 @@ function getAuth(event: any): { userId: number } | null {
     }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const auth = getAuth(event);
     if (!auth) return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized.' }) };
 
@@ -311,4 +312,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 405, body: 'Method Not Allowed' };
-};
+});

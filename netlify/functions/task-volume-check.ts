@@ -11,8 +11,9 @@ import { Handler } from '@netlify/functions';
 import { eq, and, gte, count, isNotNull } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
 import { users, plans, masterPlans, taskRuns, notifications, aiAssistants } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     // Accept both scheduled invocations and a GET call for manual testing
     if (event.httpMethod !== 'GET' && event.httpMethod !== 'POST') {
         return { statusCode: 405, body: 'Method Not Allowed' };
@@ -150,4 +151,4 @@ export const handler: Handler = async (event) => {
         console.error('[task-volume-check]', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Task volume check failed.' }) };
     }
-};
+});

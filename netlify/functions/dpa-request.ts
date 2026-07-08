@@ -15,10 +15,11 @@ import { Handler } from '@netlify/functions';
 import { getDb } from '../../db/client';
 import { dpaRequests } from '../../db/schema';
 import { sendMagicLinkEmail } from '../../src/utils/email';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const LEGAL_EMAIL = process.env.LEGAL_EMAIL || 'hello@bemoreswan.com';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     try {
@@ -95,4 +96,4 @@ export const handler: Handler = async (event) => {
         console.error('[dpa-request]', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Failed to submit DPA request.' }) };
     }
-};
+});

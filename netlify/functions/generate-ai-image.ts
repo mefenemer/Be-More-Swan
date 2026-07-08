@@ -24,6 +24,7 @@ import {
     FalContentPolicyError, FalServiceError, FalError, type AspectRatio, type GeneratedImage,
 } from '../../src/lib/fal-gateway';
 import { holdCredits, settleHold, getBalance, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const PROMPT_MAX = 1000;
 const IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
@@ -56,7 +57,7 @@ function mockImages(aspect: AspectRatio): GeneratedImage[] {
     }));
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -164,7 +165,7 @@ export const handler: Handler = async (event) => {
         console.error('[generate-ai-image] generation error:', message);
         return { statusCode: 502, body: JSON.stringify({ error: 'Image generation failed. Please try again.' }) };
     }
-};
+});
 
 async function handleSelect(db: ReturnType<typeof getDb>, orgId: number, userId: number, jobId?: number, index?: number) {
     if (!jobId || index == null || index < 0) {

@@ -13,6 +13,7 @@ import { getDb } from '../../db/client';
 import { connectionCollisionAttempts, userOrganisations, users, notifications, plans, masterPlans } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { sendEmail } from '../../src/utils/email';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -20,7 +21,7 @@ const json = (statusCode: number, body: unknown) => ({
 
 const LABELS: Record<string, string> = { instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X (Twitter)' };
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method Not Allowed' });
 
     const db = getDb();
@@ -105,4 +106,4 @@ export const handler: Handler = async (event) => {
         .where(eq(connectionCollisionAttempts.id, attempt.id));
 
     return json(200, { ok: true });
-};
+});

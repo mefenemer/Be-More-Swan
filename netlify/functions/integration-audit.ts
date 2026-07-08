@@ -8,10 +8,11 @@ import { eq, and, gte, lte, desc } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
 import { users, userOrganisations, integrationApiCalls, systemConnections } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod !== 'GET') {
         return { statusCode: 405, body: 'Method Not Allowed' };
     }
@@ -130,4 +131,4 @@ export const handler = async (event: HandlerEvent) => {
         console.error('integration-audit error:', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Failed to fetch audit log.' }) };
     }
-};
+});

@@ -25,6 +25,7 @@ import {
     validateImageDataUrl,
     getAdminRecipients,
 } from '../../src/utils/issue-reports';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode,
@@ -32,7 +33,7 @@ const json = (statusCode: number, body: unknown) => ({
     body: JSON.stringify(body),
 });
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const db = getDb();
 
     const session = requireSession(event);
@@ -186,7 +187,7 @@ export const handler: Handler = async (event) => {
         .catch((e) => console.error('[issue-reports] admin notify failed:', e?.message || e));
 
     return json(201, { ok: true, id: created.id });
-};
+});
 
 async function notifyAdmins(
     db: ReturnType<typeof getDb>,

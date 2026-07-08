@@ -13,12 +13,13 @@ import jwt from 'jsonwebtoken';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, userOrganisations, organisations, notifications } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET!;
 const BASE_URL  = process.env.BASE_URL || '';
 const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN || '';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const qs        = event.queryStringParameters || {};
@@ -155,4 +156,4 @@ export const handler: Handler = async (event) => {
         } as Record<string, string>,
         body: '',
     };
-};
+});

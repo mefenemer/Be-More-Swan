@@ -11,11 +11,12 @@ import { aiAssistants, systemConnections, organisations, userOrganisations } fro
 import { getSecret } from '../../src/utils/vault';
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const anthropic  = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL      = 'claude-haiku-4-5-20251001';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -233,4 +234,4 @@ Rules:
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ok: true, draft, metaPushStatus, ...(metaPushError ? { metaPushError } : {}) }),
     };
-};
+});

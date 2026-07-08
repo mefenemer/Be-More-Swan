@@ -12,6 +12,7 @@ import {
 } from '../../db/schema';
 import { getSecret } from '../../src/utils/vault';
 import { recordPostedAssets } from '../../src/utils/pexels';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BATCH = 100;
 // Backoff in minutes: attempt 1→2m, 2→8m, 3→30m
@@ -43,7 +44,7 @@ function userMessage(reason: FailureReason): string {
     return `Publishing failed: ${reason.errorMessage}`;
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const db = getDb();
     const tickStart = Date.now();
     const now = new Date();
@@ -242,7 +243,7 @@ export const handler: Handler = async () => {
     }
 
     return { statusCode: 200, body: JSON.stringify({ processed, succeeded, failed, durationMs }) };
-};
+});
 
 async function handlePublishFailure(
     db: ReturnType<typeof getDb>,

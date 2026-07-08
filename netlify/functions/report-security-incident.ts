@@ -10,11 +10,12 @@ import { eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, securityIncidents, notifications, adminAuditLog } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const BASE_URL  = process.env.BASE_URL || 'https://bemoreswan.com';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -122,4 +123,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ success: true, incidentId: incident.id, severity, isHighRisk }),
     };
-};
+});

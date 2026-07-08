@@ -6,6 +6,7 @@
 // NOTE: This is a technical template. Legal review is required before publication.
 
 import { Handler } from '@netlify/functions';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 export const CURRENT_DPA_VERSION = '1.0';
 export const DPA_EFFECTIVE_DATE  = '2024-05-01';
@@ -140,7 +141,7 @@ const DPA_HTML = `
 </p>
 `;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -160,4 +161,4 @@ export const handler: Handler = async (event) => {
             html: DPA_HTML.trim(),
         }),
     };
-};
+});

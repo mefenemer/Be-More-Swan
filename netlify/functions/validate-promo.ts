@@ -8,6 +8,7 @@
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import Stripe from 'stripe';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret    = process.env.JWT_SECRET!;
 const stripeSecret = process.env.STRIPE_SECRET_KEY!;
@@ -30,7 +31,7 @@ function parseSession(event: any): number | null {
     try { return (jwt.verify(match[1], jwtSecret) as { userId: number }).userId; } catch { return null; }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const userId = parseSession(event);
@@ -122,4 +123,4 @@ export const handler: Handler = async (event) => {
             codeName:            promoCode.code,
         }),
     };
-};
+});

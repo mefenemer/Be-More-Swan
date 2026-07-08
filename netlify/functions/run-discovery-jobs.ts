@@ -12,8 +12,9 @@
 import { Handler } from '@netlify/functions';
 import { dispatchDueRuns } from './dispatch-discovery-runs';
 import { drainDiscoveryJobs } from './process-discovery-jobs';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const secret = process.env.CRON_TRIGGER_SECRET;
@@ -37,4 +38,4 @@ export const handler: Handler = async (event) => {
         console.error('[run-discovery-jobs]', err);
         return { statusCode: 500, body: JSON.stringify({ ok: false, error: err instanceof Error ? err.message : 'error' }) };
     }
-};
+});

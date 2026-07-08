@@ -10,8 +10,9 @@
 import { Handler } from '@netlify/functions';
 import { sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const db = getDb();
 
     const result = await db.execute(sql`
@@ -48,4 +49,4 @@ export const handler: Handler = async () => {
 
     const rolledUp = Array.isArray(result) ? result.length : (result as any)?.rowCount ?? 0;
     return { statusCode: 200, body: JSON.stringify({ rolledUp }) };
-};
+});

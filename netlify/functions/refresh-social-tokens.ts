@@ -19,6 +19,7 @@ import { storeSecret, getSecret } from '../../src/utils/vault';
 import { sendEmail } from '../../src/utils/email';
 import { resolveActionNotifications, CONNECTION_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { systemPauseWorkingAssistants } from '../../src/utils/assistant-lifecycle';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const CONCURRENCY = 25;
 
@@ -39,7 +40,7 @@ type Conn = {
     tokenExpiresAt: Date | null;
 };
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const db = getDb();
 
     const connections = await db
@@ -75,7 +76,7 @@ export const handler: Handler = async () => {
     }
 
     return { statusCode: 200, body: `refreshed up to ${due.length} social token(s)` };
-};
+});
 
 async function refreshConnection(db: ReturnType<typeof getDb>, conn: Conn) {
     if (!conn.vaultRefKey) return;

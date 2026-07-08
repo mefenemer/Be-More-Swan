@@ -7,10 +7,11 @@ import jwt from 'jsonwebtoken';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { billingInformation } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (!['GET', 'POST'].includes(event.httpMethod)) {
         return { statusCode: 405, body: 'Method Not Allowed' };
     }
@@ -120,4 +121,4 @@ export const handler: Handler = async (event) => {
         console.error('[billing-information POST]', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Failed to save billing information.' }) };
     }
-};
+});

@@ -19,6 +19,7 @@ import {
 } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
 import { requireOnboarding } from '../../src/utils/onboarding-guard';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET!;
 const BASE_URL  = process.env.BASE_URL || '';
@@ -29,7 +30,7 @@ function parseSession(event: any): number | null {
     try { return (jwt.verify(match[1], jwtSecret) as { userId: number }).userId; } catch { return null; }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (!['GET', 'POST'].includes(event.httpMethod)) return { statusCode: 405, body: 'Method Not Allowed' };
 
     const userId = parseSession(event);
@@ -186,4 +187,4 @@ export const handler: Handler = async (event) => {
             message: 'Your data export is being prepared. You\'ll receive an email when it\'s ready.',
         }),
     };
-};
+});

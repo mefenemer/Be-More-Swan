@@ -18,6 +18,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants, auditLogs, notifications, scheduledPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 // Statuses that can be rescheduled (all non-terminal, non-publishing states).
 const RESCHEDULABLE = ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled'];
@@ -53,7 +54,7 @@ async function parseInstruction(instruction: string, now: Date, timezone: string
     return isNaN(parsed.getTime()) ? null : parsed;
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -207,4 +208,4 @@ export const handler: Handler = async (event) => {
             conflictWarning,
         }),
     };
-};
+});

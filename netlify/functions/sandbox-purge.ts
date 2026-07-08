@@ -25,6 +25,7 @@ import { resolveEnvironment, runWithEnvironment, currentEnv } from '../../src/ut
 import { getStripe, stripeKeyAvailable } from '../../src/utils/stripe';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { runSeed } from '../../seed/run-seed';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const CONFIRM_PHRASE = 'PURGE SANDBOX';
@@ -75,7 +76,7 @@ async function truncateAllTables(): Promise<number> {
     return tables.length;
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'POST required.' }) };
     }
@@ -133,4 +134,4 @@ export const handler: Handler = async (event) => {
             body: JSON.stringify({ ok: true, truncatedTables, stripe, reseed }),
         };
     });
-};
+});

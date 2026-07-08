@@ -27,6 +27,7 @@ import { getDb } from '../../db/client';
 import {
     users, taskRuns, pendingActions, actionPolicies, notifications,
 } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -54,7 +55,7 @@ function classifyTier(actionType: string, policyMinTier: number, integrationMap?
     return Math.max(effectiveTier, policyMinTier);
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -189,4 +190,4 @@ export const handler: Handler = async (event) => {
             reason: `Tier ${tier} action requires Human-in-the-Loop approval before execution.`,
         }),
     };
-};
+});

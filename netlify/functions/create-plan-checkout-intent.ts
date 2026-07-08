@@ -11,6 +11,7 @@ import { getDb } from '../../db/client';
 import { users, masterPlans, planPrices } from '../../db/schema';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const stripeSecret = process.env.STRIPE_SECRET_KEY!;
 
@@ -18,7 +19,7 @@ const stripe = new Stripe(stripeSecret, { apiVersion: '2026-05-27.dahlia' });
 
 const SUPPORTED_CURRENCIES = ['GBP', 'USD', 'EUR', 'AUD', 'CAD'];
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -136,4 +137,4 @@ export const handler: Handler = async (event) => {
         console.error('[create-plan-checkout-intent] unhandled', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal error creating checkout session' }) };
     }
-};
+});

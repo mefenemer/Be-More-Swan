@@ -5,10 +5,11 @@ import { eq, and, count } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
 import { masterAssistants, taskRuns, waitlist, notifications } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     if (!jwtSecret) {
         return { statusCode: 500, body: JSON.stringify({ error: 'Server configuration error.' }) };
     }
@@ -170,4 +171,4 @@ export const handler = async (event: HandlerEvent) => {
     }
 
     return { statusCode: 405, body: 'Method Not Allowed' };
-};
+});

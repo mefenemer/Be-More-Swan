@@ -12,6 +12,7 @@ import { eq, and, lt, lte, gte, isNotNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, plans, aiAssistants, notifications, processedWebhookEvents } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BASE_URL = process.env.BASE_URL || '';
 
@@ -145,7 +146,7 @@ async function runTrialExpiry() {
     }
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     try {
         await runTrialExpiry();
         return { statusCode: 200 };
@@ -153,4 +154,4 @@ export const handler: Handler = async () => {
         console.error('[trial-expiry]', err);
         return { statusCode: 500 };
     }
-};
+});

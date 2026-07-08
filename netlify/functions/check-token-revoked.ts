@@ -10,8 +10,9 @@ import { Handler } from '@netlify/functions';
 import { eq, and, or, isNull, gt } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { jwtBlocklist } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') {
         return { statusCode: 405, body: 'Method Not Allowed' };
     }
@@ -43,4 +44,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
         body: JSON.stringify({ revoked: !!entry }),
     };
-};
+});

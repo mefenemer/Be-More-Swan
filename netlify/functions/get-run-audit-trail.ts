@@ -8,6 +8,7 @@ import jwt from 'jsonwebtoken';
 import { and, asc, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, taskRuns, agentRunEvents, agentRunSummaries, userOrganisations } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -25,7 +26,7 @@ function toCsv(events: any[]): string {
     return [headers.join(','), ...rows].join('\n');
 }
 
-export const handler: Handler = async (event): Promise<HandlerResponse> => {
+export default withLambda(async (event): Promise<HandlerResponse> => {
     if (event.httpMethod !== 'GET') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -93,4 +94,4 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ runId, events, summary: summary ?? null, total: events.length }),
     };
-};
+});

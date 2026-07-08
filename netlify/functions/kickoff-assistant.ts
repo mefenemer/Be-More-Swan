@@ -13,6 +13,7 @@ import { getDb, withTenant } from '../../db/client';
 import { aiAssistants, systemConnections, notifications } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { transitionAssistantStatus, provisioningBlockInfo } from '../../src/utils/assistant-lifecycle';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const CONN_LABELS: Record<string, string> = { x: 'X (Twitter)', instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn' };
 
@@ -20,7 +21,7 @@ const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 });
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method Not Allowed' });
 
     const idParam = event.queryStringParameters?.id;
@@ -126,4 +127,4 @@ export const handler: Handler = async (event) => {
     }
 
     return json(200, { ok: true, from: result.from, lifecycleStatus: 'working' });
-};
+});

@@ -14,6 +14,7 @@ import jwt from 'jsonwebtoken';
 import { lt } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { waitlist, waitlistReferrals, users, userOrganisations } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const BASE_URL = process.env.BASE_URL || 'https://bemoreswan.com';
@@ -24,7 +25,7 @@ const MILESTONES = [
     { count: 5, reward: 'First month free (coupon emailed automatically)' },
 ];
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const qs = event.queryStringParameters || {};
@@ -158,4 +159,4 @@ export const handler = async (event: HandlerEvent) => {
         console.error('waitlist-status error:', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Failed to fetch waitlist status.' }) };
     }
-};
+});

@@ -17,6 +17,7 @@ import { getDb, withTenant } from '../../db/client';
 import { aiAssistants } from '../../db/schema';
 import { getSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 const VALID_NOTIF_PREFS = new Set(['immediate', 'daily_digest', 'red_urgency_only']);
@@ -34,7 +35,7 @@ function getUserId(event: any): number | null {
     }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'PATCH') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -96,4 +97,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ updated: true, ...updates }),
     };
-};
+});

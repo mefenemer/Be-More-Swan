@@ -12,6 +12,7 @@ import { eq, and, or, lte, isNotNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, systemConnections, notifications, processedWebhookEvents } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BASE_URL = process.env.BASE_URL || '';
 
@@ -116,7 +117,7 @@ async function runIntegrationHealthCheck() {
     }
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     try {
         await runIntegrationHealthCheck();
         return { statusCode: 200 };
@@ -124,4 +125,4 @@ export const handler: Handler = async () => {
         console.error('[integration-health-check]', err);
         return { statusCode: 500 };
     }
-};
+});

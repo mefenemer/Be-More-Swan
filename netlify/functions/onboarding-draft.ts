@@ -16,6 +16,7 @@ import { getDb } from '../../db/client';
 import { onboardingDrafts } from '../../db/schema';
 import { getSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode,
@@ -23,7 +24,7 @@ const json = (statusCode: number, body: unknown) => ({
     body: JSON.stringify(body),
 });
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const session = getSession(event);
     if (!session) return json(401, { error: 'Unauthorized.' });
     const userId = session.userId;
@@ -111,4 +112,4 @@ export const handler: Handler = async (event) => {
         console.error('Onboarding Draft API Error:', error);
         return json(500, { error: 'Internal Server Error' });
     }
-};
+});

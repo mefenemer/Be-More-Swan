@@ -18,6 +18,7 @@ import { getDb } from '../../db/client';
 import { users, userOrganisations, workspaceAssets, storageUsage, plans, masterPlans } from '../../db/schema';
 import { buildTenantKey } from '../../src/utils/storage-keys';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET  = process.env.JWT_SECRET;
 const R2_ENDPOINT = process.env.R2_ENDPOINT;           // https://<accountId>.r2.cloudflarestorage.com
@@ -50,7 +51,7 @@ function getR2Client(): S3Client {
     });
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
     if (!JWT_SECRET) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
 
@@ -137,4 +138,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ uploadUrl, assetId: asset.id }),
     };
-};
+});

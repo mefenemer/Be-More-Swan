@@ -9,10 +9,11 @@ import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
 import { users, systemConnections, userOrganisations } from '../../db/schema';
 import { deleteSecret, deleteSecretsByPrefix } from '../../src/utils/vault';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: 'Method Not Allowed' };
     }
@@ -158,4 +159,4 @@ export const handler = async (event: HandlerEvent) => {
     }
 
     return { statusCode: 400, body: JSON.stringify({ error: 'scope must be "single" or "org".' }) };
-};
+});

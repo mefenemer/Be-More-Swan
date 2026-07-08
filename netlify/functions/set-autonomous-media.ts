@@ -16,10 +16,11 @@ import { aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { normalizeMediaSources } from '../../src/utils/media-sources';
 import { monthlyAllowance } from '../../src/utils/ai-credits';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const MAX_CAP = 100000;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'PATCH') return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
 
     const db = getDb();
@@ -82,4 +83,4 @@ export const handler: Handler = async (event) => {
             mediaSources: normalizeMediaSources(updated.mediaSources),
         }),
     };
-};
+});

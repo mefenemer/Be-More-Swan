@@ -15,6 +15,7 @@ import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { resolveActionNotifications, CONNECTION_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret   = process.env.JWT_SECRET!;
 const metaAppId   = process.env.META_APP_ID!;
@@ -40,7 +41,7 @@ function validateStateCsrf(state: Record<string, string>, stored: string): boole
     return createHmac('sha256', jwtSecret).update(state.csrf ?? '').digest('hex') === stored;
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const action = event.queryStringParameters?.action;
 
     const baseUrl = resolveBaseUrl(event.headers);
@@ -246,4 +247,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 400, body: 'Unknown action' };
-};
+});

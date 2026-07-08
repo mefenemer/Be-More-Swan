@@ -8,11 +8,12 @@ import { logAuditEvent } from '../../src/utils/audit';
 import { checkRateLimit } from '../../src/utils/rate-limit';
 import { checkEarlySupportTicket } from '../../src/utils/churn';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
 const FROM_EMAIL = process.env.FROM_EMAIL || 'support@bemoreswan.com';
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     const db = getDb();
     // Authenticate + resolve the active organisation (verifies membership; never trusts the claim alone).
     const ctx = await requireTenant(event, db);
@@ -156,4 +157,4 @@ export const handler = async (event: HandlerEvent) => {
         console.error('Support Tickets API Error:', error);
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal Server Error' }) };
     }
-};
+});

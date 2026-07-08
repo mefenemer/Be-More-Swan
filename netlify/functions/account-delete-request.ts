@@ -13,6 +13,7 @@ import { getDb } from '../../db/client';
 import { users, plans } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
 import { checkImpersonationBlock } from '../../src/utils/impersonation-guard';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET!;
 const stripe    = process.env.STRIPE_SECRET_KEY
@@ -26,7 +27,7 @@ function parseSession(event: any): number | null {
     try { return (jwt.verify(match[1], jwtSecret) as { userId: number }).userId; } catch { return null; }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     // US-ADM-1.2.1: Block account deletion during impersonation sessions
@@ -112,4 +113,4 @@ export const handler: Handler = async (event) => {
             message: 'Your deletion request has been received. Check your email for a cancellation link — your account will be permanently deleted in 24 hours.',
         }),
     };
-};
+});

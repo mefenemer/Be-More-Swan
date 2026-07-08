@@ -14,8 +14,9 @@ import { getDb } from '../../db/client';
 import { aiAssistants, masterAssistants } from '../../db/schema';
 import { enqueueScheduleGapFill } from '../../src/utils/schedule-gap-fill';
 import { SMM_ROLE_KEYS } from '../../src/constants/roles';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     // Allow both scheduled invocations and manual POST for testing
     if (event.httpMethod !== 'POST' && !(event as any).schedule) {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
@@ -62,4 +63,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ran: true, assistantsChecked: smmAssistants.length, jobsEnqueued, skipped }),
     };
-};
+});

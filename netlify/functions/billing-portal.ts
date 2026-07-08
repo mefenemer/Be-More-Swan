@@ -9,11 +9,12 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users } from '../../db/schema';
 import { resolveBaseUrl } from '../../src/utils/base-url';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret    = process.env.JWT_SECRET;
 const stripeSecret = process.env.STRIPE_SECRET_KEY;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
     if (!jwtSecret)    return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
     if (!stripeSecret) return { statusCode: 503, body: JSON.stringify({ error: 'Stripe is not configured.' }) };
@@ -75,4 +76,4 @@ export const handler: Handler = async (event) => {
         console.error('[billing-portal]', err);
         return { statusCode: 500, body: JSON.stringify({ error: err.message || 'Failed to create portal session.' }) };
     }
-};
+});

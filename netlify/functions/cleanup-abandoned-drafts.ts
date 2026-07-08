@@ -16,13 +16,14 @@ import { and, eq, gte, isNull, lt } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { auditLogs, onboardingDrafts, users } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BASE_URL = process.env.BASE_URL || 'https://bemoreswan.com';
 const NUDGE_DAYS = 23;
 const DELETE_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const db = getDb();
     const now = Date.now();
     const nudgeCutoff = new Date(now - NUDGE_DAYS * DAY_MS);   // updatedAt older than this → due a nudge
@@ -108,4 +109,4 @@ export const handler: Handler = async () => {
         console.error('[cleanup-abandoned-drafts] error:', e);
         return { statusCode: 500, body: JSON.stringify({ error: 'Cleanup failed' }) };
     }
-};
+});

@@ -14,13 +14,14 @@ import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 function toneOf(onboardingContext: unknown): string {
     const ctx = (onboardingContext as Record<string, unknown> | null) ?? {};
     return typeof ctx.tone_of_voice === 'string' ? ctx.tone_of_voice : '';
 }
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
@@ -61,4 +62,4 @@ export const handler = async (event: HandlerEvent) => {
     }
 
     return { statusCode: 405, body: 'Method Not Allowed' };
-};
+});

@@ -10,6 +10,7 @@ import jwt from 'jsonwebtoken';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, plans, cancellationReasons, notifications } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret    = process.env.JWT_SECRET!;
 const stripe       = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' });
@@ -32,7 +33,7 @@ function parseSession(event: any): number | null {
     } catch { return null; }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const userId = parseSession(event);
@@ -111,4 +112,4 @@ export const handler: Handler = async (event) => {
     });
 
     return { statusCode: 200, body: JSON.stringify({ success: true }) };
-};
+});

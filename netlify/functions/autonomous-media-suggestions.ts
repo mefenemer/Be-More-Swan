@@ -21,6 +21,7 @@ import { FalContentPolicyError } from '../../src/lib/fal-gateway';
 import { resolveMediaForPost } from '../../src/utils/media-resolver';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { SMM_ROLE_KEYS } from '../../src/constants/roles';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const PLATFORM = 'instagram';        // only Instagram has a live publisher today
 const ASPECT = '4:5' as const;       // Instagram feed-friendly
@@ -58,7 +59,7 @@ function firstGapDay(coveredDates: Set<string>, horizonDays: number, now: Date):
     return null;
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST' && !(event as any).schedule) {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -216,4 +217,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ran: true, assistantsChecked: assistants.length, drafted, skippedNoGap, failed, exhausted }),
     };
-};
+});

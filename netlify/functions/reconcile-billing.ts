@@ -20,6 +20,7 @@ import {
     billingReconciliationLog, usageCounters, taskRuns,
 } from '../../db/schema';
 import { getPeriodStart } from '../../src/utils/atomic-cap-check';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 // Same Stripe price → tier mapping as verify.ts
 const PRICE_TO_TIER: Record<string, string> = {
@@ -297,7 +298,7 @@ async function runReconciliation(): Promise<void> {
     }
 }
 
-export const handler = async () => {
+export default withLambda(async () => {
     await runReconciliation();
     return { statusCode: 200 };
-};
+});

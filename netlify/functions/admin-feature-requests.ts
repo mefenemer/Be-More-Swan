@@ -39,6 +39,7 @@ import {
     broadcastFeatureStatusChange,
     type FeatureStatus,
 } from '../../src/utils/feature-requests';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -61,7 +62,7 @@ async function requireAdmin(event: any): Promise<{ id: number; role: string } | 
     return { id: userId, role: row.role };
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const admin = await requireAdmin(event);
     if (!admin) return json(403, { error: 'Access denied. Admin role required.' });
 
@@ -335,4 +336,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 405, body: 'Method Not Allowed' };
-};
+});

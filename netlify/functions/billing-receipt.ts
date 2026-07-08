@@ -8,10 +8,11 @@ import jwt from 'jsonwebtoken';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, payments, plans, organisations, userOrganisations } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
     if (!jwtSecret) return { statusCode: 500, body: 'Server misconfigured.' };
 
@@ -185,7 +186,7 @@ export const handler: Handler = async (event) => {
         console.error('[billing-receipt]', err);
         return { statusCode: 500, body: 'Failed to generate receipt.' };
     }
-};
+});
 
 function _cap(s: string) {
     return s ? s.charAt(0).toUpperCase() + s.slice(1) : '';

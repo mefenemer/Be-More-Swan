@@ -5,11 +5,12 @@ import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
 import { users, userProfiles, userOrganisations } from '../../db/schema';
 import { logAuditEvent } from '../../src/utils/audit';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
 // Removed the unused 'context' parameter to satisfy TS6133
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     if (!jwtSecret) {
         console.error("CRITICAL: JWT_SECRET is missing.");
         return { statusCode: 500, body: JSON.stringify({ error: 'Server configuration error.' }) };
@@ -208,4 +209,4 @@ export const handler = async (event: HandlerEvent) => {
     }
 
     return { statusCode: 405, body: 'Method Not Allowed' };
-};
+});

@@ -28,6 +28,7 @@ import {
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { sendEmail } from '../../src/utils/email';
 import { purgeUserAssets } from '../../src/utils/gdpr-asset-purge';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret    = process.env.JWT_SECRET;
 const stripe       = process.env.STRIPE_SECRET_KEY
@@ -35,7 +36,7 @@ const stripe       = process.env.STRIPE_SECRET_KEY
     : null;
 const BASE_URL     = process.env.BASE_URL || 'https://bemoreswan.com';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     // Epic: Superadmin Environment Management — live-only admin action. Reject sandbox
     // requests so this can never run while the operator believes they are in sandbox
     // (prevents production bleed). See docs/SANDBOX-ENVIRONMENT.md.
@@ -297,4 +298,4 @@ export const handler: Handler = async (event) => {
         console.error('[admin-gdpr-erase] Error:', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Erasure failed: ' + err.message }) };
     }
-};
+});

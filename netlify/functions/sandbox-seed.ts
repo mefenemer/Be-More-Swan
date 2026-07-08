@@ -20,6 +20,7 @@ import { users } from '../../db/schema';
 import { resolveEnvironment, runWithEnvironment } from '../../src/utils/env-context';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { runSeed } from '../../seed/run-seed';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -34,7 +35,7 @@ async function requireSuperAdmin(event: any): Promise<number | null> {
     return row?.role === 'super_admin' ? userId : null;
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'POST required.' }) };
     }
@@ -72,4 +73,4 @@ export const handler: Handler = async (event) => {
             return { statusCode: 422, body: JSON.stringify({ error: err?.message || 'Seed failed.' }) };
         }
     });
-};
+});

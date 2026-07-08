@@ -13,6 +13,7 @@ import { aiAssistants, scheduledPosts } from '../../db/schema';
 import { getSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
 import { requireOnboarding } from '../../src/utils/onboarding-guard';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 
@@ -38,7 +39,7 @@ function urgencyBadge(publishDate: Date, now: Date): 'green' | 'amber' | 'red' {
     return 'green';
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -145,4 +146,4 @@ export const handler: Handler = async (event) => {
             },
         }),
     };
-};
+});

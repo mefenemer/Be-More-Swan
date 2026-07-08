@@ -12,8 +12,9 @@ import { getDb, withTenant } from '../../db/client';
 import { aiAssistants, onboardingDrafts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { provisioningBlockInfo } from '../../src/utils/assistant-lifecycle';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -77,4 +78,4 @@ export const handler: Handler = async (event) => {
         console.error('get-in-progress-assistants error:', e);
         return { statusCode: 500, body: JSON.stringify({ error: 'Database error' }) };
     }
-};
+});

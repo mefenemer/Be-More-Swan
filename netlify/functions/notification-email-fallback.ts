@@ -14,6 +14,7 @@ import { getDb } from '../../db/client';
 import { notifications, users } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
 import { EMAIL_FALLBACK_TYPES } from '../../src/utils/notification-actions';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BASE_URL = (process.env.BASE_URL || 'https://bemoreswan.com').replace(/\/$/, '');
 const UNSEEN_FOR_MS = 60 * 60 * 1000; // AC4.2: delivered more than 1 hour ago
@@ -69,7 +70,7 @@ async function runFallbackSweep() {
     return { due: due.length, sent };
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     try {
         const result = await runFallbackSweep();
         console.log(`[notification-email-fallback] swept ${result.due} due, emailed ${result.sent}.`);
@@ -78,4 +79,4 @@ export const handler: Handler = async () => {
         console.error('[notification-email-fallback]', err);
         return { statusCode: 500 };
     }
-};
+});

@@ -13,6 +13,7 @@ import {
     agentRunEvents, taskRuns, aiAssistants, biasIncidents, biasSamplingReports, notifications, users,
 } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 // Simple PII tokeniser — replace obvious patterns before analysis
 function stripPii(text: string): string {
@@ -177,4 +178,4 @@ const handler = async () => {
     return { statusCode: 200 };
 };
 
-export { handler };
+export default withLambda(handler);

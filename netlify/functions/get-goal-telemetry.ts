@@ -11,8 +11,9 @@ import { getDb } from '../../db/client';
 import { goals, goalTelemetry } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { getGoalMetric } from '../../src/config/goal-metrics';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
 
     const db = getDb();
@@ -61,4 +62,4 @@ export const handler: Handler = async (event) => {
             trajectory,
         }),
     };
-};
+});

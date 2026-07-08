@@ -10,6 +10,7 @@ import { eq, and, desc, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, contentAssets, userOrganisations, scheduledPosts } from '../../db/schema';
 import { resolveAssetDisplayUrl } from '../../src/utils/social-publish';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -192,7 +193,7 @@ function auth(event: any): number | null {
     }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const userId = auth(event);
     if (!userId) return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized.' }) };
 
@@ -396,4 +397,4 @@ export const handler: Handler = async (event) => {
         console.error('Content Assets Error:', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal Server Error' }) };
     }
-};
+});

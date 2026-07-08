@@ -11,12 +11,13 @@ import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
 import { getSession } from '../../src/utils/session';
 import { requireOrgMembership } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const BASE_URL = process.env.BASE_URL || '';
 const COOKIE_DOMAIN = process.env.COOKIE_DOMAIN || '';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
 
@@ -60,4 +61,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json', 'Set-Cookie': cookieOpts } as Record<string, string>,
         body: JSON.stringify({ success: true, activeOrganisationId: organisationId, role: membership.role }),
     };
-};
+});

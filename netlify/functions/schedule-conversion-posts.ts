@@ -18,12 +18,13 @@ import { getDb } from '../../db/client';
 import { aiAssistants, masterAssistants, aiBlueprints, contentGenerationJobs, notifications } from '../../db/schema';
 import { postsPerWeekFor } from '../../src/config/posting-cadence';
 import { SMM_ROLE_KEYS } from '../../src/constants/roles';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 // At most one scheduled conversion post per assistant per this many days. Tunable; a conversion
 // post is a direct ask, so it should stay infrequent relative to value-first content.
 const CONVERSION_INTERVAL_DAYS = 7;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     // Allow scheduled invocations and manual POST (for testing), matching draft-horizon-fill.
     if (event.httpMethod !== 'POST' && !(event as { schedule?: unknown }).schedule) {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
@@ -117,4 +118,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ran: true, assistantsChecked: smmAssistants.length, conversionJobsEnqueued: enqueued, skipped }),
     };
-};
+});

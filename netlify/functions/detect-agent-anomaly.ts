@@ -19,6 +19,7 @@ import {
     users, taskRuns, aiAssistants, agentAnomalies,
     agentAnomalyThresholds, agentRunSummaries, notifications,
 } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -73,7 +74,7 @@ async function detectRateAnomaly(
     return currentRunToolCallCount > rollingAvg * multiplier;
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -194,4 +195,4 @@ export const handler: Handler = async (event) => {
             runStatus: newStatus,
         }),
     };
-};
+});

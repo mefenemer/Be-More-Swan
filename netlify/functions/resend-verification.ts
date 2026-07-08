@@ -5,8 +5,9 @@ import { getDb, withUpdatedAt } from '../../db/client';
 import { users } from '../../db/schema';
 import { sendMagicLinkEmail } from '../../src/utils/email';
 import { resolveBaseUrl } from '../../src/utils/base-url';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: 'Method Not Allowed' };
     }
@@ -83,4 +84,4 @@ export const handler: Handler = async (event) => {
         console.error('Resend Error:', error);
         return { statusCode: 500, body: JSON.stringify({ error: 'Failed to resend verification email.' }) };
     }
-};
+});

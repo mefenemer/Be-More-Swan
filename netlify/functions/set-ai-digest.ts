@@ -9,10 +9,11 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { organisations } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const VALID = ['off', 'daily', 'weekly'];
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'PATCH') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -30,4 +31,4 @@ export const handler: Handler = async (event) => {
 
     await db.update(organisations).set({ aiDigestFrequency: frequency }).where(eq(organisations.id, ctx.organisationId));
     return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ frequency }) };
-};
+});

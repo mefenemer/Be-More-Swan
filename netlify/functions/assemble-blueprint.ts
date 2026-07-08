@@ -16,13 +16,14 @@ import { eq, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiBlueprints } from '../../db/schema';
 import { assembleBlueprint, MissingField } from '../../src/utils/blueprint';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const ADMIN_ROLES = ['admin', 'super_admin', 'platform_admin', 'billing_admin', 'support_agent'];
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
 
     const match = (event.headers.cookie || '').match(/aura_session=([^;]+)/);
@@ -93,4 +94,4 @@ export const handler: Handler = async (event) => {
         console.error('[assemble-blueprint]', err);
         return { statusCode: 500, body: JSON.stringify({ error: String(err) }) };
     }
-};
+});

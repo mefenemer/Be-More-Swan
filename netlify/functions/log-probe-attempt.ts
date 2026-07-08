@@ -13,11 +13,12 @@ import jwt from 'jsonwebtoken';
 import { eq, and, gte, count, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { promptProbeAttempts, users, notifications } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const PROBE_RATE_THRESHOLD = 3;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
@@ -90,4 +91,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 200, body: JSON.stringify({ logged: true }) };
-};
+});

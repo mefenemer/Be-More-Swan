@@ -3,10 +3,11 @@ import jwt from 'jsonwebtoken';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, workspaceAssets, userProfiles, userOrganisations } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const cookieHeader = event.headers.cookie || '';
@@ -74,4 +75,4 @@ export const handler: Handler = async (event) => {
         statusCode: 200,
         body: JSON.stringify({ assistantRules, brandProfile }),
     };
-};
+});

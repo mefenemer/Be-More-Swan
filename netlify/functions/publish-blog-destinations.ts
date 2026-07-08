@@ -14,6 +14,7 @@ import { logAuditEvent } from '../../src/utils/audit';
 import { getBlogAdapter, isBlogDestinationId } from '../../src/utils/blog-destinations';
 import type { BlogDestinationId, BlogDestinationPost } from '../../src/utils/blog-destinations';
 import { resolveDestinationCreds } from '../../src/utils/blog-destinations/store';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({ statusCode, body: JSON.stringify(body) });
 
@@ -25,7 +26,7 @@ interface TargetResult {
     at?: string;
 }
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
@@ -110,4 +111,4 @@ export const handler = async (event: HandlerEvent) => {
     });
 
     return json(200, { results });
-};
+});

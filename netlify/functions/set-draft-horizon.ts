@@ -17,6 +17,7 @@ import { aiAssistants, notifications, scheduledPosts } from '../../db/schema';
 import { getSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
 import { enqueueScheduleGapFill } from '../../src/utils/schedule-gap-fill';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 const MIN_HORIZON = 1;
@@ -34,7 +35,7 @@ function getUserId(event: any): number | null {
     }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'PATCH') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -167,4 +168,4 @@ export const handler: Handler = async (event) => {
             gapFillEnqueued,
         }),
     };
-};
+});

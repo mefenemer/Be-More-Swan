@@ -42,6 +42,7 @@ import { sendMagicLinkEmail } from '../../src/utils/email';
 import { isAdminRole, hasPermission, requirePermission } from '../../src/utils/rbac';
 import { checkImpersonationBlock } from '../../src/utils/impersonation-guard';
 import { SPECIAL_CATEGORY_CLAUSE } from './get-dpa-content';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
 const FROM_EMAIL = process.env.FROM_EMAIL || 'hello@bemoreswan.com';
@@ -93,7 +94,7 @@ async function audit(db: any, adminId: number, action: string, resource: string,
     } catch { /* non-blocking */ }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const adminId = await requireAdmin(event);
     if (!adminId) {
         return { statusCode: 403, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Access denied. Admin role required.' }) };
@@ -2438,4 +2439,4 @@ export const handler: Handler = async (event) => {
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal Server Error' }) };
     }
     });
-};
+});

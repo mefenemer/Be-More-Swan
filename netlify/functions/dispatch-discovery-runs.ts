@@ -9,6 +9,7 @@ import { randomUUID } from 'crypto';
 import { and, eq, lte, or, isNull, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { discoveryCampaigns, discoverySchedules, discoveryJobs } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -78,7 +79,7 @@ export async function dispatchDueRuns(): Promise<number> {
     return enqueued;
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const enqueued = await dispatchDueRuns();
     return { statusCode: 200, body: enqueued ? `enqueued ${enqueued} discovery runs` : 'nothing due' };
-};
+});

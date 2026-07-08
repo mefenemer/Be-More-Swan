@@ -12,11 +12,12 @@ import { Handler } from '@netlify/functions';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { taskRuns } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const WORKER_SECRET  = process.env.WORKER_SECRET;
 const LEASE_MINUTES  = 5;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -57,4 +58,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ renewed: true, leaseExpiresAt: leaseExpiresAt.toISOString() }),
     };
-};
+});

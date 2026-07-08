@@ -8,10 +8,11 @@ import { lt } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { vaultSecrets } from '../../db/schema';
 import { getSecret } from '../../src/utils/vault';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
     if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
 
@@ -62,4 +63,4 @@ export const handler: Handler = async (event) => {
             failures,
         }),
     };
-};
+});

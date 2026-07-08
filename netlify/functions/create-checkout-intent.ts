@@ -22,6 +22,7 @@ import {
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { formatPlatformStrategyBrief } from '../../src/utils/platform-strategy-brief';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const connectionString = process.env.NETLIFY_DATABASE_URL;
 if (!connectionString) throw new Error('CRITICAL: NETLIFY_DATABASE_URL is missing.');
@@ -80,7 +81,7 @@ All requests requiring your sign-off are managed exclusively through your Be Mor
 `.trim();
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
   try {
@@ -264,4 +265,4 @@ export const handler: Handler = async (event) => {
     const errMsg = error.message?.includes('Blueprint') ? error.message : 'Failed to initialise checkout.';
     return { statusCode: 500, body: JSON.stringify({ error: errMsg }) };
   }
-};
+});

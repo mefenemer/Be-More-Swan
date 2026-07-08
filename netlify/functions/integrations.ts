@@ -7,10 +7,11 @@ import { storeSecret, deleteSecret, buildRefKey } from '../../src/utils/vault';
 import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     // 1. Session Authentication
     const cookieHeader = event.headers.cookie || '';
     const sessionToken = cookieHeader.match(/aura_session=([^;]+)/)?.[1];
@@ -321,4 +322,4 @@ export const handler: Handler = async (event) => {
         console.error('Integrations API Error:', error);
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal Server Error' }) };
     }
-};
+});

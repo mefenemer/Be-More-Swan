@@ -51,6 +51,7 @@ import {
     providerLabel,
     SALESFORCE_SYNTHETIC_TTL_SEC,
 } from '../../src/utils/workspace-integrations';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const CSRF_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -137,7 +138,7 @@ function resolveRoute(event: HandlerEvent): { provider: string | null; action: s
     return { provider, action };
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const baseUrl = resolveBaseUrl(event.headers);
     if (!baseUrl) return json(500, { error: 'Server misconfigured.' });
 
@@ -837,4 +838,4 @@ export const handler: Handler = async (event) => {
     }
 
     return json(400, { error: `Unknown action for ${providerLabel(provider)} integration.` });
-};
+});

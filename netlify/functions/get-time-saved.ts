@@ -11,6 +11,7 @@ import { leads, scheduledPosts, taskRuns, aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
 import { evaluateMilestones } from '../../src/utils/gamification';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -19,7 +20,7 @@ const json = (statusCode: number, body: unknown) => ({
 const PLATFORM_NAMES: Record<string, string> = { instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X' };
 const platformName = (p?: string | null): string => (p && PLATFORM_NAMES[p.toLowerCase()]) || p || 'social';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return json(405, { error: 'Method Not Allowed' });
 
     const db = getDb();
@@ -107,6 +108,6 @@ export const handler: Handler = async (event) => {
         tasks,
         taskCount,
     });
-};
+});
 
 function round1(n: number): number { return Math.round(n * 10) / 10; }

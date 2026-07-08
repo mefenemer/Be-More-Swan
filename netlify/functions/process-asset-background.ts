@@ -7,6 +7,7 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getDb } from '../../db/client';
 import { workspaceAssets } from '../../db/schema';
 import { logAuditEvent } from '../../src/utils/audit';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const R2_ENDPOINT          = process.env.R2_ENDPOINT;
 const R2_ACCESS_KEY_ID     = process.env.R2_ACCESS_KEY_ID;
@@ -46,7 +47,7 @@ function _stripPromptInjection(text: string): string {
         .trim();
 }
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     try {
         const body = JSON.parse(event.body || '{}');
         const assetId = body.assetId;
@@ -188,4 +189,4 @@ export const handler = async (event: HandlerEvent) => {
         console.error('Background Worker Critical Error:', error);
         return { statusCode: 500, body: 'Internal Server Error' };
     }
-};
+});

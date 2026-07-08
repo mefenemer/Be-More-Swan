@@ -9,6 +9,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { organisations, systemConnections, aiAssistants, notifications, onboardingDrafts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -31,7 +32,7 @@ async function clearOnboardingNudges(db: ReturnType<typeof getDb>, userId: numbe
     }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return json(405, { error: 'Method Not Allowed' });
 
     const db = getDb();
@@ -119,4 +120,4 @@ export const handler: Handler = async (event) => {
     }
 
     return json(200, { onboardingCompleted: coreAllDone, allDone: coreAllDone, justCompleted, steps });
-};
+});

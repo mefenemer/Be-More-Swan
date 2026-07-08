@@ -10,12 +10,13 @@ import { getDb } from '../../db/client';
 import { tosAcceptances, users } from '../../db/schema';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { retryBlockedAssistants } from '../../src/utils/retry-provisioning';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 export const CURRENT_TOS_VERSION = '2.0';
 
 const jwtSecret = process.env.JWT_SECRET;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
@@ -58,4 +59,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 200, body: JSON.stringify({ accepted: true, version }) };
-};
+});

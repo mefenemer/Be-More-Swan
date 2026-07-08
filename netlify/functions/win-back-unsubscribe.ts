@@ -9,8 +9,9 @@
 import { Handler } from '@netlify/functions';
 import { getDb } from '../../db/client';
 import { winBackOptOuts } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const token = event.queryStringParameters?.token;
@@ -49,4 +50,4 @@ h1{font-size:1.25rem;margin-bottom:.5rem}p{color:#6b7280;font-size:.9rem}a{color
     } catch (err) {
         return { statusCode: 400, headers: { 'Content-Type': 'text/html' }, body: '<p>Invalid or expired unsubscribe link.</p>' };
     }
-};
+});

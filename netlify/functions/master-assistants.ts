@@ -17,6 +17,7 @@ import { eq, and, ilike, or, sql } from 'drizzle-orm';
 import { Resend } from 'resend';
 import { getDb } from '../../db/client';
 import { masterAssistants, waitlist, userProfiles, notifications, organisations, userOrganisations } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
 const FROM_EMAIL = process.env.FROM_EMAIL || 'hello@bemoreswan.com';
@@ -206,7 +207,7 @@ async function handlePatch(event: any): Promise<any> {
     };
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod === 'PATCH') return handlePatch(event);
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
@@ -302,4 +303,4 @@ export const handler: Handler = async (event) => {
         console.error('master-assistants error:', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Failed to load catalog.' }) };
     }
-};
+});

@@ -15,10 +15,11 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { orchestrationLinks, orchestrationRuns, aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const SOURCE_EVENTS = ['drafts_a_post', 'publishes_a_post', 'completes_a_task'];
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
@@ -166,4 +167,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
-};
+});

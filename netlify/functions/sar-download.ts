@@ -10,8 +10,9 @@ import { Handler, HandlerResponse } from '@netlify/functions';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { dataExportRequests } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event): Promise<HandlerResponse> => {
+export default withLambda(async (event): Promise<HandlerResponse> => {
     if (event.httpMethod !== 'GET') {
         return { statusCode: 405, body: 'Method Not Allowed' };
     }
@@ -70,4 +71,4 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
         },
         body: row.downloadUrl || '{}',  // downloadUrl stores the JSON payload
     };
-};
+});

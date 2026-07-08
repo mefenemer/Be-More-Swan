@@ -15,6 +15,7 @@ import { isAdminRole } from '../../src/utils/rbac';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmark';
 import { DISCLOSURE } from '../../src/config/compliance';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -38,7 +39,7 @@ async function requireAdmin(event: any): Promise<number | null> {
     return userId;
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     // Epic: Superadmin Environment Management — live-only admin action. Reject sandbox
     // requests so this can never run while the operator believes they are in sandbox
     // (prevents production bleed). See docs/SANDBOX-ENVIRONMENT.md.
@@ -185,4 +186,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 200, body: 'done' };
-};
+});

@@ -12,6 +12,7 @@ import { getDb } from '../../db/client';
 import { users, plans, processedWebhookEvents } from '../../db/schema';
 import { sendTemplatedEmail } from '../../src/utils/email';
 import Stripe from 'stripe';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const stripe = process.env.STRIPE_SECRET_KEY
     ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' })
@@ -103,7 +104,7 @@ async function runRenewalReminder() {
     }
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     try {
         await runRenewalReminder();
         return { statusCode: 200, body: 'ok' };
@@ -111,4 +112,4 @@ export const handler: Handler = async () => {
         console.error('[renewal-reminder]', err);
         return { statusCode: 500, body: 'error' };
     }
-};
+});

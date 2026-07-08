@@ -14,10 +14,11 @@ import { randomUUID } from 'crypto';
 import { getDb } from '../../db/client';
 import { aiBlueprints, auditLogs, contentGenerationJobs, notifications, scheduledPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const MAX_FEEDBACK = 500;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -122,4 +123,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ requested: true, jobId, status: 'queued', estimatedReadyIn: '30–60 seconds' }),
     };
-};
+});

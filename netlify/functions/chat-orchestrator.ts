@@ -22,6 +22,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { atomicCapCheck } from '../../src/utils/atomic-cap-check';
 import { embedTexts } from '../../src/utils/kb-embeddings';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
@@ -723,7 +724,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -1047,4 +1048,4 @@ export const handler: Handler = async (event) => {
         // The user's turn is already persisted; the client can retry into the same session.
         return json(502, { chatSessionId: session.id, userMessageId: userMessage.id, error: "I'm having trouble right now — please try again in a moment." });
     }
-};
+});

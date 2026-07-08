@@ -8,10 +8,11 @@ import { HandlerEvent } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
 import { pageEvents } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
     if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server configuration error.' }) };
 
@@ -44,4 +45,4 @@ export const handler = async (event: HandlerEvent) => {
     await db.insert(pageEvents).values({ userId, pagePath, metadata: metadata || null });
 
     return { statusCode: 200, body: JSON.stringify({ ok: true }) };
-};
+});

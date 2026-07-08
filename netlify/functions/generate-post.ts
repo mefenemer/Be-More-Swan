@@ -10,8 +10,9 @@ import { aiBlueprints, aiAssistants, contentGenerationJobs, notifications } from
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { requireTenant } from '../../src/utils/tenant';
 import { assembleBlueprint } from '../../src/utils/blueprint';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const db = getDb();
     // Resolve the active org from the session. NOTE: the JWT carries `activeOrganisationId`,
     // not `organisationId` — reading the latter directly yields undefined and crashes the
@@ -157,4 +158,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ jobId, status: 'queued', estimatedReadyIn: '30–60 seconds' }),
     };
-};
+});

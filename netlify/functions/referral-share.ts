@@ -16,6 +16,7 @@ import { getDb } from '../../db/client';
 import { users, referralInvites } from '../../db/schema';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { sendEmail } from '../../src/utils/email';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -30,7 +31,7 @@ function getAuth(event: any): number | null {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const esc = (s: string) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const callerId = getAuth(event);
@@ -103,4 +104,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
-};
+});

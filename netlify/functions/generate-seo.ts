@@ -15,6 +15,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { excerpt } from '../../src/utils/markdown-render';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const MODEL = 'claude-haiku-4-5-20251001';
 
@@ -26,7 +27,7 @@ function slugify(input: string): string {
         .slice(0, 80) || 'post';
 }
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
     if (await isGlobalAiDisabled()) {
         return { statusCode: 503, body: JSON.stringify({ error: 'AI services are temporarily unavailable. Please try again later.' }) };
@@ -102,4 +103,4 @@ export const handler = async (event: HandlerEvent) => {
         console.error('[generate-seo] error:', error);
         return { statusCode: 500, body: JSON.stringify({ error: 'Could not generate SEO metadata. Please try again.' }) };
     }
-};
+});

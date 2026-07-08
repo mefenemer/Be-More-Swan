@@ -8,8 +8,9 @@ import { sendMagicLinkEmail } from '../../src/utils/email';
 import { checkRateLimit, getClientIp } from '../../src/utils/rate-limit';
 import { getEmailStrings } from '../../src/utils/email-i18n';
 import { resolveBaseUrl } from '../../src/utils/base-url';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const db = getDb();
 
     if (event.httpMethod === 'POST') {
@@ -113,4 +114,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 405, body: 'Method Not Allowed' };
-};
+});

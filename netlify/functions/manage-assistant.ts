@@ -11,8 +11,9 @@ import { getDb, withTenant } from '../../db/client';
 import { aiAssistants, taskRuns } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { transitionAssistantStatus } from '../../src/utils/assistant-lifecycle';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const db = getDb();
     // Managing a shared assistant (pause/resume/delete) is an owner/admin action within the org.
     const ctx = await requireTenant(event, db, { roles: ['owner', 'admin'] });
@@ -118,4 +119,4 @@ export const handler: Handler = async (event) => {
             return { statusCode: 500, body: JSON.stringify({ error: 'Internal Server Error' }) };
         }
     });
-};
+});

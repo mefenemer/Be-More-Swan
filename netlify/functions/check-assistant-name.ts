@@ -4,8 +4,9 @@ import { eq, and, sql } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
 import { aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -31,4 +32,4 @@ export const handler = async (event: HandlerEvent) => {
         console.error('Validation Error:', error);
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal Server Error' }) };
     }
-};
+});

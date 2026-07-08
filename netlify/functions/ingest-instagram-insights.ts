@@ -13,6 +13,7 @@ import { and, eq, gte, isNotNull, or, isNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, systemConnections, postInsights } from '../../db/schema';
 import { getSecret } from '../../src/utils/vault';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const GRAPH_VERSION = 'v19.0';
 // Insights stabilise within ~2 weeks; re-fetch a 30-day window to catch late engagement.
@@ -31,7 +32,7 @@ function pickMetric(map: Record<string, number>, ...names: string[]): number | n
     return null;
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const db = getDb();
     const tickStart = Date.now();
     const windowStart = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
@@ -154,4 +155,4 @@ export const handler: Handler = async () => {
     const durationMs = Date.now() - tickStart;
     console.log(`[ingest-instagram-insights] processed=${posts.length} updated=${updated} failed=${failed} ${durationMs}ms`);
     return { statusCode: 200, body: JSON.stringify({ processed: posts.length, updated, failed, durationMs }) };
-};
+});

@@ -17,6 +17,7 @@ import { aiAssistants, auditLogs, postIdeaSuggestions, scheduledPosts, systemCon
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { resolvePostImage } from '../../src/utils/social-publish';
 import { resolvePostingSchedule, computeScheduleSlots } from '../../src/config/posting-cadence';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 
@@ -65,7 +66,7 @@ function getUserId(event: any): number | null {
     }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -288,4 +289,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ approved: true, post: updated, confirmation }),
     };
-};
+});

@@ -12,6 +12,7 @@ import { getDb } from '../../db/client';
 import { organisations, users } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { businessDomainOf } from '../../src/utils/email-domain';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -47,7 +48,7 @@ const cleanHandles = (v: unknown): Record<string, string> | null => {
     return Object.keys(out).length ? out : null;
 };
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (!['GET', 'POST'].includes(event.httpMethod || '')) return json(405, { error: 'Method Not Allowed' });
 
     const db = getDb();
@@ -144,4 +145,4 @@ export const handler: Handler = async (event) => {
         console.error('[organisation-profile POST]', err);
         return json(500, { error: 'Failed to save business profile.' });
     }
-};
+});

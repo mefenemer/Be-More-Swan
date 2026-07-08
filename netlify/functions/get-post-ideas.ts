@@ -15,10 +15,11 @@ import jwt from 'jsonwebtoken';
 import { and, desc, eq, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, postIdeaSuggestions, scheduledPosts, userOrganisations } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     try {
@@ -86,4 +87,4 @@ export const handler: Handler = async (event) => {
         console.error('[get-post-ideas]', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal error.' }) };
     }
-};
+});

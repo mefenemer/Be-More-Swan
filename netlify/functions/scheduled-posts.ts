@@ -17,6 +17,7 @@ import { resolveAssetDisplayUrl } from '../../src/utils/social-publish';
 import { requireOnboarding } from '../../src/utils/onboarding-guard';
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -29,7 +30,7 @@ function getAuth(event: any): number | null {
     try { return (jwt.verify(cookie, jwtSecret) as { userId: number }).userId; } catch { return null; }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const userId = getAuth(event);
     if (!userId) return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized.' }) };
 
@@ -349,4 +350,4 @@ export const handler: Handler = async (event) => {
         console.error('Scheduled Posts Error:', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal Server Error' }) };
     }
-};
+});

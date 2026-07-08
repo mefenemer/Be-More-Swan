@@ -10,10 +10,11 @@ import { getDb } from '../../db/client';
 import { postIdeaSuggestions } from '../../db/schema';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const VALID_PLATFORMS = ['instagram', 'facebook', 'linkedin', 'x'];
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'PATCH' && event.httpMethod !== 'DELETE') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -77,4 +78,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ok: true }),
     };
-};
+});

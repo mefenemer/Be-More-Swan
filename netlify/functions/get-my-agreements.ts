@@ -24,6 +24,7 @@ import {
 import { CURRENT_TOS_VERSION } from './accept-tos';
 import { CURRENT_DPA_VERSION } from './accept-dpa';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 // Keep in lockstep with the disclaimer version stamped in legal-consent.ts.
 const CURRENT_AI_DISCLAIMER_VERSION = '2026-06-10';
@@ -34,7 +35,7 @@ const json = (statusCode: number, body: unknown) => ({
     body: JSON.stringify(body),
 });
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -150,4 +151,4 @@ export const handler: Handler = async (event) => {
     ];
 
     return json(200, { agreements });
-};
+});

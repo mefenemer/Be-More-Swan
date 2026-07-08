@@ -15,6 +15,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants, organisations, systemConnections, relationshipBuildingTasks } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -30,7 +31,7 @@ interface ChecklistRow {
     sortOrder: number; completed: boolean;
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
@@ -90,7 +91,7 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ok: true, items, date: todayUtc() }),
     };
-};
+});
 
 type LoadedAssistant = {
     id: number; name: string; systemPrompt: string | null;

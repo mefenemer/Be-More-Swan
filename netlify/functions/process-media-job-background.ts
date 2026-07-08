@@ -16,6 +16,7 @@ import { getDb } from '../../db/client';
 import { contentAssets, mediaGenerationJobs, notifications } from '../../db/schema';
 import { status as falStatus, result as falResult, extractVideo, falConfigured, FalContentPolicyError } from '../../src/lib/fal-gateway';
 import { settleHold } from '../../src/utils/ai-credits';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const R2_ENDPOINT = process.env.R2_ENDPOINT;
 const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
@@ -42,7 +43,7 @@ async function persistVideoToR2(orgId: number, url: string, contentType: string)
     return { storageKey, fileSize: bytes.byteLength };
 }
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     let jobId: number;
     try { jobId = JSON.parse(event.body || '{}').jobId; }
     catch { return { statusCode: 400, body: 'Invalid JSON' }; }
@@ -138,4 +139,4 @@ export const handler = async (event: HandlerEvent) => {
         }
         return { statusCode: 200, body: 'failed' };
     }
-};
+});

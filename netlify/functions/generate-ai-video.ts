@@ -23,6 +23,7 @@ import {
     FalContentPolicyError, FalError, type AspectRatio, type VideoDurationSeconds,
 } from '../../src/lib/fal-gateway';
 import { holdCredits, settleHold, tierCanGenerateVideo, VIDEO_CREDIT_COST } from '../../src/utils/ai-credits';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const PROMPT_MAX = 1000;
 const VIDEO_MODEL = process.env.FAL_VIDEO_MODEL ?? 'fal-ai/minimax/hailuo-2.3/standard/text-to-video';
@@ -43,7 +44,7 @@ function triggerWorker(headers: Record<string, string | undefined>, jobId: numbe
     }).catch(err => console.error('[generate-ai-video] failed to trigger worker:', err));
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
@@ -145,4 +146,4 @@ export const handler: Handler = async (event) => {
         console.error('[generate-ai-video] submit error:', err instanceof FalError ? err.message : err);
         return { statusCode: 502, body: JSON.stringify({ error: 'Video generation could not be started. Please try again.' }) };
     }
-};
+});

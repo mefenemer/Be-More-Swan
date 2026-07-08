@@ -21,6 +21,7 @@ import { isNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { vaultSecrets } from '../../db/schema';
 import { hasPermission } from '../../src/utils/rbac';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const ALGORITHM = 'aes-256-gcm';
@@ -51,7 +52,7 @@ function wrapDek(kek: Buffer, dek: Buffer): string {
     return `${iv}:${authTag}:${ciphertext}`;
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -123,4 +124,4 @@ export const handler: Handler = async (event) => {
             ...(errors.length ? { errors } : {}),
         }),
     };
-};
+});

@@ -15,10 +15,11 @@ import jwt from 'jsonwebtoken';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, contentRules, users, notifications, aiAssistants, workspaceAssets } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -157,4 +158,4 @@ export const handler: Handler = async (event) => {
             ruleText: ruleId ? ruleText : undefined,
         }),
     };
-};
+});

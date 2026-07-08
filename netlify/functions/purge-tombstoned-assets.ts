@@ -11,6 +11,7 @@ import type { Handler } from '@netlify/functions';
 import { and, eq, lt, isNotNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { workspaceAssets } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -85,10 +86,10 @@ async function runPurge(): Promise<{ purged: number; bytesFreed: number; errors:
     return { purged, bytesFreed, errors };
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const result = await runPurge();
     return {
         statusCode: 200,
         body: JSON.stringify(result),
     };
-};
+});

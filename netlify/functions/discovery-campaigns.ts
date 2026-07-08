@@ -20,6 +20,7 @@ import { aiAssistants, discoveryCampaigns, discoveryGuardrails, discoverySchedul
 import { requireTenant } from '../../src/utils/tenant';
 import { createDiscoveryRun } from '../../src/utils/discovery';
 import { isSearchConfigured } from '../../src/lib/discovery-search';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -29,7 +30,7 @@ function str(v: unknown, max: number): string | null {
     return typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : null;
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -227,4 +228,4 @@ export const handler: Handler = async (event) => {
     }
 
     return json(400, { error: `Unknown action "${action}".` });
-};
+});

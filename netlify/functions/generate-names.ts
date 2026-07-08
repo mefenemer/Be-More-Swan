@@ -7,11 +7,12 @@ import { getDb } from '../../db/client';
 import { users, userOrganisations } from '../../db/schema';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const MODEL = 'claude-haiku-4-5-20251001';
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
     if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
 
@@ -85,4 +86,4 @@ export const handler = async (event: HandlerEvent) => {
         console.error('Name Generation Error:', error);
         return { statusCode: 500, body: JSON.stringify({ error: 'Our creative gears are jammed right now. Please type a name manually!' }) };
     }
-};
+});

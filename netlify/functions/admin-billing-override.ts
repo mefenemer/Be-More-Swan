@@ -23,6 +23,7 @@ import {
 } from '../../db/schema';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { sendEmail } from '../../src/utils/email';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const stripe    = process.env.STRIPE_SECRET_KEY
@@ -33,7 +34,7 @@ const ALLOWED_ROLES = ['billing_admin', 'platform_admin', 'super_admin'];
 const VALID_ACTIONS = ['comp_month', 'upgrade_tier', 'downgrade_tier', 'extend_trial', 'pause_subscription'] as const;
 type OverrideAction = typeof VALID_ACTIONS[number];
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     // Epic: Superadmin Environment Management — live-only admin action. Reject sandbox
     // requests so this can never run while the operator believes they are in sandbox
     // (prevents production bleed). See docs/SANDBOX-ENVIRONMENT.md.
@@ -293,4 +294,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ success: true, action, stripeRef }),
     };
-};
+});

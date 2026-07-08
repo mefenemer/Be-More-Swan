@@ -10,12 +10,13 @@ import { and, eq, gte, lte } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { taskRuns } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 });
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return json(405, { error: 'Method Not Allowed' });
 
     const db = getDb();
@@ -63,4 +64,4 @@ export const handler: Handler = async (event) => {
         console.error('[get-calendar-activity]', err);
         return json(500, { error: 'Failed to load assistant activity.' });
     }
-};
+});

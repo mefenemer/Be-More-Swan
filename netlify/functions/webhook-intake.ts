@@ -13,12 +13,13 @@ import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { webhookEvents, systemConnections } from '../../db/schema';
 import { verifySlackSignature, verifyZendeskSignature } from '../../src/utils/webhook-verify';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const ok = (body: unknown = { ok: true }) => ({ statusCode: 200, body: typeof body === 'string' ? body : JSON.stringify(body) });
 const SUPPORTED = ['slack', 'zendesk'] as const;
 type Provider = typeof SUPPORTED[number];
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const provider = (event.queryStringParameters?.provider || '').toLowerCase() as Provider;
     if (!SUPPORTED.includes(provider)) return { statusCode: 404, body: 'Unknown provider' };
 
@@ -96,4 +97,4 @@ export const handler: Handler = async (event) => {
         // Still 200: a 5xx makes the provider retry a poison payload indefinitely.
         return ok({ ok: false });
     }
-};
+});

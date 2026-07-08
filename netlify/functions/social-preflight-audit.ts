@@ -11,6 +11,7 @@ import { getDb } from '../../db/client';
 import { systemConnections } from '../../db/schema';
 import { getSecret } from '../../src/utils/vault';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const HAIKU = 'claude-haiku-4-5-20251001';
@@ -202,7 +203,7 @@ async function runXChecks(token: string): Promise<PreflightCheck[]> {
     return checks;
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     // ── GET: return last results ──────────────────────────────────────────────
     if (event.httpMethod === 'GET') {
         const db = getDb();
@@ -330,4 +331,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 405, body: 'Method Not Allowed' };
-};
+});

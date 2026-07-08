@@ -22,6 +22,7 @@ import { getDb } from '../../db/client';
 import { taskRuns } from '../../db/schema';
 import { checkRepeatedTaskFailure } from '../../src/utils/churn';
 import { logAiUsage } from '../../src/utils/ai-usage';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const SCORE_MODEL = 'claude-haiku-4-5-20251001';
@@ -74,7 +75,7 @@ async function scoreOutputConfidence(taskRunId: number, outputText: string, user
 const WORKER_SECRET = process.env.WORKER_SECRET;
 const MAX_REVIEW_CYCLES = 3;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -203,4 +204,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 400, body: JSON.stringify({ error: `Unknown outcome: ${outcome}` }) };
-};
+});

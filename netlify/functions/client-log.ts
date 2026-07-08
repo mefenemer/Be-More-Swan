@@ -1,7 +1,8 @@
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: 'Method Not Allowed' };
     }
@@ -28,4 +29,4 @@ export const handler: Handler = async (event) => {
     } catch {
         return { statusCode: 204, body: '' };
     }
-};
+});

@@ -11,12 +11,13 @@ import { storeSecret, getSecret } from '../../src/utils/vault';
 import { sendEmail } from '../../src/utils/email';
 import { resolveActionNotifications, CONNECTION_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { systemPauseWorkingAssistants } from '../../src/utils/assistant-lifecycle';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const metaAppId  = process.env.META_APP_ID!;
 const metaSecret = process.env.META_APP_SECRET!;
 const CONCURRENCY = 50;
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const db = getDb();
     const fourteenDaysFromNow = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
 
@@ -46,7 +47,7 @@ export const handler: Handler = async () => {
     }
 
     return { statusCode: 200, body: `refreshed ${connections.length} token(s)` };
-};
+});
 
 async function refreshToken(db: ReturnType<typeof getDb>, conn: {
     id: number; organisationId: number; assistantId: number | null; vaultRefKey: string | null;

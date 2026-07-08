@@ -14,6 +14,7 @@ import { users, organisations, plans, userOrganisations } from '../../db/schema'
 import { and } from 'drizzle-orm';
 import Stripe from 'stripe';
 import { DISCLOSURE, isEuCountry } from '../../src/config/compliance';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const stripe = process.env.STRIPE_SECRET_KEY
@@ -33,7 +34,7 @@ async function getOrgBillingCountry(stripeCustomerId: string | null | undefined)
     }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (!['GET', 'PATCH'].includes(event.httpMethod)) {
         return { statusCode: 405, body: 'Method Not Allowed' };
     }
@@ -124,4 +125,4 @@ export const handler: Handler = async (event) => {
     await db.update(organisations).set(withUpdatedAt(updates)).where(eq(organisations.id, orgId));
 
     return { statusCode: 200, body: JSON.stringify({ ok: true }) };
-};
+});

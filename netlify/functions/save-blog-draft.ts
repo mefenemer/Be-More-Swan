@@ -9,8 +9,9 @@ import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { blogPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -41,4 +42,4 @@ export const handler = async (event: HandlerEvent) => {
     if (!updated) return { statusCode: 404, body: JSON.stringify({ error: 'Blog post not found.' }) };
 
     return { statusCode: 200, body: JSON.stringify({ ok: true, updatedAt: updated.updatedAt }) };
-};
+});

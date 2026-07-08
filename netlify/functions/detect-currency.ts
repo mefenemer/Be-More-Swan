@@ -4,6 +4,7 @@
 // → { currency: 'GBP' | 'USD' | 'EUR' | 'AUD' | 'CAD' }
 
 import { Handler } from '@netlify/functions';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 // Netlify geo header: x-nf-country (ISO 3166-1 alpha-2 country code)
 const COUNTRY_TO_CURRENCY: Record<string, string> = {
@@ -21,7 +22,7 @@ const COUNTRY_TO_CURRENCY: Record<string, string> = {
     CA: 'CAD',
 };
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const country = (
         event.headers['x-nf-country'] ||
         event.headers['x-country'] ||
@@ -39,4 +40,4 @@ export const handler: Handler = async (event) => {
         },
         body: JSON.stringify({ currency, country: country || null }),
     };
-};
+});

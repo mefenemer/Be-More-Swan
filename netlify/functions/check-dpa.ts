@@ -9,10 +9,11 @@ import { eq, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, dpaAcceptances, userOrganisations } from '../../db/schema';
 import { CURRENT_DPA_VERSION } from './accept-dpa';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -62,4 +63,4 @@ export const handler: Handler = async (event) => {
             upToDate: latest?.version === CURRENT_DPA_VERSION,
         }),
     };
-};
+});

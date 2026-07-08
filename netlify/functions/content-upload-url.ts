@@ -8,6 +8,7 @@
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const S3_BUCKET  = process.env.S3_BUCKET_NAME;
@@ -22,7 +23,7 @@ const ALLOWED_MIME_TYPES = new Set([
 
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500 MB
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
     if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
 
@@ -87,4 +88,4 @@ export const handler: Handler = async (event) => {
         console.error('Upload URL Error:', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal Server Error' }) };
     }
-};
+});

@@ -16,6 +16,7 @@ import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { userOrganisations, workspaceAssets } from '../../db/schema';
 import { keyBelongsToOrg } from '../../src/utils/storage-keys';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET  = process.env.JWT_SECRET;
 const R2_ENDPOINT = process.env.R2_ENDPOINT;
@@ -31,7 +32,7 @@ function getR2Client(): S3Client {
     });
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'DELETE' && event.httpMethod !== 'POST') {
         return { statusCode: 405, body: 'Method Not Allowed' };
     }
@@ -90,4 +91,4 @@ export const handler: Handler = async (event) => {
         .where(eq(workspaceAssets.id, assetId));
 
     return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
-};
+});

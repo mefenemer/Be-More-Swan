@@ -21,6 +21,7 @@ import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { renderTemplate, sendEmail } from '../../src/utils/email';
 import { EMAIL_VARIABLES, sampleContext, sanitiseBodyHtml } from '../../src/utils/email-template';
 import { TEMPLATE_DEFAULTS, getTemplateDefault } from '../../src/utils/email-templates-catalog';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -30,7 +31,7 @@ const json = (statusCode: number, body: unknown) => ({
     body: JSON.stringify(body),
 });
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (!jwtSecret) return json(500, { error: 'Server misconfigured.' });
 
     // ── Auth ──────────────────────────────────────────────────────────────────
@@ -203,4 +204,4 @@ export const handler: Handler = async (event) => {
         console.error('[admin-email-templates]', err);
         return json(500, { error: 'Internal error.' });
     }
-};
+});

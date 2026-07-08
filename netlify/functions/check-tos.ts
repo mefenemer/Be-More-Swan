@@ -9,10 +9,11 @@ import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { tosAcceptances } from '../../db/schema';
 import { CURRENT_TOS_VERSION } from './accept-tos';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
@@ -55,4 +56,4 @@ export const handler: Handler = async (event) => {
             upToDate: accepted,
         }),
     };
-};
+});

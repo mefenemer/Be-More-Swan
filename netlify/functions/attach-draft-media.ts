@@ -14,8 +14,9 @@ import { getDb } from '../../db/client';
 import { scheduledPosts, scheduledPostAssets, contentAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { presignR2Get } from '../../src/utils/social-publish';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -71,4 +72,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ assetId, assetType: asset.assetType, thumbnailUrl }),
     };
-};
+});

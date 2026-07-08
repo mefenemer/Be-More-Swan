@@ -17,6 +17,7 @@ import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { funnelDiagnosticFor, getGoalMetric, strategyChanges, tierAllows, TUNABLE_BRIEF_FIELDS, WAND_REWRITABLE_FIELDS, type GoalAiFeature } from '../../src/config/goal-metrics';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, payload: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
@@ -42,7 +43,7 @@ async function gate(db: any, orgId: number, feature: GoalAiFeature): Promise<{ e
     return null;
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method Not Allowed' });
 
     const db = getDb();
@@ -202,4 +203,4 @@ export const handler: Handler = async (event) => {
     }
 
     return json(400, { error: 'Unknown action.' });
-};
+});

@@ -30,6 +30,7 @@ import { and, eq, asc, lt } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { issueReports, issueReportMessages, users } from '../../db/schema';
 import { ISSUE_STATUS_LABEL, maybeAdvanceToReadyToTest, triggerStagingDeployIfDrained } from '../../src/utils/issue-reports';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode,
@@ -64,7 +65,7 @@ function authOk(event: any): boolean {
     return token.length > 0 && token === expected;
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (!process.env.DEV_HANDOFF_TOKEN) {
         return json(503, { error: 'AI auto-fix handoff is not configured (DEV_HANDOFF_TOKEN unset).' });
     }
@@ -412,4 +413,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 405, body: 'Method Not Allowed' };
-};
+});

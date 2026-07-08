@@ -12,10 +12,11 @@ import { HandlerEvent } from '@netlify/functions';
 import { and, eq, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { widgetConfigs, blogPosts, blogAbStats } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const CORS = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS, body: '' };
     if (event.httpMethod !== 'POST') return { statusCode: 405, headers: CORS, body: '' };
 
@@ -78,4 +79,4 @@ export const handler = async (event: HandlerEvent) => {
         console.error('[widget-ab-beacon] error:', err);
     }
     return { statusCode: 204, headers: CORS, body: '' };
-};
+});

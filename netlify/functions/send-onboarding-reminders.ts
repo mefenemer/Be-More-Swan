@@ -8,10 +8,11 @@ import { eq, and, isNull, lt, gte, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, plans, notificationLog, userOrganisations } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BASE_URL = process.env.BASE_URL || 'https://bemoreswan.com';
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const db = getDb();
     const now = new Date();
 
@@ -108,4 +109,4 @@ export const handler: Handler = async () => {
 
     console.log(`[send-onboarding-reminders] Sent ${sent} reminder emails`);
     return { statusCode: 200, body: JSON.stringify({ sent }) };
-};
+});

@@ -7,8 +7,9 @@ import { getDb } from '../../db/client';
 import { scheduledPosts, aiAssistants, postIdeaSuggestions } from '../../db/schema';
 import { resolvePostImage } from '../../src/utils/social-publish';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     try {
@@ -93,4 +94,4 @@ export const handler: Handler = async (event) => {
         console.error('[get-social-drafts]', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal error.' }) };
     }
-};
+});

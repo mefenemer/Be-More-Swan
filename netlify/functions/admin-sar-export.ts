@@ -24,13 +24,14 @@ import {
     gdprErasureLog, tosAcceptances, dpaAcceptances, userOrganisations,
 } from '../../db/schema';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const BASE_URL  = process.env.BASE_URL || 'https://bemoreswan.com';
 
 const ALLOWED_ROLES = ['billing_admin', 'platform_admin', 'super_admin'];
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     // Epic: Superadmin Environment Management — live-only admin action. Reject sandbox
     // requests so this can never run while the operator believes they are in sandbox
     // (prevents production bleed). See docs/SANDBOX-ENVIRONMENT.md.
@@ -203,4 +204,4 @@ export const handler: Handler = async (event) => {
             message:     'SAR package ready. You have been notified via in-app notification.',
         }),
     };
-};
+});

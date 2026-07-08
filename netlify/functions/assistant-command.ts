@@ -17,6 +17,7 @@ import { aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { computeOnboardingProgress } from '../../src/utils/onboarding-progress';
 import { provisioningBlockInfo } from '../../src/utils/assistant-lifecycle';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -38,7 +39,7 @@ function allow(userId: number): boolean {
     e.count++; return true;
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -210,4 +211,4 @@ Rules:
         console.error('[assistant-command] LLM error:', err);
         return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'answer', reply: "I'm having trouble right now — please try again in a moment." }) };
     }
-};
+});

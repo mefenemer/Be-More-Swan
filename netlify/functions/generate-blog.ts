@@ -16,6 +16,7 @@ import { aiAssistants, blogPosts, organisations } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const MODEL = 'claude-haiku-4-5-20251001';
 const DEFAULT_TONE = 'friendly and professional';
@@ -24,7 +25,7 @@ function str(v: unknown, max: number): string {
     return typeof v === 'string' ? v.trim().slice(0, max) : '';
 }
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
     if (await isGlobalAiDisabled()) {
         return { statusCode: 503, body: JSON.stringify({ error: 'AI services are temporarily unavailable. Please try again later.' }) };
@@ -114,4 +115,4 @@ export const handler = async (event: HandlerEvent) => {
         console.error('[generate-blog] error:', error);
         return { statusCode: 500, body: JSON.stringify({ error: 'Could not generate the draft. Please try again.' }) };
     }
-};
+});

@@ -34,6 +34,7 @@ import {
 import { requireTenant } from '../../src/utils/tenant';
 import { checkRateLimit } from '../../src/utils/rate-limit';
 import { CURRENT_DPA_VERSION } from './accept-dpa';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 // Instance default only — chat routes pick their own model per roleKey (chat-orchestrator ROUTES).
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
@@ -42,7 +43,7 @@ const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 });
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method Not Allowed' });
 
     const db = getDb();
@@ -187,4 +188,4 @@ export const handler: Handler = async (event) => {
         console.error('[hire-assistant]', err);
         return json(500, { error: 'Failed to hire this assistant. Please try again.' });
     }
-};
+});

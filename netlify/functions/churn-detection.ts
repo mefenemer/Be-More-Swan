@@ -20,6 +20,7 @@ import {
     userNotifications,
 } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const NETLIFY_CRON_SECRET = process.env.NETLIFY_CRON_SECRET;
 
@@ -269,7 +270,7 @@ async function detectUpgradeIntentNotConverted(db: any) {
 // ─────────────────────────────────────────────────────────────────────────────
 // Scheduled handler
 // ─────────────────────────────────────────────────────────────────────────────
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     // Allow both scheduled invocations and manual POST (protected by secret)
     if (event.httpMethod === 'POST') {
         const authHeader = event.headers['x-cron-secret'] || '';
@@ -287,7 +288,7 @@ export const handler = async (event: HandlerEvent) => {
     ]);
 
     return { statusCode: 200, body: JSON.stringify({ ok: true, ran: new Date().toISOString() }) };
-};
+});
 
 // Netlify scheduled function config — runs daily at 08:00 UTC
 export const config = { schedule: '0 8 * * *' };

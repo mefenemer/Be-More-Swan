@@ -8,6 +8,7 @@ import jwt from 'jsonwebtoken';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, invoices, billingInformation, organisations, userOrganisations } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -19,7 +20,7 @@ const AURA_COMPANY = {
     website: 'bemoreswan.com',
 };
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
     if (!jwtSecret) return { statusCode: 500, body: 'Server misconfigured.' };
 
@@ -287,7 +288,7 @@ export const handler: Handler = async (event) => {
         console.error('[invoice-pdf]', err);
         return { statusCode: 500, body: 'Failed to generate invoice.' };
     }
-};
+});
 
 function _esc(str: string) {
     return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

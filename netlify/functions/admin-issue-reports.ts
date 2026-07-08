@@ -19,6 +19,7 @@ import { issueReports, issueReportMessages, users } from '../../db/schema';
 import { isAdminRole, hasPermission } from '../../src/utils/rbac';
 import { ISSUE_STATUS_LABEL, isIssueStatus, notifyIssueUser, maybeAdvanceToReadyToTest, type IssueStatus } from '../../src/utils/issue-reports';
 import { createRoadmapItemFromIssue, isRoadmapPriority, type RoadmapPriority } from '../../src/utils/feature-roadmap';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -40,7 +41,7 @@ async function requireAdmin(event: any): Promise<{ id: number; role: string } | 
     return { id: userId, role: row.role };
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const admin = await requireAdmin(event);
     if (!admin) return json(403, { error: 'Access denied. Admin role required.' });
 
@@ -483,7 +484,7 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 405, body: 'Method Not Allowed' };
-};
+});
 
 /**
  * Execute admin-approved migration SQL against the deployment's owner DB connection

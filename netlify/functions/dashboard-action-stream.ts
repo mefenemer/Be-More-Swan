@@ -26,6 +26,7 @@ import {
     users,
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const _platformName = (p?: string | null): string => {
     if (!p) return '';
@@ -36,7 +37,7 @@ const _platformName = (p?: string | null): string => {
 // "X" is spoken "ex", so it takes "an" despite starting with a consonant letter.
 const _article = (word: string): string => (/^(x$|[aeiou])/i.test(word) ? 'an' : 'a');
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -214,4 +215,4 @@ export const handler: Handler = async (event) => {
         console.error('dashboard-action-stream error:', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Failed to load action stream.' }) };
     }
-};
+});

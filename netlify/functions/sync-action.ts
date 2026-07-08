@@ -55,6 +55,7 @@ import { logApiCall } from '../../src/utils/vault';
 import { getFreshAccessToken, getIntegration, IntegrationError, providerLabel } from '../../src/utils/workspace-integrations';
 import { sendGmailMessage } from '../../src/utils/gmail';
 import { injectAiFooter } from '../../src/utils/ai-email-footer';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -1161,7 +1162,7 @@ export async function runAction(
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method Not Allowed' });
 
     const db = getDb();
@@ -1174,4 +1175,4 @@ export const handler: Handler = async (event) => {
 
     const payload = (body.payload && typeof body.payload === 'object') ? body.payload as Record<string, unknown> : {};
     return runAction(db, ctx.userId, ctx.organisationId, body.actionType ?? '', payload);
-};
+});

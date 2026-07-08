@@ -14,12 +14,13 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { organisations } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 });
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
@@ -42,4 +43,4 @@ export const handler: Handler = async (event) => {
     }
 
     return json(405, { error: 'Method Not Allowed' });
-};
+});

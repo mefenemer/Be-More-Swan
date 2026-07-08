@@ -10,6 +10,7 @@ import type { Handler } from '@netlify/functions';
 import { lte, and, isNull, isNotNull, inArray, lt } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { contentAssets, integrationApiCalls } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const S3_BUCKET  = process.env.S3_BUCKET_NAME;
 const S3_REGION  = process.env.S3_REGION || 'us-east-1';
@@ -30,7 +31,7 @@ async function deleteFromS3(keys: string[]) {
     }
 }
 
-const retentionHandler: Handler = async () => {
+const retentionHandler = async () => {
     const db = getDb();
     const now = new Date();
 
@@ -89,4 +90,4 @@ const retentionHandler: Handler = async () => {
 };
 
 // Run every 6 hours
-export const handler = retentionHandler;
+export default withLambda(retentionHandler);

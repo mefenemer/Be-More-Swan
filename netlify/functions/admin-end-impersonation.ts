@@ -11,10 +11,11 @@
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method not allowed.' }) };
     }
@@ -77,4 +78,4 @@ export const handler: Handler = async (event) => {
         },
         body: JSON.stringify({ success: true, redirect: '/admin.html' }),
     };
-};
+});

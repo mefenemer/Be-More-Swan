@@ -19,6 +19,7 @@ import {
     CASCADE_RELATIONSHIPS,
     BLOCKING_DEPENDENCY_TABLES,
 } from '../../src/utils/delete-tiers';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 
@@ -42,7 +43,7 @@ interface CascadeGroup {
     deleteType: 'hard_deleted' | 'soft_deleted' | 'nullified';
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -159,4 +160,4 @@ export const handler: Handler = async (event) => {
             cascadeGroups,
         }),
     };
-};
+});

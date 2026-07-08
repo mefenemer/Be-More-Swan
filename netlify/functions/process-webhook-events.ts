@@ -14,6 +14,7 @@ import { webhookEvents, systemConnections, activeScenarios, integrationScenarios
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { normaliseDomain } from '../../src/utils/scenario-engine';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BATCH = 50;
 
@@ -95,7 +96,7 @@ async function finish(db: ReturnType<typeof getDb>, id: number, status: 'process
         .where(eq(webhookEvents.id, id));
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const db = getDb();
 
     const pending = await db.select().from(webhookEvents)
@@ -146,4 +147,4 @@ export const handler: Handler = async () => {
     }
 
     return { statusCode: 200, body: JSON.stringify({ claimed: pending.length, processed, ignored, failed }) };
-};
+});

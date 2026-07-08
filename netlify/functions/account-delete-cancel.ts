@@ -8,10 +8,11 @@ import * as crypto from 'crypto';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BASE_URL = process.env.BASE_URL || '';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const plainToken = event.queryStringParameters?.token;
@@ -82,4 +83,4 @@ h1{font-size:1.25rem;margin-bottom:.5rem}p{color:#6b7280;font-size:.9rem}a{color
   <p style="margin-top:1.5rem"><a href="${BASE_URL}/workspace.html">Return to your workspace →</a></p>
 </div></body></html>`,
     };
-};
+});

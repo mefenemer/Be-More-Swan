@@ -13,6 +13,7 @@ import { provisioningBlockInfo } from '../../src/utils/assistant-lifecycle';
 import { checkProhibitedUsePatterns } from '../../src/utils/tos-gate';
 import { CURRENT_TOS_VERSION } from './accept-tos';
 import { CURRENT_DPA_VERSION } from './accept-dpa';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -214,7 +215,7 @@ export async function computeAssistantReadiness(db: Db, orgId: number, assistant
         };
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return json(405, { error: 'Method Not Allowed' });
 
     const idParam = event.queryStringParameters?.id;
@@ -240,4 +241,4 @@ export const handler: Handler = async (event) => {
         console.error('[get-assistant-readiness]', err);
         return json(500, { error: 'Failed to load readiness.' });
     }
-};
+});

@@ -9,11 +9,12 @@ import { aiAssistants, scheduledPosts, taskRuns, userProfiles } from '../../db/s
 import { requireTenant } from '../../src/utils/tenant';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
 import { parseRoiPeriod, roiPeriodStart } from '../../src/utils/roi-period';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const PUBLISHED_STATUSES = new Set(['published']);
 const SCHEDULED_STATUSES = new Set(['scheduled', 'approved', 'pending_approval', 'in_review']);
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const assistantId = event.queryStringParameters?.id;
@@ -143,4 +144,4 @@ export const handler: Handler = async (event) => {
             }),
         };
     }
-};
+});

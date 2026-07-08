@@ -25,6 +25,7 @@ import {
 } from '../../db/schema';
 import { sendMagicLinkEmail } from '../../src/utils/email';
 import { tombstoneOrgMemberAssets } from '../../src/utils/gdpr-asset-purge';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret  = process.env.JWT_SECRET;
 const VALID_ROLES = ['admin', 'member', 'viewer'] as const;
@@ -37,7 +38,7 @@ function getAuth(event: any): number | null {
     try { return (jwt.verify(match[1], jwtSecret) as { userId: number }).userId; } catch { return null; }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const callerId = getAuth(event);
     if (!callerId) return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized.' }) };
 
@@ -262,4 +263,4 @@ export const handler: Handler = async (event) => {
         console.error('[manage-members]', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal server error.' }) };
     }
-};
+});

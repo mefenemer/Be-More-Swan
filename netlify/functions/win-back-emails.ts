@@ -14,6 +14,7 @@ import { eq, and, gte, lte, isNotNull, count } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, plans, winBackOptOuts, processedWebhookEvents, taskRuns } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BASE_URL = process.env.BASE_URL || '';
 
@@ -161,7 +162,7 @@ async function runWinBackEmails() {
     }
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     try {
         await runWinBackEmails();
         return { statusCode: 200 };
@@ -169,4 +170,4 @@ export const handler: Handler = async () => {
         console.error('[win-back-emails]', err);
         return { statusCode: 500 };
     }
-};
+});

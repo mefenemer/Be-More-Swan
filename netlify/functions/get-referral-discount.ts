@@ -9,11 +9,12 @@ import { Handler } from '@netlify/functions';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const DISCOUNT_PCT    = parseInt(process.env.REFERRAL_DISCOUNT_PCT    || '20', 10);
 const DISCOUNT_MONTHS = parseInt(process.env.REFERRAL_DISCOUNT_MONTHS || '3',  10);
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const ref = event.queryStringParameters?.ref?.trim();
@@ -46,4 +47,4 @@ export const handler: Handler = async (event) => {
         console.error('[get-referral-discount]', err);
         return { statusCode: 500, body: JSON.stringify({ valid: false }) };
     }
-};
+});

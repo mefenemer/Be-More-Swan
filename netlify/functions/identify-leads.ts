@@ -7,8 +7,9 @@ import { Handler } from '@netlify/functions';
 import { eq, and, lt, lte, gte, isNull, sql, ne } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, plans, aiAssistants, taskRuns, leads, leadAnalysisRuns } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const db = getDb();
     const now = new Date();
     let leadsCreated = 0;
@@ -239,4 +240,4 @@ export const handler: Handler = async () => {
             body: JSON.stringify({ error: err.message }),
         };
     }
-};
+});

@@ -13,6 +13,7 @@ import { Resend } from 'resend';
 import { eq, and, asc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, supportTickets, ticketReplies, notifications, auditLogs } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
@@ -40,7 +41,7 @@ async function audit(db: any, adminId: number, action: string, resourceId: numbe
     } catch { /* non-blocking */ }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     // Epic: Superadmin Environment Management — live-only admin action. Reject sandbox
     // requests so this can never run while the operator believes they are in sandbox
     // (prevents production bleed). See docs/SANDBOX-ENVIRONMENT.md.
@@ -233,4 +234,4 @@ export const handler: Handler = async (event) => {
         console.error('[admin-helpdesk] Error:', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal Server Error' }) };
     }
-};
+});

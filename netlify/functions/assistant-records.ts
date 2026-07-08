@@ -18,6 +18,7 @@ import { getDb } from '../../db/client';
 import { actionItems, aiAssistants, assistantRecords, discoveredLeads } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { enqueueScenarioTrigger, type TriggerSubject } from '../../src/utils/scenario-engine';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const RECORD_TYPES = new Set(['lead', 'enrichment', 'meeting', 'invoice', 'ticket']);
 const SOURCES = new Set(['chat', 'csv_import', 'integration']);
@@ -230,7 +231,7 @@ async function enqueueHandoffOnApproval(
     });
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
@@ -532,4 +533,4 @@ export const handler: Handler = async (event) => {
         console.error('[assistant-records]', err);
         return json(500, { error: 'Failed to process the request.' });
     }
-};
+});

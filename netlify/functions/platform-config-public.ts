@@ -9,8 +9,9 @@
 
 import { Handler } from '@netlify/functions';
 import { warmPlatformConfigCache, CONFIG_KEYS, DEFAULT_SESSION_TIMEOUT_CONFIG } from '../../src/utils/platform-config';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     try {
         const config = await warmPlatformConfigCache();
         const sessionTimeoutMinutes = Number(config[CONFIG_KEYS.SESSION_INACTIVITY_TIMEOUT_MINUTES]);
@@ -44,4 +45,4 @@ export const handler: Handler = async () => {
             }),
         };
     }
-};
+});

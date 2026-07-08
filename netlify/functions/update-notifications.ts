@@ -2,8 +2,9 @@ import { Handler } from '@netlify/functions';
 import { getDb } from '../../db/client';
 import { userProfiles } from '../../db/schema';
 import { eq } from 'drizzle-orm';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const standardHeaders: Record<string, string> = {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*'
@@ -62,4 +63,4 @@ export const handler: Handler = async (event) => {
         console.error('Notification update rejection:', error);
         return { statusCode: 500, headers: standardHeaders, body: JSON.stringify({ error: error.message || 'Database execution failed.' }) };
     }
-};
+});

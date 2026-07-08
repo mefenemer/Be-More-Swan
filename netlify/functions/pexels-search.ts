@@ -16,6 +16,7 @@ import {
     searchUniqueImages, searchUniqueVideos, attachPexelsImageToPost, creditLine,
     PexelsRateLimitError, PEXELS_RATE_LIMIT_MESSAGE, type PexelsCandidate, type PexelsVideoCandidate,
 } from '../../src/utils/pexels';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -30,7 +31,7 @@ function auth(event: any): number | null {
     }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const userId = auth(event);
@@ -121,4 +122,4 @@ export const handler: Handler = async (event) => {
         console.error('[pexels-search] error:', msg);
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal Server Error' }) };
     }
-};
+});

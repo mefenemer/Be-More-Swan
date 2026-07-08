@@ -14,11 +14,12 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { widgetConfigs } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const WRITE_ROLES = ['owner', 'admin'];
 const newPublicKey = () => 'wgt_' + randomBytes(12).toString('hex');
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     const db = getDb();
 
     // Reads: any member. Writes: owner/admin (enforced below on the write branch).
@@ -80,4 +81,4 @@ export const handler = async (event: HandlerEvent) => {
     }
 
     return { statusCode: 400, body: JSON.stringify({ error: 'Unknown action.' }) };
-};
+});

@@ -14,11 +14,12 @@ import { getDb } from '../../db/client';
 import { users, userOrganisations, aiCreditLedger } from '../../db/schema';
 import { getBalance, adminAdjust } from '../../src/utils/ai-credits';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const ALLOWED_ROLES = ['billing_admin', 'platform_admin', 'super_admin'];
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
 
     // ── Auth ──────────────────────────────────────────────────────────────────
@@ -103,7 +104,7 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 405, body: 'Method Not Allowed' };
-};
+});
 
 function safeJson(body: string | null): any {
     try { return JSON.parse(body || '{}'); } catch { return null; }

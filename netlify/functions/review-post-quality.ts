@@ -16,6 +16,7 @@ import {
 } from '../../db/schema';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -23,7 +24,7 @@ const JWT_SECRET = process.env.JWT_SECRET;
 // Quality review is a premium feature — available on Saver and above.
 const GATED_TIERS = new Set(['saver', 'employee']);
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     try {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
     if (!JWT_SECRET) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
@@ -154,7 +155,7 @@ Return ONLY valid JSON, no markdown, no explanation.`;
         console.error('[review-post-quality] Unhandled error:', err);
         return { statusCode: 500, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Quality review failed. Please try again.' }) };
     }
-};
+});
 
 function _hash(s: string): string {
     let h = 0;

@@ -20,6 +20,7 @@ import { CURRENT_DPA_VERSION } from './accept-dpa';
 import { isEuCountry } from '../../src/config/compliance';
 import type { ProvisioningBlockReason } from '../../src/utils/assistant-lifecycle';
 import Stripe from 'stripe';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const stripe = process.env.STRIPE_SECRET_KEY
     ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' })
@@ -52,7 +53,7 @@ async function isEuOrg(stripeCustomerId: string | null | undefined): Promise<boo
     }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const { assistantId } = JSON.parse(event.body!);
     const db = getDb();
 
@@ -296,4 +297,4 @@ export const handler: Handler = async (event) => {
 
         return { statusCode: 500, body: 'Failed' };
     }
-};
+});

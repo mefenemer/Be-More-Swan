@@ -28,6 +28,7 @@ import { eq, and, gte, gt, count, sum, asc, desc, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { plans, masterPlans, planPrices, aiAssistants, taskRuns, usageCounters, userOrganisations, users, systemConnections, organisations } from '../../db/schema';
 import { getPeriodStart } from '../../src/utils/atomic-cap-check';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const stripe = process.env.STRIPE_SECRET_KEY
     ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' })
@@ -35,7 +36,7 @@ const stripe = process.env.STRIPE_SECRET_KEY
 
 const jwtSecret = process.env.JWT_SECRET;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
     if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
 
@@ -367,4 +368,4 @@ export const handler: Handler = async (event) => {
         console.error('[check-capacity]', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Failed to check capacity.' }) };
     }
-};
+});

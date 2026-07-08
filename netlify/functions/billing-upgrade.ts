@@ -14,6 +14,7 @@ import { users, plans, masterPlans, notifications, processedWebhookEvents, userO
 import { sendEmail } from '../../src/utils/email';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
 import { resolveActionNotifications, PLAN_UPGRADED_TYPES } from '../../src/utils/notification-actions';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret      = process.env.JWT_SECRET!;
 const stripeSecret   = process.env.STRIPE_SECRET_KEY!;
@@ -43,7 +44,7 @@ function parseSession(event: any): number | null {
     } catch { return null; }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (!['GET', 'POST'].includes(event.httpMethod)) {
         return { statusCode: 405, body: 'Method Not Allowed' };
     }
@@ -319,4 +320,4 @@ export const handler: Handler = async (event) => {
             }),
         };
     }
-};
+});

@@ -20,6 +20,7 @@ import jwt from 'jsonwebtoken';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { taskRuns, agentRunEvents, agentRunSummaries } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -46,7 +47,7 @@ function sanitise(value: unknown): unknown {
 
 const VALID_EVENT_TYPES = ['llm_call', 'tool_call', 'human_intervention', 'suspension', 'termination'];
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -133,4 +134,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ eventId: inserted.id }),
     };
-};
+});

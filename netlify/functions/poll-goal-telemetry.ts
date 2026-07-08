@@ -21,6 +21,7 @@ import {
 import { getSecret } from '../../src/utils/vault';
 import { connectionDisplayName, getGoalMetric, pollCadenceHours, RUN_RATE_THRESHOLDS } from '../../src/config/goal-metrics';
 import { computeGoalProgress } from '../../src/utils/goal-progress';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const GRAPH_VERSION = 'v19.0';
 const BATCH = 200;
@@ -328,7 +329,7 @@ export async function pollGoalTelemetry(): Promise<{ goals: number; polled: numb
     return { goals: activeGoals.length, polled, skipped, disconnected: disconnectedCount };
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const result = await pollGoalTelemetry();
     return { statusCode: 200, body: JSON.stringify(result) };
-};
+});

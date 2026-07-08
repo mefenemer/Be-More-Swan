@@ -15,8 +15,9 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import { resolvePostImage } from '../../src/utils/social-publish';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const postId = Number(event.queryStringParameters?.postId);
@@ -68,4 +69,4 @@ export const handler: Handler = async (event) => {
         console.error(`[media-proxy] post ${postId} error:`, msg);
         return { statusCode: 500, body: 'Internal Server Error' };
     }
-};
+});

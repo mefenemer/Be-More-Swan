@@ -3,10 +3,11 @@ import jwt from 'jsonwebtoken';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, organisations, userOrganisations } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET!;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const cookieHeader = event.headers.cookie || '';
     const match = cookieHeader.match(/aura_session=([^;]+)/);
     const token = match ? match[1] : null;
@@ -43,4 +44,4 @@ export const handler: Handler = async (event) => {
     } catch (e) {
         return { statusCode: 500, body: JSON.stringify({ error: 'Server error' }) };
     }
-};
+});

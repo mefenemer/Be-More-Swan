@@ -16,6 +16,7 @@ import { blogPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const MODEL = 'claude-haiku-4-5-20251001';
 const MAX_SELECTION_CHARS = 6000;
@@ -36,7 +37,7 @@ function buildInstruction(action: Action, tone?: string, instruction?: string): 
     }
 }
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     if (await isGlobalAiDisabled()) {
@@ -114,4 +115,4 @@ export const handler = async (event: HandlerEvent) => {
         console.error('[rewrite-section] error:', error);
         return { statusCode: 500, body: JSON.stringify({ error: 'The rewrite could not be completed. Please try again.' }) };
     }
-};
+});

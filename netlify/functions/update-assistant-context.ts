@@ -5,8 +5,9 @@ import { aiAssistants, auditLogs } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { retryBlockedAssistants } from '../../src/utils/retry-provisioning';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'PUT') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -87,4 +88,4 @@ export const handler: Handler = async (event) => {
         console.error('Update Context Error:', error);
         return { statusCode: 500, body: JSON.stringify({ error: 'Failed to update context.' }) };
     }
-};
+});

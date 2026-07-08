@@ -14,6 +14,7 @@ import { getDb } from '../../db/client';
 import { users, userProfiles, plans, masterPlans, aiAssistants, taskRuns, scheduledPosts } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
 import { isEmailEnabled } from '../../src/utils/notification-prefs';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BASE_URL = process.env.BASE_URL || '';
 
@@ -132,7 +133,7 @@ async function runWeeklyDigest() {
     console.log(`[weekly-digest] Done — sent=${sent}, skipped=${skipped}`);
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     try {
         await runWeeklyDigest();
         return { statusCode: 200 };
@@ -140,4 +141,4 @@ export const handler: Handler = async () => {
         console.error('[weekly-digest]', err);
         return { statusCode: 500 };
     }
-};
+});

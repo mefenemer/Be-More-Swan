@@ -10,8 +10,9 @@ import { and, desc, eq, gte, inArray, lte, or } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, blogPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
@@ -126,4 +127,4 @@ export const handler = async (event: HandlerEvent) => {
     }
 
     return { statusCode: 405, body: 'Method Not Allowed' };
-};
+});

@@ -20,6 +20,7 @@ import { blogPosts, blogPostAssets, contentAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { resolveAssetDisplayUrl } from '../../src/utils/social-publish';
 import { createPexelsAsset, type PexelsCandidate } from '../../src/utils/pexels';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -57,7 +58,7 @@ async function loadMedia(db: Db, orgId: number, blogPostId: number, featureAsset
     return { feature, inline };
 }
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
@@ -152,4 +153,4 @@ export const handler = async (event: HandlerEvent) => {
     }
 
     return { statusCode: 200, body: JSON.stringify(await loadMedia(db, orgId, blogPostId, nextFeature)) };
-};
+});

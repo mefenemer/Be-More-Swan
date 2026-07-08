@@ -9,6 +9,7 @@ import type { Handler } from '@netlify/functions';
 import { and, eq, lt, inArray, notInArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { agentRunEvents, agentRunSummaries, legalHolds, adminAuditLog } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const SIX_MONTHS_MS  = 6  * 30 * 24 * 60 * 60 * 1000;
 const TWO_YEARS_MS   = 2  * 365 * 24 * 60 * 60 * 1000;
@@ -80,7 +81,7 @@ async function runExpiry() {
     return { eventsDeleted, summariesDeleted, heldOrgs: heldOrgIds.length };
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const result = await runExpiry();
     return { statusCode: 200, body: JSON.stringify(result) };
-};
+});

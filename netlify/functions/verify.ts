@@ -10,6 +10,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { resolveActiveOrg } from '../../src/utils/tenant';
 import jwt from 'jsonwebtoken';
 import Stripe from 'stripe';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 // Define a helper to ensure type safety for headers
 const getHeaders = (cookie?: string): Record<string, string> => {
@@ -22,7 +23,7 @@ const getHeaders = (cookie?: string): Record<string, string> => {
     return headers;
 };
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return {
             statusCode: 405,
@@ -323,4 +324,4 @@ export const handler: Handler = async (event) => {
             body: JSON.stringify({ error: 'Verification failed. Please try again or request a new link.' }),
         };
     }
-};
+});

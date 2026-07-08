@@ -12,6 +12,7 @@ import { eq, and, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, plans, masterPlans, aiAssistants, notifications, userOrganisations } from '../../db/schema';
 import { checkImpersonationBlock } from '../../src/utils/impersonation-guard';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret    = process.env.JWT_SECRET!;
 const stripeSecret = process.env.STRIPE_SECRET_KEY!;
@@ -39,7 +40,7 @@ function parseSession(event: any): number | null {
     } catch { return null; }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (!['GET', 'POST', 'DELETE'].includes(event.httpMethod)) {
         return { statusCode: 405, body: 'Method Not Allowed' };
     }
@@ -250,4 +251,4 @@ export const handler: Handler = async (event) => {
         console.error('[billing-downgrade] Stripe error:', err);
         return { statusCode: 502, body: JSON.stringify({ error: err.message }) };
     }
-};
+});

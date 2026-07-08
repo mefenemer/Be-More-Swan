@@ -12,6 +12,7 @@ import { Handler } from '@netlify/functions';
 import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { blogPosts, blogAbStats } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const MIN_IMPRESSIONS = Number(process.env.AB_MIN_IMPRESSIONS || 200); // total across variants
 
@@ -23,7 +24,7 @@ function scoreVariant(s: { impressions: number; engagedCount: number; sumDwellMs
     return engagedRate * 0.6 + avgDwell * 0.25 + avgScroll * 0.15;
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const db = getDb();
 
     const testing = await db
@@ -68,4 +69,4 @@ export const handler: Handler = async () => {
     }
 
     return { statusCode: 200, body: JSON.stringify({ resolved }) };
-};
+});

@@ -15,6 +15,7 @@ import { getDb } from '../../db/client';
 import { users, plans, processedWebhookEvents } from '../../db/schema';
 import { sendTemplatedEmail } from '../../src/utils/email';
 import Stripe from 'stripe';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const stripe = process.env.STRIPE_SECRET_KEY
     ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' })
@@ -117,7 +118,7 @@ async function runDunningEscalation() {
     }
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     try {
         await runDunningEscalation();
         return { statusCode: 200 };
@@ -125,4 +126,4 @@ export const handler: Handler = async () => {
         console.error('[dunning-escalation]', err);
         return { statusCode: 500 };
     }
-};
+});

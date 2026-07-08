@@ -6,6 +6,7 @@ import type { Handler } from '@netlify/functions';
 import { and, eq, lt } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { pendingActions, notifications } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 async function runExpiry() {
     const db = getDb();
@@ -32,7 +33,7 @@ async function runExpiry() {
     return { expired: expired.length };
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const result = await runExpiry();
     return { statusCode: 200, body: JSON.stringify(result) };
-};
+});

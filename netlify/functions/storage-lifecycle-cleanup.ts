@@ -16,6 +16,7 @@ import { S3Client, DeleteObjectCommand, HeadObjectCommand } from '@aws-sdk/clien
 import { eq, and, lt, or, isNull, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { workspaceAssets, storageUsage, adminAuditLog } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const R2_ENDPOINT = process.env.R2_ENDPOINT;
 const R2_ACCESS_KEY_ID     = process.env.R2_ACCESS_KEY_ID;
@@ -47,7 +48,7 @@ async function deleteFromR2(s3: S3Client, key: string): Promise<boolean> {
     }
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const db = getDb();
     const s3 = getR2Client();
     const now = new Date();
@@ -122,4 +123,4 @@ export const handler: Handler = async () => {
     console.log(`[storage-lifecycle-cleanup] deleted=${totalDeleted} reclaimedBytes=${totalBytes}`);
 
     return { statusCode: 200, body: JSON.stringify({ deleted: totalDeleted, reclaimedBytes: totalBytes }) };
-};
+});

@@ -20,6 +20,7 @@ import { generateAndPersistImage } from '../../src/lib/media-persist';
 import { FalContentPolicyError } from '../../src/lib/fal-gateway';
 import { DISCLOSURE } from '../../src/config/compliance';
 import { fireOrchestrations } from '../../src/utils/orchestration';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 // Fal image model for inline AI generation (matches the autonomous suggestions path).
 const AI_IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
@@ -82,10 +83,10 @@ export async function drainContentJobs(): Promise<number> {
     return jobs.length;
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const processed = await drainContentJobs();
     return { statusCode: 200, body: processed ? `processed ${processed} jobs` : 'no jobs' };
-};
+});
 
 async function processJob(db: ReturnType<typeof getDb>, job: {
     id: number; job_id: string; blueprint_id: number; assistant_id: number;

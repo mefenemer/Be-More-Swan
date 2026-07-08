@@ -4,8 +4,9 @@ import { getDb, withTenant } from '../../db/client';
 import { aiAssistants, contentGenerationJobs, goals, scheduledPosts, userProfiles } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -172,4 +173,4 @@ export const handler: Handler = async (event) => {
         console.error("Fetch Assistants Error:", e);
         return { statusCode: 500, body: JSON.stringify({ error: 'Database error' }) };
     }
-};
+});

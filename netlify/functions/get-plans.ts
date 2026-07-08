@@ -6,6 +6,7 @@ import { Handler } from '@netlify/functions';
 import { eq, asc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { masterPlans } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const HEADERS = {
     'Content-Type': 'application/json',
@@ -13,7 +14,7 @@ const HEADERS = {
     'Cache-Control': 'public, max-age=60',
 };
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') {
         return { statusCode: 405, headers: HEADERS, body: 'Method Not Allowed' };
     }
@@ -42,4 +43,4 @@ export const handler: Handler = async (event) => {
         console.error('[get-plans]', err);
         return { statusCode: 500, headers: HEADERS, body: JSON.stringify({ error: 'Failed to load plans.' }) };
     }
-};
+});

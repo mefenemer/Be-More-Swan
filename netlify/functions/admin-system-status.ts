@@ -11,6 +11,7 @@ import jwt from 'jsonwebtoken';
 import { eq, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const json = (statusCode: number, body: unknown) => ({
@@ -119,7 +120,7 @@ function maskedHint(varName: string): string | null {
     return v.length <= 4 ? '••••' : `••••${v.slice(-4)}`;
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return json(405, { error: 'Method Not Allowed' });
     if (!(await requireSuperAdmin(event))) return json(403, { error: 'Forbidden' });
 
@@ -150,4 +151,4 @@ export const handler: Handler = async (event) => {
     }));
 
     return json(200, { environment, services });
-};
+});

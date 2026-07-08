@@ -24,6 +24,7 @@ import {
     notifications,
 } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret  = process.env.JWT_SECRET;
 const BASE_URL   = process.env.BASE_URL || 'https://bemoreswan.com';
@@ -35,7 +36,7 @@ function getAuth(event: any): number | null {
     try { return (jwt.verify(match[1], jwtSecret) as { userId: number }).userId; } catch { return null; }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const callerId = getAuth(event);
@@ -275,4 +276,4 @@ export const handler: Handler = async (event) => {
             directAdd: false,
         }),
     };
-};
+});

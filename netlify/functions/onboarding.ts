@@ -25,6 +25,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { isEuCountry } from '../../src/config/compliance';
 import { normalizeMediaSources, type MediaSource } from '../../src/utils/media-sources';
 import { formatPlatformStrategyBrief } from '../../src/utils/platform-strategy-brief';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const connectionString = process.env.NETLIFY_DATABASE_URL;
 if (!connectionString) throw new Error('CRITICAL: NETLIFY_DATABASE_URL is missing.');
@@ -115,7 +116,7 @@ ${AURA_SAFE_CONTENT_BENCHMARK}
 `.trim();
 }
 
-export const handler: Handler = async (event): Promise<HandlerResponse> => {
+export default withLambda(async (event): Promise<HandlerResponse> => {
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
   try {
@@ -325,4 +326,4 @@ export const handler: Handler = async (event): Promise<HandlerResponse> => {
     console.error('onboarding error:', error);
     return { statusCode: 500, body: JSON.stringify({ error: 'Failed to set up assistant.' }) };
   }
-};
+});

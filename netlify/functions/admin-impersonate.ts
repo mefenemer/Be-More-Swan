@@ -23,6 +23,7 @@ import { getDb } from '../../db/client';
 import { users } from '../../db/schema';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { resolveActiveOrg } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const IMPERSONATION_TTL_SECONDS = 15 * 60; // 15 minutes
@@ -45,7 +46,7 @@ export interface ImpersonationPayload {
     exp?: number;
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     // Epic: Superadmin Environment Management — live-only admin action. Reject sandbox
     // requests so this can never run while the operator believes they are in sandbox
     // (prevents production bleed). See docs/SANDBOX-ENVIRONMENT.md.
@@ -200,4 +201,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 400, body: JSON.stringify({ error: 'action must be "start" or "end".' }) };
-};
+});

@@ -13,6 +13,7 @@ import { activeScenarios, integrationScenarios, suppressionList, workspaceIntegr
 import { getFreshAccessToken, isIntegrationProvider, type IntegrationProvider } from '../../src/utils/workspace-integrations';
 import { normaliseDomain } from '../../src/utils/scenario-engine';
 import { logApiCall } from '../../src/utils/vault';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -58,7 +59,7 @@ async function resolveActorUserId(db: Db, organisationId: number, integrationId:
     return wi?.connectedBy ?? null;
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const db = getDb();
 
     const recipes = await db
@@ -102,4 +103,4 @@ export const handler: Handler = async () => {
     }
 
     return { statusCode: 200, body: JSON.stringify({ recipes: recipes.length, synced, domainsAdded: added, skipped }) };
-};
+});

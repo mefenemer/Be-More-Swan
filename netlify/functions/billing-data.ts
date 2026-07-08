@@ -9,11 +9,12 @@ import Stripe from 'stripe';
 import { eq, desc, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, plans, payments, masterPlans, storageUsage, userOrganisations } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const stripeSecret = process.env.STRIPE_SECRET_KEY;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
     if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
 
@@ -302,4 +303,4 @@ export const handler: Handler = async (event) => {
         console.error('[billing-data] Error:', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Failed to load billing data.' }) };
     }
-};
+});

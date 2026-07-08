@@ -22,6 +22,7 @@ import { scheduledPosts, systemConnections, publishCronLog, notifications } from
 import { getSecret } from '../../src/utils/vault';
 import { resolvePostImage, type PostImage } from '../../src/utils/social-publish';
 import { recordPostedAssets } from '../../src/utils/pexels';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BATCH = 100;
 const BACKOFF_MINS = [2, 8, 30];
@@ -41,7 +42,7 @@ type DriverResult = { ok: true; id: string } | { ok: false; status: number | nul
 const isRetryable = (s: number | null) => s === 429 || (s != null && s >= 500);
 const esc = (s: string) => s.replace(/'/g, "''");
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const db = getDb();
     const tickStart = Date.now();
     const now = new Date();
@@ -119,7 +120,7 @@ export const handler: Handler = async () => {
     const durationMs = Date.now() - tickStart;
     await db.insert(publishCronLog).values({ postsProcessed: processed, postsSucceeded: succeeded, postsFailed: failed, durationMs });
     return { statusCode: 200, body: JSON.stringify({ processed, succeeded, failed, durationMs }) };
-};
+});
 
 // Resolve the Page id + a Page access token for this post. Prefers a dedicated 'facebook'
 // connection (future standalone FB OAuth) and otherwise falls back to the org's Meta

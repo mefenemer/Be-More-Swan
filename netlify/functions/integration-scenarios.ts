@@ -18,6 +18,7 @@ import {
     integrationProviders, integrationScenarios, activeScenarios,
     workspaceIntegrations, integrationApiCalls, featureRequests, featureRequestVotes,
 } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -35,7 +36,7 @@ function resourceOf(event: { rawUrl?: string; path?: string }): string {
     return pathOnly.split('/').pop() || '';
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
@@ -187,4 +188,4 @@ export const handler: Handler = async (event) => {
         console.error('[integration-scenarios] failure:', err);
         return json(500, { error: 'The Integrations Hub request failed unexpectedly.' });
     }
-};
+});

@@ -13,10 +13,11 @@ import jwt from 'jsonwebtoken';
 import { and, eq, desc, count as sqlCount } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { pendingActions, aiAssistants, taskRuns } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -84,4 +85,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ items, totalPending, page, limit }),
     };
-};
+});

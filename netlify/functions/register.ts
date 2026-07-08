@@ -11,6 +11,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { businessDomainOf } from '../../src/utils/email-domain';
 import { findPaidDomainWorkspace } from '../../src/utils/domain-workspace';
 import { isEuCountry } from '../../src/config/compliance';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const slugify = (str: string) =>
     str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
@@ -31,7 +32,7 @@ function detectLangFromHeader(acceptLanguage: string | undefined): string {
 }
 
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: 'Method Not Allowed' };
     }
@@ -366,4 +367,4 @@ export const handler: Handler = async (event) => {
             }),
         };
     }
-};
+});

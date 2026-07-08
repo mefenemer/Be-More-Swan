@@ -12,10 +12,11 @@ import { requireTenant } from '../../src/utils/tenant';
 import { logAuditEvent } from '../../src/utils/audit';
 import { getBlogAdapter, isBlogDestinationId } from '../../src/utils/blog-destinations';
 import { saveBlogDestination, deleteBlogDestination, listBlogDestinations } from '../../src/utils/blog-destinations/store';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({ statusCode, body: JSON.stringify(body) });
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
@@ -58,4 +59,4 @@ export const handler = async (event: HandlerEvent) => {
     }
 
     return json(400, { error: 'Unknown action.' });
-};
+});

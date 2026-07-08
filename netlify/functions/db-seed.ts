@@ -35,6 +35,7 @@ import {
     supportedLanguages,
 } from '../../db/schema';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -362,7 +363,7 @@ function checkSchemaVersion(seedVersion: string): { blocked: boolean; warning: b
 // Main handler
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const adminId = await requireSuperAdmin(event);
     if (!adminId) {
         return { statusCode: 401, body: JSON.stringify({ error: 'super_admin required.' }) };
@@ -450,4 +451,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 400, body: JSON.stringify({ error: 'action must be export, dry-run, or apply.' }) };
-};
+});

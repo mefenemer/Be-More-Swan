@@ -11,6 +11,7 @@ import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { masterAssistants, notifications, riskAssessments, users, userOrganisations } from '../../db/schema';
 import { suggestsHighRisk } from '../../src/config/compliance';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -26,7 +27,7 @@ function getAuth(event: any): { userId: number } | null {
     }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const auth = getAuth(event);
     if (!auth) return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized.' }) };
 
@@ -195,4 +196,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 405, body: 'Method Not Allowed' };
-};
+});

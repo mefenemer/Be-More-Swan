@@ -16,6 +16,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants, organisations } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -33,7 +34,7 @@ function clampDraft(d: BioDraft): BioDraft {
     };
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -151,7 +152,7 @@ Rules:
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ok: true, draft }),
     };
-};
+});
 
 // Store bios in onboarding_context: per-platform variants under `profile_bios`, and the
 // canonical `business_bio` (Facebook variant) that social-profile-sync falls back to.

@@ -13,8 +13,9 @@ import { requireTenant } from '../../src/utils/tenant';
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { getOrgMediaCapabilities } from '../../src/utils/assistant-capabilities';
 import { getBalance, monthlyAllowance, tierCanGenerateVideo, IMAGE_CREDIT_COST, VIDEO_CREDIT_COST } from '../../src/utils/ai-credits';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -37,4 +38,4 @@ export const handler: Handler = async (event) => {
             tierCanVideo: tierCanGenerateVideo(tierKey),
         }),
     };
-};
+});

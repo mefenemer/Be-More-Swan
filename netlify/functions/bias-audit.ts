@@ -18,12 +18,13 @@ import { getDb, withUpdatedAt } from '../../db/client';
 import {
     users, biasAuditReviews, biasIncidents, biasSamplingReports, aiAssistants, notifications,
 } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
 function isSuperAdmin(role: string) { return role === 'super_admin'; }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
 
     const match = (event.headers.cookie || '').match(/aura_session=([^;]+)/);
@@ -182,4 +183,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 404, body: JSON.stringify({ error: 'Unknown resource.' }) };
-};
+});

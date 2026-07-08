@@ -10,10 +10,11 @@ import { eq, gte, count } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
 import { users, userChurnSignals } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
     if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server configuration error.' }) };
 
@@ -80,4 +81,4 @@ export const handler = async (event: HandlerEvent) => {
         statusCode: 200,
         body: JSON.stringify({ signals, total, generatedAt: new Date().toISOString() }),
     };
-};
+});

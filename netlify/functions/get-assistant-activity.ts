@@ -20,8 +20,9 @@ import {
     contentRules,
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') {
         return { statusCode: 405, body: 'Method Not Allowed' };
     }
@@ -406,7 +407,7 @@ export const handler: Handler = async (event) => {
         console.error('[get-assistant-activity]', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Failed to load activity.' }) };
     }
-};
+});
 
 function _platformName(p: string): string {
     const map: Record<string, string> = {

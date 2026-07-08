@@ -24,6 +24,7 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts } from '../../db/schema';
 import { logAiUsage } from '../../src/utils/ai-usage';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret    = process.env.JWT_SECRET;
 const anthropic    = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -113,7 +114,7 @@ ${caption}
     }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -194,4 +195,4 @@ export const handler: Handler = async (event) => {
             routedToReview: routeToReview,
         }),
     };
-};
+});

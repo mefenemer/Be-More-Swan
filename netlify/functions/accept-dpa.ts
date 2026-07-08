@@ -14,12 +14,13 @@ import { getDb } from '../../db/client';
 import { users, dpaAcceptances, userOrganisations } from '../../db/schema';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { retryBlockedAssistants } from '../../src/utils/retry-provisioning';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 export const CURRENT_DPA_VERSION = '1.0';
 
 const jwtSecret = process.env.JWT_SECRET;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -76,4 +77,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ accepted: true, version, organisationId: user.organisationId }),
     };
-};
+});

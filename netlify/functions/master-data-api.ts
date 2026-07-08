@@ -35,6 +35,7 @@ import {
 } from '../../db/schema';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { isAdminRole } from '../../src/utils/rbac';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -529,7 +530,7 @@ async function handleSupportedLanguages(event: any, adminId: number, ip?: string
 // Main handler
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const auth = await requireAdmin(event);
     if (!auth) return unauth();
 
@@ -549,4 +550,4 @@ export const handler: Handler = async (event) => {
         default:
             return { statusCode: 400, body: JSON.stringify({ error: 'resource param required: master-plans | plan-prices | master-assistants | assistant-versions | feature-flags | platform-config | supported-languages' }) };
     }
-};
+});

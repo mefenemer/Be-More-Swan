@@ -7,6 +7,7 @@ import { and, eq, lt, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { pendingActions, users } from '../../db/schema';
 import { Resend } from 'resend';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
 const FROM   = process.env.EMAIL_FROM || 'noreply@bemoreswan.com';
@@ -54,5 +55,5 @@ const handler = async () => {
     return { statusCode: 200 };
 };
 
-export { handler };
+export default withLambda(handler);
 // Schedule: "0 9 * * *" — configured in netlify.toml

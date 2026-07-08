@@ -5,8 +5,9 @@ import { aiAssistants, dpaAcceptances, masterAssistants } from '../../db/schema'
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { CURRENT_DPA_VERSION } from './accept-dpa';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const assistantId = event.queryStringParameters?.id;
@@ -96,4 +97,4 @@ export const handler: Handler = async (event) => {
                 replacementAssistantId: row.replacementAssistantId ?? null,
             }) };
     });
-};
+});

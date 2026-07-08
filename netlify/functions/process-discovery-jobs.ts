@@ -25,6 +25,7 @@ import { scoreCandidates, type ScoreCandidate } from '../../src/lib/discovery-sc
 import { search, isSearchConfigured, normaliseDomain, SearchNotConfiguredError } from '../../src/lib/discovery-search';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { enqueueScenarioTrigger } from '../../src/utils/scenario-engine';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -87,10 +88,10 @@ export async function drainDiscoveryJobs(): Promise<number> {
     return jobs.length;
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const processed = await drainDiscoveryJobs();
     return { statusCode: 200, body: processed ? `processed ${processed} discovery jobs` : 'no jobs' };
-};
+});
 
 // ── One bounded slice of one job ───────────────────────────────────────────────
 

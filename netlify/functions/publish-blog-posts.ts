@@ -11,11 +11,12 @@ import { and, eq, lte, lt } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { blogPosts } from '../../db/schema';
 import { publishBlogPost } from '../../src/utils/blog-publish';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BATCH = 50;
 const STALE_PUBLISHING_MINS = 15;
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const db = getDb();
     const now = new Date();
     let claimed = 0, published = 0, failed = 0;
@@ -60,4 +61,4 @@ export const handler: Handler = async () => {
     }
 
     return { statusCode: 200, body: JSON.stringify({ due: due.length, claimed, published, failed }) };
-};
+});

@@ -17,8 +17,9 @@ import { generateAndPersistImage } from '../../src/lib/media-persist';
 import { holdCredits, settleHold, getBalance, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
 import { presignR2Get } from '../../src/utils/social-publish';
 import { FalContentPolicyError } from '../../src/lib/fal-gateway';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -81,4 +82,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ assetId, thumbnailUrl, balance: balance.balance }),
     };
-};
+});

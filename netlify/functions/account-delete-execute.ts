@@ -12,6 +12,7 @@ import { getDb } from '../../db/client';
 import { users, plans, organisations, userOrganisations, gdprErasureLog, jwtBlocklist, aiAssistants, aiUsageLog } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
 import { purgeUserAssets } from '../../src/utils/gdpr-asset-purge';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const stripe    = process.env.STRIPE_SECRET_KEY
     ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' })
@@ -160,7 +161,7 @@ async function executeDeleteions() {
     return pendingUsers.length;
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     try {
         const deleted = await executeDeleteions();
         console.log(`[account-delete-execute] Processed ${deleted} deletion(s)`);
@@ -169,4 +170,4 @@ export const handler: Handler = async () => {
         console.error('[account-delete-execute]', err);
         return { statusCode: 500 };
     }
-};
+});

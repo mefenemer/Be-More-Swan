@@ -5,11 +5,12 @@ import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, plans, payments, masterPlans, notifications } from '../../db/schema';
 import { resolveActionNotifications, PAYMENT_RESTORED_TYPES } from '../../src/utils/notification-actions';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' });
 const jwtSecret = process.env.JWT_SECRET!;
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     try {
@@ -129,4 +130,4 @@ export const handler: Handler = async (event) => {
         console.error('confirm-payment error:', err);
         return { statusCode: 500, body: JSON.stringify({ error: err.message || 'Server error' }) };
     }
-};
+});

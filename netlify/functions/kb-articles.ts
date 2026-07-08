@@ -24,6 +24,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants, kbArticles, kbChunks, vectorEmbeddings } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { chunkArticle, embedTexts, embeddingsConfigured } from '../../src/utils/kb-embeddings';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const SOURCES = new Set(['manual', 'file_upload']);
 const MAX_TITLE_CHARS = 300;
@@ -99,7 +100,7 @@ async function ingestArticle(
     return { embeddingStatus, chunkCount: chunks.length };
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
@@ -252,4 +253,4 @@ export const handler: Handler = async (event) => {
         console.error('[kb-articles]', err);
         return json(500, { error: 'Failed to process the request.' });
     }
-};
+});

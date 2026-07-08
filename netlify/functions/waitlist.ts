@@ -16,6 +16,7 @@ import { eq, and, count, lt } from 'drizzle-orm';
 import crypto from 'crypto';
 import { getDb } from '../../db/client';
 import { masterAssistants, waitlist, waitlistReferrals, users } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const BASE_URL = process.env.BASE_URL || 'https://bemoreswan.com';
@@ -86,7 +87,7 @@ async function generateStripeCoupon(email: string): Promise<string | null> {
     }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     let body: { masterAssistantId?: number; email?: string; ref?: string } = {};
@@ -295,4 +296,4 @@ export const handler: Handler = async (event) => {
         console.error('waitlist error:', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Failed to join waitlist.' }) };
     }
-};
+});

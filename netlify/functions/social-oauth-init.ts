@@ -10,6 +10,7 @@ import { getDb } from '../../db/client';
 import { storeSecret } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const CSRF_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -17,7 +18,7 @@ function buildState(payload: object): string {
     return Buffer.from(JSON.stringify(payload)).toString('base64url');
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const platform = event.queryStringParameters?.platform;
 
     const baseUrl = resolveBaseUrl(event.headers);
@@ -78,4 +79,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 302, headers: { Location: authUrl }, body: '' };
-};
+});

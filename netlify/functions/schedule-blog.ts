@@ -15,6 +15,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants, blogPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { resolvePostingSchedule, computeScheduleSlots } from '../../src/config/posting-cadence';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 type Db = ReturnType<typeof getDb>;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -66,7 +67,7 @@ async function pickCadenceSlot(
     return slots.find(s => !takenMs.has(s.getTime())) ?? slots[0];
 }
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -132,4 +133,4 @@ export const handler = async (event: HandlerEvent) => {
         .returning({ id: blogPosts.id, status: blogPosts.status, publishDate: blogPosts.publishDate });
 
     return { statusCode: 200, body: JSON.stringify({ post: updated }) };
-};
+});

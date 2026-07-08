@@ -6,6 +6,7 @@ import { getDb } from '../../db/client';
 import { users, notifications, userProfiles } from '../../db/schema';
 import { kindOf, categoryOf, priorityOf, isDismissibleType, resolvesOnClick } from '../../src/utils/notification-actions';
 import { isInAppEnabledFor, resolveInAppPrefs, type AssistantOverrideMap } from '../../src/utils/notification-prefs';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -13,7 +14,7 @@ const jwtSecret = process.env.JWT_SECRET;
 // as the single source of truth — imported here so the inbox/badge and the server-side
 // auto-resolver agree on what counts as an "action". Unknown types default to 'info'.
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
 
     // 1. Authenticate the User
@@ -194,4 +195,4 @@ export const handler = async (event: HandlerEvent) => {
         console.error('Notifications API Error:', error);
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal Server Error' }) };
     }
-};
+});

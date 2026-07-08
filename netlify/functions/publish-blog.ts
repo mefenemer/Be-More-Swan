@@ -12,8 +12,9 @@ import { getDb } from '../../db/client';
 import { blogPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { publishBlogPost } from '../../src/utils/blog-publish';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -41,4 +42,4 @@ export const handler = async (event: HandlerEvent) => {
 
     const updated = await publishBlogPost(db, post, ctx.organisationId);
     return { statusCode: 200, body: JSON.stringify({ post: updated }) };
-};
+});

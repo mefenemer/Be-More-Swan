@@ -27,6 +27,7 @@ import {
     contentProvenance,
     scheduledPosts,
 } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const C2PA_SCHEMA_VERSION = '1.0';
@@ -74,7 +75,7 @@ async function getUserRole(db: any, userId: number): Promise<{ platformRole: str
     };
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (!jwtSecret) {
         return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
     }
@@ -211,4 +212,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed.' }) };
-};
+});

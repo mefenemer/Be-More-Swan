@@ -12,6 +12,7 @@ import { eq } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
 import { userProfiles } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -19,7 +20,7 @@ const jwtSecret = process.env.JWT_SECRET;
 // dashboard-content.html. Unknown keys are dropped so junk can't be stored.
 const ALLOWED_KEYS = ['quick-actions', 'roi-mini', 'team-status', 'notifications', 'tips', 'referral'];
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server configuration error.' }) };
 
     const sessionToken = (event.headers.cookie || '').match(/aura_session=([^;]+)/)?.[1];
@@ -92,4 +93,4 @@ export const handler = async (event: HandlerEvent) => {
     }
 
     return { statusCode: 405, body: 'Method Not Allowed' };
-};
+});

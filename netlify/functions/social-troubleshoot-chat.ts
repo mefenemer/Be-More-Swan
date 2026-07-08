@@ -6,6 +6,7 @@
 import { Handler, HandlerResponse } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
 import jwt from 'jsonwebtoken';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET!;
 const anthropic  = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -32,7 +33,7 @@ function checkRateLimit(key: string): { allowed: boolean; remaining: number } {
     return { allowed: true, remaining: RATE_LIMIT_MAX - entry.count };
 }
 
-export const handler: Handler = async (event): Promise<HandlerResponse> => {
+export default withLambda(async (event): Promise<HandlerResponse> => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const cookieHeader = event.headers.cookie || '';
@@ -121,4 +122,4 @@ Do not mention check IDs. Do not use bullet points. Write naturally as if you're
         console.error('[social-troubleshoot-chat] LLM error:', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Could not generate troubleshooting message' }) };
     }
-};
+});

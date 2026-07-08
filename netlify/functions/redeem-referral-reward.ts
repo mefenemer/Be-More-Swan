@@ -15,6 +15,7 @@ import Stripe from 'stripe';
 import { getDb } from '../../db/client';
 import { plans, organisations, userReferrals, userOrganisations, rewardRedemptions } from '../../db/schema';
 import { REFUND_WINDOW_DAYS, FREE_ASSISTANT_THRESHOLD, CREDIT_GBP } from '../../src/utils/referral-tokens';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const stripe = process.env.STRIPE_SECRET_KEY
@@ -32,7 +33,7 @@ const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 });
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method Not Allowed' });
 
     const callerId = getAuth(event);
@@ -153,4 +154,4 @@ export const handler: Handler = async (event) => {
         console.error('[redeem-referral-reward] error:', e);
         return json(500, { error: 'Redemption failed. No tokens were spent.' });
     }
-};
+});

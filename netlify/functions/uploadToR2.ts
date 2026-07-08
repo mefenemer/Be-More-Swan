@@ -1,6 +1,7 @@
 // /netlify/functions/uploadToR2.ts
 import { Handler } from "@netlify/functions";
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 // 1. Initialize the client outside the handler so it can be reused across function invocations
 const s3Client = new S3Client({
@@ -13,7 +14,7 @@ const s3Client = new S3Client({
 });
 
 // 2. The actual serverless function that your frontend will call
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     // Only allow POST requests
     if (event.httpMethod !== "POST") {
         return { statusCode: 405, body: "Method Not Allowed" };
@@ -46,4 +47,4 @@ export const handler: Handler = async (event) => {
             body: JSON.stringify({ error: "Failed to upload file" }),
         };
     }
-};
+});

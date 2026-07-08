@@ -6,6 +6,7 @@ import { payments, plans, aiAssistants, onboardingDrafts, notifications, users, 
 import { sendEmail, buildAnnualRenewalEmail, buildDunningEmail } from '../../src/utils/email';
 import { resolveActionNotifications, PAYMENT_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { recordCardFingerprint } from '../../src/utils/billing-fingerprint';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' });
 const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
@@ -32,7 +33,7 @@ function getInvoiceSubscriptionId(invoice: Stripe.Invoice): string | null {
     return typeof sub === 'string' ? sub : sub?.id ?? null;
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const sig = event.headers['stripe-signature'];
@@ -902,7 +903,7 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 200, body: JSON.stringify({ received: true }) };
-};
+});
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

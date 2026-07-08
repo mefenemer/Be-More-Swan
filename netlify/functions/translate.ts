@@ -14,6 +14,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { uiTranslations } from '../../db/schema';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -32,7 +33,7 @@ function getAuth(event: any): number | null {
 
 const hash = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
     if (!getAuth(event)) return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized.' }) };
 
@@ -106,7 +107,7 @@ Rules:
     // 4. Map every requested string back (cache hit → translation, else original).
     const translations = capped.map(s => cache.get(s) ?? s);
     return json({ translations });
-};
+});
 
 // Models occasionally wrap JSON in ```json fences — strip them before parse.
 function stripFence(s: string): string {

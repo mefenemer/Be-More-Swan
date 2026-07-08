@@ -8,12 +8,13 @@ import { Resend } from 'resend';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, leads } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
 const FROM_EMAIL  = process.env.FROM_EMAIL   || 'hello@bemoreswan.com';
 const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL || FROM_EMAIL; // internal inbox
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     let body: { email?: string; subject?: string; message?: string; source?: string };
@@ -88,4 +89,4 @@ export const handler: Handler = async (event) => {
         console.error('[contact] Error:', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Failed to send. Please try again.' }) };
     }
-};
+});

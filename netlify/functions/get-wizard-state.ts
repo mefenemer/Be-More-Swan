@@ -14,12 +14,13 @@ import { getDb } from '../../db/client';
 import { requireTenant } from '../../src/utils/tenant';
 import { computeOnboardingProgress } from '../../src/utils/onboarding-progress';
 import { computeAssistantReadiness } from './get-assistant-readiness';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 });
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return json(405, { error: 'Method Not Allowed' });
 
     const db = getDb();
@@ -81,4 +82,4 @@ export const handler: Handler = async (event) => {
         // The assistant the "Preparing your assistant" step (and its sub-tasks) deep-links into.
         primaryAssistantId: progress.primaryAssistantId,
     });
-};
+});

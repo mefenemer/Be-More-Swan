@@ -10,10 +10,11 @@ import { Handler } from '@netlify/functions';
 import { and, eq, inArray, lt, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, workspaceAssets, adminAuditLog } from '../../db/schema';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const ARCHIVE_RETENTION_DAYS = 30;
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const db = getDb();
     const now = new Date();
     const cutoff = new Date(now.getTime() - ARCHIVE_RETENTION_DAYS * 24 * 60 * 60 * 1000);
@@ -71,4 +72,4 @@ export const handler: Handler = async () => {
 
     console.log(`[archive-cleanup] deleted=${ids.length} posts past ${ARCHIVE_RETENTION_DAYS}-day archive window`);
     return { statusCode: 200, body: JSON.stringify({ deleted: ids.length }) };
-};
+});

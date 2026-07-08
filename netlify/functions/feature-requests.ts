@@ -34,6 +34,7 @@ import {
     syncVoteCount,
     votedFeatureIds,
 } from '../../src/utils/feature-requests';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode,
@@ -61,7 +62,7 @@ function card(r: any, voted: Set<number>) {
     };
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const db = getDb();
 
     const session = requireSession(event);
@@ -270,4 +271,4 @@ export const handler: Handler = async (event) => {
     }).returning({ id: featureRequests.id });
 
     return json(201, { ok: true, id: created.id });
-};
+});

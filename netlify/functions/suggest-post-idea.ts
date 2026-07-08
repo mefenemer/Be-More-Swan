@@ -14,10 +14,11 @@ import { aiAssistants, aiBlueprints, contentGenerationJobs, postIdeaSuggestions 
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { requireTenant } from '../../src/utils/tenant';
 import { assembleBlueprint } from '../../src/utils/blueprint';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const VALID_PLATFORMS = ['instagram', 'facebook', 'linkedin', 'x'];
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -120,4 +121,4 @@ export const handler: Handler = async (event) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ok: true }),
     };
-};
+});

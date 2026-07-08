@@ -31,6 +31,7 @@ import {
     assistantCategoryAppliesToRole, isPublishingOnlyCategory,
     type PrefChannel, type AssistantOverrideMap,
 } from '../../src/utils/notification-prefs';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -97,7 +98,7 @@ async function loadPrefs(db: ReturnType<typeof getDb>, userId: number): Promise<
     }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (!['GET', 'POST'].includes(event.httpMethod)) {
         return { statusCode: 405, body: 'Method Not Allowed' };
     }
@@ -281,4 +282,4 @@ export const handler: Handler = async (event) => {
         }
         return { statusCode: 500, body: JSON.stringify({ error: 'Could not save preference.' }) };
     }
-};
+});

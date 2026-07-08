@@ -12,10 +12,11 @@ import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users } from '../../db/schema';
 import { insertAdminAuditLog } from '../../src/utils/admin-audit';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const SITE_URL = process.env.BASE_URL || 'https://bemoreswan.com';
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') {
         return { statusCode: 405, body: 'Method Not Allowed' };
     }
@@ -127,7 +128,7 @@ export const handler: Handler = async (event) => {
 </body>
 </html>`,
     };
-};
+});
 
 function htmlError(message: string) {
     return {

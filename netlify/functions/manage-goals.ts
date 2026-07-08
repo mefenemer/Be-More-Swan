@@ -24,6 +24,7 @@ import {
     isValidMetricKey,
     tierAllows,
 } from '../../src/config/goal-metrics';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, payload: unknown) => ({
     statusCode,
@@ -65,7 +66,7 @@ async function assistantRoleKey(db: any, assistantId: number, orgId: number): Pr
     return (row?.roleKey as string | null) ?? null;
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
@@ -280,4 +281,4 @@ export const handler: Handler = async (event) => {
     }
 
     return json(405, { error: 'Method Not Allowed' });
-};
+});

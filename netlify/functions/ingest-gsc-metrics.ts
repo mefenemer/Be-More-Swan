@@ -15,6 +15,7 @@ import { getDb } from '../../db/client';
 import { blogPosts, notifications, workspaceIntegrations } from '../../db/schema';
 import { getFreshAccessToken, IntegrationError } from '../../src/utils/workspace-integrations';
 import { evaluateDecay, gscDateRange, matchProperty } from '../../src/utils/gsc-decay';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const DECAY_RATIO = Number(process.env.GSC_DECAY_RATIO || 0.6);   // flag at a 40% drop from peak
 const MIN_BASELINE = Number(process.env.GSC_MIN_BASELINE || 50);  // ignore posts with tiny peaks
@@ -48,7 +49,7 @@ async function queryImpressions(token: string, property: string, pageUrl: string
     return Math.round(data.rows?.[0]?.impressions ?? 0);
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const db = getDb();
     const range = gscDateRange(LOOKBACK_DAYS, LAG_DAYS);
 
@@ -128,4 +129,4 @@ export const handler: Handler = async () => {
     }
 
     return { statusCode: 200, body: JSON.stringify({ orgs: integrations.length, checked, flagged }) };
-};
+});

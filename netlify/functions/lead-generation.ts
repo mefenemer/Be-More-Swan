@@ -34,6 +34,7 @@ import { createDiscoveryRun } from '../../src/utils/discovery';
 import { isSearchConfigured } from '../../src/lib/discovery-search';
 import { sendGmailMessage } from '../../src/utils/gmail';
 import { IntegrationError } from '../../src/utils/workspace-integrations';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 /** Chase reminder for an approved+contacted lead: 3 days out at 09:00, nudged off weekends. */
 function chaseDate(): Date {
@@ -102,7 +103,7 @@ function normaliseLeadCard(raw: unknown, fallbackName: string): Record<string, u
     };
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -416,4 +417,4 @@ Return STRICT JSON only (no markdown), an array of exactly 3 objects:
         console.error('[lead-generation]', action, err);
         return json(502, { error: 'The Lead Generator is having trouble right now — please try again in a moment.' });
     }
-};
+});

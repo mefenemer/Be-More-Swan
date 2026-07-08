@@ -16,6 +16,7 @@ import { and, desc, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { widgetConfigs, blogPosts, contentAssets } from '../../db/schema';
 import { resolveAssetDisplayUrl } from '../../src/utils/social-publish';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const CORS = {
     'Access-Control-Allow-Origin': '*',
@@ -64,7 +65,7 @@ function json(statusCode: number, obj: unknown, cache = false) {
     };
 }
 
-export const handler = async (event: HandlerEvent) => {
+export default withLambda(async (event: HandlerEvent) => {
     if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers: CORS, body: '' };
     if (event.httpMethod !== 'GET') return json(405, { error: 'Method Not Allowed' });
 
@@ -183,4 +184,4 @@ export const handler = async (event: HandlerEvent) => {
     }
 
     return json(404, { error: 'Unknown widget resource.' });
-};
+});

@@ -23,6 +23,7 @@ import {
     type TriggerSubject,
 } from '../../src/utils/scenario-engine';
 import { logApiCall } from '../../src/utils/vault';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BATCH = 25;
 const RETRY_BACKOFF_MS = 5 * 60 * 1000; // 5 minutes between attempts
@@ -127,7 +128,7 @@ async function processJob(db: Db, job: typeof scenarioJobs.$inferSelect): Promis
     return 'completed';
 }
 
-export const handler: Handler = async () => {
+export default withLambda(async () => {
     const db = getDb();
     const now = new Date();
 
@@ -162,4 +163,4 @@ export const handler: Handler = async () => {
     }
 
     return { statusCode: 200, body: JSON.stringify({ claimed: pending.length, completed, retried, failed }) };
-};
+});

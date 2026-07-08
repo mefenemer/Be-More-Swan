@@ -21,6 +21,7 @@ import { getDb } from '../../db/client';
 import { TABLE_DELETE_CONFIG, BLOCKING_DEPENDENCY_TABLES } from '../../src/utils/delete-tiers';
 import { insertAdminAuditLog } from '../../src/utils/admin-audit';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 const BULK_CONFIRM_THRESHOLD = 100;
@@ -38,7 +39,7 @@ function getAdminId(event: any): { adminId: number; role: string } | null {
     }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     // Epic: Superadmin Environment Management — live-only admin action. Reject sandbox
     // requests so this can never run while the operator believes they are in sandbox
     // (prevents production bleed). See docs/SANDBOX-ENVIRONMENT.md.
@@ -208,4 +209,4 @@ export const handler: Handler = async (event) => {
             confirmation: `Deleted ${table} #${targetIds.join(', ')}. ${deletedCount} record(s) affected. Logged to audit trail.`,
         }),
     };
-};
+});

@@ -22,6 +22,7 @@ import { logAiUsage } from '../../src/utils/ai-usage';
 import { getSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret   = process.env.JWT_SECRET;
 const anthropic   = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -120,7 +121,7 @@ function formatChecks(raw: Record<string, any>, isFull: boolean): ReviewCheck[] 
     return checks;
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, body: JSON.stringify({ error: 'Method Not Allowed' }) };
     }
@@ -246,4 +247,4 @@ export const handler: Handler = async (event) => {
         console.error('[quality-review]', err);
         return { statusCode: 500, body: JSON.stringify({ error: 'Quality review failed.' }) };
     }
-};
+});

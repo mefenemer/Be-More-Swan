@@ -13,13 +13,14 @@ import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { resolveActionNotifications, CONNECTION_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
+import { withLambda } from '@netlify/aws-lambda-compat';
 
 function parseState(raw: string): Record<string, string> | null {
     try { return JSON.parse(Buffer.from(raw, 'base64url').toString()); }
     catch { return null; }
 }
 
-export const handler: Handler = async (event) => {
+export default withLambda(async (event) => {
     const platform = event.queryStringParameters?.platform;
 
     const baseUrl = resolveBaseUrl(event.headers);
@@ -184,4 +185,4 @@ export const handler: Handler = async (event) => {
     }
 
     return { statusCode: 400, body: 'Unknown platform' };
-};
+});
