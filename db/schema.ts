@@ -652,7 +652,7 @@ export const integrationScenarios = pgTable("integration_scenarios", {
   providerKey: text("provider_key").notNull(),              // → integration_providers.provider_key
   tier: integer("tier").notNull().default(1),
   direction: text("direction").notNull(),                   // 'outbound' | 'inbound' | 'two_way'
-  scenarioType: text("scenario_type").notNull(),            // 'handoff_push' | 'feedback_loop' | 'suppression_sync'
+  scenarioType: text("scenario_type").notNull(),            // 'handoff_push' | 'meeting_handoff' | 'feedback_loop' | 'suppression_sync'
   title: text("title").notNull(),
   description: text("description"),
   // Recipe trigger contract, e.g. { on: 'lead.status_changed', when: ['QUALIFIED','MEETING_BOOKED'] }.

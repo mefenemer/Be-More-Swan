@@ -289,6 +289,8 @@ const PROVIDERS = [
     { providerKey: 'hubspot', displayName: 'HubSpot', category: 'crm', authType: 'oauth2', logoKey: 'hubspot' },
     { providerKey: 'salesforce', displayName: 'Salesforce', category: 'crm', authType: 'oauth2', logoKey: 'salesforce' },
     { providerKey: 'custom_webhook', displayName: 'Custom Webhook (Zapier / Make)', category: 'generic', authType: 'webhook_url', logoKey: 'webhook' },
+    { providerKey: 'slack', displayName: 'Slack', category: 'comms', authType: 'oauth2', logoKey: 'slack' },
+    { providerKey: 'notion', displayName: 'Notion', category: 'productivity', authType: 'oauth2', logoKey: 'notion' },
     { providerKey: 'pipedrive', displayName: 'Pipedrive', category: 'crm', authType: 'oauth2', logoKey: 'pipedrive' },
     { providerKey: 'zoho', displayName: 'Zoho CRM', category: 'crm', authType: 'oauth2', logoKey: 'zoho' },
 ];
@@ -304,6 +306,23 @@ const LEAD_HANDOFF_FIELDS = [
     { bmsField: 'score', label: 'Lead score', required: false, defaultTarget: 'lead_score' },
 ];
 
+// Meeting handoff (MEETING_BOOKED) → CRM contact/company property update.
+const MEETING_CRM_FIELDS = [
+    { bmsField: 'company', label: 'Company name', required: true, defaultTarget: 'company' },
+    { bmsField: 'contactEmail', label: 'Contact email', required: false, defaultTarget: 'email' },
+    { bmsField: 'meetingTime', label: 'Meeting time', required: false, defaultTarget: 'last_meeting_booked' },
+    { bmsField: 'meetingSummary', label: 'Meeting summary', required: false, defaultTarget: 'notes_last_meeting' },
+    { bmsField: 'meetingLink', label: 'Meeting link', required: false, defaultTarget: 'meeting_link' },
+];
+
+// Meeting handoff → Slack / Notion summary post. The summary payload reads these canonical
+// meeting fields directly; the map is informational (which fields to include).
+const MEETING_SUMMARY_FIELDS = [
+    { bmsField: 'meetingSummary', label: 'Meeting summary', required: true, defaultTarget: 'summary' },
+    { bmsField: 'meetingTime', label: 'Meeting time', required: false, defaultTarget: 'time' },
+    { bmsField: 'tasks', label: 'Action items', required: false, defaultTarget: 'tasks' },
+];
+
 // tier 1 native | 2 universal webhook | 3 roadmap (greyed + upvotable).
 const SCENARIOS = [
     // ── Tier 1: HubSpot (2-way) ──
@@ -312,7 +331,7 @@ const SCENARIOS = [
         direction: 'outbound', scenarioType: 'handoff_push',
         title: 'Push Qualified Lead to HubSpot',
         description: 'When a lead is qualified or books a meeting, create/update the HubSpot contact with the AI summary and attribution.',
-        triggerConfig: { on: 'lead.status_changed', when: ['QUALIFIED', 'MEETING_BOOKED'] },
+        triggerConfig: { on: 'lead.status_changed', when: ['QUALIFIED'] },
         actionType: 'hubspot_update_record', fieldSchema: LEAD_HANDOFF_FIELDS, status: 'available', sortOrder: 10,
     },
     {
@@ -337,7 +356,7 @@ const SCENARIOS = [
         direction: 'outbound', scenarioType: 'handoff_push',
         title: 'Push Qualified Lead to Salesforce',
         description: 'Create/update the Salesforce Contact or Account with the enriched lead fields on qualification.',
-        triggerConfig: { on: 'lead.status_changed', when: ['QUALIFIED', 'MEETING_BOOKED'] },
+        triggerConfig: { on: 'lead.status_changed', when: ['QUALIFIED'] },
         actionType: 'salesforce_update_record', fieldSchema: LEAD_HANDOFF_FIELDS, status: 'available', sortOrder: 20,
     },
     // ── Tier 2: Universal webhook ──
@@ -346,8 +365,33 @@ const SCENARIOS = [
         direction: 'outbound', scenarioType: 'handoff_push',
         title: 'Send Qualified Lead to a Webhook',
         description: 'POST the qualified-lead payload to any URL (Zapier / Make / your own endpoint) for unsupported tools.',
-        triggerConfig: { on: 'lead.status_changed', when: ['QUALIFIED', 'MEETING_BOOKED'] },
+        triggerConfig: { on: 'lead.status_changed', when: ['QUALIFIED'] },
         actionType: null, fieldSchema: LEAD_HANDOFF_FIELDS, status: 'available', sortOrder: 30,
+    },
+    // ── Meeting handoff (MEETING_BOOKED) — distinct scenario type + field schema ──
+    {
+        scenarioKey: 'hubspot_meeting_handoff', providerKey: 'hubspot', tier: 1,
+        direction: 'outbound', scenarioType: 'meeting_handoff',
+        title: 'Log Booked Meeting to HubSpot',
+        description: 'When a meeting is booked, stamp the meeting time and summary onto the HubSpot contact.',
+        triggerConfig: { on: 'lead.status_changed', when: ['MEETING_BOOKED'] },
+        actionType: 'hubspot_update_record', fieldSchema: MEETING_CRM_FIELDS, status: 'available', sortOrder: 40,
+    },
+    {
+        scenarioKey: 'slack_meeting_summary', providerKey: 'slack', tier: 1,
+        direction: 'outbound', scenarioType: 'meeting_handoff',
+        title: 'Post Booked Meeting to Slack',
+        description: 'When a meeting is booked, post the summary and action items to your Slack channel.',
+        triggerConfig: { on: 'lead.status_changed', when: ['MEETING_BOOKED'] },
+        actionType: 'slack_post_summary', fieldSchema: MEETING_SUMMARY_FIELDS, status: 'available', sortOrder: 41,
+    },
+    {
+        scenarioKey: 'universal_webhook_meeting', providerKey: 'custom_webhook', tier: 2,
+        direction: 'outbound', scenarioType: 'meeting_handoff',
+        title: 'Send Booked Meeting to a Webhook',
+        description: 'POST the booked-meeting payload to any URL (Zapier / Make / your own endpoint).',
+        triggerConfig: { on: 'lead.status_changed', when: ['MEETING_BOOKED'] },
+        actionType: null, fieldSchema: MEETING_CRM_FIELDS, status: 'available', sortOrder: 42,
     },
     // ── Tier 3: Roadmap (greyed, upvotable) ──
     {

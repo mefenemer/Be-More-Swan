@@ -24,6 +24,7 @@ import { generateQueries, type DiscoveryStrategy } from '../../src/lib/discovery
 import { scoreCandidates, type ScoreCandidate } from '../../src/lib/discovery-scoring';
 import { search, isSearchConfigured, normaliseDomain, SearchNotConfiguredError } from '../../src/lib/discovery-search';
 import { logAiUsage } from '../../src/utils/ai-usage';
+import { enqueueScenarioTrigger } from '../../src/utils/scenario-engine';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -362,6 +363,29 @@ async function promoteOne(
             })
             .returning({ id: assistantRecords.id });
         recordId = created.id;
+
+        // Integration Scenario Library — auto-approved leads (require_human_approval=false)
+        // skip the Review Queue PATCH seam, so fire the outbound handoff (QUALIFIED) here.
+        // Human-approved leads insert as 'pending_approval' and fire on approval instead.
+        if (approvalStatus === 'approved') {
+            const card = (lead.scoringCard && typeof lead.scoringCard === 'object') ? lead.scoringCard as Record<string, unknown> : {};
+            await enqueueScenarioTrigger(db, {
+                organisationId, assistantId, triggerEvent: 'lead.status_changed',
+                subject: {
+                    recordType: 'lead', recordId, newStatus: 'QUALIFIED',
+                    fields: {
+                        company: lead.companyName,
+                        rating: lead.rating ?? undefined,
+                        score: card.score,
+                        aiSummary: card.summary ?? card.reason ?? card.rationale,
+                        attribution: 'Be More Swan discovery',
+                        contactName: card.contactName ?? card.contact_name,
+                        contactEmail: card.contactEmail ?? card.email,
+                        domain: card.domain,
+                    },
+                },
+            });
+        }
     }
     await db.update(discoveredLeads)
         .set({ status: 'promoted', assistantRecordId: recordId, updatedAt: new Date() })

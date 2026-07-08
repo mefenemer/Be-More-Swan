@@ -19,6 +19,11 @@ type Db = ReturnType<typeof getDb>;
 // Canonical BMS outbound trigger events (extend as new triggers are added).
 export type TriggerEvent = 'lead.status_changed';
 
+// Scenario types the outbound job processor dispatches. Both are gated by the recipe's
+// trigger_config.when, so a QUALIFIED job matches only lead recipes and a MEETING_BOOKED
+// job matches only meeting recipes even though they share the 'lead.status_changed' event.
+export const OUTBOUND_SCENARIO_TYPES = new Set(['handoff_push', 'meeting_handoff']);
+
 export interface TriggerSubject {
     recordType: string;                  // 'lead'
     recordId?: number;                   // assistant_records.id / discovered_leads.id
@@ -96,7 +101,7 @@ export async function getMatchingOutboundScenarios(
 
     return rows.filter(({ scenario }) => {
         if (scenario.direction !== 'outbound' && scenario.direction !== 'two_way') return false;
-        if (scenario.scenarioType !== 'handoff_push') return false;
+        if (!OUTBOUND_SCENARIO_TYPES.has(scenario.scenarioType)) return false;
         const cfg = (scenario.triggerConfig ?? {}) as TriggerConfig;
         if (cfg.on && cfg.on !== triggerEvent) return false;
         if (Array.isArray(cfg.when) && cfg.when.length > 0) {
@@ -158,4 +163,44 @@ export function buildWebhookPayload(
         recordId: subject.recordId ?? null,
         data: mapped,
     };
+}
+
+// Action handlers whose payload is a meeting summary (summary + action items) rather than a
+// record-update diff. Meeting handoff recipes can target these instead of a CRM.
+const SUMMARY_ACTIONS = new Set(['slack_post_summary', 'notion_create_page']);
+
+interface SummaryTask { description?: unknown; assignee?: unknown; dueDate?: unknown }
+
+/**
+ * Build the meeting-summary payload the slack_post_summary / notion_create_page handlers
+ * consume. Summary + action items come from the subject's meeting fields; `channel` is an
+ * optional config value stored on the recipe's field map (fieldMappings.channel).
+ */
+export function buildSummaryPayload(
+    subject: TriggerSubject,
+    fieldMappings: Record<string, unknown>,
+): Record<string, unknown> {
+    const f = subject.fields ?? {};
+    const rawTasks = Array.isArray(f.tasks) ? f.tasks : Array.isArray(f.actionItems) ? f.actionItems : [];
+    const tasks = (rawTasks as SummaryTask[]).filter((t) => t && typeof t === 'object' && t.description);
+    return {
+        meetingSummary: f.meetingSummary ?? f.aiSummary ?? '',
+        title: f.meetingTitle ?? f.company ?? f.title ?? '',
+        tasks,
+        ...(typeof fieldMappings.channel === 'string' ? { channel: fieldMappings.channel } : {}),
+    };
+}
+
+/**
+ * Resolve the payload an ACTION_HANDLERS entry expects. Summary actions get the meeting
+ * summary shape; everything else (CRM record updates) gets the field-mapped diff shape.
+ */
+export function buildActionPayload(
+    actionType: string,
+    subject: TriggerSubject,
+    fieldMappings: Record<string, unknown>,
+): Record<string, unknown> {
+    return SUMMARY_ACTIONS.has(actionType)
+        ? buildSummaryPayload(subject, fieldMappings)
+        : buildDiffPayload(subject, fieldMappings);
 }

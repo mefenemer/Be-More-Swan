@@ -54,8 +54,13 @@ grant.
 Three data-flow patterns from the brief, each mapped to a concrete function:
 
 ### Type A — "Handoff" push (BMS ➔ external) · `process-scenario-jobs.ts`
-- **Trigger:** a lead flips to `QUALIFIED` / `MEETING_BOOKED`. The write-path seam calls
+- **Trigger:** a lead flips to `QUALIFIED` or a meeting to `MEETING_BOOKED`. The write-path seam calls
   `enqueueScenarioTrigger()` (`src/utils/scenario-engine.ts`) → one `scenario_jobs` row.
+- **Two outbound scenario types, gated by status:** `handoff_push` (lead recipes, `when: ['QUALIFIED']`,
+  lead field schema) and `meeting_handoff` (meeting recipes, `when: ['MEETING_BOOKED']`, meeting field
+  schema). A QUALIFIED job matches only lead recipes; a MEETING_BOOKED job only meeting recipes.
+  `buildActionPayload()` routes CRM record-update actions to the diff shape and Slack/Notion summary
+  actions to the meeting-summary shape.
 - **Drain (every minute):** claim the job, `getMatchingOutboundScenarios()` resolves the assistant's
   enabled recipes whose `trigger_config.when` includes the new status, `buildDiffPayload()` applies each
   recipe's field map, then execute:

@@ -15,8 +15,9 @@
 import { Handler } from '@netlify/functions';
 import { and, desc, eq, gte, lte } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, assistantRecords } from '../../db/schema';
+import { aiAssistants, assistantRecords, discoveredLeads } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { enqueueScenarioTrigger, type TriggerSubject } from '../../src/utils/scenario-engine';
 
 const RECORD_TYPES = new Set(['lead', 'enrichment', 'meeting', 'invoice', 'ticket']);
 const SOURCES = new Set(['chat', 'csv_import', 'integration']);
@@ -33,6 +34,85 @@ function json(statusCode: number, body: unknown) {
 function csvCell(value: unknown): string {
     const s = value === null || value === undefined ? '' : String(value);
     return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+type Db = ReturnType<typeof getDb>;
+
+// Approval states that count as "live" — a record already in one of these has already
+// fired its handoff, so re-approving/editing it must not fire again.
+const LIVE_APPROVAL = new Set(['approved', 'scheduled']);
+
+// Integration Scenario Library — fire the outbound "Handoff" push (Scenario Type A) when a
+// Review Queue record first goes live. lead → QUALIFIED, meeting → MEETING_BOOKED; the
+// scenario engine enqueues a job that maps these fields into the tenant's active recipes.
+// Best-effort: enqueueScenarioTrigger already swallows its own errors so approval never fails.
+async function enqueueHandoffOnApproval(
+    db: Db,
+    orgId: number,
+    record: { id: number; recordType: string; aiAssistantId: number; title: string | null; status: string | null; data: unknown },
+): Promise<void> {
+    const triggerStatus = record.recordType === 'lead' ? 'QUALIFIED'
+        : record.recordType === 'meeting' ? 'MEETING_BOOKED'
+        : null;
+    if (!triggerStatus) return; // enrichment/invoice/ticket don't map to a handoff trigger
+
+    const data = (record.data && typeof record.data === 'object') ? record.data as Record<string, unknown> : {};
+    let fields: Record<string, unknown>;
+
+    if (record.recordType === 'meeting') {
+        // Meeting handoff — its own field set (summary, time, link, action items). Consumed by
+        // CRM record-update recipes (mapped to properties) or Slack/Notion summary recipes.
+        const summary = data.summary ?? data.meetingSummary ?? data.notes;
+        fields = {
+            company: data.company ?? record.title ?? undefined,
+            contactName: data.contactName ?? data.attendee ?? data.with,
+            contactEmail: data.contactEmail ?? data.email ?? data.attendeeEmail,
+            meetingTitle: record.title ?? undefined,
+            meetingSummary: summary,
+            aiSummary: summary, // alias so CRM recipes can map the same text to a notes field
+            meetingTime: data.meetingTime ?? data.startTime ?? data.scheduledFor ?? data.when ?? data.date,
+            meetingLink: data.meetingLink ?? data.link ?? data.joinUrl ?? data.location,
+            tasks: data.tasks ?? data.actionItems,
+            attribution: 'Be More Swan',
+        };
+    } else {
+        // Lead handoff.
+        fields = {
+            company: record.title ?? undefined,
+            rating: record.status ?? undefined,
+            aiSummary: data.summary ?? data.aiSummary ?? data.reason ?? data.rationale,
+            attribution: data.source ?? data.matchedQuery ?? 'Be More Swan',
+            contactName: data.contactName ?? data.contact_name,
+            contactEmail: data.contactEmail ?? data.email,
+            domain: data.domain,
+            score: data.score,
+        };
+        // Leads carry canonical company/contact/score on the linked discovered_leads row.
+        try {
+            const [dl] = await db.select({
+                companyName: discoveredLeads.companyName, domain: discoveredLeads.domain,
+                contactName: discoveredLeads.contactName, contactEmail: discoveredLeads.contactEmail,
+                score: discoveredLeads.score,
+            }).from(discoveredLeads)
+                .where(and(eq(discoveredLeads.organisationId, orgId), eq(discoveredLeads.assistantRecordId, record.id)))
+                .limit(1);
+            if (dl) {
+                fields.company = fields.company ?? dl.companyName;
+                fields.domain = fields.domain ?? dl.domain;
+                fields.contactName = fields.contactName ?? dl.contactName;
+                fields.contactEmail = fields.contactEmail ?? dl.contactEmail;
+                fields.score = fields.score ?? dl.score;
+            }
+        } catch { /* discovery not in play for this lead — the record's own data still maps */ }
+    }
+
+    const subject: TriggerSubject = { recordType: record.recordType, recordId: record.id, newStatus: triggerStatus, fields };
+    await enqueueScenarioTrigger(db, {
+        organisationId: orgId,
+        assistantId: record.aiAssistantId,
+        triggerEvent: 'lead.status_changed',
+        subject,
+    });
 }
 
 export const handler: Handler = async (event) => {
@@ -245,6 +325,9 @@ export const handler: Handler = async (event) => {
             }
             // Approval-gate transitions (Review Queue): approve / reject / schedule. Scheduling a
             // record requires a scheduled_for and implies approval (so "Approve & Schedule" is one PATCH).
+            // When a record FIRST goes live we fire the Integration Scenario Library handoff push —
+            // prefetch it here so we can tell a genuine transition from a re-approval / edit.
+            let handoffRecord: { id: number; recordType: string; aiAssistantId: number; title: string | null; status: string | null; data: unknown } | null = null;
             if (body.approvalStatus !== undefined) {
                 const next = String(body.approvalStatus);
                 if (!['pending_approval', 'approved', 'scheduled', 'rejected'].includes(next)) {
@@ -258,6 +341,24 @@ export const handler: Handler = async (event) => {
                 } else if (next !== 'approved') {
                     // Leaving the scheduled state clears the due date (rejected / sent back to review).
                     patch.scheduledFor = null;
+                }
+
+                if (LIVE_APPROVAL.has(next)) {
+                    const [prev] = await db.select({
+                        id: assistantRecords.id,
+                        recordType: assistantRecords.recordType,
+                        aiAssistantId: assistantRecords.aiAssistantId,
+                        title: assistantRecords.title,
+                        status: assistantRecords.status,
+                        data: assistantRecords.data,
+                        approvalStatus: assistantRecords.approvalStatus,
+                    }).from(assistantRecords)
+                        .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
+                        .limit(1);
+                    // Only a transition INTO live fires the handoff — not an edit of an already-live record.
+                    if (prev && !LIVE_APPROVAL.has(prev.approvalStatus ?? '')) {
+                        handoffRecord = prev;
+                    }
                 }
             }
 
@@ -273,6 +374,17 @@ export const handler: Handler = async (event) => {
                     updatedAt: assistantRecords.updatedAt,
                 });
             if (!row) return json(404, { error: 'Record not found.' });
+
+            // Fire the outbound handoff after the approval commits. Uses the latest data (the
+            // PATCH may have edited it in the same request).
+            if (handoffRecord) {
+                await enqueueHandoffOnApproval(db, orgId, {
+                    ...handoffRecord,
+                    title: (patch.title as string | undefined) ?? handoffRecord.title,
+                    status: (patch.status as string | null | undefined) !== undefined ? (patch.status as string | null) : handoffRecord.status,
+                    data: patch.data !== undefined ? patch.data : handoffRecord.data,
+                });
+            }
             return json(200, { record: row });
         }
 

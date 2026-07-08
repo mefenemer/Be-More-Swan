@@ -18,7 +18,7 @@ import { activeScenarios, scenarioJobs, users, workspaceIntegrations } from '../
 import { runAction } from './sync-action';
 import {
     getMatchingOutboundScenarios,
-    buildDiffPayload,
+    buildActionPayload,
     buildWebhookPayload,
     type TriggerSubject,
 } from '../../src/utils/scenario-engine';
@@ -96,7 +96,7 @@ async function processJob(db: Db, job: typeof scenarioJobs.$inferSelect): Promis
             const actorId = await resolveActorUserId(db, job.organisationId, active.integrationId);
             if (actorId == null) { errors.push(`${scenario.scenarioKey}: no actor user`); continue; }
 
-            const payload = buildDiffPayload(subject, mappings);
+            const payload = buildActionPayload(scenario.actionType, subject, mappings);
             const result = await runAction(db, actorId, job.organisationId, scenario.actionType, payload);
             await logApiCall(db, {
                 userId: actorId,
