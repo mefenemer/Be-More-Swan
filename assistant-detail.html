@@ -969,6 +969,11 @@
       <div class="col-span-full flex items-center justify-center py-16 text-gray-400 text-sm">Loading platforms…</div>
     </div>
 
+    <!-- Synced actions — this assistant's Integration Scenario Library recipes, filtered to its
+         role. Rendered by src/components/assistant-integrations.js (AssistantIntegrations.init);
+         self-hides when the role has no relevant recipes. -->
+    <div id="assistant-integrations-host" class="hidden"></div>
+
     <!-- US-AUD-4.2.1 SC4: Emergency Revocation — Revoke All Connections (workspace-wide) -->
     <div class="bg-red-50 rounded-2xl border border-red-100 p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
       <div class="flex items-start gap-3.5 min-w-0">

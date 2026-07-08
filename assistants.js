@@ -986,6 +986,9 @@ window._openBriefDrawer = function(tabKey) {
     const backBtn = document.getElementById('brief-drawer-back');
     if (backBtn) backBtn.hidden = false;
     if (tabKey === 'notifications') _initAssistantNotifPrefs();
+    // Re-read the assistant's synced-action recipes each time the Connections tab opens, so a
+    // just-connected provider or a recipe enabled in the hub reflects here without a reload.
+    if (tabKey === 'platforms') window.AssistantIntegrations?.refresh();
     // Learned Directives lives alongside Assistant Rules on this panel (issue #113, moved into
     // its own Rules section in issue #125) — refresh it whenever the panel is opened, same as
     // the rules editor.
@@ -2763,6 +2766,9 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
 
     // ── Connections (full connect/manage UI, scoped to this assistant) ──
     await window.initAssistantConnections(assistantId, currentData);
+    // Synced actions — this assistant's Integration Scenario Library recipes, in the same tab.
+    // Reads relevance from window._detailReviewQueue.recordType (set by the dashboard registry).
+    window.AssistantIntegrations?.init({ assistantId });
     // Now that supportedTools have loaded, fold them into "Your Onboarding Answers".
     _renderOnboardingConnections();
 
