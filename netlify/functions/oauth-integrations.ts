@@ -81,7 +81,9 @@ const SCOPES: Record<IntegrationProvider, string> = {
     // authUrl + callback token-exchange for these are wired in step 3 — these scope strings are
     // declared now so the provider union stays complete. offline_access → a refresh token.
     jira: 'write:jira-work read:jira-work read:jira-user offline_access',
-    asana: 'default',
+    // Asana's classic OAuth grants full task read/write on consent — the scope param is omitted
+    // (its authorize URL below sends no scope), so this stays empty like Notion/Intercom.
+    asana: '',
 };
 
 /**
@@ -244,10 +246,14 @@ export const handler: Handler = async (event) => {
             // Atlassian 3LO (api.atlassian.com). offline_access (in SCOPES) yields a refresh
             // token; prompt=consent guarantees it is re-issued on re-auth.
             authUrl = `https://auth.atlassian.com/authorize?audience=api.atlassian.com&client_id=${clientId}&scope=${encodeURIComponent(SCOPES.jira)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}&response_type=code&prompt=consent`;
+        } else if (provider === 'asana') {
+            // Asana 3LO — no scope param (classic full-access grant). refresh token comes back
+            // automatically; there is no offline flag to set.
+            authUrl = `https://app.asana.com/-/oauth_authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
         } else if (provider === 'slack') {
             authUrl = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=${encodeURIComponent(SCOPES.slack)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
         } else {
-            // Provider is in the union but its OAuth flow isn't wired yet (e.g. asana → step 4).
+            // Provider is in the union but its OAuth flow isn't wired yet.
             return redirect(`/integrations.html?oauth_error=not_configured&provider=${provider}`);
         }
         return redirect(authUrl);
@@ -748,6 +754,44 @@ export const handler: Handler = async (event) => {
                     tenantId: cloudId,
                     externalAccountName: siteUrl,
                     scopes: tokenData.scope ?? SCOPES.jira,
+                });
+            } else if (provider === 'asana') {
+                const tokenRes = await fetch('https://app.asana.com/-/oauth_token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        grant_type: 'authorization_code',
+                        client_id: process.env.ASANA_CLIENT_ID ?? '',
+                        client_secret: process.env.ASANA_CLIENT_SECRET ?? '',
+                        redirect_uri: redirectUri,
+                        code,
+                    }),
+                });
+                const tokenData: { access_token?: string; refresh_token?: string; expires_in?: number; data?: { name?: string; email?: string } } = await tokenRes.json().catch(() => ({}));
+                if (!tokenData.access_token) return redirect(`/integrations.html?oauth_error=token_exchange&provider=asana`);
+
+                // Resolve the user's default workspace (gid + name) for the card label. Tasks are
+                // filed by project gid (the recipe config), so the workspace is display-only here.
+                let workspaceGid: string | null = null;
+                let workspaceName: string | null = null;
+                try {
+                    const wsRes = await fetch('https://app.asana.com/api/1.0/workspaces?limit=1', {
+                        headers: { Authorization: `Bearer ${tokenData.access_token}`, Accept: 'application/json' },
+                    });
+                    const ws: { data?: Array<{ gid?: string; name?: string }> } = wsRes.ok ? await wsRes.json() : {};
+                    workspaceGid = ws.data?.[0]?.gid ?? null;
+                    workspaceName = ws.data?.[0]?.name ?? null;
+                } catch { /* label only — connection still succeeds */ }
+
+                await saveIntegration(db, {
+                    organisationId, userId, provider: 'asana',
+                    accessToken: tokenData.access_token,
+                    // Asana access tokens live ~1h; the refresh token does not rotate on use.
+                    refreshToken: tokenData.refresh_token ?? null,
+                    expiresInSec: tokenData.expires_in ?? 3600,
+                    tenantId: workspaceGid,
+                    externalAccountName: workspaceName ?? tokenData.data?.name ?? tokenData.data?.email ?? null,
+                    scopes: null,
                 });
             } else if (provider === 'slack') {
                 const tokenRes = await fetch('https://slack.com/api/oauth.v2.access', {

@@ -939,28 +939,36 @@ function parseDueDate(raw: string | null): string | null {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/** Create one Jira issue for an action item; returns the issue key. Throws with a readable
- *  message on rejection so the caller can stamp it onto the ledger row. */
-async function createJiraIssue(accessToken: string, cloudId: string | null, payload: CreateTasksPayload, row: LedgerRow): Promise<string> {
+// A created ticket, normalised across providers: external id + a browse URL (null when the
+// provider gives none) to stamp onto the ledger row.
+interface TicketRef { id: string; url: string | null }
+
+/** The owner/due/attribution lines shared by both providers' ticket bodies. Assignees are
+ *  free-text meeting names (not provider account ids), so the owner is surfaced in the body and
+ *  the ticket left unassigned (plan §8). */
+function ticketBodyLines(row: LedgerRow): string[] {
+    const owner = row.assignee && row.assignee.toLowerCase() !== 'unassigned' ? row.assignee : null;
+    return [
+        ...(owner ? [`Owner (from meeting): ${owner}`] : []),
+        ...(row.dueDate ? [`Due (as stated): ${row.dueDate}`] : []),
+        '',
+        'Created by Be More Swan from an approved meeting action item.',
+    ];
+}
+
+/** Create one Jira issue for an action item. Throws with a readable message on rejection so the
+ *  caller can stamp it onto the ledger row. */
+async function createJiraIssue(accessToken: string, cloudId: string | null, siteUrl: string, payload: CreateTasksPayload, row: LedgerRow): Promise<TicketRef> {
     if (!cloudId) throw new Error('Jira site is missing — reconnect Jira.');
     const projectKey = typeof payload.projectKey === 'string' ? payload.projectKey.trim() : '';
     if (!projectKey) throw new Error('No Jira project key is configured for this recipe.');
     const issueType = typeof payload.issueType === 'string' && payload.issueType.trim() ? payload.issueType.trim() : 'Task';
 
-    // Assignees are free-text meeting names, not Jira account ids — surface the owner in the
-    // description and leave the ticket unassigned (plan §8). Due date is best-effort.
-    const owner = row.assignee && row.assignee.toLowerCase() !== 'unassigned' ? row.assignee : null;
-    const description = adfDoc([
-        ...(owner ? [`Owner (from meeting): ${owner}`] : []),
-        ...(row.dueDate ? [`Due (as stated): ${row.dueDate}`] : []),
-        '',
-        'Created by Be More Swan from an approved meeting action item.',
-    ]);
     const fields: Record<string, unknown> = {
         project: { key: projectKey },
         summary: row.description.slice(0, 250),
         issuetype: { name: issueType },
-        description,
+        description: adfDoc(ticketBodyLines(row)),
     };
     const due = parseDueDate(row.dueDate);
     if (due) fields.duedate = due;
@@ -975,7 +983,34 @@ async function createJiraIssue(accessToken: string, cloudId: string | null, payl
         const detail = data.errorMessages?.join('; ') || (data.errors ? Object.values(data.errors).join('; ') : '') || `Jira returned ${res.status}`;
         throw new Error(detail);
     }
-    return data.key;
+    return { id: data.key, url: siteUrl ? `${siteUrl}/browse/${data.key}` : null };
+}
+
+/** Create one Asana task for an action item, in the recipe's configured project. Asana infers
+ *  the workspace from the project, so none is sent (avoids a project/workspace mismatch). */
+async function createAsanaTask(accessToken: string, payload: CreateTasksPayload, row: LedgerRow): Promise<TicketRef> {
+    const projectGid = typeof payload.asanaProjectGid === 'string' ? payload.asanaProjectGid.trim() : '';
+    if (!projectGid) throw new Error('No Asana project is configured for this recipe.');
+
+    const data: Record<string, unknown> = {
+        name: row.description.slice(0, 250),
+        notes: ticketBodyLines(row).join('\n'),
+        projects: [projectGid],
+    };
+    const due = parseDueDate(row.dueDate);
+    if (due) data.due_on = due;
+
+    const res = await fetch('https://app.asana.com/api/1.0/tasks', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ data }),
+    });
+    const body: { data?: { gid?: string; permalink_url?: string }; errors?: Array<{ message?: string }> } = await res.json().catch(() => ({}));
+    if (!res.ok || !body.data?.gid) {
+        const detail = body.errors?.map((e) => e.message).filter(Boolean).join('; ') || `Asana returned ${res.status}`;
+        throw new Error(detail);
+    }
+    return { id: body.data.gid, url: body.data.permalink_url ?? null };
 }
 
 async function handleCreateTasks(
@@ -1024,35 +1059,38 @@ async function handleCreateTasks(
         throw err;
     }
 
-    if (provider === 'asana') {
-        // Asana ticket creation is wired in Phase 3 step 4.
-        return json(501, { error: 'Asana task creation is not implemented yet.' });
+    // Jira browse links need the connected site URL (stored as the connection label); Asana
+    // returns its own permalink, so no lookup is needed there.
+    let siteUrl = '';
+    if (provider === 'jira') {
+        const jiraInt = await getIntegration(db, organisationId, 'jira');
+        siteUrl = (jiraInt?.externalAccountName ?? '').replace(/\/+$/, '');
     }
-
-    // Jira — the connected site URL (stored as the connection label) roots ticket browse links.
-    const jiraInt = await getIntegration(db, organisationId, 'jira');
-    const siteUrl = (jiraInt?.externalAccountName ?? '').replace(/\/+$/, '');
+    const endpoint = provider === 'jira'
+        ? 'api.atlassian.com/ex/jira/rest/api/3/issue'
+        : 'app.asana.com/api/1.0/tasks';
 
     // File one ticket per action item. A single bad task never blocks the rest: its row is
     // stamped 'failed' (auto-retries on the next job attempt) while the others sync.
     let synced = 0, failed = 0;
     for (const row of rows) {
         try {
-            const key = await createJiraIssue(token.accessToken, token.tenantId, payload, row);
+            const ticket = provider === 'jira'
+                ? await createJiraIssue(token.accessToken, token.tenantId, siteUrl, payload, row)
+                : await createAsanaTask(token.accessToken, payload, row);
             await db.update(actionItems).set({
-                syncStatus: 'synced', provider, externalTicketId: key,
-                externalUrl: siteUrl ? `${siteUrl}/browse/${key}` : null,
+                syncStatus: 'synced', provider, externalTicketId: ticket.id, externalUrl: ticket.url,
                 errorMessage: null, syncedAt: new Date(), updatedAt: new Date(),
             }).where(eq(actionItems.id, row.id));
-            await logApiCall(db, { userId, integrationId: token.integrationId, endpoint: 'api.atlassian.com/ex/jira/rest/api/3/issue', httpStatus: 200 });
+            await logApiCall(db, { userId, integrationId: token.integrationId, endpoint, httpStatus: 200 });
             synced++;
         } catch (e) {
             await db.update(actionItems).set({
                 syncStatus: 'failed', provider,
-                errorMessage: String((e as Error)?.message ?? 'Jira rejected the ticket.').slice(0, 500),
+                errorMessage: String((e as Error)?.message ?? 'The task tracker rejected the ticket.').slice(0, 500),
                 updatedAt: new Date(),
             }).where(eq(actionItems.id, row.id));
-            await logApiCall(db, { userId, integrationId: token.integrationId, endpoint: 'api.atlassian.com/ex/jira/rest/api/3/issue', httpStatus: 502 });
+            await logApiCall(db, { userId, integrationId: token.integrationId, endpoint, httpStatus: 502 });
             failed++;
         }
     }

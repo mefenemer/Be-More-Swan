@@ -336,10 +336,20 @@ async function refreshProviderToken(provider: IntegrationProvider, refreshToken:
     }
 
     if (provider === 'asana') {
-        // Meeting Note Taker Phase 3: the Asana refresh grant is wired in step 4. Until then no
-        // Asana token can exist, so a refresh here means the row was created out of band — force a
-        // reconnect rather than silently falling through to the Slack grant below.
-        throw new IntegrationError('refresh_failed', 'Asana token refresh is not available yet — please reconnect it.', 401);
+        const res = await fetch('https://app.asana.com/-/oauth_token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                grant_type: 'refresh_token',
+                client_id: process.env.ASANA_CLIENT_ID ?? '',
+                client_secret: process.env.ASANA_CLIENT_SECRET ?? '',
+                refresh_token: refreshToken,
+            }),
+        });
+        const data: { access_token?: string; refresh_token?: string; expires_in?: number } = await res.json().catch(() => ({}));
+        if (!res.ok || !data.access_token) throw new IntegrationError('refresh_failed', 'Asana token refresh was rejected.', 401);
+        // Asana does not rotate the refresh token on use — keep the stored one when none is returned.
+        return { accessToken: data.access_token, refreshToken: data.refresh_token ?? null, expiresInSec: data.expires_in ?? 3600 };
     }
 
     // Slack: only used when token rotation is enabled on the app (otherwise bot tokens

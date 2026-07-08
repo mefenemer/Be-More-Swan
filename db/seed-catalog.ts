@@ -296,8 +296,9 @@ const PROVIDERS = [
     // Connection-optional: sends from a connected Gmail if present, else from the Be More Swan
     // outbound domain — so its recipes activate with no setup (see integration-scenarios.ts).
     { providerKey: 'email', displayName: 'Email Follow-Up', category: 'comms', authType: 'builtin', logoKey: 'email' },
-    // Project management — meeting action items → tickets. Asana follows in Phase 3 step 4.
+    // Project management — meeting action items → tickets.
     { providerKey: 'jira', displayName: 'Jira', category: 'pm', authType: 'oauth2', logoKey: 'jira' },
+    { providerKey: 'asana', displayName: 'Asana', category: 'pm', authType: 'oauth2', logoKey: 'asana' },
 ];
 
 // Field maps the FieldMapper renders. bmsField = the canonical BMS lead field the engine
@@ -335,6 +336,9 @@ const MEETING_SUMMARY_FIELDS = [
 const MEETING_TASKS_FIELDS = [
     { bmsField: 'projectKey', label: 'Jira project key', required: true, defaultTarget: '' },
     { bmsField: 'issueType', label: 'Issue type', required: false, defaultTarget: 'Task' },
+];
+const MEETING_ASANA_FIELDS = [
+    { bmsField: 'asanaProjectGid', label: 'Asana project ID', required: true, defaultTarget: '' },
 ];
 
 // tier 1 native | 2 universal webhook | 3 roadmap (greyed + upvotable).
@@ -422,6 +426,14 @@ const SCENARIOS = [
         description: 'When you approve a meeting, create one Jira ticket per action item in your chosen project, with the owner and due date captured from the notes.',
         triggerConfig: { on: 'lead.status_changed', when: ['MEETING_BOOKED'] },
         actionType: 'jira_create_tasks', fieldSchema: MEETING_TASKS_FIELDS, status: 'available', sortOrder: 44,
+    },
+    {
+        scenarioKey: 'asana_create_tasks', providerKey: 'asana', tier: 1,
+        direction: 'outbound', scenarioType: 'meeting_handoff',
+        title: 'Create Asana Tasks from Action Items',
+        description: 'When you approve a meeting, create one Asana task per action item in your chosen project, with the owner and due date captured from the notes.',
+        triggerConfig: { on: 'lead.status_changed', when: ['MEETING_BOOKED'] },
+        actionType: 'asana_create_tasks', fieldSchema: MEETING_ASANA_FIELDS, status: 'available', sortOrder: 45,
     },
     // ── Tier 3: Roadmap (greyed, upvotable) ──
     {
