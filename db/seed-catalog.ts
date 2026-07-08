@@ -435,6 +435,17 @@ const SCENARIOS = [
         triggerConfig: { on: 'lead.status_changed', when: ['MEETING_BOOKED'] },
         actionType: 'asana_create_tasks', fieldSchema: MEETING_ASANA_FIELDS, status: 'available', sortOrder: 45,
     },
+    {
+        // Zero-config (fieldSchema: []) like email_meeting_followup — the handler files the page
+        // under the most-recently-edited page you've shared with the Be More Swan connection, so
+        // there's no target to configure. handleNotionCreatePage builds summary + to_do blocks.
+        scenarioKey: 'notion_create_page', providerKey: 'notion', tier: 1,
+        direction: 'outbound', scenarioType: 'meeting_handoff',
+        title: 'Create a Notion Page from Meeting Notes',
+        description: 'When you approve a meeting, create a Notion page with the summary and each action item as a to-do — filed under a page you\'ve shared with Be More Swan.',
+        triggerConfig: { on: 'lead.status_changed', when: ['MEETING_BOOKED'] },
+        actionType: 'notion_create_page', fieldSchema: [], status: 'available', sortOrder: 46,
+    },
     // ── Tier 3: Roadmap (greyed, upvotable) ──
     {
         scenarioKey: 'pipedrive_handoff_push', providerKey: 'pipedrive', tier: 3,
