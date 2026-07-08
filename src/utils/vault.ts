@@ -209,7 +209,7 @@ export async function deleteSecretsByPrefix(
  */
 export async function logApiCall(
     db: NodePgDatabase<any>,
-    opts: { userId: number; integrationId?: number | null; endpoint: string; httpStatus?: number | null }
+    opts: { userId: number; integrationId?: number | null; endpoint: string; httpStatus?: number | null; activeScenarioId?: number | null }
 ): Promise<void> {
     const { integrationApiCalls } = await import('../../db/schema');
     await db.insert(integrationApiCalls).values({
@@ -217,5 +217,6 @@ export async function logApiCall(
         integrationId: opts.integrationId ?? null,
         endpoint: opts.endpoint,
         httpStatus: opts.httpStatus ?? null,
+        activeScenarioId: opts.activeScenarioId ?? null,
     });
 }

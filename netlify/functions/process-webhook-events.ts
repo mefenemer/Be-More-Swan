@@ -10,13 +10,77 @@
 import { Handler } from '@netlify/functions';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { webhookEvents, systemConnections } from '../../db/schema';
+import { webhookEvents, systemConnections, activeScenarios, integrationScenarios, discoveredLeads } from '../../db/schema';
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
+import { normaliseDomain } from '../../src/utils/scenario-engine';
 
 const BATCH = 50;
 
+type Db = ReturnType<typeof getDb>;
 type WebhookEvent = typeof webhookEvents.$inferSelect;
+
+// ── Integration Scenario Library — inbound "Feedback Loop" (Scenario Type B) ─────
+// A CRM deal-stage webhook (HubSpot/Salesforce) lands in webhook_events; if the tenant
+// has an enabled inbound recipe for that provider, we reverse-map the external stage to a
+// BMS outcome (CLOSED_WON/CLOSED_LOST) and record it on the matching discovered_lead so
+// the discovery AI learns which prospects actually converted. Runs BEFORE the legacy
+// systemConnections routing; returns true when it owned the event.
+
+/** Read a dot-path (e.g. 'properties.dealstage') out of an arbitrary payload. */
+function readPath(obj: unknown, path: string): unknown {
+    return path.split('.').reduce<unknown>((acc, key) => (acc && typeof acc === 'object') ? (acc as Record<string, unknown>)[key] : undefined, obj);
+}
+
+interface FeedbackTriggerConfig {
+    on?: string;
+    stagePath?: string;
+    identifierPath?: string;
+    stageMap?: Record<string, string>;
+}
+
+async function handleFeedbackLoop(db: Db, ev: WebhookEvent): Promise<boolean> {
+    if (ev.organisationId == null) return false;
+
+    // Enabled inbound recipes for this org + provider.
+    const recipes = await db
+        .select({ active: activeScenarios, scenario: integrationScenarios })
+        .from(activeScenarios)
+        .innerJoin(integrationScenarios, eq(activeScenarios.scenarioId, integrationScenarios.id))
+        .where(and(
+            eq(activeScenarios.organisationId, ev.organisationId),
+            eq(activeScenarios.isEnabled, true),
+            eq(integrationScenarios.providerKey, ev.provider),
+            eq(integrationScenarios.scenarioType, 'feedback_loop'),
+        ));
+    if (recipes.length === 0) return false;
+
+    for (const { scenario } of recipes) {
+        const cfg = (scenario.triggerConfig ?? {}) as FeedbackTriggerConfig;
+        const stageRaw = String(readPath(ev.payload, cfg.stagePath ?? 'properties.dealstage') ?? '').trim().toLowerCase();
+        const outcome = cfg.stageMap?.[stageRaw];
+        if (!outcome) continue; // stage not a terminal outcome we track
+
+        const identifier = String(readPath(ev.payload, cfg.identifierPath ?? 'properties.email') ?? '').trim();
+        if (!identifier) continue;
+
+        // Match the discovered lead by email (exact) or normalised domain.
+        const isEmail = identifier.includes('@');
+        const domain = normaliseDomain(isEmail ? identifier.split('@')[1] : identifier);
+        const [lead] = await db.select().from(discoveredLeads)
+            .where(and(
+                eq(discoveredLeads.organisationId, ev.organisationId),
+                isEmail ? eq(discoveredLeads.contactEmail, identifier) : eq(discoveredLeads.domain, domain),
+            )).limit(1);
+        if (!lead) continue;
+
+        const signals = { ...((lead.signals as Record<string, unknown>) ?? {}), crmOutcome: outcome, crmStage: stageRaw, outcomeAt: new Date().toISOString() };
+        await db.update(discoveredLeads)
+            .set({ signals, updatedAt: new Date() })
+            .where(eq(discoveredLeads.id, lead.id));
+    }
+    return true;
+}
 
 // Connector handlers register here, keyed by provider. A handler only runs AFTER the
 // sandbox check passes. Throw to mark the event 'failed' (kept for inspection/retry).
@@ -50,6 +114,11 @@ export const handler: Handler = async () => {
         if (claimed.length === 0) continue; // another runner took it
 
         try {
+            // Integration Scenario Library feedback loop (Type B) — owns CRM deal-stage
+            // events when the tenant has an enabled inbound recipe; workspace-integration
+            // based, so it runs before the systemConnections routing below.
+            if (await handleFeedbackLoop(db, ev)) { await finish(db, ev.id, 'processed'); processed++; continue; }
+
             // Route to the owning assistant via the connection.
             if (!ev.connectionId) { await finish(db, ev.id, 'ignored', 'no_connection'); ignored++; continue; }
             const [conn] = await db.select({

@@ -35,6 +35,57 @@
     Connections are workspace-wide and stored encrypted. Only workspace owners and admins can disconnect a tool.
   </p>
 
+  <!-- ═══════════════ Integration Scenario Library ═══════════════ -->
+  <section id="scenario-library" class="mt-14 hidden">
+    <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
+      <div>
+        <h2 class="text-2xl font-extrabold text-gray-900">Integration Scenarios</h2>
+        <p class="text-gray-500 mt-1">Turn on prebuilt recipes that move data between Be More Swan and your tools — per assistant.</p>
+      </div>
+      <div id="scenario-assistant-bar" class="hidden shrink-0">
+        <label for="scenario-assistant-select" class="block text-xs font-bold text-gray-600 mb-1">Assistant</label>
+        <select id="scenario-assistant-select" class="w-full sm:w-64 px-3 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium focus:outline-none focus:border-emerald-500"></select>
+      </div>
+    </div>
+
+    <div id="scenarios-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-8 text-center text-gray-500 col-span-full" id="scenarios-loading">Loading scenarios…</div>
+    </div>
+
+    <!-- Execution logs -->
+    <div class="mt-10">
+      <h3 class="text-lg font-bold text-gray-900 mb-3">Execution log</h3>
+      <div id="scenario-logs" class="bg-white rounded-2xl border border-gray-200 shadow-sm divide-y divide-gray-100 text-sm">
+        <div class="p-5 text-gray-400" id="scenario-logs-empty">No runs yet — logs appear here once a scenario fires.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Config drawer / field mapper modal -->
+  <div id="scenario-modal" class="hidden fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 px-0 sm:px-4">
+    <div class="bg-white w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl shadow-xl max-h-[90vh] overflow-y-auto">
+      <div class="flex items-start justify-between gap-4 p-5 border-b border-gray-100 sticky top-0 bg-white">
+        <div>
+          <h3 id="scenario-modal-title" class="font-bold text-gray-900">Configure scenario</h3>
+          <p id="scenario-modal-desc" class="text-sm text-gray-500 mt-0.5"></p>
+        </div>
+        <button type="button" id="scenario-modal-close" class="text-gray-400 hover:text-gray-700 text-2xl leading-none shrink-0">&times;</button>
+      </div>
+      <div class="p-5 space-y-4">
+        <div id="scenario-modal-webhook" class="hidden space-y-1.5">
+          <label class="text-xs font-bold text-gray-600" for="scenario-webhook-url">Webhook URL</label>
+          <input id="scenario-webhook-url" type="url" placeholder="https://hooks.zapier.com/…" class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500">
+        </div>
+        <div id="scenario-modal-fields" class="space-y-3"></div>
+        <p id="scenario-modal-error" class="hidden text-sm font-semibold text-red-600"></p>
+      </div>
+      <div class="p-5 border-t border-gray-100 flex justify-end gap-2 sticky bottom-0 bg-white">
+        <button type="button" id="scenario-modal-cancel" class="px-4 py-2 bg-white border border-gray-200 text-gray-600 text-sm font-bold rounded-lg">Cancel</button>
+        <button type="button" id="scenario-modal-save" class="px-5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg">Enable scenario</button>
+      </div>
+    </div>
+  </div>
+
 </main>
 
 <script src="./mobileMenu.js"></script>
@@ -320,6 +371,214 @@
     } catch (e) {}
     loadStatus();
   })();
+})();
+</script>
+
+<!-- ═══════════════ Integration Scenario Library controller ═══════════════ -->
+<script>
+(function () {
+  'use strict';
+  const API = '/api/integrations';
+  const grid = document.getElementById('scenarios-grid');
+  const section = document.getElementById('scenario-library');
+  const selectBar = document.getElementById('scenario-assistant-bar');
+  const select = document.getElementById('scenario-assistant-select');
+  const logsEl = document.getElementById('scenario-logs');
+  const modal = document.getElementById('scenario-modal');
+
+  let assistantId = null;
+  let scenarios = [];
+  let editing = null; // the scenario being configured
+
+  function esc(v) {
+    return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function tierBadge(t) {
+    const m = { 1: ['Native', 'bg-emerald-50 text-emerald-800 border-emerald-200'], 2: ['Webhook', 'bg-sky-50 text-sky-800 border-sky-200'], 3: ['Roadmap', 'bg-gray-100 text-gray-500 border-gray-200'] };
+    const [label, cls] = m[t] || m[1];
+    return '<span class="text-xs font-bold px-2 py-0.5 rounded-full border ' + cls + '">' + label + '</span>';
+  }
+
+  async function loadAssistants() {
+    let list = [];
+    try {
+      const res = await fetch('/.netlify/functions/get-assistants');
+      if (res.ok) list = ((await res.json()).assistants || []).filter(a => a.isActive !== false);
+    } catch (e) {}
+    if (!list.length) { section.classList.remove('hidden'); grid.innerHTML = '<div class="col-span-full text-gray-500 p-6 bg-white rounded-2xl border border-gray-200 text-center">Create an assistant first — scenarios are configured per assistant.</div>'; return; }
+    select.innerHTML = list.map(a => '<option value="' + a.id + '">' + esc(a.name) + (a.role ? ' — ' + esc(a.role) : '') + '</option>').join('');
+    assistantId = String(list[0].id);
+    select.value = assistantId;
+    selectBar.classList.remove('hidden');
+    section.classList.remove('hidden');
+    select.addEventListener('change', function () { assistantId = select.value; loadScenarios(); loadLogs(); });
+    loadScenarios();
+    loadLogs();
+  }
+
+  function ctaFor(s) {
+    // Tier 3 / coming soon → greyed + upvote.
+    if (s.tier === 3 || s.status !== 'available') {
+      return '<button type="button" data-upvote="' + s.id + '" class="w-full px-4 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 text-sm font-bold rounded-lg transition">▲ Upvote' + (s.roadmapVotes != null ? ' (' + s.roadmapVotes + ')' : '') + '</button>';
+    }
+    if (s.active) {
+      const label = s.active.isEnabled ? 'Enabled' : 'Disabled';
+      const dot = s.active.isEnabled ? 'bg-emerald-600' : 'bg-gray-400';
+      return '<div class="flex items-center gap-2">' +
+        '<button type="button" data-toggle="' + s.active.id + '" data-enabled="' + (s.active.isEnabled ? '1' : '0') + '" class="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm font-bold text-gray-700"><span class="w-1.5 h-1.5 rounded-full ' + dot + '"></span>' + label + '</button>' +
+        '<button type="button" data-config="' + s.id + '" class="grow px-3 py-2 bg-white border border-gray-200 text-gray-600 text-sm font-bold rounded-lg">Configure</button>' +
+        '<button type="button" data-remove="' + s.active.id + '" class="px-3 py-2 text-gray-400 hover:text-red-600 text-sm font-bold rounded-lg" title="Remove">✕</button>' +
+      '</div>';
+    }
+    // Tier 2 webhook needs no OAuth; Tier 1 needs the provider connected first.
+    if (s.tier !== 2 && !s.connection) {
+      return '<a href="/api/oauth/' + esc(s.providerKey) + '/connect" class="block w-full text-center px-4 py-2 bg-white border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-sm font-bold rounded-lg transition">Connect ' + esc(s.providerName) + ' first</a>';
+    }
+    return '<button type="button" data-config="' + s.id + '" class="w-full px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition">Enable</button>';
+  }
+
+  function render() {
+    if (!scenarios.length) { grid.innerHTML = '<div class="col-span-full text-gray-500 p-6 bg-white rounded-2xl border border-gray-200 text-center">No scenarios available yet.</div>'; return; }
+    grid.innerHTML = scenarios.map(function (s) {
+      const dir = s.direction === 'inbound' ? '← in' : s.direction === 'two_way' ? '⇄ 2-way' : '→ out';
+      const grey = (s.tier === 3 || s.status !== 'available') ? ' opacity-70' : '';
+      return '<div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3' + grey + '">' +
+        '<div class="flex items-start justify-between gap-2">' +
+          '<div class="flex items-center gap-2 flex-wrap">' + tierBadge(s.tier) + '<span class="text-xs font-semibold text-gray-400">' + dir + '</span></div>' +
+          '<span class="text-xs font-semibold text-gray-400">' + esc(s.providerName) + '</span>' +
+        '</div>' +
+        '<div class="grow"><p class="font-bold text-gray-900">' + esc(s.title) + '</p>' +
+          '<p class="text-sm text-gray-500 mt-1">' + esc(s.description) + '</p></div>' +
+        ctaFor(s) +
+      '</div>';
+    }).join('');
+  }
+
+  async function loadScenarios() {
+    grid.innerHTML = '<div class="col-span-full text-gray-400 p-6 text-center">Loading scenarios…</div>';
+    try {
+      const res = await fetch(API + '/scenarios?assistantId=' + encodeURIComponent(assistantId));
+      if (!res.ok) throw new Error('status ' + res.status);
+      scenarios = (await res.json()).scenarios || [];
+      render();
+    } catch (e) {
+      grid.innerHTML = '<div class="col-span-full text-red-600 p-6 text-center">Couldn’t load scenarios.</div>';
+    }
+  }
+
+  async function loadLogs() {
+    try {
+      const res = await fetch(API + '/logs?assistantId=' + encodeURIComponent(assistantId));
+      if (!res.ok) return;
+      const logs = (await res.json()).logs || [];
+      if (!logs.length) { logsEl.innerHTML = '<div class="p-5 text-gray-400">No runs yet — logs appear here once a scenario fires.</div>'; return; }
+      logsEl.innerHTML = logs.map(function (l) {
+        const ok = (l.httpStatus || 0) < 400;
+        const badge = '<span class="text-xs font-bold px-2 py-0.5 rounded-full ' + (ok ? 'bg-emerald-50 text-emerald-800' : 'bg-red-50 text-red-700') + '">' + (l.httpStatus || '—') + '</span>';
+        const when = l.calledAt ? new Date(l.calledAt).toLocaleString('en-GB') : '';
+        return '<div class="flex items-center justify-between gap-3 p-3.5"><div class="min-w-0"><p class="font-semibold text-gray-800 truncate">' + esc(l.scenarioTitle || l.endpoint) + '</p><p class="text-xs text-gray-400 truncate">' + esc(l.endpoint) + ' · ' + esc(when) + '</p></div>' + badge + '</div>';
+      }).join('');
+    } catch (e) {}
+  }
+
+  // ── Config modal / field mapper ──
+  function openModal(s) {
+    editing = s;
+    document.getElementById('scenario-modal-title').textContent = s.title;
+    document.getElementById('scenario-modal-desc').textContent = s.description || '';
+    document.getElementById('scenario-modal-error').classList.add('hidden');
+    const webhookWrap = document.getElementById('scenario-modal-webhook');
+    const webhookInput = document.getElementById('scenario-webhook-url');
+    if (s.tier === 2) { webhookWrap.classList.remove('hidden'); webhookInput.value = (s.active && s.active.webhookUrl) || ''; }
+    else webhookWrap.classList.add('hidden');
+
+    const map = (s.active && s.active.fieldMappings) || {};
+    const fields = Array.isArray(s.fieldSchema) ? s.fieldSchema : [];
+    document.getElementById('scenario-modal-fields').innerHTML = fields.length
+      ? '<p class="text-xs font-bold text-gray-500 uppercase tracking-wide">Field mapping</p>' + fields.map(function (f) {
+          const val = map[f.bmsField] != null ? map[f.bmsField] : (f.defaultTarget || '');
+          return '<div class="flex items-center gap-2"><span class="w-1/2 text-sm font-medium text-gray-700 truncate">' + esc(f.label) + (f.required ? ' *' : '') + '</span>' +
+            '<span class="text-gray-300">→</span>' +
+            '<input data-map="' + esc(f.bmsField) + '" value="' + esc(val) + '" placeholder="external field" class="w-1/2 px-2.5 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:border-emerald-500"></div>';
+        }).join('')
+      : '<p class="text-sm text-gray-500">This scenario has no fields to map — it runs automatically once enabled.</p>';
+    document.getElementById('scenario-modal-save').textContent = s.active ? 'Save changes' : 'Enable scenario';
+    modal.classList.remove('hidden');
+  }
+  function closeModal() { modal.classList.add('hidden'); editing = null; }
+
+  async function saveModal() {
+    if (!editing) return;
+    const errEl = document.getElementById('scenario-modal-error');
+    const fieldMappings = {};
+    modal.querySelectorAll('[data-map]').forEach(function (i) { if (i.value.trim()) fieldMappings[i.getAttribute('data-map')] = i.value.trim(); });
+    const payload = { scenarioId: editing.id, assistantId: Number(assistantId), fieldMappings };
+    if (editing.tier === 2) {
+      const url = document.getElementById('scenario-webhook-url').value.trim();
+      if (!/^https:\/\//.test(url)) { errEl.textContent = 'Enter a valid https webhook URL.'; errEl.classList.remove('hidden'); return; }
+      payload.webhookUrl = url;
+    } else if (editing.connection) {
+      payload.integrationId = editing.connection.id;
+    }
+    const btn = document.getElementById('scenario-modal-save');
+    btn.disabled = true; btn.textContent = 'Saving…';
+    try {
+      const res = await fetch(API + '/activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      const data = await res.json().catch(function () { return {}; });
+      if (!res.ok) throw new Error(data.error || 'Could not enable scenario.');
+      closeModal();
+      loadScenarios();
+    } catch (e) {
+      errEl.textContent = String(e.message || 'Could not enable scenario.'); errEl.classList.remove('hidden');
+    } finally { btn.disabled = false; }
+  }
+
+  // ── Card actions ──
+  grid.addEventListener('click', async function (e) {
+    const cfg = e.target.closest('[data-config]');
+    if (cfg) { const s = scenarios.find(x => String(x.id) === cfg.getAttribute('data-config')); if (s) openModal(s); return; }
+
+    const up = e.target.closest('[data-upvote]');
+    if (up) {
+      up.disabled = true;
+      try {
+        const res = await fetch(API + '/upvote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scenarioId: Number(up.getAttribute('data-upvote')) }) });
+        const data = await res.json().catch(function () { return {}; });
+        if (res.ok) up.textContent = '▲ Upvoted (' + (data.voteCount != null ? data.voteCount : '✓') + ')';
+        else up.disabled = false;
+      } catch (err) { up.disabled = false; }
+      return;
+    }
+
+    const tog = e.target.closest('[data-toggle]');
+    if (tog) {
+      const id = Number(tog.getAttribute('data-toggle'));
+      const next = tog.getAttribute('data-enabled') !== '1';
+      tog.disabled = true;
+      try {
+        const res = await fetch(API + '/toggle', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ activeScenarioId: id, isEnabled: next }) });
+        if (res.ok) loadScenarios();
+      } catch (err) {} finally { tog.disabled = false; }
+      return;
+    }
+
+    const rm = e.target.closest('[data-remove]');
+    if (rm) {
+      if (!window.confirm('Remove this scenario? It will stop firing for this assistant.')) return;
+      try {
+        const res = await fetch(API + '/deactivate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ activeScenarioId: Number(rm.getAttribute('data-remove')) }) });
+        if (res.ok) loadScenarios();
+      } catch (err) {}
+      return;
+    }
+  });
+
+  document.getElementById('scenario-modal-save').addEventListener('click', saveModal);
+  document.getElementById('scenario-modal-cancel').addEventListener('click', closeModal);
+  document.getElementById('scenario-modal-close').addEventListener('click', closeModal);
+  modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+
+  loadAssistants();
 })();
 </script>
 </body>

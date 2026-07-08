@@ -820,6 +820,61 @@ async function handleYoutubeUploadVideo(db: Db, userId: number, organisationId: 
     return json(200, { success: true, message: `${isShorts ? 'Short' : 'Video'} "${title}" uploaded to YouTube.`, platformPostId: videoData.id });
 }
 
+// ── Action registry ────────────────────────────────────────────────────────────
+// One entry per outbound integration action, keyed by actionType. This is the
+// "ADAPTERS library" the Integration Scenario Library dispatches through: adding a
+// provider action is a one-line registry entry — the HTTP handler below and the
+// scenario job processor (process-scenario-jobs.ts) both resolve handlers from here,
+// so neither needs editing. All handlers share the (db, userId, organisationId,
+// payload) signature and return a json()-shaped response; payloads are untrusted and
+// validated inside each handler.
+
+export type ActionResponse = ReturnType<typeof json>;
+export type ActionHandler = (
+    db: Db,
+    userId: number,
+    organisationId: number,
+    payload: Record<string, unknown>,
+) => Promise<ActionResponse>;
+
+export const ACTION_HANDLERS: Record<string, ActionHandler> = {
+    hubspot_update_record: handleHubspotUpdate,
+    xero_log_note: handleXeroLogNote,
+    slack_post_summary: handleSlackPostSummary,
+    salesforce_update_record: handleSalesforceUpdate,
+    zendesk_add_internal_note: handleZendeskAddNote,
+    notion_create_page: handleNotionCreatePage,
+    qbo_log_note: handleQboLogNote,
+    intercom_add_internal_note: handleIntercomAddNote,
+    gmail_create_draft: handleGmailCreateDraft,
+    threads_create_post: handleThreadsCreatePost,
+    tiktok_upload_video: handleTiktokUploadVideo,
+    youtube_upload_video: handleYoutubeUploadVideo,
+};
+
+/** Run an action by key. Shared by the HTTP handler and the scenario job processor.
+ *  IntegrationError is normalised to a json() response so both callers can treat the
+ *  result uniformly. */
+export async function runAction(
+    db: Db,
+    userId: number,
+    organisationId: number,
+    actionType: string,
+    payload: Record<string, unknown>,
+): Promise<ActionResponse> {
+    const handlerFn = ACTION_HANDLERS[actionType];
+    if (!handlerFn) return json(400, { error: `Unknown actionType "${actionType}".` });
+    try {
+        return await handlerFn(db, userId, organisationId, payload);
+    } catch (err) {
+        if (err instanceof IntegrationError) {
+            return json(err.statusCode, { error: err.message, code: err.code });
+        }
+        console.error(`[sync-action] "${actionType}" failed:`, err);
+        return json(500, { error: 'The sync failed unexpectedly — please try again.' });
+    }
+}
+
 // ── Handler ───────────────────────────────────────────────────────────────────
 
 export const handler: Handler = async (event) => {
@@ -834,41 +889,5 @@ export const handler: Handler = async (event) => {
     catch { return json(400, { error: 'Invalid JSON body.' }); }
 
     const payload = (body.payload && typeof body.payload === 'object') ? body.payload as Record<string, unknown> : {};
-
-    try {
-        switch (body.actionType) {
-            case 'hubspot_update_record':
-                return await handleHubspotUpdate(db, ctx.userId, ctx.organisationId, payload);
-            case 'xero_log_note':
-                return await handleXeroLogNote(db, ctx.userId, ctx.organisationId, payload);
-            case 'slack_post_summary':
-                return await handleSlackPostSummary(db, ctx.userId, ctx.organisationId, payload);
-            case 'salesforce_update_record':
-                return await handleSalesforceUpdate(db, ctx.userId, ctx.organisationId, payload);
-            case 'zendesk_add_internal_note':
-                return await handleZendeskAddNote(db, ctx.userId, ctx.organisationId, payload);
-            case 'notion_create_page':
-                return await handleNotionCreatePage(db, ctx.userId, ctx.organisationId, payload);
-            case 'qbo_log_note':
-                return await handleQboLogNote(db, ctx.userId, ctx.organisationId, payload);
-            case 'intercom_add_internal_note':
-                return await handleIntercomAddNote(db, ctx.userId, ctx.organisationId, payload);
-            case 'gmail_create_draft':
-                return await handleGmailCreateDraft(db, ctx.userId, ctx.organisationId, payload);
-            case 'threads_create_post':
-                return await handleThreadsCreatePost(db, ctx.userId, ctx.organisationId, payload);
-            case 'tiktok_upload_video':
-                return await handleTiktokUploadVideo(db, ctx.userId, ctx.organisationId, payload);
-            case 'youtube_upload_video':
-                return await handleYoutubeUploadVideo(db, ctx.userId, ctx.organisationId, payload);
-            default:
-                return json(400, { error: `Unknown actionType "${body.actionType ?? ''}".` });
-        }
-    } catch (err) {
-        if (err instanceof IntegrationError) {
-            return json(err.statusCode, { error: err.message, code: err.code });
-        }
-        console.error('[sync-action] unexpected failure:', err);
-        return json(500, { error: 'The sync failed unexpectedly — please try again.' });
-    }
+    return runAction(db, ctx.userId, ctx.organisationId, body.actionType ?? '', payload);
 };

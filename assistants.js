@@ -733,11 +733,38 @@ window._detailRqRecordAct = async function (btn, action) {
             method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch),
         });
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Update failed.');
-        const toast = action === 'outreachSent'
-            ? `First outreach logged — chase reminder set for ${chaseWhen.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}. See the Calendar.`
-            : action === 'schedule' ? 'Scheduled — it’s on the Calendar now.'
-            : action === 'reject' ? 'Rejected.' : 'Updated.';
-        window.showToast?.(toast);
+
+        // Auto-send: when a LEAD is approved and the assistant has an email provider connected,
+        // send its outreach email. The backend returns { sent, reason } and, on send, moves the
+        // record to scheduled + chase reminder — so we just translate the outcome into a toast.
+        if (action === 'approve' && (window._detailReviewQueue || {}).recordType === 'lead') {
+            let toast = 'Lead approved.';
+            try {
+                const sres = await fetch('/.netlify/functions/lead-generation', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'send_outreach', assistantId: window._currentAssistantId, recordId: patch.id }),
+                });
+                const sdata = await sres.json().catch(() => ({}));
+                if (sres.ok && sdata.sent) {
+                    const d = sdata.chaseDate ? new Date(sdata.chaseDate) : null;
+                    toast = `Outreach emailed to ${sdata.to} — chase reminder set${d ? ` for ${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}. See the Calendar.`;
+                } else if (sres.ok && sdata.reason === 'not_connected') {
+                    toast = 'Lead approved. Connect your Google account (Integrations) to auto-send outreach.';
+                } else if (sres.ok && sdata.reason === 'microsoft_coming_soon') {
+                    toast = 'Lead approved. Microsoft email sending is coming soon — use “Mark outreach sent” for now.';
+                } else if (sres.ok && sdata.reason === 'no_recipient') {
+                    toast = 'Lead approved — no email address on this lead, so nothing was sent.';
+                }
+                // reason 'no_provider' (user chose manual outreach) keeps the plain "Lead approved." toast.
+            } catch { /* network issue on send — the lead is still approved; keep the plain toast */ }
+            window.showToast?.(toast);
+        } else {
+            const toast = action === 'outreachSent'
+                ? `First outreach logged — chase reminder set for ${chaseWhen.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}. See the Calendar.`
+                : action === 'schedule' ? 'Scheduled — it’s on the Calendar now.'
+                : action === 'reject' ? 'Rejected.' : 'Updated.';
+            window.showToast?.(toast);
+        }
         _detailRqRenderGroups(_detailRqCurrentStatus);
         // A newly scheduled/approved record changes the Calendar + Data Hub — force them to reload
         // next time they're opened (both are cached once per detail mount).

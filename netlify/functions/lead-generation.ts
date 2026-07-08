@@ -32,6 +32,18 @@ import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { createDiscoveryRun } from '../../src/utils/discovery';
 import { isSearchConfigured } from '../../src/lib/discovery-search';
+import { sendGmailMessage } from '../../src/utils/gmail';
+import { IntegrationError } from '../../src/utils/workspace-integrations';
+
+/** Chase reminder for an approved+contacted lead: 3 days out at 09:00, nudged off weekends. */
+function chaseDate(): Date {
+    const d = new Date();
+    d.setDate(d.getDate() + 3);
+    d.setHours(9, 0, 0, 0);
+    if (d.getDay() === 6) d.setDate(d.getDate() + 2);
+    else if (d.getDay() === 0) d.setDate(d.getDate() + 1);
+    return d;
+}
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -98,7 +110,7 @@ export const handler: Handler = async (event) => {
     if ('error' in ctx) return ctx.error;
     const { organisationId: orgId, userId } = ctx;
 
-    let body: { action?: string; assistantId?: number; ideaId?: number; lead?: Record<string, unknown> };
+    let body: { action?: string; assistantId?: number; ideaId?: number; recordId?: number; lead?: Record<string, unknown> };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
     const action = String(body.action || '');
@@ -204,6 +216,73 @@ Write an outreachDraft for hot/warm leads; use null for cold leads.`;
             const card = normaliseLeadCard(parseJson(raw), title);
             const id = await upsertRecord('lead', title, String(card.rating), card, 'manual');
             return json(200, { record: { id, title, status: card.rating, data: card } });
+        }
+
+        // ── Send the outreach email for an approved lead (auto-send on approval) ──
+        // Reads the assistant's outreachEmailProvider setup answer. For 'google', sends the
+        // lead's outreach email from the connected Gmail account, then sets a chase reminder
+        // (approvalStatus='scheduled' + scheduledFor) so it lands on the Calendar. Returns a
+        // { sent:false, reason } for every non-send outcome so the caller can explain it — never
+        // an error the user has to act on. Design: [[outreach-email-connect]].
+        if (action === 'send_outreach') {
+            const recordId = Number(body.recordId);
+            if (!Number.isInteger(recordId)) return json(400, { error: 'recordId is required.' });
+
+            const provider = str(onboarding.outreachEmailProvider, 40);
+            if (provider === 'microsoft') return json(200, { sent: false, reason: 'microsoft_coming_soon' });
+            if (provider !== 'google') return json(200, { sent: false, reason: 'no_provider' });
+
+            const [rec] = await db
+                .select({ id: assistantRecords.id, title: assistantRecords.title, data: assistantRecords.data })
+                .from(assistantRecords)
+                .where(and(
+                    eq(assistantRecords.id, recordId),
+                    eq(assistantRecords.organisationId, orgId),
+                    eq(assistantRecords.aiAssistantId, assistant.id),
+                    eq(assistantRecords.recordType, 'lead'),
+                ))
+                .limit(1);
+            if (!rec) return json(404, { error: 'Lead not found.' });
+
+            const data = (rec.data && typeof rec.data === 'object' && !Array.isArray(rec.data)) ? rec.data as Record<string, unknown> : {};
+            const draft = (data.outreachDraft && typeof data.outreachDraft === 'object') ? data.outreachDraft as Record<string, unknown> : null;
+            const leadObj = (data.lead && typeof data.lead === 'object') ? data.lead as Record<string, unknown> : {};
+            const recipient = str(draft?.to as string, 200) || str(data.contactEmail as string, 200) || str(leadObj.email as string, 200);
+            if (!recipient) return json(200, { sent: false, reason: 'no_recipient' });
+
+            // Use the stored draft if present; otherwise generate one from the lead's details.
+            let subject = str(draft?.subject as string, 300);
+            let bodyText = str(draft?.body as string, 4000);
+            if (!bodyText) {
+                const tone = str(onboarding.salesTone, 40) ?? 'professional';
+                const system =
+`You write a short, personalised cold outreach email for "${assistant.name}" (a business using Be More Swan) to the lead below, in a ${tone} tone. Under 150 words, no placeholders or brackets, no subject-line clichés. Return STRICT JSON only: { "subject": "<subject>", "body": "<email body>" }`;
+                const resp = await anthropic.messages.create({
+                    model: MODEL, max_tokens: 512, system,
+                    messages: [{ role: 'user', content: `Lead: ${JSON.stringify({ title: rec.title, ...data })}` }],
+                });
+                logUsage(resp, 'send_outreach_gen');
+                const gen = parseJson<{ subject?: string; body?: string }>(resp.content[0]?.type === 'text' ? resp.content[0].text : '') || {};
+                subject = str(gen.subject, 300) || subject;
+                bodyText = str(gen.body, 4000);
+                if (!bodyText) return json(502, { error: 'Could not draft an outreach email for this lead.' });
+            }
+            if (!subject) subject = `Quick note for ${rec.title}`;
+
+            try {
+                await sendGmailMessage(db, orgId, { to: recipient, subject, body: bodyText });
+            } catch (e) {
+                if (e instanceof IntegrationError) return json(200, { sent: false, reason: 'not_connected' });
+                throw e;
+            }
+
+            const chase = chaseDate();
+            const nextData = { ...data, outreachDraft: { to: recipient, subject, body: bodyText }, outreachSentAt: new Date().toISOString() };
+            await db.update(assistantRecords)
+                .set({ approvalStatus: 'scheduled', scheduledFor: chase, data: nextData, updatedAt: new Date() })
+                .where(eq(assistantRecords.id, recordId));
+
+            return json(200, { sent: true, to: recipient, chaseDate: chase.toISOString() });
         }
 
         // ── List this assistant's lead ideas ─────────────────────────────────────

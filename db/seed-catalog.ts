@@ -16,8 +16,8 @@ config({ path: path.resolve(process.cwd(), '.env') });
 
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
-import { masterAssistants, masterPlans } from './schema';
-import { sql } from 'drizzle-orm';
+import { masterAssistants, masterPlans, integrationProviders, integrationScenarios, featureRequests } from './schema';
+import { sql, eq } from 'drizzle-orm';
 
 const connectionString = process.env.NETLIFY_DATABASE_URL || process.env.DATABASE_URL;
 if (!connectionString) throw new Error('NETLIFY_DATABASE_URL / DATABASE_URL is not set.');
@@ -281,6 +281,130 @@ const CATALOG = [
     },
 ];
 
+// ── Integration Scenario Library ────────────────────────────────────────────────
+// Providers users can connect + the browsable recipe library. See
+// docs/integration-scenario-library-plan.md. providerKey mirrors the IntegrationProvider
+// union in src/utils/workspace-integrations.ts (+ 'custom_webhook' for the Tier-2 recipe).
+const PROVIDERS = [
+    { providerKey: 'hubspot', displayName: 'HubSpot', category: 'crm', authType: 'oauth2', logoKey: 'hubspot' },
+    { providerKey: 'salesforce', displayName: 'Salesforce', category: 'crm', authType: 'oauth2', logoKey: 'salesforce' },
+    { providerKey: 'custom_webhook', displayName: 'Custom Webhook (Zapier / Make)', category: 'generic', authType: 'webhook_url', logoKey: 'webhook' },
+    { providerKey: 'pipedrive', displayName: 'Pipedrive', category: 'crm', authType: 'oauth2', logoKey: 'pipedrive' },
+    { providerKey: 'zoho', displayName: 'Zoho CRM', category: 'crm', authType: 'oauth2', logoKey: 'zoho' },
+];
+
+// Field maps the FieldMapper renders. bmsField = the canonical BMS lead field the engine
+// exposes in the trigger subject; label = UI copy; defaultTarget = suggested external key.
+const LEAD_HANDOFF_FIELDS = [
+    { bmsField: 'company', label: 'Company name', required: true, defaultTarget: 'company' },
+    { bmsField: 'contactName', label: 'Contact name', required: false, defaultTarget: 'firstname' },
+    { bmsField: 'contactEmail', label: 'Contact email', required: false, defaultTarget: 'email' },
+    { bmsField: 'aiSummary', label: 'AI interaction summary', required: false, defaultTarget: 'ai_summary' },
+    { bmsField: 'attribution', label: 'Attribution / source', required: false, defaultTarget: 'lead_source' },
+    { bmsField: 'score', label: 'Lead score', required: false, defaultTarget: 'lead_score' },
+];
+
+// tier 1 native | 2 universal webhook | 3 roadmap (greyed + upvotable).
+const SCENARIOS = [
+    // ── Tier 1: HubSpot (2-way) ──
+    {
+        scenarioKey: 'hubspot_handoff_push', providerKey: 'hubspot', tier: 1,
+        direction: 'outbound', scenarioType: 'handoff_push',
+        title: 'Push Qualified Lead to HubSpot',
+        description: 'When a lead is qualified or books a meeting, create/update the HubSpot contact with the AI summary and attribution.',
+        triggerConfig: { on: 'lead.status_changed', when: ['QUALIFIED', 'MEETING_BOOKED'] },
+        actionType: 'hubspot_update_record', fieldSchema: LEAD_HANDOFF_FIELDS, status: 'available', sortOrder: 10,
+    },
+    {
+        scenarioKey: 'hubspot_feedback_loop', providerKey: 'hubspot', tier: 1,
+        direction: 'inbound', scenarioType: 'feedback_loop',
+        title: 'Sync Closed-Won/Lost from HubSpot',
+        description: 'When a HubSpot deal reaches Closed Won or Closed Lost, record the outcome on the matching BMS lead to train discovery.',
+        triggerConfig: { on: 'crm.deal_stage_changed', stagePath: 'properties.dealstage', identifierPath: 'properties.email', stageMap: { closedwon: 'CLOSED_WON', closedlost: 'CLOSED_LOST' } },
+        actionType: null, fieldSchema: [], status: 'available', sortOrder: 11,
+    },
+    {
+        scenarioKey: 'hubspot_suppression_sync', providerKey: 'hubspot', tier: 1,
+        direction: 'inbound', scenarioType: 'suppression_sync',
+        title: 'Suppress Existing HubSpot Customers',
+        description: 'Daily, pull your existing-customer domains from HubSpot so the discovery AI never prospects a current client.',
+        triggerConfig: { on: 'schedule.daily' },
+        actionType: null, fieldSchema: [], status: 'available', sortOrder: 12,
+    },
+    // ── Tier 1: Salesforce ──
+    {
+        scenarioKey: 'salesforce_handoff_push', providerKey: 'salesforce', tier: 1,
+        direction: 'outbound', scenarioType: 'handoff_push',
+        title: 'Push Qualified Lead to Salesforce',
+        description: 'Create/update the Salesforce Contact or Account with the enriched lead fields on qualification.',
+        triggerConfig: { on: 'lead.status_changed', when: ['QUALIFIED', 'MEETING_BOOKED'] },
+        actionType: 'salesforce_update_record', fieldSchema: LEAD_HANDOFF_FIELDS, status: 'available', sortOrder: 20,
+    },
+    // ── Tier 2: Universal webhook ──
+    {
+        scenarioKey: 'universal_webhook_handoff', providerKey: 'custom_webhook', tier: 2,
+        direction: 'outbound', scenarioType: 'handoff_push',
+        title: 'Send Qualified Lead to a Webhook',
+        description: 'POST the qualified-lead payload to any URL (Zapier / Make / your own endpoint) for unsupported tools.',
+        triggerConfig: { on: 'lead.status_changed', when: ['QUALIFIED', 'MEETING_BOOKED'] },
+        actionType: null, fieldSchema: LEAD_HANDOFF_FIELDS, status: 'available', sortOrder: 30,
+    },
+    // ── Tier 3: Roadmap (greyed, upvotable) ──
+    {
+        scenarioKey: 'pipedrive_handoff_push', providerKey: 'pipedrive', tier: 3,
+        direction: 'two_way', scenarioType: 'handoff_push',
+        title: 'Pipedrive 2-Way Sync', description: 'Push qualified leads to Pipedrive and sync deal outcomes back.',
+        triggerConfig: {}, actionType: null, fieldSchema: [], status: 'coming_soon', sortOrder: 90,
+        roadmapTitle: 'Pipedrive integration',
+    },
+    {
+        scenarioKey: 'zoho_handoff_push', providerKey: 'zoho', tier: 3,
+        direction: 'two_way', scenarioType: 'handoff_push',
+        title: 'Zoho CRM 2-Way Sync', description: 'Push qualified leads to Zoho CRM and sync deal outcomes back.',
+        triggerConfig: {}, actionType: null, fieldSchema: [], status: 'coming_soon', sortOrder: 91,
+        roadmapTitle: 'Zoho CRM integration',
+    },
+];
+
+/** Find-or-create a roadmap feature_request for a Tier-3 scenario so its "Upvote" button
+ *  writes into the existing voting system. Idempotent on title. */
+async function findOrCreateRoadmapFeature(title: string): Promise<number> {
+    const [existing] = await db.select({ id: featureRequests.id }).from(featureRequests).where(eq(featureRequests.title, title)).limit(1);
+    if (existing) return existing.id;
+    const [created] = await db.insert(featureRequests).values({
+        title, description: `Integration Scenario Library roadmap item: ${title}.`,
+        category: 'app_core', status: 'planned', source: 'manual',
+    }).returning({ id: featureRequests.id });
+    return created.id;
+}
+
+async function seedIntegrationLibrary() {
+    console.log(`\n🔌 Seeding ${PROVIDERS.length} integration providers…`);
+    for (const p of PROVIDERS) {
+        await db.insert(integrationProviders).values(p).onConflictDoUpdate({
+            target: integrationProviders.providerKey,
+            set: { displayName: sql`excluded.display_name`, category: sql`excluded.category`, authType: sql`excluded.auth_type`, logoKey: sql`excluded.logo_key` },
+        });
+    }
+
+    console.log(`🔌 Seeding ${SCENARIOS.length} integration scenarios…`);
+    for (const s of SCENARIOS) {
+        const { roadmapTitle, ...scenario } = s as typeof s & { roadmapTitle?: string };
+        const roadmapFeatureId = roadmapTitle ? await findOrCreateRoadmapFeature(roadmapTitle) : null;
+        await db.insert(integrationScenarios).values({ ...scenario, roadmapFeatureId }).onConflictDoUpdate({
+            target: integrationScenarios.scenarioKey,
+            set: {
+                providerKey: sql`excluded.provider_key`, tier: sql`excluded.tier`, direction: sql`excluded.direction`,
+                scenarioType: sql`excluded.scenario_type`, title: sql`excluded.title`, description: sql`excluded.description`,
+                triggerConfig: sql`excluded.trigger_config`, actionType: sql`excluded.action_type`,
+                fieldSchema: sql`excluded.field_schema`, roadmapFeatureId: sql`excluded.roadmap_feature_id`,
+                status: sql`excluded.status`, sortOrder: sql`excluded.sort_order`,
+            },
+        });
+        console.log(`  ✓ ${scenario.title}`);
+    }
+}
+
 // ── Upsert ────────────────────────────────────────────────────────────────────
 async function seedCatalog() {
     console.log(`\n🌱 Seeding ${CATALOG.length} master assistant roles…\n`);
@@ -318,6 +442,8 @@ async function seedCatalog() {
         features: { monthly_ai_credits: 0 },   // no AI media generation on trial (Epic 2) — upgrade to use
     }).onConflictDoNothing();
     console.log('  ✓ masterPlan: trial');
+
+    await seedIntegrationLibrary();
 
     console.log('\n✅ Catalog seeded successfully.\n');
     await client.end();

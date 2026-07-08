@@ -43,6 +43,13 @@
   to = "/.netlify/functions/sync-action"
   status = 200
 
+# Integration Scenario Library: browse/activate recipes + read execution logs. The original
+# /api/integrations/:resource path survives in event.rawUrl, which integration-scenarios.ts parses.
+[[redirects]]
+  from = "/api/integrations/*"
+  to = "/.netlify/functions/integration-scenarios"
+  status = 200
+
 # Autonomous Content Engine (US 3.1): public, read-only native-widget API. Rewrite (status 200) —
 # the original /api/widget/:key/:resource path survives in event.rawUrl, which widget-api.ts parses.
 [[redirects]]
@@ -132,6 +139,14 @@ node_bundler = "esbuild"
   schedule = "0 * * * *"
 [functions.process-discovery-jobs]
   schedule = "* * * * *"
+
+# Integration Scenario Library — outbound "Handoff" push drain (every minute, mirrors the
+# discovery worker) + inbound feedback loop draining via process-webhook-events. Suppression
+# sync pulls existing-customer domains from the CRM daily. docs/integration-scenario-library-plan.md.
+[functions.process-scenario-jobs]
+  schedule = "* * * * *"
+[functions.suppression-sync]
+  schedule = "0 4 * * *"
 # US-GOV-2.1.1: Daily digest for stale pending HITL actions — 09:00 UTC every day
 [functions.pending-actions-digest]
   schedule = "0 9 * * *"

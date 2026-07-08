@@ -603,10 +603,14 @@ export const integrationApiCalls = pgTable("integration_api_calls", {
   integrationId: integer("integration_id").references(() => systemConnections.id, { onDelete: "set null" }),
   endpoint: text("endpoint").notNull(), // redacted URL — path only, no query params (SC6)
   httpStatus: integer("http_status"),
+  // Integration Scenario Library: correlates a log line to the recipe that produced it
+  // (null for legacy disruptive-ui action calls). Powers the per-scenario log filter.
+  activeScenarioId: integer("active_scenario_id").references((): any => activeScenarios.id, { onDelete: "set null" }),
   calledAt: timestamp("called_at").defaultNow().notNull(),
 }, (t) => [
   // US-DB-1.1.1: 90-day pruning job and per-user API call history
   index("integration_api_calls_user_called_idx").on(t.userId, t.calledAt),
+  index("integration_api_calls_scenario_idx").on(t.activeScenarioId, t.calledAt),
 ]);
 
 // ── Webhook idempotency log — prevents double-processing Stripe events ────────
@@ -617,6 +621,121 @@ export const processedWebhookEvents = pgTable("processed_webhook_events", {
   eventType: text("event_type").notNull(),
   processedAt: timestamp("processed_at").defaultNow().notNull(),
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Integration Scenario Library — the Zapier-style recipe layer over the Phase-1
+// integration primitives: workspaceIntegrations (the OAuth grant), webhookEvents
+// (inbound intake) and the sync-action ACTION_HANDLERS registry (outbound execution).
+// Design: docs/integration-scenario-library-plan.md.
+// DDL: db/integration-scenarios.sql + db/scenario-jobs.sql (apply manually — no db:push).
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Catalog of connectable providers. SEED table (db/seed-catalog.ts), not tenant data —
+// providerKey mirrors the IntegrationProvider union in src/utils/workspace-integrations.ts
+// (+ 'custom_webhook' for the Tier-2 universal recipe).
+export const integrationProviders = pgTable("integration_providers", {
+  id: serial().primaryKey(),
+  providerKey: text("provider_key").notNull().unique(),   // 'hubspot' | 'salesforce' | 'custom_webhook'
+  displayName: text("display_name").notNull(),
+  category: text("category").notNull(),                    // 'crm' | 'accounting' | 'comms' | 'generic'
+  authType: text("auth_type").notNull(),                   // 'oauth2' | 'api_key' | 'webhook_url'
+  logoKey: text("logo_key"),                               // icon key reused by the UI scenario card
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// The library of recipe definitions users browse in the Integrations Hub. SEED table.
+// tier: 1 native (deep prebuilt) | 2 universal webhook | 3 roadmap (greyed + upvotable).
+export const integrationScenarios = pgTable("integration_scenarios", {
+  id: serial().primaryKey(),
+  scenarioKey: text("scenario_key").notNull().unique(),     // 'hubspot_handoff_push'
+  providerKey: text("provider_key").notNull(),              // → integration_providers.provider_key
+  tier: integer("tier").notNull().default(1),
+  direction: text("direction").notNull(),                   // 'outbound' | 'inbound' | 'two_way'
+  scenarioType: text("scenario_type").notNull(),            // 'handoff_push' | 'feedback_loop' | 'suppression_sync'
+  title: text("title").notNull(),
+  description: text("description"),
+  // Recipe trigger contract, e.g. { on: 'lead.status_changed', when: ['QUALIFIED','MEETING_BOOKED'] }.
+  triggerConfig: jsonb("trigger_config").notNull().default({}),
+  // Outbound path only: the ACTION_HANDLERS key invoked in sync-action.ts
+  // (null for inbound feedback-loop / suppression-sync scenarios).
+  actionType: text("action_type"),
+  // Field-mapping schema the UI FieldMapper renders:
+  // [{ bmsField, label, required, defaultTarget }]
+  fieldSchema: jsonb("field_schema").notNull().default([]),
+  // Tier 3 only — link a greyed scenario to the existing upvote system (featureRequests).
+  roadmapFeatureId: integer("roadmap_feature_id").references((): any => featureRequests.id, { onDelete: "set null" }),
+  status: text("status").notNull().default("available"),    // 'available' | 'coming_soon' | 'deprecated'
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("integration_scenarios_provider_idx").on(t.providerKey, t.status),
+]);
+
+// A recipe a tenant has turned on — scoped PER ASSISTANT (product decision).
+// fieldMappings is the user's custom map; connection = the workspace OAuth grant.
+export const activeScenarios = pgTable("active_scenarios", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  assistantId: integer("assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  scenarioId: integer("scenario_id").notNull().references(() => integrationScenarios.id, { onDelete: "cascade" }),
+  // The workspace OAuth grant powering it. Null for Tier-2 pure webhook-URL recipes.
+  integrationId: integer("integration_id").references(() => workspaceIntegrations.id, { onDelete: "cascade" }),
+  // User's custom field map: { bmsField: 'externalPropertyName', ... }.
+  fieldMappings: jsonb("field_mappings").notNull().default({}),
+  // Tier-2 universal webhook target (Zapier/Make catch URL).
+  webhookUrl: text("webhook_url"),
+  isEnabled: boolean("is_enabled").notNull().default(true),
+  lastFiredAt: timestamp("last_fired_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  // One activation of a given recipe per assistant.
+  unique("active_scenarios_assistant_scenario_unique").on(t.assistantId, t.scenarioId),
+  index("active_scenarios_org_enabled_idx").on(t.organisationId, t.isEnabled),
+  // Hot dispatcher lookup: "which enabled recipes fire on this scenario?"
+  index("active_scenarios_scenario_enabled_idx").on(t.scenarioId, t.isEnabled),
+]);
+
+// Suppression list — Scenario Type C target. Domains the autonomous discovery AI must
+// never prospect (existing customers pulled from the CRM, or manual entries). Domain is
+// normalised the same way as discovered_leads (lowercase, no www) so the guard is a join.
+export const suppressionList = pgTable("suppression_list", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  domain: text("domain").notNull(),
+  reason: text("reason").notNull().default("existing_customer"),
+  source: text("source").notNull().default("crm_sync"),     // 'crm_sync' | 'manual'
+  sourceScenarioId: integer("source_scenario_id").references((): any => activeScenarios.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  unique("suppression_list_org_domain_unique").on(t.organisationId, t.domain),
+  index("suppression_list_org_idx").on(t.organisationId),
+]);
+
+// Outbound scenario job queue — mirrors discovery_jobs. A BMS trigger fires, one row is
+// enqueued, and process-scenario-jobs drains it (FOR UPDATE SKIP LOCKED), expanding it
+// into one execution per matching active_scenarios row. Retries with backoff.
+export const scenarioJobs = pgTable("scenario_jobs", {
+  id: serial().primaryKey(),
+  jobId: text("job_id").notNull().unique(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  assistantId: integer("assistant_id").references(() => aiAssistants.id, { onDelete: "cascade" }),
+  triggerEvent: text("trigger_event").notNull(),           // 'lead.status_changed'
+  // Trigger subject — the BMS record + values recipes map from, e.g.
+  // { recordType:'lead', recordId:123, newStatus:'QUALIFIED', fields:{ aiSummary, company, ... } }
+  subject: jsonb("subject").notNull(),
+  status: text("status").notNull().default("queued"),      // queued | processing | completed | failed
+  attempt: integer("attempt").notNull().default(0),
+  maxAttempts: integer("max_attempts").notNull().default(3),
+  nextRetryAt: timestamp("next_retry_at"),
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("scenario_jobs_status_idx").on(t.status, t.nextRetryAt),
+  index("scenario_jobs_org_idx").on(t.organisationId, t.status),
+]);
 
 // MASTER CATALOG TABLES
 export const masterPlans = pgTable("master_plans", {
