@@ -44,12 +44,6 @@
     return data;
   }
 
-  const RATING_CHIP = {
-    hot: 'bg-emerald-50 text-emerald-800 border-emerald-200',
-    warm: 'bg-amber-50 text-amber-800 border-amber-200',
-    cold: 'bg-gray-50 text-gray-500 border-gray-200',
-  };
-
   function body() { return state.overlay?.querySelector('[data-ideas-body]'); }
 
   function setBody(html) { const b = body(); if (b) b.innerHTML = html; }
@@ -79,40 +73,6 @@
             <span class="hidden text-xs font-semibold text-red-600" data-idea-status></span>
           </div>` : ''}
         <div data-idea-results></div>
-      </div>`;
-  }
-
-  function leadRow(lead) {
-    const d = lead.data || {};
-    const chip = RATING_CHIP[d.rating] || RATING_CHIP.cold;
-    const owner = lead.owner !== 'lead_qualifier'
-      ? `<span class="text-xs text-gray-500"> → hand off to <span class="font-semibold text-gray-700">${esc(lead.ownerName)}</span></span>` : '';
-    return `
-      <li class="py-2">
-        <div class="flex items-center gap-2">
-          <span class="text-xs font-bold px-2 py-0.5 rounded-full border shrink-0 ${chip}">${esc(d.score)}/100</span>
-          <span class="font-semibold text-gray-900 text-sm truncate">${esc(d.leadName)}</span>
-        </div>
-        ${d.suggestedNextStep ? `<p class="text-xs text-gray-600 mt-1"><span class="font-semibold">Next:</span> ${esc(d.suggestedNextStep)}${owner}</p>` : owner ? `<p class="text-xs mt-1">${owner}</p>` : ''}
-      </li>`;
-  }
-
-  function renderResults(container, data) {
-    const handledHere = data.handledHere || [];
-    const handoffs = data.handoffs || [];
-    container.innerHTML = `
-      <div class="mt-3 pt-3 border-t border-gray-100 space-y-3">
-        <p class="text-sm font-semibold text-emerald-800">Found &amp; scored ${data.leads.length} lead${data.leads.length === 1 ? '' : 's'} — now in your Leads tab.</p>
-        ${handledHere.length ? `
-          <div>
-            <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Ready for the Lead Generator</p>
-            <ul class="divide-y divide-gray-100">${handledHere.map(leadRow).join('')}</ul>
-          </div>` : ''}
-        ${handoffs.length ? `
-          <div>
-            <p class="text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Needs another assistant</p>
-            <ul class="divide-y divide-gray-100">${handoffs.map(leadRow).join('')}</ul>
-          </div>` : ''}
       </div>`;
   }
 

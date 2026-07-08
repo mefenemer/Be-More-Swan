@@ -719,5 +719,21 @@
     }
   }
 
-  window.AssistantDataHub = { init };
+  // Re-read records without rebuilding the toolbar — called each time the Data Hub tab is
+  // opened (assistants.js _activateMainTab) so records produced after page-load appear without a
+  // reload. Records land here from background flows the hub itself doesn't drive: discovery
+  // promotion (pending_approval leads), chat, integrations, and Review-Queue approvals. Silent
+  // (no loading flash) since the existing table stays visible until the fresh data swaps in.
+  async function refresh() {
+    if (!state.hub || !state.assistantId) return; // init() hasn't run yet — nothing to refresh
+    try {
+      await fetchRecords();
+      renderTable();
+    } catch (err) {
+      const host = document.getElementById('datahub-table-host');
+      if (host) host.innerHTML = `<div class="bg-red-50 border border-red-200 rounded-2xl p-6 text-sm font-semibold text-red-700">${esc(err.message)}</div>`;
+    }
+  }
+
+  window.AssistantDataHub = { init, refresh };
 })();

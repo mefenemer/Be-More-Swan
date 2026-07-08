@@ -482,6 +482,10 @@ window._activateMainTab = function(name) {
     // Load the assistant-scoped review queue when the tab is first opened. detailRqOpenStatus
     // branches on window._detailReviewQueue.kind (posts vs records) internally.
     if (name === 'review-queue') detailRqOpenStatus('review');
+    // Re-read the Data Hub each time it's opened, so records produced after page-load —
+    // discovery-promoted leads, chat/integration records, Review-Queue approvals — appear
+    // without a full reload. init() already ran at page setup; this only refetches.
+    if (name === 'datahub') window.AssistantDataHub?.refresh();
     // Render the per-assistant Calendar on first open (component scopes calendar.js to this assistant).
     if (name === 'calendar') window.AssistantCalendar?.show();
 };
