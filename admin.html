@@ -1604,6 +1604,16 @@
             <textarea id="fr-form-brief" rows="5" placeholder="What should be built, key considerations, and acceptance criteria…" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 resize-y focus:ring-2 focus:ring-emerald-500 focus:outline-none"></textarea>
             <p class="text-[11px] text-gray-400 mt-1">Set status to "Brief Ready" once this is approved and ready to hand off.</p>
           </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs font-bold uppercase text-gray-400 mb-1">Type</label>
+              <select id="fr-form-item-type" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2"></select>
+            </div>
+            <div>
+              <label class="block text-xs font-bold uppercase text-gray-400 mb-1">Parent</label>
+              <select id="fr-form-parent" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2"></select>
+            </div>
+          </div>
           <div class="grid grid-cols-3 gap-3">
             <div>
               <label class="block text-xs font-bold uppercase text-gray-400 mb-1">Category</label>
@@ -1629,7 +1639,7 @@
           <div class="flex items-center gap-2 mb-3">
             <label class="text-xs font-bold uppercase text-gray-400">Filter</label>
             <select id="fr-mod-filter" onchange="renderModerationList()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
-              <option value="">All</option>
+              <option value="">All statuses</option>
               <option value="pending_review">Pending Review</option>
               <option value="under_review">Under Review</option>
               <option value="open">Open</option>
@@ -1639,6 +1649,13 @@
               <option value="released">Released</option>
               <option value="declined">Declined</option>
               <option value="duplicate">Duplicate</option>
+            </select>
+            <select id="fr-mod-type-filter" onchange="renderModerationList()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5">
+              <option value="">All types</option>
+              <option value="epic">Epic</option>
+              <option value="feature">Feature</option>
+              <option value="user_story">User Story</option>
+              <option value="acceptance_criteria">Acceptance Criteria</option>
             </select>
           </div>
           <div id="fr-board" class="space-y-2">
@@ -3957,6 +3974,13 @@ const FR_PRIORITY_CLS = {
   critical: 'bg-red-100 text-red-700', high: 'bg-orange-100 text-orange-700',
   medium: 'bg-amber-100 text-amber-800', low: 'bg-gray-100 text-gray-600',
 };
+// Work-item breakdown (KEEP IN SYNC with src/utils/feature-requests.ts).
+const FR_ITEM_TYPES = ['epic','feature','user_story','acceptance_criteria'];
+const FR_ITEM_TYPE_LABEL = { epic: 'Epic', feature: 'Feature', user_story: 'User Story', acceptance_criteria: 'Acceptance Criteria' };
+const FR_ITEM_TYPE_CLS = {
+  epic: 'bg-violet-100 text-violet-700', feature: 'bg-blue-100 text-blue-700',
+  user_story: 'bg-teal-100 text-teal-700', acceptance_criteria: 'bg-gray-100 text-gray-600',
+};
 // Full lifecycle (KEEP IN SYNC with src/utils/feature-requests.ts).
 const FR_STATUSES = ['pending_review','under_review','open','planned','brief_ready','in_progress','released','declined','duplicate'];
 const FR_STATUS_LABEL = {
@@ -4003,7 +4027,9 @@ function renderModerationList() {
   const board = document.getElementById('fr-board');
   if (!board) return;
   const filter = document.getElementById('fr-mod-filter')?.value || '';
-  const items = filter ? _frItems.filter(x => x.status === filter) : _frItems;
+  const typeFilter = document.getElementById('fr-mod-type-filter')?.value || '';
+  let items = filter ? _frItems.filter(x => x.status === filter) : _frItems;
+  if (typeFilter) items = items.filter(x => (x.itemType || 'feature') === typeFilter);
   if (!items.length) {
     board.innerHTML = '<div class="text-gray-400 text-sm py-10 text-center border border-dashed border-gray-200 rounded-2xl">No requests in this view.</div>';
     return;
@@ -4011,6 +4037,9 @@ function renderModerationList() {
   board.innerHTML = items.map((it) => {
     const pCls = FR_PRIORITY_CLS[it.priority] || 'bg-gray-100 text-gray-600';
     const sCls = FR_STATUS_CLS[it.status] || 'bg-gray-100 text-gray-600';
+    const itemType = it.itemType || 'feature';
+    const tCls = FR_ITEM_TYPE_CLS[itemType] || 'bg-gray-100 text-gray-600';
+    const parent = it.parentId ? _frItems.find(x => x.id === it.parentId) : null;
     const origin = it.source === 'issue' && it.issueId
       ? `<button onclick="openIssuePanel(${it.issueId})" class="text-[11px] text-violet-600 font-semibold hover:underline">From issue #${it.issueId}</button>`
       : it.source === 'manual'
@@ -4025,10 +4054,12 @@ function renderModerationList() {
         </div>
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 flex-wrap mb-1">
+            <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${tCls}">${FR_ITEM_TYPE_LABEL[itemType] || itemType}</span>
             <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${sCls}">${FR_STATUS_LABEL[it.status] || it.status}</span>
             <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${pCls}">${FR_PRIORITY_LABEL[it.priority] || it.priority}</span>
             <span class="text-[10px] text-gray-400">${FR_CATEGORY_LABEL[it.category] || it.category}${it.assistantRef ? ' · ' + _esc(it.assistantRef) : ''}</span>
           </div>
+          ${parent ? `<p class="text-[11px] text-gray-400 mb-1">↳ under: <span class="font-semibold text-gray-500">${_esc(parent.title)}</span></p>` : ''}
           <p class="text-sm font-semibold text-gray-900 break-words">${_esc(it.title)}</p>
           ${it.description ? `<p class="text-xs text-gray-500 mt-1 whitespace-pre-wrap break-words">${_esc(it.description)}</p>` : ''}
           <div class="mt-2 flex items-center gap-3 flex-wrap">${origin}
@@ -4073,12 +4104,23 @@ function _frResetEnhance() {
   document.getElementById('fr-enhance-preview').classList.add('hidden');
   document.getElementById('fr-enhance-text').textContent = '';
 }
+// Populates the Parent select with every other request, grouped by title; "None" clears it.
+function _frFillParentSelect(excludeId, val) {
+  const el = document.getElementById('fr-form-parent');
+  if (!el) return;
+  const opts = _frItems.filter(x => x.id !== excludeId);
+  el.innerHTML = '<option value="">None</option>' + opts.map(o =>
+    `<option value="${o.id}" ${String(o.id) === String(val) ? 'selected' : ''}>${FR_ITEM_TYPE_LABEL[o.itemType || 'feature']}: ${_esc(o.title)}</option>`
+  ).join('');
+}
 function openRoadmapAdd() {
   document.getElementById('fr-form-id').value = '';
   document.getElementById('fr-form-title').textContent = 'Add request';
   document.getElementById('fr-form-title-input').value = '';
   document.getElementById('fr-form-desc').value = '';
   document.getElementById('fr-form-brief').value = '';
+  _frFillSelect(document.getElementById('fr-form-item-type'), FR_ITEM_TYPES, FR_ITEM_TYPE_LABEL, 'feature');
+  _frFillParentSelect(null, '');
   _frFillSelect(document.getElementById('fr-form-category'), FR_CATEGORIES, FR_CATEGORY_LABEL, 'app_core');
   _frFillSelect(document.getElementById('fr-form-priority'), FR_PRIORITIES, FR_PRIORITY_LABEL, 'medium');
   document.getElementById('fr-form-status-wrap').classList.add('hidden');
@@ -4095,6 +4137,8 @@ function openRoadmapEdit(id) {
   document.getElementById('fr-form-title-input').value = it.title || '';
   document.getElementById('fr-form-desc').value = it.description || '';
   document.getElementById('fr-form-brief').value = it.brief || '';
+  _frFillSelect(document.getElementById('fr-form-item-type'), FR_ITEM_TYPES, FR_ITEM_TYPE_LABEL, it.itemType || 'feature');
+  _frFillParentSelect(it.id, it.parentId || '');
   _frFillSelect(document.getElementById('fr-form-category'), FR_CATEGORIES, FR_CATEGORY_LABEL, it.category);
   _frFillSelect(document.getElementById('fr-form-priority'), FR_PRIORITIES, FR_PRIORITY_LABEL, it.priority);
   _frFillSelect(document.getElementById('fr-form-status'), FR_STATUSES, FR_STATUS_LABEL, it.status);
@@ -4152,18 +4196,20 @@ async function submitRoadmapForm() {
   const description = document.getElementById('fr-form-desc').value.trim();
   const category = document.getElementById('fr-form-category').value;
   const priority = document.getElementById('fr-form-priority').value;
+  const itemType = document.getElementById('fr-form-item-type').value;
+  const parentId = document.getElementById('fr-form-parent').value || null;
   try {
     if (id) {
       const status = document.getElementById('fr-form-status').value;
       const brief = document.getElementById('fr-form-brief').value.trim();
       await api(`${FR_API}?id=${id}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, description, category, priority, status, brief }),
+        body: JSON.stringify({ title, description, category, priority, status, brief, itemType, parentId }),
       });
     } else {
       await api(FR_API, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title, description, category, priority }),
+        body: JSON.stringify({ title, description, category, priority, itemType, parentId }),
       });
     }
     closeRoadmapForm();

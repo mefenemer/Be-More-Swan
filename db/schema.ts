@@ -1333,6 +1333,10 @@ export const featureRequests = pgTable("feature_requests", {
   category: text("category").notNull().default("app_core"),
   // CATALOGUE ROLE slug when category='existing_assistant' (not a tenant instance).
   assistantRef: text("assistant_ref"),
+  // Work-item breakdown: 'epic' | 'feature' | 'user_story' | 'acceptance_criteria'.
+  itemType: text("item_type").notNull().default("feature"),
+  // Optional parent for the Epic → Feature → User Story → Acceptance Criteria hierarchy.
+  parentId: integer("parent_id").references((): AnyPgColumn => featureRequests.id, { onDelete: "set null" }),
   // pending_review | under_review | open | planned | brief_ready | in_progress | released | declined | duplicate
   status: text("status").notNull().default("pending_review"),
   // 'critical' | 'high' | 'medium' | 'low'
@@ -1363,6 +1367,7 @@ export const featureRequests = pgTable("feature_requests", {
   index("feature_requests_submitter_idx").on(t.submittedBy, t.createdAt),
   index("feature_requests_quarter_idx").on(t.targetQuarter),
   index("feature_requests_issue_idx").on(t.issueId),
+  index("feature_requests_parent_idx").on(t.parentId),
 ]);
 
 // One row per (feature, user). UNIQUE enforces "one upvote per user"; toggling deletes the row.
