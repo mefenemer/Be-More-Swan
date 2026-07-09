@@ -17,6 +17,38 @@
 </style>
 <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full pb-20">
 
+  <!-- Issue #177 follow-up: role-specific markup (button labels, tabs, KPIs, etc.) is only
+       correct once get-assistant-context resolves — showing #assistant-detail-content before
+       then flashes the previous/default role's fields. Show this generic skeleton instead and
+       reveal the real content (initAssistantDetail hides this + un-hides #assistant-detail-content
+       in its load-and-hydrate finally block) once the fetch settles, success or failure. -->
+  <div id="assistant-detail-skeleton" class="animate-pulse" aria-hidden="true">
+    <div class="h-5 w-28 bg-gray-200 rounded mb-6"></div>
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm px-5 py-4 mb-6">
+      <div class="flex items-center gap-4">
+        <div class="w-11 h-11 rounded-xl bg-gray-200 shrink-0"></div>
+        <div class="flex-1 space-y-2">
+          <div class="h-4 w-40 bg-gray-200 rounded"></div>
+          <div class="h-3 w-24 bg-gray-100 rounded"></div>
+        </div>
+      </div>
+    </div>
+    <div class="mb-8 border-b border-gray-200 flex gap-x-8">
+      <div class="h-4 w-20 bg-gray-200 rounded mb-4"></div>
+      <div class="h-4 w-20 bg-gray-100 rounded mb-4"></div>
+      <div class="h-4 w-20 bg-gray-100 rounded mb-4"></div>
+      <div class="h-4 w-20 bg-gray-100 rounded mb-4"></div>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="h-32 bg-gray-100 rounded-2xl border border-gray-200"></div>
+      <div class="h-32 bg-gray-100 rounded-2xl border border-gray-200"></div>
+      <div class="h-32 bg-gray-100 rounded-2xl border border-gray-200"></div>
+      <div class="h-32 bg-gray-100 rounded-2xl border border-gray-200"></div>
+    </div>
+  </div>
+
+  <div id="assistant-detail-content" class="hidden">
+
   <!-- US-LEGAL-3.1: EU AI Act Art.50 — persistent AI interaction disclosure (non-dismissable) -->
   <div id="ai-interaction-disclosure" role="note" aria-label="AI system disclosure"
        class="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-700 font-medium">
@@ -1448,6 +1480,8 @@
   </div><!-- /maintab-meetings -->
 
   <!-- tab-integrations removed — merged into tab-platforms as "Connections" -->
+
+  </div><!-- /assistant-detail-content -->
 
 </div>
 
