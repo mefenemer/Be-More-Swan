@@ -1,17 +1,21 @@
 // manage-assistant.ts
-// PATCH  ?id=N  { action: "pause" | "resume" }  → toggle isActive
-// DELETE ?id=N                                   → soft-delete (isActive=false, status=cancelled)
+// PATCH  ?id=N  { action: "pause" | "resume" | "reinstate" }  → toggle isActive / undo an archive
+// DELETE ?id=N                                                 → archive (14-day reinstate window, then purged)
 //
 // Edit is handled client-side: redirect to onboarding with ?edit=assistantId
 // so the user can modify their blueprint/setup answers.
 
 import { Handler } from '@netlify/functions';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, count, asc } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, taskRuns } from '../../db/schema';
+import { aiAssistants, taskRuns, notifications, masterPlans, organisations, plans } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { transitionAssistantStatus } from '../../src/utils/assistant-lifecycle';
 import { withLambda } from '@netlify/aws-lambda-compat';
+
+// Issue #191: archiving starts a 14-day reinstate window before purge-archived-assistants.ts
+// (daily cron) permanently deletes the assistant and all of its associated data.
+const ARCHIVE_GRACE_PERIOD_DAYS = 14;
 
 export default withLambda(async (event) => {
     const db = getDb();
@@ -41,12 +45,63 @@ export default withLambda(async (event) => {
                 const body = JSON.parse(event.body || '{}');
                 const action: string = body.action || '';
 
-                if (!['pause', 'resume'].includes(action)) {
-                    return { statusCode: 400, body: JSON.stringify({ error: 'action must be "pause" or "resume".' }) };
+                if (!['pause', 'resume', 'reinstate'].includes(action)) {
+                    return { statusCode: 400, body: JSON.stringify({ error: 'action must be "pause", "resume" or "reinstate".' }) };
                 }
 
                 const existing = await findAssistant();
                 if (!existing) return { statusCode: 404, body: JSON.stringify({ error: 'Assistant not found.' }) };
+
+                // Issue #191 — Reinstate: undo an archive within its 14-day grace window,
+                // subject to the same plan assistant-limit gate as hiring a new one.
+                if (action === 'reinstate') {
+                    if (existing.lifecycleStatus !== 'archived') {
+                        return { statusCode: 409, body: JSON.stringify({ error: 'Only archived assistants can be reinstated.' }) };
+                    }
+                    const scheduledDeletionAt = existing.scheduledDeletionAt instanceof Date
+                        ? existing.scheduledDeletionAt
+                        : existing.scheduledDeletionAt ? new Date(existing.scheduledDeletionAt as unknown as string) : null;
+                    if (scheduledDeletionAt && scheduledDeletionAt.getTime() <= Date.now()) {
+                        return { statusCode: 410, body: JSON.stringify({ error: 'This assistant and its data have already been permanently deleted and cannot be reinstated.' }) };
+                    }
+
+                    // Capacity gate — mirrors hire-assistant.ts's "server-side twin" of check-capacity.
+                    const [planRow] = await tx
+                        .select({ assistantLimit: masterPlans.assistantLimit })
+                        .from(plans)
+                        .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
+                        .where(and(eq(plans.userId, ctx.userId), inArray(plans.status, ['active', 'past_due'])))
+                        .orderBy(asc(plans.status), asc(plans.startedAt))
+                        .limit(1);
+                    let assistantLimit: number | null = planRow?.assistantLimit ?? null;
+                    if (assistantLimit !== null) {
+                        const [org] = await tx
+                            .select({ bonusAssistants: organisations.bonusAssistants })
+                            .from(organisations)
+                            .where(eq(organisations.id, orgId))
+                            .limit(1);
+                        assistantLimit += org?.bonusAssistants ?? 0;
+
+                        const [{ value: occupied }] = await tx
+                            .select({ value: count() })
+                            .from(aiAssistants)
+                            .where(and(
+                                eq(aiAssistants.organisationId, orgId),
+                                inArray(aiAssistants.lifecycleStatus, ['provisioning', 'ready_for_work', 'working']),
+                            ));
+                        if (occupied >= assistantLimit) {
+                            return { statusCode: 409, body: JSON.stringify({ error: "Your plan's assistant limit has been reached. Upgrade your plan or archive another assistant before reinstating this one.", code: 'CAPACITY' }) };
+                        }
+                    }
+
+                    const result = await transitionAssistantStatus(db, id, 'paused', { reason: 'user_reinstate', actorUserId: ctx.userId });
+                    if (!result.ok) return { statusCode: 409, body: JSON.stringify({ error: result.error }) };
+                    await tx.update(aiAssistants)
+                        .set({ provisioningStatus: 'complete', archivedAt: null, scheduledDeletionAt: null, updatedAt: new Date() })
+                        .where(eq(aiAssistants.id, id));
+
+                    return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: true, lifecycleStatus: 'paused' }) };
+                }
 
                 // US4 (AC4.2/4.3): user pause is a canonical working → paused transition. The helper
                 // sets isActive=false (immediate halt of outgoing actions/polling) and audits it.
@@ -88,13 +143,19 @@ export default withLambda(async (event) => {
                 const existing = await findAssistant();
                 if (!existing) return { statusCode: 404, body: JSON.stringify({ error: 'Assistant not found.' }) };
 
+                // Issue #191: archiving now opens a 14-day reinstate window (rather than being
+                // immediately terminal) — archivedAt/scheduledDeletionAt drive both the reinstate
+                // gate above and purge-archived-assistants.ts's hard-delete sweep.
+                const now = new Date();
+                const scheduledDeletionAt = new Date(now.getTime() + ARCHIVE_GRACE_PERIOD_DAYS * 24 * 60 * 60 * 1000);
+
                 // AC5.2 state transition: archived is reachable from every state. The helper audits
                 // it and sets isActive=false; we also keep the legacy provisioningStatus='cancelled'
                 // so older consumers still treat it as gone. (IDOR already verified above; the helper
                 // runs on the owner db.)
                 await transitionAssistantStatus(db, id, 'archived', { reason: 'user_archive', actorUserId: ctx.userId });
                 await db.update(aiAssistants)
-                    .set({ provisioningStatus: 'cancelled', updatedAt: new Date() })
+                    .set({ provisioningStatus: 'cancelled', archivedAt: now, scheduledDeletionAt, updatedAt: now })
                     .where(eq(aiAssistants.id, id));
 
                 // AC5.2 purge: hard-delete queued / in-flight task runs so nothing more executes.
@@ -105,10 +166,22 @@ export default withLambda(async (event) => {
                     inArray(taskRuns.status, ['pending', 'running', 'reviewing', 'suspended']),
                 ));
 
+                // Issue #191: notify the user, with a link to the archived assistant's detail page
+                // (where the reinstate banner lives) and the deletion deadline spelled out.
+                const deletionDateLabel = scheduledDeletionAt.toISOString().slice(0, 10);
+                await db.insert(notifications).values({
+                    userId: ctx.userId,
+                    type: 'assistant_archived',
+                    title: `"${existing.name}" has been archived`,
+                    message: `"${existing.name}" has been archived and removed from your active workspace. You have until ${deletionDateLabel} (${ARCHIVE_GRACE_PERIOD_DAYS} days) to reinstate it, subject to your plan's assistant limit. After that date, this assistant and all of its associated data will be permanently deleted and cannot be recovered.`,
+                    metadata: { assistantId: id, scheduledDeletionAt: scheduledDeletionAt.toISOString() },
+                    assistantId: id,
+                }).catch(() => {});
+
                 return {
                     statusCode: 200,
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ success: true, lifecycleStatus: 'archived' }),
+                    body: JSON.stringify({ success: true, lifecycleStatus: 'archived', scheduledDeletionAt: scheduledDeletionAt.toISOString() }),
                 };
             }
 

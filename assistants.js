@@ -490,7 +490,7 @@ function _resizeBriefAutoGrow() {
 // stale set of nodes is matched. Delegation resolves the target at click time, so it
 // works regardless of when/whether init ran and survives any view re-injection.
 
-// Activate a main tab by name ('overview' | 'goals' | 'automation' | 'config'). Exposed so other code
+// Activate a main tab by name ('overview' | 'goals' | 'workflow' | 'meetings'). Exposed so other code
 // (deep-links, attention CTAs, child-tab clicks) can surface the right section.
 window._activateMainTab = function(name) {
     document.querySelectorAll('.main-tab-btn').forEach(b => b.classList.toggle('active-tab', b.dataset.maintab === name));
@@ -1055,7 +1055,7 @@ async function _initAssistantNotifPrefs() {
         if (!res.ok) throw new Error('Load failed');
         const { categories } = await res.json();
         // Role-aware: post/publishing alerts only apply to roles that actually publish
-        // content. Non-social roles (Lead Qualifier, AR Clerk, Support, …) never draft or
+        // content. Non-social roles (Lead Generator, AR Clerk, Support, …) never draft or
         // publish posts, so the registry hides "Content & Publishing" for them — mirroring
         // how the Review-alert cadence card is gated in _applyDashboardRegistry.
         const registry = window.AssistantDashboardRegistry;
@@ -1455,6 +1455,11 @@ if (!window._detailTabsDelegated) {
 // during onboarding is visible on the detail page, regardless of which editable fields are
 // wired below (e.g. Trigger/Content Source are captured as label strings the radios can't bind).
 // Sourced from the structured onboardingContext (data.context) + configuration.inputs.
+//
+// Schema-driven roles: only the OPERATIONAL fields are folded in here — the non-operational
+// ones are already shown, editable, immediately below in the "Setup Answers" card
+// (_renderRoleAnswersEditor). Including both would show the same answer twice in a row on
+// the same page (see issue #169).
 function _renderOnboardingSummary(data) {
     const host = document.getElementById('onboarding-summary');
     if (!host) return;
@@ -1467,8 +1472,8 @@ function _renderOnboardingSummary(data) {
     // Roles onboarded via the schema wizard capture Trigger/Content Source under the shared
     // Operational Set-Up step (surfaced by schemaRows below), so drop the legacy inputs-based
     // rows for them to avoid showing each answer twice.
-    const schemaFields = _roleSchemaFields(data && data.roleKey);
-    const hasSchemaOperational = _roleOperationalFields(data && data.roleKey).length > 0;
+    const schemaFields = _roleOperationalFields(data && data.roleKey);
+    const hasSchemaOperational = schemaFields.length > 0;
 
     const objectiveLabels = { brand_awareness: 'Brand Awareness', lead_generation: 'Lead Generation', direct_sales: 'Direct Sales', community_engagement: 'Community & Engagement' };
     const objective = clean(ctx.primary_objective || inputs.primary_objective);
@@ -1493,9 +1498,11 @@ function _renderOnboardingSummary(data) {
         ]),
     ].filter(([, v]) => v && v !== MISSING);
 
-    // Role-specific answers captured by the schema wizard (assistant-setup.html) live in
+    // Operational answers captured by the schema wizard (assistant-setup.html) live in
     // onboardingContext under the schema's own keys — surface them via the role's
     // AssistantOnboardingSchemas entry so non-social roles aren't shown as "no answers".
+    // (Non-operational schema answers are intentionally excluded — see _roleOperationalFields
+    // above; they render editable in the "Setup Answers" card instead.)
     const schemaRows = schemaFields
         .map(f => [f.label || f.key, _formatSchemaAnswer(f, ctx[f.key])])
         .filter(([, v]) => v !== '');
@@ -1805,16 +1812,9 @@ function _applyDashboardRegistry(data) {
         setText('opcard-operation-sub', 'Trigger and content source');
     }
 
-    // Automation main tab (autonomous posting + media sources) — entirely post/media-centric.
-    const showAutomation = mods.hasContentAutomation !== false;
-    toggle('maintab-btn-automation', showAutomation);
-    // If the active tab is being hidden, fall back to Overview so the page never lands on a blank tab.
-    if (!showAutomation) {
-        const autoBtn = document.getElementById('maintab-btn-automation');
-        if (autoBtn && autoBtn.classList.contains('active-tab') && typeof window._activateMainTab === 'function') {
-            window._activateMainTab('overview');
-        }
-    }
+    // Automation (autonomous posting + media sources) — entirely post/media-centric, lives in the
+    // profile's Operational Setup section (issue #194: moved out of its own main tab).
+    toggle('module-content-automation', mods.hasContentAutomation !== false);
 
     // Overview primary action — relabel + rebind by role. 'chat' opens the assistant's chat intake
     // (how Data Hub roles receive work); the Blog Writer opens the Blog Studio modal (authored as
@@ -2384,21 +2384,16 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     // Configuration child tabs are handled by module-level delegated click listeners
     // (see top of file) so they survive this view being re-injected on every navigation.
 
-    // Deep-link to a specific section (e.g. post-OAuth returns to the Connections tab, or a
-    // per-assistant Quick Action on the dashboard card jumping straight to Data Hub/Review
-    // Queue/Calendar — issue #178). Main tabs go through _activateMainTab; anything else is
-    // assumed to be a Configuration child tab (problem/operation/strategy/platforms/rules/
-    // guardrails), surfaced by clicking the child button, which also reveals Configuration.
-    const MAIN_TABS = ['overview', 'datahub', 'review-queue', 'calendar', 'goals', 'automation', 'meetings', 'activity', 'kb'];
-    if (window._assistantDetailInitialTab) {
-        const wanted = window._assistantDetailInitialTab;
+    // Deep-link to a specific section. 'goals' (and other tabs that don't depend on the
+    // assistant-context fetch below) can activate immediately; every other target —
+    // review-queue/datahub/calendar main tabs (e.g. issue #178's per-assistant dashboard
+    // Quick Actions, or chat's "View in Review Queue" link) and the Configuration child
+    // tabs (e.g. post-OAuth returning to Connections) — needs that data first, so it's
+    // consumed by the matching block after "Load & hydrate" below. Activating a
+    // records-backed queue early would render it with the wrong (default 'posts') renderer.
+    if (window._assistantDetailInitialTab === 'goals') {
         window._assistantDetailInitialTab = null;
-        if (MAIN_TABS.includes(wanted)) {
-            window._activateMainTab?.(wanted);
-        } else {
-            const target = document.querySelector(`.detail-tab-btn[data-tab="${wanted}"]`);
-            if (target) target.click();
-        }
+        window._activateMainTab?.('goals');
     }
 
     // ── Platform handle toggles ───────────────────────────────────
@@ -2576,11 +2571,12 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         window._detailCurrentData = currentData;
         window._renderStatusPill(currentData);
 
-        // US6 AC5.1: Archive Assistant — permanent end-of-life, then return to the dashboard.
+        // US6 AC5.1: Archive Assistant — stops it and removes it from the active workspace.
+        // Issue #191: no longer immediately permanent — a 14-day reinstate window follows.
         const archiveBtn = document.getElementById('btn-archive-assistant');
         if (archiveBtn) archiveBtn.onclick = async () => {
             const name = currentData.name || 'this assistant';
-            const message = `Archive "${name}"? This permanently stops the assistant and removes it from your active workspace. Its history is kept for reporting, but this cannot be undone.`;
+            const message = `Archive "${name}"? This stops the assistant and removes it from your active workspace. You'll have 14 days to reinstate it (subject to your plan's assistant limit) before it and all of its data are permanently deleted.`;
             const doArchive = async () => {
                 archiveBtn.disabled = true;
                 try {
@@ -2596,6 +2592,73 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                 await doArchive();
             }
         };
+
+        // Issue #191: an archived assistant can't be archived or paused/resumed again — hide
+        // both "More actions" entries and show a reinstate banner with the countdown instead
+        // (below). The banner's own button is the one live path back from archived.
+        const isArchived = currentData.lifecycleStatus === 'archived';
+        if (archiveBtn) archiveBtn.classList.toggle('hidden', isArchived);
+        document.getElementById('btn-toggle-status')?.classList.toggle('hidden', isArchived);
+        // Both entries are hidden when archived, so the "…" trigger has nothing left to open.
+        document.getElementById('btn-more-actions')?.classList.toggle('hidden', isArchived);
+
+        // Issue #191 — Safe Archiving reinstate window: archived assistants are reachable only
+        // via the archive notification's deep link (they're filtered out of the "My Assistants"
+        // grid), so this banner is the one place a user can reinstate one within its 14-day
+        // window, gated server-side on the plan's assistant limit (manage-assistant.ts).
+        const existingArchivedBanner = document.getElementById('archived-assistant-banner');
+        if (existingArchivedBanner) existingArchivedBanner.remove();
+        if (currentData.lifecycleStatus === 'archived') {
+            const deletionAt = currentData.scheduledDeletionAt ? new Date(currentData.scheduledDeletionAt) : null;
+            const daysLeft = deletionAt ? Math.max(0, Math.ceil((deletionAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000))) : null;
+            const deletionLabel = deletionAt ? deletionAt.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }) : null;
+            const banner = document.createElement('div');
+            banner.id = 'archived-assistant-banner';
+            banner.className = 'mx-4 mt-4 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3';
+            banner.innerHTML = `
+                <span class="text-2xl flex-shrink-0">🗄️</span>
+                <div class="flex-1">
+                    <p class="text-sm font-bold text-red-800">This assistant is archived.</p>
+                    <p class="text-sm text-red-700 mt-0.5">
+                        ${daysLeft !== null
+                            ? `You have ${daysLeft} day${daysLeft === 1 ? '' : 's'} left (until ${deletionLabel}) to reinstate it, subject to your plan's assistant limit.`
+                            : `You have a limited time to reinstate it, subject to your plan's assistant limit.`}
+                        After that, this assistant and all of its associated data will be permanently deleted — this cannot be undone.
+                    </p>
+                    <button type="button" id="btn-reinstate-assistant" class="mt-2.5 px-4 py-2 text-sm font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors cursor-pointer">
+                        Reinstate assistant
+                    </button>
+                </div>`;
+            const detailEl = document.getElementById('assistant-detail-view') || document.getElementById('content-container');
+            if (detailEl) detailEl.prepend(banner);
+
+            const reinstateBtn = document.getElementById('btn-reinstate-assistant');
+            if (reinstateBtn) reinstateBtn.onclick = async () => {
+                reinstateBtn.disabled = true;
+                const original = reinstateBtn.textContent;
+                reinstateBtn.textContent = 'Reinstating…';
+                try {
+                    const r = await fetch(`/.netlify/functions/manage-assistant?id=${assistantId}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'reinstate' }),
+                    });
+                    if (!r.ok) {
+                        const d = await r.json().catch(() => ({}));
+                        alert(d.error || 'Failed to reinstate assistant.');
+                        reinstateBtn.disabled = false;
+                        reinstateBtn.textContent = original;
+                        return;
+                    }
+                    window.showToast?.('Assistant reinstated.');
+                    window.routeToAssistantDetail?.(assistantId);
+                } catch {
+                    alert('Network error — please try again.');
+                    reinstateBtn.disabled = false;
+                    reinstateBtn.textContent = original;
+                }
+            };
+        }
 
         // US-ADM-4.1.1: Show deprecation banner if assistant's master role is deprecated
         const existingBanner = document.getElementById('deprecated-assistant-banner');
@@ -2638,6 +2701,23 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         _wirePostingSchedule();
         _renderKickOff(assistantId);
         window._initReviewMeetings?.(assistantId);
+
+        // Deep-link (continued from above): review-queue/datahub/calendar main tabs read
+        // window._detailReviewQueue (just set by _applyDashboardRegistry above) and other
+        // data hydrated here, so they're only safe to activate now — e.g. chat's "View in
+        // Review Queue" link (chat-session.js / workspace.html's ?view=assistant-detail&tab=)
+        // must not fire detailRqOpenStatus() before _detailReviewQueue.kind is known, or a
+        // records-backed queue would render with the wrong (default 'posts') renderer.
+        if (window._assistantDetailInitialTab) {
+            const wanted = window._assistantDetailInitialTab;
+            window._assistantDetailInitialTab = null;
+            if (document.querySelector(`.main-tab-btn[data-maintab="${wanted}"]`)) {
+                window._activateMainTab?.(wanted);
+            } else {
+                const target = document.querySelector(`.detail-tab-btn[data-tab="${wanted}"]`);
+                if (target) target.click();
+            }
+        }
     } catch (e) {
         console.error('Failed to load assistant detail:', e);
     }
@@ -2860,7 +2940,14 @@ async function _prefetchDetailRqBadge(assistantId) {
 // ─────────────────────────────────────────────────────────────────
 // Impact & ROI metrics — per-assistant post counts + time/money saved.
 // ─────────────────────────────────────────────────────────────────
-async function _fetchAndRenderAssistantMetrics(assistantId, period = 'week') {
+// Default to 'month', not 'week': the calendar week resets hard at the Sunday
+// boundary, so for many hours after each rollover an assistant with real
+// historical activity legitimately has nothing yet in the brand-new week
+// window and this card reads as "broken" (0 hours/£ saved) despite the
+// all-time post counts above it being nonzero. The dashboard hero widget
+// hit the identical issue (#132) and was fixed the same way — see the
+// matching comment in dashboard-content.html.
+async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
     const card = document.getElementById('assistant-metrics-card');
     if (!card) return;
     // Non-social roles have no post-based ROI — the registry marks the card role-hidden; respect it.

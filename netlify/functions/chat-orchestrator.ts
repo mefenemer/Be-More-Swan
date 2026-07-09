@@ -292,14 +292,34 @@ function hubRecordsFromUiElement(uiElement: unknown): HubRecord[] {
     }
 }
 
+// Issue #180: the chat transcript had no link back to where a completed task actually
+// landed. Every hub record starts 'pending_approval' (assistant_records default), which
+// is what surfaces it in the assistant-detail Review Queue tab — so whenever a turn
+// produces hub records, tell the user in-line and point them at that tab.
+const HUB_RECORD_LABELS: Record<string, string> = {
+    lead: 'lead',
+    enrichment: 'enrichment record',
+    meeting: 'meeting summary',
+    invoice: 'invoice',
+    ticket: 'ticket',
+};
+
+function hubLinkFromRecords(records: HubRecord[]): { tab: string; label: string } | null {
+    if (records.length === 0) return null;
+    if (records.length === 1) {
+        const kind = HUB_RECORD_LABELS[records[0].recordType] ?? 'record';
+        return { tab: 'review-queue', label: `Added this ${kind} to your Review Queue` };
+    }
+    return { tab: 'review-queue', label: `Added ${records.length} items to your Review Queue` };
+}
+
 /** Best-effort upsert of a reply's hub records — a persistence failure never fails the turn. */
 async function persistHubRecords(
     db: ReturnType<typeof getDb>,
     orgId: number,
     aiAssistantId: number,
-    uiElement: unknown,
+    records: HubRecord[],
 ): Promise<void> {
-    const records = hubRecordsFromUiElement(uiElement);
     if (records.length === 0) return;
     try {
         for (const rec of records) {
@@ -414,7 +434,7 @@ async function retrieveKnowledgeBase(
 }
 
 const ROUTES: Record<string, AssistantRoute> = {
-    // Tier 1, Batch 1 — Lead Qualifier. Scores inbound leads against the ideal-customer
+    // Tier 1, Batch 1 — Lead Generator. Scores inbound leads against the ideal-customer
     // profile captured at hire time (targetIndustries / minHeadcount / salesTone, see
     // src/config/assistant-onboarding-schemas.js). Wire shape: reply + lead_scoring_card
     // uiElement, matching the LeadScoringCard renderer in disruptive-ui-registry.js.
@@ -972,7 +992,7 @@ export default withLambda(async (event) => {
 
             // The shadow assistant's structured output lands in ITS Data Hub too — but
             // only when the org has actually hired that role (no instance, no hub).
-            if (shadowRow) await persistHubRecords(db, orgId, shadowRow.id, shadow.uiElement);
+            if (shadowRow) await persistHubRecords(db, orgId, shadowRow.id, hubRecordsFromUiElement(shadow.uiElement));
 
             // The Context Injection + Resumption: append the shadow output as an extra
             // user turn so the active assistant completes its original task with it.
@@ -1009,6 +1029,16 @@ export default withLambda(async (event) => {
         const raw = response.content[0]?.type === 'text' ? response.content[0].text : '';
         const { content, uiElement } = route.parseResponse(raw);
 
+        // Golden Rule 2: structured output flows into the Data Hub automatically. Computed
+        // up front (rather than inside persistHubRecords) so the same records list can also
+        // stamp a hubLink onto the uiElement below — the transcript then carries its own
+        // "where did this go" pointer, and it round-trips through uiElementJson on reload.
+        const hubRecords = hubRecordsFromUiElement(uiElement);
+        const hubLink = hubLinkFromRecords(hubRecords);
+        if (hubLink && uiElement && typeof uiElement === 'object') {
+            (uiElement as Record<string, unknown>).hubLink = hubLink;
+        }
+
         // One transaction: the shadow call's audit row (role 'system' — hidden from the
         // transcript and excluded from the LLM window, kept so the handoff's work is
         // auditable) commits together with the final assistant reply, or not at all.
@@ -1029,8 +1059,7 @@ export default withLambda(async (event) => {
 
         await db.update(chatSessions).set({ updatedAt: new Date() }).where(eq(chatSessions.id, session.id));
 
-        // Golden Rule 2: structured output flows into the Data Hub automatically.
-        await persistHubRecords(db, orgId, session.aiAssistantId, uiElement);
+        await persistHubRecords(db, orgId, session.aiAssistantId, hubRecords);
 
         return json(200, {
             chatSessionId: session.id,

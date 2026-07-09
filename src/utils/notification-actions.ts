@@ -72,6 +72,8 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     content_library_empty: 'suggested_action',
     risk_assessment_submitted: 'suggested_action', billing_renewal_due: 'suggested_action',
     billing_alert: 'suggested_action', action_rejected: 'suggested_action', action_expired: 'suggested_action',
+    // Issue #191 — archived assistant has a 14-day reinstate window before permanent deletion.
+    assistant_archived: 'suggested_action',
     // state_change — completed / changed confirmations
     billing_renewed: 'state_change', billing_payment_received: 'state_change', payment_confirmation: 'state_change',
     plan_upgraded: 'state_change', downgrade_scheduled: 'state_change', downgrade_cancelled: 'state_change',

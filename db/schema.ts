@@ -286,6 +286,12 @@ export const aiAssistants = pgTable("ai_assistants", {
   // non-null signals that this assistant's knowledge base may be incomplete.
   knowledgeStaleAt: timestamp("knowledge_stale_at"),
 
+  // Issue #191 — Safe Archiving grace period: when the assistant was archived, and the
+  // deadline after which purge-archived-assistants hard-deletes it (archivedAt + 14 days).
+  // Both null while not archived; cleared again on reinstate. db/assistant-archive-grace-period.sql.
+  archivedAt: timestamp("archived_at"),
+  scheduledDeletionAt: timestamp("scheduled_deletion_at"),
+
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   // provisioningStatus: 'pending' | 'complete' | 'failed' | 'cancelled' | 'paused_limit' | 'paused_payment' | 'blocked'
@@ -2784,7 +2790,7 @@ export const blogAbStats = pgTable("blog_ab_stats", {
 // ────────────────────────────────────────────────────────────────────────────
 // Lead Generator — Outbound Discovery Layer
 // Design: docs/lead-generator-discovery-plan.md. SQL: db/lead-discovery.sql
-// (apply manually — no drizzle-kit push). Turns the inbound Lead Qualifier
+// (apply manually — no drizzle-kit push). Turns the inbound Lead Generator
 // (roleKey `lead_qualifier`) into a proactive outbound discovery engine.
 //
 // NOTE: distinct from the `leads` table above (that is Be More Swan's OWN
