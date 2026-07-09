@@ -2379,6 +2379,12 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         newBtn.addEventListener('click', () => loadViewCb('assistants'));
     }
 
+    // Issue #197: header "Chat" CTA — always visible, regardless of tab or role.
+    const btnChat = document.getElementById('btn-detail-chat');
+    if (btnChat) {
+        btnChat.onclick = () => { window.location.href = `assistant-chat.html?assistantId=${assistantId}`; };
+    }
+
     // ── Tab switching ─────────────────────────────────────────────
     // Both main tabs (Overview / Goals & Automation / Configuration) and the nested
     // Configuration child tabs are handled by module-level delegated click listeners
