@@ -490,7 +490,7 @@ function _resizeBriefAutoGrow() {
 // stale set of nodes is matched. Delegation resolves the target at click time, so it
 // works regardless of when/whether init ran and survives any view re-injection.
 
-// Activate a main tab by name ('overview' | 'goals' | 'automation' | 'config'). Exposed so other code
+// Activate a main tab by name ('datahub' | 'goals' | 'automation' | 'config'). Exposed so other code
 // (deep-links, attention CTAs, child-tab clicks) can surface the right section.
 window._activateMainTab = function(name) {
     document.querySelectorAll('.main-tab-btn').forEach(b => b.classList.toggle('active-tab', b.dataset.maintab === name));
@@ -1815,11 +1815,11 @@ function _applyDashboardRegistry(data) {
     // Automation main tab (autonomous posting + media sources) — entirely post/media-centric.
     const showAutomation = mods.hasContentAutomation !== false;
     toggle('maintab-btn-automation', showAutomation);
-    // If the active tab is being hidden, fall back to Overview so the page never lands on a blank tab.
+    // If the active tab is being hidden, fall back to Data Hub so the page never lands on a blank tab.
     if (!showAutomation) {
         const autoBtn = document.getElementById('maintab-btn-automation');
         if (autoBtn && autoBtn.classList.contains('active-tab') && typeof window._activateMainTab === 'function') {
-            window._activateMainTab('overview');
+            window._activateMainTab('datahub');
         }
     }
 
