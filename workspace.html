@@ -7264,14 +7264,15 @@ async function gpSubmitReject() {
   // The drawer is a fixed right-hand strip, so the fields it covers sit *underneath* it —
   // a click there lands on the drawer's own background/whitespace (drawer.contains(e.target)
   // is true), not on the page behind it. Excluding every click inside the drawer therefore
-  // never collapsed it for exactly the case being reported. Only genuine interactive controls
-  // (the checklist rows, sub-task links, kick-off button, etc.) should keep it open; a click
-  // anywhere else inside the drawer's bounds is treated the same as clicking through to
+  // never collapsed it for exactly the case being reported. Only the checklist/kick-off
+  // <button> controls should keep it open (they deep-link the main area as a companion, per
+  // US1 AC2); an <a> link inside the drawer (e.g. "Read the setup guide") navigates away, so
+  // it should close the drawer just like a click outside — same as clicking through to
   // whatever it's covering.
   document.addEventListener('click', (e) => {
     if (!isOpen) return;
     if (fab.contains(e.target)) return;
-    if (drawer.contains(e.target) && e.target.closest('button, a')) return;
+    if (drawer.contains(e.target) && e.target.closest('button')) return;
     collapse();
   });
 
