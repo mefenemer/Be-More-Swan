@@ -385,7 +385,7 @@
 
     if (state.records.length === 0) {
       const emptyMsg = hub.kind === 'content_library'
-        ? 'Posts this assistant drafts will appear here across their whole lifecycle — from draft through scheduled to published. Review and approve them in Review.'
+        ? 'Posts this assistant drafts will appear here across their whole lifecycle — from draft through scheduled to published. Click Create Post above to write one yourself or generate one with AI.'
         : `Work your assistant produces in chat lands here automatically — or import a CSV to get started. ${esc(hub.importHint)}`;
       host.innerHTML = `
         <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-10 text-center">
@@ -438,19 +438,33 @@
     }
   }
 
-  // Content Library toolbar — browse-only (posts are created via Assign Task / Blog Studio and
-  // approved in the Review Queue), so no CSV import/export or manual add.
+  // Content Library toolbar — a "Create Post" button opens the same post-creation surface as
+  // Assign Task / Blog Studio (write it yourself, suggest an idea, or work with AI), so the
+  // library isn't just a read-only history: approval still happens in the Review Queue.
   function renderLibraryToolbar() {
     const host = document.getElementById('datahub-toolbar');
     if (!host) return;
     const hub = state.hub;
+    const isBlog = hub.source === 'blog_posts';
     host.innerHTML = `
       <div class="flex flex-col sm:flex-row sm:items-start justify-between gap-4 mb-6">
         <div class="min-w-0">
           <h3 class="text-lg font-bold text-gray-900">${esc(hub.label)}</h3>
           <p class="text-sm text-gray-500 mt-1 max-w-2xl">${esc(hub.description)}</p>
         </div>
+        <button type="button" id="datahub-create-post"
+          class="inline-flex items-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed whitespace-nowrap shrink-0">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          Create Post
+        </button>
       </div>`;
+    const btn = document.getElementById('datahub-create-post');
+    if (btn) {
+      btn.addEventListener('click', () => {
+        if (isBlog) window.openBlogStudio?.({ assistantId: state.assistantId });
+        else window.openGeneratePostSheet?.();
+      });
+    }
   }
 
   function renderToolbar() {
