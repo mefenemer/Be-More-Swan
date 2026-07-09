@@ -221,8 +221,8 @@ window.generateAssistantCardHTML = function(assistant) {
         ${metricsHtml}
         ${quickActionsHtml}
         <div class="mt-auto pt-4 border-t border-gray-50 flex justify-between items-center">
-            <a href="assistant-chat.html?assistantId=${assistant.id}" onclick="event.stopPropagation()"
-               class="px-3.5 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition">💬 Chat</a>
+            <button type="button" onclick="event.stopPropagation(); window.openAssistantChatModal ? window.openAssistantChatModal('${assistant.id}', '${(assistant.name || 'Your assistant').replace(/'/g, '&#39;')}', '${role.replace(/'/g, '&#39;')}', '${(assistant.roleKey || '').replace(/'/g, '&#39;')}') : (window.location.href = 'assistant-chat.html?assistantId=${assistant.id}')"
+               class="px-3.5 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition cursor-pointer">💬 Chat</button>
             <span class="text-sm font-bold text-gray-900 group-hover:text-emerald-700 transition-colors">View Details &rarr;</span>
         </div>
     </div>`;
