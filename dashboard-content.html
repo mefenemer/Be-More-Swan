@@ -639,10 +639,6 @@
   /* widget internals */
   .dw-stat { font-size: 30px; font-weight: 800; color: #0f172a; line-height: 1; }
   .dw-stat-sub { font-size: 13px; color: #64748b; margin-top: 6px; }
-  .dw-qa { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .dw-qa button { border: 1px solid #e2e8f0; background: #f8fafc; color: #334155; font-size: 13px; font-weight: 600;
-    padding: 10px; border-radius: 10px; cursor: pointer; text-align: left; transition: all .15s ease; }
-  .dw-qa button:hover { background: #fdf2f8; border-color: #fbcfe8; color: #be185d; }
   .dw-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 9px; }
   .dw-list li { font-size: 13px; color: #475569; display: flex; gap: 8px; }
   .dw-list .t { color: #0f172a; font-weight: 600; }
@@ -688,16 +684,19 @@
     const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
     const fmtGBP = v => Number(v).toLocaleString('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 });
 
+    // Issue #178: the old global, one-size-fits-all "Quick actions" widget (Create a post /
+    // Hire an assistant / Open calendar / Invite a teammate) has moved onto each assistant
+    // card, where the links are scoped and relevant to that specific assistant (see
+    // generateAssistantCardHTML's quick-actions block in assistants.js).
     const CATALOG = {
-      'quick-actions': { title: 'Quick actions', icon: '⚡', desc: 'One-tap shortcuts', render: renderQuickActions },
       'roi-mini':      { title: 'Value this week', icon: '💷', desc: 'Hours & money saved', render: renderRoiMini },
       'team-status':   { title: 'Your assistants', icon: '👥', desc: 'Who is working right now', render: renderTeamStatus },
       'notifications': { title: 'Latest updates', icon: '🔔', desc: 'Your most recent activity', render: renderNotifications },
       'tips':          { title: 'Tip', icon: '💡', desc: 'Get more from your team', render: renderTips },
       'referral':      { title: 'Invite a teammate', icon: '🎁', desc: 'Share Be More Swan', render: renderReferral },
     };
-    const ORDER = ['quick-actions', 'roi-mini', 'team-status', 'notifications', 'tips', 'referral'];
-    const DEFAULT_ON = { 'quick-actions': true, 'roi-mini': true, 'team-status': true, 'notifications': true, 'tips': false, 'referral': false };
+    const ORDER = ['roi-mini', 'team-status', 'notifications', 'tips', 'referral'];
+    const DEFAULT_ON = { 'roi-mini': true, 'team-status': true, 'notifications': true, 'tips': false, 'referral': false };
 
     let layout = [];
     let editing = false;
@@ -794,11 +793,6 @@
     document.getElementById('dw-tray-backdrop').onclick = exitEdit;
 
     // ── widget renderers ──
-    function renderQuickActions(el) {
-      const acts = [['📝', 'Create a post', 'review-queue'], ['➕', 'Hire an assistant', 'catalog'], ['📅', 'Open calendar', 'calendar'], ['🎁', 'Invite a teammate', 'referral']];
-      el.innerHTML = `<div class="dw-qa">${acts.map(a => `<button data-v="${a[2]}">${a[0]} ${esc(a[1])}</button>`).join('')}</div>`;
-      el.querySelectorAll('button').forEach(b => b.onclick = () => window.loadView && window.loadView(b.dataset.v));
-    }
     async function renderRoiMini(el) {
       try {
         const d = await (await fetch('/.netlify/functions/roi-stats?period=week')).json();
@@ -874,8 +868,8 @@
 
   /* ── AC3: consistent micro-interactions ── */
   #dash-root .cc-toggle-btn:active, #dash-root .as-btn:active, #dash-root .dw-customize:active,
-  #dash-root .dw-qa button:active, #dash-root .cc-tile:active { transform: scale(.97); }
-  #dash-root .as-btn, #dash-root .dw-customize, #dash-root .cc-toggle-btn, #dash-root .dw-qa button { transition: transform .12s ease, background .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease; }
+  #dash-root .cc-tile:active { transform: scale(.97); }
+  #dash-root .as-btn, #dash-root .dw-customize, #dash-root .cc-toggle-btn { transition: transform .12s ease, background .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease; }
   #dash-root .as-btn-approve:hover, #dash-root .dw-tray-close:hover { box-shadow: 0 6px 16px -6px rgba(236,72,153,0.6); }
   #dash-root button:focus-visible, #dash-root input:focus-visible, #dash-root [tabindex]:focus-visible {
     outline: 2px solid #ec4899; outline-offset: 2px; border-radius: 8px; }
