@@ -1530,6 +1530,16 @@ export const pexelsSearchCache = pgTable("pexels_search_cache", {
   index("pexels_search_cache_created_idx").on(t.createdAt),
 ]);
 
+// Guided tour voice narration cache (issue #161) — static TOUR_STEPS copy synthesized once via
+// OpenAI TTS and reused for every user, keyed by a hash of text + voice. db/tour-narration-cache.sql.
+export const tourNarrationCache = pgTable("tour_narration_cache", {
+  textHash: text("text_hash").primaryKey(),
+  voice: text("voice").notNull(),
+  audioBase64: text("audio_base64").notNull(),
+  mimeType: text("mime_type").notNull().default("audio/mpeg"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 // Invoices table — one row per generated invoice, created on every successful payment
 export const invoices = pgTable("invoices", {
   id: serial().primaryKey(),
