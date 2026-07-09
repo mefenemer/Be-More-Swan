@@ -329,7 +329,7 @@
     wrap.innerHTML = `
       ${body ? `<p class="text-sm text-gray-800 whitespace-pre-line">${esc(body)}</p>` : '<p class="text-sm text-gray-500">No content yet.</p>'}
       ${tags ? `<p class="text-xs text-emerald-700 mt-3">${esc(tags)}</p>` : ''}
-      <p class="text-xs text-gray-400 mt-4 pt-3 border-t border-gray-100">Approve or reject this in the <span class="font-semibold text-gray-600">Review Queue</span>; scheduled posts appear on the <span class="font-semibold text-gray-600">Calendar</span>.</p>
+      <p class="text-xs text-gray-400 mt-4 pt-3 border-t border-gray-100">Approve or reject this in <span class="font-semibold text-gray-600">Review</span>; scheduled posts appear on the <span class="font-semibold text-gray-600">Calendar</span>.</p>
     `;
     return wrap;
   }
@@ -385,7 +385,7 @@
 
     if (state.records.length === 0) {
       const emptyMsg = hub.kind === 'content_library'
-        ? 'Posts this assistant drafts will appear here across their whole lifecycle — from draft through scheduled to published. Review and approve them in the Review Queue.'
+        ? 'Posts this assistant drafts will appear here across their whole lifecycle — from draft through scheduled to published. Review and approve them in Review.'
         : `Work your assistant produces in chat lands here automatically — or import a CSV to get started. ${esc(hub.importHint)}`;
       host.innerHTML = `
         <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-10 text-center">

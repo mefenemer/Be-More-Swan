@@ -412,8 +412,8 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                         ? `${assistantLabel}: draft ready — out of AI credits`
                         : `${assistantLabel}: draft ready — media needed`,
                     message: outOfCredits
-                        ? `Your ${platformLabel} post draft is ready to review, but we couldn't generate an AI image — your AI credit balance is empty. Top up credits or add media in the Review Queue.`
-                        : `Your ${platformLabel} post draft is ready to review, but we couldn't source any media for it. Check the assistant's Media Sources settings or add media in the Review Queue.`,
+                        ? `Your ${platformLabel} post draft is ready to review, but we couldn't generate an AI image — your AI credit balance is empty. Top up credits or add media in Review.`
+                        : `Your ${platformLabel} post draft is ready to review, but we couldn't source any media for it. Check the assistant's Media Sources settings or add media in Review.`,
                     metadata: { jobId: job.job_id, postId: post.id, reason: mediaExhaustedReason, assistantId: job.assistant_id },
                 });
             } else {

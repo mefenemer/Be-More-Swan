@@ -42,9 +42,9 @@ const handler = async () => {
             subject: `[Be More Swan] ${row.count} action${row.count > 1 ? 's' : ''} waiting for your review`,
             html: `
 <p>Hi ${name},</p>
-<p>You have <strong>${row.count} pending action${row.count > 1 ? 's' : ''}</strong> in your Be More Swan Review Queue that ${row.count > 1 ? 'have' : 'has'} been waiting for more than 24 hours.</p>
+<p>You have <strong>${row.count} pending action${row.count > 1 ? 's' : ''}</strong> in your Be More Swan Review that ${row.count > 1 ? 'have' : 'has'} been waiting for more than 24 hours.</p>
 <p>Unapproved actions will expire automatically. Please review them before they expire.</p>
-<p><a href="${BASE}/workspace.html" style="display:inline-block;padding:10px 20px;background:#059669;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold;">Open Review Queue</a></p>
+<p><a href="${BASE}/workspace.html" style="display:inline-block;padding:10px 20px;background:#059669;color:#fff;border-radius:8px;text-decoration:none;font-weight:bold;">Open Review</a></p>
 <p style="color:#6b7280;font-size:12px;">You are receiving this because you have pending actions awaiting human approval in your Be More Swan workspace.</p>
             `.trim(),
         });

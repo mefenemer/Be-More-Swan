@@ -13,7 +13,7 @@ import { Handler } from '@netlify/functions';
 import { and, eq, gte, lte, ne, sql } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
-import { aiAssistants, auditLogs, postIdeaSuggestions, scheduledPosts, systemConnections } from '../../db/schema';
+import { aiAssistants, auditLogs, contentRules, postIdeaSuggestions, scheduledPosts, systemConnections } from '../../db/schema';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { resolvePostImage } from '../../src/utils/social-publish';
 import { resolvePostingSchedule, computeScheduleSlots } from '../../src/config/posting-cadence';
@@ -105,6 +105,20 @@ export default withLambda(async (event) => {
             .set({ status: 'pending', usedPostId: null, usedAt: null })
             .where(and(eq(postIdeaSuggestions.usedPostId, postId), eq(postIdeaSuggestions.status, 'in_review')))
             .catch(() => {});
+        // The rejection reason becomes part of the assistant's memory: save it as a Content Rule so
+        // future drafts (see src/utils/blueprint.ts) avoid the same mistake. Best-effort, never blocks.
+        if (rejected.assistantId && rejected.organisationId) {
+            await db.insert(contentRules).values({
+                assistantId: rejected.assistantId,
+                workspaceId: rejected.organisationId,
+                ruleText: rejectionReason.trim(),
+                platform: rejected.platform || null,
+                createdByUserId: userId,
+                isActive: true,
+                origin: 'rejection_feedback',
+                originPostId: postId,
+            }).catch(() => {});
+        }
         await db.insert(auditLogs).values({
             userId,
             actionType: 'POST_REJECTED',

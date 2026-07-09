@@ -338,7 +338,7 @@ window.showComplianceModals = function showComplianceModals(force) {
       </div>
       <div id="gpw-status" class="hidden mb-4 text-sm rounded-xl p-3 bg-emerald-50 text-emerald-800 border border-emerald-200"></div>
       <div class="flex gap-2">
-        <button id="gpw-submit-btn" onclick="gpwSubmit()" class="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Add to Review Queue</button>
+        <button id="gpw-submit-btn" onclick="gpwSubmit()" class="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Add to Review</button>
         <button onclick="closeGeneratePostSheet()" class="px-5 py-2.5 border border-gray-300 text-gray-700 text-sm font-bold rounded-xl hover:bg-gray-50 transition cursor-pointer">Cancel</button>
       </div>
     </div>
@@ -1378,7 +1378,7 @@ function formatCurrency(amount, currency) {
       'my-content': { file: 'my-content.html', title: '| My Content' },
       'calendar': { file: 'calendar.html', title: '| Content Calendar' },
       'referral': { file: 'referral-content.html', title: '| Refer a Friend' },
-      'review-queue': { file: 'review-queue.html', title: '| Review Queue' },
+      'review-queue': { file: 'review-queue.html', title: '| Review' },
       'assistant-setup': { file: 'assistant-setup-checklist.html', title: '| Assistant Setup' },
       'getting-started': { file: 'getting-started.html', title: '| Getting Started' }
     };
@@ -5405,7 +5405,7 @@ function gpBackToChooser() {
     document.getElementById('gpw-media-picker')?.classList.add('hidden');
     gpSetPanelStatus('gpw-status', '');
     const wBtn = document.getElementById('gpw-submit-btn');
-    if (wBtn) { wBtn.disabled = false; wBtn.textContent = 'Add to Review Queue'; }
+    if (wBtn) { wBtn.disabled = false; wBtn.textContent = 'Add to Review'; }
 
     // Reset suggest-an-idea (default selection = All platforms).
     _gpiSelectedPlatforms = [];
@@ -5661,7 +5661,7 @@ async function gpApplyApprovalConnectGate(platform) {
         notice.classList.toggle('hidden', connected);
         if (!connected) {
             const textEl = document.getElementById('gp-connect-notice-text');
-            if (textEl) textEl.textContent = `Connect your ${rqPlatformLabel(platform)} account to schedule or publish this post. Your draft is saved in the Review Queue in the meantime.`;
+            if (textEl) textEl.textContent = `Connect your ${rqPlatformLabel(platform)} account to schedule or publish this post. Your draft is saved in Review in the meantime.`;
         }
     }
     return connected;
@@ -5875,7 +5875,7 @@ async function gpwSubmit() {
 
     const btn = document.getElementById('gpw-submit-btn');
     if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
-    gpSetPanelStatus('gpw-status', 'Adding to your Review Queue…');
+    gpSetPanelStatus('gpw-status', 'Adding to your Review…');
     try {
         const res = await fetch('/.netlify/functions/create-manual-post', {
             method: 'POST',
@@ -5891,11 +5891,11 @@ async function gpwSubmit() {
         const d = await res.json().catch(() => ({}));
         if (!res.ok) {
             gpSetPanelStatus('gpw-status', d.error || 'Could not create the post.', 'error');
-            if (btn) { btn.disabled = false; btn.textContent = 'Add to Review Queue'; }
+            if (btn) { btn.disabled = false; btn.textContent = 'Add to Review'; }
             return;
         }
         const n = (d.created || []).length;
-        gpSetPanelStatus('gpw-status', `Added ${n} draft${n === 1 ? '' : 's'} to your Review Queue.`);
+        gpSetPanelStatus('gpw-status', `Added ${n} draft${n === 1 ? '' : 's'} to your Review.`);
         if (typeof refreshPendingBadge === 'function') refreshPendingBadge();
         // Refresh whichever Review Queue view is currently mounted — the global Review Queue
         // page (Social tab) and/or the assistant-detail page's own scoped Review Queue tab.
@@ -5904,7 +5904,7 @@ async function gpwSubmit() {
         setTimeout(closeGeneratePostSheet, 1500);
     } catch {
         gpSetPanelStatus('gpw-status', 'Network error — please try again.', 'error');
-        if (btn) { btn.disabled = false; btn.textContent = 'Add to Review Queue'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Add to Review'; }
     }
 }
 
@@ -5958,7 +5958,7 @@ async function gpiSubmit() {
             if (btn) { btn.disabled = false; btn.textContent = 'Submit Idea'; }
             return;
         }
-        gpSetPanelStatus('gpi-status', 'Thanks! Your assistant is drafting a post from your idea now — it will appear in the Review Queue shortly.');
+        gpSetPanelStatus('gpi-status', 'Thanks! Your assistant is drafting a post from your idea now — it will appear in Review shortly.');
         // Refresh whichever Review Queue view is currently mounted so the new idea shows up
         // immediately instead of only after a manual tab switch / reload.
         if (typeof rqLoadItems === 'function') { try { rqLoadItems('pending_approval', 'social'); } catch { /* ignore */ } }
@@ -6767,11 +6767,11 @@ async function gpSubmitReject() {
             body: JSON.stringify({ assistantId: d.assistantId, platform, contextPrompt: d.brief || command, triggerType: 'on_demand' }),
           });
           if (!r.ok) throw 0;
-          showReply(`${reply}<div class="cmdbar-followup"><button type="button" class="cmdbar-go">View in Review Queue →</button></div>`);
+          showReply(`${reply}<div class="cmdbar-followup"><button type="button" class="cmdbar-go">View in Review →</button></div>`);
           result.querySelector('.cmdbar-go').onclick = () => { if (window.loadView) window.loadView('review-queue'); close(); };
           input.value = '';
         } catch {
-          showReply('I started on that but couldn’t queue it — you can create it from the Review Queue.');
+          showReply('I started on that but couldn’t queue it — you can create it from Review.');
         }
         return;
       }
