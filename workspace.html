@@ -4981,6 +4981,10 @@ function _rqReviewRefresh() {
     closePostReview();
     rqRenderGroups(_rqCurrentStatus);
     if (typeof refreshPendingBadge === 'function') { try { refreshPendingBadge(); } catch { /* ignore */ } }
+    // Also refresh the assistant-detail page's own scoped Review Queue tab (if mounted) — the
+    // post-review modal is shared by both the global Review Queue and this per-assistant view,
+    // but until now only the global list/badge were kept in sync after approve/reject/etc.
+    if (typeof window.detailRqRefresh === 'function') { try { window.detailRqRefresh(); } catch { /* ignore */ } }
 }
 
 // Toggle the review modal's approve button + connect notice for a post's platform connection.
