@@ -1,20 +1,23 @@
-// content-upload-url.ts — Generates a presigned S3 PUT URL for direct browser-to-S3 uploads
-// POST { fileName, mimeType, fileSize } → { uploadUrl, storageKey, storageUrl }
+// content-upload-url.ts — Generates a presigned R2 PUT URL for direct browser-to-R2 uploads
+// POST { fileName, mimeType, fileSize } → { uploadUrl, storageKey } (or { mock: true, storageKey })
 //
-// When AWS credentials are configured (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
-// S3_BUCKET_NAME, S3_REGION), this returns a real presigned URL.
-// Until then, it returns 501 (storage not configured) — no uploads are accepted.
+// Storage backend is Cloudflare R2 (R2_ENDPOINT, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY,
+// R2_BUCKET_NAME) — the same backend every other upload/download path in this app uses
+// (see storage-request-upload.ts, storage-download-url.ts). Falls back to mock mode,
+// matching those siblings, when R2 isn't configured.
 
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
+import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
-const S3_BUCKET  = process.env.S3_BUCKET_NAME;
-const S3_REGION  = process.env.S3_REGION || 'us-east-1';
-const AWS_KEY    = process.env.AWS_ACCESS_KEY_ID;
-const AWS_SECRET = process.env.AWS_SECRET_ACCESS_KEY;
+const R2_ENDPOINT = process.env.R2_ENDPOINT;
+const R2_ACCESS_KEY_ID     = process.env.R2_ACCESS_KEY_ID;
+const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
+const R2_BUCKET   = process.env.R2_BUCKET_NAME;
 
 const ALLOWED_MIME_TYPES = new Set([
     'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
@@ -22,6 +25,17 @@ const ALLOWED_MIME_TYPES = new Set([
 ]);
 
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500 MB
+
+function getR2Client(): S3Client {
+    return new S3Client({
+        region: 'auto',
+        endpoint: R2_ENDPOINT,
+        credentials: { accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY! },
+        // See storage-request-upload.ts for why WHEN_REQUIRED is needed for R2 presigned PUTs.
+        requestChecksumCalculation: 'WHEN_REQUIRED',
+        responseChecksumValidation: 'WHEN_REQUIRED',
+    });
+}
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -55,33 +69,24 @@ export default withLambda(async (event) => {
         const uniqueId = crypto.randomUUID();
         const storageKey = `content/org-${orgId || 'unknown'}/user-${userId}/${uniqueId}.${ext}`;
 
-        // ── Real S3 presigned URL (when AWS is configured) ────────
-        if (S3_BUCKET && AWS_KEY && AWS_SECRET) {
-            // Dynamic import so the build doesn't fail when @aws-sdk is not installed
-            const { S3Client, PutObjectCommand } = await import('@aws-sdk/client-s3');
-            const { getSignedUrl } = await import('@aws-sdk/s3-request-presigner');
-
-            const s3 = new S3Client({ region: S3_REGION });
-            const command = new PutObjectCommand({
-                Bucket: S3_BUCKET,
-                Key: storageKey,
-                ContentType: mimeType,
-                ContentLength: fileSize,
-            });
-
-            const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
-            const storageUrl = `https://${S3_BUCKET}.s3.${S3_REGION}.amazonaws.com/${storageKey}`;
-
-            return {
-                statusCode: 200,
-                body: JSON.stringify({ uploadUrl, storageKey, storageUrl }),
-            };
+        // ── Mock mode — R2 not yet configured ─────────────────────
+        if (!R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET) {
+            return { statusCode: 200, body: JSON.stringify({ mock: true, storageKey }) };
         }
 
-        // ── Storage not yet configured ────────────────────
+        // ── Real R2 presigned URL ──────────────────────────────────
+        const s3 = getR2Client();
+        const command = new PutObjectCommand({
+            Bucket: R2_BUCKET,
+            Key: storageKey,
+            ContentType: mimeType,
+            ContentLength: fileSize,
+        });
+        const uploadUrl = await getSignedUrl(s3, command, { expiresIn: 3600 });
+
         return {
-            statusCode: 501,
-            body: JSON.stringify({ error: 'Content upload storage is not yet configured.' }),
+            statusCode: 200,
+            body: JSON.stringify({ uploadUrl, storageKey }),
         };
 
     } catch (err) {
