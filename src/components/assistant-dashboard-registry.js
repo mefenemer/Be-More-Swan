@@ -41,7 +41,7 @@
  *   Overview · Data Hub · Review Queue · Calendar — so the layout builds user muscle
  *   memory. Only labels/content differ per role (via hubTab/reviewQueue). Calendar needs
  *   no registry config (assistant-calendar.js scopes the global calendar to this assistant).
- *   Secondary tabs (Goals, Automation, Progress Reviews, Activity, KB) follow the core four
+ *   Secondary tabs (Goals, Automation, Activity, KB) follow the core four
  *   and stay role-gated via `modules` (Automation) / `kbTab` (Knowledge Base).
  *
  * hubTab shape:
@@ -416,9 +416,9 @@
         id: 'datahub',
         label: 'Meeting Notes',
         recordType: 'meeting',
-        // NOT the same thing as the Progress Reviews tab (check-ins with this
-        // assistant) — this is a library of the user's own business meetings.
-        description: 'Notes from your business meetings — browse summaries and tick off action items. Check-ins with this assistant live in Progress Reviews.',
+        // NOT the same thing as a check-in with this assistant — this is a library
+        // of the user's own business meetings.
+        description: 'Notes from your business meetings — browse summaries and tick off action items.',
         columns: [
           { key: 'title', label: 'Meeting' },
           { key: 'tasks', label: 'Action items' },
