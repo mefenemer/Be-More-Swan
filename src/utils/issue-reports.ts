@@ -14,6 +14,7 @@ type Db = ReturnType<typeof getDb>;
 export const ISSUE_STATUSES = [
     'reported',
     'backlog',
+    'on_hold',
     'fix_in_progress',
     'merge',
     'fixed_ready_to_test',
@@ -32,6 +33,7 @@ export function isIssueStatus(v: unknown): v is IssueStatus {
 export const ISSUE_STATUS_LABEL: Record<IssueStatus, string> = {
     reported: 'Reported',
     backlog: 'Backlog',
+    on_hold: 'On Hold',
     fix_in_progress: 'Fix In Progress',
     merge: 'Merge',
     fixed_ready_to_test: 'Fixed & Ready to Test',
@@ -108,6 +110,7 @@ export async function notifyIssueUser(
         status === 'more_info_required'  ? "We'd love to help, but we need a bit more detail from you first." :
         status === 'fix_in_progress'     ? "We've picked this up and are working on a fix now." :
         status === 'backlog'             ? "We've added this to our backlog and will investigate as soon as we can." :
+        status === 'on_hold'             ? "We're putting this on hold for now while we weigh it up against other work — we'll come back to it." :
         status === 'merge'               ? "The fix is done and queued to be merged to staging — nearly there!" :
         status === 'roadmap'             ? "We've added your request to our roadmap — we'll get to it as soon as we can." :
         status === 'closed'              ? "We've closed this one out. Thanks again for flagging it!" :
@@ -117,6 +120,7 @@ export async function notifyIssueUser(
         status === 'fixed_ready_to_test' ? `✅ Issue #${issueId} fixed — ready to test` :
         status === 'more_info_required'  ? `❓ Issue #${issueId} — more info needed` :
         status === 'backlog'             ? `🗂️ Issue #${issueId} added to the backlog` :
+        status === 'on_hold'             ? `⏸️ Issue #${issueId} placed on hold` :
         status === 'roadmap'             ? `🗺️ Issue #${issueId} added to our roadmap` :
         `🔧 Issue #${issueId} updated: ${label}`;
 

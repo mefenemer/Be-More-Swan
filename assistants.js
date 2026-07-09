@@ -179,7 +179,7 @@ window.generateAssistantCardHTML = function(assistant) {
             </div>
             ${platformPills ? `<div class="flex items-center gap-3 mb-2">${platformPills}</div>` : ''}
             <div class="flex items-center justify-between pt-2 border-t border-gray-200">
-                <span class="inline-flex items-center gap-1 text-xs font-semibold text-green-700" title="Estimated time saved (30 min per post)">
+                <span class="inline-flex items-center gap-1 text-xs font-semibold text-green-700" title="Time saved this week — matches this assistant's Impact & ROI tab">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                     ~${hoursSaved}h saved
                 </span>
@@ -197,7 +197,7 @@ window.generateAssistantCardHTML = function(assistant) {
     const dReg = window.AssistantDashboardRegistry ? window.AssistantDashboardRegistry.get(assistant.roleKey) : null;
     const quickActions = dReg ? [
         ['🗂️', dReg.hubTab?.label || 'Data Hub', 'datahub'],
-        ['✅', dReg.reviewQueue?.label || 'Review Queue', 'review-queue'],
+        ['✅', dReg.reviewQueue?.label || 'Review', 'review-queue'],
         ['📅', 'Calendar', 'calendar'],
     ] : [];
     const quickActionsHtml = quickActions.length ? `
@@ -221,8 +221,8 @@ window.generateAssistantCardHTML = function(assistant) {
         ${metricsHtml}
         ${quickActionsHtml}
         <div class="mt-auto pt-4 border-t border-gray-50 flex justify-between items-center">
-            <a href="assistant-chat.html?assistantId=${assistant.id}" onclick="event.stopPropagation()"
-               class="px-3.5 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition">💬 Chat</a>
+            <button type="button" onclick="event.stopPropagation(); window.openAssistantChatModal ? window.openAssistantChatModal('${assistant.id}', '${(assistant.name || 'Your assistant').replace(/'/g, '&#39;')}', '${role.replace(/'/g, '&#39;')}', '${(assistant.roleKey || '').replace(/'/g, '&#39;')}') : (window.location.href = 'assistant-chat.html?assistantId=${assistant.id}')"
+               class="px-3.5 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition cursor-pointer">💬 Chat</button>
             <span class="text-sm font-bold text-gray-900 group-hover:text-emerald-700 transition-colors">View Details &rarr;</span>
         </div>
     </div>`;
@@ -490,7 +490,7 @@ function _resizeBriefAutoGrow() {
 // stale set of nodes is matched. Delegation resolves the target at click time, so it
 // works regardless of when/whether init ran and survives any view re-injection.
 
-// Activate a main tab by name ('datahub' | 'goals' | 'automation' | 'config'). Exposed so other code
+// Activate a main tab by name ('datahub' | 'goals' | 'workflow' | 'meetings'). Exposed so other code
 // (deep-links, attention CTAs, child-tab clicks) can surface the right section.
 window._activateMainTab = function(name) {
     document.querySelectorAll('.main-tab-btn').forEach(b => b.classList.toggle('active-tab', b.dataset.maintab === name));
@@ -499,7 +499,18 @@ window._activateMainTab = function(name) {
     _resizeBriefAutoGrow();
     // Load the assistant-scoped review queue when the tab is first opened. detailRqOpenStatus
     // branches on window._detailReviewQueue.kind (posts vs records) internally.
-    if (name === 'review-queue') detailRqOpenStatus('review');
+    if (name === 'review-queue') {
+        const renderDone = detailRqOpenStatus('review');
+        // Issue #180 follow-up: a chat "review & approve" link can name the exact post it
+        // just drafted (window._assistantDetailInitialPostId, set by workspace.html's
+        // ?postId= deep-link) — pop the review modal to it once the list has rendered and
+        // warmed the post cache (openPostReview falls back to its own fetch either way).
+        const openPostId = window._assistantDetailInitialPostId;
+        if (openPostId != null) {
+            window._assistantDetailInitialPostId = null;
+            Promise.resolve(renderDone).then(() => window.openPostReview?.(openPostId));
+        }
+    }
     // Re-read the Data Hub each time it's opened, so records produced after page-load —
     // discovery-promoted leads, chat/integration records, Review-Queue approvals — appear
     // without a full reload. init() already ran at page setup; this only refetches.
@@ -534,7 +545,7 @@ window.detailRqOpenStatus = function(statusKey, btn) {
     });
     const active = btn || document.querySelector(`.detail-rq-col[data-status="${statusKey}"]`);
     if (active) { active.classList.add('border-b-2', 'border-emerald-600', 'text-emerald-700'); active.classList.remove('text-gray-500'); }
-    _detailRqRenderGroups(statusKey);
+    return _detailRqRenderGroups(statusKey);
 };
 
 // Re-render whichever column is currently open, e.g. after a new idea/post is added elsewhere
@@ -1451,15 +1462,14 @@ if (!window._detailTabsDelegated) {
 }
 
 
-// Read-only "Your Onboarding Answers" summary — guarantees every answer the user gave
+// Read-only "Your Onboarding Answers" summary — the single place every answer the user gave
 // during onboarding is visible on the detail page, regardless of which editable fields are
 // wired below (e.g. Trigger/Content Source are captured as label strings the radios can't bind).
 // Sourced from the structured onboardingContext (data.context) + configuration.inputs.
 //
-// Schema-driven roles: only the OPERATIONAL fields are folded in here — the non-operational
-// ones are already shown, editable, immediately below in the "Setup Answers" card
-// (_renderRoleAnswersEditor). Including both would show the same answer twice in a row on
-// the same page (see issue #169).
+// Schema-driven roles: ALL of the role's onboarding fields are folded in here as a read-only
+// reminder. Editing them happens in the relevant profile sub-section (Operational Setup —
+// see _renderOperationSection) rather than in a second copy on this home tab (see issue #169).
 function _renderOnboardingSummary(data) {
     const host = document.getElementById('onboarding-summary');
     if (!host) return;
@@ -1469,10 +1479,10 @@ function _renderOnboardingSummary(data) {
     const MISSING = '⚠️ [MISSING - PLEASE UPDATE]';
     const clean = (v) => (v === null || v === undefined) ? '' : String(v).trim();
 
-    // Roles onboarded via the schema wizard capture Trigger/Content Source under the shared
-    // Operational Set-Up step (surfaced by schemaRows below), so drop the legacy inputs-based
-    // rows for them to avoid showing each answer twice.
-    const schemaFields = _roleOperationalFields(data && data.roleKey);
+    // Roles onboarded via the schema wizard capture Trigger/Content Source under their own
+    // schema fields (surfaced by schemaRows below), so drop the legacy inputs-based rows for
+    // them to avoid showing each answer twice.
+    const schemaFields = _roleSchemaFields(data && data.roleKey);
     const hasSchemaOperational = schemaFields.length > 0;
 
     const objectiveLabels = { brand_awareness: 'Brand Awareness', lead_generation: 'Lead Generation', direct_sales: 'Direct Sales', community_engagement: 'Community & Engagement' };
@@ -1498,11 +1508,10 @@ function _renderOnboardingSummary(data) {
         ]),
     ].filter(([, v]) => v && v !== MISSING);
 
-    // Operational answers captured by the schema wizard (assistant-setup.html) live in
-    // onboardingContext under the schema's own keys — surface them via the role's
-    // AssistantOnboardingSchemas entry so non-social roles aren't shown as "no answers".
-    // (Non-operational schema answers are intentionally excluded — see _roleOperationalFields
-    // above; they render editable in the "Setup Answers" card instead.)
+    // Answers captured by the schema wizard (assistant-setup.html) live in onboardingContext
+    // under the schema's own keys — surface them via the role's AssistantOnboardingSchemas
+    // entry so non-social roles aren't shown as "no answers". They're editable in the
+    // Operational Setup profile sub-section (_renderOperationSection), not here.
     const schemaRows = schemaFields
         .map(f => [f.label || f.key, _formatSchemaAnswer(f, ctx[f.key])])
         .filter(([, v]) => v !== '');
@@ -1812,16 +1821,9 @@ function _applyDashboardRegistry(data) {
         setText('opcard-operation-sub', 'Trigger and content source');
     }
 
-    // Automation main tab (autonomous posting + media sources) — entirely post/media-centric.
-    const showAutomation = mods.hasContentAutomation !== false;
-    toggle('maintab-btn-automation', showAutomation);
-    // If the active tab is being hidden, fall back to Data Hub so the page never lands on a blank tab.
-    if (!showAutomation) {
-        const autoBtn = document.getElementById('maintab-btn-automation');
-        if (autoBtn && autoBtn.classList.contains('active-tab') && typeof window._activateMainTab === 'function') {
-            window._activateMainTab('datahub');
-        }
-    }
+    // Automation (autonomous posting + media sources) — entirely post/media-centric, lives in the
+    // profile's Operational Setup section (issue #194: moved out of its own main tab).
+    toggle('module-content-automation', mods.hasContentAutomation !== false);
 
     // Overview primary action — relabel + rebind by role. 'chat' opens the assistant's chat intake
     // (how Data Hub roles receive work); the Blog Writer opens the Blog Studio modal (authored as
@@ -1884,22 +1886,6 @@ function _roleSchemaFields(roleKey) {
     return _roleSchemaSteps(roleKey).flatMap(s => (s.fields || []).filter(f => f && f.key && f.type));
 }
 
-// Fields from the role's operational step(s) (step.operational === true) — these render in
-// the profile's "Operational Setup" section (_renderOperationSection). [] for social/legacy.
-function _roleOperationalFields(roleKey) {
-    return _roleSchemaSteps(roleKey)
-        .filter(s => s.operational)
-        .flatMap(s => (s.fields || []).filter(f => f && f.key && f.type));
-}
-
-// Fields NOT in an operational step — these render in the "Setup Answers" card
-// (_renderRoleAnswersEditor), so operational settings aren't duplicated across both surfaces.
-function _roleNonOperationalFields(roleKey) {
-    return _roleSchemaSteps(roleKey)
-        .filter(s => !s.operational)
-        .flatMap(s => (s.fields || []).filter(f => f && f.key && f.type));
-}
-
 // Human-readable value for a schema answer (option label for radio/dropdown,
 // Yes/No for toggles). '' means "not answered" and the row is omitted.
 function _formatSchemaAnswer(field, value) {
@@ -1912,9 +1898,9 @@ function _formatSchemaAnswer(field, value) {
     return String(value);
 }
 
-// Shared control renderer for schema-driven onboarding answers. Used by both the "Setup
-// Answers" card (idPrefix 'edit_onb_') and the Operational Setup section (idPrefix 'edit_op_').
-// Inputs get an id starting `edit_` (so the [id^="edit_"] autosave wiring picks them up) and
+// Shared control renderer for schema-driven onboarding answers, used by the Operational Setup
+// section (idPrefix 'edit_op_'). Inputs get an id starting `edit_` (so the [id^="edit_"]
+// autosave wiring picks them up) and
 // carry data-onboarding-key (so _detailCollect writes them back into onboardingContext under
 // their original keys). radio/dropdown render as a <select> for a compact edit surface.
 function _onboardingFieldControl(f, ctx, idPrefix) {
@@ -1955,45 +1941,15 @@ function _syncSchemaSelects(fields, ctx, idPrefix) {
     });
 }
 
-// Editable role-specific onboarding answers (drawer home, #role-answers-editor).
-// Rendered for roles onboarded via the schema wizard (assistant-setup.html) so the user can
-// revise those answers here. Only NON-operational fields appear — the operational ones live
-// in the dedicated Operational Setup section (_renderOperationSection) to avoid duplication.
-function _renderRoleAnswersEditor(data) {
-    const host = document.getElementById('role-answers-editor');
-    if (!host) return;
-    const fields = _roleNonOperationalFields(data.roleKey);
-    if (!fields.length) { host.innerHTML = ''; return; }
-    const ctx = (data.context && typeof data.context === 'object') ? data.context : {};
-    const esc = _escapeHtml;
-
-    host.innerHTML = `
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
-        <div class="mb-5">
-          <h3 class="text-lg font-bold text-gray-900">Setup Answers</h3>
-          <p class="text-sm text-gray-500 mt-1">The answers you gave when hiring this assistant. Edit them here — changes apply to everything it does from now on.</p>
-        </div>
-        <div class="space-y-5">
-          ${fields.map(f => `
-            <div>
-              <label for="edit_onb_${esc(f.key)}" class="block text-sm font-bold text-gray-700 mb-1">${esc(f.label || f.key)}</label>
-              ${f.helpText ? `<p class="text-xs text-gray-500 mb-2">${esc(f.helpText)}</p>` : ''}
-              ${_onboardingFieldControl(f, ctx, 'edit_onb_')}
-            </div>`).join('')}
-        </div>
-      </div>`;
-
-    _syncSchemaSelects(fields, ctx, 'edit_onb_');
-}
-
 // Role-specific Operational Setup section (profile ▸ Operational Setup tab). Schema-driven
-// roles render their operational-step fields into #operation-role-fields and hide the generic
-// Trigger/Content Source block (#operation-generic); social/legacy roles keep the generic block.
+// roles render ALL of their onboarding fields into #operation-role-fields — this is the one
+// editable home for those answers (see issue #169) — and hide the generic Trigger/Content
+// Source block (#operation-generic); social/legacy roles keep the generic block.
 function _renderOperationSection(data) {
     const host = document.getElementById('operation-role-fields');
     const generic = document.getElementById('operation-generic');
     if (!host) return;
-    const fields = _roleOperationalFields(data.roleKey);
+    const fields = _roleSchemaFields(data.roleKey);
     if (!fields.length) {
         host.innerHTML = '';
         if (generic) generic.classList.remove('hidden');
@@ -2318,11 +2274,10 @@ function _detailCollect(currentData) {
         primary_platforms: platforms,
     };
 
-    // Role-specific onboarding answers (schema-driven roles) — inputs in the Setup Answers
-    // card (#role-answers-editor) and the Operational Setup section (#operation-role-fields)
-    // both carry data-onboarding-key; write each back under its original onboardingContext key
-    // so assistant-setup.html answers stay editable here.
-    document.querySelectorAll('#role-answers-editor [data-onboarding-key], #operation-role-fields [data-onboarding-key]').forEach(el => {
+    // Role-specific onboarding answers (schema-driven roles) — inputs in the Operational Setup
+    // section (#operation-role-fields) carry data-onboarding-key; write each back under its
+    // original onboardingContext key so assistant-setup.html answers stay editable here.
+    document.querySelectorAll('#operation-role-fields [data-onboarding-key]').forEach(el => {
         const key = el.dataset.onboardingKey;
         if (!key) return;
         if (el.type === 'checkbox') {
@@ -2374,7 +2329,12 @@ function _detailSetSaveStatus(msg, colour) {
 }
 
 window.initAssistantDetail = async function(assistantId, loadViewCb) {
-    if (!assistantId) return;
+    if (!assistantId) {
+        // No assistant to load — don't leave the loading skeleton stuck on screen forever.
+        document.getElementById('assistant-detail-skeleton')?.classList.add('hidden');
+        document.getElementById('assistant-detail-content')?.classList.remove('hidden');
+        return;
+    }
     window.activeAssistantId = assistantId;
     window._currentAssistantId = assistantId;
 
@@ -2384,6 +2344,12 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         const newBtn = btnBack.cloneNode(true);
         btnBack.parentNode.replaceChild(newBtn, btnBack);
         newBtn.addEventListener('click', () => loadViewCb('assistants'));
+    }
+
+    // Issue #197: header "Chat" CTA — always visible, regardless of tab or role.
+    const btnChat = document.getElementById('btn-detail-chat');
+    if (btnChat) {
+        btnChat.onclick = () => { window.location.href = `assistant-chat.html?assistantId=${assistantId}`; };
     }
 
     // ── Tab switching ─────────────────────────────────────────────
@@ -2636,7 +2602,11 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                         Reinstate assistant
                     </button>
                 </div>`;
-            const detailEl = document.getElementById('assistant-detail-view') || document.getElementById('content-container');
+            // Issue #191 follow-up: 'assistant-detail-view'/'content-container' don't exist
+            // anywhere in the DOM — assistant-detail.html is loaded as a fragment into
+            // #workspace-content (workspace.html), so those lookups always returned null and
+            // silently dropped the banner (and its Reinstate button) instead of ever rendering it.
+            const detailEl = document.getElementById('workspace-content');
             if (detailEl) detailEl.prepend(banner);
 
             const reinstateBtn = document.getElementById('btn-reinstate-assistant');
@@ -2686,7 +2656,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                     </p>
                 </div>`;
             // Insert before main content area or at top of detail container
-            const detailEl = document.getElementById('assistant-detail-view') || document.getElementById('content-container');
+            const detailEl = document.getElementById('workspace-content');
             if (detailEl) detailEl.prepend(banner);
         }
 
@@ -2694,13 +2664,12 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         window.cachedContext = currentData.context || {};
 
         // Role-aware dashboard: KPI card copy + social-only module visibility
-        // (must run before attachAutoSave so the role-answers editor inputs exist).
+        // (must run before attachAutoSave so the operational-setup editor inputs exist).
         _applyDashboardRegistry(currentData);
         _detailHydrate(currentData);
         _renderMandateSuggestions(currentData);
         _renderOnboardingSummary(currentData);
         _renderOutreachEmailConnect(currentData);
-        _renderRoleAnswersEditor(currentData);
         _renderOperationSection(currentData);
         _renderMeetingsBrief(currentData);
         _hydrateAutonomousToggle(currentData);
@@ -2727,6 +2696,12 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         }
     } catch (e) {
         console.error('Failed to load assistant detail:', e);
+    } finally {
+        // Issue #177 follow-up: reveal the real (now role-correct) markup and drop the generic
+        // loading skeleton — runs on success, failure, and the DPA-required early return alike,
+        // so the skeleton never gets stuck showing.
+        document.getElementById('assistant-detail-skeleton')?.classList.add('hidden');
+        document.getElementById('assistant-detail-content')?.classList.remove('hidden');
     }
 
     // ── Name generator ────────────────────────────────────────────
@@ -2947,7 +2922,14 @@ async function _prefetchDetailRqBadge(assistantId) {
 // ─────────────────────────────────────────────────────────────────
 // Impact & ROI metrics — per-assistant post counts + time/money saved.
 // ─────────────────────────────────────────────────────────────────
-async function _fetchAndRenderAssistantMetrics(assistantId, period = 'week') {
+// Default to 'month', not 'week': the calendar week resets hard at the Sunday
+// boundary, so for many hours after each rollover an assistant with real
+// historical activity legitimately has nothing yet in the brand-new week
+// window and this card reads as "broken" (0 hours/£ saved) despite the
+// all-time post counts above it being nonzero. The dashboard hero widget
+// hit the identical issue (#132) and was fixed the same way — see the
+// matching comment in dashboard-content.html.
+async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
     const card = document.getElementById('assistant-metrics-card');
     if (!card) return;
     // Non-social roles have no post-based ROI — the registry marks the card role-hidden; respect it.

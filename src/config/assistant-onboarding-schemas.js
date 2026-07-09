@@ -10,11 +10,12 @@
  *
  * OPERATIONAL STEP: each role ends with one step flagged `operational: true` — the
  * questions that govern HOW the assistant runs day to day (trigger/schedule, intake,
- * routing, cadences, thresholds, destinations). The detail page renders those fields in
- * the profile's "Operational Setup" section instead of the generic Social Media Manager
- * trigger/source radios (assistants.js _renderOperationSection), while the remaining
- * (non-operational) fields render in the "Setup Answers" card. Both surfaces read the flag
- * via _roleOperationalFields / _roleNonOperationalFields.
+ * routing, cadences, thresholds, destinations). The detail page renders ALL of a role's
+ * fields (operational + non-operational) together in the profile's "Operational Setup"
+ * section instead of the generic Social Media Manager trigger/source radios (assistants.js
+ * _renderOperationSection via _roleSchemaFields) — that's the one editable home for these
+ * answers. The read-only "Your Onboarding Answers" summary on the home tab mirrors the same
+ * fields for reference only (see issue #169).
  *
  * Usage:
  *   const schema = window.AssistantOnboardingSchemas['lead_qualifier'];
