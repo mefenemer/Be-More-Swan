@@ -2940,7 +2940,14 @@ async function _prefetchDetailRqBadge(assistantId) {
 // ─────────────────────────────────────────────────────────────────
 // Impact & ROI metrics — per-assistant post counts + time/money saved.
 // ─────────────────────────────────────────────────────────────────
-async function _fetchAndRenderAssistantMetrics(assistantId, period = 'week') {
+// Default to 'month', not 'week': the calendar week resets hard at the Sunday
+// boundary, so for many hours after each rollover an assistant with real
+// historical activity legitimately has nothing yet in the brand-new week
+// window and this card reads as "broken" (0 hours/£ saved) despite the
+// all-time post counts above it being nonzero. The dashboard hero widget
+// hit the identical issue (#132) and was fixed the same way — see the
+// matching comment in dashboard-content.html.
+async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
     const card = document.getElementById('assistant-metrics-card');
     if (!card) return;
     // Non-social roles have no post-based ROI — the registry marks the card role-hidden; respect it.
