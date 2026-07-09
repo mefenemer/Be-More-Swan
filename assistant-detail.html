@@ -155,41 +155,11 @@
   </div>
 
   <!-- ── MAIN TAB: Overview ─────────────────────────────────────────── -->
+  <!-- Issue #181: Overview is a read-only snapshot — Performance + Active Workflows only.
+       Actionable buttons live on the tabs they act on: the primary action bar + role-specific
+       actions moved to Data Hub (#maintab-datahub), the Relationship checklist to Activity
+       (#maintab-activity). -->
   <div id="maintab-overview" class="main-tab-content">
-
-  <!-- Primary action bar (Epic 2.1) — the two most common intents, front and centre. -->
-  <div class="flex flex-col sm:flex-row gap-3 mb-6">
-    <!-- Primary action — label + handler set per role by _applyDashboardRegistry (generate_post
-         opens the post sheet for social; chat opens the assistant's chat intake for Data Hub roles).
-         Issue #177: starts hidden — the label/onclick below are the Social Media Manager defaults,
-         so showing this before the registry resolves flashes SMM content on every other role. -->
-    <button type="button" id="btn-primary-action" onclick="window.openGeneratePostSheet && window.openGeneratePostSheet()"
-      class="hidden flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-extrabold text-white bg-emerald-600 hover:bg-emerald-700 rounded-2xl shadow-md transition-colors cursor-pointer">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-      <span id="primary-action-label">Assign New Task</span>
-    </button>
-    <button type="button" id="btn-review-pending" onclick="window._activateMainTab('review-queue')"
-      class="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-extrabold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-2xl shadow-sm transition-colors cursor-pointer">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-      Review Pending Items
-      <span id="review-pending-count" class="hidden ml-0.5 min-w-[1.5rem] h-6 px-1.5 inline-flex items-center justify-center rounded-full text-xs font-black bg-amber-100 text-amber-700"></span>
-    </button>
-    <!-- Role-specific secondary action — Lead Generator's "Review Lead Ideas" (assistant-lead-ideas.js).
-         Hidden by default; shown + wired per role by _applyDashboardRegistry from registry.ideasReview. -->
-    <button type="button" id="btn-lead-ideas"
-      class="hidden flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-extrabold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-2xl shadow-sm transition-colors cursor-pointer">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-      <span id="lead-ideas-label">Review Lead Ideas</span>
-    </button>
-    <!-- Role-specific secondary action — Lead Generator's "Find New Leads" outbound discovery
-         (assistant-discovery-campaigns.js). Hidden by default; shown + wired per role by
-         _applyDashboardRegistry from registry.discoveryCampaigns. -->
-    <button type="button" id="btn-discovery-campaigns"
-      class="hidden flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-extrabold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-2xl shadow-sm transition-colors cursor-pointer">
-      <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-      <span id="discovery-campaigns-label">Find New Leads</span>
-    </button>
-  </div>
 
   <!-- Kick Off CTA — shown when assistant hasn't been kicked off yet -->
   <div id="meetings-kickoff-cta" class="hidden bg-blue-50 border border-blue-200 rounded-2xl px-5 py-4 mb-6 flex items-center justify-between gap-4">
@@ -343,7 +313,13 @@
   <!-- Goals section is relocated here (directly under Recent Activity) by initAssistantDetail;
        its markup lives in #tab-goals further down and is moved into this slot on load. -->
 
-  <!-- AC6: Daily Relationship-Building Checklist — hidden until loaded; only shown for social assistants. -->
+  </div><!-- /maintab-overview -->
+
+  <!-- ── MAIN TAB: Activity ─────────────────────────────────────────── -->
+  <div id="maintab-activity" class="main-tab-content hidden">
+
+  <!-- AC6: Daily Relationship-Building Checklist (relocated here by issue #181) — hidden until
+       loaded; only shown for social assistants. -->
   <div id="relationship-checklist-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-8 hidden">
     <div class="flex items-start justify-between gap-3 mb-4">
       <div>
@@ -357,11 +333,6 @@
     </div>
     <p id="rbc-progress" class="text-xs font-medium text-gray-400 mt-3"></p>
   </div>
-
-  </div><!-- /maintab-overview -->
-
-  <!-- ── MAIN TAB: Activity ─────────────────────────────────────────── -->
-  <div id="maintab-activity" class="main-tab-content hidden">
 
   <!-- Unified Activity feed (Epic 2.2) — chronological, with Failed/Needs-Input pinned on top. -->
   <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-8">
@@ -427,6 +398,42 @@
        assistant-data-hub.js from the hubTab config; records live in
        assistant_records (netlify/functions/assistant-records.ts). -->
   <div id="maintab-datahub" class="main-tab-content hidden">
+
+    <!-- Primary action bar (Epic 2.1; relocated here by issue #181) — the two most common
+         intents, front and centre on the assistant's workspace tab. -->
+    <div class="flex flex-col sm:flex-row gap-3 mb-6">
+      <!-- Primary action — label + handler set per role by _applyDashboardRegistry (generate_post
+           opens the post sheet for social; chat opens the assistant's chat intake for Data Hub roles).
+           Issue #177: starts hidden — the label/onclick below are the Social Media Manager defaults,
+           so showing this before the registry resolves flashes SMM content on every other role. -->
+      <button type="button" id="btn-primary-action" onclick="window.openGeneratePostSheet && window.openGeneratePostSheet()"
+        class="hidden flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-extrabold text-white bg-emerald-600 hover:bg-emerald-700 rounded-2xl shadow-md transition-colors cursor-pointer">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        <span id="primary-action-label">Assign New Task</span>
+      </button>
+      <button type="button" id="btn-review-pending" onclick="window._activateMainTab('review-queue')"
+        class="flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-extrabold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-2xl shadow-sm transition-colors cursor-pointer">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+        Review Pending Items
+        <span id="review-pending-count" class="hidden ml-0.5 min-w-[1.5rem] h-6 px-1.5 inline-flex items-center justify-center rounded-full text-xs font-black bg-amber-100 text-amber-700"></span>
+      </button>
+      <!-- Role-specific secondary action — Lead Generator's "Review Lead Ideas" (assistant-lead-ideas.js).
+           Hidden by default; shown + wired per role by _applyDashboardRegistry from registry.ideasReview. -->
+      <button type="button" id="btn-lead-ideas"
+        class="hidden flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-extrabold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-2xl shadow-sm transition-colors cursor-pointer">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+        <span id="lead-ideas-label">Review Lead Ideas</span>
+      </button>
+      <!-- Role-specific secondary action — Lead Generator's "Find New Leads" outbound discovery
+           (assistant-discovery-campaigns.js). Hidden by default; shown + wired per role by
+           _applyDashboardRegistry from registry.discoveryCampaigns. -->
+      <button type="button" id="btn-discovery-campaigns"
+        class="hidden flex-1 inline-flex items-center justify-center gap-2 px-5 py-3 text-sm font-extrabold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-2xl shadow-sm transition-colors cursor-pointer">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+        <span id="discovery-campaigns-label">Find New Leads</span>
+      </button>
+    </div>
+
     <div id="datahub-toolbar"></div>
     <div id="datahub-table-host"></div>
   </div><!-- /maintab-datahub -->
