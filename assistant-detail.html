@@ -76,6 +76,14 @@
       <!-- CTA group -->
       <div class="flex items-center gap-2.5 w-full sm:w-auto shrink-0">
         <span id="detail-save-status" class="text-sm font-semibold text-emerald-600 transition-all mr-1"></span>
+        <!-- Issue #197: the assistant's chat intake (Data Hub tab's primary action, or the assistants
+             list card) was the only way to open a conversation — nothing on this page's default
+             Overview tab. A header CTA guarantees a chat entry point on every tab, for every role. -->
+        <button id="btn-detail-chat" type="button"
+          class="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-sm cursor-pointer">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+          Chat
+        </button>
         <!-- Issue #192: Review Progress moved out of the header and into the Goals tab
              (#btn-review-progress lives there now, next to "Add New Goal"). -->
         <!-- Epic 1: contextual persona config — opens the slide-over (no setup tab in the main nav) -->
