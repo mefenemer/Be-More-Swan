@@ -2367,7 +2367,12 @@ function _detailSetSaveStatus(msg, colour) {
 }
 
 window.initAssistantDetail = async function(assistantId, loadViewCb) {
-    if (!assistantId) return;
+    if (!assistantId) {
+        // No assistant to load — don't leave the loading skeleton stuck on screen forever.
+        document.getElementById('assistant-detail-skeleton')?.classList.add('hidden');
+        document.getElementById('assistant-detail-content')?.classList.remove('hidden');
+        return;
+    }
     window.activeAssistantId = assistantId;
     window._currentAssistantId = assistantId;
 
@@ -2720,6 +2725,12 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         }
     } catch (e) {
         console.error('Failed to load assistant detail:', e);
+    } finally {
+        // Issue #177 follow-up: reveal the real (now role-correct) markup and drop the generic
+        // loading skeleton — runs on success, failure, and the DPA-required early return alike,
+        // so the skeleton never gets stuck showing.
+        document.getElementById('assistant-detail-skeleton')?.classList.add('hidden');
+        document.getElementById('assistant-detail-content')?.classList.remove('hidden');
     }
 
     // ── Name generator ────────────────────────────────────────────
