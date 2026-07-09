@@ -17,7 +17,7 @@ import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, assistantRecords, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, masterPlans, plans } from '../../db/schema';
+import { aiAssistants, assistantRecords, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, masterPlans, organisations, plans } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { atomicCapCheck } from '../../src/utils/atomic-cap-check';
@@ -112,6 +112,9 @@ interface RouteContext {
     baseSystemPrompt: string | null;
     /** Role-specific onboarding answers captured at hire time (aiAssistants.onboardingContext). */
     onboardingContext: unknown;
+    /** The org's own business identity (Business Information page) — grounds every route in
+     *  the business it actually serves, not the Be More Swan platform itself. */
+    business: { name: string; industry: string | null; description: string | null };
     /** KB retrieval for this turn — only populated for routes with usesKnowledgeBase.
      *  null/undefined (e.g. shadow handoff calls) renders the "no KB yet" prompt path. */
     knowledgeBase?: KnowledgeBaseContext | null;
@@ -131,9 +134,13 @@ interface AssistantRoute {
 }
 
 function sharedContextBlock(rc: RouteContext): string {
+    const b = rc.business;
     return [
         rc.baseSystemPrompt ? rc.baseSystemPrompt.trim() : '',
-        `You are "${rc.assistantName}"${rc.jobRole ? `, the ${rc.jobRole}` : ''} for a small business using Be More Swan.`,
+        `You are "${rc.assistantName}"${rc.jobRole ? `, the ${rc.jobRole}` : ''}, a digital assistant provided via the Be More Swan platform. `
+            + `You work exclusively for ${b.name}${b.industry ? ` (industry: ${b.industry})` : ''}, not for Be More Swan itself — Be More Swan is only the platform that runs you. `
+            + `Every reply must be grounded in ${b.name}'s own business, products/services, and audience.`
+            + (b.description ? ` About ${b.name}: ${b.description}` : ''),
         rc.onboardingContext
             ? 'The <strict_configuration> block at the end of these instructions holds the answers this business gave during setup — never ask for information already answered there.'
             : 'No onboarding context has been captured for this assistant yet.',
@@ -833,21 +840,36 @@ export default withLambda(async (event) => {
         session = created;
     }
 
-    // ── Retrieve state: assistant instance + roleKey + prior turns ──
-    const [assistantRow] = await db
-        .select({
-            id: aiAssistants.id,
-            name: aiAssistants.name,
-            jobRole: aiAssistants.aiAssistantJobRole,
-            systemPrompt: aiAssistants.systemPrompt,
-            onboardingContext: aiAssistants.onboardingContext,
-            roleKey: masterAssistants.roleKey,
-        })
-        .from(aiAssistants)
-        .leftJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
-        .where(and(eq(aiAssistants.id, session.aiAssistantId), eq(aiAssistants.organisationId, orgId)))
-        .limit(1);
+    // ── Retrieve state: assistant instance + roleKey + org business identity + prior turns ──
+    const [[assistantRow], [orgRow]] = await Promise.all([
+        db
+            .select({
+                id: aiAssistants.id,
+                name: aiAssistants.name,
+                jobRole: aiAssistants.aiAssistantJobRole,
+                systemPrompt: aiAssistants.systemPrompt,
+                onboardingContext: aiAssistants.onboardingContext,
+                roleKey: masterAssistants.roleKey,
+            })
+            .from(aiAssistants)
+            .leftJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
+            .where(and(eq(aiAssistants.id, session.aiAssistantId), eq(aiAssistants.organisationId, orgId)))
+            .limit(1),
+        db
+            .select({ name: organisations.name, industry: organisations.industry, businessDescription: organisations.businessDescription })
+            .from(organisations)
+            .where(eq(organisations.id, orgId))
+            .limit(1),
+    ]);
     if (!assistantRow) return json(404, { error: 'Assistant not found in this organisation.' });
+
+    // Every route's prompt is grounded in this — the business the assistant actually works
+    // for, not the Be More Swan platform that runs it (issue #199).
+    const business = {
+        name: orgRow?.name || 'the user\'s business',
+        industry: orgRow?.industry ?? null,
+        description: orgRow?.businessDescription ?? null,
+    };
 
     const history = await db
         .select({ role: chatMessages.role, content: chatMessages.content, createdAt: chatMessages.createdAt })
@@ -876,6 +898,7 @@ export default withLambda(async (event) => {
             jobRole: assistantRow.jobRole,
             baseSystemPrompt: assistantRow.systemPrompt,
             onboardingContext: assistantRow.onboardingContext,
+            business,
             knowledgeBase,
         }),
         assistantRow.onboardingContext,
@@ -962,6 +985,7 @@ export default withLambda(async (event) => {
                     jobRole: shadowRow?.jobRole ?? null,
                     baseSystemPrompt: shadowRow?.systemPrompt ?? null,
                     onboardingContext: shadowRow?.onboardingContext ?? null,
+                    business,
                 }),
                 shadowRow?.onboardingContext ?? null,
             );
