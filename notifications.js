@@ -129,6 +129,11 @@ window.initNotifications = async function() {
         if (notif.type === 'media_ready') {
             return { label: 'View content', run: () => window.loadView?.('my-content', meta.assetId ? { assetId: meta.assetId } : null) };
         }
+        // Issue #191 — archived assistant: deep-link straight to its detail page, where the
+        // reinstate banner (and 14-day deletion countdown) lives.
+        if (notif.type === 'assistant_archived' && meta.assistantId) {
+            return { label: 'View & Reinstate', run: () => window.routeToAssistantDetail?.(meta.assistantId) };
+        }
         // Draft post ready to review (incl. the media-needed/out-of-credits variant of ai_review) —
         // deep-link straight to that post's review modal instead of dropping the user on the
         // queue list to hunt for it.

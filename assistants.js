@@ -2571,11 +2571,12 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         window._detailCurrentData = currentData;
         window._renderStatusPill(currentData);
 
-        // US6 AC5.1: Archive Assistant — permanent end-of-life, then return to the dashboard.
+        // US6 AC5.1: Archive Assistant — stops it and removes it from the active workspace.
+        // Issue #191: no longer immediately permanent — a 14-day reinstate window follows.
         const archiveBtn = document.getElementById('btn-archive-assistant');
         if (archiveBtn) archiveBtn.onclick = async () => {
             const name = currentData.name || 'this assistant';
-            const message = `Archive "${name}"? This permanently stops the assistant and removes it from your active workspace. Its history is kept for reporting, but this cannot be undone.`;
+            const message = `Archive "${name}"? This stops the assistant and removes it from your active workspace. You'll have 14 days to reinstate it (subject to your plan's assistant limit) before it and all of its data are permanently deleted.`;
             const doArchive = async () => {
                 archiveBtn.disabled = true;
                 try {
@@ -2591,6 +2592,73 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                 await doArchive();
             }
         };
+
+        // Issue #191: an archived assistant can't be archived or paused/resumed again — hide
+        // both "More actions" entries and show a reinstate banner with the countdown instead
+        // (below). The banner's own button is the one live path back from archived.
+        const isArchived = currentData.lifecycleStatus === 'archived';
+        if (archiveBtn) archiveBtn.classList.toggle('hidden', isArchived);
+        document.getElementById('btn-toggle-status')?.classList.toggle('hidden', isArchived);
+        // Both entries are hidden when archived, so the "…" trigger has nothing left to open.
+        document.getElementById('btn-more-actions')?.classList.toggle('hidden', isArchived);
+
+        // Issue #191 — Safe Archiving reinstate window: archived assistants are reachable only
+        // via the archive notification's deep link (they're filtered out of the "My Assistants"
+        // grid), so this banner is the one place a user can reinstate one within its 14-day
+        // window, gated server-side on the plan's assistant limit (manage-assistant.ts).
+        const existingArchivedBanner = document.getElementById('archived-assistant-banner');
+        if (existingArchivedBanner) existingArchivedBanner.remove();
+        if (currentData.lifecycleStatus === 'archived') {
+            const deletionAt = currentData.scheduledDeletionAt ? new Date(currentData.scheduledDeletionAt) : null;
+            const daysLeft = deletionAt ? Math.max(0, Math.ceil((deletionAt.getTime() - Date.now()) / (24 * 60 * 60 * 1000))) : null;
+            const deletionLabel = deletionAt ? deletionAt.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' }) : null;
+            const banner = document.createElement('div');
+            banner.id = 'archived-assistant-banner';
+            banner.className = 'mx-4 mt-4 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start gap-3';
+            banner.innerHTML = `
+                <span class="text-2xl flex-shrink-0">🗄️</span>
+                <div class="flex-1">
+                    <p class="text-sm font-bold text-red-800">This assistant is archived.</p>
+                    <p class="text-sm text-red-700 mt-0.5">
+                        ${daysLeft !== null
+                            ? `You have ${daysLeft} day${daysLeft === 1 ? '' : 's'} left (until ${deletionLabel}) to reinstate it, subject to your plan's assistant limit.`
+                            : `You have a limited time to reinstate it, subject to your plan's assistant limit.`}
+                        After that, this assistant and all of its associated data will be permanently deleted — this cannot be undone.
+                    </p>
+                    <button type="button" id="btn-reinstate-assistant" class="mt-2.5 px-4 py-2 text-sm font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors cursor-pointer">
+                        Reinstate assistant
+                    </button>
+                </div>`;
+            const detailEl = document.getElementById('assistant-detail-view') || document.getElementById('content-container');
+            if (detailEl) detailEl.prepend(banner);
+
+            const reinstateBtn = document.getElementById('btn-reinstate-assistant');
+            if (reinstateBtn) reinstateBtn.onclick = async () => {
+                reinstateBtn.disabled = true;
+                const original = reinstateBtn.textContent;
+                reinstateBtn.textContent = 'Reinstating…';
+                try {
+                    const r = await fetch(`/.netlify/functions/manage-assistant?id=${assistantId}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ action: 'reinstate' }),
+                    });
+                    if (!r.ok) {
+                        const d = await r.json().catch(() => ({}));
+                        alert(d.error || 'Failed to reinstate assistant.');
+                        reinstateBtn.disabled = false;
+                        reinstateBtn.textContent = original;
+                        return;
+                    }
+                    window.showToast?.('Assistant reinstated.');
+                    window.routeToAssistantDetail?.(assistantId);
+                } catch {
+                    alert('Network error — please try again.');
+                    reinstateBtn.disabled = false;
+                    reinstateBtn.textContent = original;
+                }
+            };
+        }
 
         // US-ADM-4.1.1: Show deprecation banner if assistant's master role is deprecated
         const existingBanner = document.getElementById('deprecated-assistant-banner');
