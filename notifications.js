@@ -186,6 +186,9 @@ window.initNotifications = async function() {
         'trial_expiring_soon', 'trial_expired', 'tier_mismatch', 'assistants_paused_downgrade',
         'task_limit_reached', 'task_limit_warning',
         'social_oauth_revoked', 'instagram_token_refresh_failed', 'integration_alert',
+        // Issue #191 follow-up: mirrors src/utils/notification-actions.ts's COMPLETION_RESOLVED_TYPES —
+        // reinstating is a separate action, so viewing the notification must not resolve it.
+        'assistant_archived',
     ]);
     const catOf = (n) => n.category || (kindOf(n) === 'action' ? (URGENT_TYPES.has(n.type) ? 'critical_action' : 'suggested_action') : 'informational');
     const prioOf = (n) => (typeof n.priority === 'number' ? n.priority : PRIORITY_BY_CATEGORY[catOf(n)] ?? 4);

@@ -86,6 +86,8 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     account_update: 'state_change', assistant_task: 'state_change', assistant_ready: 'state_change',
     // Issue #115 — Kick Off Meeting confirmed: assistant moved to actively working.
     assistant_kickoff_complete: 'state_change',
+    // Issue #191 follow-up — confirms a reinstate actually took effect.
+    assistant_reinstated: 'state_change',
     goal_autonomous_adjustment: 'state_change', // SMART Goals AC3.3.3 — autonomous brief change FYI
     feature_status_change: 'state_change', // Feature Requests US06 — a backed request moved status
     // celebratory
@@ -138,6 +140,12 @@ export const CONNECTION_RESTORED_TYPES = [
 const COMPLETION_RESOLVED_TYPES = new Set<string>([
     'onboarding_prompt', 'onboarding_incomplete',
     ...PLAN_UPGRADED_TYPES, ...CONNECTION_RESTORED_TYPES,
+    // Issue #191 follow-up: reinstating is a separate, plan-gated action taken from the
+    // assistant's detail page, not merely viewing it — resolving on click hid the "View &
+    // Reinstate" CTA the moment the user opened the notification, before they'd had any
+    // chance to act on it. This item now only resolves once the assistant is actually
+    // reinstated (or permanently purged), same as the other completion-driven types above.
+    'assistant_archived',
 ]);
 
 /** True when clicking the CTA should immediately resolve the item (no completion hook exists). */

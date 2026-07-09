@@ -2629,7 +2629,11 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                         Reinstate assistant
                     </button>
                 </div>`;
-            const detailEl = document.getElementById('assistant-detail-view') || document.getElementById('content-container');
+            // Issue #191 follow-up: 'assistant-detail-view'/'content-container' don't exist
+            // anywhere in the DOM — assistant-detail.html is loaded as a fragment into
+            // #workspace-content (workspace.html), so those lookups always returned null and
+            // silently dropped the banner (and its Reinstate button) instead of ever rendering it.
+            const detailEl = document.getElementById('workspace-content');
             if (detailEl) detailEl.prepend(banner);
 
             const reinstateBtn = document.getElementById('btn-reinstate-assistant');
@@ -2679,7 +2683,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                     </p>
                 </div>`;
             // Insert before main content area or at top of detail container
-            const detailEl = document.getElementById('assistant-detail-view') || document.getElementById('content-container');
+            const detailEl = document.getElementById('workspace-content');
             if (detailEl) detailEl.prepend(banner);
         }
 
