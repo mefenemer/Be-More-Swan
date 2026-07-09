@@ -190,6 +190,23 @@ window.generateAssistantCardHTML = function(assistant) {
             </div>
         </div>` : '';
 
+    // Issue #178: per-assistant Quick Actions — replaces the old dashboard-wide "Quick
+    // actions" widget with shortcuts scoped to this assistant, using the same per-role
+    // labels as its own Data Hub / Review Queue tabs (AssistantDashboardRegistry), so a
+    // lead_qualifier card links to "Leads" while a tier1_support_agent links to "Tickets".
+    const dReg = window.AssistantDashboardRegistry ? window.AssistantDashboardRegistry.get(assistant.roleKey) : null;
+    const quickActions = dReg ? [
+        ['🗂️', dReg.hubTab?.label || 'Data Hub', 'datahub'],
+        ['✅', dReg.reviewQueue?.label || 'Review Queue', 'review-queue'],
+        ['📅', 'Calendar', 'calendar'],
+    ] : [];
+    const quickActionsHtml = quickActions.length ? `
+        <div class="flex items-center gap-2 flex-wrap mb-4 pt-4 border-t border-gray-50">
+            ${quickActions.map(([icon, label, tab]) => `
+            <button type="button" onclick="event.stopPropagation(); window._assistantDetailInitialTab='${tab}'; window.routeToAssistantDetail('${assistant.id}')"
+                class="px-2.5 py-1.5 text-xs font-semibold text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 hover:text-emerald-700 transition">${icon} ${label}</button>`).join('')}
+        </div>` : '';
+
     return `
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow p-6 flex flex-col cursor-pointer group" onclick="window.routeToAssistantDetail('${assistant.id}')">
         <div class="flex justify-between items-start mb-4">
@@ -202,6 +219,7 @@ window.generateAssistantCardHTML = function(assistant) {
         <p class="text-sm text-gray-500 mb-4">${role}</p>
         ${goalsHtml}
         ${metricsHtml}
+        ${quickActionsHtml}
         <div class="mt-auto pt-4 border-t border-gray-50 flex justify-between items-center">
             <a href="assistant-chat.html?assistantId=${assistant.id}" onclick="event.stopPropagation()"
                class="px-3.5 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition">💬 Chat</a>
@@ -2366,15 +2384,17 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     // Configuration child tabs are handled by module-level delegated click listeners
     // (see top of file) so they survive this view being re-injected on every navigation.
 
-    // Deep-link to a specific section (e.g. post-OAuth returns to the Connections tab).
-    // 'goals' is now its own main tab; the Configuration child tabs (problem/operation/
-    // strategy/platforms/rules/guardrails) are surfaced by clicking the child button, which also
-    // reveals the Configuration main tab.
+    // Deep-link to a specific section (e.g. post-OAuth returns to the Connections tab, or a
+    // per-assistant Quick Action on the dashboard card jumping straight to Data Hub/Review
+    // Queue/Calendar — issue #178). Main tabs go through _activateMainTab; anything else is
+    // assumed to be a Configuration child tab (problem/operation/strategy/platforms/rules/
+    // guardrails), surfaced by clicking the child button, which also reveals Configuration.
+    const MAIN_TABS = ['overview', 'datahub', 'review-queue', 'calendar', 'goals', 'automation', 'meetings', 'activity', 'kb'];
     if (window._assistantDetailInitialTab) {
         const wanted = window._assistantDetailInitialTab;
         window._assistantDetailInitialTab = null;
-        if (wanted === 'goals') {
-            window._activateMainTab?.('goals');
+        if (MAIN_TABS.includes(wanted)) {
+            window._activateMainTab?.(wanted);
         } else {
             const target = document.querySelector(`.detail-tab-btn[data-tab="${wanted}"]`);
             if (target) target.click();
