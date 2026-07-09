@@ -24,6 +24,21 @@ export const FR_CATEGORY_LABEL: Record<FeatureCategory, string> = {
 export const isFeatureCategory = (v: unknown): v is FeatureCategory =>
     typeof v === 'string' && (FR_CATEGORIES as readonly string[]).includes(v);
 
+// ── Item type (work-item breakdown) ─────────────────────────────────────────────
+// Epic → Feature → User Story → Acceptance Criteria, linked via parent_id.
+export const FR_ITEM_TYPES = ['epic', 'feature', 'user_story', 'acceptance_criteria'] as const;
+export type FeatureItemType = (typeof FR_ITEM_TYPES)[number];
+
+export const FR_ITEM_TYPE_LABEL: Record<FeatureItemType, string> = {
+    epic: 'Epic',
+    feature: 'Feature',
+    user_story: 'User Story',
+    acceptance_criteria: 'Acceptance Criteria',
+};
+
+export const isFeatureItemType = (v: unknown): v is FeatureItemType =>
+    typeof v === 'string' && (FR_ITEM_TYPES as readonly string[]).includes(v);
+
 // ── Status ────────────────────────────────────────────────────────────────────
 export const FR_STATUSES = [
     'pending_review', 'under_review', 'open', 'planned', 'brief_ready',
