@@ -490,7 +490,7 @@ function _resizeBriefAutoGrow() {
 // stale set of nodes is matched. Delegation resolves the target at click time, so it
 // works regardless of when/whether init ran and survives any view re-injection.
 
-// Activate a main tab by name ('overview' | 'goals' | 'automation' | 'config'). Exposed so other code
+// Activate a main tab by name ('overview' | 'goals' | 'workflow' | 'meetings'). Exposed so other code
 // (deep-links, attention CTAs, child-tab clicks) can surface the right section.
 window._activateMainTab = function(name) {
     document.querySelectorAll('.main-tab-btn').forEach(b => b.classList.toggle('active-tab', b.dataset.maintab === name));
@@ -1812,16 +1812,9 @@ function _applyDashboardRegistry(data) {
         setText('opcard-operation-sub', 'Trigger and content source');
     }
 
-    // Automation main tab (autonomous posting + media sources) — entirely post/media-centric.
-    const showAutomation = mods.hasContentAutomation !== false;
-    toggle('maintab-btn-automation', showAutomation);
-    // If the active tab is being hidden, fall back to Overview so the page never lands on a blank tab.
-    if (!showAutomation) {
-        const autoBtn = document.getElementById('maintab-btn-automation');
-        if (autoBtn && autoBtn.classList.contains('active-tab') && typeof window._activateMainTab === 'function') {
-            window._activateMainTab('overview');
-        }
-    }
+    // Automation (autonomous posting + media sources) — entirely post/media-centric, lives in the
+    // profile's Operational Setup section (issue #194: moved out of its own main tab).
+    toggle('module-content-automation', mods.hasContentAutomation !== false);
 
     // Overview primary action — relabel + rebind by role. 'chat' opens the assistant's chat intake
     // (how Data Hub roles receive work); the Blog Writer opens the Blog Studio modal (authored as

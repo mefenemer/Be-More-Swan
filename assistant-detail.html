@@ -139,9 +139,6 @@
       <!-- ── Secondary tabs — role-gated, after the core four ── -->
       <button type="button" data-maintab="goals"         class="main-tab-btn">Goals</button>
       <button type="button" data-maintab="workflow"      class="main-tab-btn">Workflow</button>
-      <!-- Issue #177: hidden by default (like the KB tab below) — hasContentAutomation is a
-           social-only module, so this tab must not appear before _applyDashboardRegistry decides. -->
-      <button type="button" id="maintab-btn-automation" data-maintab="automation" class="main-tab-btn hidden">Automation</button>
       <button type="button" data-maintab="meetings"      class="main-tab-btn" title="Progress Reviews: the Kick Off Meeting and your check-in history. Rules — including Learned Directives — live in the Assistant Profile.">Progress Reviews
         <span id="meetings-kickoff-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-blue-100 text-blue-700 text-[10px] font-black rounded-full inline-flex items-center justify-center">!</span>
       </button>
@@ -714,6 +711,67 @@
         </div>
       </div>
     </div>
+
+    <!-- Automation — autonomous posting + media sources; role-gated by hasContentAutomation.
+         Issue #194: moved out of its own main tab into Operational Setup, since it's part of
+         how/when this assistant runs, not a separate concern. -->
+    <div id="module-content-automation" class="space-y-6">
+
+      <!-- Autonomous Optimization Mode (US3.3) — highest-tier self-adjusting toggle -->
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h3 class="text-lg font-bold text-gray-900 flex items-center gap-2">Autonomous Goal Seeking <span id="autonomous-lock" class="hidden text-xs font-bold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">🔒 Premium</span></h3>
+            <p class="text-sm text-gray-500 mt-1">When a goal goes off track, let this assistant automatically fine-tune its own brief — brand voice, target audience, content strategy, or posting frequency — to recover, no manual edits needed. It adjusts one field at a time, and every change is logged and you're notified.</p>
+          </div>
+          <button id="toggle-autonomous-goals" type="button" role="switch" aria-checked="false"
+            onclick="window._toggleAutonomousGoals()"
+            class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none bg-gray-300 mt-1">
+            <span id="toggle-autonomous-goals-dot" class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Autonomous Content Suggestions (Epic 2 US5) -->
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h3 class="text-lg font-bold text-gray-900">Autonomous Content Suggestions</h3>
+            <p class="text-sm text-gray-500 mt-1">Let this assistant proactively draft posts — complete with AI-generated images — to fill empty slots in your schedule. Drafts always land in the <strong>AI review queue</strong> for your approval and are never published automatically.</p>
+          </div>
+          <button id="toggle-autonomous-media" type="button" role="switch" aria-checked="false"
+            onclick="window._toggleAutonomousMedia()"
+            class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none bg-gray-300 mt-1">
+            <span id="toggle-autonomous-media-dot" class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
+          </button>
+        </div>
+        <div id="autonomous-media-cap-row" class="hidden mt-4 border-t border-gray-100 pt-4 space-y-3">
+          <p class="text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+            <strong class="text-blue-700">What are AI credits?</strong>
+            Credits are the tokens your plan includes each month for AI media generation — each AI-generated image costs <strong>1 credit</strong> and each AI-generated video costs <strong>5 credits</strong>. Unused credits roll over to the next month. Your monthly allowance is set by your subscription plan.
+          </p>
+          <div class="flex items-center gap-3">
+            <label for="autonomous-media-cap" class="text-sm font-bold text-gray-700">Monthly credit cap</label>
+            <input id="autonomous-media-cap" type="number" min="0" step="1" onchange="window._saveAutonomousMediaCap()"
+              class="w-24 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
+            <span id="autonomous-media-cap-hint" class="text-xs text-gray-400">Max credits this assistant may spend on auto-suggestions per month.</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Media Sources (Media Source Selection) -->
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+        <div>
+          <h3 class="text-lg font-bold text-gray-900">Media Sources</h3>
+          <p class="text-sm text-gray-500 mt-1">Choose where this assistant gets images and videos when it creates a post. Enabled sources are tried <strong>top to bottom</strong> — if one has nothing suitable, the next is tried automatically. Use the arrows to set the order.</p>
+        </div>
+        <div id="media-sources-list" class="mt-5 space-y-2.5">
+          <!-- Rows injected by _applyMediaSourcesUi() in assistants.js -->
+        </div>
+        <p id="media-sources-empty-warning" class="hidden mt-3 text-xs font-semibold text-amber-600">Enable at least one source so this assistant can attach media.</p>
+      </div>
+
+    </div><!-- /module-content-automation -->
   </div>
 
   <!-- ── TAB: Creative Strategy ────────────────────────────────── -->
@@ -1282,67 +1340,6 @@
   </div>
 
   </div><!-- /maintab-workflow -->
-
-  <!-- ── MAIN TAB: Automation ──────────────────────────────────────── -->
-  <div id="maintab-automation" class="main-tab-content hidden">
-  <div class="space-y-6 mb-8">
-
-    <!-- Autonomous Optimization Mode (US3.3) — highest-tier self-adjusting toggle -->
-    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
-      <div class="flex items-start justify-between gap-4">
-        <div>
-          <h3 class="text-lg font-bold text-gray-900 flex items-center gap-2">Autonomous Goal Seeking <span id="autonomous-lock" class="hidden text-xs font-bold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full">🔒 Premium</span></h3>
-          <p class="text-sm text-gray-500 mt-1">When a goal goes off track, let this assistant automatically fine-tune its own brief — brand voice, target audience, content strategy, or posting frequency — to recover, no manual edits needed. It adjusts one field at a time, and every change is logged and you're notified.</p>
-        </div>
-        <button id="toggle-autonomous-goals" type="button" role="switch" aria-checked="false"
-          onclick="window._toggleAutonomousGoals()"
-          class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none bg-gray-300 mt-1">
-          <span id="toggle-autonomous-goals-dot" class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
-        </button>
-      </div>
-    </div>
-
-    <!-- Autonomous Content Suggestions (Epic 2 US5) -->
-    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
-      <div class="flex items-start justify-between gap-4">
-        <div>
-          <h3 class="text-lg font-bold text-gray-900">Autonomous Content Suggestions</h3>
-          <p class="text-sm text-gray-500 mt-1">Let this assistant proactively draft posts — complete with AI-generated images — to fill empty slots in your schedule. Drafts always land in the <strong>AI review queue</strong> for your approval and are never published automatically.</p>
-        </div>
-        <button id="toggle-autonomous-media" type="button" role="switch" aria-checked="false"
-          onclick="window._toggleAutonomousMedia()"
-          class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none bg-gray-300 mt-1">
-          <span id="toggle-autonomous-media-dot" class="translate-x-0 pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"></span>
-        </button>
-      </div>
-      <div id="autonomous-media-cap-row" class="hidden mt-4 border-t border-gray-100 pt-4 space-y-3">
-        <p class="text-xs text-gray-500 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
-          <strong class="text-blue-700">What are AI credits?</strong>
-          Credits are the tokens your plan includes each month for AI media generation — each AI-generated image costs <strong>1 credit</strong> and each AI-generated video costs <strong>5 credits</strong>. Unused credits roll over to the next month. Your monthly allowance is set by your subscription plan.
-        </p>
-        <div class="flex items-center gap-3">
-          <label for="autonomous-media-cap" class="text-sm font-bold text-gray-700">Monthly credit cap</label>
-          <input id="autonomous-media-cap" type="number" min="0" step="1" onchange="window._saveAutonomousMediaCap()"
-            class="w-24 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
-          <span id="autonomous-media-cap-hint" class="text-xs text-gray-400">Max credits this assistant may spend on auto-suggestions per month.</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Media Sources (Media Source Selection) -->
-    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
-      <div>
-        <h3 class="text-lg font-bold text-gray-900">Media Sources</h3>
-        <p class="text-sm text-gray-500 mt-1">Choose where this assistant gets images and videos when it creates a post. Enabled sources are tried <strong>top to bottom</strong> — if one has nothing suitable, the next is tried automatically. Use the arrows to set the order.</p>
-      </div>
-      <div id="media-sources-list" class="mt-5 space-y-2.5">
-        <!-- Rows injected by _applyMediaSourcesUi() in assistants.js -->
-      </div>
-      <p id="media-sources-empty-warning" class="hidden mt-3 text-xs font-semibold text-amber-600">Enable at least one source so this assistant can attach media.</p>
-    </div>
-  </div>
-
-  </div><!-- /maintab-automation -->
 
   <!-- ── MAIN TAB: Meetings ────────────────────────────────────────── -->
   <div id="maintab-meetings" class="main-tab-content hidden space-y-6">
