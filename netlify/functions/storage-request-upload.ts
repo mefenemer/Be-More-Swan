@@ -29,7 +29,9 @@ const R2_BUCKET   = process.env.R2_BUCKET_NAME;
 // AC3/AC14: MIME allowlist per assetType
 const MIME_ALLOWLIST: Record<string, Set<string>> = {
     brand_logo:       new Set(['image/png', 'image/jpeg', 'image/svg+xml', 'image/webp']),
-    brand_document:   new Set(['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain']),
+    // Audio types mirror `voice_recording` below — assets.js routes any non-image upload
+    // (including MP3/etc. business recordings) through this assetType.
+    brand_document:   new Set(['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'text/plain', 'audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg']),
     social_image:     new Set(['image/png', 'image/jpeg', 'image/webp']),
     voice_recording:  new Set(['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg']),
     generated_content:new Set(['image/png', 'image/jpeg', 'image/webp']),
