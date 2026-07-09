@@ -1388,7 +1388,7 @@ window._tuningRevisePost = async function() {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ postId: _tuningCtx.postId, feedbackText: correction, applyAsRule: false }),
         });
-        window.showToast?.('Revised draft on the way — check your Review Queue.');
+        window.showToast?.('Revised draft on the way — check your Review.');
     } catch { /* non-critical */ }
     window._closeTuningSession();
 };
@@ -1732,9 +1732,9 @@ function _applyDashboardRegistry(data) {
     window._detailReviewQueue = cfg.reviewQueue || { kind: 'posts' };
     toggle('maintab-btn-review-queue', true);
     toggleBtn('btn-review-pending', true);
-    // Per-role tab label override (e.g. meeting note-taker → "Inbox"); defaults to "Review Queue".
+    // Per-role tab label override (e.g. meeting note-taker → "Inbox"); defaults to "Review".
     // The tab button's badge span must survive, so only its leading text node is rewritten.
-    const rqLabel = window._detailReviewQueue.label || 'Review Queue';
+    const rqLabel = window._detailReviewQueue.label || 'Review';
     setText('detail-rq-heading', rqLabel);
     const rqTabBtn = document.getElementById('maintab-btn-review-queue');
     if (rqTabBtn && rqTabBtn.firstChild && rqTabBtn.firstChild.nodeType === 3) rqTabBtn.firstChild.nodeValue = rqLabel + ' ';

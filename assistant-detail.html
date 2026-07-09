@@ -130,7 +130,7 @@
       </button>
       <!-- Review Queue — items awaiting the human's approval (posts pending_approval, or records
            with approval_status='pending_approval'). The core human-in-the-loop gate. -->
-      <button type="button" id="maintab-btn-review-queue" data-maintab="review-queue" class="main-tab-btn">Review Queue
+      <button type="button" id="maintab-btn-review-queue" data-maintab="review-queue" class="main-tab-btn">Review
         <span id="detail-rq-pending-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
       <!-- Calendar — this assistant's scheduled work / timeline (assistant-calendar.js scopes
@@ -387,7 +387,7 @@
 
     <div class="flex flex-wrap items-start justify-between gap-4 mb-6">
       <div>
-        <h2 id="detail-rq-heading" class="text-lg font-extrabold text-gray-900">Review Queue</h2>
+        <h2 id="detail-rq-heading" class="text-lg font-extrabold text-gray-900">Review</h2>
         <!-- Subtitle + primary button copy adapt to the role's reviewQueue kind (posts vs records)
              in _applyDashboardRegistry. -->
         <p id="detail-rq-subtitle" class="text-sm text-gray-500 mt-1">Items awaiting your review — approve, edit or reject before anything is scheduled.</p>
@@ -647,7 +647,7 @@
         <!-- ── Posting Schedule — social-only module, toggled by AssistantDashboardRegistry ── -->
         <div id="module-posting-schedule" class="pt-2 border-t border-gray-100">
           <h4 class="text-sm font-bold text-gray-900 mb-1">Posting Schedule</h4>
-          <p class="text-xs text-gray-500 mb-4">Set how often, on which days and at what times this assistant publishes — and how far ahead it should keep your Review Queue stocked with drafts.</p>
+          <p class="text-xs text-gray-500 mb-4">Set how often, on which days and at what times this assistant publishes — and how far ahead it should keep your Review stocked with drafts.</p>
 
           <div class="space-y-5">
             <!-- Frequency -->
@@ -715,7 +715,7 @@
                 <span class="text-sm text-gray-600">days into the future</span>
                 <span id="posting-horizon-status" class="text-sm font-semibold"></span>
               </div>
-              <p class="text-xs text-gray-400 mt-1">The assistant keeps your Review Queue filled this many days ahead, so you always have content to approve. Increasing this drafts the new days now; decreasing it archives unreviewed drafts beyond the window.</p>
+              <p class="text-xs text-gray-400 mt-1">The assistant keeps your Review filled this many days ahead, so you always have content to approve. Increasing this drafts the new days now; decreasing it archives unreviewed drafts beyond the window.</p>
             </div>
           </div>
         </div>
@@ -1128,7 +1128,7 @@
       </div>
       <div id="autonomous-on-msg" class="hidden mt-4 flex items-start gap-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-sm text-emerald-800">
         <svg class="w-4 h-4 shrink-0 mt-0.5 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-        <span>When your content hub is empty, this assistant will still prepare <strong>draft posts</strong> (text-only or AI-assisted media) and send them to your <strong>Review Queue</strong> for approval — they are never published on their own. AI-media drafts are flagged <strong>"100% AI-Generated"</strong> so you can spot them at a glance.</span>
+        <span>When your content hub is empty, this assistant will still prepare <strong>draft posts</strong> (text-only or AI-assisted media) and send them to your <strong>Review</strong> for approval — they are never published on their own. AI-media drafts are flagged <strong>"100% AI-Generated"</strong> so you can spot them at a glance.</span>
       </div>
       <div id="autonomous-off-msg" class="mt-4 flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
         <svg class="w-4 h-4 shrink-0 mt-0.5 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>

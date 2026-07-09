@@ -79,7 +79,7 @@ export default withLambda(async (event) => {
                        <p>Your <strong>${post.platform}</strong> post scheduled for <strong>${publishLabel}</strong> via <em>${assistantName}</em> needs your approval.</p>
                        <p>You have approximately <strong>${hoursLeft} hours</strong> before the publish window closes.</p>
                        <p>Posts not approved before the cut-off are never auto-published.</p>
-                       <p><a href="${process.env.BASE_URL || ''}/workspace.html#review-queue">Open Review Queue →</a></p>
+                       <p><a href="${process.env.BASE_URL || ''}/workspace.html#review-queue">Open Review →</a></p>
                        <p>The Be More Swan Team</p>`,
             }).catch(() => {});
         }
