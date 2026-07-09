@@ -197,7 +197,7 @@ window.generateAssistantCardHTML = function(assistant) {
     const dReg = window.AssistantDashboardRegistry ? window.AssistantDashboardRegistry.get(assistant.roleKey) : null;
     const quickActions = dReg ? [
         ['🗂️', dReg.hubTab?.label || 'Data Hub', 'datahub'],
-        ['✅', dReg.reviewQueue?.label || 'Review Queue', 'review-queue'],
+        ['✅', dReg.reviewQueue?.label || 'Review', 'review-queue'],
         ['📅', 'Calendar', 'calendar'],
     ] : [];
     const quickActionsHtml = quickActions.length ? `
