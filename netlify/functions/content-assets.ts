@@ -157,24 +157,25 @@ export async function propagateAssetStatuses(
 }
 
 // ── Physical file deletion ────────────────────────────────────────────────
-// Removes an object from S3 using the same config as content-upload-url.ts.
+// Removes an object from R2 using the same config as content-upload-url.ts.
 // Best-effort: a storage failure must not block the DB delete (the row is the
 // user-facing record), but it is logged so leaked objects can be reconciled.
 async function deleteStorageObject(storageKey: string | null | undefined): Promise<void> {
     if (!storageKey) return; // link/URL assets have no physical file
-    const bucket = process.env.S3_BUCKET_NAME;
-    const region = process.env.S3_REGION || 'us-east-1';
-    if (!bucket || !process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
-        console.warn(`[content-assets] S3 not configured — cannot delete object ${storageKey}`);
+    const endpoint  = process.env.R2_ENDPOINT;
+    const accessKey = process.env.R2_ACCESS_KEY_ID;
+    const secretKey = process.env.R2_SECRET_ACCESS_KEY;
+    const bucket    = process.env.R2_BUCKET_NAME;
+    if (!endpoint || !accessKey || !secretKey || !bucket) {
+        console.warn(`[content-assets] R2 not configured — cannot delete object ${storageKey}`);
         return;
     }
     try {
-        // Dynamic import so the build doesn't fail when @aws-sdk is not installed.
         const { S3Client, DeleteObjectCommand } = await import('@aws-sdk/client-s3');
-        const s3 = new S3Client({ region });
+        const s3 = new S3Client({ region: 'auto', endpoint, credentials: { accessKeyId: accessKey, secretAccessKey: secretKey } });
         await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: storageKey }));
     } catch (err) {
-        console.error(`[content-assets] Failed to delete S3 object ${storageKey}:`, err);
+        console.error(`[content-assets] Failed to delete R2 object ${storageKey}:`, err);
     }
 }
 
