@@ -286,6 +286,12 @@ export const aiAssistants = pgTable("ai_assistants", {
   // non-null signals that this assistant's knowledge base may be incomplete.
   knowledgeStaleAt: timestamp("knowledge_stale_at"),
 
+  // Issue #191 — Safe Archiving grace period: when the assistant was archived, and the
+  // deadline after which purge-archived-assistants hard-deletes it (archivedAt + 14 days).
+  // Both null while not archived; cleared again on reinstate. db/assistant-archive-grace-period.sql.
+  archivedAt: timestamp("archived_at"),
+  scheduledDeletionAt: timestamp("scheduled_deletion_at"),
+
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
   // provisioningStatus: 'pending' | 'complete' | 'failed' | 'cancelled' | 'paused_limit' | 'paused_payment' | 'blocked'

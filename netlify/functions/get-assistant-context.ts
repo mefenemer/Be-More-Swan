@@ -34,6 +34,10 @@ export default withLambda(async (event) => {
             // Canonical lifecycle state (assistant-lifecycle-epic) — distinct from the master
             // assistant's lifecycleState (draft/review/live) joined below.
             lifecycleStatus: aiAssistants.lifecycleStatus,
+            // Issue #191 — reinstate window: the detail page's archived banner shows the
+            // countdown to permanent deletion from these.
+            archivedAt: aiAssistants.archivedAt,
+            scheduledDeletionAt: aiAssistants.scheduledDeletionAt,
             onboardingContext: aiAssistants.onboardingContext,
             configuration: aiAssistants.configuration,
             draftHorizonDays: aiAssistants.draftHorizonDays,
@@ -88,6 +92,8 @@ export default withLambda(async (event) => {
                 status: row.status || 'pending',
                 isActive: row.isActive,
                 lifecycleStatus: row.lifecycleStatus || 'provisioning',
+                archivedAt: row.archivedAt ?? null,
+                scheduledDeletionAt: row.scheduledDeletionAt ?? null,
                 // null for legacy assistants with no master role — the frontend registry
                 // falls back to the social_media_manager (default) dashboard.
                 roleKey: row.roleKey ?? null,

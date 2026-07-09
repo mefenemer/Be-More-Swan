@@ -21,16 +21,20 @@ export const ASSISTANT_STATES = [
 
 export type AssistantLifecycleStatus = (typeof ASSISTANT_STATES)[number];
 
-// Legal transition graph. `archived` is terminal (US6: cannot be undone). Note that the
-// historical "auto-activate on provisioning complete" path (provisioning → working) is driven
-// by the legacy fields + DB trigger, NOT this helper; US3 will route it through ready_for_work.
+// Legal transition graph. `archived` was originally terminal (US6: cannot be undone); issue
+// #191 opened a 14-day reinstate window (archived → paused), gated on the same plan-capacity
+// check as hiring (manage-assistant.ts's `reinstate` action) and on the assistant not yet
+// having passed its scheduledDeletionAt (purge-archived-assistants.ts hard-deletes it then,
+// at which point there is no longer a row to transition). Note that the historical
+// "auto-activate on provisioning complete" path (provisioning → working) is driven by the
+// legacy fields + DB trigger, NOT this helper; US3 will route it through ready_for_work.
 export const LEGAL_TRANSITIONS: Record<AssistantLifecycleStatus, AssistantLifecycleStatus[]> = {
     provisioning:   ['ready_for_work', 'system_paused', 'archived'],
     ready_for_work: ['working', 'system_paused', 'archived'],
     working:        ['paused', 'system_paused', 'archived'],
     paused:         ['working', 'system_paused', 'archived'],
     system_paused:  ['ready_for_work', 'working', 'archived'],
-    archived:       [],
+    archived:       ['paused'],
 };
 
 export function isLegalTransition(from: AssistantLifecycleStatus, to: AssistantLifecycleStatus): boolean {
