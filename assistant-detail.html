@@ -73,18 +73,11 @@
           </div>
         </div>
       </div>
-      <!-- CTA group — Review Meeting is the hero action -->
+      <!-- CTA group -->
       <div class="flex items-center gap-2.5 w-full sm:w-auto shrink-0">
         <span id="detail-save-status" class="text-sm font-semibold text-emerald-600 transition-all mr-1"></span>
-        <!-- Primary CTA: Review Progress — opens the progress page (update + recommendations),
-             which auto-logs a Review Meeting in the Meetings tab. -->
-        <button id="btn-review-progress" onclick="window._openReviewProgress()" type="button"
-          class="relative flex-1 sm:flex-none px-5 py-2.5 text-sm font-extrabold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-md cursor-pointer">
-          <span class="flex items-center gap-2">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
-            Review Progress
-          </span>
-        </button>
+        <!-- Issue #192: Review Progress moved out of the header and into the Goals tab
+             (#btn-review-progress lives there now, next to "Add New Goal"). -->
         <!-- Epic 1: contextual persona config — opens the slide-over (no setup tab in the main nav) -->
         <button id="btn-assistant-profile" onclick="window._openProfileDrawer()" type="button"
           class="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-bold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-xl transition-colors shadow-sm cursor-pointer">
@@ -92,7 +85,7 @@
           <span id="profile-btn-label">Assistant Profile</span>
         </button>
         <!-- Issue #65: Pause/Archive are state-changing (and Archive is irreversible), so they're
-             tucked behind a "More actions" menu rather than sitting flush against Review Progress /
+             tucked behind a "More actions" menu rather than sitting flush against
              Assistant Profile where they were too easy to click by mistake. -->
         <div class="relative shrink-0 ml-1 pl-2 border-l border-gray-200">
           <button id="btn-more-actions" type="button" aria-haspopup="true" aria-expanded="false" title="More actions"
@@ -1261,11 +1254,20 @@
           <h3 class="text-lg font-bold text-gray-900">Goals</h3>
           <p class="text-sm text-gray-500 mt-1">Set measurable targets for this assistant. Progress is tracked automatically against the data from your connections.</p>
         </div>
-        <button type="button" id="btn-add-goal" onclick="window._toggleGoalBuilder(true)"
-          class="inline-flex items-center gap-1.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-3.5 py-2 rounded-lg transition cursor-pointer shrink-0">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-          Add New Goal
-        </button>
+        <div class="flex items-center gap-2 shrink-0">
+          <!-- Issue #192: moved here from the assistant-detail header. Opens the progress page
+               (update + recommendations), which auto-logs a Review Meeting in the Meetings tab. -->
+          <button type="button" id="btn-review-progress" onclick="window._openReviewProgress()"
+            class="inline-flex items-center gap-1.5 text-sm font-bold text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 px-3.5 py-2 rounded-lg transition cursor-pointer">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+            Review Progress
+          </button>
+          <button type="button" id="btn-add-goal" onclick="window._toggleGoalBuilder(true)"
+            class="inline-flex items-center gap-1.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-3.5 py-2 rounded-lg transition cursor-pointer">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+            Add New Goal
+          </button>
+        </div>
       </div>
 
       <!-- Add New Goal builder (AC1.1.1 / AC1.1.2) — hidden until "Add New Goal" -->
