@@ -2363,6 +2363,11 @@ function formatCurrency(amount, currency) {
       history.replaceState(null, '', window.location.pathname);
       const tabParam = qs.get('tab');
       if (tabParam) window._assistantDetailInitialTab = tabParam;
+      // Issue #180 follow-up: a chat-drafted social post's "review & approve" link carries
+      // the specific post it created — once the review-queue tab is up, pop the review
+      // modal straight to it instead of leaving the user to find it in the list.
+      const postIdParam = qs.get('postId');
+      if (postIdParam && Number.isInteger(Number(postIdParam))) window._assistantDetailInitialPostId = Number(postIdParam);
       await loadView('assistant-detail', qs.get('assistantId'));
     } else if (viewParam && routes[viewParam]) {
       history.replaceState(null, '', window.location.pathname);

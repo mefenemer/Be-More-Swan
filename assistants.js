@@ -499,7 +499,18 @@ window._activateMainTab = function(name) {
     _resizeBriefAutoGrow();
     // Load the assistant-scoped review queue when the tab is first opened. detailRqOpenStatus
     // branches on window._detailReviewQueue.kind (posts vs records) internally.
-    if (name === 'review-queue') detailRqOpenStatus('review');
+    if (name === 'review-queue') {
+        const renderDone = detailRqOpenStatus('review');
+        // Issue #180 follow-up: a chat "review & approve" link can name the exact post it
+        // just drafted (window._assistantDetailInitialPostId, set by workspace.html's
+        // ?postId= deep-link) — pop the review modal to it once the list has rendered and
+        // warmed the post cache (openPostReview falls back to its own fetch either way).
+        const openPostId = window._assistantDetailInitialPostId;
+        if (openPostId != null) {
+            window._assistantDetailInitialPostId = null;
+            Promise.resolve(renderDone).then(() => window.openPostReview?.(openPostId));
+        }
+    }
     // Re-read the Data Hub each time it's opened, so records produced after page-load —
     // discovery-promoted leads, chat/integration records, Review-Queue approvals — appear
     // without a full reload. init() already ran at page setup; this only refetches.
@@ -534,7 +545,7 @@ window.detailRqOpenStatus = function(statusKey, btn) {
     });
     const active = btn || document.querySelector(`.detail-rq-col[data-status="${statusKey}"]`);
     if (active) { active.classList.add('border-b-2', 'border-emerald-600', 'text-emerald-700'); active.classList.remove('text-gray-500'); }
-    _detailRqRenderGroups(statusKey);
+    return _detailRqRenderGroups(statusKey);
 };
 
 // Re-render whichever column is currently open, e.g. after a new idea/post is added elsewhere
