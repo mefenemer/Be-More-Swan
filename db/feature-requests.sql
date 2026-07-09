@@ -188,3 +188,22 @@ FROM issue_reports ir
 WHERE fr.issue_id = ir.id
   AND fr.source = 'issue'
   AND fr.submitted_by IS NULL;
+
+-- Issue #160 (round 2) — the ask was never about notifications: the Feature Requests admin UI
+-- had no way to classify or nest a work-item breakdown of Epic → Feature → User Story →
+-- Acceptance Criteria, so the reporter had nothing of the kind to see regardless of the two
+-- earlier notification fixes. item_type classifies each row; parent_id lets a Feature roll up
+-- under an Epic, a User Story under a Feature, etc. Existing rows default to 'feature' (their
+-- prior implicit type) and stay unparented.
+ALTER TABLE feature_requests ADD COLUMN IF NOT EXISTS item_type TEXT NOT NULL DEFAULT 'feature';
+ALTER TABLE feature_requests ADD COLUMN IF NOT EXISTS parent_id INTEGER REFERENCES feature_requests(id) ON DELETE SET NULL;
+
+CREATE INDEX IF NOT EXISTS feature_requests_parent_idx ON feature_requests (parent_id);
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'feature_requests_item_type_check') THEN
+    ALTER TABLE feature_requests ADD CONSTRAINT feature_requests_item_type_check
+      CHECK (item_type IN ('epic', 'feature', 'user_story', 'acceptance_criteria'));
+  END IF;
+END $$;

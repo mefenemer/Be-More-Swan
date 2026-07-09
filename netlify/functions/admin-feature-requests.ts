@@ -30,9 +30,11 @@ import {
     FR_CATEGORY_LABEL,
     FR_STATUS_LABEL,
     FR_PRIORITY_LABEL,
+    FR_ITEM_TYPE_LABEL,
     isFeatureCategory,
     isFeaturePriority,
     isFeatureStatus,
+    isFeatureItemType,
     isQuarter,
     nextTopSortOrder,
     syncVoteCount,
@@ -198,6 +200,16 @@ export default withLambda(async (event) => {
         const description = typeof body.description === 'string' && body.description.trim() ? body.description.trim() : null;
         const category = isFeatureCategory(body.category) ? body.category : 'app_core';
         const priority = isFeaturePriority(body.priority) ? body.priority : 'medium';
+        const itemType = isFeatureItemType(body.itemType) ? body.itemType : 'feature';
+
+        let parentId: number | null = null;
+        if (body.parentId !== undefined && body.parentId !== null && body.parentId !== '') {
+            const pid = Number(body.parentId);
+            if (!Number.isInteger(pid)) return json(400, { error: 'Invalid parentId.' });
+            const [parent] = await db.select({ id: featureRequests.id }).from(featureRequests).where(eq(featureRequests.id, pid)).limit(1);
+            if (!parent) return json(400, { error: 'Parent request not found.' });
+            parentId = pid;
+        }
 
         const sortOrder = await nextTopSortOrder(db);
         const [inserted] = await db.insert(featureRequests).values({
@@ -205,6 +217,8 @@ export default withLambda(async (event) => {
             description,
             category,
             priority,
+            itemType,
+            parentId,
             status: 'open',
             source: 'manual',
             sortOrder,
@@ -251,6 +265,21 @@ export default withLambda(async (event) => {
         if (body.priority !== undefined) {
             if (!isFeaturePriority(body.priority)) return json(400, { error: 'Invalid priority.' });
             set.priority = body.priority;
+        }
+        if (body.itemType !== undefined) {
+            if (!isFeatureItemType(body.itemType)) return json(400, { error: 'Invalid item type.' });
+            set.itemType = body.itemType;
+        }
+        if (body.parentId !== undefined) {
+            if (body.parentId === null || body.parentId === '') {
+                set.parentId = null;
+            } else {
+                const pid = Number(body.parentId);
+                if (!Number.isInteger(pid) || pid === id) return json(400, { error: 'Invalid parentId.' });
+                const [parent] = await db.select({ id: featureRequests.id }).from(featureRequests).where(eq(featureRequests.id, pid)).limit(1);
+                if (!parent) return json(400, { error: 'Parent request not found.' });
+                set.parentId = pid;
+            }
         }
         if (body.targetQuarter !== undefined) {
             if (body.targetQuarter === null || body.targetQuarter === '') {
@@ -309,6 +338,8 @@ export default withLambda(async (event) => {
                 brief: featureRequests.brief,
                 category: featureRequests.category,
                 assistantRef: featureRequests.assistantRef,
+                itemType: featureRequests.itemType,
+                parentId: featureRequests.parentId,
                 status: featureRequests.status,
                 priority: featureRequests.priority,
                 targetQuarter: featureRequests.targetQuarter,
@@ -331,6 +362,7 @@ export default withLambda(async (event) => {
                 categoryLabel: FR_CATEGORY_LABEL[r.category as keyof typeof FR_CATEGORY_LABEL] || r.category,
                 statusLabel: FR_STATUS_LABEL[r.status as keyof typeof FR_STATUS_LABEL] || r.status,
                 priorityLabel: FR_PRIORITY_LABEL[r.priority as keyof typeof FR_PRIORITY_LABEL] || r.priority,
+                itemTypeLabel: FR_ITEM_TYPE_LABEL[r.itemType as keyof typeof FR_ITEM_TYPE_LABEL] || r.itemType,
             })),
         });
     }

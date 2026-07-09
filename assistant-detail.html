@@ -17,6 +17,38 @@
 </style>
 <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full pb-20">
 
+  <!-- Issue #177 follow-up: role-specific markup (button labels, tabs, KPIs, etc.) is only
+       correct once get-assistant-context resolves — showing #assistant-detail-content before
+       then flashes the previous/default role's fields. Show this generic skeleton instead and
+       reveal the real content (initAssistantDetail hides this + un-hides #assistant-detail-content
+       in its load-and-hydrate finally block) once the fetch settles, success or failure. -->
+  <div id="assistant-detail-skeleton" class="animate-pulse" aria-hidden="true">
+    <div class="h-5 w-28 bg-gray-200 rounded mb-6"></div>
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm px-5 py-4 mb-6">
+      <div class="flex items-center gap-4">
+        <div class="w-11 h-11 rounded-xl bg-gray-200 shrink-0"></div>
+        <div class="flex-1 space-y-2">
+          <div class="h-4 w-40 bg-gray-200 rounded"></div>
+          <div class="h-3 w-24 bg-gray-100 rounded"></div>
+        </div>
+      </div>
+    </div>
+    <div class="mb-8 border-b border-gray-200 flex gap-x-8">
+      <div class="h-4 w-20 bg-gray-200 rounded mb-4"></div>
+      <div class="h-4 w-20 bg-gray-100 rounded mb-4"></div>
+      <div class="h-4 w-20 bg-gray-100 rounded mb-4"></div>
+      <div class="h-4 w-20 bg-gray-100 rounded mb-4"></div>
+    </div>
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div class="h-32 bg-gray-100 rounded-2xl border border-gray-200"></div>
+      <div class="h-32 bg-gray-100 rounded-2xl border border-gray-200"></div>
+      <div class="h-32 bg-gray-100 rounded-2xl border border-gray-200"></div>
+      <div class="h-32 bg-gray-100 rounded-2xl border border-gray-200"></div>
+    </div>
+  </div>
+
+  <div id="assistant-detail-content" class="hidden">
+
   <!-- US-LEGAL-3.1: EU AI Act Art.50 — persistent AI interaction disclosure (non-dismissable) -->
   <div id="ai-interaction-disclosure" role="note" aria-label="AI system disclosure"
        class="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-700 font-medium">
@@ -76,6 +108,14 @@
       <!-- CTA group -->
       <div class="flex items-center gap-2.5 w-full sm:w-auto shrink-0">
         <span id="detail-save-status" class="text-sm font-semibold text-emerald-600 transition-all mr-1"></span>
+        <!-- Issue #197: the assistant's chat intake (Data Hub tab's primary action, or the assistants
+             list card) was the only way to open a conversation — nothing on this page's default
+             Overview tab. A header CTA guarantees a chat entry point on every tab, for every role. -->
+        <button id="btn-detail-chat" type="button"
+          class="flex-1 sm:flex-none inline-flex items-center justify-center gap-1.5 px-4 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-colors shadow-sm cursor-pointer">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/></svg>
+          Chat
+        </button>
         <!-- Issue #192: Review Progress moved out of the header and into the Goals tab
              (#btn-review-progress lives there now, next to "Add New Goal"). -->
         <!-- Epic 1: contextual persona config — opens the slide-over (no setup tab in the main nav) -->
@@ -464,13 +504,10 @@
   <!-- ── HOME: onboarding answers + Operating File card index ─────── -->
   <div id="tab-profile-home" class="detail-tab-content space-y-6">
 
-  <!-- Read-only summary of every answer captured during onboarding (populated by assistants.js) -->
+  <!-- Read-only summary of every answer captured during onboarding (populated by assistants.js).
+       This is the single, collapsible reminder of what was captured — editing happens in the
+       relevant Operating File sub-section below (e.g. Operational Setup), not here (issue #169). -->
   <div id="onboarding-summary"></div>
-
-  <!-- Editable role-specific onboarding answers (assistant-setup.html roles) — rendered from
-       the role's AssistantOnboardingSchemas entry by _renderRoleAnswersEditor() in assistants.js;
-       values round-trip through aiAssistants.onboardingContext. Empty for social assistants. -->
-  <div id="role-answers-editor"></div>
 
   <!-- Operating File card list -->
   <div class="space-y-3">
@@ -1443,6 +1480,8 @@
   </div><!-- /maintab-meetings -->
 
   <!-- tab-integrations removed — merged into tab-platforms as "Connections" -->
+
+  </div><!-- /assistant-detail-content -->
 
 </div>
 
