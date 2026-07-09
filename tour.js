@@ -191,22 +191,35 @@
   const reduceMotion = () =>
     window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  // ── Voice narration: reads each step aloud in a calming British female voice ──
+  // ── Voice narration: reads each step aloud ──────────────────────────────────
   // Gated by "Narrate the guided tour" (My Account → Sounds); default-on like the
   // other Aurora sound preferences, read from the localStorage cache the settings
   // page keeps in sync with the server (see workspace.html initSoundToggles).
+  //
+  // Primary path: a real neural voice from netlify/functions/tour-narration.ts
+  // (OpenAI TTS, cached server-side) — actually sounds human, unlike any browser
+  // SpeechSynthesis voice. Falls back to SpeechSynthesis when the endpoint is
+  // unavailable (no API key configured, offline, request failed) so the tour
+  // still narrates, just with the lower-quality built-in voice.
   let narrationVoice = null;
   const FEMALE_BRITISH_HINTS = /female|serena|kate|fiona|martha|amy|emma|hazel|sonia|libby/i;
+  const HIGH_QUALITY_HINTS = /natural|enhanced|premium|neural|online/i;
+  let currentAudio = null;   // in-flight/playing neural narration <audio>, if any
+  let narrationToken = 0;    // invalidates a stale fetch/play when the step changes fast
 
   function pickNarrationVoice() {
     if (!window.speechSynthesis) return null;
     const voices = window.speechSynthesis.getVoices();
     if (!voices.length) return null;
     const british = voices.filter((v) => v.lang === 'en-GB' || v.lang === 'en_GB');
+    const englishFemale = voices.filter((v) => /^en/i.test(v.lang) && FEMALE_BRITISH_HINTS.test(v.name));
     return (
+      british.find((v) => HIGH_QUALITY_HINTS.test(v.name) && FEMALE_BRITISH_HINTS.test(v.name)) ||
       british.find((v) => FEMALE_BRITISH_HINTS.test(v.name)) ||
+      british.find((v) => HIGH_QUALITY_HINTS.test(v.name)) ||
       british[0] ||
-      voices.find((v) => /^en/i.test(v.lang) && FEMALE_BRITISH_HINTS.test(v.name)) ||
+      englishFemale.find((v) => HIGH_QUALITY_HINTS.test(v.name)) ||
+      englishFemale[0] ||
       null
     );
   }
@@ -220,19 +233,47 @@
     return localStorage.getItem('bms_tourNarrationEnabled') !== '0';
   }
 
-  function speakStep(step) {
-    if (!window.speechSynthesis || !narrationEnabled()) return;
+  function speakWithBrowserVoice(text) {
+    if (!window.speechSynthesis) return;
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(`${step.title}. ${step.copy}`);
+    const utterance = new SpeechSynthesisUtterance(text);
     if (!narrationVoice) narrationVoice = pickNarrationVoice();
     if (narrationVoice) utterance.voice = narrationVoice;
     utterance.lang = 'en-GB';
-    utterance.pitch = 1;
-    utterance.rate = 0.95; // slightly slower — calmer, easier to follow alongside the spotlight
+    utterance.pitch = 1.08;
+    utterance.rate = 1.02;
     window.speechSynthesis.speak(utterance);
   }
 
+  async function speakStep(step) {
+    if (!narrationEnabled()) return;
+    stopNarration();          // stop any prior clip and invalidate its in-flight fetch, if any
+    const token = ++narrationToken;
+    const text = `${step.title}. ${step.copy}`;
+
+    try {
+      const res = await fetch('/.netlify/functions/tour-narration', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text }),
+      });
+      if (token !== narrationToken) return; // user moved on while we were fetching
+      if (!res.ok) throw new Error(`tour-narration ${res.status}`);
+      const { audio, mimeType } = await res.json();
+      if (!audio) throw new Error('empty narration response');
+      if (token !== narrationToken) return;
+
+      const el = new Audio(`data:${mimeType || 'audio/mpeg'};base64,${audio}`);
+      currentAudio = el;
+      el.play().catch(() => { if (token === narrationToken) speakWithBrowserVoice(text); });
+    } catch {
+      if (token === narrationToken) speakWithBrowserVoice(text);
+    }
+  }
+
   function stopNarration() {
+    narrationToken++;
+    if (currentAudio) { currentAudio.pause(); currentAudio = null; }
     if (window.speechSynthesis) window.speechSynthesis.cancel();
   }
 

@@ -9,6 +9,8 @@
 --
 -- Lifecycle (status): reported → fix_in_progress → merge → fixed_ready_to_test → closed
 --                     ↘ backlog (super-admin defers the ticket for later investigation)
+--                     ↘ on_hold (super-admin is deciding whether to proceed, or other tickets
+--                                must be developed first — parked pending that decision) ↗
 --                     ↘ more_info_required (admin asks the user for detail) ↗
 --                     ↘ roadmap (feature request promoted to the Feature Roadmap; see db/feature-roadmap.sql)
 -- The threaded back-and-forth (admin status messages + user replies) lives in
@@ -32,7 +34,7 @@ CREATE TABLE IF NOT EXISTS issue_reports (
   image_data       TEXT,
   image_mime       TEXT,
 
-  -- reported | backlog | fix_in_progress | merge | fixed_ready_to_test | more_info_required | closed | roadmap
+  -- reported | backlog | on_hold | fix_in_progress | merge | fixed_ready_to_test | more_info_required | closed | roadmap
   status           TEXT NOT NULL DEFAULT 'reported',
 
   created_at       TIMESTAMP NOT NULL DEFAULT now(),
@@ -52,7 +54,7 @@ BEGIN
   ALTER TABLE issue_reports DROP CONSTRAINT IF EXISTS issue_reports_status_check;
   ALTER TABLE issue_reports
     ADD CONSTRAINT issue_reports_status_check
-    CHECK (status IN ('reported', 'backlog', 'fix_in_progress', 'merge', 'fixed_ready_to_test', 'more_info_required', 'closed', 'roadmap'));
+    CHECK (status IN ('reported', 'backlog', 'on_hold', 'fix_in_progress', 'merge', 'fixed_ready_to_test', 'more_info_required', 'closed', 'roadmap'));
 END $$;
 
 -- Threaded conversation: admin status updates / supporting messages, and user replies
@@ -137,6 +139,8 @@ ALTER TABLE issue_reports ADD COLUMN IF NOT EXISTS dev_sql_ran_at TIMESTAMP;
 --                     merging → the watcher has claimed it and is merging
 --                     merged  → merged to staging
 --                     failed  → the merge attempt failed (see dev_merge_result); retriable
+--        conflict_queued      → a failed merge sent back for AI conflict investigation
+--        conflict_resolving   → the watcher has claimed the conflict fix and is resolving it
 ALTER TABLE issue_reports ADD COLUMN IF NOT EXISTS dev_merge_status TEXT;
 ALTER TABLE issue_reports ADD COLUMN IF NOT EXISTS dev_merged_at    TIMESTAMP;
 ALTER TABLE issue_reports ADD COLUMN IF NOT EXISTS dev_merge_result TEXT;     -- gh output / error
@@ -173,14 +177,14 @@ BEGIN
   END IF;
 END $$;
 
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint WHERE conname = 'issue_reports_dev_merge_status_check'
-  ) THEN
-    ALTER TABLE issue_reports
-      ADD CONSTRAINT issue_reports_dev_merge_status_check
-      CHECK (dev_merge_status IS NULL
-             OR dev_merge_status IN ('ready', 'queued', 'merging', 'merged', 'failed'));
-  END IF;
-END $$;
+-- NOTE: this constraint's allowed-value set has GROWN over time ('conflict_queued' and
+-- 'conflict_resolving' were added with the AI conflict-fix feature). A plain "add if not
+-- exists" guard would leave an OLDER constraint in place and silently reject the new values
+-- (an UPDATE to 'conflict_queued' then 500s and the admin sees a blank error). So we
+-- DROP-then-ADD every run: idempotent AND self-healing when the value set changes.
+ALTER TABLE issue_reports DROP CONSTRAINT IF EXISTS issue_reports_dev_merge_status_check;
+ALTER TABLE issue_reports
+  ADD CONSTRAINT issue_reports_dev_merge_status_check
+  CHECK (dev_merge_status IS NULL
+         OR dev_merge_status IN ('ready', 'queued', 'merging', 'merged', 'failed',
+                                 'conflict_queued', 'conflict_resolving'));

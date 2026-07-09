@@ -6,7 +6,7 @@
 // so the user can modify their blueprint/setup answers.
 
 import { Handler } from '@netlify/functions';
-import { eq, and, inArray, count, asc } from 'drizzle-orm';
+import { eq, and, inArray, count, asc, isNull } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
 import { aiAssistants, taskRuns, notifications, masterPlans, organisations, plans } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
@@ -99,6 +99,27 @@ export default withLambda(async (event) => {
                     await tx.update(aiAssistants)
                         .set({ provisioningStatus: 'complete', archivedAt: null, scheduledDeletionAt: null, updatedAt: new Date() })
                         .where(eq(aiAssistants.id, id));
+
+                    // Issue #191 follow-up: close out the original archive notification (it was
+                    // left open/unresolved so its "View & Reinstate" CTA stayed usable — see
+                    // notification-actions.ts) and confirm the reinstatement so the user isn't
+                    // left wondering whether the action actually took effect.
+                    await db.update(notifications)
+                        .set({ isRead: true, readAt: new Date(), resolvedAt: new Date() })
+                        .where(and(
+                            eq(notifications.userId, ctx.userId),
+                            eq(notifications.type, 'assistant_archived'),
+                            eq(notifications.assistantId, id),
+                            isNull(notifications.resolvedAt),
+                        )).catch(() => {});
+                    await db.insert(notifications).values({
+                        userId: ctx.userId,
+                        type: 'assistant_reinstated',
+                        title: `"${existing.name}" has been reinstated`,
+                        message: `"${existing.name}" is back in your active workspace.`,
+                        metadata: { assistantId: id },
+                        assistantId: id,
+                    }).catch(() => {});
 
                     return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: true, lifecycleStatus: 'paused' }) };
                 }

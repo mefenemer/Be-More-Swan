@@ -1228,7 +1228,7 @@ export const issueReports = pgTable("issue_reports", {
   imageData: text("image_data"),
   imageMime: text("image_mime"),
 
-  // 'reported' | 'backlog' | 'fix_in_progress' | 'merge' | 'fixed_ready_to_test' | 'more_info_required' | 'closed' | 'roadmap'
+  // 'reported' | 'backlog' | 'on_hold' | 'fix_in_progress' | 'merge' | 'fixed_ready_to_test' | 'more_info_required' | 'closed' | 'roadmap'
   status: text("status").notNull().default("reported"),
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -1333,6 +1333,10 @@ export const featureRequests = pgTable("feature_requests", {
   category: text("category").notNull().default("app_core"),
   // CATALOGUE ROLE slug when category='existing_assistant' (not a tenant instance).
   assistantRef: text("assistant_ref"),
+  // Work-item breakdown: 'epic' | 'feature' | 'user_story' | 'acceptance_criteria'.
+  itemType: text("item_type").notNull().default("feature"),
+  // Optional parent for the Epic → Feature → User Story → Acceptance Criteria hierarchy.
+  parentId: integer("parent_id").references((): AnyPgColumn => featureRequests.id, { onDelete: "set null" }),
   // pending_review | under_review | open | planned | brief_ready | in_progress | released | declined | duplicate
   status: text("status").notNull().default("pending_review"),
   // 'critical' | 'high' | 'medium' | 'low'
@@ -1363,6 +1367,7 @@ export const featureRequests = pgTable("feature_requests", {
   index("feature_requests_submitter_idx").on(t.submittedBy, t.createdAt),
   index("feature_requests_quarter_idx").on(t.targetQuarter),
   index("feature_requests_issue_idx").on(t.issueId),
+  index("feature_requests_parent_idx").on(t.parentId),
 ]);
 
 // One row per (feature, user). UNIQUE enforces "one upvote per user"; toggling deletes the row.
@@ -1524,6 +1529,16 @@ export const pexelsSearchCache = pgTable("pexels_search_cache", {
 }, (t) => [
   index("pexels_search_cache_created_idx").on(t.createdAt),
 ]);
+
+// Guided tour voice narration cache (issue #161) — static TOUR_STEPS copy synthesized once via
+// OpenAI TTS and reused for every user, keyed by a hash of text + voice. db/tour-narration-cache.sql.
+export const tourNarrationCache = pgTable("tour_narration_cache", {
+  textHash: text("text_hash").primaryKey(),
+  voice: text("voice").notNull(),
+  audioBase64: text("audio_base64").notNull(),
+  mimeType: text("mime_type").notNull().default("audio/mpeg"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+});
 
 // Invoices table — one row per generated invoice, created on every successful payment
 export const invoices = pgTable("invoices", {
