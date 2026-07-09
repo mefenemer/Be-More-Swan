@@ -645,6 +645,35 @@ window.showComplianceModals = function showComplianceModals(force) {
   </div>
 </div>
 
+<!-- Chat with assistant modal — card action opens this in-page instead of navigating to
+     assistant-chat.html (window.ChatSession.mount, same widget that page used to own). -->
+<div id="chat-modal" class="hidden fixed inset-0 z-[90] items-center justify-center p-4 bg-gray-900/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="chat-modal-title">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[92vh] flex flex-col overflow-hidden">
+    <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100 shrink-0">
+      <div class="flex items-center gap-3 min-w-0">
+        <div class="w-9 h-9 bg-emerald-100 rounded-full flex items-center justify-center text-lg shrink-0">💬</div>
+        <div class="min-w-0">
+          <h2 id="chat-modal-title" class="text-sm font-extrabold text-gray-900 truncate"></h2>
+          <p id="chat-modal-role" class="text-xs text-gray-500 truncate"></p>
+        </div>
+      </div>
+      <button onclick="window.closeAssistantChatModal()" aria-label="Close" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 cursor-pointer">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <!-- US-LEGAL-3.1: EU AI Act Art.50 — persistent AI interaction disclosure (non-dismissable),
+         same notice assistant-chat.html shows on every direct AI-chat surface. -->
+    <div role="note" aria-label="AI system disclosure"
+         class="flex items-center gap-2 px-5 py-2 border-b border-blue-100 bg-blue-50 text-xs text-blue-700 font-medium shrink-0">
+      <svg class="w-3.5 h-3.5 shrink-0 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
+        <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clip-rule="evenodd"/>
+      </svg>
+      <span>You are interacting with an AI assistant. AI-generated content may be inaccurate — always review before sending or publishing.</span>
+    </div>
+    <div id="chat-modal-root" class="flex-1 min-h-[24rem] overflow-hidden"></div>
+  </div>
+</div>
+
 <!-- First-login welcome modal retired (US-ONB-2.2.1): the welcome + 3-step setup
      checklist now live in the Notifications area and the Getting Started view
      (getting-started.html / initGettingStarted). -->
@@ -3429,8 +3458,8 @@ function formatCurrency(amount, currency) {
               <div class="flex items-center gap-3">
                   <button class="text-sm font-semibold text-emerald-700 hover:text-emerald-800 transition cursor-pointer" onclick="window.routeToAssistantDetail('${assistant.id}')">View Details &rarr;</button>
                   ${lifecycle !== 'provisioning' && lifecycle !== 'archived' ? `
-                  <a href="assistant-chat.html?assistantId=${assistant.id}"
-                     class="px-3.5 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition">💬 Chat</a>` : ''}
+                  <button type="button" onclick="window.openAssistantChatModal('${assistant.id}', '${(assistant.name || 'Your assistant').replace(/'/g, '&#39;')}', '${role.replace(/'/g, '&#39;')}', '${(assistant.roleKey || '').replace(/'/g, '&#39;')}')"
+                     class="px-3.5 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition cursor-pointer">💬 Chat</button>` : ''}
               </div>
               ${footerActions}
           </div>
@@ -4123,6 +4152,10 @@ function formatCurrency(amount, currency) {
      assistant-detail.html: Disruptive UI renderers reused for record detail,
      CSV import (Spreadsheet Fallback), and the hub table itself. -->
 <script src="/src/components/disruptive-ui-registry.js"></script>
+<!-- Chat modal (workspace "💬 Chat" card action) — same mountable widget assistant-chat.html
+     uses, embedded in-page instead of navigating to a separate page. -->
+<script src="/src/components/assistant-starter-prompts.js"></script>
+<script src="/src/components/chat-session.js"></script>
 <script src="/src/components/spreadsheet-import.js"></script>
 <script src="/src/components/assistant-data-hub.js"></script>
 <!-- Connections › "Synced actions" — this assistant's Integration Scenario Library recipes,
@@ -4910,6 +4943,36 @@ function closePostReview() {
     modal.classList.remove('flex');
     _rqReviewPostId = null;
 }
+
+// ── "💬 Chat" card action — mounts the shared ChatSession widget in a modal instead of
+// navigating to the standalone assistant-chat.html page. ──────────────────────────────
+let _chatModalSession = null;
+
+window.openAssistantChatModal = function(assistantId, assistantName, assistantRole, roleKey) {
+    const modal = document.getElementById('chat-modal');
+    const root = document.getElementById('chat-modal-root');
+    if (!modal || !root || !window.ChatSession) return;
+
+    document.getElementById('chat-modal-title').textContent = assistantName || 'Your assistant';
+    document.getElementById('chat-modal-role').textContent = assistantRole || 'Digital Assistant';
+
+    if (_chatModalSession) { _chatModalSession.destroy(); _chatModalSession = null; }
+    _chatModalSession = window.ChatSession.mount({
+        container: root,
+        assistantId: Number(assistantId),
+        assistantName,
+        roleKey,
+    });
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+};
+
+window.closeAssistantChatModal = function() {
+    const modal = document.getElementById('chat-modal');
+    if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+    if (_chatModalSession) { _chatModalSession.destroy(); _chatModalSession = null; }
+};
 
 // ── Add / change media from the review modal ────────────────────────────────────────────────────
 // Rather than rebuild the media picker, we borrow the Work-with-AI panel (#gp-ai-media) — it already
