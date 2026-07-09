@@ -328,12 +328,19 @@ window.showComplianceModals = function showComplianceModals(force) {
       </div>
       <div class="mb-4">
         <div class="flex items-center justify-between mb-1.5">
-          <label class="block text-xs font-semibold text-gray-700">Media from My Content <span class="font-normal text-gray-400">(optional)</span></label>
+          <label class="block text-xs font-semibold text-gray-700">Media <span class="font-normal text-gray-400">(optional)</span></label>
           <button type="button" id="gpw-media-toggle" onclick="gpwToggleMediaPicker()" class="text-xs font-semibold text-emerald-700 hover:text-emerald-800 transition cursor-pointer">Add media</button>
         </div>
         <div id="gpw-media-picker" class="hidden border border-gray-200 rounded-xl p-2 max-h-48 overflow-y-auto">
+          <div class="flex justify-end mb-2">
+            <button type="button" onclick="gpwUpload()" class="px-2 py-1 text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer flex items-center gap-1">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+              <span>Upload</span>
+            </button>
+            <input type="file" id="gpw-upload-input" class="hidden" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm" onchange="gpwUploadSelected(event)">
+          </div>
           <div id="gpw-media-grid" class="grid grid-cols-3 gap-2"></div>
-          <p id="gpw-media-empty" class="hidden text-xs text-gray-400 text-center py-4">No media in My Content yet.</p>
+          <p id="gpw-media-empty" class="hidden text-xs text-gray-400 text-center py-4">No media in your library yet — click Upload to add some.</p>
         </div>
       </div>
       <div id="gpw-status" class="hidden mb-4 text-sm rounded-xl p-3 bg-emerald-50 text-emerald-800 border border-emerald-200"></div>
@@ -424,6 +431,11 @@ window.showComplianceModals = function showComplianceModals(force) {
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
           <span id="gp-ai-own-label">Use my own</span>
         </button>
+        <button type="button" onclick="gpAiUpload()" class="px-2.5 py-1 text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer flex items-center gap-1">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+          <span>Upload</span>
+        </button>
+        <input type="file" id="gp-ai-upload-input" class="hidden" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm" onchange="gpAiUploadSelected(event)">
         <button type="button" onclick="gpAiFind()" class="px-2.5 py-1 text-xs font-semibold border border-sky-300 text-sky-700 hover:bg-sky-50 rounded-lg transition cursor-pointer flex items-center gap-1">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
           <span id="gp-ai-find-label">Find a photo</span>
@@ -434,10 +446,10 @@ window.showComplianceModals = function showComplianceModals(force) {
         </button>
       </div>
       <p id="gp-ai-media-status" class="hidden text-xs"></p>
-      <!-- My Content picker (shown after "Use my own") -->
+      <!-- Library picker (shown after "Use my own") — already-uploaded content-assets -->
       <div id="gp-ai-own" class="hidden mt-2 border border-gray-200 rounded-xl p-2 max-h-48 overflow-y-auto">
         <div id="gp-ai-own-grid" class="grid grid-cols-3 gap-2"></div>
-        <p id="gp-ai-own-empty" class="hidden text-xs text-gray-400 text-center py-4">No matching media in My Content yet.</p>
+        <p id="gp-ai-own-empty" class="hidden text-xs text-gray-400 text-center py-4">No matching media in your library yet.</p>
       </div>
       <!-- Stock candidate grid (shown after "Find with AI") -->
       <div id="gp-ai-pexels" class="hidden mt-2 grid grid-cols-3 gap-2"></div>
@@ -5790,6 +5802,35 @@ function gpSetPanelStatus(id, msg, type) {
     el.textContent = msg;
 }
 
+// ── Shared: upload a new file straight into the content library (issue #184 — lets Create Post
+// upload/browse/search/generate media inline, without a trip to a separate My Content page). ─────
+async function gpUploadContentAsset(file) {
+    const urlRes = await fetch('/.netlify/functions/content-upload-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fileName: file.name, mimeType: file.type, fileSize: file.size }),
+    });
+    if (!urlRes.ok) {
+        const err = await urlRes.json().catch(() => ({}));
+        throw new Error(err.error || 'Could not get an upload URL.');
+    }
+    const { uploadUrl, storageKey, storageUrl, mock } = await urlRes.json();
+    if (!mock) {
+        const putRes = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
+        if (!putRes.ok) throw new Error('Upload failed.');
+    }
+    const assetType = file.type.startsWith('video/') ? 'video' : 'image';
+    const createRes = await fetch('/.netlify/functions/content-assets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: file.name, assetType, mimeType: file.type, fileSize: file.size, storageKey, storageUrl }),
+    });
+    if (!createRes.ok) throw new Error('File uploaded but could not be saved. Please try again.');
+    const { asset, rejected } = await createRes.json();
+    if (rejected) throw new Error(asset?.rejectionReason || 'That file was flagged and could not be used.');
+    return asset;
+}
+
 // ── Mode 1: Write it yourself (no AI) ───────────────────────────────────────────────────────────
 function gpwTogglePlatform(btn) {
     const p = btn.dataset.platform;
@@ -5854,6 +5895,28 @@ function gpwToggleAsset(cell, id) {
         check.className = 'gpw-check absolute top-1 right-1 w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs shadow';
         check.textContent = '✓';
         cell.appendChild(check);
+    }
+}
+
+function gpwUpload() {
+    document.getElementById('gpw-upload-input')?.click();
+}
+
+async function gpwUploadSelected(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    gpSetPanelStatus('gpw-status', 'Uploading…');
+    try {
+        const asset = await gpUploadContentAsset(file);
+        const picker = document.getElementById('gpw-media-picker');
+        if (picker) delete picker.dataset.loaded;
+        await gpwLoadMedia();
+        const cell = document.querySelector(`.gpw-media-cell[data-asset-id="${asset.id}"]`);
+        if (cell && !_gpwSelectedAssets.includes(asset.id)) gpwToggleAsset(cell, asset.id);
+        gpSetPanelStatus('gpw-status', '');
+    } catch (err) {
+        gpSetPanelStatus('gpw-status', err.message || 'Upload failed. Please try again.', 'error');
     }
 }
 
@@ -6100,6 +6163,33 @@ async function gpAiSelectOwn(assetId) {
         gpAiMediaStatus('Media attached to this post.');
     } catch {
         gpAiMediaStatus('Network error — please try again.', 'error');
+    }
+}
+
+// ── Source: Upload a new file ────────────────────────────────────────────────
+function gpAiUpload() {
+    document.getElementById('gp-ai-upload-input')?.click();
+}
+
+async function gpAiUploadSelected(e) {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file || !_gpCurrentPostId) return;
+    // Auto-switch the Image/Video toggle to match the uploaded file so the attach below (which
+    // reads _gpAiMediaType) stays consistent with what the user just picked.
+    const uploadType = file.type.startsWith('video/') ? 'video' : 'image';
+    if (uploadType !== _gpAiMediaType) gpAiSetMediaType(uploadType);
+    document.getElementById('gp-ai-own')?.classList.add('hidden');
+    document.getElementById('gp-ai-pexels')?.classList.add('hidden');
+    gpAiMediaBusy(true);
+    gpAiMediaStatus('Uploading…');
+    try {
+        const asset = await gpUploadContentAsset(file);
+        await gpAiSelectOwn(asset.id);
+    } catch (err) {
+        gpAiMediaStatus(err.message || 'Upload failed. Please try again.', 'error');
+    } finally {
+        gpAiMediaBusy(false);
     }
 }
 
