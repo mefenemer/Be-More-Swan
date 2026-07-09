@@ -187,6 +187,7 @@
     function renderHubLink(hubLink) {
       if (!hubLink || typeof hubLink !== 'object' || typeof hubLink.tab !== 'string' || assistantId == null) return null;
       const params = new URLSearchParams({ view: 'assistant-detail', assistantId: String(assistantId), tab: hubLink.tab });
+      if (hubLink.postId != null) params.set('postId', String(hubLink.postId));
       const a = document.createElement('a');
       a.href = `workspace.html?${params.toString()}`;
       a.className = 'inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-2 transition w-fit';

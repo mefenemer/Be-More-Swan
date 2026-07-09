@@ -17,11 +17,12 @@ import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, assistantRecords, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, masterPlans, organisations, plans } from '../../db/schema';
+import { aiAssistants, assistantRecords, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, masterPlans, organisations, plans, scheduledPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { atomicCapCheck } from '../../src/utils/atomic-cap-check';
 import { embedTexts } from '../../src/utils/kb-embeddings';
+import { computeScheduleSlots, resolvePostingSchedule } from '../../src/config/posting-cadence';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -314,13 +315,98 @@ const HUB_RECORD_LABELS: Record<string, string> = {
     ticket: 'ticket',
 };
 
-function hubLinkFromRecords(records: HubRecord[]): { tab: string; label: string } | null {
+type HubLink = { tab: string; label: string; postId?: number };
+
+function hubLinkFromRecords(records: HubRecord[]): HubLink | null {
     if (records.length === 0) return null;
     if (records.length === 1) {
         const kind = HUB_RECORD_LABELS[records[0].recordType] ?? 'record';
         return { tab: 'review-queue', label: `Added this ${kind} to your Review Queue` };
     }
     return { tab: 'review-queue', label: `Added ${records.length} items to your Review Queue` };
+}
+
+// ── Social post drafting (social_media_manager) ───────────────────────────────
+// Issue #180 follow-up: the social_media_manager route has no structured output of its
+// own, so a drafted post used to live only in the chat transcript — nothing was ever
+// saved, and the assistant had to tell the user to go create/schedule it themselves
+// elsewhere. A drafted post is now persisted for real (one scheduled_posts row per
+// platform, status 'pending_approval', same lifecycle create-manual-post.ts's manual
+// "Write your own" path lands in) so the chat can instead hand the user a direct link to
+// review and approve it.
+const SOCIAL_PLATFORMS = ['instagram', 'facebook', 'linkedin', 'x'];
+
+type SocialPostDraft = { platforms: string[]; caption: string; hashtags: string | null };
+
+function socialPostDraftFromUiElement(uiElement: unknown): SocialPostDraft | null {
+    if (!uiElement || typeof uiElement !== 'object') return null;
+    const ui = uiElement as Record<string, unknown>;
+    if (ui.type !== 'social_post_draft') return null;
+    const caption = typeof ui.caption === 'string' ? ui.caption.trim() : '';
+    if (!caption) return null;
+    const platforms = Array.isArray(ui.platforms)
+        ? [...new Set(ui.platforms.filter((p): p is string => typeof p === 'string' && SOCIAL_PLATFORMS.includes(p)))]
+        : [];
+    if (platforms.length === 0) return null;
+    const hashtags = typeof ui.hashtags === 'string' && ui.hashtags.trim() ? ui.hashtags.trim() : null;
+    return { platforms, caption, hashtags };
+}
+
+/**
+ * Persist a chat-drafted post as one pending_approval scheduled_posts row per platform,
+ * pre-filled with the next slot from the assistant's own posting schedule (posting_days /
+ * posting_times / posting_timezone in onboardingContext — the same config the Calendar
+ * and autonomous drafts use). Instagram can't go live without an image and chat has none
+ * to attach, so its row is still created but flagged mediaMissing — the Review Queue
+ * already prompts to source one before approving (issue #55) — rather than silently
+ * dropping the platform. Best-effort: a persistence failure never fails the turn.
+ */
+async function persistSocialPostDraft(
+    db: ReturnType<typeof getDb>,
+    orgId: number,
+    userId: number,
+    aiAssistantId: number,
+    assistantName: string,
+    onboardingContext: unknown,
+    draft: SocialPostDraft,
+): Promise<{ id: number; platform: string }[]> {
+    try {
+        const schedule = resolvePostingSchedule(
+            onboardingContext && typeof onboardingContext === 'object' ? onboardingContext as Record<string, unknown> : null,
+        );
+        const [slot] = computeScheduleSlots({ schedule, horizonDays: 14 });
+        const publishDate = slot ?? new Date(Date.now() + 24 * 60 * 60 * 1000);
+        const now = new Date();
+
+        const created: { id: number; platform: string }[] = [];
+        for (const platform of draft.platforms) {
+            const isInstagram = platform === 'instagram';
+            const [post] = await db.insert(scheduledPosts).values({
+                userId,
+                organisationId: orgId,
+                assistantId: aiAssistantId,
+                platform,
+                postFormat: 'text',
+                publishDate,
+                caption: draft.caption,
+                hashtags: draft.hashtags,
+                contentAssetIds: [],
+                status: 'pending_approval',
+                triggerType: 'manual',
+                isAutonomous: false,
+                ownerId: userId,
+                ownerLabel: `AI: ${assistantName}`,
+                generatedAt: now,
+                mediaMissing: isInstagram,
+                mediaMissingNote: isInstagram ? 'Instagram needs an image — add one below before approving.' : null,
+            }).returning({ id: scheduledPosts.id });
+            created.push({ id: post.id, platform });
+        }
+        return created;
+    } catch (err) {
+        console.error('[chat-orchestrator] social post draft persistence failed:', err);
+        return [];
+    }
 }
 
 /** Best-effort upsert of a reply's hub records — a persistence failure never fails the turn. */
@@ -750,6 +836,36 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
         },
         parseResponse: parseStructuredReply,
     },
+
+    // Social Media Manager — the default/legacy assistant role. Drafts real, ready-to-post
+    // captions in chat; the handler below (persistSocialPostDraft) saves each as a
+    // pending_approval scheduled_posts row, so the reply only needs to confirm the draft
+    // exists and that a schedule was suggested — the actual "review it" link is appended
+    // by the client from the hubLink the handler stamps on the reply.
+    social_media_manager: {
+        model: DEFAULT_MODEL,
+        maxTokens: 1024,
+        buildRolePrompt: (rc) => [
+            sharedContextBlock(rc),
+            `You are this business's social media manager. When the user asks you to draft, write, or come up with a social media post — or gives you enough to write one (a topic, an announcement, a promotion, an update) — write the actual finished caption and hashtags, ready to post as-is: no placeholders, no brackets, no "[insert X here]".
+
+Every post you draft here is saved for real the moment you include the post draft below, with a suggested posting slot already picked from this business's posting schedule — this chat cannot publish or schedule it further than that. Because of this: NEVER tell the user to go set it up, schedule it, or add it to their Review Queue themselves, and never describe dashboard steps, tools, or sections to visit. Once you include the post draft, your reply should just briefly confirm you've drafted the post and suggested a schedule for it — a link to review and approve it is added automatically straight after your reply, so don't mention where that link is or how to find it.
+
+Only include the post draft once you have enough to write real, finished copy — a topic or brief is enough. Ask a short clarifying question (uiElement: null) when you don't have that yet, or when it's genuinely unclear which platform(s) they want it for.
+
+Return STRICT JSON (no markdown, no prose outside the JSON):
+{
+  "reply": "your conversational message to the user",
+  "uiElement": {                      // or null when there is nothing to draft yet
+    "type": "social_post_draft",
+    "platforms": ["facebook" | "instagram" | "linkedin" | "x", ...],
+    "caption": "<the finished, ready-to-post caption>",
+    "hashtags": "<space-separated hashtags>" | null
+  }
+}`,
+        ].join('\n\n'),
+        parseResponse: parseStructuredReply,
+    },
 };
 
 // ── Handler ───────────────────────────────────────────────────────────────────
@@ -1061,7 +1177,25 @@ export default withLambda(async (event) => {
         // stamp a hubLink onto the uiElement below — the transcript then carries its own
         // "where did this go" pointer, and it round-trips through uiElementJson on reload.
         const hubRecords = hubRecordsFromUiElement(uiElement);
-        const hubLink = hubLinkFromRecords(hubRecords);
+        let hubLink = hubLinkFromRecords(hubRecords);
+
+        // Social post drafts land in scheduled_posts, not assistant_records, so they get
+        // their own persistence path — but the same "tell the transcript where it went"
+        // treatment, pointing straight at the drafted post rather than just the tab.
+        const socialDraft = socialPostDraftFromUiElement(uiElement);
+        if (socialDraft) {
+            const createdPosts = await persistSocialPostDraft(
+                db, orgId, userId, session.aiAssistantId, assistantRow.name, assistantRow.onboardingContext, socialDraft,
+            );
+            if (createdPosts.length > 0) {
+                hubLink = {
+                    tab: 'review-queue',
+                    label: createdPosts.length > 1 ? `Drafted ${createdPosts.length} posts — review & approve` : 'Drafted this post — review & approve',
+                    postId: createdPosts[0].id,
+                };
+            }
+        }
+
         if (hubLink && uiElement && typeof uiElement === 'object') {
             (uiElement as Record<string, unknown>).hubLink = hubLink;
         }
