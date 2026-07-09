@@ -1455,6 +1455,11 @@ if (!window._detailTabsDelegated) {
 // during onboarding is visible on the detail page, regardless of which editable fields are
 // wired below (e.g. Trigger/Content Source are captured as label strings the radios can't bind).
 // Sourced from the structured onboardingContext (data.context) + configuration.inputs.
+//
+// Schema-driven roles: only the OPERATIONAL fields are folded in here — the non-operational
+// ones are already shown, editable, immediately below in the "Setup Answers" card
+// (_renderRoleAnswersEditor). Including both would show the same answer twice in a row on
+// the same page (see issue #169).
 function _renderOnboardingSummary(data) {
     const host = document.getElementById('onboarding-summary');
     if (!host) return;
@@ -1467,8 +1472,8 @@ function _renderOnboardingSummary(data) {
     // Roles onboarded via the schema wizard capture Trigger/Content Source under the shared
     // Operational Set-Up step (surfaced by schemaRows below), so drop the legacy inputs-based
     // rows for them to avoid showing each answer twice.
-    const schemaFields = _roleSchemaFields(data && data.roleKey);
-    const hasSchemaOperational = _roleOperationalFields(data && data.roleKey).length > 0;
+    const schemaFields = _roleOperationalFields(data && data.roleKey);
+    const hasSchemaOperational = schemaFields.length > 0;
 
     const objectiveLabels = { brand_awareness: 'Brand Awareness', lead_generation: 'Lead Generation', direct_sales: 'Direct Sales', community_engagement: 'Community & Engagement' };
     const objective = clean(ctx.primary_objective || inputs.primary_objective);
@@ -1493,9 +1498,11 @@ function _renderOnboardingSummary(data) {
         ]),
     ].filter(([, v]) => v && v !== MISSING);
 
-    // Role-specific answers captured by the schema wizard (assistant-setup.html) live in
+    // Operational answers captured by the schema wizard (assistant-setup.html) live in
     // onboardingContext under the schema's own keys — surface them via the role's
     // AssistantOnboardingSchemas entry so non-social roles aren't shown as "no answers".
+    // (Non-operational schema answers are intentionally excluded — see _roleOperationalFields
+    // above; they render editable in the "Setup Answers" card instead.)
     const schemaRows = schemaFields
         .map(f => [f.label || f.key, _formatSchemaAnswer(f, ctx[f.key])])
         .filter(([, v]) => v !== '');
