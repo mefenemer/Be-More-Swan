@@ -128,13 +128,6 @@
       placement: 'bottom',
     },
     {
-      view: 'my-content',
-      targets: ['#btn-open-upload', '#workspace-content h1'],
-      title: 'Your Content Library',
-      copy: 'Upload images, videos and links — or generate them with AI — and your assistants will put them to work. My Content also tracks every asset through the publishing pipeline.',
-      placement: 'bottom',
-    },
-    {
       view: 'referral',
       targets: ['#nav-referral'],
       sidebar: true,

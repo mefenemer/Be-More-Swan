@@ -140,15 +140,19 @@
     + '        <div id="bs-feature-preview" class="bs-feature-empty">No feature image yet.</div>'
     + '        <div class="bs-row" style="margin-top:12px;">'
     + '          <button id="bs-feature-library" class="bs-btn bs-btn-ghost">Choose from Library</button>'
+    + '          <button id="bs-feature-upload" class="bs-btn bs-btn-ghost">Upload</button>'
     + '          <button id="bs-feature-pexels" class="bs-btn bs-btn-ghost">Stock photo</button>'
     + '          <button id="bs-feature-ai" class="bs-btn bs-btn-ghost">AI generate</button>'
     + '          <button id="bs-feature-remove" class="bs-btn bs-btn-ghost bs-hidden">Remove</button>'
+    + '          <input type="file" id="bs-feature-upload-input" class="bs-hidden" accept="image/png,image/jpeg,image/gif,image/webp">'
     + '        </div>'
     + '        <div style="margin-top:14px;font-size:12px;color:#6b7280;">Inline body image</div>'
     + '        <div class="bs-row" style="margin-top:6px;">'
     + '          <button id="bs-inline-library" class="bs-btn bs-btn-ghost">Library</button>'
+    + '          <button id="bs-inline-upload" class="bs-btn bs-btn-ghost">Upload</button>'
     + '          <button id="bs-inline-pexels" class="bs-btn bs-btn-ghost">Stock</button>'
     + '          <button id="bs-inline-ai" class="bs-btn bs-btn-ghost">AI</button>'
+    + '          <input type="file" id="bs-inline-upload-input" class="bs-hidden" accept="image/png,image/jpeg,image/gif,image/webp">'
     + '        </div>'
     + '        <div id="bs-ai-form" class="bs-field bs-hidden" style="margin-top:12px;">'
     + '          <input id="bs-ai-prompt" placeholder="Describe the image…">'
@@ -398,6 +402,43 @@
     if (state.mediaTarget === 'inline') return attachInline(body);
     if (body.pexelsCandidate) return attachFeatureCandidate(body.pexelsCandidate);
     return attachFeature(body.assetId);
+  }
+  // Upload a new file straight into the content library, then attach it (issue #184 — the Blog
+  // Writer's media picker needs its own upload entry point now that My Content isn't a nav item).
+  function uploadContentAsset(file) {
+    return fetch('/.netlify/functions/content-upload-url', {
+      credentials: 'same-origin', method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileName: file.name, mimeType: file.type, fileSize: file.size }),
+    }).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error((res.body && res.body.error) || 'Could not get an upload URL.');
+        var uploadUrl = res.body.uploadUrl, storageKey = res.body.storageKey, storageUrl = res.body.storageUrl, mock = res.body.mock;
+        var putPromise = mock ? Promise.resolve() : fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file })
+          .then(function (r) { if (!r.ok) throw new Error('Upload failed.'); });
+        return putPromise.then(function () {
+          return api('content-assets', { method: 'POST', body: JSON.stringify({
+            name: file.name, assetType: 'image', mimeType: file.type, fileSize: file.size, storageKey: storageKey, storageUrl: storageUrl,
+          }) });
+        });
+      })
+      .then(function (res) {
+        if (!res.ok) throw new Error((res.body && res.body.error) || 'Could not save the upload.');
+        if (res.body.rejected) throw new Error((res.body.asset && res.body.asset.rejectionReason) || 'That image was flagged and could not be used.');
+        return res.body.asset;
+      });
+  }
+  function handleUploadInput(e) {
+    var file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file || !state.postId) return;
+    mediaEls.picker.classList.add('bs-hidden');
+    setStatus('bs-media-status', 'Uploading…');
+    uploadContentAsset(file).then(function (asset) {
+      setStatus('bs-media-status', '');
+      routeImage({ assetId: asset.id });
+    }).catch(function (err) {
+      setStatus('bs-media-status', err.message || 'Upload failed. Please try again.');
+    });
   }
   function openLibrary() {
     if (!state.postId) return;
@@ -656,10 +697,12 @@
     mediaEls = {
       preview: el('bs-feature-preview'), library: el('bs-feature-library'), pexels: el('bs-feature-pexels'),
       ai: el('bs-feature-ai'), remove: el('bs-feature-remove'),
+      upload: el('bs-feature-upload'), uploadInput: el('bs-feature-upload-input'),
       aiForm: el('bs-ai-form'), aiPrompt: el('bs-ai-prompt'), aiGo: el('bs-ai-go'),
       pexelsForm: el('bs-pexels-form'), pexelsQuery: el('bs-pexels-query'), pexelsGo: el('bs-pexels-go'),
       picker: el('bs-media-picker'),
       inlineLibrary: el('bs-inline-library'), inlinePexels: el('bs-inline-pexels'), inlineAi: el('bs-inline-ai'),
+      inlineUpload: el('bs-inline-upload'), inlineUploadInput: el('bs-inline-upload-input'),
     };
 
     mediaEls.remove.addEventListener('click', function () {
@@ -673,6 +716,10 @@
     mediaEls.inlineAi.addEventListener('click', function () { state.mediaTarget = 'inline'; openAiForm(); });
     mediaEls.pexels.addEventListener('click', function () { state.mediaTarget = 'feature'; openPexelsForm(); });
     mediaEls.inlinePexels.addEventListener('click', function () { state.mediaTarget = 'inline'; openPexelsForm(); });
+    mediaEls.upload.addEventListener('click', function () { state.mediaTarget = 'feature'; mediaEls.uploadInput.click(); });
+    mediaEls.inlineUpload.addEventListener('click', function () { state.mediaTarget = 'inline'; mediaEls.inlineUploadInput.click(); });
+    mediaEls.uploadInput.addEventListener('change', handleUploadInput);
+    mediaEls.inlineUploadInput.addEventListener('change', handleUploadInput);
 
     mediaEls.aiGo.addEventListener('click', function () {
       var prompt = mediaEls.aiPrompt.value.trim();
