@@ -27,10 +27,10 @@
       iconKey: 'megaphone',
       iconColor: 'pink',
       tagline: 'Consistent, on-brand content — without the daily grind.',
-      description: 'Plans, writes, and schedules branded content across all your social channels. Every post lands in your Review Queue for approval, so nothing goes out without your sign-off.',
+      description: 'Plans, writes, and schedules branded content across all your social channels. Every post lands in your Review for approval, so nothing goes out without your sign-off.',
       keyFeatures: [
         'Automated Content Drafting & Scheduling',
-        'Human-in-the-loop Review Queue',
+        'Human-in-the-loop Review',
         'Per-platform Hashtag & Format Strategy',
       ],
       integrations: ['Facebook', 'Instagram', 'LinkedIn', 'X (Twitter)', 'Threads', 'TikTok', 'YouTube'],

@@ -930,7 +930,7 @@ window._mcPromptDelete = function (assetId) {
     const usedIn = asset?.usedInPosts || [];
     if (usedIn.length > 0) {
         const postWord = usedIn.length === 1 ? 'post' : 'posts';
-        warningEl.textContent = `This is used in ${usedIn.length} draft/scheduled ${postWord}. Deleting it will flag ${usedIn.length === 1 ? 'that post' : 'those posts'} in the Review Queue so the assistant can source new media.`;
+        warningEl.textContent = `This is used in ${usedIn.length} draft/scheduled ${postWord}. Deleting it will flag ${usedIn.length === 1 ? 'that post' : 'those posts'} in Review so the assistant can source new media.`;
         warningEl.classList.remove('hidden');
     } else {
         warningEl.classList.add('hidden');
@@ -949,7 +949,7 @@ async function _doDelete() {
             await _loadAssets();
             const affected = d.affectedPosts?.length || 0;
             if (affected > 0) {
-                const msg = `Deleted. ${affected} ${affected === 1 ? 'post has' : 'posts have'} been flagged in the Review Queue for new media.`;
+                const msg = `Deleted. ${affected} ${affected === 1 ? 'post has' : 'posts have'} been flagged in Review for new media.`;
                 window.showToast ? window.showToast(msg, { icon: '⚠️', duration: 6000 }) : alert(msg);
             }
         }

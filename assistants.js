@@ -190,6 +190,23 @@ window.generateAssistantCardHTML = function(assistant) {
             </div>
         </div>` : '';
 
+    // Issue #178: per-assistant Quick Actions — replaces the old dashboard-wide "Quick
+    // actions" widget with shortcuts scoped to this assistant, using the same per-role
+    // labels as its own Data Hub / Review Queue tabs (AssistantDashboardRegistry), so a
+    // lead_qualifier card links to "Leads" while a tier1_support_agent links to "Tickets".
+    const dReg = window.AssistantDashboardRegistry ? window.AssistantDashboardRegistry.get(assistant.roleKey) : null;
+    const quickActions = dReg ? [
+        ['🗂️', dReg.hubTab?.label || 'Data Hub', 'datahub'],
+        ['✅', dReg.reviewQueue?.label || 'Review Queue', 'review-queue'],
+        ['📅', 'Calendar', 'calendar'],
+    ] : [];
+    const quickActionsHtml = quickActions.length ? `
+        <div class="flex items-center gap-2 flex-wrap mb-4 pt-4 border-t border-gray-50">
+            ${quickActions.map(([icon, label, tab]) => `
+            <button type="button" onclick="event.stopPropagation(); window._assistantDetailInitialTab='${tab}'; window.routeToAssistantDetail('${assistant.id}')"
+                class="px-2.5 py-1.5 text-xs font-semibold text-gray-600 bg-gray-50 border border-gray-200 rounded-lg hover:bg-gray-100 hover:text-emerald-700 transition">${icon} ${label}</button>`).join('')}
+        </div>` : '';
+
     return `
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow p-6 flex flex-col cursor-pointer group" onclick="window.routeToAssistantDetail('${assistant.id}')">
         <div class="flex justify-between items-start mb-4">
@@ -202,6 +219,7 @@ window.generateAssistantCardHTML = function(assistant) {
         <p class="text-sm text-gray-500 mb-4">${role}</p>
         ${goalsHtml}
         ${metricsHtml}
+        ${quickActionsHtml}
         <div class="mt-auto pt-4 border-t border-gray-50 flex justify-between items-center">
             <a href="assistant-chat.html?assistantId=${assistant.id}" onclick="event.stopPropagation()"
                class="px-3.5 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition">💬 Chat</a>
@@ -1370,7 +1388,7 @@ window._tuningRevisePost = async function() {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ postId: _tuningCtx.postId, feedbackText: correction, applyAsRule: false }),
         });
-        window.showToast?.('Revised draft on the way — check your Review Queue.');
+        window.showToast?.('Revised draft on the way — check your Review.');
     } catch { /* non-critical */ }
     window._closeTuningSession();
 };
@@ -1714,9 +1732,9 @@ function _applyDashboardRegistry(data) {
     window._detailReviewQueue = cfg.reviewQueue || { kind: 'posts' };
     toggle('maintab-btn-review-queue', true);
     toggleBtn('btn-review-pending', true);
-    // Per-role tab label override (e.g. meeting note-taker → "Inbox"); defaults to "Review Queue".
+    // Per-role tab label override (e.g. meeting note-taker → "Inbox"); defaults to "Review".
     // The tab button's badge span must survive, so only its leading text node is rewritten.
-    const rqLabel = window._detailReviewQueue.label || 'Review Queue';
+    const rqLabel = window._detailReviewQueue.label || 'Review';
     setText('detail-rq-heading', rqLabel);
     const rqTabBtn = document.getElementById('maintab-btn-review-queue');
     if (rqTabBtn && rqTabBtn.firstChild && rqTabBtn.firstChild.nodeType === 3) rqTabBtn.firstChild.nodeValue = rqLabel + ' ';
@@ -1804,6 +1822,9 @@ function _applyDashboardRegistry(data) {
     const pa = cfg.primaryAction;
     const paBtn = document.getElementById('btn-primary-action');
     const paLabel = document.getElementById('primary-action-label');
+    // Issue #177: the button starts hidden in markup (its label/onclick are the SMM defaults) —
+    // reveal it only now that the role-specific label/handler below are actually being applied.
+    toggleBtn('btn-primary-action', true);
     if (data.roleKey === 'blog_writer') {
         if (paLabel) paLabel.textContent = 'Write Blog Post';
         if (paBtn) paBtn.onclick = () => { if (window.openBlogStudio) window.openBlogStudio({ assistantId: data.id }); };
@@ -2363,11 +2384,13 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     // Configuration child tabs are handled by module-level delegated click listeners
     // (see top of file) so they survive this view being re-injected on every navigation.
 
-    // Deep-link to a specific section (e.g. post-OAuth returns to the Connections tab).
-    // 'goals' doesn't depend on the assistant-context fetch below, so it can activate
-    // immediately; every other target (review-queue/datahub/calendar main tabs, or the
-    // Configuration child tabs) needs that data first — see the matching block after
-    // "Load & hydrate" below, which is where those get consumed and activated.
+    // Deep-link to a specific section. 'goals' (and other tabs that don't depend on the
+    // assistant-context fetch below) can activate immediately; every other target —
+    // review-queue/datahub/calendar main tabs (e.g. issue #178's per-assistant dashboard
+    // Quick Actions, or chat's "View in Review Queue" link) and the Configuration child
+    // tabs (e.g. post-OAuth returning to Connections) — needs that data first, so it's
+    // consumed by the matching block after "Load & hydrate" below. Activating a
+    // records-backed queue early would render it with the wrong (default 'posts') renderer.
     if (window._assistantDetailInitialTab === 'goals') {
         window._assistantDetailInitialTab = null;
         window._activateMainTab?.('goals');
@@ -2552,14 +2575,21 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         const archiveBtn = document.getElementById('btn-archive-assistant');
         if (archiveBtn) archiveBtn.onclick = async () => {
             const name = currentData.name || 'this assistant';
-            if (!confirm(`Archive "${name}"?\n\nThis permanently stops the assistant and removes it from your active workspace. Its history is kept for reporting, but this cannot be undone.`)) return;
-            archiveBtn.disabled = true;
-            try {
-                const r = await fetch(`/.netlify/functions/manage-assistant?id=${assistantId}`, { method: 'DELETE' });
-                if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'Failed to archive assistant.'); archiveBtn.disabled = false; return; }
-                window.showToast?.('Assistant archived.');
-                window.loadView?.('dashboard');
-            } catch { alert('Network error — please try again.'); archiveBtn.disabled = false; }
+            const message = `Archive "${name}"? This permanently stops the assistant and removes it from your active workspace. Its history is kept for reporting, but this cannot be undone.`;
+            const doArchive = async () => {
+                archiveBtn.disabled = true;
+                try {
+                    const r = await fetch(`/.netlify/functions/manage-assistant?id=${assistantId}`, { method: 'DELETE' });
+                    if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'Failed to archive assistant.'); archiveBtn.disabled = false; return; }
+                    window.showToast?.('Assistant archived.');
+                    window.loadView?.('dashboard');
+                } catch { alert('Network error — please try again.'); archiveBtn.disabled = false; }
+            };
+            if (window.showConfirmModal) {
+                window.showConfirmModal(message, doArchive, { title: 'Archive assistant?', confirmLabel: 'Yes, archive', cancelLabel: 'Keep assistant' });
+            } else if (confirm(message)) {
+                await doArchive();
+            }
         };
 
         // US-ADM-4.1.1: Show deprecation banner if assistant's master role is deprecated
