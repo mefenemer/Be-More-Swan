@@ -2384,21 +2384,16 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     // Configuration child tabs are handled by module-level delegated click listeners
     // (see top of file) so they survive this view being re-injected on every navigation.
 
-    // Deep-link to a specific section (e.g. post-OAuth returns to the Connections tab, or a
-    // per-assistant Quick Action on the dashboard card jumping straight to Data Hub/Review
-    // Queue/Calendar — issue #178). Main tabs go through _activateMainTab; anything else is
-    // assumed to be a Configuration child tab (problem/operation/strategy/platforms/rules/
-    // guardrails), surfaced by clicking the child button, which also reveals Configuration.
-    const MAIN_TABS = ['overview', 'datahub', 'review-queue', 'calendar', 'goals', 'automation', 'meetings', 'activity', 'kb'];
-    if (window._assistantDetailInitialTab) {
-        const wanted = window._assistantDetailInitialTab;
+    // Deep-link to a specific section. 'goals' (and other tabs that don't depend on the
+    // assistant-context fetch below) can activate immediately; every other target —
+    // review-queue/datahub/calendar main tabs (e.g. issue #178's per-assistant dashboard
+    // Quick Actions, or chat's "View in Review Queue" link) and the Configuration child
+    // tabs (e.g. post-OAuth returning to Connections) — needs that data first, so it's
+    // consumed by the matching block after "Load & hydrate" below. Activating a
+    // records-backed queue early would render it with the wrong (default 'posts') renderer.
+    if (window._assistantDetailInitialTab === 'goals') {
         window._assistantDetailInitialTab = null;
-        if (MAIN_TABS.includes(wanted)) {
-            window._activateMainTab?.(wanted);
-        } else {
-            const target = document.querySelector(`.detail-tab-btn[data-tab="${wanted}"]`);
-            if (target) target.click();
-        }
+        window._activateMainTab?.('goals');
     }
 
     // ── Platform handle toggles ───────────────────────────────────
@@ -2638,6 +2633,23 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         _wirePostingSchedule();
         _renderKickOff(assistantId);
         window._initReviewMeetings?.(assistantId);
+
+        // Deep-link (continued from above): review-queue/datahub/calendar main tabs read
+        // window._detailReviewQueue (just set by _applyDashboardRegistry above) and other
+        // data hydrated here, so they're only safe to activate now — e.g. chat's "View in
+        // Review Queue" link (chat-session.js / workspace.html's ?view=assistant-detail&tab=)
+        // must not fire detailRqOpenStatus() before _detailReviewQueue.kind is known, or a
+        // records-backed queue would render with the wrong (default 'posts') renderer.
+        if (window._assistantDetailInitialTab) {
+            const wanted = window._assistantDetailInitialTab;
+            window._assistantDetailInitialTab = null;
+            if (document.querySelector(`.main-tab-btn[data-maintab="${wanted}"]`)) {
+                window._activateMainTab?.(wanted);
+            } else {
+                const target = document.querySelector(`.detail-tab-btn[data-tab="${wanted}"]`);
+                if (target) target.click();
+            }
+        }
     } catch (e) {
         console.error('Failed to load assistant detail:', e);
     }

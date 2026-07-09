@@ -2313,6 +2313,15 @@ function formatCurrency(amount, currency) {
         if (d) await loadView('assistant-setup', { kind: 'draft', draftId: d.id, onboardingPath: d.onboardingPath, displayName: d.displayName, currentStep: d.currentStep });
         else await loadView('dashboard');
       } catch { await loadView('dashboard'); }
+    } else if (viewParam === 'assistant-detail' && qs.get('assistantId')) {
+      // Deep-link into a specific assistant's detail page and (optionally) a specific
+      // tab — used by the chat "View in Review Queue" link (chat-session.js) so a
+      // completed task in assistant-chat.html can hand the user straight to the tab
+      // where the result landed.
+      history.replaceState(null, '', window.location.pathname);
+      const tabParam = qs.get('tab');
+      if (tabParam) window._assistantDetailInitialTab = tabParam;
+      await loadView('assistant-detail', qs.get('assistantId'));
     } else if (viewParam && routes[viewParam]) {
       history.replaceState(null, '', window.location.pathname);
       await loadView(viewParam);
