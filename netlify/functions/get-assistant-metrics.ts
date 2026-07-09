@@ -5,7 +5,7 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, gte, sql, count } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, scheduledPosts, taskRuns, userProfiles } from '../../db/schema';
+import { aiAssistants, scheduledPosts, taskRuns, userProfiles, leads } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
 import { parseRoiPeriod, roiPeriodStart } from '../../src/utils/roi-period';
@@ -49,7 +49,20 @@ export default withLambda(async (event) => {
         const period = parseRoiPeriod(event.queryStringParameters?.period);
         const periodStart = roiPeriodStart(period);
 
-        const [postRows, profileRow, mult, [{ postsInPeriod }], [{ taskRunsInPeriod }]] = await Promise.all([
+        // Issue #110 (follow-up): roi-stats.ts (dashboard) sums leads generated org-wide
+        // into its hero figure, because the `leads` table has no assistantId to attribute
+        // rows to a specific assistant. That's fine for the org total, but left this
+        // per-assistant endpoint permanently short of the dashboard by however many leads
+        // came in during the period — even for an org with a single assistant, where the
+        // org total and this assistant's total should be identical. Since attribution is
+        // only unambiguous when there's exactly one assistant in the org, count leads here
+        // too, but only when that holds.
+        const [assistantCountRow] = await withTenant(orgId, (tx) =>
+            tx.select({ c: count() }).from(aiAssistants).where(eq(aiAssistants.organisationId, orgId))
+        );
+        const isOnlyAssistantInOrg = Number(assistantCountRow?.c ?? 0) === 1;
+
+        const [postRows, profileRow, mult, [{ postsInPeriod }], [{ taskRunsInPeriod }], [{ leadsInPeriod }]] = await Promise.all([
             db.select({
                 status: scheduledPosts.status,
                 platform: scheduledPosts.platform,
@@ -84,6 +97,15 @@ export default withLambda(async (event) => {
                   eq(taskRuns.status, 'completed'),
                   gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, periodStart.toISOString())
               )),
+
+            // Org-wide, since `leads` has no assistantId — only meaningful to fold in when
+            // this is the org's sole assistant (see isOnlyAssistantInOrg above).
+            db.select({ leadsInPeriod: count() })
+              .from(leads)
+              .where(and(
+                  eq(leads.organisationId, orgId),
+                  gte(leads.createdAt, periodStart)
+              )),
         ]);
 
         const prefs = (profileRow[0]?.preferences as Record<string, any>) || {};
@@ -102,9 +124,12 @@ export default withLambda(async (event) => {
             if (PUBLISHED_STATUSES.has(r.status)) { byPlatform[p].published += r.c; totalPublished += r.c; }
         }
 
-        // Same formula as roi-stats.ts (posts × content_drafted + completed task runs × tasks_completed)
-        // so a single-assistant org sees identical hero figures on both pages.
-        const totalMinutesInPeriod = Number(postsInPeriod) * mult.content_drafted + Number(taskRunsInPeriod) * mult.tasks_completed;
+        // Same formula as roi-stats.ts (posts × content_drafted + completed task runs ×
+        // tasks_completed + leads × leads_generated) so a single-assistant org sees
+        // identical hero figures on both pages. Leads only count in when unambiguous.
+        const totalMinutesInPeriod = Number(postsInPeriod) * mult.content_drafted
+            + Number(taskRunsInPeriod) * mult.tasks_completed
+            + (isOnlyAssistantInOrg ? Number(leadsInPeriod) * mult.leads_generated : 0);
         const hoursSaved = parseFloat((totalMinutesInPeriod / 60).toFixed(1));
         const gbpSaved = hourlyRateGbp ? parseFloat((hoursSaved * hourlyRateGbp).toFixed(2)) : null;
 
