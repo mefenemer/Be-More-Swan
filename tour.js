@@ -197,16 +197,23 @@
   // page keeps in sync with the server (see workspace.html initSoundToggles).
   let narrationVoice = null;
   const FEMALE_BRITISH_HINTS = /female|serena|kate|fiona|martha|amy|emma|hazel|sonia|libby/i;
+  // Modern engines (Edge, Safari, Chrome OS) ship higher-fidelity voice variants
+  // alongside the classic robotic ones — prefer those so the tour sounds human.
+  const HIGH_QUALITY_HINTS = /natural|enhanced|premium|neural|online/i;
 
   function pickNarrationVoice() {
     if (!window.speechSynthesis) return null;
     const voices = window.speechSynthesis.getVoices();
     if (!voices.length) return null;
     const british = voices.filter((v) => v.lang === 'en-GB' || v.lang === 'en_GB');
+    const englishFemale = voices.filter((v) => /^en/i.test(v.lang) && FEMALE_BRITISH_HINTS.test(v.name));
     return (
+      british.find((v) => HIGH_QUALITY_HINTS.test(v.name) && FEMALE_BRITISH_HINTS.test(v.name)) ||
       british.find((v) => FEMALE_BRITISH_HINTS.test(v.name)) ||
+      british.find((v) => HIGH_QUALITY_HINTS.test(v.name)) ||
       british[0] ||
-      voices.find((v) => /^en/i.test(v.lang) && FEMALE_BRITISH_HINTS.test(v.name)) ||
+      englishFemale.find((v) => HIGH_QUALITY_HINTS.test(v.name)) ||
+      englishFemale[0] ||
       null
     );
   }
@@ -227,8 +234,8 @@
     if (!narrationVoice) narrationVoice = pickNarrationVoice();
     if (narrationVoice) utterance.voice = narrationVoice;
     utterance.lang = 'en-GB';
-    utterance.pitch = 1;
-    utterance.rate = 0.95; // slightly slower — calmer, easier to follow alongside the spotlight
+    utterance.pitch = 1.08; // a touch brighter than flat — reads as warmer/more alive, less robotic
+    utterance.rate = 1.02;  // a natural conversational pace instead of a slow monotone drawl
     window.speechSynthesis.speak(utterance);
   }
 
