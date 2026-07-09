@@ -2784,7 +2784,7 @@ export const blogAbStats = pgTable("blog_ab_stats", {
 // ────────────────────────────────────────────────────────────────────────────
 // Lead Generator — Outbound Discovery Layer
 // Design: docs/lead-generator-discovery-plan.md. SQL: db/lead-discovery.sql
-// (apply manually — no drizzle-kit push). Turns the inbound Lead Qualifier
+// (apply manually — no drizzle-kit push). Turns the inbound Lead Generator
 // (roleKey `lead_qualifier`) into a proactive outbound discovery engine.
 //
 // NOTE: distinct from the `leads` table above (that is Be More Swan's OWN

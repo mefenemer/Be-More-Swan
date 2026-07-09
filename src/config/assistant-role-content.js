@@ -52,7 +52,7 @@
     },
 
     lead_qualifier: {
-      name: 'The Lead Qualifier',
+      name: 'The Lead Generator',
       category: 'Marketing & Sales',
       iconKey: 'chart',
       iconColor: 'blue',
