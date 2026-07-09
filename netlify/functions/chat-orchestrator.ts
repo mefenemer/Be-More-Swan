@@ -190,13 +190,16 @@ ${parameters}
 </strict_configuration>`;
 }
 
-// Plain conversational reply, no structured UI.
+// Plain conversational reply, no structured UI. This is the fallback for every roleKey
+// that has no AssistantRoute below — nothing this route says is ever persisted (no
+// assistant_records row, no post, no email), so it must never claim otherwise.
 const defaultRoute: AssistantRoute = {
     model: DEFAULT_MODEL,
     maxTokens: 1024,
     buildRolePrompt: (rc) => [
         sharedContextBlock(rc),
         'Reply conversationally in plain text. Be concise, warm, and practical. Do not use markdown headings.',
+        'IMPORTANT: this chat is conversational only — you cannot actually create, save, schedule, publish, or send anything from here, and nothing you draft in this conversation is stored anywhere else in the app (not in the Review Queue, Calendar, or Data Hub). Never tell the user something has been "created", "scheduled", "added to your Review Queue", or similar — you may draft copy, ideas, or advice in the chat itself, but if they want it actually created/scheduled they must use the relevant tool elsewhere in their dashboard (e.g. the assistant\'s dashboard tools, Review Queue, or Calendar).',
     ].join('\n\n'),
     parseResponse: (raw) => ({ content: raw.trim(), uiElement: null }),
 };
