@@ -464,13 +464,10 @@
   <!-- ── HOME: onboarding answers + Operating File card index ─────── -->
   <div id="tab-profile-home" class="detail-tab-content space-y-6">
 
-  <!-- Read-only summary of every answer captured during onboarding (populated by assistants.js) -->
+  <!-- Read-only summary of every answer captured during onboarding (populated by assistants.js).
+       This is the single, collapsible reminder of what was captured — editing happens in the
+       relevant Operating File sub-section below (e.g. Operational Setup), not here (issue #169). -->
   <div id="onboarding-summary"></div>
-
-  <!-- Editable role-specific onboarding answers (assistant-setup.html roles) — rendered from
-       the role's AssistantOnboardingSchemas entry by _renderRoleAnswersEditor() in assistants.js;
-       values round-trip through aiAssistants.onboardingContext. Empty for social assistants. -->
-  <div id="role-answers-editor"></div>
 
   <!-- Operating File card list -->
   <div class="space-y-3">
