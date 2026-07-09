@@ -3363,7 +3363,7 @@ function priorityBadge(p) {
 }
 async function api(url, opts) {
   const r = await fetch(url, opts);
-  if (!r.ok) { const d = await r.json().catch(()=>({})); throw new Error(d.error || r.statusText); }
+  if (!r.ok) { const d = await r.json().catch(()=>({})); throw new Error(d.error || r.statusText || `Request failed (HTTP ${r.status}).`); }
   return r.json();
 }
 

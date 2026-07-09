@@ -483,7 +483,7 @@ export default withLambda(async (event) => {
         return json(200, { ok: true, status: finalStatus });
     }
 
-    return { statusCode: 405, body: 'Method Not Allowed' };
+    return json(405, { error: 'Method Not Allowed.' });
 });
 
 /**
