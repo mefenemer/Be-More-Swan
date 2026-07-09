@@ -1055,7 +1055,7 @@ async function _initAssistantNotifPrefs() {
         if (!res.ok) throw new Error('Load failed');
         const { categories } = await res.json();
         // Role-aware: post/publishing alerts only apply to roles that actually publish
-        // content. Non-social roles (Lead Qualifier, AR Clerk, Support, …) never draft or
+        // content. Non-social roles (Lead Generator, AR Clerk, Support, …) never draft or
         // publish posts, so the registry hides "Content & Publishing" for them — mirroring
         // how the Review-alert cadence card is gated in _applyDashboardRegistry.
         const registry = window.AssistantDashboardRegistry;

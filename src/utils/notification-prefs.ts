@@ -177,7 +177,7 @@ export function categoryForType(type: string): PrefCategory {
 
 // ── Role-aware applicability of scope:'assistant' categories ──────────────────
 // Some assistant-scope categories only make sense for roles that publish content.
-// Non-publishing roles (Lead Qualifier, AR Clerk, Tier-1 Support, CRM Enricher,
+// Non-publishing roles (Lead Generator, AR Clerk, Tier-1 Support, CRM Enricher,
 // Meeting Note-Taker) never draft or publish posts, so those categories are hidden
 // in the UI and rejected on write. This is the single source of truth; the frontend
 // registry mirrors it via the `hasContentPublishing` module flag

@@ -73,7 +73,7 @@ check('role filtering — each assistant only sees metrics for its role', () => 
     const arc = availableMetricsForRole('accounts_receivable_clerk', ['instagram']).map(m => m.key);
     assert.deepEqual(arc.sort(), ['cash_recovered', 'invoices_chased']);
 
-    // Lead Qualifier sees its two lead metrics; Support sees tickets; nobody bleeds across.
+    // Lead Generator sees its two lead metrics; Support sees tickets; nobody bleeds across.
     assert.deepEqual(availableMetricsForRole('lead_qualifier', []).map(m => m.key).sort(), ['leads_scored', 'qualified_leads']);
     assert.deepEqual(availableMetricsForRole('tier1_support_agent', []).map(m => m.key), ['tickets_resolved']);
     assert.deepEqual(availableMetricsForRole('crm_enricher', []).map(m => m.key), ['records_enriched']);

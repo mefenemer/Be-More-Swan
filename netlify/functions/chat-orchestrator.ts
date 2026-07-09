@@ -434,7 +434,7 @@ async function retrieveKnowledgeBase(
 }
 
 const ROUTES: Record<string, AssistantRoute> = {
-    // Tier 1, Batch 1 — Lead Qualifier. Scores inbound leads against the ideal-customer
+    // Tier 1, Batch 1 — Lead Generator. Scores inbound leads against the ideal-customer
     // profile captured at hire time (targetIndustries / minHeadcount / salesTone, see
     // src/config/assistant-onboarding-schemas.js). Wire shape: reply + lead_scoring_card
     // uiElement, matching the LeadScoringCard renderer in disruptive-ui-registry.js.

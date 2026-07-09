@@ -92,12 +92,12 @@
         ],
       },
     ],
-    // Tier 1, Batch 1 — Lead Qualifier. Captures the ideal customer profile the
+    // Tier 1, Batch 1 — Lead Generator. Captures the ideal customer profile the
     // orchestrator scores every inbound lead against, then how it runs operationally.
     lead_qualifier: [
       {
         title: 'Who is your ideal customer?',
-        description: 'Your Lead Qualifier scores every enquiry against this profile, so you only spend time on leads worth chasing.',
+        description: 'Your Lead Generator scores every enquiry against this profile, so you only spend time on leads worth chasing.',
         fields: [
           {
             key: 'targetIndustries',
@@ -136,7 +136,7 @@
       },
       {
         title: 'Operational set-up',
-        description: 'How your Lead Qualifier runs day to day — when it scores leads, where they come from, and where the good ones go.',
+        description: 'How your Lead Generator runs day to day — when it scores leads, where they come from, and where the good ones go.',
         operational: true,
         fields: [
           {

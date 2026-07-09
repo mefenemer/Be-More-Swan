@@ -1,7 +1,7 @@
 -- Lead Generator — Outbound Discovery Layer.
 -- Design: docs/lead-generator-discovery-plan.md. Drizzle mirror: db/schema.ts
 -- (discoveryCampaigns / discoverySchedules / discoveryGuardrails / discoveryJobs /
--- discoveredLeads). Turns the inbound Lead Qualifier (roleKey `lead_qualifier`)
+-- discoveredLeads). Turns the inbound Lead Generator (roleKey `lead_qualifier`)
 -- into a proactive outbound discovery engine.
 --
 -- NOTE: distinct from the `leads` table (Be More Swan's OWN trial/upgrade sales

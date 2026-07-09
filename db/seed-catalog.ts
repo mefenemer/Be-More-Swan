@@ -83,7 +83,7 @@ const CATALOG = [
     },
     {
         roleKey: 'lead_qualifier',
-        name: 'The Lead Qualifier',
+        name: 'The Lead Generator',
         description: 'Researches inbound leads, scores them based on your company criteria, and drafts personalised outreach emails — so your sales team only calls the right people.',
         category: 'Marketing & Sales',
         iconKey: 'chart',
