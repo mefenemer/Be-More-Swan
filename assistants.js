@@ -1451,15 +1451,14 @@ if (!window._detailTabsDelegated) {
 }
 
 
-// Read-only "Your Onboarding Answers" summary — guarantees every answer the user gave
+// Read-only "Your Onboarding Answers" summary — the single place every answer the user gave
 // during onboarding is visible on the detail page, regardless of which editable fields are
 // wired below (e.g. Trigger/Content Source are captured as label strings the radios can't bind).
 // Sourced from the structured onboardingContext (data.context) + configuration.inputs.
 //
-// Schema-driven roles: only the OPERATIONAL fields are folded in here — the non-operational
-// ones are already shown, editable, immediately below in the "Setup Answers" card
-// (_renderRoleAnswersEditor). Including both would show the same answer twice in a row on
-// the same page (see issue #169).
+// Schema-driven roles: ALL of the role's onboarding fields are folded in here as a read-only
+// reminder. Editing them happens in the relevant profile sub-section (Operational Setup —
+// see _renderOperationSection) rather than in a second copy on this home tab (see issue #169).
 function _renderOnboardingSummary(data) {
     const host = document.getElementById('onboarding-summary');
     if (!host) return;
@@ -1469,10 +1468,10 @@ function _renderOnboardingSummary(data) {
     const MISSING = '⚠️ [MISSING - PLEASE UPDATE]';
     const clean = (v) => (v === null || v === undefined) ? '' : String(v).trim();
 
-    // Roles onboarded via the schema wizard capture Trigger/Content Source under the shared
-    // Operational Set-Up step (surfaced by schemaRows below), so drop the legacy inputs-based
-    // rows for them to avoid showing each answer twice.
-    const schemaFields = _roleOperationalFields(data && data.roleKey);
+    // Roles onboarded via the schema wizard capture Trigger/Content Source under their own
+    // schema fields (surfaced by schemaRows below), so drop the legacy inputs-based rows for
+    // them to avoid showing each answer twice.
+    const schemaFields = _roleSchemaFields(data && data.roleKey);
     const hasSchemaOperational = schemaFields.length > 0;
 
     const objectiveLabels = { brand_awareness: 'Brand Awareness', lead_generation: 'Lead Generation', direct_sales: 'Direct Sales', community_engagement: 'Community & Engagement' };
@@ -1498,11 +1497,10 @@ function _renderOnboardingSummary(data) {
         ]),
     ].filter(([, v]) => v && v !== MISSING);
 
-    // Operational answers captured by the schema wizard (assistant-setup.html) live in
-    // onboardingContext under the schema's own keys — surface them via the role's
-    // AssistantOnboardingSchemas entry so non-social roles aren't shown as "no answers".
-    // (Non-operational schema answers are intentionally excluded — see _roleOperationalFields
-    // above; they render editable in the "Setup Answers" card instead.)
+    // Answers captured by the schema wizard (assistant-setup.html) live in onboardingContext
+    // under the schema's own keys — surface them via the role's AssistantOnboardingSchemas
+    // entry so non-social roles aren't shown as "no answers". They're editable in the
+    // Operational Setup profile sub-section (_renderOperationSection), not here.
     const schemaRows = schemaFields
         .map(f => [f.label || f.key, _formatSchemaAnswer(f, ctx[f.key])])
         .filter(([, v]) => v !== '');
@@ -1877,22 +1875,6 @@ function _roleSchemaFields(roleKey) {
     return _roleSchemaSteps(roleKey).flatMap(s => (s.fields || []).filter(f => f && f.key && f.type));
 }
 
-// Fields from the role's operational step(s) (step.operational === true) — these render in
-// the profile's "Operational Setup" section (_renderOperationSection). [] for social/legacy.
-function _roleOperationalFields(roleKey) {
-    return _roleSchemaSteps(roleKey)
-        .filter(s => s.operational)
-        .flatMap(s => (s.fields || []).filter(f => f && f.key && f.type));
-}
-
-// Fields NOT in an operational step — these render in the "Setup Answers" card
-// (_renderRoleAnswersEditor), so operational settings aren't duplicated across both surfaces.
-function _roleNonOperationalFields(roleKey) {
-    return _roleSchemaSteps(roleKey)
-        .filter(s => !s.operational)
-        .flatMap(s => (s.fields || []).filter(f => f && f.key && f.type));
-}
-
 // Human-readable value for a schema answer (option label for radio/dropdown,
 // Yes/No for toggles). '' means "not answered" and the row is omitted.
 function _formatSchemaAnswer(field, value) {
@@ -1905,9 +1887,9 @@ function _formatSchemaAnswer(field, value) {
     return String(value);
 }
 
-// Shared control renderer for schema-driven onboarding answers. Used by both the "Setup
-// Answers" card (idPrefix 'edit_onb_') and the Operational Setup section (idPrefix 'edit_op_').
-// Inputs get an id starting `edit_` (so the [id^="edit_"] autosave wiring picks them up) and
+// Shared control renderer for schema-driven onboarding answers, used by the Operational Setup
+// section (idPrefix 'edit_op_'). Inputs get an id starting `edit_` (so the [id^="edit_"]
+// autosave wiring picks them up) and
 // carry data-onboarding-key (so _detailCollect writes them back into onboardingContext under
 // their original keys). radio/dropdown render as a <select> for a compact edit surface.
 function _onboardingFieldControl(f, ctx, idPrefix) {
@@ -1948,45 +1930,15 @@ function _syncSchemaSelects(fields, ctx, idPrefix) {
     });
 }
 
-// Editable role-specific onboarding answers (drawer home, #role-answers-editor).
-// Rendered for roles onboarded via the schema wizard (assistant-setup.html) so the user can
-// revise those answers here. Only NON-operational fields appear — the operational ones live
-// in the dedicated Operational Setup section (_renderOperationSection) to avoid duplication.
-function _renderRoleAnswersEditor(data) {
-    const host = document.getElementById('role-answers-editor');
-    if (!host) return;
-    const fields = _roleNonOperationalFields(data.roleKey);
-    if (!fields.length) { host.innerHTML = ''; return; }
-    const ctx = (data.context && typeof data.context === 'object') ? data.context : {};
-    const esc = _escapeHtml;
-
-    host.innerHTML = `
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
-        <div class="mb-5">
-          <h3 class="text-lg font-bold text-gray-900">Setup Answers</h3>
-          <p class="text-sm text-gray-500 mt-1">The answers you gave when hiring this assistant. Edit them here — changes apply to everything it does from now on.</p>
-        </div>
-        <div class="space-y-5">
-          ${fields.map(f => `
-            <div>
-              <label for="edit_onb_${esc(f.key)}" class="block text-sm font-bold text-gray-700 mb-1">${esc(f.label || f.key)}</label>
-              ${f.helpText ? `<p class="text-xs text-gray-500 mb-2">${esc(f.helpText)}</p>` : ''}
-              ${_onboardingFieldControl(f, ctx, 'edit_onb_')}
-            </div>`).join('')}
-        </div>
-      </div>`;
-
-    _syncSchemaSelects(fields, ctx, 'edit_onb_');
-}
-
 // Role-specific Operational Setup section (profile ▸ Operational Setup tab). Schema-driven
-// roles render their operational-step fields into #operation-role-fields and hide the generic
-// Trigger/Content Source block (#operation-generic); social/legacy roles keep the generic block.
+// roles render ALL of their onboarding fields into #operation-role-fields — this is the one
+// editable home for those answers (see issue #169) — and hide the generic Trigger/Content
+// Source block (#operation-generic); social/legacy roles keep the generic block.
 function _renderOperationSection(data) {
     const host = document.getElementById('operation-role-fields');
     const generic = document.getElementById('operation-generic');
     if (!host) return;
-    const fields = _roleOperationalFields(data.roleKey);
+    const fields = _roleSchemaFields(data.roleKey);
     if (!fields.length) {
         host.innerHTML = '';
         if (generic) generic.classList.remove('hidden');
@@ -2311,11 +2263,10 @@ function _detailCollect(currentData) {
         primary_platforms: platforms,
     };
 
-    // Role-specific onboarding answers (schema-driven roles) — inputs in the Setup Answers
-    // card (#role-answers-editor) and the Operational Setup section (#operation-role-fields)
-    // both carry data-onboarding-key; write each back under its original onboardingContext key
-    // so assistant-setup.html answers stay editable here.
-    document.querySelectorAll('#role-answers-editor [data-onboarding-key], #operation-role-fields [data-onboarding-key]').forEach(el => {
+    // Role-specific onboarding answers (schema-driven roles) — inputs in the Operational Setup
+    // section (#operation-role-fields) carry data-onboarding-key; write each back under its
+    // original onboardingContext key so assistant-setup.html answers stay editable here.
+    document.querySelectorAll('#operation-role-fields [data-onboarding-key]').forEach(el => {
         const key = el.dataset.onboardingKey;
         if (!key) return;
         if (el.type === 'checkbox') {
@@ -2687,13 +2638,12 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         window.cachedContext = currentData.context || {};
 
         // Role-aware dashboard: KPI card copy + social-only module visibility
-        // (must run before attachAutoSave so the role-answers editor inputs exist).
+        // (must run before attachAutoSave so the operational-setup editor inputs exist).
         _applyDashboardRegistry(currentData);
         _detailHydrate(currentData);
         _renderMandateSuggestions(currentData);
         _renderOnboardingSummary(currentData);
         _renderOutreachEmailConnect(currentData);
-        _renderRoleAnswersEditor(currentData);
         _renderOperationSection(currentData);
         _renderMeetingsBrief(currentData);
         _hydrateAutonomousToggle(currentData);
