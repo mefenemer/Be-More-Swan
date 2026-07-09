@@ -2580,14 +2580,21 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         const archiveBtn = document.getElementById('btn-archive-assistant');
         if (archiveBtn) archiveBtn.onclick = async () => {
             const name = currentData.name || 'this assistant';
-            if (!confirm(`Archive "${name}"?\n\nThis permanently stops the assistant and removes it from your active workspace. Its history is kept for reporting, but this cannot be undone.`)) return;
-            archiveBtn.disabled = true;
-            try {
-                const r = await fetch(`/.netlify/functions/manage-assistant?id=${assistantId}`, { method: 'DELETE' });
-                if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'Failed to archive assistant.'); archiveBtn.disabled = false; return; }
-                window.showToast?.('Assistant archived.');
-                window.loadView?.('dashboard');
-            } catch { alert('Network error — please try again.'); archiveBtn.disabled = false; }
+            const message = `Archive "${name}"? This permanently stops the assistant and removes it from your active workspace. Its history is kept for reporting, but this cannot be undone.`;
+            const doArchive = async () => {
+                archiveBtn.disabled = true;
+                try {
+                    const r = await fetch(`/.netlify/functions/manage-assistant?id=${assistantId}`, { method: 'DELETE' });
+                    if (!r.ok) { const d = await r.json().catch(() => ({})); alert(d.error || 'Failed to archive assistant.'); archiveBtn.disabled = false; return; }
+                    window.showToast?.('Assistant archived.');
+                    window.loadView?.('dashboard');
+                } catch { alert('Network error — please try again.'); archiveBtn.disabled = false; }
+            };
+            if (window.showConfirmModal) {
+                window.showConfirmModal(message, doArchive, { title: 'Archive assistant?', confirmLabel: 'Yes, archive', cancelLabel: 'Keep assistant' });
+            } else if (confirm(message)) {
+                await doArchive();
+            }
         };
 
         // US-ADM-4.1.1: Show deprecation banner if assistant's master role is deprecated
