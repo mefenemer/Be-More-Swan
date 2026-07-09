@@ -855,6 +855,7 @@ window.showComplianceModals = function showComplianceModals(force) {
           <option value="fixed_ready_to_test">Fixed & Ready to Test</option>
           <option value="reported">Reported</option>
           <option value="backlog">Backlog</option>
+          <option value="on_hold">On Hold</option>
           <option value="fix_in_progress">Fix In Progress</option>
           <option value="merge">Merge</option>
           <option value="more_info_required">More Info Required</option>
@@ -6378,6 +6379,7 @@ async function gpSubmitReject() {
   const STATUS_BADGE = {
     reported:            ['Reported', 'bg-gray-100 text-gray-700'],
     backlog:             ['Backlog', 'bg-slate-100 text-slate-700'],
+    on_hold:             ['On Hold', 'bg-orange-100 text-orange-700'],
     fix_in_progress:     ['Fix In Progress', 'bg-blue-100 text-blue-700'],
     merge:               ['Merge', 'bg-indigo-100 text-indigo-700'],
     fixed_ready_to_test: ['Fixed & Ready to Test', 'bg-emerald-100 text-emerald-700'],

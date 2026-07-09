@@ -9,6 +9,8 @@
 --
 -- Lifecycle (status): reported → fix_in_progress → merge → fixed_ready_to_test → closed
 --                     ↘ backlog (super-admin defers the ticket for later investigation)
+--                     ↘ on_hold (super-admin is deciding whether to proceed, or other tickets
+--                                must be developed first — parked pending that decision) ↗
 --                     ↘ more_info_required (admin asks the user for detail) ↗
 --                     ↘ roadmap (feature request promoted to the Feature Roadmap; see db/feature-roadmap.sql)
 -- The threaded back-and-forth (admin status messages + user replies) lives in
@@ -32,7 +34,7 @@ CREATE TABLE IF NOT EXISTS issue_reports (
   image_data       TEXT,
   image_mime       TEXT,
 
-  -- reported | backlog | fix_in_progress | merge | fixed_ready_to_test | more_info_required | closed | roadmap
+  -- reported | backlog | on_hold | fix_in_progress | merge | fixed_ready_to_test | more_info_required | closed | roadmap
   status           TEXT NOT NULL DEFAULT 'reported',
 
   created_at       TIMESTAMP NOT NULL DEFAULT now(),
@@ -52,7 +54,7 @@ BEGIN
   ALTER TABLE issue_reports DROP CONSTRAINT IF EXISTS issue_reports_status_check;
   ALTER TABLE issue_reports
     ADD CONSTRAINT issue_reports_status_check
-    CHECK (status IN ('reported', 'backlog', 'fix_in_progress', 'merge', 'fixed_ready_to_test', 'more_info_required', 'closed', 'roadmap'));
+    CHECK (status IN ('reported', 'backlog', 'on_hold', 'fix_in_progress', 'merge', 'fixed_ready_to_test', 'more_info_required', 'closed', 'roadmap'));
 END $$;
 
 -- Threaded conversation: admin status updates / supporting messages, and user replies

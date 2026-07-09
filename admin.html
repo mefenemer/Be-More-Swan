@@ -3369,14 +3369,15 @@ async function api(url, opts) {
 
 // ── Issue Reports (Testing) ──────────────────────────────────────────────────
 const IR_API = '/.netlify/functions/admin-issue-reports';
-const IR_STATUSES = ['reported','backlog','fix_in_progress','merge','fixed_ready_to_test','more_info_required','closed','roadmap'];
+const IR_STATUSES = ['reported','backlog','on_hold','fix_in_progress','merge','fixed_ready_to_test','more_info_required','closed','roadmap'];
 const IR_STATUS_LABEL = {
-  reported: 'Reported', backlog: 'Backlog', fix_in_progress: 'Fix In Progress', merge: 'Merge',
+  reported: 'Reported', backlog: 'Backlog', on_hold: 'On Hold', fix_in_progress: 'Fix In Progress', merge: 'Merge',
   fixed_ready_to_test: 'Fixed & Ready to Test', more_info_required: 'More Info Required', closed: 'Closed',
   roadmap: 'On Roadmap',
 };
 const IR_STATUS_CLS = {
   reported: 'bg-gray-100 text-gray-700', backlog: 'bg-slate-100 text-slate-700',
+  on_hold: 'bg-orange-100 text-orange-700',
   fix_in_progress: 'bg-blue-100 text-blue-700', merge: 'bg-indigo-100 text-indigo-700',
   fixed_ready_to_test: 'bg-emerald-100 text-emerald-700', more_info_required: 'bg-amber-100 text-amber-800',
   closed: 'bg-gray-200 text-gray-500', roadmap: 'bg-violet-100 text-violet-700',
