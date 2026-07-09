@@ -147,51 +147,6 @@
     </div>
   </div>
 
-  <!-- ── Main tab bar ───────────────────────────────────────────────
-       Top-level sections. Configuration nests the existing child tab control. -->
-  <div class="mb-8 border-b border-gray-200 overflow-x-auto">
-    <nav class="-mb-px flex gap-x-8" aria-label="Assistant sections">
-      <!-- ── Core four — the unified template, same order on every assistant ──
-           Overview · Data Hub · Review Queue · Calendar. All four are ALWAYS shown
-           (assistant-dashboard-registry.js gives every role a hubTab + reviewQueue);
-           only their labels/content differ per role. -->
-      <button type="button" data-maintab="overview"      class="main-tab-btn active-tab">Overview</button>
-      <!-- Data Hub — the assistant's workspace/database. Label comes from the role's hubTab
-           (Content Library for social/blog; Leads / Ledger / Tickets / … for data-hub roles). -->
-      <button type="button" id="maintab-btn-datahub" data-maintab="datahub" class="main-tab-btn">
-        <span id="datahub-tab-label">Data Hub</span>
-      </button>
-      <!-- Review Queue — items awaiting the human's approval (posts pending_approval, or records
-           with approval_status='pending_approval'). The core human-in-the-loop gate. -->
-      <button type="button" id="maintab-btn-review-queue" data-maintab="review-queue" class="main-tab-btn">Review
-        <span id="detail-rq-pending-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
-      </button>
-      <!-- Calendar — this assistant's scheduled work / timeline (assistant-calendar.js scopes
-           the global calendar to this assistant). Always shown. -->
-      <button type="button" id="maintab-btn-calendar" data-maintab="calendar" class="main-tab-btn">Calendar</button>
-      <!-- ── Secondary tabs — role-gated, after the core four ── -->
-      <button type="button" data-maintab="goals"         class="main-tab-btn">Goals</button>
-      <button type="button" data-maintab="workflow"      class="main-tab-btn">Workflow</button>
-      <button type="button" data-maintab="meetings"      class="main-tab-btn" title="Progress Reviews: the Kick Off Meeting and your check-in history. Rules — including Learned Directives — live in the Assistant Profile.">Progress Reviews
-        <span id="meetings-kickoff-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-blue-100 text-blue-700 text-[10px] font-black rounded-full inline-flex items-center justify-center">!</span>
-      </button>
-      <button type="button" data-maintab="activity"      class="main-tab-btn">Activity</button>
-      <!-- Knowledge Base — support-only (kbTab, tier1_support_agent); manages the KB articles
-           that ground the assistant's answers (assistant-knowledge-base.js → kb-articles.ts).
-           Placed last; hidden by default, shown by _applyDashboardRegistry when a kbTab exists. -->
-      <button type="button" id="maintab-btn-kb" data-maintab="kb" class="main-tab-btn hidden">
-        <span id="kb-tab-label">Knowledge Base</span>
-      </button>
-    </nav>
-  </div>
-
-  <!-- ── MAIN TAB: Overview ─────────────────────────────────────────── -->
-  <!-- Issue #181: Overview is a read-only snapshot — Performance + Active Workflows only.
-       Actionable buttons live on the tabs they act on: the primary action bar + role-specific
-       actions moved to Data Hub (#maintab-datahub), the Relationship checklist to Activity
-       (#maintab-activity). -->
-  <div id="maintab-overview" class="main-tab-content">
-
   <!-- Kick Off CTA — shown when assistant hasn't been kicked off yet -->
   <div id="meetings-kickoff-cta" class="hidden bg-blue-50 border border-blue-200 rounded-2xl px-5 py-4 mb-6 flex items-center justify-between gap-4">
     <div class="flex items-center gap-3 min-w-0">
@@ -204,7 +159,7 @@
     <button onclick="window._activateMainTab('meetings')" class="shrink-0 px-4 py-2 text-sm font-extrabold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition shadow-sm cursor-pointer">Go to Meetings</button>
   </div>
 
-  <!-- Impact & ROI — elevated to top of Overview (most important executive metric) -->
+  <!-- Impact & ROI — elevated to top of the page (most important executive metric) -->
   <div id="assistant-metrics-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6 hidden">
     <div class="flex items-center justify-between mb-5">
       <div>
@@ -249,7 +204,8 @@
     <div id="metrics-by-platform" class="space-y-2"></div>
   </div>
 
-  <!-- Performance KPIs — positioned directly after Impact & ROI in Overview -->
+  <!-- Performance KPIs — issue #183: moved beneath the assistant name/header section (out of the
+       now-removed Overview tab) so it's visible without needing to click into a tab. -->
   <div class="mb-8">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Performance Metrics</h3>
@@ -326,10 +282,43 @@
     <p id="metric-value-wins" class="hidden text-xs text-emerald-700 font-medium mt-3"></p>
   </div>
 
-  <!-- Goals section is relocated here (directly under Recent Activity) by initAssistantDetail;
-       its markup lives in #tab-goals further down and is moved into this slot on load. -->
-
-  </div><!-- /maintab-overview -->
+  <!-- ── Main tab bar ───────────────────────────────────────────────
+       Top-level sections. Configuration nests the existing child tab control. -->
+  <div class="mb-8 border-b border-gray-200 overflow-x-auto">
+    <nav class="-mb-px flex gap-x-8" aria-label="Assistant sections">
+      <!-- ── Core three — the unified template, same order on every assistant ──
+           Data Hub · Review Queue · Calendar. All three are ALWAYS shown
+           (assistant-dashboard-registry.js gives every role a hubTab + reviewQueue);
+           only their labels/content differ per role. Issue #183: the Overview tab was
+           removed — its Performance cards now live above, directly under the assistant name. -->
+      <!-- Data Hub — the assistant's workspace/database. Label comes from the role's hubTab
+           (Content Library for social/blog; Leads / Ledger / Tickets / … for data-hub roles). -->
+      <button type="button" id="maintab-btn-datahub" data-maintab="datahub" class="main-tab-btn active-tab">
+        <span id="datahub-tab-label">Data Hub</span>
+      </button>
+      <!-- Review Queue — items awaiting the human's approval (posts pending_approval, or records
+           with approval_status='pending_approval'). The core human-in-the-loop gate. -->
+      <button type="button" id="maintab-btn-review-queue" data-maintab="review-queue" class="main-tab-btn">Review
+        <span id="detail-rq-pending-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
+      </button>
+      <!-- Calendar — this assistant's scheduled work / timeline (assistant-calendar.js scopes
+           the global calendar to this assistant). Always shown. -->
+      <button type="button" id="maintab-btn-calendar" data-maintab="calendar" class="main-tab-btn">Calendar</button>
+      <!-- ── Secondary tabs — role-gated, after the core three ── -->
+      <button type="button" data-maintab="goals"         class="main-tab-btn">Goals</button>
+      <button type="button" data-maintab="workflow"      class="main-tab-btn">Workflow</button>
+      <button type="button" data-maintab="meetings"      class="main-tab-btn" title="Progress Reviews: the Kick Off Meeting and your check-in history. Rules — including Learned Directives — live in the Assistant Profile.">Progress Reviews
+        <span id="meetings-kickoff-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-blue-100 text-blue-700 text-[10px] font-black rounded-full inline-flex items-center justify-center">!</span>
+      </button>
+      <button type="button" data-maintab="activity"      class="main-tab-btn">Activity</button>
+      <!-- Knowledge Base — support-only (kbTab, tier1_support_agent); manages the KB articles
+           that ground the assistant's answers (assistant-knowledge-base.js → kb-articles.ts).
+           Placed last; hidden by default, shown by _applyDashboardRegistry when a kbTab exists. -->
+      <button type="button" id="maintab-btn-kb" data-maintab="kb" class="main-tab-btn hidden">
+        <span id="kb-tab-label">Knowledge Base</span>
+      </button>
+    </nav>
+  </div>
 
   <!-- ── MAIN TAB: Activity ─────────────────────────────────────────── -->
   <div id="maintab-activity" class="main-tab-content hidden">
@@ -413,7 +402,7 @@
        enrichment diffs / meeting notes / ledger / tickets. Populated by
        assistant-data-hub.js from the hubTab config; records live in
        assistant_records (netlify/functions/assistant-records.ts). -->
-  <div id="maintab-datahub" class="main-tab-content hidden">
+  <div id="maintab-datahub" class="main-tab-content">
 
     <!-- Primary action bar (Epic 2.1; relocated here by issue #181) — the two most common
          intents, front and centre on the assistant's workspace tab. -->
