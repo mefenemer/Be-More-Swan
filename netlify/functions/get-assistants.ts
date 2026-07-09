@@ -1,9 +1,10 @@
 import { Handler } from '@netlify/functions';
-import { and, eq, sql, inArray } from 'drizzle-orm';
+import { and, eq, gte, sql, count, inArray } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, contentGenerationJobs, goals, scheduledPosts, userProfiles } from '../../db/schema';
+import { aiAssistants, contentGenerationJobs, goals, scheduledPosts, taskRuns, userProfiles, leads } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
+import { parseRoiPeriod, roiPeriodStart } from '../../src/utils/roi-period';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -32,8 +33,16 @@ export default withLambda(async (event) => {
 
         const assistantIds = assistants.map(a => a.id);
 
+        // Issue #110: the "~Xh saved / £Y ROI" figures on these cards must match the
+        // assistant detail page's Impact & ROI tab (get-assistant-metrics.ts) — same
+        // period window, same formula (posts + completed task runs + org leads when this
+        // is the org's sole assistant), not the old all-time posts-only estimate.
+        const period = parseRoiPeriod(event.queryStringParameters?.period);
+        const periodStart = roiPeriodStart(period);
+        const isOnlyAssistantInOrg = assistantIds.length === 1;
+
         // Run goals + post metrics + hourly rate in parallel
-        const [goalRows, postRows, activeJobRows, profileRow, mult] = await Promise.all([
+        const [goalRows, postRows, activeJobRows, profileRow, mult, postsInPeriodRows, taskRunsInPeriodRows, [{ leadsInPeriod }]] = await Promise.all([
             // SMART Goals AC2.1.1 — per-assistant goal status counts for dashboard card micro-summary.
             // goals has no RLS (owner-path, like content_rules), so query it on the owner connection.
             assistantIds.length > 0
@@ -80,6 +89,42 @@ export default withLambda(async (event) => {
                 .limit(1),
 
             getTimeMultipliers(),
+
+            // Posts drafted in the period, per assistant — same window as get-assistant-metrics.ts.
+            assistantIds.length > 0
+                ? db.select({ assistantId: scheduledPosts.assistantId, c: sql<number>`count(*)::int` })
+                    .from(scheduledPosts)
+                    .where(and(
+                        eq(scheduledPosts.organisationId, orgId),
+                        inArray(scheduledPosts.assistantId, assistantIds),
+                        gte(scheduledPosts.createdAt, periodStart),
+                    ))
+                    .groupBy(scheduledPosts.assistantId)
+                : Promise.resolve([] as { assistantId: number | null; c: number }[]),
+
+            // Completed task runs in the period, per assistant — windowed on
+            // COALESCE(completed_at, created_at), same as get-assistant-metrics.ts.
+            assistantIds.length > 0
+                ? db.select({ assistantId: taskRuns.assistantId, c: sql<number>`count(*)::int` })
+                    .from(taskRuns)
+                    .where(and(
+                        eq(taskRuns.organisationId, orgId),
+                        inArray(taskRuns.assistantId, assistantIds),
+                        eq(taskRuns.status, 'completed'),
+                        gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, periodStart.toISOString()),
+                    ))
+                    .groupBy(taskRuns.assistantId)
+                : Promise.resolve([] as { assistantId: number | null; c: number }[]),
+
+            // Org-wide leads in the period — `leads` has no assistantId, so this is only
+            // folded into a card's total when the org has exactly one assistant (see
+            // isOnlyAssistantInOrg above and get-assistant-metrics.ts for the same rule).
+            db.select({ leadsInPeriod: count() })
+                .from(leads)
+                .where(and(
+                    eq(leads.organisationId, orgId),
+                    gte(leads.createdAt, periodStart),
+                )),
         ]);
 
         // --- Goals summary ---
@@ -141,6 +186,17 @@ export default withLambda(async (event) => {
             activeJobCount.set(r.assistantId, r.c);
         }
 
+        const postsInPeriod = new Map<number, number>();
+        for (const r of postsInPeriodRows) {
+            if (r.assistantId == null) continue;
+            postsInPeriod.set(r.assistantId, r.c);
+        }
+        const taskRunsInPeriod = new Map<number, number>();
+        for (const r of taskRunsInPeriodRows) {
+            if (r.assistantId == null) continue;
+            taskRunsInPeriod.set(r.assistantId, r.c);
+        }
+
         // --- Hourly rate & ROI ---
         const prefs = (profileRow[0]?.preferences as Record<string, any>) || {};
         const hourlyRateGbp = prefs.hourlyRateGbp ? parseFloat(String(prefs.hourlyRateGbp)) : null;
@@ -148,7 +204,14 @@ export default withLambda(async (event) => {
         // Assemble final response
         const withMetrics = assistants.map(a => {
             const pm = postMetrics.get(a.id) || { totalCreated: 0, totalScheduled: 0, totalPublished: 0, byPlatform: {} };
-            const hoursSaved = parseFloat(((pm.totalCreated * mult.content_drafted) / 60).toFixed(1));
+
+            // Same formula/window as get-assistant-metrics.ts (posts + completed task runs +
+            // org leads when this is the org's sole assistant) so the dashboard/My Assistants
+            // cards always agree with the assistant detail page's Impact & ROI tab.
+            const totalMinutesInPeriod = (postsInPeriod.get(a.id) || 0) * mult.content_drafted
+                + (taskRunsInPeriod.get(a.id) || 0) * mult.tasks_completed
+                + (isOnlyAssistantInOrg ? Number(leadsInPeriod) * mult.leads_generated : 0);
+            const hoursSaved = parseFloat((totalMinutesInPeriod / 60).toFixed(1));
             const gbpSaved = hourlyRateGbp ? parseFloat((hoursSaved * hourlyRateGbp).toFixed(2)) : null;
             return {
                 ...a,
