@@ -283,20 +283,32 @@ window.initAssistantConnections = async function (assistantId, currentData) {
     }
 };
 
+// The same save feedback drives the Connections drawer header and the Overview status card,
+// either of which may be the one the user is looking at when they flip a switch.
+const _SAVE_STATUS_IDS = ['platforms-save-status', 'connections-save-status'];
+function _setPlatformSaveStatus(text) {
+    _SAVE_STATUS_IDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+    });
+}
+
 // Persist the per-assistant "Use for this assistant" toggle. Mirrors the old
 // _renderPlatformsTab save: recompute primary_platforms slugs + linked_integrations
 // + appliedDefaults.platforms, then PUT update-assistant-context.
 window._intToggleUseForAssistant = async function (connId, checked) {
     connId = Number(connId);
     if (checked) _assistantSelectedIds.add(connId); else _assistantSelectedIds.delete(connId);
+    // Repaint the Overview card off the new state so its pill/headline track the switch the
+    // user just flipped, wherever they flipped it. The drawer grid re-renders on next open.
+    window._renderConnectionsStatusCard();
     const checkedIds = Array.from(_assistantSelectedIds);
     const activeConns = _userConnections.filter(c => c.status === 'active' && c.userId);
     const checkedKeys = activeConns
         .filter(c => checkedIds.includes(c.id))
         .map(c => PLATFORM_KEY_MAP[c.serviceName.toLowerCase()] || c.serviceName.toLowerCase());
 
-    const statusEl = document.getElementById('platforms-save-status');
-    if (statusEl) statusEl.textContent = 'Saving…';
+    _setPlatformSaveStatus('Saving…');
     try {
         const updatedContext = { ...(window.cachedContext || {}), primary_platforms: checkedKeys, linked_integrations: checkedIds };
         const r = await fetch('/.netlify/functions/update-assistant-context', {
@@ -306,12 +318,16 @@ window._intToggleUseForAssistant = async function (connId, checked) {
         });
         if (r.ok) {
             window.cachedContext = updatedContext;
-            if (statusEl) { statusEl.textContent = '✓ Saved'; setTimeout(() => { if (statusEl.textContent === '✓ Saved') statusEl.textContent = ''; }, 2500); }
-        } else if (statusEl) {
-            statusEl.textContent = 'Error saving';
+            _setPlatformSaveStatus('✓ Saved');
+            setTimeout(() => {
+                const el = document.getElementById('platforms-save-status');
+                if (el && el.textContent === '✓ Saved') _setPlatformSaveStatus('');
+            }, 2500);
+        } else {
+            _setPlatformSaveStatus('Error saving');
         }
     } catch {
-        if (statusEl) statusEl.textContent = 'Error saving';
+        _setPlatformSaveStatus('Error saving');
     }
 };
 
@@ -335,6 +351,10 @@ async function _loadConnections() {
     } catch (e) {
         console.warn('Could not load connections:', e);
     }
+
+    // Overview status card first — it lives outside this grid and must render on every path,
+    // including the "nothing relevant to connect" empty state below.
+    window._renderConnectionsStatusCard();
 
     grid.innerHTML = '';
     const platforms = _relevantPlatforms();
@@ -421,45 +441,143 @@ function _queueConnectPermissionPrompts(platforms) {
     askNext();
 }
 
+// ── Overview ▸ Connections status card ───────────────────────────
+// Sits beside the Autopilot card and answers two questions at a glance: is each channel
+// connected and healthy, and is THIS assistant switched on for it. The switch writes the
+// same per-assistant state as "Use for this assistant" in the Connections drawer
+// (_intToggleUseForAssistant → primary_platforms + linked_integrations). Connecting,
+// reconnecting and disconnecting stay in the drawer, where the handle gate and the
+// troubleshooting flow live — a row that isn't connected links there instead of
+// re-implementing that gate.
+function _connSwitch(conn, label, on) {
+    return `
+        <label class="relative shrink-0 cursor-pointer">
+            <input type="checkbox" class="sr-only peer" ${on ? 'checked' : ''}
+                aria-label="Use ${_esc(label)} for this assistant"
+                onchange="window._intToggleUseForAssistant(${conn.id}, this.checked)">
+            <span class="block w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-emerald-700 peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-200 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:shadow-sm after:transition-all peer-checked:after:translate-x-full peer-checked:after:border-white"></span>
+        </label>`;
+}
+
+function _connStatusRow(platform, conn) {
+    const health = _connHealth(conn);
+    const isActive = !!conn && conn.status === 'active';
+    const on = isActive && _assistantSelectedIds.has(conn.id);
+    // Subtext carries the health when it needs attention, otherwise whether this
+    // assistant is switched on — the toggle beside it already shows on/off state.
+    const sub = !conn ? 'Connect it to publish here'
+        : health.problem ? health.label
+        : on ? 'Publishing enabled' : 'Connected, not in use';
+    const subTone = !conn ? 'text-gray-400' : health.problem ? 'text-amber-700' : on ? 'text-emerald-700' : 'text-gray-400';
+    const control = isActive
+        ? _connSwitch(conn, platform.label, on)
+        : `<button type="button" onclick="window._openBriefDrawer && window._openBriefDrawer('platforms')" class="shrink-0 px-2.5 py-1 text-xs font-bold rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">${conn ? 'Reconnect' : 'Connect'}</button>`;
+    return `
+        <div class="flex items-center justify-between gap-3 py-2">
+            <div class="flex items-center gap-2.5 min-w-0">
+                <span class="w-8 h-8 rounded-lg ${platform.iconBg} ${platform.iconText} flex items-center justify-center text-base shrink-0">${platform.emoji}</span>
+                <div class="min-w-0">
+                    <p class="text-sm font-bold text-gray-900 truncate">${_esc(platform.label)}</p>
+                    <p class="text-xs font-semibold ${subTone} truncate">${_esc(sub)}</p>
+                </div>
+            </div>
+            ${control}
+        </div>`;
+}
+
+// Rendered from whatever _loadConnections last fetched, so it never issues its own request.
+// Self-hides for roles with no connector platforms (their integrations are recipes in the
+// Connections drawer's "Synced actions" list, which carry their own enable toggles).
+window._renderConnectionsStatusCard = function () {
+    const card = document.getElementById('connections-status-card');
+    if (!card) return;
+    const list = document.getElementById('connections-status-list');
+    const platforms = _assistantScoped ? _relevantPlatforms() : [];
+    if (!list || !platforms.length) {
+        card.classList.add('hidden');
+        window._syncStatusRow && window._syncStatusRow();
+        return;
+    }
+    card.classList.remove('hidden');
+
+    const rows = platforms.map(p => ({ p, conn: _userConnections.find(c => _serviceMatchesPlatform(c.serviceName, p.id)) }));
+    const connected = rows.filter(r => r.conn && r.conn.status === 'active');
+    const enabled = connected.filter(r => _assistantSelectedIds.has(r.conn.id));
+
+    const pill = document.getElementById('connections-pill');
+    if (pill) {
+        const ok = connected.length > 0;
+        pill.textContent = ok ? `${enabled.length} of ${connected.length} on` : '● None connected';
+        pill.className = 'inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full ' +
+            (enabled.length ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500');
+    }
+    const headline = document.getElementById('connections-headline');
+    if (headline) {
+        headline.textContent = !connected.length
+            ? 'No channels connected yet'
+            : !enabled.length
+            ? 'Connected — but no channel is switched on for this assistant'
+            : `Posting to ${_listPhrase(enabled.map(r => r.p.label))}`;
+    }
+    // A toggle re-renders the list it lives in, so the switch the user just flipped is replaced
+    // mid-interaction. Put focus back on its successor, or keyboard users lose their place.
+    const focused = list.contains(document.activeElement) ? document.activeElement.getAttribute('aria-label') : null;
+    list.innerHTML = rows.map(r => _connStatusRow(r.p, r.conn)).join('');
+    if (focused) list.querySelector(`input[aria-label="${focused}"]`)?.focus();
+    window._syncStatusRow && window._syncStatusRow();
+};
+
+// "Facebook", "Facebook and X", "Facebook, X and LinkedIn"
+function _listPhrase(items) {
+    if (items.length <= 1) return items[0] || '';
+    return items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1];
+}
+
+// US-GAP-10.1.1 SC4: token health of a stored connection — Connected / Expiring soon /
+// Disconnected / Needs attention. Shared by the platform card badge and the Overview
+// Connections card, so the two can never disagree about a connection's state.
+// `problem`: the connection exists but needs the user's attention.
+function _connHealth(conn) {
+    if (!conn) return { key: 'none', label: 'Not connected', problem: false };
+    if (conn.status === 'expired' || conn.status === 'failed' || conn.status === 'revoked' || conn.status === 'token_refresh_failed') {
+        return { key: 'bad', label: 'Disconnected', problem: true };
+    }
+    // Connections that carry an offline refresh token (e.g. X) are renewed silently by
+    // the refresh-social-tokens cron, so their short-lived expiry shouldn't alarm the user.
+    if (typeof conn.scopes === 'string' && conn.scopes.includes('offline.access')) {
+        return { key: 'ok', label: 'Connected', problem: false };
+    }
+    if (conn.tokenExpiresAt) {
+        const daysLeft = Math.ceil((new Date(conn.tokenExpiresAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+        if (daysLeft <= 0) return { key: 'bad', label: 'Disconnected', problem: true };
+        if (daysLeft <= 7) return { key: 'warn', label: `Expiring in ${daysLeft}d`, problem: true };
+        return { key: 'ok', label: 'Connected', problem: false };
+    }
+    return conn.status === 'active'
+        ? { key: 'ok', label: 'Connected', problem: false }
+        : { key: 'warn', label: 'Needs attention', problem: true };
+}
+
+// Healthy, connected platforms show a pink "Connected" pill. (Pink Tailwind bg
+// utilities aren't in the prebuilt CSS, so the fills are set inline.)
+function _healthBadge(health) {
+    const pill = 'inline-flex items-center gap-1.5 text-xs font-bold px-2.5 py-1 rounded-full border';
+    const dot = 'w-1.5 h-1.5 rounded-full';
+    if (health.key === 'ok')   return `<span class="${pill} text-pink-700 border-pink-200" style="background-color:#fce7f3"><span class="${dot}" style="background-color:#ec4899"></span> ${health.label}</span>`;
+    if (health.key === 'bad')  return `<span class="${pill} text-red-700 bg-red-50 border-red-200"><span class="${dot} bg-red-500"></span> ${health.label}</span>`;
+    if (health.key === 'warn') return `<span class="${pill} text-amber-700 bg-amber-50 border-amber-200"><span class="${dot} bg-amber-500 animate-pulse"></span> ${health.label}</span>`;
+    return `<span class="${pill} text-gray-500 bg-gray-100 border-gray-200"><span class="${dot} bg-gray-400"></span> ${health.label}</span>`;
+}
+
 function _platformCard(platform, conn) {
     const isConnected = !!conn;
     const handle = conn?.externalUserId || '';
 
-    // US-GAP-10.1.1 SC4: Active / Expiring Soon / Disconnected badges
-    // Healthy, connected platforms show a pink "Connected" pill. (Pink Tailwind bg
-    // utilities aren't in the prebuilt CSS, so the fills are set inline.)
-    const connectedPill = `<span class="inline-flex items-center gap-1.5 text-xs font-bold text-pink-700 border border-pink-200 px-2.5 py-1 rounded-full" style="background-color:#fce7f3"><span class="w-1.5 h-1.5 rounded-full" style="background-color:#ec4899"></span> Connected</span>`;
-    let statusBadge;
+    const health = _connHealth(conn);
+    const statusBadge = _healthBadge(health);
     // connProblem: the connection exists but its token needs attention (expiring/disconnected).
     // Used by the assistant-scoped capability card to surface a secondary health pill.
-    let connProblem = false;
-    // Connections that carry an offline refresh token (e.g. X) are renewed silently by
-    // the refresh-social-tokens cron, so their short-lived expiry shouldn't alarm the user.
-    const autoRenews = isConnected && typeof conn.scopes === 'string' && conn.scopes.includes('offline.access');
-    if (!isConnected) {
-        statusBadge = `<span class="inline-flex items-center gap-1.5 text-xs font-bold text-gray-500 bg-gray-100 border border-gray-200 px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-gray-400"></span> Not connected</span>`;
-    } else if (conn.status === 'expired' || conn.status === 'failed' || conn.status === 'revoked' || conn.status === 'token_refresh_failed') {
-        statusBadge = `<span class="inline-flex items-center gap-1.5 text-xs font-bold text-red-700 bg-red-50 border border-red-200 px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span> Disconnected</span>`;
-        connProblem = true;
-    } else if (autoRenews) {
-        statusBadge = connectedPill;
-    } else if (conn.tokenExpiresAt) {
-        const daysLeft = Math.ceil((new Date(conn.tokenExpiresAt).getTime() - Date.now()) / (24 * 60 * 60 * 1000));
-        if (daysLeft <= 7 && daysLeft > 0) {
-            statusBadge = `<span class="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span> Expiring in ${daysLeft}d</span>`;
-            connProblem = true;
-        } else if (daysLeft <= 0) {
-            statusBadge = `<span class="inline-flex items-center gap-1.5 text-xs font-bold text-red-700 bg-red-50 border border-red-200 px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span> Disconnected</span>`;
-            connProblem = true;
-        } else {
-            statusBadge = connectedPill;
-        }
-    } else {
-        statusBadge = conn.status === 'active'
-            ? connectedPill
-            : `<span class="inline-flex items-center gap-1.5 text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-2.5 py-1 rounded-full"><span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span> Needs attention</span>`;
-        if (conn.status !== 'active') connProblem = true;
-    }
+    const connProblem = health.problem;
 
     // A platform can only be connected once its handle has been entered on Business
     // Information (single source of truth). Without one, show a disabled prompt that

@@ -1338,6 +1338,20 @@ function _syncAutopilotPending(count) {
     if (el) el.textContent = String(count || 0);
 }
 
+// The Overview status row holds the Autopilot and Connections cards side by side, but each
+// hides on its own signal (posting schedule / connector platforms). Go two-up only when both
+// are showing, so a lone card spans the row instead of leaving half of it empty, and drop the
+// row entirely when neither applies to this role.
+window._syncStatusRow = function() {
+    const row = document.getElementById('overview-status-row');
+    if (!row) return;
+    const shown = ['autopilot-status-card', 'connections-status-card']
+        .filter(id => !document.getElementById(id)?.classList.contains('hidden'));
+    // In the compiled stylesheet `.hidden` doesn't beat `.grid`, so hide the row inline.
+    row.style.display = shown.length ? '' : 'none';
+    row.classList.toggle('lg:grid-cols-2', shown.length === 2);
+};
+
 window._renderAutopilotCard = function(data) {
     const card = document.getElementById('autopilot-status-card');
     if (!card) return;
@@ -1965,8 +1979,10 @@ function _applyDashboardRegistry(data) {
     }
     toggle('module-posting-schedule', mods.hasPostingSchedule !== false);
     // Autopilot status card (Overview) rides the same signal as the Posting Schedule it summarises —
-    // only roles with a scheduled posting cadence have an autopilot to surface.
+    // only roles with a scheduled posting cadence have an autopilot to surface. Its neighbour, the
+    // Connections card, hides itself once integrations.js knows whether this role has any connectors.
     toggle('autopilot-status-card', mods.hasPostingSchedule !== false);
+    window._syncStatusRow();
     toggle('module-social-strategy', mods.hasSocialStrategy !== false);
 
     // Overview — the post-based Impact & ROI card is meaningless for non-social roles (they publish

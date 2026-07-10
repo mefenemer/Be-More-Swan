@@ -215,13 +215,18 @@
     <div id="metrics-by-platform" class="space-y-2"></div>
   </div>
 
+  <!-- ── Status row: Autopilot + Connections, side by side. Each card hides on its own signal, and
+       _syncStatusRow() (assistants.js) drops the row to one column so a lone card never sits in a
+       half-empty grid. -->
+  <div id="overview-status-row" class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8 items-stretch">
+
   <!-- ── Autopilot status — surfaces the always-on scheduled-drafting engine (draft-horizon-fill cron
        → schedule-gap-fill → process-content-jobs) so the user can see at a glance that their assistant
        is continuously drafting posts into the Review Queue on a cadence, and jump straight to the
        schedule to change it. Social-only: gated by hasPostingSchedule in _applyDashboardRegistry.
        Populated by window._renderAutopilotCard() in assistants.js from onboarding_context + horizon. -->
-  <div id="autopilot-status-card" class="hidden mb-8">
-    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+  <div id="autopilot-status-card" class="hidden">
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 h-full">
       <div class="flex items-start justify-between gap-4 flex-wrap">
         <div class="flex items-start gap-3 min-w-0">
           <div class="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center shrink-0">
@@ -253,6 +258,38 @@
       </div>
     </div>
   </div>
+
+  <!-- ── Connections status — the channels this assistant can reach, their token health, and a
+       per-channel switch for whether THIS assistant uses them. Connections are a shared workspace
+       pool: switching one off here stops this assistant posting there, it does not disconnect the
+       account. Rows + toggles are rendered by _renderConnectionsStatusCard() in integrations.js,
+       which owns the connection state and the _intToggleUseForAssistant persistence; the card
+       self-hides for roles with no connector platforms. -->
+  <div id="connections-status-card" class="hidden">
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 h-full">
+      <div class="flex items-start justify-between gap-4 flex-wrap">
+        <div class="flex items-start gap-3 min-w-0">
+          <div class="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center shrink-0">
+            <svg class="w-5 h-5 text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.657l-3 3a4 4 0 01-5.657-5.657l1.5-1.5m6.828-6.829l3-3a4 4 0 015.657 5.657l-1.5 1.5"/></svg>
+          </div>
+          <div class="min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <h3 class="text-sm font-bold text-gray-900">Connections</h3>
+              <span id="connections-pill" class="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">—</span>
+              <span id="connections-save-status" class="text-xs font-bold text-emerald-600 transition-all"></span>
+            </div>
+            <p id="connections-headline" class="text-sm text-gray-700 mt-1 font-semibold"></p>
+            <p class="text-xs text-gray-500 mt-0.5">Switch a channel off and this assistant stops posting there. The account stays connected for your other assistants.</p>
+          </div>
+        </div>
+        <button type="button" onclick="window._openBriefDrawer && window._openBriefDrawer('platforms')" class="shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Manage connections</button>
+      </div>
+      <div id="connections-status-list" class="mt-4 pt-4 border-t border-gray-100 space-y-1"></div>
+    </div>
+  </div>
+
+  </div>
+  <!-- ── end status row ── -->
 
   <!-- Performance KPIs — issue #183: moved beneath the assistant name/header section (out of the
        now-removed Overview tab) so it's visible without needing to click into a tab. -->
