@@ -179,7 +179,7 @@ window.generateAssistantCardHTML = function(assistant) {
             </div>
             ${platformPills ? `<div class="flex items-center gap-3 mb-2">${platformPills}</div>` : ''}
             <div class="flex items-center justify-between pt-2 border-t border-gray-200">
-                <span class="inline-flex items-center gap-1 text-xs font-semibold text-green-700" title="Time saved this week — matches this assistant's Impact & ROI tab">
+                <span class="inline-flex items-center gap-1 text-xs font-semibold text-green-700" title="Time saved this month — matches this assistant's Impact & ROI tab">
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
                     ~${hoursSaved}h saved
                 </span>
@@ -265,7 +265,12 @@ window.fetchAndRenderAssistants = async function(containerId, options) {
     if (!container) return;
 
     try {
-        const res = await fetch('/.netlify/functions/get-assistants');
+        // Issue #110 (follow-up): request the 'month' window so these cards' ~Xh / £Y ROI
+        // figures match the assistant detail page's Impact & ROI tab, which defaults to
+        // month (see _fetchAndRenderAssistantMetrics). With no period the server defaulted
+        // to 'week', so a card and the detail tab reported the same assistant over different
+        // windows and disagreed — early in a month the week can even exceed the month.
+        const res = await fetch('/.netlify/functions/get-assistants?period=month');
         if (!res.ok) throw new Error("Failed to fetch");
 
         const data = await res.json();
