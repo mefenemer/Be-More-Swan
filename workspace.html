@@ -254,45 +254,18 @@ window.showComplianceModals = function showComplianceModals(force) {
     </button>
   </div>
   <div class="px-5 pb-6 overflow-y-auto flex-1">
-    <!-- Mode chooser (first screen) — three ways to get a post into the Review Queue. -->
-    <div id="gp-chooser" class="space-y-2.5">
-      <p class="text-xs text-gray-500 mb-1">How would you like to create this post?</p>
-      <button type="button" onclick="gpChooseMode('write')" class="w-full text-left px-4 py-3 rounded-xl border border-gray-200 hover:border-emerald-500 hover:bg-emerald-50/40 transition cursor-pointer flex items-start gap-3">
-        <span class="mt-0.5 shrink-0 w-8 h-8 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-        </span>
-        <span>
-          <span class="block text-sm font-bold text-gray-900">Write it yourself</span>
-          <span class="block text-xs text-gray-500 mt-0.5">Add your own text, pick platforms, and attach media from My Content. No AI.</span>
-        </span>
-      </button>
-      <button type="button" onclick="gpChooseMode('idea')" class="w-full text-left px-4 py-3 rounded-xl border border-gray-200 hover:border-emerald-500 hover:bg-emerald-50/40 transition cursor-pointer flex items-start gap-3">
-        <span class="mt-0.5 shrink-0 w-8 h-8 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m0 16v.01M5.6 5.6l.7.7m12.1-.7l-.7.7M3 12h1m16 0h1M12 7a5 5 0 00-3 9h6a5 5 0 00-3-9z"/></svg>
-        </span>
-        <span>
-          <span class="block text-sm font-bold text-gray-900">Suggest an idea</span>
-          <span class="block text-xs text-gray-500 mt-0.5">Share a topic and let your assistant work it into a future draft.</span>
-        </span>
-      </button>
-      <button type="button" onclick="gpChooseMode('ai')" class="w-full text-left px-4 py-3 rounded-xl border border-gray-200 hover:border-emerald-500 hover:bg-emerald-50/40 transition cursor-pointer flex items-start gap-3">
-        <span class="mt-0.5 shrink-0 w-8 h-8 rounded-lg bg-violet-100 text-violet-700 flex items-center justify-center">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>
-        </span>
-        <span>
-          <span class="block text-sm font-bold text-gray-900">Work with AI</span>
-          <span class="block text-xs text-gray-500 mt-0.5">Generate post copy and media ideas together, then review before it's queued.</span>
-        </span>
-      </button>
+    <!-- Mode switcher — an always-visible segmented control (no upfront "how do you want to create
+         this?" gate). The user lands on Write and can jump to Idea or AI at any time. The three
+         panels below share the same modal; only one shows at a time. -->
+    <div id="gp-mode-tabs" class="flex gap-1 p-1 bg-gray-100 rounded-xl mb-4">
+      <button type="button" data-gpmode="write" onclick="gpChooseMode('write')" class="gp-mode-tab flex-1 px-2 py-2 text-[11px] font-bold rounded-lg transition cursor-pointer text-gray-500 whitespace-nowrap">Write it yourself</button>
+      <button type="button" data-gpmode="idea" onclick="gpChooseMode('idea')" class="gp-mode-tab flex-1 px-2 py-2 text-[11px] font-bold rounded-lg transition cursor-pointer text-gray-500 whitespace-nowrap">Suggest an idea</button>
+      <button type="button" data-gpmode="ai" onclick="gpChooseMode('ai')" class="gp-mode-tab flex-1 px-2 py-2 text-[11px] font-bold rounded-lg transition cursor-pointer text-gray-500 whitespace-nowrap">Work with AI</button>
     </div>
 
-    <!-- Mode panels (shown after a mode is picked). Drafting never requires a connected account —
-         the connection is asked for at the point a post is approved/scheduled for its platform. -->
-    <div id="gp-modes" class="hidden">
-      <button type="button" onclick="gpBackToChooser()" class="mb-3 text-xs font-semibold text-gray-500 hover:text-gray-700 transition cursor-pointer flex items-center gap-1">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
-        Back
-      </button>
+    <!-- Mode panels. Drafting never requires a connected account — the connection is asked for at
+         the point a post is approved/scheduled for its platform. -->
+    <div id="gp-modes">
 
     <!-- Assistant selector — shown only when the sheet is opened without an assistant in context
          (e.g. from the global Review Queue drawer rather than an assistant detail page). -->
@@ -5415,17 +5388,18 @@ let _gpwAssetsById = {};           // write-your-own: id → asset object (for t
 let _gpiSelectedPlatforms = [];    // suggest-an-idea: multi-select ([] === all platforms)
 let _gpHasMedia = false;           // work-with-AI: whether the current draft has an image attached
 
-// Opens the sheet on the mode chooser. The AI task-limit gate is enforced only when the user
-// actually picks the "Work with AI" mode (gpChooseMode) — writing your own post or suggesting an
-// idea doesn't consume AI generations.
+// Opens the sheet directly on the "Write it yourself" panel, with a segmented control to switch to
+// "Suggest an idea" or "Work with AI" at any time (no upfront chooser). The AI task-limit gate is
+// enforced only when the user switches to "Work with AI" — writing or suggesting an idea is free.
 async function openGeneratePostSheet() {
     _gpCurrentAssistantId = window._currentAssistantId || null;
     _gpCurrentJobId = null;
     _gpCurrentPostId = null;
     clearInterval(_gpPollInterval);
 
-    // Reset every mode back to its chooser state.
+    // Reset every mode's in-progress state, then land on "Write it yourself" (no upfront chooser).
     gpBackToChooser();
+    gpChooseMode('write');
 
     // Cache capacity (connected-platform dots + AI limit) so mode panels can use it without refetch.
     _gpCap = await window.checkCapacity().catch(() => null);
@@ -5463,13 +5437,10 @@ function gpGoConnect() {
     }
 }
 
-// Return to the three-card chooser and clear any in-progress mode state.
+// Reset every mode's in-progress state. The active panel is (re)selected by gpChooseMode; there's
+// no longer a chooser screen to return to, so this only clears state.
 function gpBackToChooser() {
     clearInterval(_gpPollInterval);
-    document.getElementById('gp-chooser')?.classList.remove('hidden');
-    document.getElementById('gp-modes')?.classList.add('hidden');
-    ['gp-mode-write', 'gp-mode-idea', 'gp-mode-ai'].forEach(id =>
-        document.getElementById(id)?.classList.add('hidden'));
 
     // Reset AI mode controls.
     const ctx = document.getElementById('gen-post-context');
@@ -5539,11 +5510,19 @@ function gpChooseMode(mode) {
         }
     }
 
-    document.getElementById('gp-chooser')?.classList.add('hidden');
     document.getElementById('gp-modes')?.classList.remove('hidden');
     document.getElementById('gp-mode-write')?.classList.toggle('hidden', mode !== 'write');
     document.getElementById('gp-mode-idea')?.classList.toggle('hidden', mode !== 'idea');
     document.getElementById('gp-mode-ai')?.classList.toggle('hidden', mode !== 'ai');
+
+    // Highlight the active segmented tab (only reached on success — the AI-limit gate returns above).
+    document.querySelectorAll('.gp-mode-tab').forEach(b => {
+        const on = b.dataset.gpmode === mode;
+        b.classList.toggle('bg-white', on);
+        b.classList.toggle('text-emerald-700', on);
+        b.classList.toggle('shadow-sm', on);
+        b.classList.toggle('text-gray-500', !on);
+    });
 
     if (mode === 'ai') {
         gpUpdateConnectedPlatforms(_gpCap?.connectedPlatforms || []);

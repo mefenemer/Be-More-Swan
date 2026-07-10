@@ -47,16 +47,7 @@
     </div>
   </div>
 
-  <div id="assistant-detail-content" class="hidden">
-
-  <!-- US-LEGAL-3.1: EU AI Act Art.50 — persistent AI interaction disclosure (non-dismissable) -->
-  <div id="ai-interaction-disclosure" role="note" aria-label="AI system disclosure"
-       class="flex items-center gap-2 mb-4 px-3 py-2 rounded-lg bg-blue-50 border border-blue-200 text-xs text-blue-700 font-medium">
-    <svg class="w-3.5 h-3.5 shrink-0 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
-      <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clip-rule="evenodd"/>
-    </svg>
-    <span>You are interacting with an AI assistant. AI-generated content may be inaccurate — always review before sending or publishing.</span>
-  </div>
+  <div id="assistant-detail-content" class="hidden pb-16">
 
   <!-- Back nav -->
   <nav class="flex mb-6 text-sm font-medium text-gray-500">
@@ -1388,6 +1379,15 @@
 
 
   <!-- tab-integrations removed — merged into tab-platforms as "Connections" -->
+
+  <!-- US-LEGAL-3.1: EU AI Act Art.50 — persistent AI interaction disclosure (non-dismissable), pinned to bottom of the screen -->
+  <div id="ai-interaction-disclosure" role="note" aria-label="AI system disclosure"
+       class="fixed bottom-0 left-0 right-0 z-40 flex items-center justify-center gap-2 px-3 py-2 bg-blue-50 border-t border-blue-200 text-xs text-blue-700 font-medium">
+    <svg class="w-3.5 h-3.5 shrink-0 text-blue-500" fill="currentColor" viewBox="0 0 20 20">
+      <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clip-rule="evenodd"/>
+    </svg>
+    <span>You are interacting with an AI assistant. AI-generated content may be inaccurate — always review before sending or publishing.</span>
+  </div>
 
   </div><!-- /assistant-detail-content -->
 
