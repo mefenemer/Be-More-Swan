@@ -212,16 +212,50 @@ const defaultRoute: AssistantRoute = {
     parseResponse: (raw) => ({ content: raw.trim(), uiElement: null }),
 };
 
-// Strips accidental ```json fences and parses the route's structured reply. Falls back to
-// treating the whole response as plain text so a malformed reply never 500s the chat.
+// Strips accidental ```json fences and parses the route's structured reply. A malformed
+// reply must NEVER surface raw JSON to the user: a model that dumps its own scaffolding (or
+// blows the token budget mid-string, or unescapes a quote inside a caption) produces an
+// unparseable blob, and the old fallback showed that blob verbatim in chat — which also
+// meant uiElement was null, so the drafted post was never persisted and no review link was
+// stamped. So: try a direct parse, then a best-effort parse of the outermost {...} span, and
+// only when the output was never a structured attempt at all do we pass it through as plain
+// text. A JSON-shaped-but-broken reply degrades to a friendly retry line, not the payload.
+const STRUCTURED_REPLY_FALLBACK =
+    "Sorry — something went wrong formatting that on my end. Could you send that to me again? I'll redraft it cleanly.";
+
+/** True when `text` was clearly meant to be the route's JSON envelope (so a parse failure
+ *  should degrade to the retry line rather than being shown to the user as-is). */
+function looksLikeStructuredAttempt(text: string): boolean {
+    const t = text.trimStart();
+    return t.startsWith('{') || t.startsWith('[') || /"reply"\s*:/.test(text) || /"uiElement"\s*:/.test(text);
+}
+
 function parseStructuredReply(raw: string): { content: string; uiElement: unknown | null } {
-    const jsonText = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
-    try {
-        const parsed = JSON.parse(jsonText);
-        if (parsed && typeof parsed.reply === 'string') {
-            return { content: parsed.reply.trim(), uiElement: parsed.uiElement ?? null };
-        }
-    } catch { /* fall through to plain text */ }
+    const stripped = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
+
+    // Direct parse first, then a best-effort parse of the outermost {...} span — this
+    // recovers a reply wrapped in stray prose, though not one broken *inside* the JSON.
+    const candidates = [stripped];
+    const first = stripped.indexOf('{');
+    const last = stripped.lastIndexOf('}');
+    if (first !== -1 && last > first) candidates.push(stripped.slice(first, last + 1));
+
+    for (const candidate of candidates) {
+        try {
+            const parsed = JSON.parse(candidate);
+            if (parsed && typeof parsed.reply === 'string') {
+                return { content: parsed.reply.trim(), uiElement: parsed.uiElement ?? null };
+            }
+        } catch { /* try the next candidate */ }
+    }
+
+    // Unparseable. Never show raw JSON scaffolding to the user: if this was clearly a
+    // (broken) structured attempt, degrade to a friendly retry line; only genuine
+    // non-JSON prose is passed through untouched.
+    if (looksLikeStructuredAttempt(stripped)) {
+        console.warn('[chat-orchestrator] structured reply was unparseable — showing retry fallback');
+        return { content: STRUCTURED_REPLY_FALLBACK, uiElement: null };
+    }
     return { content: raw.trim(), uiElement: null };
 }
 
@@ -335,6 +369,32 @@ function hubLinkFromRecords(records: HubRecord[]): HubLink | null {
 // "Write your own" path lands in) so the chat can instead hand the user a direct link to
 // review and approve it.
 const SOCIAL_PLATFORMS = ['instagram', 'facebook', 'linkedin', 'x'];
+
+// primary_platforms (onboardingContext) is stored as short codes — fb/ig/li/x, per
+// integrations.js PLATFORM_KEY_MAP — but the draft wire shape, the model's output format,
+// and persistence all use full names. Normalize to the canonical full name so the SMM prompt
+// can name the configured platforms in exactly the form the model must emit them.
+const PLATFORM_CODE_TO_NAME: Record<string, string> = {
+    fb: 'facebook', facebook: 'facebook',
+    ig: 'instagram', instagram: 'instagram',
+    li: 'linkedin', linkedin: 'linkedin',
+    x: 'x', twitter: 'x',
+};
+
+/** Configured social platforms for this assistant, normalized to the supported full names. */
+function configuredPlatforms(onboardingContext: unknown): string[] {
+    let ctx = onboardingContext;
+    if (typeof ctx === 'string') { try { ctx = JSON.parse(ctx); } catch { ctx = null; } }
+    const raw = ctx && typeof ctx === 'object' && !Array.isArray(ctx)
+        ? (ctx as Record<string, unknown>).primary_platforms
+        : null;
+    if (!Array.isArray(raw)) return [];
+    return [...new Set(
+        raw
+            .map((p) => (typeof p === 'string' ? PLATFORM_CODE_TO_NAME[p.toLowerCase()] : null))
+            .filter((p): p is string => !!p && SOCIAL_PLATFORMS.includes(p)),
+    )];
+}
 
 type SocialPostDraft = { platforms: string[]; caption: string; hashtags: string | null };
 
@@ -845,15 +905,20 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
     social_media_manager: {
         model: DEFAULT_MODEL,
         maxTokens: 1024,
-        buildRolePrompt: (rc) => [
-            sharedContextBlock(rc),
-            `You are this business's social media manager. When the user asks you to draft, write, or come up with a social media post — or gives you enough to write one (a topic, an announcement, a promotion, an update) — write the actual finished caption and hashtags, ready to post as-is: no placeholders, no brackets, no "[insert X here]".
+        buildRolePrompt: (rc) => {
+            const platforms = configuredPlatforms(rc.onboardingContext);
+            const platformLine = platforms.length
+                ? `This business has ALREADY configured its social platforms: ${platforms.join(', ')}. These are the default target for every post — put exactly these values in the draft's "platforms" array unless the user's message explicitly asks for a different or narrower set. You already know their platforms, so NEVER ask which platform(s) to use; asking wastes the user's time.`
+                : `This business has not configured any social platforms yet. If the user's request doesn't make the target platform(s) clear, ask one short clarifying question (uiElement: null) before drafting.`;
+            return [
+                sharedContextBlock(rc),
+                `You are this business's social media manager. When the user asks you to draft, write, or come up with a social media post — or gives you enough to write one (a topic, an announcement, a promotion, an update) — write the actual finished caption and hashtags, ready to post as-is: no placeholders, no brackets, no "[insert X here]".
 
 Every post you draft here is saved for real the moment you include the post draft below, with a suggested posting slot already picked from this business's posting schedule — this chat cannot publish or schedule it further than that. Because of this: NEVER tell the user to go set it up, schedule it, or add it to their Review Queue themselves, and never describe dashboard steps, tools, or sections to visit. Once you include the post draft, your reply should just briefly confirm you've drafted the post and suggested a schedule for it — a link to review and approve it is added automatically straight after your reply, so don't mention where that link is or how to find it.
 
-Only include the post draft once you have enough to write real, finished copy — a topic or brief is enough. Ask a short clarifying question (uiElement: null) when you don't have that yet, or when it's genuinely unclear which platform(s) they want it for.
-
-Return STRICT JSON (no markdown, no prose outside the JSON):
+Only include the post draft once you have enough to write real, finished copy — a topic or brief is enough. Ask a short clarifying question (uiElement: null) only when you don't have a topic to write about yet.`,
+                platformLine,
+                `Return STRICT JSON and NOTHING else — no markdown, no code fences, no prose before or after the object, and never repeat the conversation back. Keep "reply" to one or two short sentences. Every string must be valid JSON (escape any quotes or newlines inside caption/hashtags):
 {
   "reply": "your conversational message to the user",
   "uiElement": {                      // or null when there is nothing to draft yet
@@ -863,7 +928,8 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
     "hashtags": "<space-separated hashtags>" | null
   }
 }`,
-        ].join('\n\n'),
+            ].join('\n\n');
+        },
         parseResponse: parseStructuredReply,
     },
 };

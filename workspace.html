@@ -254,14 +254,9 @@ window.showComplianceModals = function showComplianceModals(force) {
     </button>
   </div>
   <div class="px-5 pb-6 overflow-y-auto flex-1">
-    <!-- Mode switcher — an always-visible segmented control (no upfront "how do you want to create
-         this?" gate). The user lands on Write and can jump to Idea or AI at any time. The three
-         panels below share the same modal; only one shows at a time. -->
-    <div id="gp-mode-tabs" class="flex gap-1 p-1 bg-gray-100 rounded-xl mb-4">
-      <button type="button" data-gpmode="write" onclick="gpChooseMode('write')" class="gp-mode-tab flex-1 px-2 py-2 text-[11px] font-bold rounded-lg transition cursor-pointer text-gray-500 whitespace-nowrap">Write it yourself</button>
-      <button type="button" data-gpmode="idea" onclick="gpChooseMode('idea')" class="gp-mode-tab flex-1 px-2 py-2 text-[11px] font-bold rounded-lg transition cursor-pointer text-gray-500 whitespace-nowrap">Suggest an idea</button>
-      <button type="button" data-gpmode="ai" onclick="gpChooseMode('ai')" class="gp-mode-tab flex-1 px-2 py-2 text-[11px] font-bold rounded-lg transition cursor-pointer text-gray-500 whitespace-nowrap">Work with AI</button>
-    </div>
+    <!-- Single flow: the user fully writes their own post across any platforms and can add media. The
+         Swan button by the caption hands the draft to the assistant in chat for improvement suggestions,
+         and a quiet secondary link reveals the on-demand "let the assistant draft it" generator. No tabs. -->
 
     <!-- Mode panels. Drafting never requires a connected account — the connection is asked for at
          the point a post is approved/scheduled for its platform. -->
@@ -287,7 +282,13 @@ window.showComplianceModals = function showComplianceModals(force) {
         <p class="text-xs text-gray-400 mt-1">Pick one or more — a separate draft is created for each.</p>
       </div>
       <div class="mb-4">
-        <label class="block text-xs font-semibold text-gray-700 mb-1.5">Post text</label>
+        <div class="flex items-center justify-between mb-1.5">
+          <label class="block text-xs font-semibold text-gray-700">Post text</label>
+          <button type="button" id="gpw-swan-btn" onclick="gpAskSwanImprove()" title="Ask your assistant to suggest improvements to this draft" class="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 hover:text-emerald-800 transition cursor-pointer">
+            <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain">
+            <span>Ask Swan to improve</span>
+          </button>
+        </div>
         <div class="relative">
           <textarea id="gpw-caption" maxlength="5000" rows="4" oninput="gpwRefreshDynamic()" placeholder="Write your post…" class="w-full text-sm border border-gray-300 rounded-xl px-3 py-2.5 pr-10 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-400"></textarea>
           <button type="button" id="gpw-mic-btn" onclick="gpStartVoice('gpw-caption')" title="Dictate post text" class="absolute bottom-2 right-2 text-gray-400 hover:text-emerald-600 transition cursor-pointer">
@@ -324,45 +325,23 @@ window.showComplianceModals = function showComplianceModals(force) {
            Instagram needs an image) as they become relevant — no cluttered per-platform form. -->
       <div id="gpw-live-preview" class="hidden mb-4"></div>
       <div id="gpw-status" class="hidden mb-4 text-sm rounded-xl p-3 bg-emerald-50 text-emerald-800 border border-emerald-200"></div>
+      <!-- On-demand generator — not a co-equal tab, just a quiet way to have the assistant draft one. -->
+      <button type="button" onclick="gpChooseMode('ai')" class="w-full mb-3 py-2 text-xs font-semibold text-gray-500 hover:text-emerald-700 border border-dashed border-gray-300 hover:border-emerald-300 rounded-xl transition cursor-pointer inline-flex items-center justify-center gap-1.5">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>
+        Prefer your assistant to draft it? Generate a post
+      </button>
       <div class="flex gap-2">
         <button id="gpw-submit-btn" onclick="gpwSubmit()" class="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Add to Review</button>
         <button onclick="closeGeneratePostSheet()" class="px-5 py-2.5 border border-gray-300 text-gray-700 text-sm font-bold rounded-xl hover:bg-gray-50 transition cursor-pointer">Cancel</button>
       </div>
     </div>
 
-    <!-- ── Mode: Suggest an idea ───────────────────────────────────────────── -->
-    <div id="gp-mode-idea" class="hidden">
-      <div class="mb-4">
-        <label class="block text-xs font-semibold text-gray-700 mb-1.5">Your post idea</label>
-        <div class="relative">
-          <textarea id="gpi-idea" maxlength="500" rows="3" placeholder="e.g. A behind-the-scenes look at how we pack orders" class="w-full text-sm border border-gray-300 rounded-xl px-3 py-2.5 pr-16 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-400"></textarea>
-          <span class="absolute bottom-2 right-8 text-xs text-gray-400"><span id="gpi-idea-count">0</span>/500</span>
-          <button type="button" id="gpi-mic-btn" onclick="gpStartVoice('gpi-idea')" title="Dictate idea" class="absolute bottom-2 right-2 text-gray-400 hover:text-emerald-600 transition cursor-pointer">
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4M12 3a4 4 0 014 4v4a4 4 0 01-8 0V7a4 4 0 014-4z"/></svg>
-          </button>
-        </div>
-        <p class="text-xs text-gray-400 mt-1">Your assistant will weave this into an upcoming scheduled draft — it won't be posted automatically.</p>
-      </div>
-      <div class="mb-4">
-        <label class="block text-xs font-semibold text-gray-700 mb-1.5">Platforms</label>
-        <div id="gpi-platforms" class="flex flex-wrap gap-2">
-          <button type="button" class="gpi-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="all" onclick="gpiTogglePlatform(this)">All platforms</button>
-          <button type="button" class="gpi-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="instagram" onclick="gpiTogglePlatform(this)">Instagram</button>
-          <button type="button" class="gpi-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="facebook" onclick="gpiTogglePlatform(this)">Facebook</button>
-          <button type="button" class="gpi-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="linkedin" onclick="gpiTogglePlatform(this)">LinkedIn</button>
-          <button type="button" class="gpi-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="x" onclick="gpiTogglePlatform(this)">X</button>
-        </div>
-        <p class="text-xs text-gray-400 mt-1">Pick one or more — leave “All platforms” selected to use it everywhere.</p>
-      </div>
-      <div id="gpi-status" class="hidden mb-4 text-sm rounded-xl p-3 bg-emerald-50 text-emerald-800 border border-emerald-200"></div>
-      <div class="flex gap-2">
-        <button id="gpi-submit-btn" onclick="gpiSubmit()" class="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Submit Idea</button>
-        <button onclick="closeGeneratePostSheet()" class="px-5 py-2.5 border border-gray-300 text-gray-700 text-sm font-bold rounded-xl hover:bg-gray-50 transition cursor-pointer">Cancel</button>
-      </div>
-    </div>
-
-    <!-- ── Mode: Work with AI (existing generate flow) ─────────────────────── -->
+    <!-- ── Mode: Work with AI (on-demand generate flow, reached from the write panel's link) ── -->
     <div id="gp-mode-ai" class="hidden">
+    <button type="button" onclick="gpChooseMode('write')" class="mb-3 inline-flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-emerald-700 transition cursor-pointer">
+      <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+      Back to writing your own
+    </button>
     <!-- Platform selector -->
     <div class="mb-4">
       <label class="block text-xs font-semibold text-gray-700 mb-1.5">Platform</label>
@@ -4142,6 +4121,9 @@ function formatCurrency(amount, currency) {
      uses, embedded in-page instead of navigating to a separate page. -->
 <script src="/src/components/assistant-starter-prompts.js"></script>
 <script src="/src/components/chat-session.js"></script>
+<!-- Assistant Detail "Chat" CTA opens the conversation as a popup (self-injects markup;
+     uses ChatSession above) instead of redirecting to assistant-chat.html. -->
+<script src="/src/components/assistant-chat-modal.js"></script>
 <script src="/src/components/spreadsheet-import.js"></script>
 <script src="/src/components/assistant-data-hub.js"></script>
 <!-- Connections › "Synced actions" — this assistant's Integration Scenario Library recipes,
@@ -4225,7 +4207,7 @@ const RQ_COLUMNS = {
 
 // Content groups for this assistant type. Each: how to fetch its items for a column + how to render.
 const RQ_GROUPS = [
-    { key: 'ideas', label: 'Ideas', empty: 'No ideas here.',  emptyReview: 'No ideas yet — use Create Post → Suggest an idea.' },
+    { key: 'ideas', label: 'Ideas', empty: 'No ideas here.',  emptyReview: 'No ideas here yet.' },
     { key: 'posts', label: 'Posts', empty: 'No posts here.',  emptyReview: 'No posts awaiting review.' },
 ];
 
@@ -5350,11 +5332,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const ctxCount = document.getElementById('gen-post-ctx-count');
     if (ctx && ctxCount) ctx.addEventListener('input', () => { ctxCount.textContent = ctx.value.length; });
 
-    // Suggest-an-idea counter
-    const ideaEl = document.getElementById('gpi-idea');
-    const ideaCount = document.getElementById('gpi-idea-count');
-    if (ideaEl && ideaCount) ideaEl.addEventListener('input', () => { ideaCount.textContent = ideaEl.value.length; });
-
     // Start badge polling
     refreshPendingBadge();
     _rqPollInterval = setInterval(refreshPendingBadge, 60_000);
@@ -5385,12 +5362,11 @@ let _gpCap = null;                 // cached capacity (connected platforms + AI 
 let _gpwSelectedPlatforms = [];    // write-your-own: multi-select
 let _gpwSelectedAssets = [];       // write-your-own: chosen My Content asset ids
 let _gpwAssetsById = {};           // write-your-own: id → asset object (for the live preview)
-let _gpiSelectedPlatforms = [];    // suggest-an-idea: multi-select ([] === all platforms)
 let _gpHasMedia = false;           // work-with-AI: whether the current draft has an image attached
 
-// Opens the sheet directly on the "Write it yourself" panel, with a segmented control to switch to
-// "Suggest an idea" or "Work with AI" at any time (no upfront chooser). The AI task-limit gate is
-// enforced only when the user switches to "Work with AI" — writing or suggesting an idea is free.
+// Opens the sheet on the single "write your own" composer. From there the user can hand the draft to
+// the assistant for improvements (Ask Swan) or reveal the on-demand generator via its link. The AI
+// task-limit gate is enforced only when the generator is opened — writing your own is always free.
 async function openGeneratePostSheet() {
     _gpCurrentAssistantId = window._currentAssistantId || null;
     _gpCurrentJobId = null;
@@ -5481,15 +5457,6 @@ function gpBackToChooser() {
     gpSetPanelStatus('gpw-status', '');
     const wBtn = document.getElementById('gpw-submit-btn');
     if (wBtn) { wBtn.disabled = false; wBtn.textContent = 'Add to Review'; }
-
-    // Reset suggest-an-idea (default selection = All platforms).
-    _gpiSelectedPlatforms = [];
-    const idea = document.getElementById('gpi-idea'); if (idea) idea.value = '';
-    const ideaCount = document.getElementById('gpi-idea-count'); if (ideaCount) ideaCount.textContent = '0';
-    gpiSyncPlatformChips();
-    gpSetPanelStatus('gpi-status', '');
-    const iBtn = document.getElementById('gpi-submit-btn');
-    if (iBtn) { iBtn.disabled = false; iBtn.textContent = 'Submit Idea'; }
 }
 
 // Reveal a mode's panel. 'ai' enforces the monthly AI generation limit first.
@@ -5512,17 +5479,7 @@ function gpChooseMode(mode) {
 
     document.getElementById('gp-modes')?.classList.remove('hidden');
     document.getElementById('gp-mode-write')?.classList.toggle('hidden', mode !== 'write');
-    document.getElementById('gp-mode-idea')?.classList.toggle('hidden', mode !== 'idea');
     document.getElementById('gp-mode-ai')?.classList.toggle('hidden', mode !== 'ai');
-
-    // Highlight the active segmented tab (only reached on success — the AI-limit gate returns above).
-    document.querySelectorAll('.gp-mode-tab').forEach(b => {
-        const on = b.dataset.gpmode === mode;
-        b.classList.toggle('bg-white', on);
-        b.classList.toggle('text-emerald-700', on);
-        b.classList.toggle('shadow-sm', on);
-        b.classList.toggle('text-gray-500', !on);
-    });
 
     if (mode === 'ai') {
         gpUpdateConnectedPlatforms(_gpCap?.connectedPlatforms || []);
@@ -5815,7 +5772,6 @@ function gpRejectPost() {
 const GP_VOICE_FIELDS = {
     'gen-post-context': { mic: 'gen-post-mic-btn', count: 'gen-post-ctx-count' },
     'gpw-caption':      { mic: 'gpw-mic-btn' },
-    'gpi-idea':         { mic: 'gpi-mic-btn', count: 'gpi-idea-count' },
 };
 function gpStartVoice(targetId = 'gen-post-context') {
     const cfg = GP_VOICE_FIELDS[targetId] || { mic: 'gen-post-mic-btn' };
@@ -5854,7 +5810,7 @@ function gpwSetChipState(btn, on) {
     }
 }
 
-// Per-panel status line (write / idea panels have their own status elements).
+// Per-panel status line (the write panel has its own status element).
 function gpSetPanelStatus(id, msg, type) {
     const el = document.getElementById(id);
     if (!el) return;
@@ -6104,66 +6060,53 @@ async function gpwSubmit() {
     }
 }
 
-// ── Mode 2: Suggest an idea ─────────────────────────────────────────────────────────────────────
-// Multi-select platforms: the user can pick one, some, or all. The "All platforms" chip clears any
-// individual picks; an empty selection ([]) means all. Picking every individual platform collapses
-// back to "all" on submit.
-const _GPI_PLATFORMS = ['instagram', 'facebook', 'linkedin', 'x'];
+// ── Ask Swan to improve ─────────────────────────────────────────────────────────────────────────
+// Hand the current write-your-own draft to the assistant in the in-SPA chat modal, asking it to
+// suggest improvements. The chat modal (openAssistantChatModal) exposes the mounted ChatSession via
+// _chatModalSession, so once it's open we seed the conversation with the draft. The composer stays
+// open underneath — the user copies the assistant's suggestions back into their post.
+async function gpAskSwanImprove() {
+    const assistantId = _gpCurrentAssistantId || window._currentAssistantId || null;
+    if (!assistantId) { gpSetPanelStatus('gpw-status', 'Pick an assistant first.', 'error'); return; }
+    if (typeof window.openAssistantChatModal !== 'function') return;
 
-function gpiTogglePlatform(btn) {
-    const p = btn.dataset.platform;
-    if (p === 'all') { _gpiSelectedPlatforms = []; gpiSyncPlatformChips(); return; }
-    const i = _gpiSelectedPlatforms.indexOf(p);
-    if (i >= 0) _gpiSelectedPlatforms.splice(i, 1);
-    else _gpiSelectedPlatforms.push(p);
-    gpiSyncPlatformChips();
-}
+    const caption   = document.getElementById('gpw-caption')?.value?.trim() || '';
+    const hashtags  = document.getElementById('gpw-hashtags')?.value?.trim() || '';
+    const platforms = _gpwSelectedPlatforms.slice();
 
-// Reflect _gpiSelectedPlatforms onto the chips. Empty selection lights up "All platforms".
-function gpiSyncPlatformChips() {
-    const all = _gpiSelectedPlatforms.length === 0;
-    document.querySelectorAll('.gpi-platform-btn').forEach(b => {
-        const p = b.dataset.platform;
-        gpwSetChipState(b, p === 'all' ? all : (!all && _gpiSelectedPlatforms.includes(p)));
-    });
-}
+    const meta = await gpResolveAssistantMeta(assistantId);
+    window.openAssistantChatModal(assistantId, meta.name, meta.role, meta.roleKey);
 
-async function gpiSubmit() {
-    if (!_gpCurrentAssistantId) { gpSetPanelStatus('gpi-status', 'No assistant selected. Open an assistant first.', 'error'); return; }
-    const idea = document.getElementById('gpi-idea')?.value?.trim() || '';
-    if (!idea) { gpSetPanelStatus('gpi-status', 'Describe your idea first.', 'error'); return; }
-
-    const btn = document.getElementById('gpi-submit-btn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Submitting…'; }
-    try {
-        const res = await fetch('/.netlify/functions/suggest-post-idea', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                assistantId: _gpCurrentAssistantId,
-                idea,
-                // [] or all four === every platform; the server treats an empty/complete list as "all".
-                platforms: (_gpiSelectedPlatforms.length && _gpiSelectedPlatforms.length < _GPI_PLATFORMS.length)
-                    ? _gpiSelectedPlatforms
-                    : undefined,
-            }),
-        });
-        const d = await res.json().catch(() => ({}));
-        if (!res.ok) {
-            gpSetPanelStatus('gpi-status', d.error || 'Could not submit your idea.', 'error');
-            if (btn) { btn.disabled = false; btn.textContent = 'Submit Idea'; }
-            return;
-        }
-        gpSetPanelStatus('gpi-status', 'Thanks! Your assistant is drafting a post from your idea now — it will appear in Review shortly.');
-        // Refresh whichever Review Queue view is currently mounted so the new idea shows up
-        // immediately instead of only after a manual tab switch / reload.
-        if (typeof rqLoadItems === 'function') { try { rqLoadItems('pending_approval', 'social'); } catch { /* ignore */ } }
-        if (typeof window.detailRqRefresh === 'function') { try { window.detailRqRefresh(); } catch { /* ignore */ } }
-        setTimeout(closeGeneratePostSheet, 1800);
-    } catch {
-        gpSetPanelStatus('gpi-status', 'Network error — please try again.', 'error');
-        if (btn) { btn.disabled = false; btn.textContent = 'Submit Idea'; }
+    // Only seed the conversation when there's actually a draft to critique.
+    if (caption || hashtags) {
+        const label = p => (p === 'x' ? 'X' : p.charAt(0).toUpperCase() + p.slice(1));
+        const platformLine = platforms.length ? `for ${platforms.map(label).join(', ')} ` : '';
+        const parts = [
+            `Here's a draft social post ${platformLine}I'm working on. Please suggest improvements and give me a stronger version I can use.`,
+            '',
+            caption || '(no caption yet)',
+        ];
+        if (hashtags) parts.push('', hashtags);
+        const seed = parts.join('\n');
+        // sendMessage is exposed by ChatSession.mount(); give the fresh mount a tick to settle.
+        setTimeout(() => { try { _chatModalSession?.sendMessage(seed); } catch { /* ignore */ } }, 60);
     }
+}
+
+// Resolve an assistant's display name / role / roleKey for opening the chat modal. Cached per id so
+// repeat clicks don't refetch. Falls back to sensible SMM defaults if the lookup fails.
+let _gpAssistantMetaCache = {};
+async function gpResolveAssistantMeta(id) {
+    if (_gpAssistantMetaCache[id]) return _gpAssistantMetaCache[id];
+    let meta = { name: 'Your assistant', role: 'Social Media Manager', roleKey: 'social_media_manager' };
+    try {
+        const res = await fetch('/.netlify/functions/get-assistants');
+        const data = res.ok ? await res.json() : { assistants: [] };
+        const a = (data.assistants || []).find(x => Number(x.id) === Number(id));
+        if (a) meta = { name: a.name || meta.name, role: a.role || meta.role, roleKey: a.roleKey || null };
+    } catch { /* fall back to defaults */ }
+    _gpAssistantMetaCache[id] = meta;
+    return meta;
 }
 
 // ── Mode 3 media: replace the AI draft's image with a fresh AI render or a Pexels photo ──────────

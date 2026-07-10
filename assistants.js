@@ -602,7 +602,7 @@ async function _detailRqRenderGroups(statusKey) {
     // Reuse the global render helpers from workspace.html (rqRenderSocialCard, rqRenderIdeaCard, etc.)
     const renderByGroup = { ideas: typeof rqRenderIdeaCard === 'function' ? rqRenderIdeaCard : () => '', posts: typeof rqRenderSocialCard === 'function' ? rqRenderSocialCard : () => '' };
     const RQ_GROUPS = [
-        { key: 'ideas', label: 'Ideas', empty: 'No ideas here.', emptyReview: 'No ideas yet — use Create Post → Suggest an idea.' },
+        { key: 'ideas', label: 'Ideas', empty: 'No ideas here.', emptyReview: 'No ideas here yet.' },
         { key: 'posts', label: 'Posts', empty: 'No posts here.', emptyReview: 'No posts awaiting review.' },
     ];
     const itemsByGroup = { ideas, posts };
@@ -1283,10 +1283,138 @@ window._updateOpSignals = function(patch) {
 // button — hidden at 0, amber pill otherwise. Replaces the retired amber strip.
 window._setReviewPendingBadge = function(count) {
     const badge = document.getElementById('review-pending-count');
-    if (!badge) return;
-    badge.textContent = count || '';
-    badge.classList.toggle('hidden', !count);
+    if (badge) {
+        badge.textContent = count || '';
+        badge.classList.toggle('hidden', !count);
+    }
+    // Keep the Autopilot card's "waiting for your review" number in sync — it's fed by the same
+    // pending-review count computed on load and after every approval/rejection (no extra fetch).
+    _syncAutopilotPending(count);
 };
+
+// ── Autopilot status card (Overview) ──────────────────────────────────────────
+// Makes the always-on scheduled-drafting engine visible: draft-horizon-fill (daily cron) computes
+// the posting slots inside the draft horizon and enqueues a generation job per uncovered one;
+// process-content-jobs turns each into a dated draft in the Review Queue. This card reads the same
+// onboarding_context the engine reads (posting_frequency/days/times/timezone) plus draftHorizonDays,
+// so what the user sees here is exactly what the cron will act on.
+const _AUTOPILOT_DAY_LABEL = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
+const _AUTOPILOT_FREQ_PHRASE = {
+    'daily': 'every day',
+    '5 times a week': '5 times a week',
+    '3 times a week': '3 times a week',
+    '2 times a week': '2 times a week',
+    'weekly': 'once a week',
+};
+
+// Derive a plain-language schedule summary from onboarding_context, mirroring resolvePostingSchedule's
+// defaults (3×/week, weekdays, 09:00, London) so the card matches what the engine would do.
+function _autopilotSummary(ctx) {
+    const rawFreq = String(ctx.posting_frequency || _POSTING_DEFAULT_FREQ).trim();
+    const low = rawFreq.toLowerCase();
+    const active = !!rawFreq && !/on[\s-]?demand|manual|as needed|ad[\s-]?hoc/.test(low);
+    const phrase = _AUTOPILOT_FREQ_PHRASE[low] || rawFreq;
+
+    const days = (Array.isArray(ctx.posting_days) && ctx.posting_days.length
+        ? ctx.posting_days.map(d => String(d).toLowerCase().slice(0, 3)).filter(d => _AUTOPILOT_DAY_LABEL[d])
+        : ['mon', 'tue', 'wed', 'thu', 'fri']);
+    const daySet = new Set(days);
+    let daysLabel;
+    if (daySet.size === 7) daysLabel = 'every day';
+    else if (['mon', 'tue', 'wed', 'thu', 'fri'].every(d => daySet.has(d)) && !daySet.has('sat') && !daySet.has('sun')) daysLabel = 'weekdays';
+    else daysLabel = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].filter(d => daySet.has(d)).map(d => _AUTOPILOT_DAY_LABEL[d]).join(', ') || 'weekdays';
+
+    const times = (Array.isArray(ctx.posting_times) && ctx.posting_times.length ? ctx.posting_times : ['09:00'])
+        .map(t => String(t).trim()).filter(Boolean);
+    const timesLabel = times.join(', ');
+
+    const tzLabel = String(ctx.posting_timezone || 'Europe/London').split('/').pop().replace(/_/g, ' ');
+
+    return { active, phrase, daysLabel, timesLabel, tzLabel };
+}
+
+function _syncAutopilotPending(count) {
+    const el = document.getElementById('autopilot-pending');
+    if (el) el.textContent = String(count || 0);
+}
+
+window._renderAutopilotCard = function(data) {
+    const card = document.getElementById('autopilot-status-card');
+    if (!card) return;
+    data = data || window._detailCurrentData || {};
+    const ctx = data.context || {};
+    const s = _autopilotSummary(ctx);
+    const horizon = data.draftHorizonDays || 7;
+
+    const pill = document.getElementById('autopilot-pill');
+    const headline = document.getElementById('autopilot-headline');
+    const detail = document.getElementById('autopilot-detail');
+    const adjustBtn = document.getElementById('autopilot-adjust-btn');
+    const horizonStat = document.getElementById('autopilot-horizon-stat');
+    const horizonEl = document.getElementById('autopilot-horizon');
+
+    if (s.active) {
+        if (pill) { pill.textContent = '● Active'; pill.className = 'inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700'; }
+        if (headline) headline.textContent = `Drafting ${s.phrase}, automatically`;
+        if (detail) detail.textContent = `${s.daysLabel} at ${s.timesLabel} · ${s.tzLabel} — new drafts land in your Review for approval.`;
+        if (adjustBtn) adjustBtn.textContent = 'Adjust schedule';
+        if (horizonStat) horizonStat.classList.remove('hidden');
+        if (horizonEl) horizonEl.textContent = String(horizon);
+        // Fill in "Next post: …" from the assistant's nearest upcoming draft (async; hidden until found).
+        _loadAutopilotNext(window._currentAssistantId);
+    } else {
+        if (pill) { pill.textContent = '● Paused'; pill.className = 'inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500'; }
+        if (headline) headline.textContent = 'Autopilot is off — you’re creating posts manually';
+        if (detail) detail.textContent = 'Turn it on and your assistant will draft posts on a schedule for you to review — no need to start each one yourself.';
+        if (adjustBtn) adjustBtn.textContent = 'Turn on autopilot';
+        if (horizonStat) horizonStat.classList.add('hidden');
+        document.getElementById('autopilot-next')?.classList.add('hidden');
+    }
+    // Reflect whatever the pending-review signal last computed (kept in sync via _setReviewPendingBadge).
+    _syncAutopilotPending(window._detailOpSignals?.pendingReview || 0);
+};
+
+// "Adjust schedule" / "Turn on autopilot" → open the Operational Setup panel and scroll to the
+// Posting Schedule controls, which already write posting_frequency/days/times/timezone + horizon.
+window._openAutopilotSettings = function() {
+    if (typeof window._openBriefDrawer === 'function') window._openBriefDrawer('operation');
+    setTimeout(() => {
+        document.getElementById('module-posting-schedule')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 120);
+};
+
+// Fill "Next post: …" from the assistant's nearest upcoming draft — the earliest future publish date
+// across the posts the autopilot has queued (still in Review, approved, or scheduled). Runs async and
+// never blocks the card (which already rendered synchronously); stays hidden when nothing is dated ahead.
+async function _loadAutopilotNext(assistantId) {
+    const el = document.getElementById('autopilot-next');
+    if (!el || !assistantId) return;
+    try {
+        const statuses = ['pending_approval', 'approved', 'scheduled'];
+        const results = await Promise.all(statuses.map(s =>
+            fetch(`/.netlify/functions/get-social-drafts?status=${s}&assistantId=${assistantId}`)
+                .then(r => (r.ok ? r.json() : { drafts: [] }))
+                .catch(() => ({ drafts: [] }))
+        ));
+        // Race guard: the user may have opened another assistant while these were in flight.
+        if (Number(window._currentAssistantId) !== Number(assistantId)) return;
+
+        const now = Date.now();
+        let next = null;
+        for (const { drafts } of results) {
+            for (const d of (drafts || [])) {
+                const t = d.publishDate ? new Date(d.publishDate).getTime() : NaN;
+                if (!Number.isNaN(t) && t > now && (next === null || t < next)) next = t;
+            }
+        }
+        if (next === null) { el.classList.add('hidden'); return; }
+        const when = new Date(next).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+        el.textContent = `Next post: ${when}`;
+        el.classList.remove('hidden');
+    } catch {
+        el.classList.add('hidden');
+    }
+}
 
 // ══ Epic 3 — Continuous Improvement Loop (Tuning Sessions + Runbook) ═══════════
 
@@ -1836,6 +1964,9 @@ function _applyDashboardRegistry(data) {
         window.AssistantDiscoveryCampaigns?.init({ assistantId: data.id, cfg: discovery });
     }
     toggle('module-posting-schedule', mods.hasPostingSchedule !== false);
+    // Autopilot status card (Overview) rides the same signal as the Posting Schedule it summarises —
+    // only roles with a scheduled posting cadence have an autopilot to surface.
+    toggle('autopilot-status-card', mods.hasPostingSchedule !== false);
     toggle('module-social-strategy', mods.hasSocialStrategy !== false);
 
     // Overview — the post-based Impact & ROI card is meaningless for non-social roles (they publish
@@ -2397,9 +2528,17 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     }
 
     // Issue #197: header "Chat" CTA — always visible, regardless of tab or role.
+    // Opens the conversation as a popup modal (assistant-chat-modal.js) so the user keeps
+    // their place on the Detail page; falls back to the standalone page if the modal isn't loaded.
     const btnChat = document.getElementById('btn-detail-chat');
     if (btnChat) {
-        btnChat.onclick = () => { window.location.href = `assistant-chat.html?assistantId=${assistantId}`; };
+        btnChat.onclick = () => {
+            if (typeof window.openAssistantChat === 'function') {
+                window.openAssistantChat({ assistantId });
+            } else {
+                window.location.href = `assistant-chat.html?assistantId=${assistantId}`;
+            }
+        };
     }
 
     // ── Tab switching ─────────────────────────────────────────────
@@ -2450,6 +2589,8 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
             if (res.ok) {
                 currentData.context = newContext;
                 currentData.configuration = newConfiguration;
+                // Reflect any posting-schedule change (frequency/days/times/timezone) on the Autopilot card.
+                window._renderAutopilotCard(currentData);
                 if (disclosureText !== undefined) currentData.disclosureText = disclosureText;
                 if (newName) {
                     document.getElementById('detail-avatar').textContent = newName.charAt(0).toUpperCase();
@@ -2532,6 +2673,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                     if (res.ok) {
                         const out = await res.json().catch(() => ({}));
                         currentData.draftHorizonDays = days;
+                        window._renderAutopilotCard(currentData);
                         setStatus(out.gapFillEnqueued ? `✓ Saved — drafting ${out.gapFillEnqueued} new post${out.gapFillEnqueued === 1 ? '' : 's'}` : '✓ Saved', 'text-emerald-600');
                         setTimeout(() => setStatus(''), 4000);
                     } else {
@@ -2723,6 +2865,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         _renderOperationSection(currentData);
         _renderMeetingsBrief(currentData);
         _hydrateAutonomousToggle(currentData);
+        window._renderAutopilotCard(currentData);
         attachAutoSave();
         _wirePostingSchedule();
         _renderKickOff(assistantId);
@@ -3184,7 +3327,9 @@ async function _renderKickOff(assistantId) {
     const subEl     = document.getElementById('kickoff-subtitle');
     if (!card || !listEl || !btn) return;
 
-    card.classList.remove('hidden');
+    // Keep the card hidden until the readiness fetch tells us it should be shown. Revealing it
+    // eagerly here made it flash on load for already-working assistants (e.g. SMM), which then
+    // hide the card again once `data.working` comes back true (issue #115).
 
     // Collapsible body — wire the chevron toggle once; the default open/closed state is
     // set per branch below (working assistants start collapsed to keep the page tidy).
@@ -3231,6 +3376,7 @@ async function _renderKickOff(assistantId) {
             reason = 'This assistant needs attention before it can run again.';
             ctaLabel = 'Review Connections'; ctaKind = 'platforms';
         }
+        card.classList.remove('hidden');
         subEl.textContent = 'Attention required — resolve the issue below to resume.';
         listEl.innerHTML = '';
         const panel = document.getElementById('kickoff-summary');
@@ -3256,6 +3402,7 @@ async function _renderKickOff(assistantId) {
     // satisfies the precondition, retry re-fires provisioning and the assistant advances.
     if (data.blocked) {
         const b = data.blocked;
+        card.classList.remove('hidden');
         subEl.textContent = 'Action required before this assistant can start.';
         const panel = document.getElementById('kickoff-summary');
         if (panel) {
@@ -3333,6 +3480,8 @@ async function _renderKickOff(assistantId) {
         return;
     }
 
+    // Not working and no gate → this is a genuine kick-off; now it's safe to reveal the card.
+    card.classList.remove('hidden');
     btn.classList.remove('hidden');
     const outstanding = items.filter(i => i.required && !i.done);
     if (data.allRequiredDone) {

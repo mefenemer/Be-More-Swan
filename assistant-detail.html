@@ -215,6 +215,45 @@
     <div id="metrics-by-platform" class="space-y-2"></div>
   </div>
 
+  <!-- ── Autopilot status — surfaces the always-on scheduled-drafting engine (draft-horizon-fill cron
+       → schedule-gap-fill → process-content-jobs) so the user can see at a glance that their assistant
+       is continuously drafting posts into the Review Queue on a cadence, and jump straight to the
+       schedule to change it. Social-only: gated by hasPostingSchedule in _applyDashboardRegistry.
+       Populated by window._renderAutopilotCard() in assistants.js from onboarding_context + horizon. -->
+  <div id="autopilot-status-card" class="hidden mb-8">
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+      <div class="flex items-start justify-between gap-4 flex-wrap">
+        <div class="flex items-start gap-3 min-w-0">
+          <div class="w-10 h-10 rounded-xl bg-emerald-50 border border-emerald-100 flex items-center justify-center shrink-0">
+            <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-6 h-6 object-contain">
+          </div>
+          <div class="min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <h3 class="text-sm font-bold text-gray-900">Autopilot</h3>
+              <span id="autopilot-pill" class="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">—</span>
+            </div>
+            <p id="autopilot-headline" class="text-sm text-gray-700 mt-1 font-semibold"></p>
+            <p id="autopilot-detail" class="text-xs text-gray-500 mt-0.5"></p>
+            <p id="autopilot-next" class="hidden text-xs font-semibold text-emerald-700 mt-1"></p>
+          </div>
+        </div>
+        <button type="button" id="autopilot-adjust-btn" onclick="window._openAutopilotSettings && window._openAutopilotSettings()" class="shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Adjust schedule</button>
+      </div>
+      <!-- Flow stats — the two numbers that tell the story: what's queued for the user to act on, and
+           how far ahead the assistant is drafting. -->
+      <div class="mt-4 pt-4 border-t border-gray-100 flex flex-wrap gap-x-10 gap-y-2">
+        <button type="button" onclick="window._activateMainTab && window._activateMainTab('review-queue')" class="text-left cursor-pointer group">
+          <p class="text-xl font-black text-gray-900"><span id="autopilot-pending">0</span></p>
+          <p class="text-xs font-semibold text-gray-500 group-hover:text-emerald-700 transition">Waiting for your review</p>
+        </button>
+        <div id="autopilot-horizon-stat">
+          <p class="text-xl font-black text-gray-900"><span id="autopilot-horizon">7</span> days</p>
+          <p class="text-xs font-semibold text-gray-500">Drafts kept ahead</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Performance KPIs — issue #183: moved beneath the assistant name/header section (out of the
        now-removed Overview tab) so it's visible without needing to click into a tab. -->
   <div class="mb-8">
