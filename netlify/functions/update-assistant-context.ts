@@ -37,8 +37,21 @@ export default withLambda(async (event) => {
                 throw new Error('DISCLOSURE_REQUIRED: AI disclosure text cannot be removed from an active assistant (EU AI Act Art. 52).');
             }
 
+            // This endpoint REPLACES onboardingContext wholesale, so any caller that doesn't
+            // round-trip a key silently drops it. That's tolerable for descriptive fields, but
+            // publishPolicy governs whether posts publish without human review — the onboarding
+            // wizard (assistant-onboarding-shell.js) sends only its own answers, so re-running
+            // setup would quietly reset a deployer's auto-publish choice. Carry it across when the
+            // caller didn't mention it; an explicit value (even {}) still wins.
+            const mergedContext = { ...newContext };
+            const existingCtx = (existingAssistant.onboardingContext as Record<string, unknown> | null) ?? {};
+            if (!Object.prototype.hasOwnProperty.call(mergedContext, 'publishPolicy')
+                && Object.prototype.hasOwnProperty.call(existingCtx, 'publishPolicy')) {
+                mergedContext.publishPolicy = existingCtx.publishPolicy;
+            }
+
             // Perform the Update
-            const updatePayload: any = { onboardingContext: newContext, updatedAt: new Date() };
+            const updatePayload: any = { onboardingContext: mergedContext, updatedAt: new Date() };
             if (newConfiguration) updatePayload.configuration = newConfiguration;
             if (newName) updatePayload.name = newName;
             if (disclosureText !== undefined) updatePayload.disclosureText = disclosureText;
@@ -65,7 +78,7 @@ export default withLambda(async (event) => {
                 resourceType: 'aiAssistants',
                 resourceId: assistantId.toString(),
                 previousState: existingAssistant.onboardingContext,
-                newState: newContext,
+                newState: mergedContext,
                 ipAddress: event.headers['x-nf-client-connection-ip'] || 'unknown',
             });
         });

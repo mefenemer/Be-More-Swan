@@ -1,9 +1,15 @@
 // netlify/functions/autonomous-media-suggestions.ts
 // Epic 2 US5: daily cron — for each assistant with autonomous media suggestions enabled, find an
 // empty slot in the upcoming schedule and draft a complete post (AI copy + AI image) into the AI
-// review queue (status='pending_approval', isAutonomous=true). NEVER auto-published (AC: human
-// approval required). Respects the per-assistant monthly autonomous credit cap (AC: threshold
-// protection) — credits are held/settled exactly like manual generation.
+// review queue (status='pending_approval', isAutonomous=true). Respects the per-assistant monthly
+// autonomous credit cap (AC: threshold protection) — credits are held/settled exactly like manual
+// generation.
+//
+// Auto-publish (src/utils/publish-policy.ts): a draft skips the review queue and goes straight to
+// status='scheduled' ONLY when the deployer has opted this platform into 'auto_publish' AND the
+// confidence scorer rates the caption green with zero factual claims. Both default to review, so
+// human approval remains the default for every assistant. This is the only writer permitted to
+// skip review — manual and chat drafts always have a human present.
 //
 // Schedule: "0 7 * * *" (07:00 UTC daily), after draft-horizon-fill (06:00). Also POSTable for tests.
 
@@ -21,9 +27,14 @@ import { FalContentPolicyError } from '../../src/lib/fal-gateway';
 import { resolveMediaForPost } from '../../src/utils/media-resolver';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { SMM_ROLE_KEYS } from '../../src/constants/roles';
+import { AUTONOMOUS_DRAFT_PLATFORMS } from '../../src/utils/publish-policy';
+import { decideAutoPublish, describeDecision } from '../../src/utils/auto-publish-runtime';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
-const PLATFORM = 'instagram';        // only Instagram has a live publisher today
+// Only Instagram has a live publisher today. Sourced from publish-policy.ts so the settings UI
+// (which reads the same list via get-assistant-context) can never offer a toggle for a platform
+// this drafter doesn't actually draft for.
+const PLATFORM = AUTONOMOUS_DRAFT_PLATFORMS[0];
 const ASPECT = '4:5' as const;       // Instagram feed-friendly
 const IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
 
@@ -75,6 +86,7 @@ export default withLambda(async (event) => {
             horizonDays: aiAssistants.draftHorizonDays,
             cap: aiAssistants.autonomousMediaMonthlyCap,
             mediaSources: aiAssistants.mediaSources,
+            onboardingContext: aiAssistants.onboardingContext,
             orgName: organisations.name,
         })
         .from(aiAssistants)
@@ -86,9 +98,14 @@ export default withLambda(async (event) => {
             inArray(masterAssistants.roleKey, SMM_ROLE_KEYS),
         ));
 
-    let drafted = 0, skippedNoGap = 0, failed = 0, exhausted = 0;
-    const draftedByUser = new Map<number, number>();     // US8: aggregate for one summary notification per user
-    const exhaustedByUser = new Map<number, number>();   // AC2.3: assistants that couldn't source any media
+    let drafted = 0, autoScheduled = 0, skippedNoGap = 0, failed = 0, exhausted = 0;
+    // A scorer that times out or returns junk falls back to amber, which looks exactly like a
+    // cautious verdict. Count it separately so a persistently broken scorer is visible in the
+    // cron's own output instead of silently routing everything to review forever.
+    let scoringUnavailable = 0;
+    const draftedByUser = new Map<number, number>();       // US8: aggregate for one summary notification per user
+    const autoScheduledByUser = new Map<number, number>(); // auto-publish: skipped review, needs a different message
+    const exhaustedByUser = new Map<number, number>();     // AC2.3: assistants that couldn't source any media
 
     for (const a of assistants) {
         const horizonDays = a.horizonDays ?? 7;
@@ -170,15 +187,49 @@ export default withLambda(async (event) => {
         const sourceLabel = resolved.source === 'manual' ? 'your content library'
             : resolved.source === 'stock' ? 'a Pexels stock photo' : 'an AI-generated image';
 
+        // Autopilot publish gate — the same decision path the cadence engine (process-content-jobs)
+        // uses: platform policy, no AI media, green caption, a live connection, and the rolling
+        // weekly ceiling. Everything else lands in 'pending_approval'.
+        const gate = await decideAutoPublish(db, {
+            assistantId: a.id,
+            organisationId: a.organisationId,
+            platform: PLATFORM,
+            caption: copy.caption,
+            mediaSource: resolved.source,
+            onboardingContext: a.onboardingContext,
+            now,
+        });
+
+        if (gate.reason === 'scoring_unavailable') {
+            scoringUnavailable++;
+            console.warn(`[autonomous-media] confidence scorer unavailable (${gate.confidence?.failureMode}) for assistant ${a.id} — routed to review.`);
+        }
+        if (gate.reason === 'weekly_cap_reached') {
+            console.warn(`[autonomous-media] assistant ${a.id} hit its weekly auto-publish ceiling — routed to review.`);
+        }
+
+        const gateLabel = describeDecision(gate);
+
         const [post] = await db.insert(scheduledPosts).values({
             userId: a.userId, organisationId: a.organisationId, assistantId: a.id,
             platform: PLATFORM, postFormat: 'image', publishDate: gapDay,
             caption: copy.caption, hashtags: copy.hashtags || null,
             contentAssetIds: [assetId],
-            status: 'pending_approval', isAutonomous: true, triggerType: 'scheduled',
+            connectionId: gate.connectionId,
+            status: gate.status, isAutonomous: true, triggerType: 'scheduled',
+            // Marks the post unattended and counts toward the rolling weekly ceiling.
+            autoPublishedAt: gate.status === 'scheduled' ? new Date() : null,
             ownerLabel: `AI: ${a.name}`,
-            generationReason: `Drafted to fill an empty ${PLATFORM} slot on ${dateLabel} (media from ${sourceLabel}).`,
+            generationReason: `Drafted to fill an empty ${PLATFORM} slot on ${dateLabel} (media from ${sourceLabel}). ${gateLabel}`,
             generatedAt: new Date(),
+            // Persist the scorer's verdict inline — the drafter calls scoreCaption directly, so
+            // there's no separate score-post-confidence round-trip to fill these in. Null when the
+            // platform is in review mode and scoring was skipped.
+            confidenceScore: gate.confidence?.confidenceScore ?? null,
+            factualClaimsCount: gate.confidence?.factualClaimsCount ?? null,
+            factualClaims: (gate.confidence?.factualClaims ?? null) as any,
+            confidenceAssessedAt: gate.confidence ? new Date() : null,
+            confidenceAssessmentMs: gate.confidence?.assessmentDurationMs ?? null,
         }).returning({ id: scheduledPosts.id });
 
         await db.insert(scheduledPostAssets).values({ scheduledPostId: post.id, contentAssetId: assetId, position: 0 }).onConflictDoNothing();
@@ -188,7 +239,12 @@ export default withLambda(async (event) => {
             await recordPostedAssets(db, { orgId: a.organisationId, userId: a.userId, scheduledPostId: post.id }).catch(() => {});
         }
 
-        draftedByUser.set(a.userId, (draftedByUser.get(a.userId) || 0) + 1);
+        if (gate.status === 'scheduled') {
+            autoScheduledByUser.set(a.userId, (autoScheduledByUser.get(a.userId) || 0) + 1);
+            autoScheduled++;
+        } else {
+            draftedByUser.set(a.userId, (draftedByUser.get(a.userId) || 0) + 1);
+        }
         drafted++;
     }
 
@@ -199,6 +255,17 @@ export default withLambda(async (event) => {
             title: 'New AI drafts ready for review',
             message: `Your AI assistant drafted ${n} new post${n === 1 ? '' : 's'} for your review.`,
             metadata: { count: n },
+        }).catch(() => {});
+    }
+
+    // Auto-publish alert: these skipped the review queue, so tell the user what was scheduled
+    // on their behalf rather than asking them to review it.
+    for (const [uid, n] of autoScheduledByUser) {
+        await db.insert(notifications).values({
+            userId: uid, type: 'ai_auto_publish',
+            title: 'New posts scheduled automatically',
+            message: `Your AI assistant scheduled ${n} new post${n === 1 ? '' : 's'} automatically. Open the calendar to change or cancel ${n === 1 ? 'it' : 'them'} before ${n === 1 ? 'it goes' : 'they go'} live.`,
+            metadata: { count: n, reason: 'auto_publish' },
         }).catch(() => {});
     }
 
@@ -215,6 +282,6 @@ export default withLambda(async (event) => {
     return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ran: true, assistantsChecked: assistants.length, drafted, skippedNoGap, failed, exhausted }),
+        body: JSON.stringify({ ran: true, assistantsChecked: assistants.length, drafted, autoScheduled, scoringUnavailable, skippedNoGap, failed, exhausted }),
     };
 });

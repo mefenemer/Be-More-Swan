@@ -20,6 +20,8 @@ import { generateAndPersistImage } from '../../src/lib/media-persist';
 import { FalContentPolicyError } from '../../src/lib/fal-gateway';
 import { DISCLOSURE } from '../../src/config/compliance';
 import { fireOrchestrations } from '../../src/utils/orchestration';
+import { decideAutoPublish, describeDecision } from '../../src/utils/auto-publish-runtime';
+import type { MediaSource } from '../../src/utils/publish-policy';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 // Fal image model for inline AI generation (matches the autonomous suggestions path).
@@ -313,6 +315,13 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // When every enabled source comes back empty this stays set so the review notification can tell
         // the user their draft has no media (and whether AI credits were the blocker).
         let mediaExhaustedReason: 'ai_credits_exhausted' | 'media_exhausted' | null = null;
+        // Which source actually supplied the image. The Autopilot gate needs it (an AI-generated
+        // image can never publish unattended), and it stays null when no media was attached — a
+        // media-less post must never auto-publish either.
+        let attachedMediaSource: MediaSource | null = null;
+        // Set when the Autopilot gate promoted this draft straight to 'scheduled'. The user is told
+        // what was scheduled on their behalf, not asked to review something that already left.
+        let autoPublished = false;
         try {
             const mediaContext = (generated.suggestedMediaDescription || generated.caption || '').trim();
             if (mediaContext) {
@@ -363,6 +372,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 });
                 if (resolved.ok) {
                     await attachAssetToPost(db, post.id, resolved.assetId);
+                    attachedMediaSource = resolved.source;
                     // US3 AC3.3: credit line only for stock (Pexels) media, and only when the org opts in.
                     if (resolved.source === 'stock' && generated.caption) {
                         const [org] = await db.select({ enabled: organisations.pexelsAttributionEnabled })
@@ -390,6 +400,64 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             console.warn(`[process-content-jobs] job ${job.job_id} media sourcing skipped:`, imgErr instanceof Error ? imgErr.message : imgErr);
         }
 
+        // ── Autopilot: publish mode ───────────────────────────────────────────────────────────
+        // The post above was inserted as 'pending_approval'. This block can only PROMOTE it to
+        // 'scheduled'; it never demotes, so every failure — a thrown query, a missing assistant, an
+        // absent media source — leaves the draft safely in the review queue.
+        //
+        // It runs here, after media resolution, rather than at the insert: the gate refuses to
+        // auto-publish an AI-generated image, and the media source doesn't exist until now.
+        // Admin-test drafts (status 'admin_test') are never real posts and are excluded.
+        if (!isAdminTest && attachedMediaSource) {
+            try {
+                const [asst] = await db.select({ onboardingContext: aiAssistants.onboardingContext })
+                    .from(aiAssistants).where(eq(aiAssistants.id, job.assistant_id)).limit(1);
+
+                const decision = await decideAutoPublish(db, {
+                    assistantId: job.assistant_id,
+                    organisationId: job.organisation_id,
+                    platform,
+                    caption: generated.caption ?? '',
+                    mediaSource: attachedMediaSource,
+                    onboardingContext: asst?.onboardingContext ?? null,
+                    now,
+                });
+
+                // Stamp the connection on every draft, published or not: a human-approved post needs
+                // it too, and publish-instagram.ts hard-fails without it.
+                const patch: Record<string, unknown> = { connectionId: decision.connectionId, updatedAt: now };
+
+                if (decision.confidence) {
+                    patch.confidenceScore = decision.confidence.confidenceScore;
+                    patch.factualClaimsCount = decision.confidence.factualClaimsCount;
+                    patch.factualClaims = decision.confidence.factualClaims;
+                    patch.confidenceAssessedAt = now;
+                    patch.confidenceAssessmentMs = decision.confidence.assessmentDurationMs;
+                }
+
+                if (decision.status === 'scheduled') {
+                    patch.status = 'scheduled';
+                    patch.autoPublishedAt = now;   // marks it unattended + counts toward the weekly ceiling
+                    autoPublished = true;
+                }
+
+                // Only explain the routing when the deployer actually turned publish mode on —
+                // otherwise every draft in the product would carry a redundant "sent for review" note.
+                if (decision.reason !== 'platform_in_review_mode') {
+                    patch.generationReason = describeDecision(decision);
+                }
+
+                await db.update(scheduledPosts).set(patch).where(eq(scheduledPosts.id, post.id));
+
+                if (decision.reason === 'weekly_cap_reached') {
+                    console.warn(`[process-content-jobs] assistant ${job.assistant_id} hit its weekly auto-publish ceiling — post ${post.id} routed to review.`);
+                }
+            } catch (gateErr) {
+                // A broken gate must not publish and must not fail the job: the draft stays in review.
+                console.error(`[process-content-jobs] auto-publish gate failed for post ${post.id} (left in review):`, gateErr instanceof Error ? gateErr.message : gateErr);
+            }
+        }
+
         const tokenCols = tokensInput != null ? `, tokens_input = ${tokensInput}, tokens_output = ${tokensOutput ?? 0}` : '';
         await db.execute(
             `UPDATE content_generation_jobs SET status = 'completed', result_post_id = ${post.id}${tokenCols}, updated_at = now() WHERE id = ${job.id}`
@@ -401,7 +469,17 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             const assistantLabel = asst?.name ?? 'Your assistant';
             const platformLabel = platform.charAt(0).toUpperCase() + platform.slice(1);
 
-            if (mediaExhaustedReason) {
+            if (autoPublished) {
+                // Nothing to review — it's already scheduled. Point at the calendar, where the user
+                // can still change or cancel it before its publish date arrives.
+                await db.insert(notifications).values({
+                    userId: job.user_id,
+                    type: 'ai_auto_publish',
+                    title: `${assistantLabel}: ${platformLabel} post scheduled automatically`,
+                    message: `Autopilot scheduled a ${platformLabel} post without review. Open the calendar to change or cancel it before it goes live.`,
+                    metadata: { jobId: job.job_id, postId: post.id, reason: 'auto_publish', assistantId: job.assistant_id },
+                });
+            } else if (mediaExhaustedReason) {
                 // The draft is ready but has no media. Send ONE actionable notice instead of the generic
                 // "draft ready", flagging the AI-credit case explicitly so the fix (top up) is obvious.
                 const outOfCredits = mediaExhaustedReason === 'ai_credits_exhausted';

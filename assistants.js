@@ -2211,6 +2211,7 @@ function _detailHydrate(data) {
     // Reference style link + per-platform hashtag/algorithm strategy (parity with onboarding).
     _detailSetVal('edit_reference_url', ctx.reference_style_url || '');
     _hydratePlatformStrategy(data);
+    _hydrateAutoPublish(data);
     // workflowText is Be More Swan IP — not displayed to the user
 
     // Radios — trigger / source.
@@ -2421,6 +2422,97 @@ function _collectPlatformStrategy(prior) {
     return out;
 }
 
+// ── Autopilot mode (context.publishPolicy) ───────────────────────────────────
+// Autopilot is one feature with two modes. The status card above (_renderAutopilotCard) reports the
+// DRAFTING half — the always-on engine that fills the posting schedule. This controls what happens
+// to each finished draft, per platform: publish it, or hold it for human review (the default).
+//
+// The gate in src/utils/publish-policy.ts keys off scheduled_posts.platform values, NOT the
+// fb/ig/li short codes _platformCodes() returns — so map across the two keyspaces here.
+const _AUTOPUBLISH_PLATFORMS = [
+    { code: 'fb',      value: 'facebook',  label: 'Facebook'  },
+    { code: 'ig',      value: 'instagram', label: 'Instagram' },
+    { code: 'li',      value: 'linkedin',  label: 'LinkedIn'  },
+    { code: 'x',       value: 'x',         label: 'X'         },
+    { code: 'threads', value: 'threads',   label: 'Threads'   },
+    { code: 'tiktok',  value: 'tiktok',    label: 'TikTok'    },
+    { code: 'youtube', value: 'youtube',   label: 'YouTube'   },
+];
+
+// Which platforms an autonomous drafter actually exists for. Served by get-assistant-context
+// from AUTONOMOUS_DRAFT_PLATFORMS in src/utils/publish-policy.ts — never hardcode it here, or
+// adding a drafter server-side would leave this toggle greyed out and insisting otherwise.
+// The empty-set fallback is deliberate: if the backend didn't say, offer no live toggles rather
+// than guess and imply auto-publish works somewhere it doesn't.
+function _autoPublishLivePlatforms(data) {
+    return new Set(Array.isArray(data?.autoPublishPlatforms) ? data.autoPublishPlatforms : []);
+}
+
+function _hydrateAutoPublish(data) {
+    const listEl = document.getElementById('autopublish-platform-list');
+    const emptyEl = document.getElementById('autopublish-empty');
+    if (!listEl) return;
+
+    const codes = _platformCodes(data);
+    const policy = (data.context && typeof data.context.publishPolicy === 'object' && data.context.publishPolicy) || {};
+    const live = _autoPublishLivePlatforms(data);
+    const rows = _AUTOPUBLISH_PLATFORMS.filter(p => codes.has(p.code));
+
+    // Volume sentence comes from the server, computed by the same helper that enforces the ceiling,
+    // so what the user reads can't disagree with what's applied. Shown only once a platform is in
+    // publish mode — it's meaningless while everything routes to review.
+    const volumeEl = document.getElementById('autopublish-volume');
+    if (volumeEl) {
+        const anyPublishing = rows.some(p => live.has(p.value) && policy[p.value] === 'auto_publish');
+        volumeEl.textContent = anyPublishing ? (data.autoPublishVolumeText || '') : '';
+        volumeEl.classList.toggle('hidden', !anyPublishing || !data.autoPublishVolumeText);
+    }
+
+    emptyEl?.classList.toggle('hidden', rows.length > 0);
+    listEl.innerHTML = rows.map(p => {
+        const on = policy[p.value] === 'auto_publish';
+        const inert = !live.has(p.value);
+        const subtitle = inert
+            ? 'Autopilot doesn\'t draft for this platform yet — your choice is saved for when it does.'
+            : on
+                ? 'Publishing without review. Drafts that fail a safety check still come to you.'
+                : 'Holding every draft for your review before it publishes.';
+        return `
+          <label class="flex items-center justify-between gap-4 p-3 border border-gray-200 rounded-lg ${inert ? '' : 'cursor-pointer hover:bg-gray-50'}">
+            <span>
+              <span class="block text-sm font-bold text-gray-900">${p.label}</span>
+              <span class="block text-xs ${inert ? 'text-gray-400' : 'text-gray-500'} mt-0.5">${subtitle}</span>
+            </span>
+            <span class="relative inline-flex shrink-0">
+              <input type="checkbox" data-autopublish-platform="${p.value}" class="sr-only peer" ${on ? 'checked' : ''} ${inert ? 'disabled' : ''}>
+              <span class="w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-emerald-700 peer-disabled:opacity-40 transition
+                after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-5 after:h-5 after:bg-white after:rounded-full after:shadow after:transition-all peer-checked:after:translate-x-5"></span>
+            </span>
+          </label>`;
+    }).join('');
+
+    // Flipping a toggle changes the subtitle and reveals/hides the volume line — re-render in place.
+    listEl.querySelectorAll('[data-autopublish-platform]').forEach(el => {
+        el.addEventListener('change', () => {
+            const next = { ...policy, [el.dataset.autopublishPlatform]: el.checked ? 'auto_publish' : 'review' };
+            _hydrateAutoPublish({ ...data, context: { ...data.context, publishPolicy: next } });
+        });
+    });
+}
+
+// Read the rendered toggles back into context.publishPolicy. Platforms that aren't currently
+// surfaced keep their stored value, so a save never silently flips an unrendered platform to
+// review — same guarantee _collectPlatformStrategy() makes.
+function _collectPublishPolicy(prior) {
+    const out = { ...(prior && typeof prior === 'object' ? prior : {}) };
+    document.querySelectorAll('#autopublish-platform-list [data-autopublish-platform]').forEach(el => {
+        // A disabled (inert) toggle still reports its stored state — don't downgrade it.
+        if (el.disabled) return;
+        out[el.dataset.autopublishPlatform] = el.checked ? 'auto_publish' : 'review';
+    });
+    return out;
+}
+
 function _detailCollect(currentData) {
     // Platforms are managed via the dynamic platforms tab — preserve existing values
     const platforms = currentData.context?.primary_platforms || [];
@@ -2452,6 +2544,7 @@ function _detailCollect(currentData) {
         sales_objections: document.getElementById('edit_objections')?.value || '',
         reference_style_url: document.getElementById('edit_reference_url')?.value || '',
         platform_strategy: _collectPlatformStrategy(currentData.context?.platform_strategy),
+        publishPolicy: _collectPublishPolicy(currentData.context?.publishPolicy),
         primary_platforms: platforms,
     };
 

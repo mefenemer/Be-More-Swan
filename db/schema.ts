@@ -1632,6 +1632,12 @@ export const scheduledPosts = pgTable("scheduled_posts", {
   confidenceAssessedAt: timestamp("confidence_assessed_at"),
   confidenceAssessmentMs: integer("confidence_assessment_ms"), // duration of scoring call
 
+  // Autopilot "publish" mode: set when a draft skipped human review (src/utils/publish-policy.ts).
+  // Null for every post a human approved, and for every draft still awaiting review. Doubles as the
+  // counter for the rolling-7-day unattended-publish ceiling and as the audit marker for "this went
+  // out without anyone looking at it".
+  autoPublishedAt: timestamp("auto_published_at"),
+
   // US-GOV-3.2.1: C2PA provenance — FK set at publish time
   provenanceContentId: text("provenance_content_id"),      // references contentProvenance.contentId
 

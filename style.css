@@ -3187,6 +3187,11 @@
       --tw-ring-color: var(--color-emerald-200);
     }
   }
+  .peer-disabled\:opacity-40 {
+    &:is(:where(.peer):disabled ~ *) {
+      opacity: 40%;
+    }
+  }
   .file\:mr-3 {
     &::file-selector-button {
       margin-right: calc(var(--spacing) * 3);

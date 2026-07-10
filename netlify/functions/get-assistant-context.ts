@@ -5,6 +5,7 @@ import { aiAssistants, dpaAcceptances, masterAssistants } from '../../db/schema'
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { CURRENT_DPA_VERSION } from './accept-dpa';
 import { requireTenant } from '../../src/utils/tenant';
+import { AUTONOMOUS_DRAFT_PLATFORMS, describeAutoPublishVolume } from '../../src/utils/publish-policy';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -85,6 +86,14 @@ export default withLambda(async (event) => {
                 id: row.id,
                 context: row.onboardingContext ?? {},
                 configuration: row.configuration,
+                // Platforms an autonomous drafter actually exists for. The Autopilot mode card
+                // renders a live toggle only for these; everything else is shown disabled. Served
+                // from the backend so the UI can't drift from what the drafter really does.
+                autoPublishPlatforms: [...AUTONOMOUS_DRAFT_PLATFORMS],
+                // The unattended-publish volume this assistant's own posting schedule implies.
+                // Derived server-side from the same helper that computes the enforced ceiling, so
+                // the sentence the user reads can't disagree with the limit actually applied.
+                autoPublishVolumeText: describeAutoPublishVolume(row.onboardingContext),
                 draftHorizonDays: row.draftHorizonDays ?? 7,
                 reviewNotifPreference: row.reviewNotifPreference ?? 'immediate',
                 name: row.name,

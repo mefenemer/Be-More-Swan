@@ -803,7 +803,7 @@
         <div class="flex items-start justify-between gap-4">
           <div>
             <h3 class="text-lg font-bold text-gray-900">Autonomous Content Suggestions</h3>
-            <p class="text-sm text-gray-500 mt-1">Let this assistant proactively draft posts — complete with AI-generated images — to fill empty slots in your schedule. Drafts always land in the <strong>AI review queue</strong> for your approval and are never published automatically.</p>
+            <p class="text-sm text-gray-500 mt-1">Let this assistant proactively draft posts — complete with AI-generated images — to fill empty slots in your schedule. Drafts land in the <strong>AI review queue</strong> for your approval, unless you switch a platform to publish mode below.</p>
           </div>
           <button id="toggle-autonomous-media" type="button" role="switch" aria-checked="false"
             onclick="window._toggleAutonomousMedia()"
@@ -823,6 +823,32 @@
             <span id="autonomous-media-cap-hint" class="text-xs text-gray-400">Max credits this assistant may spend on auto-suggestions per month.</span>
           </div>
         </div>
+      </div>
+
+      <!-- Autopilot mode (US-GOV-2.2.1) — Autopilot always DRAFTS on the posting schedule above.
+           This chooses, per platform, what happens when a draft is ready: publish it, or hold it for
+           human review. Stored as context.publishPolicy = { "<platform>": "auto_publish" | "review" },
+           defaulting to "review" everywhere.
+
+           A draft only publishes unattended when ALL of these hold (src/utils/publish-policy.ts +
+           auto-publish-runtime.ts): platform in publish mode, caption scores green with zero factual
+           claims, the image is NOT AI-generated, a live connection exists, and the assistant is under
+           its rolling-7-day ceiling. The ceiling is derived from the posting schedule and is
+           deliberately not user-editable — see #autopublish-volume. -->
+      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
+        <div>
+          <h3 class="text-lg font-bold text-gray-900">Autopilot mode</h3>
+          <p class="text-sm text-gray-500 mt-1">Autopilot drafts posts for you on the schedule above. Choose what happens next, per platform: <strong>publish without review</strong>, or <strong>hold every draft for your review</strong> before it goes out. Reviewing is the default.</p>
+        </div>
+        <div class="mt-4 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2">
+          <p class="text-xs text-amber-800"><strong>In publish mode, posts go live without you.</strong> They post to your real accounts. Scheduled posts stay visible on the calendar, so you can still change or cancel one before it publishes.</p>
+        </div>
+        <p id="autopublish-volume" class="mt-3 text-xs font-semibold text-gray-600"></p>
+        <p class="mt-2 text-xs text-gray-500">Even in publish mode, a draft is held for review if its caption isn't confidently factual, if its image was <strong>AI-generated</strong> (the confidence check reads the caption, not the picture), or if the assistant has already published its weekly allowance. Nothing is ever discarded — it just waits for you.</p>
+        <div id="autopublish-platform-list" class="mt-5 space-y-2.5">
+          <!-- Rows injected by _hydrateAutoPublish() in assistants.js -->
+        </div>
+        <p id="autopublish-empty" class="hidden mt-3 text-xs font-semibold text-gray-400">Connect a platform first — Autopilot mode applies per platform.</p>
       </div>
 
       <!-- Media Sources (Media Source Selection) -->
