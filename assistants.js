@@ -495,7 +495,7 @@ function _resizeBriefAutoGrow() {
 // stale set of nodes is matched. Delegation resolves the target at click time, so it
 // works regardless of when/whether init ran and survives any view re-injection.
 
-// Activate a main tab by name ('overview' | 'goals' | 'workflow' | 'meetings'). Exposed so other code
+// Activate a main tab by name ('datahub' | 'goals' | 'workflow' | 'activity'). Exposed so other code
 // (deep-links, attention CTAs, child-tab clicks) can surface the right section.
 window._activateMainTab = function(name) {
     document.querySelectorAll('.main-tab-btn').forEach(b => b.classList.toggle('active-tab', b.dataset.maintab === name));
@@ -1386,7 +1386,7 @@ window._submitTuning = async function() {
         document.getElementById('tuning-revise-btn').classList.toggle('hidden', !_tuningCtx.postId);
         document.getElementById('tuning-done-btn').classList.remove('hidden');
         window._renderRunbookDirectives();
-        window.showToast?.('Directive added to Progress Reviews.');
+        window.showToast?.('Directive added to Learned Directives.');
     } catch (e) {
         errEl.textContent = e.message || 'Something went wrong.'; errEl.classList.remove('hidden');
     } finally {
@@ -2681,7 +2681,6 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         attachAutoSave();
         _wirePostingSchedule();
         _renderKickOff(assistantId);
-        window._initReviewMeetings?.(assistantId);
 
         // Deep-link (continued from above): review-queue/datahub/calendar main tabs read
         // window._detailReviewQueue (just set by _applyDashboardRegistry above) and other
@@ -3275,25 +3274,15 @@ async function _renderKickOff(assistantId) {
             <div class="flex flex-wrap gap-1.5">${connPills}</div>`;
     }
 
-    // Overview kick-off CTA and tab badge — visible only until the assistant is working.
-    const overviewCta  = document.getElementById('meetings-kickoff-cta');
-    const meetingsBadge = document.getElementById('meetings-kickoff-badge');
-
     // Issue #115: once kicked off, the Kick Off Meeting card has done its job — its detail
     // (primary directive + connections) now lives in the notification sent by
     // kickoff-assistant.ts, and pausing a working assistant is already available from the
     // My Assistants grid (window._assistantTogglePause), so the card no longer needs to
     // linger here at all.
     if (data.working) {
-        if (overviewCta)   overviewCta.classList.add('hidden');
-        if (meetingsBadge) meetingsBadge.classList.add('hidden');
         card.classList.add('hidden');
         return;
     }
-
-    // Not yet working — show the Overview CTA and badge so users notice the Meetings tab.
-    if (overviewCta)   overviewCta.classList.remove('hidden');
-    if (meetingsBadge) meetingsBadge.classList.remove('hidden');
 
     btn.classList.remove('hidden');
     const outstanding = items.filter(i => i.required && !i.done);
@@ -3377,156 +3366,6 @@ function _renderMeetingsBrief(data) {
         </div>`).join('');
     card.classList.remove('hidden');
 }
-
-// ─────────────────────────────────────────────────────────────────
-// Meetings tab — Review Meetings (localStorage-backed log per assistant)
-// ─────────────────────────────────────────────────────────────────
-(function () {
-    let _reviewAssistantId = null;
-
-    function _reviewKey() { return `review_meetings_${_reviewAssistantId}`; }
-
-    function _loadReviews() {
-        try { return JSON.parse(localStorage.getItem(_reviewKey()) || '[]'); } catch { return []; }
-    }
-
-    function _saveReviews(list) {
-        localStorage.setItem(_reviewKey(), JSON.stringify(list));
-    }
-
-    function _renderHistory() {
-        const host = document.getElementById('review-history');
-        if (!host) return;
-        const list = _loadReviews();
-        if (!list.length) {
-            host.innerHTML = '<p class="text-sm text-gray-400 text-center py-8">No review meetings logged yet.<br>Log your first review to track your assistant\'s progress over time.</p>';
-            return;
-        }
-        const stars = (n) => '⭐'.repeat(Number(n));
-        const fmtDate = (iso) => { try { return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); } catch { return iso; } };
-        const STATUS_BADGE = {
-            on_track:  { cls: 'bg-emerald-100 text-emerald-700', label: 'On Track' },
-            at_risk:   { cls: 'bg-amber-100 text-amber-700',   label: 'At Risk' },
-            off_track: { cls: 'bg-red-100 text-red-700',       label: 'Off Track' },
-            achieved:  { cls: 'bg-blue-100 text-blue-700',     label: 'Achieved' },
-        };
-        host.innerHTML = list.slice().reverse().map((r, i) => {
-            const idx = list.length - 1 - i;
-            const goalChips = (r.goalStatuses || []).map(gs => {
-                const b = STATUS_BADGE[gs.status] || { cls: 'bg-gray-100 text-gray-600', label: gs.status };
-                return `<span class="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${b.cls}">${_escapeHtml(gs.label)}: ${b.label}</span>`;
-            }).join('');
-            const recs = (r.recommendations || []).map(t => `<li class="text-sm text-gray-700">${_escapeHtml(t)}</li>`).join('');
-            const autoBadge = r.auto
-                ? '<span class="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-100">Auto-logged</span>'
-                : '';
-            return `
-            <div class="border border-gray-100 rounded-xl p-4 space-y-2.5">
-              <div class="flex items-start justify-between gap-3">
-                <div>
-                  <div class="flex items-center gap-2">
-                    <p class="text-sm font-bold text-gray-900">${fmtDate(r.date)}</p>
-                    ${autoBadge}
-                  </div>
-                  <p class="text-xs text-gray-500 mt-0.5">${stars(r.rating)} ${['','Poor','Needs improvement','Satisfactory','Good','Excellent'][r.rating] || ''}</p>
-                </div>
-                <button onclick="window._deleteReviewMeeting(${idx})" class="text-xs text-gray-400 hover:text-red-500 transition cursor-pointer shrink-0">Remove</button>
-              </div>
-              ${r.agenda ? `<div><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-0.5">Agenda</p><p class="text-sm text-gray-700 whitespace-pre-wrap">${_escapeHtml(r.agenda)}</p></div>` : ''}
-              ${goalChips ? `<div class="flex flex-wrap gap-1.5">${goalChips}</div>` : ''}
-              ${r.notes ? `<div><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-0.5">Discussion</p><p class="text-sm text-gray-700 whitespace-pre-wrap">${_escapeHtml(r.notes)}</p></div>` : ''}
-              ${r.outcomes ? `<div><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-0.5">Outcomes &amp; Actions</p><p class="text-sm text-gray-700 whitespace-pre-wrap">${_escapeHtml(r.outcomes)}</p></div>` : ''}
-              ${recs ? `<div><p class="text-[10px] font-bold text-gray-400 uppercase tracking-wide mb-0.5">Recommendations</p><ul class="list-disc list-inside space-y-0.5">${recs}</ul></div>` : ''}
-              ${r.nextDate ? `<p class="text-xs text-gray-400 pt-1 border-t border-gray-50">Next review: <span class="font-semibold text-gray-600">${fmtDate(r.nextDate)}</span></p>` : ''}
-            </div>`;
-        }).join('');
-    }
-
-    window._initReviewMeetings = function (assistantId) {
-        _reviewAssistantId = assistantId;
-        // Default date to today
-        const dateEl = document.getElementById('review-date');
-        if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
-        _renderHistory();
-    };
-
-    window._openReviewForm = function () {
-        const form = document.getElementById('review-form');
-        if (!form) return;
-        const dateEl = document.getElementById('review-date');
-        if (dateEl) dateEl.value = new Date().toISOString().slice(0, 10);
-        const notesEl = document.getElementById('review-notes');
-        if (notesEl) notesEl.value = '';
-        const outcomesEl = document.getElementById('review-outcomes');
-        if (outcomesEl) outcomesEl.value = '';
-        const nextEl = document.getElementById('review-next');
-        if (nextEl) nextEl.value = '';
-        const ratingEl = document.getElementById('review-rating');
-        if (ratingEl) ratingEl.value = '3';
-        // Reset goal status selects
-        document.querySelectorAll('#review-goals-checks select').forEach(s => { s.value = ''; });
-        form.classList.remove('hidden');
-        form.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    };
-
-    window._closeReviewForm = function () {
-        document.getElementById('review-form')?.classList.add('hidden');
-    };
-
-    window._saveReviewMeeting = function () {
-        const date     = document.getElementById('review-date')?.value;
-        const rating   = document.getElementById('review-rating')?.value || '3';
-        const notes    = document.getElementById('review-notes')?.value?.trim() || '';
-        const outcomes = document.getElementById('review-outcomes')?.value?.trim() || '';
-        const next     = document.getElementById('review-next')?.value || '';
-        if (!date) { window.showToast?.('Please select a meeting date.'); return; }
-        // Capture goal statuses (only those explicitly set)
-        const goalStatuses = [];
-        document.querySelectorAll('#review-goals-checks select').forEach(s => {
-            if (s.value) {
-                const goalId = s.name.replace('goal_status_', '');
-                const goal = (window._goalsCache || []).find(g => String(g.id) === goalId);
-                if (goal) {
-                    const { label } = window._goalMetricLabel?.(goal.metricKey) || { label: goal.metricKey };
-                    goalStatuses.push({ goalId, label, status: s.value });
-                }
-            }
-        });
-        const list = _loadReviews();
-        list.push({ date, rating: Number(rating), notes, outcomes, goalStatuses, nextDate: next, savedAt: new Date().toISOString() });
-        _saveReviews(list);
-        window._closeReviewForm();
-        _renderHistory();
-        window.showToast?.('Review meeting saved.');
-    };
-
-    window._deleteReviewMeeting = function (idx) {
-        const list = _loadReviews();
-        list.splice(idx, 1);
-        _saveReviews(list);
-        _renderHistory();
-    };
-
-    // Auto-log / update today's Review Progress session as a Review Meeting. Deduped to one
-    // auto entry per assistant per day: reopening the page (or generating recommendations)
-    // updates that entry rather than appending a new one. Manual "Log a Review" entries are
-    // left untouched.
-    window._upsertAutoReviewMeeting = function (payload) {
-        if (_reviewAssistantId == null) return null;
-        const today = new Date().toISOString().slice(0, 10);
-        const list = _loadReviews();
-        let entry = list.find(r => r.auto && r.date === today);
-        if (entry) {
-            Object.assign(entry, payload, { auto: true, date: today, savedAt: new Date().toISOString() });
-        } else {
-            entry = { date: today, auto: true, notes: '', outcomes: '', goalStatuses: [], nextDate: '', recommendations: [], savedAt: new Date().toISOString(), ...payload };
-            list.push(entry);
-        }
-        _saveReviews(list);
-        _renderHistory();
-        return entry;
-    };
-})();
 
 // ─────────────────────────────────────────────────────────────────
 // Performance Metrics — fetches get-assistant-metrics and populates the
@@ -4102,31 +3941,11 @@ function _syncReviewButton() {
     // Always visible — Review Meeting is not gated on goals existing.
 }
 
+// No goals yet — Review Progress has nothing to chart, so send the user to add one instead
+// (keeps the hero CTA from ever being a dead end).
 window._openReviewMeeting = function () {
-    window._activateMainTab('meetings');
-    setTimeout(() => {
-        const section = document.getElementById('review-goals-section');
-        const checks = document.getElementById('review-goals-checks');
-        if (section && checks && _goalsCache.length) {
-            checks.innerHTML = _goalsCache.map(g => {
-                const { label } = _goalMetricLabel(g.metricKey);
-                return `<label class="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-                    <select name="goal_status_${g.id}" class="border border-gray-300 rounded-md px-2 py-1 text-xs bg-white focus:ring-2 focus:ring-emerald-500 outline-none">
-                        <option value="">Not discussed</option>
-                        <option value="on_track">On Track</option>
-                        <option value="at_risk">At Risk</option>
-                        <option value="off_track">Off Track</option>
-                        <option value="achieved">Achieved</option>
-                    </select>
-                    <span class="truncate">${_escapeHtml(label)}${g.isPrimary ? ' <span class="text-gray-400 text-xs">(Primary)</span>' : ''}</span>
-                </label>`;
-            }).join('');
-            section.classList.remove('hidden');
-        } else if (section) {
-            section.classList.add('hidden');
-        }
-        window._openReviewForm();
-    }, 80);
+    window._activateMainTab('goals');
+    setTimeout(() => window._toggleGoalBuilder(true), 80);
 };
 
 // Objective labels — mirror GOAL_OBJECTIVES in src/config/goal-metrics.ts. 'outcome' is the
@@ -4311,8 +4130,7 @@ window._openReviewProgress = function (goalId) {
     const modal = document.getElementById('modal-review-progress');
     const sel = document.getElementById('review-goal-select');
     if (!modal || !sel) return;
-    // No goals to review against yet — fall back to the manual review-log form so the
-    // hero CTA is never a dead end.
+    // No goals to review against yet — fall back to adding one so the hero CTA is never a dead end.
     if (!_goalsCache.length) { window._openReviewMeeting?.(); return; }
     sel.innerHTML = _goalsCache.map(g => {
         const { label } = _goalMetricLabel(g.metricKey);
@@ -4322,40 +4140,7 @@ window._openReviewProgress = function (goalId) {
     sel.value = String(initial);
     modal.classList.remove('hidden');
     window._renderReviewChart(Number(initial));
-    // Opening the progress page is itself a review session — log it (once per day) as a
-    // Review Meeting so the user and assistant can refer back to it.
-    _recordReviewProgressSession();
 };
-
-// Auto-log the current Review Progress session as a Review Meeting. The "agenda" captures
-// which goals were reviewed and their status; "outcomes" summarises the headline result and
-// is enriched with the assistant's recommendations once they're generated (_getAiRecommendations).
-function _recordReviewProgressSession() {
-    if (!_goalsCache.length || !window._upsertAutoReviewMeeting) return;
-    const goalStatuses = _goalsCache.map(g => {
-        const { label } = _goalMetricLabel(g.metricKey);
-        const status = _GOAL_STATUS_META[g.status] ? g.status : 'pending';
-        return { goalId: String(g.id), label, status };
-    });
-    const counts = goalStatuses.reduce((a, gs) => { a[gs.status] = (a[gs.status] || 0) + 1; return a; }, {});
-    const onTrack = counts.on_track || 0;
-    const atRisk = counts.at_risk || 0;
-    const offTrack = counts.off_track || 0;
-    const n = goalStatuses.length;
-    const assistantName = document.getElementById('detail-name-input')?.value?.trim() || 'Your assistant';
-    const agenda = `Progress review of ${n} goal${n > 1 ? 's' : ''}: ${goalStatuses.map(gs => gs.label).join(', ')}.`;
-    let rating = 3;
-    if (offTrack === 0 && atRisk === 0) rating = 5;
-    else if (offTrack === 0) rating = 4;
-    else if (offTrack >= n) rating = 1;
-    else rating = 2;
-    const bits = [];
-    if (onTrack) bits.push(`${onTrack} on track`);
-    if (atRisk) bits.push(`${atRisk} at risk`);
-    if (offTrack) bits.push(`${offTrack} off track`);
-    const outcomes = `${assistantName} reviewed progress — ${bits.join(', ') || 'status pending'}.`;
-    window._upsertAutoReviewMeeting({ agenda, goalStatuses, rating, outcomes });
-}
 
 window._renderReviewChart = async function (goalId) {
     const chart = document.getElementById('review-chart');
@@ -4685,8 +4470,6 @@ window._getAiRecommendations = async function (goalId) {
             ? `<span class="text-[10px] font-bold uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded">${_escapeHtml(data.funnelStage)}</span>`
             : '';
         const assistantName = document.getElementById('detail-name-input')?.value?.trim() || 'AI';
-        // Fold the assistant's update + recommendations into today's auto-logged Review Meeting.
-        window._upsertAutoReviewMeeting?.({ recommendations: data.recommendations });
         if (box) box.innerHTML = `<div class="mt-3 space-y-3">
             <div class="flex items-center gap-2 flex-wrap">
                 <p class="text-xs font-bold text-gray-500 uppercase tracking-wide">${_escapeHtml(assistantName)}'s Recommendations</p>
