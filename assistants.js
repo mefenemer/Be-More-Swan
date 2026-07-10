@@ -3245,7 +3245,7 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
     // dashboard is showing.
     card.querySelectorAll('.metrics-period-btn').forEach(btn => {
         const active = btn.dataset.period === period;
-        btn.className = `metrics-period-btn px-3 py-1.5 text-xs font-bold rounded-lg transition ${active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`;
+        btn.className = `metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition ${active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`;
         btn.setAttribute('aria-selected', String(active));
         btn.onclick = active ? null : () => _fetchAndRenderAssistantMetrics(assistantId, btn.dataset.period);
     });
@@ -3265,7 +3265,11 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
 
         const el = id => document.getElementById(id);
         const periodLabel = period === 'month' ? 'this month' : 'this week';
-        el('metrics-period-note').textContent = `All-time posts created by this assistant; time & money saved ${periodLabel} (matches the dashboard's ${period === 'month' ? 'This Month' : 'This Week'} view)`;
+        // Short caption on screen; the sentence that explains how it lines up with the dashboard
+        // is one hover away, rather than costing a line of the card.
+        const note = el('metrics-period-note');
+        note.textContent = `All-time posts · time & money saved ${periodLabel}`;
+        note.title = `All-time posts created by this assistant; time & money saved ${periodLabel} (matches the dashboard's ${period === 'month' ? 'This Month' : 'This Week'} view)`;
         el('metrics-total-created').textContent = d.totalCreated.toLocaleString();
         el('metrics-total-scheduled').textContent = d.totalScheduled.toLocaleString();
         el('metrics-total-published').textContent = d.totalPublished.toLocaleString();
@@ -3277,31 +3281,33 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
             el('metrics-roi-note').textContent = `At your configured hourly rate`;
         } else {
             el('metrics-gbp-saved').textContent = '—';
-            el('metrics-roi-note').innerHTML = `<a href="#" onclick="loadView && loadView('account'); return false" class="text-emerald-600 hover:underline">Set your hourly rate</a> to see £ ROI`;
+            el('metrics-roi-note').innerHTML = `<a href="#" onclick="loadView && loadView('account'); return false" class="text-emerald-600 hover:underline">Set your hourly rate</a> to see this`;
         }
 
-        // Per-platform breakdown table
+        // Per-platform breakdown — collapsed by default, and absent entirely when this
+        // assistant has only ever posted to one platform (the strip above already says it all).
         const platformEl = el('metrics-by-platform');
-        if (platformEl && d.byPlatform) {
-            const rows = Object.entries(d.byPlatform)
+        const breakdown = el('metrics-breakdown');
+        if (platformEl && breakdown) {
+            const entries = Object.entries(d.byPlatform || {})
                 .filter(([, v]) => v.created > 0)
-                .sort(([, a], [, b]) => b.created - a.created)
-                .map(([p, v]) => {
-                    const icon = (window._PLATFORM_ICONS || {})[p] || '';
-                    const label = (window._PLATFORM_LABEL || {})[p] || p.charAt(0).toUpperCase() + p.slice(1);
-                    const pct = d.totalCreated > 0 ? Math.round((v.published / d.totalCreated) * 100) : 0;
-                    return `<div class="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
-                        <div class="flex items-center gap-2 text-sm font-semibold text-gray-700">
-                            <span class="text-gray-400">${icon}</span>${label}
-                        </div>
-                        <div class="grid grid-cols-3 gap-4 text-xs font-semibold text-right" style="min-width:220px;font-variant-numeric:tabular-nums">
-                            <span class="text-gray-500">${v.created} created</span>
-                            <span class="text-blue-600">${v.scheduled} scheduled</span>
-                            <span class="text-emerald-600">${v.published} published</span>
-                        </div>
-                    </div>`;
-                }).join('');
-            platformEl.innerHTML = rows || '<p class="text-xs text-gray-400">No platform data yet.</p>';
+                .sort(([, a], [, b]) => b.created - a.created);
+            breakdown.classList.toggle('hidden', entries.length < 2);
+            el('metrics-breakdown-label').textContent = `Breakdown by platform (${entries.length})`;
+            platformEl.innerHTML = entries.map(([p, v]) => {
+                const icon = (window._PLATFORM_ICONS || {})[p] || '';
+                const label = (window._PLATFORM_LABEL || {})[p] || p.charAt(0).toUpperCase() + p.slice(1);
+                return `<div class="flex items-center justify-between py-1 border-b border-gray-50 last:border-0">
+                    <div class="flex items-center gap-2 text-xs font-semibold text-gray-700">
+                        <span class="text-gray-400">${icon}</span>${label}
+                    </div>
+                    <div class="grid grid-cols-3 gap-4 text-xs font-semibold text-right" style="min-width:220px;font-variant-numeric:tabular-nums">
+                        <span class="text-gray-500">${v.created} created</span>
+                        <span class="text-blue-600">${v.scheduled} scheduled</span>
+                        <span class="text-emerald-600">${v.published} published</span>
+                    </div>
+                </div>`;
+            }).join('');
         }
     } catch {
         // silently skip — metrics are supplementary
