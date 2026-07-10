@@ -317,7 +317,16 @@
           <span id="metric-engagement-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
         </div>
         <div>
-          <p id="metric-engagement-value" class="text-2xl font-extrabold text-gray-900">—</p>
+          <div class="flex items-end justify-between gap-3">
+            <p id="metric-engagement-value" class="text-2xl font-extrabold text-gray-900">—</p>
+            <!-- Trend curve. Decorative while the card is empty (see _setKpiCard in assistants.js);
+                 redrawn from a real series, in colour, once the metrics endpoint returns one. -->
+            <svg id="metric-engagement-spark" class="w-20 h-7 shrink-0 text-gray-200" viewBox="0 0 80 28"
+                 fill="none" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+              <path d="M0 22 L13 20 L26 23 L39 16 L52 13 L65 8 L80 5" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
           <p id="kpi-1-title" class="text-base font-bold text-gray-700 mt-0.5"></p>
           <p id="kpi-1-desc" class="text-xs text-gray-500 mt-1"></p>
         </div>
@@ -333,7 +342,16 @@
           <span id="metric-reach-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
         </div>
         <div>
-          <p id="metric-reach-value" class="text-2xl font-extrabold text-gray-900">—</p>
+          <div class="flex items-end justify-between gap-3">
+            <p id="metric-reach-value" class="text-2xl font-extrabold text-gray-900">—</p>
+            <!-- Trend curve. Decorative while the card is empty (see _setKpiCard in assistants.js);
+                 redrawn from a real series, in colour, once the metrics endpoint returns one. -->
+            <svg id="metric-reach-spark" class="w-20 h-7 shrink-0 text-gray-200" viewBox="0 0 80 28"
+                 fill="none" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+              <path d="M0 22 L13 20 L26 23 L39 16 L52 13 L65 8 L80 5" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
           <p id="kpi-2-title" class="text-base font-bold text-gray-700 mt-0.5"></p>
           <p id="kpi-2-desc" class="text-xs text-gray-500 mt-1"></p>
         </div>
@@ -349,7 +367,16 @@
           <span id="metric-ctr-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
         </div>
         <div>
-          <p id="metric-ctr-value" class="text-2xl font-extrabold text-gray-900">—</p>
+          <div class="flex items-end justify-between gap-3">
+            <p id="metric-ctr-value" class="text-2xl font-extrabold text-gray-900">—</p>
+            <!-- Trend curve. Decorative while the card is empty (see _setKpiCard in assistants.js);
+                 redrawn from a real series, in colour, once the metrics endpoint returns one. -->
+            <svg id="metric-ctr-spark" class="w-20 h-7 shrink-0 text-gray-200" viewBox="0 0 80 28"
+                 fill="none" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+              <path d="M0 22 L13 20 L26 23 L39 16 L52 13 L65 8 L80 5" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
           <p id="kpi-3-title" class="text-base font-bold text-gray-700 mt-0.5"></p>
           <p id="kpi-3-desc" class="text-xs text-gray-500 mt-1"></p>
         </div>
@@ -365,7 +392,16 @@
           <span id="metric-value-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
         </div>
         <div>
-          <p id="metric-value-value" class="text-2xl font-extrabold text-gray-900">—</p>
+          <div class="flex items-end justify-between gap-3">
+            <p id="metric-value-value" class="text-2xl font-extrabold text-gray-900">—</p>
+            <!-- Trend curve. Decorative while the card is empty (see _setKpiCard in assistants.js);
+                 redrawn from a real series, in colour, once the metrics endpoint returns one. -->
+            <svg id="metric-value-spark" class="w-20 h-7 shrink-0 text-gray-200" viewBox="0 0 80 28"
+                 fill="none" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+              <path d="M0 22 L13 20 L26 23 L39 16 L52 13 L65 8 L80 5" stroke="currentColor" stroke-width="2"
+                    stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
           <p id="kpi-4-title" class="text-base font-bold text-gray-700 mt-0.5"></p>
           <p id="kpi-4-desc" class="text-xs text-gray-500 mt-1"></p>
         </div>

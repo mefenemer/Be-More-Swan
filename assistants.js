@@ -3685,11 +3685,52 @@ function _renderMeetingsBrief(data) {
 // three KPI cards. Shows "—" honestly wherever a metric has no data or the
 // platform doesn't expose it (e.g. CTR for Instagram's organic feed).
 // ─────────────────────────────────────────────────────────────────
+// ── Performance Metrics KPI cards ────────────────────────────────────────────
+// A card with nothing real to report renders muted: grey value, grey curve, grey dot.
+// Colour is reserved for a figure the user can act on.
+//
+// The curve is DECORATIVE while the card is empty — it stands in for a trend line rather
+// than charting anything — so it must never sit under a real number. A card that has a
+// value but no series hides its curve instead of drawing an invented one. `_sparkPath`
+// is what draws a real one, the day the endpoint returns `series`.
+const _KPI_KEYS = ['engagement', 'reach', 'ctr', 'value'];
+const _SPARK_EMPTY_D = 'M0 22 L13 20 L26 23 L39 16 L52 13 L65 8 L80 5';
+
+function _sparkPath(series) {
+    if (!Array.isArray(series) || series.length < 2) return null;
+    const min = Math.min(...series);
+    const span = Math.max(...series) - min || 1;
+    return series.map((v, i) => {
+        const x = (i / (series.length - 1)) * 80;
+        const y = 26 - ((v - min) / span) * 24;
+        return `${i ? 'L' : 'M'}${x.toFixed(1)} ${y.toFixed(1)}`;
+    }).join(' ');
+}
+
+function _setKpiCard(key, { empty, tone = 'brand', series = null } = {}) {
+    const val = document.getElementById(`metric-${key}-value`);
+    if (val) val.className = `text-2xl font-extrabold ${empty ? 'text-gray-300' : 'text-gray-900'}`;
+
+    const spark = document.getElementById(`metric-${key}-spark`);
+    if (!spark) return;
+    const real = _sparkPath(series);
+    const show = empty || !!real;
+    spark.style.display = show ? '' : 'none';
+    if (!show) return;
+    spark.querySelector('path')?.setAttribute('d', real || _SPARK_EMPTY_D);
+    spark.setAttribute('class', `w-20 h-7 shrink-0 ${
+        empty ? 'text-gray-200' : tone === 'down' ? 'text-rose-400' : 'text-emerald-400'}`);
+}
+
 async function _loadAssistantMetrics(assistantId) {
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
     const dotEl   = (k) => document.getElementById(`metric-${k}-dot`);
     if (!valEl('engagement')) return; // section not on this page
+
+    // Start muted. Every path out of this function that doesn't produce a figure — fetch
+    // failure, no published posts, a metric the platform doesn't report — leaves it that way.
+    _KPI_KEYS.forEach(k => _setKpiCard(k, { empty: true }));
 
     // 0–1 fraction → "12.3%". Null/undefined → "—".
     const pct = (v) => (v === null || v === undefined) ? '—' : `${(v * 100).toFixed(1)}%`;
@@ -3722,24 +3763,34 @@ async function _loadAssistantMetrics(assistantId) {
         if (!data.hasData) return; // keep placeholders
 
         const m = data.metrics || {};
+        const series = data.series || {};
+        // A zero rate is as empty as a missing one — there is no movement to colour in.
+        const blank = (v) => v === null || v === undefined || v === 0;
 
         // Engagement Rate
         valEl('engagement').textContent = pct(m.engagementRate);
-        if (m.engagementRate !== null && m.engagementRate !== undefined) {
+        _setKpiCard('engagement', { empty: blank(m.engagementRate), series: series.engagement });
+        if (!blank(m.engagementRate)) {
             trendEl('engagement').textContent = `${(data.current?.posts) || 0} posts`;
             setDot('engagement', 'live');
         }
 
         // Organic Reach Growth (period-over-period; can be negative)
         valEl('reach').textContent = signedPct(m.reachGrowth);
-        if (m.reachGrowth !== null && m.reachGrowth !== undefined) {
+        _setKpiCard('reach', {
+            empty: blank(m.reachGrowth),
+            tone: m.reachGrowth < 0 ? 'down' : 'brand',
+            series: series.reach,
+        });
+        if (!blank(m.reachGrowth)) {
             trendEl('reach').textContent = m.reachGrowth >= 0 ? 'Growing' : 'Declining';
             setDot('reach', m.reachGrowth >= 0 ? 'up' : 'down');
         }
 
         // Click-Through Rate (null for IG organic — stays "—")
         valEl('ctr').textContent = pct(m.clickThroughRate);
-        if (m.clickThroughRate !== null && m.clickThroughRate !== undefined) {
+        _setKpiCard('ctr', { empty: blank(m.clickThroughRate), series: series.ctr });
+        if (!blank(m.clickThroughRate)) {
             setDot('ctr', 'live');
         } else {
             trendEl('ctr').textContent = 'Not tracked on Instagram';
@@ -3749,13 +3800,19 @@ async function _loadAssistantMetrics(assistantId) {
         // headline. Trend shows the raw value signals so success isn't judged on views alone.
         if (valEl('value')) {
             valEl('value').textContent = pct(m.meaningfulEngagementRate);
+            const down = m.valueScoreGrowth != null && m.valueScoreGrowth < 0;
+            _setKpiCard('value', {
+                empty: blank(m.meaningfulEngagementRate),
+                tone: down ? 'down' : 'brand',
+                series: series.value,
+            });
             const c = data.current || {};
             const parts = [];
             if (c.saves != null)  parts.push(`${c.saves} saves`);
             if (c.shares != null) parts.push(`${c.shares} shares`);
             if (parts.length) trendEl('value').textContent = parts.join(' · ');
-            if (m.meaningfulEngagementRate != null) {
-                setDot('value', m.valueScoreGrowth != null && m.valueScoreGrowth < 0 ? 'down' : 'up');
+            if (!blank(m.meaningfulEngagementRate)) {
+                setDot('value', down ? 'down' : 'up');
             }
             // Recognise high-value / low-reach posts as wins.
             const wins = (data.topValuePosts || []).filter(p => p.lowReachHighValue).length;

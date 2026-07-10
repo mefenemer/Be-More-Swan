@@ -2683,6 +2683,9 @@
   .text-emerald-900 {
     color: var(--color-emerald-900);
   }
+  .text-gray-200 {
+    color: var(--color-gray-200);
+  }
   .text-gray-300 {
     color: var(--color-gray-300);
   }
@@ -2784,6 +2787,9 @@
   }
   .text-red-900 {
     color: var(--color-red-900);
+  }
+  .text-rose-400 {
+    color: var(--color-rose-400);
   }
   .text-rose-600 {
     color: var(--color-rose-600);
