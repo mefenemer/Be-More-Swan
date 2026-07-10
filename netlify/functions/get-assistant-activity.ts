@@ -6,7 +6,7 @@
 // tosAcceptances, dpaAcceptances, and contentRules (Kick Off meeting milestones).
 
 import { Handler } from '@netlify/functions';
-import { eq, and, desc, inArray, gte } from 'drizzle-orm';
+import { eq, and, desc, inArray, gte, sql } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
 import {
     aiAssistants,
@@ -70,7 +70,7 @@ export default withLambda(async (event) => {
             cutoffDate ? and(baseFilters, gte(col, cutoffDate)) : baseFilters;
 
         // Run all queries in parallel
-        const [genJobs, posts, ideas, mediaJobs, auditRows, tosRows, dpaRows, ruleRows] = await Promise.all([
+        const [genJobs, posts, ideas, mediaJobs, auditRows, postAuditRows, tosRows, dpaRows, ruleRows] = await Promise.all([
             // Content generation jobs
             db.select({
                 id: contentGenerationJobs.id,
@@ -153,6 +153,29 @@ export default withLambda(async (event) => {
             .where(withCutoff(auditLogs.createdAt, and(
                 inArray(auditLogs.resourceType, ['assistant', 'ai_assistants']),
                 eq(auditLogs.resourceId, String(assistantId)),
+            )))
+            .orderBy(desc(auditLogs.createdAt))
+            .limit(limit),
+
+            // Post-level audit entries (e.g. POST_APPROVED from approve-post.ts). These are keyed by
+            // resourceId = the scheduled_posts row, not the assistant, so they have to be attributed
+            // via a join. Without this the approval never reaches the feed: the post row itself is
+            // sorted and filtered on created_at, so approving a draft older than the selected
+            // timeframe leaves no trace at all.
+            db.select({
+                id: auditLogs.id,
+                actionType: auditLogs.actionType,
+                newState: auditLogs.newState,
+                createdAt: auditLogs.createdAt,
+            })
+            .from(auditLogs)
+            // Compare as text rather than casting resourceId to int — resource_id is a free-form
+            // text column shared by every resource type, so a cast would throw on non-numeric rows.
+            .innerJoin(scheduledPosts, eq(auditLogs.resourceId, sql`${scheduledPosts.id}::text`))
+            .where(withCutoff(auditLogs.createdAt, and(
+                eq(auditLogs.resourceType, 'scheduled_posts'),
+                eq(scheduledPosts.assistantId, aId),
+                eq(scheduledPosts.organisationId, orgId),
             )))
             .orderBy(desc(auditLogs.createdAt))
             .limit(limit),
@@ -339,10 +362,12 @@ export default withLambda(async (event) => {
             items.push({ id: `media-${m.id}`, type: 'media_generation', icon, description, createdAt: m.createdAt, status });
         }
 
-        for (const log of auditRows) {
+        // audit_logs.id is a global serial, so the assistant-scoped and post-scoped rows
+        // can share the `audit-` id prefix without colliding.
+        for (const log of [...auditRows, ...postAuditRows]) {
             const description = _describeAudit(log.actionType, log.newState as Record<string, any> | null);
             const icon = _auditIcon(log.actionType);
-            items.push({ id: `audit-${log.id}`, type: 'audit', icon, description, createdAt: log.createdAt, status: 'info' });
+            items.push({ id: `audit-${log.id}`, type: 'audit', icon, description, createdAt: log.createdAt, status: _auditStatus(log.actionType) });
         }
 
         // ── Kick Off meeting milestones ────────────────────────────────────────
@@ -427,6 +452,13 @@ function _auditIcon(actionType: string): string {
     if (actionType === 'POST_APPROVED') return 'check';
     if (actionType === 'POST_CANCELLED') return 'x';
     return 'settings';
+}
+
+// Approving or publishing a post is a completed action, not a neutral log line — surface it
+// as a success so it reads the same as the post/job rows it sits alongside.
+function _auditStatus(actionType: string): 'success' | 'info' {
+    if (actionType === 'POST_APPROVED' || actionType === 'PUBLISH') return 'success';
+    return 'info';
 }
 
 function _describeAudit(actionType: string, newState: Record<string, any> | null): string {
