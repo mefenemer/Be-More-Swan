@@ -39,7 +39,13 @@ export default withLambda(async (event) => {
         // is the org's sole assistant), not the old all-time posts-only estimate.
         const period = parseRoiPeriod(event.queryStringParameters?.period);
         const periodStart = roiPeriodStart(period);
-        const isOnlyAssistantInOrg = assistantIds.length === 1;
+        // Org leads (which have no assistantId) are only attributable to a card when the org
+        // has a single assistant — but count only ACTIVE (non-archived) assistants here, so
+        // that an org with one active assistant plus retired ones still attributes leads, and
+        // stays consistent with the dashboard ROI hero (roi-stats.ts), which likewise scopes
+        // its aggregate to active assistants. 'active' == not archived.
+        const activeAssistantCount = assistants.filter(a => a.lifecycleStatus !== 'archived').length;
+        const isOnlyAssistantInOrg = activeAssistantCount === 1;
 
         // Run goals + post metrics + hourly rate in parallel
         const [goalRows, postRows, activeJobRows, profileRow, mult, postsInPeriodRows, taskRunsInPeriodRows, [{ leadsInPeriod }]] = await Promise.all([

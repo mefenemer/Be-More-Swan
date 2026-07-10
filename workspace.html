@@ -316,15 +316,18 @@ window.showComplianceModals = function showComplianceModals(force) {
       <div class="mb-4">
         <label class="block text-xs font-semibold text-gray-700 mb-1.5">Post text</label>
         <div class="relative">
-          <textarea id="gpw-caption" maxlength="5000" rows="4" placeholder="Write your post…" class="w-full text-sm border border-gray-300 rounded-xl px-3 py-2.5 pr-10 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-400"></textarea>
+          <textarea id="gpw-caption" maxlength="5000" rows="4" oninput="gpwRefreshDynamic()" placeholder="Write your post…" class="w-full text-sm border border-gray-300 rounded-xl px-3 py-2.5 pr-10 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-400"></textarea>
           <button type="button" id="gpw-mic-btn" onclick="gpStartVoice('gpw-caption')" title="Dictate post text" class="absolute bottom-2 right-2 text-gray-400 hover:text-emerald-600 transition cursor-pointer">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4M12 3a4 4 0 014 4v4a4 4 0 01-8 0V7a4 4 0 014-4z"/></svg>
           </button>
         </div>
+        <!-- Per-platform dynamic feedback: a counter chip per selected platform. Appears only once a
+             platform is picked; turns amber near the limit and red (blocking) once exceeded. -->
+        <div id="gpw-platform-meta" class="hidden flex flex-wrap gap-1.5 mt-2"></div>
       </div>
       <div class="mb-4">
         <label class="block text-xs font-semibold text-gray-700 mb-1.5">Hashtags <span class="font-normal text-gray-400">(optional)</span></label>
-        <input id="gpw-hashtags" type="text" maxlength="500" placeholder="#example #brand" class="w-full text-sm border border-gray-300 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-400">
+        <input id="gpw-hashtags" type="text" maxlength="500" oninput="gpwRefreshDynamic()" placeholder="#example #brand" class="w-full text-sm border border-gray-300 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-400">
       </div>
       <div class="mb-4">
         <div class="flex items-center justify-between mb-1.5">
@@ -343,6 +346,10 @@ window.showComplianceModals = function showComplianceModals(force) {
           <p id="gpw-media-empty" class="hidden text-xs text-gray-400 text-center py-4">No media in your library yet — click Upload to add some.</p>
         </div>
       </div>
+      <!-- Live, constraint-driven preview. Renders each selected platform exactly as it will publish
+           (PlatformPostPreview) and surfaces per-platform warnings (char over-limit, aspect ratio,
+           Instagram needs an image) as they become relevant — no cluttered per-platform form. -->
+      <div id="gpw-live-preview" class="hidden mb-4"></div>
       <div id="gpw-status" class="hidden mb-4 text-sm rounded-xl p-3 bg-emerald-50 text-emerald-800 border border-emerald-200"></div>
       <div class="flex gap-2">
         <button id="gpw-submit-btn" onclick="gpwSubmit()" class="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Add to Review</button>
@@ -5404,6 +5411,7 @@ let _gpDraftPlatform = null;   // platform of the currently previewed draft (set
 let _gpCap = null;                 // cached capacity (connected platforms + AI task limit)
 let _gpwSelectedPlatforms = [];    // write-your-own: multi-select
 let _gpwSelectedAssets = [];       // write-your-own: chosen My Content asset ids
+let _gpwAssetsById = {};           // write-your-own: id → asset object (for the live preview)
 let _gpiSelectedPlatforms = [];    // suggest-an-idea: multi-select ([] === all platforms)
 let _gpHasMedia = false;           // work-with-AI: whether the current draft has an image attached
 
@@ -5497,6 +5505,8 @@ function gpBackToChooser() {
     const cap = document.getElementById('gpw-caption'); if (cap) cap.value = '';
     const tags = document.getElementById('gpw-hashtags'); if (tags) tags.value = '';
     document.getElementById('gpw-media-picker')?.classList.add('hidden');
+    document.getElementById('gpw-platform-meta')?.classList.add('hidden');
+    document.getElementById('gpw-live-preview')?.classList.add('hidden');
     gpSetPanelStatus('gpw-status', '');
     const wBtn = document.getElementById('gpw-submit-btn');
     if (wBtn) { wBtn.disabled = false; wBtn.textContent = 'Add to Review'; }
@@ -5910,6 +5920,57 @@ function gpwTogglePlatform(btn) {
     const i = _gpwSelectedPlatforms.indexOf(p);
     if (i >= 0) { _gpwSelectedPlatforms.splice(i, 1); gpwSetChipState(btn, false); }
     else { _gpwSelectedPlatforms.push(p); gpwSetChipState(btn, true); }
+    gpwRefreshDynamic();
+}
+
+// ── Per-platform limits (mirrors CHAR_LIMITS in platform-post-preview.js) ────────────────────────
+const _GPW_CHAR_LIMITS = { instagram: 2200, facebook: 63206, linkedin: 3000, x: 280, twitter: 280 };
+
+// Re-render the constraint-driven layer for Write-your-own: a counter chip per selected platform
+// plus a live, publish-accurate preview. Called on every platform / caption / hashtag / media change,
+// so platform-specific feedback (char over-limit, Instagram-needs-an-image) transitions in only when
+// it's actually relevant — no cluttered per-platform form.
+function gpwRefreshDynamic() {
+    const meta = document.getElementById('gpw-platform-meta');
+    const preview = document.getElementById('gpw-live-preview');
+    const platforms = _gpwSelectedPlatforms;
+    const caption = document.getElementById('gpw-caption')?.value || '';
+    const hashtags = document.getElementById('gpw-hashtags')?.value?.trim() || '';
+    const assets = _gpwSelectedAssets.map(id => _gpwAssetsById[id]).filter(Boolean);
+
+    if (!platforms.length) {
+        meta?.classList.add('hidden');
+        preview?.classList.add('hidden');
+        return;
+    }
+
+    // Counter chips — the combined text (caption + hashtags) is what publishes, so count both.
+    const combinedLen = (caption + (hashtags ? '\n\n' + hashtags : '')).length;
+    if (meta) {
+        meta.classList.remove('hidden');
+        meta.innerHTML = platforms.map(p => {
+            const limit = _GPW_CHAR_LIMITS[p] || null;
+            const needsImg = p === 'instagram' && !assets.length;
+            let cls = 'border-gray-200 text-gray-600 bg-gray-50';
+            let detail = limit ? `${combinedLen}/${limit}` : `${combinedLen} chars`;
+            if (limit && combinedLen > limit) cls = 'border-red-300 text-red-700 bg-red-50 font-semibold';
+            else if (limit && combinedLen > limit * 0.9) cls = 'border-amber-300 text-amber-700 bg-amber-50';
+            else if (needsImg) { cls = 'border-amber-300 text-amber-700 bg-amber-50'; detail = 'needs an image'; }
+            const name = p === 'x' ? 'X' : p.charAt(0).toUpperCase() + p.slice(1);
+            return `<span class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg border ${cls}">${name} · ${detail}</span>`;
+        }).join('');
+    }
+
+    // Live publish-accurate preview (reuses the Review Queue preview component).
+    if (preview && window.PlatformPostPreview) {
+        preview.classList.remove('hidden');
+        const post = {
+            caption: hashtags ? `${caption}\n\n${hashtags}` : caption,
+            platform: platforms[0],
+            postFormat: assets.some(a => a?.assetType === 'video') ? 'video' : (assets.length ? 'image' : 'text'),
+        };
+        window.PlatformPostPreview.render(preview, { post, assets, platforms });
+    }
 }
 
 async function gpwToggleMediaPicker() {
@@ -5938,6 +5999,7 @@ async function gpwLoadMedia() {
         if (!visual.length) { empty?.classList.remove('hidden'); if (picker) picker.dataset.loaded = '1'; return; }
         empty?.classList.add('hidden');
         visual.forEach(a => {
+            _gpwAssetsById[a.id] = a;
             const thumb = a.storageUrl || a.externalUrl || '';
             const cell = document.createElement('button');
             cell.type = 'button';
@@ -5969,6 +6031,7 @@ function gpwToggleAsset(cell, id) {
         check.textContent = '✓';
         cell.appendChild(check);
     }
+    gpwRefreshDynamic();
 }
 
 function gpwUpload() {
@@ -5999,6 +6062,15 @@ async function gpwSubmit() {
     const hashtags = document.getElementById('gpw-hashtags')?.value?.trim() || '';
     if (!_gpwSelectedPlatforms.length) { gpSetPanelStatus('gpw-status', 'Pick at least one platform.', 'error'); return; }
     if (!caption) { gpSetPanelStatus('gpw-status', 'Write your post text first.', 'error'); return; }
+
+    // Hard block any platform whose character limit the combined text exceeds (matches the live counter).
+    const combinedLen = (caption + (hashtags ? '\n\n' + hashtags : '')).length;
+    const over = _gpwSelectedPlatforms.filter(p => _GPW_CHAR_LIMITS[p] && combinedLen > _GPW_CHAR_LIMITS[p]);
+    if (over.length) {
+        const names = over.map(p => p === 'x' ? 'X' : p.charAt(0).toUpperCase() + p.slice(1));
+        gpSetPanelStatus('gpw-status', `Too long for ${names.join(', ')} — trim the text or deselect ${over.length > 1 ? 'those platforms' : 'that platform'}.`, 'error');
+        return;
+    }
 
     // Image rules: Instagram cannot publish without an image (hard block); other platforms can post
     // text-only but an image is strongly recommended, so prompt before continuing without one.

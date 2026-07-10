@@ -5,9 +5,9 @@
 //   → { taskCount, hoursSaved, gbpSaved, planCostGbp, multiplier, period }
 
 import { HandlerEvent } from '@netlify/functions';
-import { eq, and, gte, count, desc, sql } from 'drizzle-orm';
+import { eq, ne, and, gte, count, desc, sql, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { userProfiles, taskRuns, scheduledPosts, leads, plans, masterPlans, notifications } from '../../db/schema';
+import { aiAssistants, userProfiles, taskRuns, scheduledPosts, leads, plans, masterPlans, notifications } from '../../db/schema';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
 import { requireSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
@@ -37,6 +37,24 @@ export default withLambda(async (event: HandlerEvent) => {
         // requireTenant) always agrees with this widget's count.
         const org = await resolveActiveOrg(db, userId, session.activeOrganisationId);
         const organisationId = org?.organisationId ?? null;
+
+        // This is the dashboard's aggregate ("overriding") ROI card, so it must only
+        // sum work done by ACTIVE assistants — an archived assistant's historical task
+        // runs / drafted posts must not keep inflating the org total after it's been
+        // retired. 'active' == not archived, matching assistant-capabilities.ts and the
+        // My Assistants visible-list filter. task_runs and scheduled_posts both carry an
+        // assistantId (nullable — set null on hard-delete), so we scope those counts to
+        // these ids; leads have no assistantId, so they can only be gated on whether the
+        // org has any active assistant at all (see leadCount below).
+        const activeAssistants = organisationId ? await db
+            .select({ id: aiAssistants.id })
+            .from(aiAssistants)
+            .where(and(
+                eq(aiAssistants.organisationId, organisationId),
+                ne(aiAssistants.lifecycleStatus, 'archived'),
+            )) : [];
+        const activeAssistantIds = activeAssistants.map(a => a.id);
+        const hasActiveAssistant = activeAssistantIds.length > 0;
 
         // Issue #132 (follow-up) / issue #149: the reporter saw this widget go from
         // "0" to completely blank after the coalesce/leads changes below landed — i.e.
@@ -71,20 +89,22 @@ export default withLambda(async (event: HandlerEvent) => {
         // The comparand must be an ISO string, not a Date: a raw sql`` fragment has no
         // column type, so drizzle passes a Date through to postgres-js unserialized and
         // the bind step throws ERR_INVALID_ARG_TYPE (500 on every call).
-        const taskRunCount = organisationId ? await safeCount(db
+        const taskRunCount = organisationId && hasActiveAssistant ? await safeCount(db
             .select({ count: count() })
             .from(taskRuns)
             .where(and(
                 eq(taskRuns.organisationId, organisationId),
+                inArray(taskRuns.assistantId, activeAssistantIds),
                 eq(taskRuns.status, 'completed'),
                 gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, periodStart.toISOString())
             ))) : 0;
 
-        const postCount = organisationId ? await safeCount(db
+        const postCount = organisationId && hasActiveAssistant ? await safeCount(db
             .select({ count: count() })
             .from(scheduledPosts)
             .where(and(
                 eq(scheduledPosts.organisationId, organisationId),
+                inArray(scheduledPosts.assistantId, activeAssistantIds),
                 gte(scheduledPosts.createdAt, periodStart)
             ))) : 0;
 
@@ -92,7 +112,10 @@ export default withLambda(async (event: HandlerEvent) => {
         // "Hours Saved"; omitting them here meant an org whose assistant work is mostly lead
         // generation (no task_runs, no scheduled_posts yet) saw 0 hours/£/tasks on this
         // widget despite real, non-zero activity on the modal it's supposed to agree with.
-        const leadCount = organisationId ? await safeCount(db
+        // `leads` has no assistantId, so it can't be scoped to specific active assistants;
+        // gate it on the org having at least one active assistant so an org whose assistants
+        // are all archived reports zero here too (rather than surfacing orphaned lead activity).
+        const leadCount = organisationId && hasActiveAssistant ? await safeCount(db
             .select({ count: count() })
             .from(leads)
             .where(and(

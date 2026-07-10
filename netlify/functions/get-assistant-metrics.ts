@@ -3,7 +3,7 @@
 // plus hours saved and GBP saved based on the user's configured hourly rate.
 
 import { Handler } from '@netlify/functions';
-import { and, eq, gte, sql, count } from 'drizzle-orm';
+import { and, eq, ne, gte, sql, count } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
 import { aiAssistants, scheduledPosts, taskRuns, userProfiles, leads } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
@@ -57,8 +57,14 @@ export default withLambda(async (event) => {
         // org total and this assistant's total should be identical. Since attribution is
         // only unambiguous when there's exactly one assistant in the org, count leads here
         // too, but only when that holds.
+        // Count only ACTIVE (non-archived) assistants, so lead attribution here matches
+        // get-assistants.ts (the cards) and roi-stats.ts (the dashboard ROI hero), which
+        // all scope to active assistants. 'active' == not archived.
         const [assistantCountRow] = await withTenant(orgId, (tx) =>
-            tx.select({ c: count() }).from(aiAssistants).where(eq(aiAssistants.organisationId, orgId))
+            tx.select({ c: count() }).from(aiAssistants).where(and(
+                eq(aiAssistants.organisationId, orgId),
+                ne(aiAssistants.lifecycleStatus, 'archived'),
+            ))
         );
         const isOnlyAssistantInOrg = Number(assistantCountRow?.c ?? 0) === 1;
 
