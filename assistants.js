@@ -529,17 +529,15 @@ window._activateMainTab = function(name) {
 // fetches to window._currentAssistantId so only this assistant's content shows.
 
 const _DETAIL_RQ_COLUMNS = {
-    review:    { postStatus: 'pending_approval', ideaFilter: i => i.status === 'pending' },
-    approved:  { postStatus: 'approved',         ideaFilter: () => false },
-    scheduled: { postStatus: 'scheduled',        ideaFilter: () => false },
-    posted:    { postStatus: 'published',        ideaFilter: () => false },
-    // Once an idea has been woven into a post (in_review/delivered), its own review happens on
-    // that post's card in the Posts group — it no longer needs a separate slot in Review.
-    archived:  { postStatus: 'rejected',         ideaFilter: i => i.status === 'discarded' || i.status === 'in_review' || i.status === 'delivered' },
+    review:    { postStatus: 'pending_approval' },
+    approved:  { postStatus: 'approved' },
+    scheduled: { postStatus: 'scheduled' },
+    posted:    { postStatus: 'published' },
+    archived:  { postStatus: 'rejected' },
 };
 
 let _detailRqCurrentStatus = 'review';
-const _detailRqGroupOpen = { ideas: true, posts: true };
+const _detailRqGroupOpen = { posts: true };
 
 window.detailRqOpenStatus = function(statusKey, btn) {
     if (!_DETAIL_RQ_COLUMNS[statusKey]) return;
@@ -553,7 +551,7 @@ window.detailRqOpenStatus = function(statusKey, btn) {
     return _detailRqRenderGroups(statusKey);
 };
 
-// Re-render whichever column is currently open, e.g. after a new idea/post is added elsewhere
+// Re-render whichever column is currently open, e.g. after a new post is added elsewhere
 // (the Create Post sheet) so the list reflects it without the user manually switching tabs.
 window.detailRqRefresh = function() {
     if (document.getElementById('detail-rq-groups')) _detailRqRenderGroups(_detailRqCurrentStatus);
@@ -561,7 +559,7 @@ window.detailRqRefresh = function() {
 
 async function _detailRqRenderGroups(statusKey) {
     // Records-backed Review Queue (data-hub roles): assistant_records gated by approval_status,
-    // rather than the social posts/ideas lifecycle below.
+    // rather than the social posts lifecycle below.
     if ((window._detailReviewQueue || {}).kind === 'records') return _detailRqRenderRecords(statusKey);
     // Blog Writer: long-form drafts live in blog_posts (not scheduled_posts). The queue lists them
     // and routes into Blog Studio (where blog review/editing lives) + schedules via schedule-blog.
@@ -575,14 +573,10 @@ async function _detailRqRenderGroups(statusKey) {
     const aid = window._currentAssistantId;
     if (!aid) { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">No assistant selected.</p>'; return; }
 
-    let posts = [], ideas = [];
+    let posts = [];
     try {
-        const [pRes, iRes] = await Promise.all([
-            fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}&assistantId=${aid}`),
-            fetch(`/.netlify/functions/get-post-ideas?assistantId=${aid}`),
-        ]);
+        const pRes = await fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}&assistantId=${aid}`);
         if (pRes.ok) posts = (await pRes.json()).drafts || [];
-        if (iRes.ok) ideas = ((await iRes.json()).ideas || []).filter(col.ideaFilter);
     } catch {
         container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">Failed to load.</p>';
         return;
@@ -599,13 +593,12 @@ async function _detailRqRenderGroups(statusKey) {
         window._updateOpSignals?.({ pendingReview: posts.length });
     }
 
-    // Reuse the global render helpers from workspace.html (rqRenderSocialCard, rqRenderIdeaCard, etc.)
-    const renderByGroup = { ideas: typeof rqRenderIdeaCard === 'function' ? rqRenderIdeaCard : () => '', posts: typeof rqRenderSocialCard === 'function' ? rqRenderSocialCard : () => '' };
+    // Reuse the global render helper from workspace.html (rqRenderSocialCard).
+    const renderByGroup = { posts: typeof rqRenderSocialCard === 'function' ? rqRenderSocialCard : () => '' };
     const RQ_GROUPS = [
-        { key: 'ideas', label: 'Ideas', empty: 'No ideas here.', emptyReview: 'No ideas yet — use Create Post → Suggest an idea.' },
         { key: 'posts', label: 'Posts', empty: 'No posts here.', emptyReview: 'No posts awaiting review.' },
     ];
-    const itemsByGroup = { ideas, posts };
+    const itemsByGroup = { posts };
     container.innerHTML = RQ_GROUPS.map(g => _detailRqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey)).join('');
 }
 
