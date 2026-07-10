@@ -4,6 +4,7 @@
 // GET  /.netlify/functions/blog-posts            → list the org's posts (summary rows)
 // GET  /.netlify/functions/blog-posts?id=<n>     → one full post (org-scoped)
 // POST /.netlify/functions/blog-posts            → create a draft { title }  → { post }
+// DELETE /.netlify/functions/blog-posts?id=<n>   → delete a draft (org-scoped; published posts blocked)
 
 import { HandlerEvent } from '@netlify/functions';
 import { and, desc, eq, gte, inArray, lte, or } from 'drizzle-orm';
@@ -124,6 +125,29 @@ export default withLambda(async (event: HandlerEvent) => {
             })
             .returning();
         return { statusCode: 201, body: JSON.stringify({ post }) };
+    }
+
+    // ---- Delete ----
+    if (event.httpMethod === 'DELETE') {
+        const idParam = event.queryStringParameters?.id;
+        const id = Number(idParam);
+        if (!idParam || !Number.isFinite(id)) {
+            return { statusCode: 400, body: JSON.stringify({ error: 'A valid post id is required.' }) };
+        }
+        // Org-scope the lookup so one tenant can never delete another's post.
+        const [post] = await db
+            .select({ id: blogPosts.id, status: blogPosts.status })
+            .from(blogPosts)
+            .where(and(eq(blogPosts.id, id), eq(blogPosts.organisationId, ctx.organisationId)))
+            .limit(1);
+        if (!post) return { statusCode: 404, body: JSON.stringify({ error: 'Blog post not found.' }) };
+        // A published post is live on the user's site — require unpublishing before deletion.
+        if (post.status === 'published') {
+            return { statusCode: 409, body: JSON.stringify({ error: 'This post is published. Unpublish it before deleting.' }) };
+        }
+        // Dependent blog_post_assets / blog_ab_stats rows cascade (onDelete: 'cascade' in schema).
+        await db.delete(blogPosts).where(and(eq(blogPosts.id, id), eq(blogPosts.organisationId, ctx.organisationId)));
+        return { statusCode: 200, body: JSON.stringify({ ok: true, id }) };
     }
 
     return { statusCode: 405, body: 'Method Not Allowed' };

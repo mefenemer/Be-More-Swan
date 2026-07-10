@@ -196,7 +196,7 @@ window.generateAssistantCardHTML = function(assistant) {
     // lead_qualifier card links to "Leads" while a tier1_support_agent links to "Tickets".
     const dReg = window.AssistantDashboardRegistry ? window.AssistantDashboardRegistry.get(assistant.roleKey) : null;
     const quickActions = dReg ? [
-        ['🗂️', dReg.hubTab?.label || 'Data Hub', 'datahub'],
+        ...(dReg.hideDataHub ? [] : [['🗂️', dReg.hubTab?.label || 'Data Hub', 'datahub']]),
         ['✅', dReg.reviewQueue?.label || 'Review', 'review-queue'],
         ['📅', 'Calendar', 'calendar'],
     ] : [];
@@ -864,12 +864,27 @@ const _RQ_BLOG_STATUS = {
 function _rqBlogActions(p, statusKey) {
     const primary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white transition cursor-pointer';
     const secondary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 transition cursor-pointer';
-    const open = `<button type="button" onclick="_detailRqBlogAct(this,'open')" class="${statusKey === 'review' ? primary : secondary}">Open in Blog Studio</button>`;
-    let extra = '';
-    if (statusKey === 'review' || statusKey === 'approved') extra = `<button type="button" onclick="_detailRqBlogAct(this,'showSchedule')" class="${secondary}">Schedule</button>`;
-    else if (statusKey === 'scheduled') extra = `<button type="button" onclick="_detailRqBlogAct(this,'unschedule')" class="${secondary}">Unschedule</button>`;
+    const danger = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-gray-200 text-red-600 hover:border-red-300 hover:bg-red-50 transition cursor-pointer';
+    const btn = (action, label, cls) => `<button type="button" onclick="_detailRqBlogAct(this,'${action}')" class="${cls}">${label}</button>`;
+    const actions = [];
+    if (statusKey === 'review') {
+        // Primary action in review is to approve; editing/reviewing happens in Blog Studio.
+        actions.push(btn('approveSchedule', 'Approve &amp; Schedule', primary));
+        actions.push(btn('open', 'Open in Blog Studio', secondary));
+        actions.push(btn('showSchedule', 'Pick a time…', secondary));
+    } else if (statusKey === 'approved') {
+        actions.push(btn('open', 'Open in Blog Studio', primary));
+        actions.push(btn('showSchedule', 'Schedule', secondary));
+    } else if (statusKey === 'scheduled') {
+        actions.push(btn('open', 'Open in Blog Studio', primary));
+        actions.push(btn('unschedule', 'Unschedule', secondary));
+    } else {
+        actions.push(btn('open', 'Open in Blog Studio', secondary));
+    }
+    // Delete — available for any draft that isn't already live (published deletes are blocked server-side).
+    if (statusKey !== 'posted') actions.push(btn('delete', 'Delete', danger));
     return `<div class="flex flex-wrap items-center gap-2 mt-3">
-        ${open}${extra}
+        ${actions.join('')}
         <div class="rq-sched-row hidden w-full flex items-center gap-2 mt-2">
           <input type="datetime-local" class="rq-sched-input border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
           <button type="button" onclick="_detailRqBlogAct(this,'schedule')" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-yellow-500 hover:bg-yellow-600 text-white cursor-pointer">Confirm schedule</button>
@@ -937,8 +952,28 @@ window._detailRqBlogAct = async function (btn, action) {
     if (action === 'open') { window.openBlogStudio?.({ assistantId: window._currentAssistantId, postId: id }); return; }
     if (action === 'showSchedule') { card.querySelector('.rq-sched-row')?.classList.remove('hidden'); return; }
 
+    // Delete — hard-deletes the draft (blog-posts.ts DELETE, org-scoped; published posts are blocked).
+    if (action === 'delete') {
+        if (!confirm('Delete this blog draft? This cannot be undone.')) return;
+        const buttons = card.querySelectorAll('button');
+        buttons.forEach((b) => { b.disabled = true; });
+        try {
+            const res = await fetch(`/.netlify/functions/blog-posts?id=${id}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Delete failed.');
+            window.showToast?.('Blog draft deleted.');
+            _detailRqRenderGroups(_detailRqCurrentStatus);
+            const calHost = document.getElementById('assistant-calendar-host');
+            if (calHost) calHost.dataset.ready = '';
+        } catch (e) {
+            buttons.forEach((b) => { b.disabled = false; });
+            showErr(e.message || 'Something went wrong.');
+        }
+        return;
+    }
+
     let payload;
     if (action === 'unschedule') payload = { id, action: 'unschedule' };
+    else if (action === 'approveSchedule') payload = { id, action: 'approve' };  // auto-picks the next cadence slot
     else if (action === 'schedule') {
         const val = card.querySelector('.rq-sched-input')?.value;
         if (!val) { showErr('Pick a date and time first.'); return; }
@@ -952,7 +987,9 @@ window._detailRqBlogAct = async function (btn, action) {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
         });
         if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Update failed.');
-        window.showToast?.(action === 'schedule' ? 'Scheduled — it’s on the Calendar now.' : 'Unscheduled.');
+        window.showToast?.(action === 'unschedule' ? 'Unscheduled.'
+            : action === 'approveSchedule' ? 'Approved & scheduled — it’s on the Calendar now.'
+            : 'Scheduled — it’s on the Calendar now.');
         _detailRqRenderGroups(_detailRqCurrentStatus);
         const calHost = document.getElementById('assistant-calendar-host');
         if (calHost) calHost.dataset.ready = '';
@@ -1751,6 +1788,8 @@ function _applyDashboardRegistry(data) {
     // cfg.reviewQueue { kind: 'posts' | 'records', recordType? } and is read by _detailRq* and
     // _activateMainTab. Default to posts for any legacy/unknown role.
     window._detailReviewQueue = cfg.reviewQueue || { kind: 'posts' };
+    // Role-chosen landing tab (SMM opens on its "Posts" pipeline); null → HTML default (Data Hub).
+    window._detailDefaultMainTab = cfg.defaultMainTab || null;
     toggle('maintab-btn-review-queue', true);
     toggleBtn('btn-review-pending', true);
     // Per-role tab label override (e.g. meeting note-taker → "Inbox"); defaults to "Review".
@@ -1775,6 +1814,9 @@ function _applyDashboardRegistry(data) {
         setText('detail-rq-primary-label', 'Write Blog Post');
         const rqBtn = document.getElementById('detail-rq-primary-btn');
         if (rqBtn) rqBtn.onclick = () => { window.openBlogStudio?.({ assistantId: data.id }); };
+    } else if (!rqIsRecords) {
+        // Posts queues: keep the in-queue CTA in step with the header ("Create a Post" for SMM).
+        setText('detail-rq-primary-label', cfg.primaryAction?.label || 'Create a Post');
     }
 
     // Role-specific Overview secondary action — the Lead Generator's "Review Lead Ideas"
@@ -1857,8 +1899,11 @@ function _applyDashboardRegistry(data) {
     // a hubTab: records (Leads / Ledger / …) for data-hub roles, or a content library
     // (kind:'content_library') for social/blog. Always shown; label + data model come from hub.
     const hub = cfg.hubTab;
-    toggle('maintab-btn-datahub', true);
-    if (hub) {
+    // Social roles retire the "Content Library" Data Hub tab (cfg.hideDataHub) — the Posts pipeline
+    // now owns the full post lifecycle, so there's nothing left for a separate library tab to show.
+    const showDataHub = !cfg.hideDataHub;
+    toggle('maintab-btn-datahub', showDataHub);
+    if (hub && showDataHub) {
         setText('datahub-tab-label', hub.label);
         window.AssistantDataHub?.init({ hub, assistantId: data.id });
     }
@@ -2697,6 +2742,10 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
                 const target = document.querySelector(`.detail-tab-btn[data-tab="${wanted}"]`);
                 if (target) target.click();
             }
+        } else if (window._detailDefaultMainTab &&
+                   document.querySelector(`.main-tab-btn[data-maintab="${window._detailDefaultMainTab}"]`)) {
+            // No deep-link requested — open the role's chosen landing tab (SMM → "Posts").
+            window._activateMainTab(window._detailDefaultMainTab);
         }
     } catch (e) {
         console.error('Failed to load assistant detail:', e);

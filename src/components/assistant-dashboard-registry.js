@@ -85,8 +85,14 @@
         },
       ],
       modules: { hasReviewQueue: true, hasPostingSchedule: true, hasSocialStrategy: true },
-      primaryAction: { label: 'Assign New Task', kind: 'generate_post' },
-      reviewQueue: { kind: 'posts' },
+      primaryAction: { label: 'Create a Post', kind: 'generate_post' },
+      // The Review Queue IS the social command centre — surfaced as "Posts" and used as the
+      // landing tab (defaultMainTab) so users open straight into their content pipeline.
+      reviewQueue: { kind: 'posts', label: 'Posts' },
+      defaultMainTab: 'review-queue',
+      // The old "Content Library" Data Hub tab is retired for social — the Posts pipeline is the
+      // single home for every drafted/scheduled/published post, so the separate library tab is hidden.
+      hideDataHub: true,
       // Data Hub = the content library: every post this assistant has drafted, across the
       // whole lifecycle (draft → scheduled → published). Backed by scheduled_posts via
       // get-social-drafts (assistant-data-hub.js content_library kind), not assistant_records.
@@ -143,10 +149,14 @@
       // Ignored for blog_writer (assistants.js special-cases the button to open Blog Studio),
       // but kept coherent for any generic reader of the registry.
       primaryAction: { label: 'Write Blog Post', kind: 'chat' },
-      // Review/approval still happens inside Blog Studio, but the standard Review Queue + Data
-      // Hub tabs are surfaced for consistency: both read blog_posts (blog-posts.ts) rather than
-      // scheduled_posts. The Calendar reads blog-posts.ts's from/to range feed.
-      reviewQueue: { kind: 'posts', source: 'blog_posts' },
+      // The "Blogs" tab is the single home for long-form work — create, edit, review, approve,
+      // schedule and delete drafts (blog-posts.ts). It's the landing tab, and the old separate
+      // Content Library / Data Hub tab is retired (hideDataHub) since it showed the same posts.
+      reviewQueue: { kind: 'posts', source: 'blog_posts', label: 'Blogs' },
+      defaultMainTab: 'review-queue',
+      hideDataHub: true,
+      // hubTab is retained (used by the Calendar's from/to feed + generic registry readers) even
+      // though its tab is hidden; its data model still reads blog_posts.
       hubTab: {
         id: 'datahub',
         kind: 'content_library',
