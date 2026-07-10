@@ -3185,7 +3185,7 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
                         <div class="flex items-center gap-2 text-sm font-semibold text-gray-700">
                             <span class="text-gray-400">${icon}</span>${label}
                         </div>
-                        <div class="flex items-center gap-4 text-xs font-semibold">
+                        <div class="grid grid-cols-3 gap-4 text-xs font-semibold text-right" style="min-width:220px;font-variant-numeric:tabular-nums">
                             <span class="text-gray-500">${v.created} created</span>
                             <span class="text-blue-600">${v.scheduled} scheduled</span>
                             <span class="text-emerald-600">${v.published} published</span>
