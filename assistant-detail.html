@@ -147,16 +147,36 @@
     </div>
   </div>
 
-  <!-- Kick Off CTA — shown when assistant hasn't been kicked off yet -->
-  <div id="meetings-kickoff-cta" class="hidden bg-blue-50 border border-blue-200 rounded-2xl px-5 py-4 mb-6 flex items-center justify-between gap-4">
-    <div class="flex items-center gap-3 min-w-0">
-      <div class="w-9 h-9 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center shrink-0 text-lg">🚀</div>
-      <div>
-        <p class="text-sm font-bold text-blue-900">Complete Your Kick Off Meeting</p>
-        <p class="text-xs text-blue-700 mt-0.5">Confirm a few things to put your assistant to work.</p>
+  <!-- Kick Off Meeting — readiness checklist + activation gate, shown when the assistant
+       hasn't been kicked off yet (issue #193: moved here from the removed Progress Reviews tab). -->
+  <div id="kickoff-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-6 hidden">
+    <button id="kickoff-toggle" type="button" aria-expanded="true"
+      class="w-full flex items-start justify-between gap-3 text-left cursor-pointer">
+      <span class="min-w-0">
+        <span class="flex items-center gap-2 mb-1">
+          <span class="text-xl">🚀</span>
+          <span class="text-sm font-bold text-gray-700 uppercase tracking-wide">Kick Off Meeting</span>
+        </span>
+        <span id="kickoff-subtitle" class="block text-sm text-gray-500">Confirm everything is ready, then put your assistant to work.</span>
+      </span>
+      <svg id="kickoff-chevron" class="w-5 h-5 shrink-0 text-gray-400 mt-0.5" style="transition: transform .2s ease" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+      </svg>
+    </button>
+    <div id="kickoff-body" class="mt-4">
+      <!-- US3 AC3.1: kick-off summary — primary directive + active connections to review -->
+      <div id="kickoff-summary" class="hidden mb-5 p-4 rounded-xl bg-gray-50 border border-gray-100"></div>
+      <ul id="kickoff-checklist" class="space-y-2.5 mb-5">
+        <li class="h-9 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading checklist…</li>
+      </ul>
+      <div class="flex items-center gap-3 flex-wrap">
+        <button id="btn-kick-off" type="button" disabled
+          class="px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg shadow-sm transition-colors cursor-pointer">
+          Confirm &amp; Start Working
+        </button>
+        <span id="kickoff-hint" class="text-xs text-gray-500"></span>
       </div>
     </div>
-    <button onclick="window._activateMainTab('meetings')" class="shrink-0 px-4 py-2 text-sm font-extrabold text-white bg-blue-600 hover:bg-blue-700 rounded-xl transition shadow-sm cursor-pointer">Go to Meetings</button>
   </div>
 
   <!-- Impact & ROI — elevated to top of the page (most important executive metric) -->
@@ -307,9 +327,6 @@
       <!-- ── Secondary tabs — role-gated, after the core three ── -->
       <button type="button" data-maintab="goals"         class="main-tab-btn">Goals</button>
       <button type="button" data-maintab="workflow"      class="main-tab-btn">Workflow</button>
-      <button type="button" data-maintab="meetings"      class="main-tab-btn" title="Progress Reviews: the Kick Off Meeting and your check-in history. Rules — including Learned Directives — live in the Assistant Profile.">Progress Reviews
-        <span id="meetings-kickoff-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-blue-100 text-blue-700 text-[10px] font-black rounded-full inline-flex items-center justify-center">!</span>
-      </button>
       <button type="button" data-maintab="activity"      class="main-tab-btn">Activity</button>
       <!-- Knowledge Base — support-only (kbTab, tier1_support_agent); manages the KB articles
            that ground the assistant's answers (assistant-knowledge-base.js → kb-articles.ts).
@@ -1369,104 +1386,6 @@
 
   </div><!-- /maintab-workflow -->
 
-  <!-- ── MAIN TAB: Meetings ────────────────────────────────────────── -->
-  <div id="maintab-meetings" class="main-tab-content hidden space-y-6">
-
-    <!-- Explains the "Progress Reviews" name for users unfamiliar with the term (issue #92, renamed in #116) -->
-    <p class="text-sm text-gray-500 -mt-2"><strong>Progress Reviews</strong> is your history of check-ins with this assistant: the Kick Off Meeting and past review meetings. Its rules — including Learned Directives — live in the <strong>Assistant Profile</strong>, under Brand Safety &amp; Legal.</p>
-
-    <!-- 1. Kick Off Meeting (moved from above the tabs) -->
-    <div id="kickoff-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 hidden">
-      <button id="kickoff-toggle" type="button" aria-expanded="true"
-        class="w-full flex items-start justify-between gap-3 text-left cursor-pointer">
-        <span class="min-w-0">
-          <span class="flex items-center gap-2 mb-1">
-            <span class="text-xl">🚀</span>
-            <span class="text-sm font-bold text-gray-700 uppercase tracking-wide">Kick Off Meeting</span>
-          </span>
-          <span id="kickoff-subtitle" class="block text-sm text-gray-500">Confirm everything is ready, then put your assistant to work.</span>
-        </span>
-        <svg id="kickoff-chevron" class="w-5 h-5 shrink-0 text-gray-400 mt-0.5" style="transition: transform .2s ease" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
-        </svg>
-      </button>
-      <div id="kickoff-body" class="mt-4">
-        <!-- US3 AC3.1: kick-off summary — primary directive + active connections to review -->
-        <div id="kickoff-summary" class="hidden mb-5 p-4 rounded-xl bg-gray-50 border border-gray-100"></div>
-        <ul id="kickoff-checklist" class="space-y-2.5 mb-5">
-          <li class="h-9 bg-gray-50 rounded-lg border border-dashed border-gray-200 flex items-center justify-center text-sm text-gray-400">Loading checklist…</li>
-        </ul>
-        <div class="flex items-center gap-3 flex-wrap">
-          <button id="btn-kick-off" type="button" disabled
-            class="px-5 py-2.5 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 disabled:cursor-not-allowed rounded-lg shadow-sm transition-colors cursor-pointer">
-            Confirm &amp; Start Working
-          </button>
-          <span id="kickoff-hint" class="text-xs text-gray-500"></span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Progress review history — the former "Review Meetings" section, preserved & de-emphasised -->
-    <!-- Learned Directives moved to the Assistant Profile drawer (issue #113) -->
-    <details class="bg-white rounded-2xl border border-gray-200 shadow-sm group">
-      <summary class="px-6 py-4 cursor-pointer text-sm font-bold text-gray-700 uppercase tracking-wide select-none flex items-center justify-between gap-4">
-        <span class="flex items-center gap-2">
-          <svg class="w-4 h-4 text-gray-400 transition-transform duration-200 group-open:rotate-180 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-          <span>Progress Review History</span>
-        </span>
-        <button id="btn-log-review" type="button" onclick="event.preventDefault(); window._openReviewForm()" class="px-3.5 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition cursor-pointer">Log a Review</button>
-      </summary>
-      <div class="px-6 pb-6 pt-1">
-        <p class="text-xs text-gray-400 mb-4">Periodic check-ins to assess performance and refine your assistant's direction.</p>
-
-      <!-- Review entry form -->
-      <div id="review-form" class="hidden mb-6 border border-emerald-100 bg-emerald-50/40 rounded-xl p-5 space-y-4">
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label class="block text-xs font-bold text-gray-600 mb-1">Meeting Date</label>
-            <input id="review-date" type="date" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
-          </div>
-          <div>
-            <label class="block text-xs font-bold text-gray-600 mb-1">Overall Rating</label>
-            <select id="review-rating" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
-              <option value="5">⭐⭐⭐⭐⭐ Excellent</option>
-              <option value="4">⭐⭐⭐⭐ Good</option>
-              <option value="3" selected>⭐⭐⭐ Satisfactory</option>
-              <option value="2">⭐⭐ Needs improvement</option>
-              <option value="1">⭐ Poor</option>
-            </select>
-          </div>
-        </div>
-        <div>
-          <label class="block text-xs font-bold text-gray-600 mb-1">Discussion &amp; Observations</label>
-          <textarea id="review-notes" rows="3" placeholder="What's working well? What needs adjusting? Key observations from this review period." class="w-full border border-gray-300 rounded-lg p-3 text-sm resize-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"></textarea>
-        </div>
-        <div>
-          <label class="block text-xs font-bold text-gray-600 mb-1">Outcomes &amp; Actions</label>
-          <textarea id="review-outcomes" rows="3" placeholder="Decisions made, changes agreed, actions to take before the next review." class="w-full border border-gray-300 rounded-lg p-3 text-sm resize-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none"></textarea>
-        </div>
-        <div id="review-goals-section" class="hidden">
-          <label class="block text-xs font-bold text-gray-600 mb-1">Goal Status at Review <span class="font-normal text-gray-400">(optional)</span></label>
-          <div id="review-goals-checks" class="space-y-1.5"></div>
-        </div>
-        <div>
-          <label class="block text-xs font-bold text-gray-600 mb-1">Next Review Date <span class="font-normal text-gray-400">(optional)</span></label>
-          <input id="review-next" type="date" class="w-full sm:w-52 border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none">
-        </div>
-        <div class="flex items-center gap-3 pt-1">
-          <button onclick="window._saveReviewMeeting()" class="px-4 py-2 text-sm font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition cursor-pointer">Save Review</button>
-          <button onclick="window._closeReviewForm()" class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900 transition cursor-pointer">Cancel</button>
-        </div>
-      </div>
-
-      <!-- Review history -->
-      <div id="review-history">
-        <p class="text-sm text-gray-400 text-center py-8">No review meetings logged yet.<br>Log your first review to track your assistant's progress over time.</p>
-      </div>
-      </div>
-    </details>
-
-  </div><!-- /maintab-meetings -->
 
   <!-- tab-integrations removed — merged into tab-platforms as "Connections" -->
 
