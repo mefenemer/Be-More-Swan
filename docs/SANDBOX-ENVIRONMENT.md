@@ -23,6 +23,12 @@ never bleed into production.
   [`src/utils/stripe.ts`](../src/utils/stripe.ts) read that context to pick the right
   connection / API key. **Strict default:** a missing/malformed header, a
   non-super-admin, or an unprovisioned sandbox all resolve to **live**.
+  [`admin-api.ts`](../netlify/functions/admin-api.ts) echoes the environment it
+  actually resolved back via the `X-Resolved-Env` response header; the frontend
+  compares that to what it asked for and, if the server silently downgraded to
+  live (e.g. `SANDBOX_DATABASE_URL` isn't set on this deployment), flips the toggle
+  back to Live and warns the admin instead of leaving the UI showing "Sandbox" while
+  every page keeps rendering production data.
 - **Auth & audit always use live.** Role lookups run before the env context is set;
   `insertAdminAuditLog` forces the live connection so the compliance log records every
   admin action regardless of environment.
