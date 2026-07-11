@@ -7,12 +7,6 @@
       <p class="text-sm text-gray-500 mt-1">Follow each post from review through to posted — and review or amend anything before it goes live.</p>
     </div>
     <div class="flex items-center gap-2">
-      <!-- Focus review — shown by rqRenderGroups() only on the Review column, and only when
-           social posts are actually waiting. Stacks those posts one at a time. -->
-      <button id="rq-focus-btn" onclick="window.ReviewFocusMode&&window.ReviewFocusMode.open()" class="hidden px-4 py-2 text-sm font-bold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer items-center gap-1.5">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-        Review all
-      </button>
       <!-- Blog Studio entry — shown only when an active Blog Writer assistant exists (gated below). -->
       <button id="rq-blog-btn" onclick="_rqOpenBlogStudio()" class="hidden px-4 py-2 text-sm font-bold bg-pink-600 hover:bg-pink-700 text-white rounded-lg transition cursor-pointer items-center gap-1.5">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
