@@ -327,7 +327,7 @@ window.showComplianceModals = function showComplianceModals(force) {
       <div id="gpw-status" class="hidden mb-4 text-sm rounded-xl p-3 bg-emerald-50 text-emerald-800 border border-emerald-200"></div>
       <!-- On-demand generator — not a co-equal tab, just a quiet way to have the assistant draft one. -->
       <button type="button" onclick="gpChooseMode('ai')" class="w-full mb-3 py-2 text-xs font-semibold text-gray-500 hover:text-emerald-700 border border-dashed border-gray-300 hover:border-emerald-300 rounded-xl transition cursor-pointer inline-flex items-center justify-center gap-1.5">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>
+        <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
         Prefer your assistant to draft it? Generate a post
       </button>
       <div class="flex gap-2">
@@ -400,7 +400,7 @@ window.showComplianceModals = function showComplianceModals(force) {
           <span id="gp-ai-find-label">Find a photo</span>
         </button>
         <button type="button" onclick="gpAiGenerate()" class="px-2.5 py-1 text-xs font-semibold border border-violet-300 text-violet-700 hover:bg-violet-50 rounded-lg transition cursor-pointer flex items-center gap-1">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>
+          <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
           <span id="gp-ai-gen-label">Generate with AI</span>
         </button>
       </div>
@@ -541,7 +541,7 @@ window.showComplianceModals = function showComplianceModals(force) {
         <textarea id="post-review-feedback" rows="3" maxlength="500" placeholder="e.g. Make it punchier, drop the emojis, and mention our summer sale." class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300"></textarea>
         <div class="flex gap-2">
           <button id="post-review-regen-btn" onclick="rqReviewRequestChanges()" class="flex-1 py-2.5 text-xs font-bold bg-violet-600 hover:bg-violet-700 text-white rounded-lg cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed">
-            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>
+            <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
             Regenerate
           </button>
           <button onclick="rqReviewToggle()" class="py-2.5 px-4 text-xs font-bold text-gray-500 hover:bg-gray-50 rounded-lg cursor-pointer">Cancel</button>
@@ -600,7 +600,7 @@ window.showComplianceModals = function showComplianceModals(force) {
         </button>
         <button onclick="rqReviewToggle('amend')" class="py-2.5 text-xs font-bold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer">Amend myself</button>
         <button onclick="rqReviewToggle('changes')" class="py-2.5 text-xs font-bold border border-violet-300 text-violet-700 hover:bg-violet-50 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>
+          <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
           Regenerate
         </button>
         <button onclick="rqReviewToggle('reschedule')" class="py-2.5 text-xs font-bold border border-blue-300 text-blue-700 hover:bg-blue-50 rounded-lg transition cursor-pointer">Reschedule</button>
@@ -4116,7 +4116,7 @@ function formatCurrency(amount, currency) {
 </script>
 <script src="/integrations.js"></script>
 <script src="/assets.js"></script>
-<script src="/notifications.js?v=20260628-wizard-cta"></script>
+<script src="/notifications.js?v=20260711-notif-actor-popover"></script>
 <script src="/assistants.js?v=20260703-detail-rq-refresh"></script>
 <script src="/help.js"></script>
 <script src="/my-content.js"></script>
@@ -5150,7 +5150,7 @@ function rqReviewShowRegenerating(assistantName) {
 
 // Idle markup for the Regenerate button (sparkle icon + label). Used to restore the button
 // after an in-flight/error state, since setting textContent alone would drop the icon.
-const _RQ_REGEN_BTN_IDLE = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg> Regenerate';
+const _RQ_REGEN_BTN_IDLE = '<img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0"> Regenerate';
 function rqReviewResetRegenBtn() {
     const btn = document.getElementById('post-review-regen-btn');
     if (btn) { btn.disabled = false; btn.innerHTML = _RQ_REGEN_BTN_IDLE; }

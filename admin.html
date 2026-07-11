@@ -4346,7 +4346,27 @@ async function loadSystemStatus() {
       <p class="text-xs text-gray-400">Check from the ${other} admin portal.</p>
     </div>`;
 
-  panel.innerHTML = data.services.map(s => `
+  // Launch-readiness banner — the go/no-go verdict for critical keys in THIS deployment env.
+  const r = data.readiness;
+  const readinessBanner = !r ? '' : (() => {
+    const chip = (label, items, tone) => !items || !items.length ? '' :
+      `<p class="text-xs mt-1 ${tone}"><span class="font-semibold">${label}:</span> ${items.join(', ')}</p>`;
+    if (r.launchReady) {
+      return `<div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4 mb-4">
+        <p class="text-sm font-bold text-emerald-800">✓ Launch-ready — all critical services configured in ${env}.</p>
+        ${chip('Running in mock/disabled mode', r.missingCore, 'text-amber-700')}
+        ${chip('Connectors live', r.connectorsLive, 'text-emerald-700')}
+      </div>`;
+    }
+    return `<div class="rounded-xl border border-red-200 bg-red-50 p-4 mb-4">
+      <p class="text-sm font-bold text-red-800">⚠ Not launch-ready in ${env} — critical services need attention.</p>
+      ${chip('Missing critical keys', r.missingCritical, 'text-red-700')}
+      ${chip('Configured but unreachable', r.unreachableCritical, 'text-red-700')}
+      ${chip('Also in mock/disabled mode', r.missingCore, 'text-amber-700')}
+    </div>`;
+  })();
+
+  panel.innerHTML = readinessBanner + data.services.map(s => `
     <div class="bg-white border border-gray-200 rounded-xl p-4">
       <div class="flex items-start justify-between gap-3 mb-3 flex-wrap">
         <div class="min-w-0">

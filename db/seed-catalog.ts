@@ -118,8 +118,8 @@ const CATALOG = [
         category: 'Marketing & Sales',
         iconKey: 'cog',
         iconColor: 'purple',
-        comingSoon: false,   // ← Currently Live (Tier 1, Batch 2)
-        isActive: true,
+        comingSoon: true,    // ← gated for launch: enrichment currently fabricates (no live web/CRM data connection).
+        isActive: true,      //   Un-hireable teaser (Vote, not Hire) until the CRM integration is wired. Flip back to false then.
     },
     {
         roleKey: 'newsletter_editor',
