@@ -1,9 +1,9 @@
 // netlify/functions/notifications.ts
 import { HandlerEvent } from '@netlify/functions';
-import { eq, and, desc, isNull } from 'drizzle-orm';
+import { eq, and, desc, isNull, inArray } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
-import { users, notifications, userProfiles } from '../../db/schema';
+import { users, notifications, userProfiles, aiAssistants } from '../../db/schema';
 import { kindOf, categoryOf, priorityOf, isDismissibleType, resolvesOnClick } from '../../src/utils/notification-actions';
 import { isInAppEnabledFor, resolveInAppPrefs, type AssistantOverrideMap } from '../../src/utils/notification-prefs';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -117,18 +117,48 @@ export default withLambda(async (event: HandlerEvent) => {
                 return { statusCode: 200, body: JSON.stringify({ unreadCount: unread, actionCount, updateUnread, badgeCount }) };
             }
 
+            // Actor identity: resolve each assistant-attributed notification to its assistant's
+            // name + job role so the inbox can render "who" (avatar/name/colour) rather than a
+            // generic system icon. account-level rows (assistantId null) stay system-attributed.
+            // One batched lookup for all ids on the feed; names aren't sensitive and the ids are
+            // already scoped to this user's own notifications. Defensive: if the assistant was
+            // deleted (id no longer resolves), the row simply falls back to system attribution.
+            // assistantIdOf may return a string (metadata) or number (column); normalise to a
+            // positive integer id for the assistants lookup, or null when it isn't one.
+            const numericAssistantId = (n: any): number | null => {
+                const raw = assistantIdOf(n);
+                const num = typeof raw === 'string' ? Number(raw) : raw;
+                return typeof num === 'number' && Number.isInteger(num) && num > 0 ? num : null;
+            };
+            const actorIds = [...new Set(allNotes.map(numericAssistantId).filter((id): id is number => id !== null))];
+            let actorById = new Map<number, { name: string; jobRole: string | null }>();
+            if (actorIds.length > 0) {
+                try {
+                    const rows = await db.select({
+                        id: aiAssistants.id, name: aiAssistants.name, jobRole: aiAssistants.aiAssistantJobRole,
+                    }).from(aiAssistants).where(inArray(aiAssistants.id, actorIds));
+                    actorById = new Map(rows.map(r => [r.id, { name: r.name, jobRole: r.jobRole }]));
+                } catch { /* assistant lookup best-effort; degrade to system attribution */ }
+            }
+
             // Annotate each notification with its category model (kind/category/priority/
             // dismissible/resolvesOnClick) so the client renders, sorts and resolves without
             // duplicating the classification. category etc. are derived from the canonical map
-            // (authoritative even for rows inserted before the DB trigger backfill).
-            const annotated = allNotes.map(n => ({
-                ...n,
-                kind: kindOf(n.type),
-                category: categoryOf(n.type),
-                priority: priorityOf(n.type),
-                isDismissible: isDismissibleType(n.type),
-                resolvesOnClick: resolvesOnClick(n.type),
-            }));
+            // (authoritative even for rows inserted before the DB trigger backfill). `actor`
+            // carries the assistant's identity (null ⇒ BMS system) for the actor-led card UI.
+            const annotated = allNotes.map(n => {
+                const aid = numericAssistantId(n);
+                const asst = aid !== null ? actorById.get(aid) : null;
+                return {
+                    ...n,
+                    kind: kindOf(n.type),
+                    category: categoryOf(n.type),
+                    priority: priorityOf(n.type),
+                    isDismissible: isDismissibleType(n.type),
+                    resolvesOnClick: resolvesOnClick(n.type),
+                    actor: asst ? { assistantId: aid, name: asst.name, jobRole: asst.jobRole } : null,
+                };
+            });
             return { statusCode: 200, body: JSON.stringify({ notifications: annotated }) };
         }
 

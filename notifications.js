@@ -33,23 +33,13 @@ window.updateNotificationBadge = async function() {
     }
 };
 
-window.initNotifications = async function() {
-    const listEl = document.getElementById('notif-list');
-    const loadingEl = document.getElementById('notif-loading');
-    const emptyStateEl = document.getElementById('notif-empty-state');
-    const searchInput = document.getElementById('notif-search');
-    const markAllBtn = document.getElementById('btn-mark-all-read');
-    const groupByTypeToggle = document.getElementById('notif-group-by-type');
 
-    if (!listEl) return;
-
-    // Clear badge logic when entering the notifications page
-    if (typeof window.updateNotificationBadge === 'function') {
-        window.updateNotificationBadge();
-    }
-
-    let notificationsData = [];
-
+// ── NotifKit — shared, stateless notification logic ───────────────────────────
+// Lifted from initNotifications so BOTH the full inbox page AND the header Action
+// Center popover build cards from ONE source of truth (classification, type->CTA
+// mapping, category styling, actor identity). Everything here depends only on
+// window.*/document — never on page-local state — so it is safe at module scope.
+window.NotifKit = (function () {
     // Navigate to Invoice History inside the workspace shell (billing is a VIEW fragment).
     // Falls back to a deep-link if loadView isn't available (e.g. viewed outside the workspace).
     const routeToBilling = () => {
@@ -241,6 +231,64 @@ window.initNotifications = async function() {
     const fmtDate = (d) => new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     // Human-readable label for a notif.type, e.g. "billing_payment_failed" -> "Billing Payment Failed".
     const typeLabel = (type) => (type || 'other').split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+
+    // ── Actor identity (who is asking) ─────────────────────────────────────────
+    // Every card leads with its actor: the assistant that produced it (avatar = coloured
+    // initial + name), or the BMS system (semantic category icon + "Be More Swan"). The
+    // server attaches notif.actor = { assistantId, name, jobRole } | null. The palette mirrors
+    // calendar.js so an assistant reads the same colour across the app; colour is derived from
+    // the id (stable, load-order-independent) rather than stored per assistant.
+    const ASSISTANT_PALETTE = ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#06b6d4', '#8b5cf6', '#ef4444', '#14b8a6', '#f97316', '#3b82f6'];
+    const actorColor = (id) => (id == null ? '#9ca3af' : ASSISTANT_PALETTE[Math.abs(Number(id)) % ASSISTANT_PALETTE.length]);
+    const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const actorInitial = (name) => (escHtml(name).trim().charAt(0) || '?').toUpperCase();
+    // Assistant → coloured initial avatar; system → the category-semantic icon (unchanged).
+    const avatarHTML = (notif, st) => {
+        const a = notif.actor;
+        if (a && a.name) {
+            const color = actorColor(a.assistantId);
+            return `<div class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 text-white text-sm font-bold" style="background:${color}" title="${escHtml(a.name)}">${actorInitial(a.name)}</div>`;
+        }
+        return `<div class="w-10 h-10 rounded-full ${st.ring} border flex items-center justify-center shrink-0">${st.icon}</div>`;
+    };
+    // The eyebrow line above the title — assistant name in its accent colour, or "Be More Swan".
+    const actorEyebrowHTML = (notif) => {
+        const a = notif.actor;
+        if (a && a.name) {
+            return `<p class="text-xs font-bold mb-0.5 truncate" style="color:${actorColor(a.assistantId)}">${escHtml(a.name)}</p>`;
+        }
+        return `<p class="text-xs font-bold mb-0.5 text-gray-400">Be More Swan</p>`;
+    };
+
+    return {
+        getNotificationAction, styleOf, catOf, prioOf, isResolved, resolvesClick,
+        isDismissible, dismissBtnHTML, kindOf, fmtDate, typeLabel,
+        avatarHTML, actorEyebrowHTML, actorColor, actorInitial, escHtml,
+    };
+})();
+
+window.initNotifications = async function() {
+    const listEl = document.getElementById('notif-list');
+    const loadingEl = document.getElementById('notif-loading');
+    const emptyStateEl = document.getElementById('notif-empty-state');
+    const searchInput = document.getElementById('notif-search');
+    const markAllBtn = document.getElementById('btn-mark-all-read');
+    const groupByTypeToggle = document.getElementById('notif-group-by-type');
+
+    if (!listEl) return;
+
+    // Clear badge logic when entering the notifications page
+    if (typeof window.updateNotificationBadge === 'function') {
+        window.updateNotificationBadge();
+    }
+
+    let notificationsData = [];
+
+    // Shared classification + rendering helpers (single source of truth — see window.NotifKit).
+    const {
+        getNotificationAction, styleOf, catOf, prioOf, isResolved, resolvesClick,
+        dismissBtnHTML, kindOf, fmtDate, typeLabel, avatarHTML, actorEyebrowHTML,
+    } = window.NotifKit;
     let activeTab = 'action';
     let groupByType = false;
     // Persists across re-renders so a group stays collapsed while notifications update/resolve.
@@ -290,10 +338,9 @@ window.initNotifications = async function() {
         const li = document.createElement('li');
         li.className = `flex items-center gap-3 p-4 ${resolved ? 'opacity-60' : (seen ? 'opacity-90' : '')}`;
         li.innerHTML = `
-            <div class="w-10 h-10 rounded-full ${st.ring} border flex items-center justify-center shrink-0">
-                ${st.icon}
-            </div>
+            ${avatarHTML(notif, st)}
             <div class="flex-1 min-w-0">
+                ${actorEyebrowHTML(notif)}
                 <div class="flex items-center gap-2">
                     <p class="text-sm ${seen ? 'font-semibold text-gray-700' : 'font-bold text-gray-900'}">${notif.title}</p>
                     ${critical && !resolved ? '<span class="text-xs font-bold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">Urgent</span>' : ''}
@@ -334,10 +381,9 @@ window.initNotifications = async function() {
         li.className = `group p-5 transition-colors flex gap-4 ${st.celebrate ? 'notif-celebrate' : bgClass}`;
         li.innerHTML = `
             ${dot}
-            <div class="w-10 h-10 rounded-full ${st.ring} flex items-center justify-center shrink-0 border">
-                ${st.icon}
-            </div>
+            ${avatarHTML(notif, st)}
             <div class="flex-1 min-w-0">
+                ${actorEyebrowHTML(notif)}
                 <p class="text-sm ${textClass}">${notif.title}</p>
                 ${notif.message ? `<p class="text-sm text-gray-500 mt-1 line-clamp-4">${notif.message}</p>` : ''}
                 <p class="text-xs text-gray-400 mt-2">${fmtDate(notif.createdAt)}</p>
@@ -543,3 +589,183 @@ window.routeToSupportTicket = function() {
         if (ticketTab) ticketTab.click();
     }, 100);
 };
+
+// ── Header Action Center popover ──────────────────────────────────────────────
+// Quick triage from the workspace bell: two tabs (Action required / Updates), compact
+// actor-led cards built from the SAME window.NotifKit as the full inbox page, a single
+// primary CTA per item, and "Open inbox" for batch processing. Opening the popover marks
+// nothing read/resolved — acting on an item does. Kept deliberately small: no search,
+// grouping or read-toggle here — those live on the full page.
+window.NotificationPopover = (function () {
+    const K = window.NotifKit;
+    const MAX_PER_TAB = 5;        // cap the popover; overflow lives behind "Open inbox".
+    let panel = null, listEl = null, tabActionBtn = null, tabUpdatesBtn = null;
+    let anchorEl = null, activeTab = 'action', data = [];
+
+    const openInbox = () => { close(); (window.loadView ? window.loadView('notifications') : (window.location.href = 'workspace.html?view=notifications')); };
+
+    const ensurePanel = () => {
+        if (panel) return;
+        panel = document.createElement('div');
+        panel.id = 'notif-popover';
+        panel.style.cssText = 'display:none;position:fixed;z-index:80;';
+        panel.innerHTML = `
+            <div class="bg-white rounded-xl border border-gray-200 shadow-2xl overflow-hidden" style="width:400px;max-width:calc(100vw - 24px);max-height:min(70vh,560px);display:flex;flex-direction:column;">
+                <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100 shrink-0">
+                    <span class="text-sm font-bold text-gray-900">Notifications</span>
+                    <button type="button" id="notif-pop-inbox" class="text-xs font-bold text-emerald-700 hover:text-emerald-800 inline-flex items-center gap-1">Open inbox<span aria-hidden="true">&rarr;</span></button>
+                </div>
+                <div class="flex gap-1 px-3 pt-2 shrink-0">
+                    <button type="button" id="notif-pop-tab-action" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg"></button>
+                    <button type="button" id="notif-pop-tab-updates" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg"></button>
+                </div>
+                <ul id="notif-pop-list" class="overflow-y-auto divide-y divide-gray-100 mt-1" style="flex:1 1 auto;"></ul>
+            </div>`;
+        document.body.appendChild(panel);
+        listEl = panel.querySelector('#notif-pop-list');
+        tabActionBtn = panel.querySelector('#notif-pop-tab-action');
+        tabUpdatesBtn = panel.querySelector('#notif-pop-tab-updates');
+        panel.querySelector('#notif-pop-inbox').addEventListener('click', openInbox);
+        tabActionBtn.addEventListener('click', () => { activeTab = 'action'; render(); });
+        tabUpdatesBtn.addEventListener('click', () => { activeTab = 'updates'; render(); });
+        // Dismiss on outside-click / Esc. Registered once; guarded by panel visibility.
+        document.addEventListener('click', (e) => {
+            if (panel.style.display === 'none') return;
+            if (panel.contains(e.target) || (anchorEl && anchorEl.contains(e.target))) return;
+            close();
+        });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+    };
+
+    const position = () => {
+        if (!anchorEl) return;
+        const r = anchorEl.getBoundingClientRect();
+        panel.style.top = `${Math.round(r.bottom + 8)}px`;
+        panel.style.right = `${Math.round(Math.max(12, window.innerWidth - r.right))}px`;
+    };
+
+    const patch = (id, body) => fetch('/.netlify/functions/notifications', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ notificationId: id, ...body }),
+    }).then(() => window.updateNotificationBadge && window.updateNotificationBadge())
+      .catch(err => console.error('Popover sync failed:', err));
+
+    const compactCard = (n) => {
+        const st = K.styleOf(n);
+        const isAction = K.kindOf(n) === 'action';
+        // Action-kind items always get a CTA (fallback to a generic Review); info-kind items only
+        // show a CTA when they carry a real destination — passive FYIs stay button-less, as on
+        // the full page. So "post published" links out, but "maintenance" is just informational.
+        const rawAction = K.getNotificationAction(n);
+        const action = rawAction || (isAction ? { label: 'Review', run: () => window.loadView?.('dashboard') } : null);
+        const li = document.createElement('li');
+        li.className = 'flex gap-3 p-3 hover:bg-gray-50 transition-colors';
+        li.innerHTML = `
+            ${K.avatarHTML(n, st)}
+            <div class="flex-1 min-w-0">
+                ${K.actorEyebrowHTML(n)}
+                <p class="text-sm font-bold text-gray-900 truncate">${K.escHtml(n.title)}</p>
+                ${n.message ? `<p class="text-xs text-gray-500 mt-0.5 line-clamp-2">${K.escHtml(n.message)}</p>` : ''}
+                <div class="mt-2 flex items-center gap-2">
+                    ${action ? `<button type="button" class="pop-cta px-3 py-1.5 ${st.cta} text-white text-xs font-bold rounded-lg transition whitespace-nowrap">${K.escHtml(action.label)}</button>` : ''}
+                    <span class="text-[11px] text-gray-400">${K.fmtDate(n.createdAt)}</span>
+                </div>
+            </div>`;
+        li.querySelector('.pop-cta')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (isAction) {
+                if (K.resolvesClick(n)) patch(n.id, { resolved: true }); else patch(n.id, { isRead: true });
+            } else {
+                patch(n.id, { isRead: true });
+            }
+            close();
+            action.run();
+        });
+        return li;
+    };
+
+    const emptyRow = (msg) => {
+        const li = document.createElement('li');
+        li.className = 'px-4 py-10 text-center text-sm text-gray-400';
+        li.textContent = msg;
+        return li;
+    };
+
+    const styleTabs = (openActions, unreadUpdates) => {
+        const on = 'flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800';
+        const off = 'flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-transparent text-gray-500 hover:text-gray-700';
+        const pill = (n, cls) => n > 0 ? `<span class="${cls} text-[10px] font-bold px-1.5 py-0.5 rounded-full">${n}</span>` : '';
+        tabActionBtn.className = activeTab === 'action' ? on : off;
+        tabUpdatesBtn.className = activeTab === 'updates' ? on : off;
+        tabActionBtn.innerHTML = `Action required${pill(openActions, 'bg-red-100 text-red-700')}`;
+        tabUpdatesBtn.innerHTML = `Updates${pill(unreadUpdates, 'bg-emerald-100 text-emerald-700')}`;
+    };
+
+    const render = () => {
+        const actions = data.filter(n => K.kindOf(n) === 'action');
+        const updates = data.filter(n => K.kindOf(n) === 'info');
+        const openActions = actions.filter(n => !K.isResolved(n)).length;
+        const unreadUpdates = updates.filter(n => !n.isRead).length;
+        styleTabs(openActions, unreadUpdates);
+
+        const byCreated = (a, b) => new Date(b.createdAt) - new Date(a.createdAt) || (b.id - a.id);
+        let list = (activeTab === 'action' ? actions : updates).slice();
+        if (activeTab === 'action') {
+            list.sort((a, b) => (K.isResolved(a) ? 1 : 0) - (K.isResolved(b) ? 1 : 0) || K.prioOf(a) - K.prioOf(b) || byCreated(a, b));
+        } else {
+            list.sort(byCreated);
+        }
+        const shown = list.slice(0, MAX_PER_TAB);
+
+        listEl.innerHTML = '';
+        if (shown.length === 0) {
+            listEl.appendChild(emptyRow(activeTab === 'action' ? "You're all caught up" : 'No updates yet'));
+        } else {
+            shown.forEach(n => listEl.appendChild(compactCard(n)));
+            if (list.length > shown.length) {
+                const li = document.createElement('li');
+                li.className = 'px-4 py-2.5 text-center';
+                li.innerHTML = `<button type="button" class="text-xs font-bold text-emerald-700 hover:text-emerald-800">View all ${list.length} in inbox &rarr;</button>`;
+                li.querySelector('button').addEventListener('click', openInbox);
+                listEl.appendChild(li);
+            }
+        }
+    };
+
+    const fetchAndRender = async () => {
+        listEl.innerHTML = '';
+        listEl.appendChild(emptyRow('Loading…'));
+        try {
+            const res = await fetch('/.netlify/functions/notifications');
+            if (res.ok) {
+                const j = await res.json();
+                data = j.notifications || [];
+                // Default to whichever tab has something waiting (mirrors the full page).
+                activeTab = data.some(n => K.kindOf(n) === 'action' && !K.isResolved(n)) ? 'action' : 'updates';
+                render();
+            } else {
+                listEl.innerHTML = '';
+                listEl.appendChild(emptyRow('Could not load notifications'));
+            }
+        } catch (e) {
+            console.error('Popover load failed:', e);
+            listEl.innerHTML = '';
+            listEl.appendChild(emptyRow('Could not load notifications'));
+        }
+    };
+
+    const open = (anchor) => {
+        ensurePanel();
+        anchorEl = anchor || document.getElementById('nav-notifications');
+        panel.style.display = 'block';
+        position();
+        fetchAndRender();
+    };
+    const close = () => { if (panel) panel.style.display = 'none'; };
+    const isOpen = () => !!panel && panel.style.display !== 'none';
+    const toggle = (anchor) => { ensurePanel(); isOpen() ? close() : open(anchor); };
+
+    window.addEventListener('resize', () => { if (isOpen()) position(); });
+
+    return { open, close, toggle, isOpen };
+})();
