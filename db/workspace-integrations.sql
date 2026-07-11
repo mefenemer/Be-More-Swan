@@ -20,9 +20,18 @@ CREATE TABLE IF NOT EXISTS workspace_integrations (
 );
 
 -- Unique compound constraint: one connection per provider per workspace.
-ALTER TABLE workspace_integrations
-    ADD CONSTRAINT workspace_integrations_org_provider_unique
-    UNIQUE (organisation_id, provider);
+-- Guarded so a re-run is a no-op (Postgres has no ADD CONSTRAINT IF NOT EXISTS).
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'workspace_integrations_org_provider_unique'
+    ) THEN
+        ALTER TABLE workspace_integrations
+            ADD CONSTRAINT workspace_integrations_org_provider_unique
+            UNIQUE (organisation_id, provider);
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS workspace_integrations_org_idx
     ON workspace_integrations (organisation_id);
