@@ -133,18 +133,18 @@ node_bundler = "esbuild"
   schedule = "0 3 * * *"
 
 # Lead Generator outbound discovery — hourly dispatcher enqueues due campaign runs,
-# and the worker drains the queue every minute (bounded slices, resumable via cursor).
+# and the worker drains the queue every 10 minutes (bounded slices, resumable via cursor).
 # docs/lead-generator-discovery-plan.md. Staging drives these via run-discovery-jobs.ts.
 [functions.dispatch-discovery-runs]
   schedule = "0 * * * *"
 [functions.process-discovery-jobs]
-  schedule = "* * * * *"
+  schedule = "*/10 * * * *"
 
-# Integration Scenario Library — outbound "Handoff" push drain (every minute, mirrors the
+# Integration Scenario Library — outbound "Handoff" push drain (every 10 minutes, mirrors the
 # discovery worker) + inbound feedback loop draining via process-webhook-events. Suppression
 # sync pulls existing-customer domains from the CRM daily. docs/integration-scenario-library-plan.md.
 [functions.process-scenario-jobs]
-  schedule = "* * * * *"
+  schedule = "*/10 * * * *"
 [functions.suppression-sync]
   schedule = "0 4 * * *"
 # US-GOV-2.1.1: Daily digest for stale pending HITL actions — 09:00 UTC every day
@@ -186,9 +186,14 @@ node_bundler = "esbuild"
 [functions.notification-email-fallback]
   schedule = "*/15 * * * *"
 
-# US-SMM-3.1.1: Process queued content generation jobs — every minute
+# US-SMM-3.1.1: Process queued content generation jobs — every 10 minutes.
+# NOTE: all the every-10-min queue drainers/publishers are deliberately ALIGNED to the same
+# */10 cadence (not staggered) so they fire in one batch and leave a ~9-min idle window, letting
+# Neon autosuspend between ticks. Neon bills by active compute time, and its quota is project-wide,
+# so an always-on minute-cron here silently drains the allowance production shares. See the
+# staging outage 2026-07-11 (Netlify Clockwork ran these every minute → Neon compute quota hit).
 [functions.process-content-jobs]
-  schedule = "* * * * *"
+  schedule = "*/10 * * * *"
   timeout = 26
 
 # Epic 1, US1: synchronous AI image generation submits to Fal and polls until the images
@@ -217,21 +222,21 @@ node_bundler = "esbuild"
 [functions.purge-archived-assistants]
   schedule = "30 4 * * *"
 
-# US-SMM-3.3.1/3.3.2: Publish due Instagram posts — every minute
+# US-SMM-3.3.1/3.3.2: Publish due Instagram posts — every 10 minutes (aligned; see process-content-jobs note)
 [functions.publish-instagram]
-  schedule = "* * * * *"
+  schedule = "*/10 * * * *"
 
-# Publish due LinkedIn & X posts — every minute (non-Instagram social publisher)
+# Publish due LinkedIn & X posts — every 10 minutes (non-Instagram social publisher)
 [functions.publish-social-posts]
-  schedule = "* * * * *"
+  schedule = "*/10 * * * *"
 
-# Publish due Facebook Page posts — every minute (piggybacks on the Meta connection)
+# Publish due Facebook Page posts — every 10 minutes (piggybacks on the Meta connection)
 [functions.publish-facebook]
-  schedule = "* * * * *"
+  schedule = "*/10 * * * *"
 
-# Drain inbound webhook events (intake → sandbox → connector handlers) — every minute
+# Drain inbound webhook events (intake → sandbox → connector handlers) — every 10 minutes
 [functions.process-webhook-events]
-  schedule = "* * * * *"
+  schedule = "*/10 * * * *"
 
 # US-LEGAL-1.5: 14-day pre-renewal email reminder — 07:00 UTC every day
 [functions.renewal-reminder]
