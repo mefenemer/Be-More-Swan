@@ -1,9 +1,11 @@
 // netlify/functions/get-plans.ts
-// US-ONB-2.1.1 AC9: Public endpoint — returns active master plans ordered by price.
-// Used by the plan gate modal so pricing is always live from the DB.
+// US-ONB-2.1.1 AC9: Public endpoint — returns active, purchasable master plans ordered by price.
+// Used by the plan gate modal so pricing is always live from the DB. The 'trial' tier is
+// auto-assigned at registration and is NOT user-selectable, so it is excluded here (otherwise
+// the picker would render a bogus "Free Trial — £0/mo" card that fires a £0 checkout).
 
 import { Handler } from '@netlify/functions';
-import { eq, asc } from 'drizzle-orm';
+import { and, eq, ne, asc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { masterPlans } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -35,7 +37,7 @@ export default withLambda(async (event) => {
                 features: masterPlans.features, // AC2.1.2: dynamic feature checklist source
             })
             .from(masterPlans)
-            .where(eq(masterPlans.isActive, true))
+            .where(and(eq(masterPlans.isActive, true), ne(masterPlans.tierKey, 'trial')))
             .orderBy(asc(masterPlans.monthlyPriceGbp));
 
         return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ plans }) };
