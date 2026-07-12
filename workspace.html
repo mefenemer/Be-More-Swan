@@ -2441,7 +2441,21 @@ function formatCurrency(amount, currency) {
 
       // Returning from Stripe checkout — the webhook may not have marked the plan active yet,
       // so we must NOT show the plan-selection gate here; the polling block below handles it.
-      const planActivated = qs.get('plan_activated') === 'true';
+      // The webhook can lag past our poll window (cold start / retry), and a manual refresh
+      // drops ?plan_activated — which previously slammed a just-paid user into the hard "select
+      // a plan" gate. Persist a short-lived marker so a refresh keeps showing the "activating"
+      // state (and keeps polling) rather than demanding payment again.
+      const ACTIVATING_KEY = 'bms_plan_activating_until';
+      if (qs.get('plan_activated') === 'true') {
+        try { sessionStorage.setItem(ACTIVATING_KEY, String(Date.now() + 10 * 60 * 1000)); } catch {}
+      }
+      let activatingMarker = false;
+      try {
+        const until = parseInt(sessionStorage.getItem(ACTIVATING_KEY) || '0', 10);
+        activatingMarker = until > Date.now();
+        if (!activatingMarker && until) sessionStorage.removeItem(ACTIVATING_KEY);
+      } catch {}
+      const planActivated = qs.get('plan_activated') === 'true' || activatingMarker;
 
       // Free trial removed: a user with no active/past-due plan is HARD-gated. We show the
       // non-dismissible plan picker for a brand-new user (no assistants yet) or whenever
@@ -2469,28 +2483,51 @@ function formatCurrency(amount, currency) {
         gateModal.classList.remove('hidden');
         applyGateBlur(true);
         if (pollingEl) pollingEl.classList.remove('hidden');
-        let attempts = 0;
-        const poll = setInterval(async () => {
-          attempts++;
-          const fresh = await window.checkCapacity(true);
-          if (fresh?.planStatus === 'active' || fresh?.planStatus === 'trialing') {
-            clearInterval(poll);
-            gateModal.classList.add('hidden');
-            applyGateBlur(false);
-            if (typeof window.refreshPlanPill === 'function') window.refreshPlanPill(); // cache already fresh
-            // Plan is now active — tick the wizard's "Choose your plan" step (and celebrate).
-            window.SetupWizard?.refresh?.({ autoOpen: true });
-            // Welcome modal retired — welcome + setup checklist now live in the
-            // Notifications area (see initGettingStarted / notifications.js).
-          } else if (attempts >= 5) {
-            clearInterval(poll);
-            if (pollingEl) {
-              pollingEl.textContent = 'Taking longer than expected — refresh the page.';
-              pollingEl.classList.remove('animate-pulse', 'text-emerald-700');
-              pollingEl.classList.add('text-amber-600');
-            }
+
+        const finishActivation = () => {
+          try { sessionStorage.removeItem(ACTIVATING_KEY); } catch {}
+          gateModal.classList.add('hidden');
+          applyGateBlur(false);
+          if (typeof window.refreshPlanPill === 'function') window.refreshPlanPill(); // cache already fresh
+          // Plan is now active — tick the wizard's "Choose your plan" step (and celebrate).
+          window.SetupWizard?.refresh?.({ autoOpen: true });
+          // Welcome modal retired — welcome + setup checklist now live in the
+          // Notifications area (see initGettingStarted / notifications.js).
+        };
+
+        // Poll for up to ~60s — the webhook + a function cold start can easily exceed the old
+        // 15s window. If it still hasn't landed we must NOT fall through to the hard "pay again"
+        // gate: the payment is real, and the marker (10 min) keeps us in this activating state
+        // across refreshes. Offer a manual re-check instead of demanding payment.
+        const runPoll = () => {
+          if (pollingEl) {
+            pollingEl.textContent = 'Payment received — confirming your subscription…';
+            pollingEl.classList.remove('text-amber-600');
+            pollingEl.classList.add('animate-pulse', 'text-emerald-700');
           }
-        }, 3000);
+          let attempts = 0;
+          const poll = setInterval(async () => {
+            attempts++;
+            const fresh = await window.checkCapacity(true);
+            if (fresh?.planStatus === 'active' || fresh?.planStatus === 'trialing') {
+              clearInterval(poll);
+              finishActivation();
+            } else if (attempts >= 20) {
+              clearInterval(poll);
+              if (pollingEl) {
+                pollingEl.classList.remove('animate-pulse', 'text-emerald-700');
+                pollingEl.classList.add('text-amber-600');
+                pollingEl.innerHTML = 'Your payment went through, but activation is taking longer than usual. ' +
+                  'It will finish automatically — you can ' +
+                  '<button type="button" id="plan-recheck-btn" class="underline font-medium">check again</button>' +
+                  ' or contact support if it persists.';
+                const btn = document.getElementById('plan-recheck-btn');
+                if (btn) btn.addEventListener('click', () => runPoll(), { once: true });
+              }
+            }
+          }, 3000);
+        };
+        runPoll();
       }
     })();
 

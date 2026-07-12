@@ -69,6 +69,13 @@ export default withLambda(async (event) => {
         return { statusCode: 200, body: JSON.stringify({ received: true, duplicate: true }) };
     }
 
+    // The insert above is a CLAIM, not a completion marker: it only prevents two concurrent
+    // deliveries of the same event from both processing. If handling throws below (e.g. a
+    // transient DB error mid-way through creating the plan), we must RELEASE the claim before
+    // returning non-2xx — otherwise Stripe's retry hits the idempotency guard, is treated as a
+    // duplicate, and the plan is never created. Releasing lets the retry reprocess cleanly.
+    try {
+
     // ── checkout.session.completed — plan-gate subscription checkout ──
     // create-plan-checkout-intent.ts uses Stripe Checkout in `subscription` mode. Stripe does NOT
     // route these through our custom payment_intent.succeeded metadata flow, and invoice.paid with
@@ -910,6 +917,17 @@ export default withLambda(async (event) => {
     }
 
     return { statusCode: 200, body: JSON.stringify({ received: true }) };
+
+    } catch (handlerErr) {
+        // Release the idempotency claim so Stripe's retry can reprocess this event, then
+        // rethrow so withLambda returns 5xx and Stripe actually retries. Without this, a
+        // half-finished event would be permanently swallowed as a "duplicate" on retry.
+        await db.delete(processedWebhookEvents)
+            .where(eq(processedWebhookEvents.stripeEventId, stripeEvent.id))
+            .catch(delErr => console.error('[stripe-webhook] Failed to release idempotency claim:', (delErr as any)?.message));
+        console.error('[stripe-webhook] Handler error — released claim for retry:', { eventId: stripeEvent.id, type: stripeEvent.type, err: (handlerErr as any)?.message });
+        throw handlerErr;
+    }
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
