@@ -1524,9 +1524,9 @@ function formatCurrency(amount, currency) {
         }
 
         // Deep-link into a specific draft (e.g. from a "draft ready" notification): open the
-        // Review column and pop that post's mock-up modal, same as the Ideas tab's jump-in.
-        if (routeKey === 'review-queue' && param && param.postId && typeof rqViewIdeaDraft === 'function') {
-          await rqViewIdeaDraft(param.postId);
+        // Review column and pop that post's mock-up modal.
+        if (routeKey === 'review-queue' && param && param.postId && typeof rqViewDraft === 'function') {
+          await rqViewDraft(param.postId);
         }
 
         if (routeKey === 'billing' && typeof window.initBilling === 'function') {
@@ -4194,24 +4194,20 @@ async function refreshPendingBadge() {
 
 // ── Review Queue ─────────────────────────────────────────────────────────────
 // Simple lifecycle: top columns (Review → Approved → Scheduled → Posted → Archived),
-// each showing collapsible content groups. For the Social Media Manager the groups are
-// "Ideas" and "Posts"; other assistant types can define their own groups later.
+// each showing collapsible content groups. For the Social Media Manager the only group
+// is "Posts"; other assistant types can define their own groups later.
 
-// Column = a lifecycle stage. postStatus filters scheduled_posts; ideaFilter selects which
-// post-ideas belong in this stage (ideas only make sense in Review and Archived).
+// Column = a lifecycle stage. postStatus filters scheduled_posts.
 const RQ_COLUMNS = {
-    review:    { label: 'Review',    postStatus: 'pending_approval', ideaFilter: i => i.status === 'pending' },
-    approved:  { label: 'Approved',  postStatus: 'approved',         ideaFilter: () => false },
-    scheduled: { label: 'Scheduled', postStatus: 'scheduled',        ideaFilter: () => false },
-    posted:    { label: 'Posted',    postStatus: 'published',        ideaFilter: () => false },
-    // Once an idea has been woven into a post (in_review/delivered), its own review happens on
-    // that post's card in the Posts group — it no longer needs a separate slot in Review.
-    archived:  { label: 'Archived',  postStatus: 'rejected',         ideaFilter: i => i.status === 'discarded' || i.status === 'in_review' || i.status === 'delivered' },
+    review:    { label: 'Review',    postStatus: 'pending_approval' },
+    approved:  { label: 'Approved',  postStatus: 'approved' },
+    scheduled: { label: 'Scheduled', postStatus: 'scheduled' },
+    posted:    { label: 'Posted',    postStatus: 'published' },
+    archived:  { label: 'Archived',  postStatus: 'rejected' },
 };
 
 // Content groups for this assistant type. Each: how to fetch its items for a column + how to render.
 const RQ_GROUPS = [
-    { key: 'ideas', label: 'Ideas', empty: 'No ideas here.',  emptyReview: 'No ideas here yet.' },
     { key: 'posts', label: 'Posts', empty: 'No posts here.',  emptyReview: 'No posts awaiting review.' },
 ];
 
@@ -4228,7 +4224,7 @@ const RQ_BLOG_GROUP = { key: 'blog', label: 'Blog posts', empty: 'No blog posts 
 let _rqBlogWriterActive = false;
 
 let _rqCurrentStatus = 'review';
-const _rqGroupOpen = { ideas: true, posts: true, blog: true };
+const _rqGroupOpen = { posts: true, blog: true };
 
 // Back-compat shim: several callers (gen-post success, modal refresh) still call rqLoadItems()/rqSetTab().
 function rqLoadItems() { rqRenderGroups(_rqCurrentStatus); }
@@ -4246,10 +4242,10 @@ function rqOpenStatus(statusKey, btn) {
     return rqRenderGroups(statusKey);
 }
 
-// Ideas tab "Review this draft →": jump straight to the Review column AND pop the specific
+// Deep-link "Review this draft →": jump straight to the Review column AND pop the specific
 // draft's mock-up modal, instead of leaving the user to hunt for it among the Posts group
 // (the vague tab-switch was the source of the "I don't know how to review it" feedback).
-async function rqViewIdeaDraft(postId) {
+async function rqViewDraft(postId) {
     await rqOpenStatus('review');
     if (postId) openPostReview(postId);
 }
@@ -4265,15 +4261,13 @@ async function rqRenderGroups(statusKey) {
         try { _rqBlogWriterActive = !!(await window.resolveBlogWriter()); } catch { /* non-blocking */ }
     }
 
-    let posts = [], ideas = [], blogPosts = [];
+    let posts = [], blogPosts = [];
     try {
-        const [pRes, iRes, bRes] = await Promise.all([
+        const [pRes, bRes] = await Promise.all([
             fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}`),
-            fetch('/.netlify/functions/get-post-ideas'),
             _rqBlogWriterActive ? fetch('/.netlify/functions/blog-posts') : Promise.resolve(null),
         ]);
         if (pRes.ok) posts = (await pRes.json()).drafts || [];
-        if (iRes.ok) ideas = ((await iRes.json()).ideas || []).filter(col.ideaFilter);
         if (bRes && bRes.ok) {
             const allBlog = (await bRes.json()).posts || [];
             const wanted = RQ_BLOG_STATUSES[statusKey] || [];
@@ -4295,8 +4289,8 @@ async function rqRenderGroups(statusKey) {
     }
 
     const groups = _rqBlogWriterActive ? [...RQ_GROUPS, RQ_BLOG_GROUP] : RQ_GROUPS;
-    const itemsByGroup = { ideas, posts, blog: blogPosts };
-    const renderByGroup = { ideas: rqRenderIdeaCard, posts: rqRenderSocialCard, blog: rqRenderBlogCard };
+    const itemsByGroup = { posts, blog: blogPosts };
+    const renderByGroup = { posts: rqRenderSocialCard, blog: rqRenderBlogCard };
     container.innerHTML = groups.map(g => rqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey)).join('');
 }
 
@@ -4411,93 +4405,6 @@ function rqRenderSocialCard(draft) {
       ${statusChip}
       <svg class="w-4 h-4 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
     </div>`;
-}
-
-// Review Queue → Ideas tab: one card per suggested idea, showing where it is in its lifecycle so
-// the user can tell whether it's still pending, sitting in a draft for review, or delivered (live).
-function rqRenderIdeaCard(idea) {
-    const platformLabel = { instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X' };
-    const platforms = (idea.platform || '').split(',').map(p => platformLabel[p.trim()] || p.trim()).filter(Boolean);
-    const platformHint = platforms.length ? platforms.join(', ') : 'All platforms';
-    const ago = rqTimeAgo(idea.createdAt);
-
-    const STATUS = {
-        pending:   { label: 'Pending',            cls: 'bg-amber-50 border-amber-200 text-amber-700' },
-        in_review: { label: 'In a draft to review', cls: 'bg-violet-50 border-violet-200 text-violet-700' },
-        delivered: { label: 'Delivered',          cls: 'bg-emerald-50 border-emerald-200 text-emerald-700' },
-        discarded: { label: 'Not used',           cls: 'bg-gray-100 border-gray-200 text-gray-500' },
-    };
-    const s = STATUS[idea.status] || STATUS.pending;
-
-    let progress = '';
-    if (idea.status === 'pending') {
-        progress = `<p class="text-xs text-gray-500">Waiting to be woven into an upcoming draft.</p>
-          <button onclick="ideaToggleEdit(${idea.id})" class="mt-1.5 text-xs font-semibold text-emerald-700 hover:text-emerald-800 underline cursor-pointer">Edit</button>
-          <button onclick="ideaDelete(${idea.id})" class="mt-1.5 ml-3 text-xs font-semibold text-red-600 hover:text-red-700 underline cursor-pointer">Delete</button>
-          <div class="rq-idea-edit-${idea.id} hidden mt-2">
-            <textarea id="rq-idea-input-${idea.id}" rows="2" maxlength="500" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-300">${_rqEsc(idea.idea)}</textarea>
-            <div class="flex gap-2 mt-1"><button onclick="ideaSaveEdit(${idea.id})" class="px-3 py-1.5 text-xs font-bold bg-emerald-600 text-white rounded-lg cursor-pointer">Save</button><button onclick="ideaToggleEdit(${idea.id})" class="px-3 py-1.5 text-xs font-bold text-gray-500 cursor-pointer">Cancel</button></div>
-          </div>`;
-    } else if (idea.status === 'in_review') {
-        const cap = idea.postCaption ? `<p class="text-xs text-gray-600 mt-1 line-clamp-2 italic">"${_rqEsc(idea.postCaption)}"</p>` : '';
-        progress = `<p class="text-xs text-gray-500">Built into a post — now awaiting your review.${cap ? '' : ''}</p>${cap}
-          ${idea.usedPostId ? `<button onclick="openPostReview(${idea.usedPostId})" class="mt-1.5 text-xs font-semibold text-violet-700 hover:text-violet-800 underline cursor-pointer">Review this post →</button>` : ''}`;
-    } else if (idea.status === 'delivered') {
-        const when = idea.postPublishDate ? new Date(idea.postPublishDate).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : null;
-        const postState = idea.postStatus === 'published' ? 'Published' : (idea.postStatus === 'scheduled' ? 'Scheduled' : 'Approved');
-        const cap = idea.postCaption ? `<p class="text-xs text-gray-600 mt-1 line-clamp-2 italic">"${_rqEsc(idea.postCaption)}"</p>` : '';
-        progress = `<p class="text-xs text-emerald-700 font-medium">✓ Approved and turned into a post${when ? ` · ${postState} for ${_rqEsc(when)}` : ` · ${postState}`}.</p>${cap}`;
-    } else {
-        progress = `<p class="text-xs text-gray-500">This idea wasn't used.</p>`;
-    }
-
-    return `<div class="py-4">
-      <div class="flex items-start justify-between gap-3 mb-1.5">
-        <div class="flex-1 min-w-0">
-          <p class="text-sm font-medium text-gray-900">${_rqEsc(idea.idea)}</p>
-          <p class="text-xs text-gray-500 mt-0.5">${_rqEsc(idea.assistantName || 'Assistant')} · ${platformHint} · suggested ${ago}</p>
-        </div>
-        <span class="flex-shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border ${s.cls}">${s.label}</span>
-      </div>
-      ${progress}
-    </div>`;
-}
-
-function ideaToggleEdit(id) {
-    document.querySelector(`.rq-idea-edit-${id}`)?.classList.toggle('hidden');
-}
-
-async function ideaSaveEdit(id) {
-    const idea = (document.getElementById(`rq-idea-input-${id}`) || {}).value?.trim();
-    if (!idea) { alert('Please describe your post idea.'); return; }
-    try {
-        const res = await fetch('/.netlify/functions/update-post-idea', {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id, idea }),
-        });
-        const d = await res.json().catch(() => ({}));
-        if (!res.ok) { alert(d.error || 'Could not save your idea.'); return; }
-        rqLoadItems();
-    } catch { alert('Network error — please try again.'); }
-}
-
-function ideaDelete(id) {
-    window.showConfirmModal('Delete this idea? This cannot be undone.', async () => {
-        try {
-            const res = await fetch('/.netlify/functions/update-post-idea', {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id }),
-            });
-            const d = await res.json().catch(() => ({}));
-            if (!res.ok) { window.showToast?.(d.error || 'Could not delete this idea.'); return; }
-            // Refresh whichever Review Queue view is currently mounted — the global Review Queue
-            // page (Social tab) and/or the assistant-detail page's own scoped Review Queue tab.
-            rqLoadItems();
-            if (typeof window.detailRqRefresh === 'function') { try { window.detailRqRefresh(); } catch { /* ignore */ } }
-        } catch { window.showToast?.('Network error — please try again.'); }
-    }, { title: 'Delete idea?', confirmLabel: 'Yes, delete idea' });
 }
 
 async function sdApprove(postId, action) {
@@ -5827,7 +5734,7 @@ function gpRejectPost() {
 }
 
 // Voice dictation into one of the Create Post text fields. Each field declares its own mic button
-// and (optionally) a live character counter so all three modes can share this one recognizer.
+// and (optionally) a live character counter so both modes can share this one recognizer.
 const GP_VOICE_FIELDS = {
     'gen-post-context': { mic: 'gen-post-mic-btn', count: 'gen-post-ctx-count' },
     'gpw-caption':      { mic: 'gpw-mic-btn' },
@@ -5857,7 +5764,7 @@ function gpStartVoice(targetId = 'gen-post-context') {
     rec.start();
 }
 
-// ── Shared chip styling for the write-your-own / suggest-idea platform buttons ──────────────────
+// ── Shared chip styling for the write-your-own platform buttons ──────────────────
 function gpwSetChipState(btn, on) {
     if (!btn) return;
     if (on) {
