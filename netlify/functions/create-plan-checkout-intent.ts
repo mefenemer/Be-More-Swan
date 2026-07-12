@@ -36,15 +36,19 @@ export default withLambda(async (event) => {
         return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured: base URL unavailable' }) };
     }
 
-    let planId: number; let referralCode: string | undefined; let requestedCurrency: string | undefined;
+    let planId: number; let referralCode: string | undefined; let requestedCurrency: string | undefined; let requestedCycle: string | undefined;
     try {
         const body = JSON.parse(event.body || '{}');
-        ({ planId, referralCode, currency: requestedCurrency } = body);
+        ({ planId, referralCode, currency: requestedCurrency, billingCycle: requestedCycle } = body);
     } catch {
         return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON body' }) };
     }
 
     if (!planId) return { statusCode: 400, body: JSON.stringify({ error: 'planId is required' }) };
+
+    // Annual plans bill a single 12-month lump sum at a 20% discount; monthly bills each month.
+    const billingCycle: 'monthly' | 'annual' = requestedCycle === 'annual' ? 'annual' : 'monthly';
+    const ANNUAL_DISCOUNT = 0.80;
 
     try {
     const currency = SUPPORTED_CURRENCIES.includes((requestedCurrency ?? '').toUpperCase())
@@ -71,22 +75,41 @@ export default withLambda(async (event) => {
         .where(and(eq(planPrices.masterPlanId, plan.id), eq(planPrices.currency, currency), eq(planPrices.isActive, true)))
         .limit(1);
 
-    const priceAmount  = planPrice ? Number(planPrice.monthlyPriceMajorUnit) : Number(plan.monthlyPriceGbp);
+    const monthlyAmount = planPrice ? Number(planPrice.monthlyPriceMajorUnit) : Number(plan.monthlyPriceGbp);
     const priceCurrency = (planPrice ? currency : 'GBP').toLowerCase();
     const stripePriceId = planPrice?.stripePriceId ?? null;
 
-    // Build Stripe line item
-    const lineItem: Stripe.Checkout.SessionCreateParams.LineItem = stripePriceId
-        ? { price: stripePriceId, quantity: 1 }
-        : {
+    // Build Stripe line item.
+    // - Monthly: reuse a configured Stripe price if present, else a dynamic monthly price.
+    // - Annual: always dynamic (the configured Stripe price is a MONTHLY price), billed once a
+    //   year as 12 × monthly × 0.8.
+    let lineItem: Stripe.Checkout.SessionCreateParams.LineItem;
+    if (billingCycle === 'annual') {
+        // Match the advertised annual total (pricing.html): round the discounted monthly to a
+        // whole unit, then ×12 — e.g. £349 → round(279.2)=£279 → £3,348/yr.
+        const annualAmount = Math.round(monthlyAmount * ANNUAL_DISCOUNT) * 12;
+        lineItem = {
+            quantity: 1,
+            price_data: {
+                currency: priceCurrency,
+                product_data: { name: `Be More Swan ${plan.name} (annual)` },
+                unit_amount: Math.round(annualAmount * 100),
+                recurring: { interval: 'year' },
+            },
+        };
+    } else if (stripePriceId) {
+        lineItem = { price: stripePriceId, quantity: 1 };
+    } else {
+        lineItem = {
             quantity: 1,
             price_data: {
                 currency: priceCurrency,
                 product_data: { name: `Be More Swan ${plan.name}` },
-                unit_amount: Math.round(priceAmount * 100),
+                unit_amount: Math.round(monthlyAmount * 100),
                 recurring: { interval: 'month' },
             },
         };
+    }
 
     // Build Stripe Checkout Session
     const sessionParams: Stripe.Checkout.SessionCreateParams = {
@@ -100,25 +123,37 @@ export default withLambda(async (event) => {
             organisationId: String(orgId),
             masterPlanId: String(plan.id),
             planName: plan.name,
+            billingCycle,
             ...(referralCode ? { referralCode } : {}),
         },
         subscription_data: {
             metadata: {
                 userId: String(user.id),
                 masterPlanId: String(plan.id),
+                billingCycle,
                 ...(referralCode ? { referralCode } : {}),
             },
         },
     };
 
-    // Apply referral discount coupon if present and a matching Stripe coupon exists
+    // Apply referral discount coupon if present and a matching Stripe coupon exists.
+    let discountApplied = false;
     if (referralCode) {
         try {
             await stripe.coupons.retrieve(referralCode);
             sessionParams.discounts = [{ coupon: referralCode }];
+            discountApplied = true;
         } catch {
             // No matching coupon — proceed without discount
         }
+    }
+
+    // Let the customer enter a promo code on Stripe's hosted page (this is where 100%-off
+    // codes are redeemed — a £0 invoice still fires checkout.session.completed and activates
+    // the plan). Stripe forbids combining `allow_promotion_codes` with a fixed `discounts`
+    // coupon, so only enable it when no referral coupon was pre-applied.
+    if (!discountApplied) {
+        sessionParams.allow_promotion_codes = true;
     }
 
     try {

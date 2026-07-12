@@ -20,8 +20,8 @@ const isTestMode = stripeSecret.startsWith('sk_test_');
 
 // Monthly prices by tier (must stay in sync with create-subscription.ts)
 const MONTHLY_PRICES_GBP: Record<string, number> = isTestMode
-    ? { buster: 49, saver: 99, employee: 149 }
-    : { buster: 49, saver: 99, employee: 149 };
+    ? { buster: 99, saver: 29, employee: 349 }
+    : { buster: 99, saver: 29, employee: 349 };
 
 const ANNUAL_DISCOUNT = 0.80;
 

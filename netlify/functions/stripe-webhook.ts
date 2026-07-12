@@ -76,7 +76,7 @@ export default withLambda(async (event) => {
     // otherwise check-capacity never sees an active plan and the plan-gate modal keeps reappearing.
     if (stripeEvent.type === 'checkout.session.completed') {
         const session = stripeEvent.data.object as Stripe.Checkout.Session;
-        const { userId, organisationId, masterPlanId, planName: metaPlanName, referralCode } = session.metadata || {};
+        const { userId, organisationId, masterPlanId, planName: metaPlanName, referralCode, billingCycle } = session.metadata || {};
 
         // Only our plan-gate subscription sessions carry userId + organisationId in metadata;
         // organisationId is required to create the plan record (plans.organisationId is NOT NULL).
@@ -134,7 +134,11 @@ export default withLambda(async (event) => {
 
         const sessBillingStart = new Date();
         const sessBillingEnd   = new Date(sessBillingStart);
-        sessBillingEnd.setMonth(sessBillingEnd.getMonth() + 1);
+        if (billingCycle === 'annual') {
+            sessBillingEnd.setFullYear(sessBillingEnd.getFullYear() + 1);
+        } else {
+            sessBillingEnd.setMonth(sessBillingEnd.getMonth() + 1);
+        }
         const sessInv = await _createInvoice({
             userId:                userIdInt,
             organisationId:        orgIdInt,
