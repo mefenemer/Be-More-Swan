@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+    branches: [main, staging]
+
+jobs:
+  checks:
+    name: Typecheck + tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      # Typecheck + every tests/*.test.ts (pure-logic / mocked; DB tests skip gracefully).
+      # Includes the tenant-isolation guards (tenant-guard, storage-tenant-isolation).
+      - run: npm run test:all
+
+  rls:
+    name: RLS tenant-isolation (Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # pgvector image: db/schema.ts has a vector("embedding") column, so a full push needs it.
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: aura_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NETLIFY_DATABASE_URL: postgres://postgres:postgres@localhost:5432/aura_test
+      APP_DATABASE_URL: postgres://app_user:app_test_pw@localhost:5432/aura_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      # schema.ts has a pgvector column; create the extension before pushing.
+      - name: Enable pgvector
+        run: psql "$NETLIFY_DATABASE_URL" -c 'CREATE EXTENSION IF NOT EXISTS vector;'
+      # Build the base schema from db/schema.ts (creates organisations/users/ai_assistants …).
+      - name: Provision base schema (drizzle push)
+        run: npx drizzle-kit push --force
+      # Create the RLS-subject app_user role and apply db/rls/R1-crown-jewels.sql.
+      - name: Provision app_user + RLS policies
+        run: node scripts/ci-provision-rls.mjs
+      # Prove Row-Level Security isolates tenants at the DB layer.
+      - name: RLS enforcement test
+        run: npx tsx tests/rls-enforcement.test.ts

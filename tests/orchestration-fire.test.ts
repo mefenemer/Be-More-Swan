@@ -27,7 +27,7 @@ function makeDb(canned: {
     const calls = { jobs: [] as any[], runs: [] as any[], notifications: [] as any[], updates: [] as any[] };
     const thenable = (value: any) => {
         const obj: any = {
-            from: () => obj, where: () => obj, orderBy: () => obj, limit: () => obj, groupBy: () => obj,
+            from: () => obj, where: () => obj, leftJoin: () => obj, orderBy: () => obj, limit: () => obj, groupBy: () => obj,
             then: (res: any, rej: any) => Promise.resolve(value).then(res, rej),
         };
         return obj;
@@ -39,6 +39,7 @@ function makeDb(canned: {
                 if (table === orchestrationLinks) return thenable(canned.links);
                 if (table === aiAssistants) return thenable(canned.names);
                 if (table === aiBlueprints) return thenable(canned.blueprint);
+                if (table === orchestrationRuns) return thenable([{ n: 0 }]); // daily hand-off cap count()
                 return thenable([]);
             },
         }),
