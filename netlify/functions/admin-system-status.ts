@@ -9,6 +9,7 @@
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { eq, sql } from 'drizzle-orm';
+import { S3Client, HeadBucketCommand } from '@aws-sdk/client-s3';
 import { getDb } from '../../db/client';
 import { users } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -60,6 +61,15 @@ async function pingOk(url: string, headers: Record<string, string>): Promise<Hea
         clearTimeout(t);
         return res.ok ? 'ok' : 'error';
     } catch { return 'error'; }
+}
+
+// Bound a promise that doesn't accept an AbortSignal (e.g. the S3 SDK) so a hung provider
+// can never stall the endpoint.
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+    return Promise.race([
+        p,
+        new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms)),
+    ]);
 }
 
 // One OAuth connector entry (client id + secret pair). Absence just means that integration
@@ -146,11 +156,43 @@ const SERVICES: ServiceDef[] = [
         purpose: 'Object storage for media & uploads (S3-compatible). Without it, uploads return 501 and media falls back to mock.',
         consoleUrl: 'https://dash.cloudflare.com',
         envVars: ['R2_ENDPOINT', 'R2_ACCESS_KEY_ID', 'R2_SECRET_ACCESS_KEY', 'R2_BUCKET_NAME'],
+        // Non-destructive HeadBucket: validates the credentials AND that the bucket exists.
+        check: async () => {
+            if (!(process.env.R2_ENDPOINT && process.env.R2_ACCESS_KEY_ID && process.env.R2_SECRET_ACCESS_KEY && process.env.R2_BUCKET_NAME)) return 'n/a';
+            try {
+                const client = new S3Client({
+                    region: 'auto',
+                    endpoint: process.env.R2_ENDPOINT,
+                    maxAttempts: 1,
+                    credentials: {
+                        accessKeyId: process.env.R2_ACCESS_KEY_ID!,
+                        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+                    },
+                });
+                await withTimeout(client.send(new HeadBucketCommand({ Bucket: process.env.R2_BUCKET_NAME! })), 3500);
+                return 'ok';
+            } catch { return 'error'; }
+        },
     },
     {
         key: 'fal', name: 'Fal.ai', category: 'AI', tier: 'core',
         purpose: 'AI image & video generation. Without FAL_KEY the whole media-gen flow silently returns placeholder assets.',
         consoleUrl: 'https://fal.ai/dashboard', envVars: ['FAL_KEY'],
+        // Non-destructive key check: poll the status of a nonexistent request. fal authenticates
+        // first (bad/missing key → 401/403), so a valid key returns 404 — no model is ever run.
+        check: async () => {
+            if (!process.env.FAL_KEY) return 'n/a';
+            try {
+                const ctrl = new AbortController();
+                const t = setTimeout(() => ctrl.abort(), 3500);
+                const res = await fetch(
+                    'https://queue.fal.run/fal-ai/flux/requests/00000000-0000-0000-0000-000000000000/status',
+                    { headers: { Authorization: `Key ${process.env.FAL_KEY}` }, signal: ctrl.signal },
+                );
+                clearTimeout(t);
+                return (res.status === 401 || res.status === 403) ? 'error' : 'ok';
+            } catch { return 'error'; }
+        },
     },
     {
         key: 'embeddings', name: 'Embeddings & moderation', category: 'AI', tier: 'core',
