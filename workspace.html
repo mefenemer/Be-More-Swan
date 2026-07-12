@@ -7177,6 +7177,15 @@ async function gpSubmitReject() {
           window.routeToAssistantDetail(data.primaryAssistantId);
           return;
         }
+        // "Business information" (assets.html) renders a centred form whose fields can sit
+        // directly under the fixed-width drawer strip, so — unlike the other steps, which
+        // stay open as a companion per US1 AC2 — this one must collapse on click or the
+        // fields it just routed to are left unreachable behind it.
+        if (key === 'business_info') {
+          collapse();
+          if (window.loadView) window.loadView(view);
+          return;
+        }
         // US1 AC2 — route the main area, but keep the drawer open as a companion.
         if (window.loadView) window.loadView(view);
       });
