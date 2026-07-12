@@ -16,7 +16,7 @@ config({ path: path.resolve(process.cwd(), '.env') });
 
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
-import { masterAssistants, masterPlans, integrationProviders, integrationScenarios, featureRequests } from './schema';
+import { masterAssistants, integrationProviders, integrationScenarios, featureRequests } from './schema';
 import { sql, eq } from 'drizzle-orm';
 
 const connectionString = process.env.NETLIFY_DATABASE_URL || process.env.DATABASE_URL;
@@ -525,20 +525,9 @@ async function seedCatalog() {
         console.log(`  ✓ ${role.name}`);
     }
 
-    // P2-5: Seed the trial master plan so registration can look it up at runtime
-    await db.insert(masterPlans).values({
-        tierKey: 'trial',
-        name: 'Free Trial',
-        monthlyPriceGbp: '0.00',
-        assistantLimit: 1,
-        monthlyTaskLimit: 50,
-        monthlyTokenLimit: null,
-        appConnectionLimit: 2,
-        seatLimit: 1,
-        isActive: true,
-        features: { monthly_ai_credits: 0 },   // no AI media generation on trial (Epic 2) — upgrade to use
-    }).onConflictDoNothing();
-    console.log('  ✓ masterPlan: trial');
+    // Free trial removed (product decision): no 'trial' master plan is seeded. New users must
+    // pick and pay for one of the paid tiers (buster / saver / employee). The paywall is a hard
+    // block — see hire-assistant.ts / chat-orchestrator.ts / check-capacity.ts (noPlan).
 
     await seedIntegrationLibrary();
 

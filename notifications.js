@@ -85,8 +85,6 @@ window.NotifKit = (function () {
         tier_mismatch:                 { label: 'Go to billing',       run: routeToBilling },
         subscription_paused:           { label: 'Go to billing',       run: routeToBilling },
         assistants_paused_downgrade:   { label: 'Go to billing',       run: routeToBilling },
-        trial_expiring_soon:           { label: 'Upgrade plan',        run: routeToBilling },
-        trial_expired:                 { label: 'Upgrade plan',        run: routeToBilling },
         task_limit_warning:            { label: 'Upgrade plan',        run: routeToBilling },
         task_limit_reached:            { label: 'Upgrade plan',        run: routeToBilling },
         run_cost_warning:              { label: 'Review usage',        run: routeToBilling },
@@ -148,7 +146,7 @@ window.NotifKit = (function () {
     // Urgent action types get a red accent (vs the default emerald) so the most
     // pressing items read as pressing.
     const URGENT_TYPES = new Set([
-        'billing_payment_failed', 'trial_expired', 'run_budget_suspended',
+        'billing_payment_failed', 'run_budget_suspended',
         'post_publish_failed', 'post_missed', 'post_generation_failed',
         'security', 'agent_anomaly', 'social_oauth_revoked', 'instagram_token_refresh_failed',
         'task_limit_reached', 'subscription_paused', 'assistants_paused_downgrade',
@@ -160,7 +158,7 @@ window.NotifKit = (function () {
         'billing_payment_failed', 'missing_stripe_sub', 'stripe_cancelled_but_db_active', 'tier_mismatch',
         'subscription_paused', 'assistants_paused_downgrade', 'social_oauth_revoked',
         'instagram_token_refresh_failed', 'integration_alert', 'post_publish_failed', 'post_missed',
-        'post_generation_failed', 'trial_expiring_soon', 'trial_expired', 'task_limit_reached',
+        'post_generation_failed', 'task_limit_reached',
         'task_limit_warning', 'run_budget_suspended', 'run_cost_warning', 'security', 'agent_anomaly',
         'risk_assessment_submitted',
     ]);
@@ -173,7 +171,7 @@ window.NotifKit = (function () {
     const COMPLETION_RESOLVED_FALLBACK = new Set([
         'onboarding_prompt', 'onboarding_incomplete',
         'billing_payment_failed', 'missing_stripe_sub', 'stripe_cancelled_but_db_active', 'subscription_paused',
-        'trial_expiring_soon', 'trial_expired', 'tier_mismatch', 'assistants_paused_downgrade',
+        'tier_mismatch', 'assistants_paused_downgrade',
         'task_limit_reached', 'task_limit_warning',
         'social_oauth_revoked', 'instagram_token_refresh_failed', 'integration_alert',
         // Issue #191 follow-up: mirrors src/utils/notification-actions.ts's COMPLETION_RESOLVED_TYPES —

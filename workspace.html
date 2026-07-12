@@ -646,7 +646,8 @@ window.showComplianceModals = function showComplianceModals(force) {
 <!-- US-ONB-2.1.1: Plan selection gate — non-dismissible, shows live plan cards from DB (AC5–AC18) -->
 <div id="plan-gate-modal" class="hidden fixed inset-0 z-[10000] backdrop-blur-sm flex items-center justify-center p-4" style="z-index:10000;background-color:rgba(20,18,15,0.45);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);padding-top:max(1rem,env(safe-area-inset-top));padding-bottom:max(1rem,env(safe-area-inset-bottom))">
   <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-y-auto" style="max-height:calc(100vh - 2rem)">
-    <!-- Dismissible: the wizard now drives onboarding, so the plan picker is an on-demand step rather than a hard block. -->
+    <!-- Close affordance is hidden by showGate({hard:true}) for no-plan users (free trial removed):
+         the picker is only dismissible when opened on-demand from the wizard (soft mode). -->
     <button type="button" id="plan-gate-close" aria-label="Close plan picker"
       class="absolute top-3 right-3 z-10 text-gray-400 hover:text-gray-700 transition p-1 cursor-pointer">
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -986,27 +987,6 @@ window.showComplianceModals = function showComplianceModals(force) {
     </div>
   </div>
 
-  <!-- US-GAP-8.1.1 SC6c: Trial Expired Gate — full-page non-dismissable, shown after cron marks plan 'expired' -->
-  <div id="trial-expired-gate" class="hidden fixed inset-0 z-[9999] backdrop-blur-sm flex items-center justify-center p-4" style="z-index:9999;background-color:rgba(20,18,15,0.45);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)">
-    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 text-center">
-      <div class="flex items-center justify-center w-16 h-16 bg-amber-100 rounded-full mx-auto mb-4">
-        <svg class="w-8 h-8 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-            d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-        </svg>
-      </div>
-      <h2 class="text-2xl font-bold text-gray-900 mb-2">Your Free Trial Has Ended</h2>
-      <p class="text-gray-600 mb-6">Your 14-day free trial has expired. Choose a plan to continue using your assistant — your configuration and data are safe.</p>
-      <a href="/pricing.html"
-         class="block w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-xl mb-3 transition-colors">
-        Choose a Plan →
-      </a>
-      <a href="mailto:hello@bemoreswan.com?subject=Trial%20Enquiry" class="text-sm text-gray-500 hover:text-gray-700 underline">
-        Questions? Contact us
-      </a>
-    </div>
-  </div>
-
   <!-- Issue #127: Inactivity "stay signed in?" countdown — period + countdown length are admin-configurable -->
   <div id="session-timeout-modal" class="hidden fixed inset-0 z-[9999] items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="session-timeout-title">
     <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 text-center">
@@ -1026,12 +1006,6 @@ window.showComplianceModals = function showComplianceModals(force) {
         Log Out Now
       </button>
     </div>
-  </div>
-
-  <!-- US-GAP-8.1.1 SC3: Trial Countdown Badge — persistent when plan is trial -->
-  <div id="trial-badge" class="hidden w-full bg-blue-600 text-white text-sm text-center py-2 px-4 flex items-center justify-center gap-3">
-    <span id="trial-badge-text">Free Trial</span>
-    <a href="/pricing.html" class="bg-white text-blue-700 font-semibold text-xs px-3 py-1 rounded-full hover:bg-blue-50 transition">Upgrade Now →</a>
   </div>
 
   <!-- US-GAP-9.2.1: Task Volume Warning Banner (SC1–SC5) -->
@@ -1169,11 +1143,6 @@ function formatCurrency(amount, currency) {
           cls: 'bg-red-50 border-red-300 text-red-900',
           icon: '🔴',
           msg: 'Your subscription has ended and your assistants are paused. <a href="/pricing.html" class="font-bold underline">Re-subscribe</a> to restore full access.',
-        },
-        no_plan: {
-          cls: 'bg-blue-50 border-blue-200 text-blue-900',
-          icon: 'ℹ️',
-          msg: 'You don\'t have an active plan. <a href="/pricing.html" class="font-bold underline">Choose a plan</a> to activate your assistants.',
         },
       };
       const alert = alertParam ? ALERTS[alertParam] : null;
@@ -1811,33 +1780,10 @@ function formatCurrency(amount, currency) {
 
     // Pre-fetch capacity once on workspace boot (non-blocking)
     // After loading, render the task-volume banner if applicable (US-GAP-9.2.1).
-    // US-GAP-8.1.1 SC6c: Show full-page non-dismissable gate when trial has been marked 'expired' by cron
-    function renderTrialExpiredGate(cap) {
-      if (!cap || !cap.trialExpired) return;
-      const gate = document.getElementById('trial-expired-gate');
-      if (gate) { gate.classList.remove('hidden'); gate.classList.add('flex'); }
-    }
-
-    // US-GAP-8.1.1 SC3: Trial countdown badge
-    function renderTrialBadge(cap) {
-      if (!cap || !cap.isTrial) return;
-      const badge = document.getElementById('trial-badge');
-      const text  = document.getElementById('trial-badge-text');
-      if (!badge || !text) return;
-      const days = cap.trialDaysRemaining;
-      if (days === 0) {
-        text.textContent = '⚠️ Your free trial has expired — choose a plan to continue';
-      } else {
-        text.textContent = `⏳ Trial: ${days} day${days === 1 ? '' : 's'} remaining`;
-      }
-      badge.classList.remove('hidden');
-      badge.classList.add('flex');
-    }
-
+    // (Free trial removed — no trial countdown badge or trial-expired gate. A no-plan user
+    // is hard-gated by initPlanGate below via cap.noPlan.)
     window.checkCapacity().then(cap => {
       renderPaymentRequiredGate(cap);
-      renderTrialExpiredGate(cap);
-      renderTrialBadge(cap);
       renderTaskVolumeBanner(cap);
     });
 
@@ -2376,15 +2322,17 @@ function formatCurrency(amount, currency) {
         }
       }
 
-      // The setup wizard now owns onboarding; the plan picker is an on-demand, dismissible
-      // step (wizard step 1) rather than a hard block. closeGate hides it and lifts the blur.
+      // The free trial was removed, so a no-plan user is HARD-gated: showGate({ hard:true })
+      // hides the close affordance and cannot be dismissed until a paid plan is active.
+      // The wizard's on-demand "Choose your plan" step opens it soft (dismissible).
+      const closeBtn = document.getElementById('plan-gate-close');
       function closeGate() {
         gateModal.classList.add('hidden');
         applyGateBlur(false);
       }
-      document.getElementById('plan-gate-close')?.addEventListener('click', closeGate);
-      // Exposed so the wizard's "Choose your plan" step can open the picker on demand.
-      window.openPlanSelection = (referralCode) => showGate(referralCode || null);
+      closeBtn?.addEventListener('click', closeGate);
+      // Exposed so the wizard's "Choose your plan" step can open the picker on demand (soft).
+      window.openPlanSelection = (referralCode) => showGate(referralCode || null, { hard: false });
 
       async function loadPlanCards(referralCode) {
         if (!cardsEl) return;
@@ -2456,7 +2404,10 @@ function formatCurrency(amount, currency) {
         }
       }
 
-      async function showGate(referralCode) {
+      async function showGate(referralCode, opts = {}) {
+        const hard = opts.hard !== false; // default hard — soft only when explicitly requested
+        // Hard gate: remove the close affordance so it can't be dismissed without paying.
+        if (closeBtn) closeBtn.classList.toggle('hidden', hard);
         gateModal.classList.remove('hidden');
         applyGateBlur(true);
         if (referralCode && refBanner) {
@@ -2476,29 +2427,33 @@ function formatCurrency(amount, currency) {
       }
 
       // US-ONB-2.1.2 AC11: strip ?action=select-plan from URL after handling.
-      // The setup wizard now drives onboarding (step 1 = "Choose your plan"), so a brand-new
-      // user lands on the wizard rather than the hard plan gate. If a referral code is present
-      // we still surface the picker immediately so the discount banner isn't missed.
+      // verify.ts sends a brand-new (no-plan) user here with ?action=select-plan so the hard
+      // plan gate opens immediately. Any ?ref is carried into the picker for its discount banner.
       const actionParam = qs.get('action');
       const refParam    = qs.get('ref');
-      if (actionParam === 'select-plan') {
+      const selectPlanRequested = actionParam === 'select-plan';
+      if (selectPlanRequested) {
         const url = new URL(window.location.href);
         url.searchParams.delete('action');
         url.searchParams.delete('ref');
         history.replaceState(null, '', url.toString());
-        if (refParam) showGate(refParam);
       }
 
       // Returning from Stripe checkout — the webhook may not have marked the plan active yet,
       // so we must NOT show the plan-selection gate here; the polling block below handles it.
       const planActivated = qs.get('plan_activated') === 'true';
 
-      // No-plan users are no longer hard-gated: the setup wizard auto-opens and its step 1
-      // ("Choose your plan") opens this picker on demand via window.openPlanSelection.
-      // Still warm the capacity cache for the rest of the workspace.
-      await window.checkCapacity();
+      // Free trial removed: a user with no active/past-due plan is HARD-gated. We show the
+      // non-dismissible plan picker for a brand-new user (no assistants yet) or whenever
+      // verify.ts routed here with ?action=select-plan. Existing users who churned keep their
+      // assistants visible (server-side gates still block hiring/tasks) rather than being
+      // locked out of viewing their data, so we don't hard-gate when assistants exist.
+      const cap = await window.checkCapacity();
+      if (!planActivated && cap?.noPlan && (selectPlanRequested || (cap?.assistantCount ?? 0) === 0)) {
+        showGate(refParam || null, { hard: true });
+      }
 
-      // AC6: gate is non-dismissible — no cancel handler
+      // Hard gate is non-dismissible — no cancel handler (closeBtn is hidden while hard)
 
       // AC12: ?plan_activated=true — poll for confirmed subscription
       if (planActivated) {
@@ -5533,9 +5488,7 @@ function gpChooseMode(mode) {
     if (mode === 'ai') {
         const cap = _gpCap;
         if (cap && cap.taskLimit != null && cap.taskCount >= cap.taskLimit) {
-            const resetDate = cap.trialExpiresAt
-                ? new Date(cap.trialExpiresAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })
-                : 'the start of your next billing cycle';
+            const resetDate = 'the start of your next billing cycle';
             window.openUpgradeModal(
                 'Monthly generation limit reached',
                 `You've used all ${cap.taskLimit} generations this month.`,

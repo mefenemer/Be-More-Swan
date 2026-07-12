@@ -2050,7 +2050,7 @@ export const leadAnalysisRuns = pgTable("lead_analysis_runs", {
   runAt: timestamp("run_at").defaultNow().notNull(),
   leadsCreated: integer("leads_created").notNull().default(0),
   leadsUpdated: integer("leads_updated").notNull().default(0),
-  patternCounts: jsonb("pattern_counts"),  // { trial_expiry, never_onboarded, cancellation_approaching, upgrade_candidates }
+  patternCounts: jsonb("pattern_counts"),  // { never_onboarded, cancellation_approaching, upgrade_candidates }
   status: text("status").notNull().default("success"), // 'success' | 'failed'
   errorMessage: text("error_message"),
 });

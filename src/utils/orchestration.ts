@@ -40,7 +40,6 @@ export type OrchestrationEvent = 'drafts_a_post' | 'publishes_a_post' | 'complet
 // separate queued-jobs ceiling). Tier-scaled so higher plans get more head-room; unknown /
 // no active plan falls back to DEFAULT.
 const HANDOFF_CAP_BY_TIER: Record<string, number> = {
-    trial:    10,
     buster:   25,
     saver:    50,
     employee: 100,

@@ -114,10 +114,8 @@ export default withLambda(async (event) => {
             throw planErr;
         }
 
-        // Trial-to-paid: expire any active trial plan so check-capacity returns the paid plan
-        await db.update(plans)
-            .set(withUpdatedAt({ status: 'expired' as const }))
-            .where(and(eq(plans.userId, userIdInt), eq(plans.planType, 'trial'), eq(plans.status, 'active')));
+        // (Free trial removed: a first-time subscriber has no prior plan, so the fresh
+        // active plan inserted above is the only one — no trial row to expire.)
 
         // Record the first payment + invoice (subscription_create invoice.paid is skipped below,
         // so this is the only place the initial charge is persisted for the plan-gate flow).
@@ -286,11 +284,8 @@ export default withLambda(async (event) => {
             throw planErr;
         }
 
-        // US-GAP-8.1.1 SC7: Trial-to-paid conversion — expire any active trial plan for this user
-        // so check-capacity returns the new paid plan rather than the trial
-        await db.update(plans)
-            .set(withUpdatedAt({ status: 'expired' as const }))
-            .where(and(eq(plans.userId, userIdInt), eq(plans.planType, 'trial'), eq(plans.status, 'active')));
+        // (Free trial removed: no active trial plan can exist to convert — the new paid plan
+        // inserted above is this org's only active plan.)
 
         // Create payment record — include card details
         await db.insert(payments).values({

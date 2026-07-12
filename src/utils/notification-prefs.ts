@@ -63,13 +63,13 @@ export const PREF_CATEGORIES: PrefCategory[] = [
     {
         key: 'payment_confirmation', // preserves the existing locked email key
         label: 'Billing & Subscription',
-        description: 'Payment receipts, failed payments, plan changes, and trial alerts.',
+        description: 'Payment receipts, failed payments, and plan changes.',
         scope: 'account',
         inApp: LOCKED_ON, email: LOCKED_ON,
         types: [
             'billing_payment_failed', 'missing_stripe_sub', 'stripe_cancelled_but_db_active',
-            'subscription_paused', 'assistants_paused_downgrade', 'trial_expired', 'tier_mismatch',
-            'run_budget_suspended', 'task_limit_reached', 'billing_cancelled', 'trial_expiring_soon',
+            'subscription_paused', 'assistants_paused_downgrade', 'tier_mismatch',
+            'run_budget_suspended', 'task_limit_reached', 'billing_cancelled',
             'task_limit_warning', 'run_cost_warning', 'billing_renewal_due', 'billing_alert',
             'billing_renewed', 'billing_payment_received', 'payment_confirmation', 'plan_upgraded',
             'downgrade_scheduled', 'downgrade_cancelled', 'billing',
