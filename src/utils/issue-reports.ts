@@ -220,3 +220,22 @@ export async function triggerStagingDeployIfDrained(db: Db): Promise<void> {
         console.error('[issue-reports] staging deploy hook unreachable:', e instanceof Error ? e.message : e);
     }
 }
+
+/**
+ * Fire the Netlify PRODUCTION build hook after a successful staging → main promotion.
+ * The push to `main` already auto-deploys prod, so this is a belt-and-suspenders rebuild
+ * that only runs when NETLIFY_PROD_BUILD_HOOK is set (unset → no-op). Unlike the staging
+ * hook there is no drain check: a promotion is a single deliberate action, not a batch.
+ * Best-effort: a hook failure is logged, never thrown.
+ */
+export async function triggerProdDeploy(): Promise<void> {
+    const hook = process.env.NETLIFY_PROD_BUILD_HOOK;
+    if (!hook) return;
+
+    try {
+        const res = await fetch(hook, { method: 'POST' });
+        if (!res.ok) console.error(`[issue-reports] prod deploy hook returned ${res.status}`);
+    } catch (e) {
+        console.error('[issue-reports] prod deploy hook unreachable:', e instanceof Error ? e.message : e);
+    }
+}

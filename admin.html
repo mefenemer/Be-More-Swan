@@ -3451,8 +3451,20 @@ function _irHandoffBadge(i) {
   if (i.devMergeStatus === 'conflict_queued' || i.devMergeStatus === 'conflict_resolving') {
     return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">🔧 Resolving conflict…</span>`;
   }
+  // Once merged to staging, the prod-promotion state (if any) is the more-actionable signal.
   if (i.devMergeStatus === 'merged') {
-    return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">🔀 Merged</span>`;
+    const staging = `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">🔀 Merged to staging</span>`;
+    const ps = i.devProdStatus;
+    if (ps === 'queued' || ps === 'promoting') {
+      return `${staging}<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">🚀 ${ps === 'queued' ? 'Prod queued…' : 'Promoting…'}</span>`;
+    }
+    if (ps === 'promoted') {
+      return `${staging}<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">🚀 Merged to prod</span>`;
+    }
+    if (ps === 'failed') {
+      return `${staging}<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">🚀 Prod failed</span>`;
+    }
+    return staging;
   }
   const b = IR_HANDOFF_BADGE[i.devHandoffStatus];
   if (!b) return '';
@@ -3468,7 +3480,7 @@ function _irFmt(d) { return d ? new Date(d).toLocaleString() : ''; }
 // issue (a fix or a merge), devRunnerId/devRunnerHeartbeat tell us who and since when.
 const IR_RUNNER_STALL_MS = 15 * 60 * 1000; // a fix normally finishes in minutes
 function _irRunnerActive(i) {
-  return !!i.devRunnerId && (i.devHandoffStatus === 'in_progress' || i.devMergeStatus === 'merging' || i.devMergeStatus === 'conflict_resolving');
+  return !!i.devRunnerId && (i.devHandoffStatus === 'in_progress' || i.devMergeStatus === 'merging' || i.devMergeStatus === 'conflict_resolving' || i.devProdStatus === 'promoting');
 }
 function _irRunnerElapsed(i) {
   if (!i.devRunnerHeartbeat) return '';
@@ -3574,10 +3586,13 @@ async function openIssuePanel(id) {
       <!-- Merge the fix PR to staging -->
       ${_irMergeCard(i)}
 
+      <!-- Promote the staging-verified fix to production -->
+      ${_irProdCard(i)}
+
       <!-- Status control -->
       <div class="border border-gray-200 rounded-xl p-4 space-y-3">
         <div class="flex items-center gap-3 flex-wrap">
-          <span class="text-xs font-bold uppercase text-gray-400">Current</span>${_irBadge(i.status)}${i.devMergeStatus === 'merged' ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">🔀 Merged to staging</span>' : ''}
+          <span class="text-xs font-bold uppercase text-gray-400">Current</span>${_irBadge(i.status)}${i.devMergeStatus === 'merged' ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">🔀 Merged to staging</span>' : ''}${i.devProdStatus === 'promoted' ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">🚀 Merged to prod</span>' : ''}
         </div>
         <label class="block text-xs font-bold uppercase text-gray-400">Update status</label>
         <select id="ir-new-status" onchange="irOnStatusChange()" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2">
@@ -3897,12 +3912,72 @@ function _irMergeCard(i) {
     </div>`;
 }
 
+// ── Promote the staging-verified fix to production (super-admin only) ──────────
+// Shown once the fix is merged to staging (dev_merge_status='merged'). Separate from
+// closing the ticket. Queues a promotion the local watcher performs by pushing staging →
+// main (prod deploys from main); the ticket shows "Merged to prod" once it lands.
+function _irProdCard(i) {
+  if (i.devMergeStatus !== 'merged') return '';
+  const ps = i.devProdStatus || null;
+  const resultBlock = i.devProdResult
+    ? `<div class="rounded-lg p-3 text-xs font-mono whitespace-pre-wrap max-h-48 overflow-auto bg-white border border-gray-200 text-gray-700">${_esc(i.devProdResult)}</div>` : '';
+  const isSuper = (typeof _adminRole !== 'undefined') && _adminRole === 'super_admin';
+  const canPromote = !ps || ps === 'failed';
+  const promoteBtn = isSuper
+    ? `<button onclick="requestProdPromote(${i.id})" class="w-full px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🚀</span> ${ps === 'failed' ? 'Retry push to prod' : 'Push to prod'}</button>`
+    : `<p class="text-xs text-amber-700 font-semibold">Only a super-admin can promote to production.</p>`;
+
+  let chip, inner;
+  if (canPromote) {
+    const failed = ps === 'failed';
+    chip = failed ? ['bg-red-100 text-red-700', 'Last promotion failed'] : ['bg-amber-100 text-amber-800', 'Ready for prod'];
+    inner = `<p class="text-xs text-gray-500">${failed
+        ? 'The promotion failed — see the runner output below. Resolve the problem and push to prod again.'
+        : 'This fix is live on <b>staging</b>. Promote it to <b>production</b> — the developer runner will push staging → main and prod will redeploy.'}</p>
+      ${failed ? resultBlock : ''}${promoteBtn}`;
+  } else if (ps === 'queued') {
+    chip = ['bg-indigo-100 text-indigo-700', 'Queued'];
+    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Promotion requested — the developer runner will push to production within ~15s…</div>`;
+  } else if (ps === 'promoting') {
+    chip = ['bg-indigo-100 text-indigo-700', 'Promoting…'];
+    const who = i.devRunnerId ? `<div class="text-xs text-indigo-600">🖥 Runner <b>${_esc(i.devRunnerId)}</b> is promoting${_irRunnerElapsed(i) ? ` · ${_irRunnerElapsed(i)}` : ''}</div>` : '';
+    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Pushing staging → production…</div>${who}`;
+  } else if (ps === 'promoted') {
+    chip = ['bg-emerald-100 text-emerald-700', 'Live on prod ✓'];
+    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-emerald-700">🚀 Promoted to production${i.devProdAt ? ` · ${_irFmt(i.devProdAt)}` : ''}.</div>${resultBlock}`;
+  } else { return ''; }
+
+  return `<div class="border border-red-200 bg-red-50 rounded-xl p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold uppercase text-red-600">Push to Production</span>
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${chip[0]}">${chip[1]}</span>
+      </div>
+      ${inner}
+    </div>`;
+}
+
 async function requestMerge(id) {
   if (!confirm('Merge this fix to the staging branch now? The developer runner will merge the pull request and the issue will move to “Fixed & Ready to Test”.')) return;
   const btn = event?.target?.closest('button');
   if (btn) { btn.disabled = true; btn.textContent = 'Requesting…'; }
   try {
     await api(`${IR_API}?id=${id}&action=request-merge`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    await openIssuePanel(id);
+    if (!document.getElementById('view-issue-reports').classList.contains('hidden')) loadIssueReports();
+  } catch (e) {
+    if (btn) { btn.disabled = false; }
+    alert(e.message);
+  }
+}
+
+async function requestProdPromote(id) {
+  if (!confirm('Promote this fix to PRODUCTION now? The developer runner will push staging → main and prod will redeploy with everything currently on staging. This affects live users.')) return;
+  const btn = event?.target?.closest('button');
+  if (btn) { btn.disabled = true; btn.textContent = 'Requesting…'; }
+  try {
+    await api(`${IR_API}?id=${id}&action=request-prod-promote`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     });
     await openIssuePanel(id);

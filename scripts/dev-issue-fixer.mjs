@@ -23,6 +23,11 @@
 // merges the base branch into the fix branch, resolves any conflicts with Claude Code, pushes,
 // retries `gh pr merge`, and reports back (?action=conflict-fix-result).
 //
+// It ALSO drains the prod-promotion queue: when a super-admin presses "Push to prod" on a
+// staging-merged fix, this watcher claims that request (?action=claim-promote), pushes
+// $BASE_BRANCH → $PROD_BRANCH (staging → main; prod deploys from main), and reports back
+// (?action=promote-result).
+//
 // Claude account: the runner uses WHATEVER account the Claude Code CLI is logged into on this
 // machine — no switching, no rotation. If that account is rate-limited or logged out, the fix
 // just fails like any other failure and the admin can re-queue the issue later.
@@ -36,6 +41,7 @@
 // Optional env:
 //   AURA_REPO          path to the repo (default: the repo this script lives in)
 //   BASE_BRANCH        branch to fork fixes from (default: staging)
+//   PROD_BRANCH        branch prod deploys from; "Push to prod" pushes BASE_BRANCH → it (default: main)
 //   POLL_INTERVAL_MS   idle poll cadence (default: 15000)
 //   CLAUDE_BIN         Claude Code CLI binary (default: claude)
 //   ONCE=1             process at most one issue then exit (handy for testing)
@@ -52,6 +58,8 @@ const BASE_URL = (process.env.AURA_BASE_URL || '').replace(/\/+$/, '');
 const TOKEN = process.env.DEV_HANDOFF_TOKEN || '';
 const REPO = process.env.AURA_REPO || join(dirname(fileURLToPath(import.meta.url)), '..');
 const BASE_BRANCH = process.env.BASE_BRANCH || 'staging';
+// Branch production deploys from. "Push to prod" promotes BASE_BRANCH → PROD_BRANCH.
+const PROD_BRANCH = process.env.PROD_BRANCH || 'main';
 const POLL_MS = Number(process.env.POLL_INTERVAL_MS || 15000);
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 const ONCE = process.env.ONCE === '1';
@@ -214,6 +222,25 @@ async function reportConflictFix(id, payload) {
     body: JSON.stringify(payload),
   }, { label: 'conflict-fix-result' });
   if (!res.ok) throw new Error(`conflict-fix-result failed: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
+async function claimPromote() {
+  const res = await apiFetch(`${ENDPOINT}?action=claim-promote`, {
+    headers: { 'x-handoff-token': TOKEN, 'x-runner-id': RUNNER_ID },
+  }, { label: 'claim-promote' });
+  if (!res.ok) throw new Error(`claim-promote failed: ${res.status} ${await res.text()}`);
+  const data = await res.json();
+  return data.issue || null;
+}
+
+async function reportPromote(id, payload) {
+  const res = await apiFetch(`${ENDPOINT}?id=${id}&action=promote-result`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'x-handoff-token': TOKEN },
+    body: JSON.stringify(payload),
+  }, { label: 'promote-result' });
+  if (!res.ok) throw new Error(`promote-result failed: ${res.status} ${await res.text()}`);
   return res.json();
 }
 
@@ -407,6 +434,31 @@ async function processMerge(job) {
   }
 }
 
+// Promote a staging-verified fix to production by pushing the base branch (staging) onto
+// the prod branch (main) — prod deploys from main. No worktree/checkout needed; the push
+// runs against the remote refs. A non-fast-forward (or any push failure) is reported back
+// as a failure with the git output so a human can resolve it, same shape as a failed merge.
+async function processPromote(job) {
+  const id = job.id;
+  try {
+    log(`#${id} promoting origin/${BASE_BRANCH} → ${PROD_BRANCH}…`);
+    const fetch = git(['fetch', 'origin', '--quiet']);
+    if (!fetch.ok) throw new Error(`git fetch failed: ${fetch.stderr}`);
+
+    const p = git(['push', 'origin', `origin/${BASE_BRANCH}:${PROD_BRANCH}`]);
+    const outcome = (p.stdout || p.stderr || '').trim();
+    if (!p.ok) throw new Error(outcome || `git push origin/${BASE_BRANCH}:${PROD_BRANCH} failed`);
+
+    log(`#${id} ✓ promoted ${BASE_BRANCH} → ${PROD_BRANCH}`);
+    await reportPromote(id, { ok: true, outcome: outcome || `Pushed ${BASE_BRANCH} → ${PROD_BRANCH}.` });
+    log(`#${id} ✓ promotion reported`);
+  } catch (e) {
+    log(`#${id} ✖ promotion failed: ${e.message}`);
+    await reportPromote(id, { ok: false, outcome: e.message })
+      .catch((re) => log(`#${id} ✖ could not report promotion failure: ${re.message}`));
+  }
+}
+
 // Investigate a failed merge: merge the base branch into the fix branch in an isolated
 // worktree, and if that leaves conflict markers, ask Claude Code to resolve them in place
 // (edits only — no git commands), then commit, push, and retry `gh pr merge`. Reports back
@@ -521,6 +573,16 @@ async function main() {
     catch (e) { log(`conflict-fix poll error: ${e.message}`); }
     if (conflictFix) {
       await processConflictFix(conflictFix);
+      if (ONCE) break;
+      continue;
+    }
+
+    // 4) Otherwise, a staging-verified fix approved for promotion to production.
+    let promote = null;
+    try { promote = await claimPromote(); }
+    catch (e) { log(`promote poll error: ${e.message}`); }
+    if (promote) {
+      await processPromote(promote);
       if (ONCE) break;
       continue;
     }

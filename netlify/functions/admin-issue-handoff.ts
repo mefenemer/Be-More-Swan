@@ -29,7 +29,7 @@ import { Handler } from '@netlify/functions';
 import { and, eq, asc, lt } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { issueReports, issueReportMessages, users } from '../../db/schema';
-import { ISSUE_STATUS_LABEL, maybeAdvanceToReadyToTest, triggerStagingDeployIfDrained } from '../../src/utils/issue-reports';
+import { ISSUE_STATUS_LABEL, maybeAdvanceToReadyToTest, triggerStagingDeployIfDrained, triggerProdDeploy } from '../../src/utils/issue-reports';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
@@ -220,6 +220,81 @@ export default withLambda(async (event) => {
         // it gets deployed even though this particular one failed.
         await triggerStagingDeployIfDrained(db);
         return json(200, { ok: true, devMergeStatus: 'failed' });
+    }
+
+    // ── Claim the next queued PROD PROMOTION ─────────────────────────────────────
+    // A super-admin pressed "Push to prod" (dev_prod_status='queued'); the runner claims
+    // it (queued → promoting), pushes staging → main, then POSTs ?action=promote-result.
+    if (event.httpMethod === 'GET' && action === 'claim-promote') {
+        const [next] = await db
+            .select({ id: issueReports.id })
+            .from(issueReports)
+            .where(eq(issueReports.devProdStatus, 'queued'))
+            .orderBy(asc(issueReports.devHandoffAt))
+            .limit(1);
+        if (!next) return json(200, { issue: null });
+
+        const claimed = await db.update(issueReports)
+            .set({ devProdStatus: 'promoting', devRunnerId: runnerId(event), devRunnerHeartbeat: new Date(), updatedAt: new Date() })
+            .where(and(eq(issueReports.id, next.id), eq(issueReports.devProdStatus, 'queued')))
+            .returning({ id: issueReports.id });
+        if (claimed.length === 0) return json(200, { issue: null }); // lost the race
+
+        const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, next.id)).limit(1);
+        return json(200, { issue: { id: issue.id } });
+    }
+
+    // ── Report the outcome of a prod promotion ───────────────────────────────────
+    if (event.httpMethod === 'POST' && action === 'promote-result' && id) {
+        let body: any;
+        try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON.' }); }
+
+        const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
+        if (!issue) return json(404, { error: 'Issue not found.' });
+
+        const ok = body.ok !== false;
+        const outcome = (typeof body.outcome === 'string' ? body.outcome : '').trim();
+
+        if (ok) {
+            await db.update(issueReports).set({
+                devProdStatus: 'promoted',
+                devProdAt: new Date(),
+                devProdResult: outcome || 'Promoted from staging to production.',
+                devRunnerId: null,
+                devRunnerHeartbeat: null,
+                updatedAt: new Date(),
+            }).where(eq(issueReports.id, id));
+
+            await db.insert(issueReportMessages).values({
+                issueId: id,
+                authorType: 'admin',
+                authorId: null,
+                body: `🚀 Promoted from staging to production.${outcome ? `\n\n${outcome}` : ''}`,
+                status: null,
+            });
+
+            // The push to main auto-deploys prod; also fire the prod build hook if configured.
+            await triggerProdDeploy();
+            return json(200, { ok: true, devProdStatus: 'promoted' });
+        }
+
+        await db.update(issueReports).set({
+            devProdStatus: 'failed',
+            devProdResult: outcome || 'The promotion to production could not be completed.',
+            devRunnerId: null,
+            devRunnerHeartbeat: null,
+            updatedAt: new Date(),
+        }).where(eq(issueReports.id, id));
+
+        await db.insert(issueReportMessages).values({
+            issueId: id,
+            authorType: 'admin',
+            authorId: null,
+            body: `⚠️ Promotion to production failed — the fix was NOT pushed to prod.${outcome ? `\n\n${outcome}` : ''}\n\nResolve the problem and request the promotion again.`,
+            status: null,
+        });
+
+        return json(200, { ok: true, devProdStatus: 'failed' });
     }
 
     // ── Claim the next queued CONFLICT FIX ───────────────────────────────────────

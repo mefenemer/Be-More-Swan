@@ -258,6 +258,44 @@ export default withLambda(async (event) => {
         return json(200, { ok: true, devMergeStatus: 'queued' });
     }
 
+    // ── POST ?action=request-prod-promote: promote a staging-verified fix to prod ──
+    // Super-admin only, and separate from closing the ticket. The fix must already be
+    // merged to staging. Queues a promotion the local watcher claims and performs by
+    // pushing staging → main (prod deploys from main); see admin-issue-handoff's
+    // claim-promote / promote-result.
+    if (event.httpMethod === 'POST' && action === 'request-prod-promote' && id) {
+        if (admin.role !== 'super_admin') {
+            return json(403, { error: 'Promoting to production requires super-admin privilege.' });
+        }
+        const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
+        if (!issue) return json(404, { error: 'Issue not found.' });
+        if (issue.devMergeStatus !== 'merged') {
+            return json(400, { error: 'Merge this fix to staging before promoting to production.' });
+        }
+        if (issue.devProdStatus === 'queued' || issue.devProdStatus === 'promoting') {
+            return json(409, { error: 'A promotion to production is already in progress for this issue.' });
+        }
+        if (issue.devProdStatus === 'promoted') {
+            return json(409, { error: 'This fix has already been promoted to production.' });
+        }
+
+        await db.update(issueReports).set({
+            devProdStatus: 'queued',
+            devProdResult: null,
+            updatedAt: new Date(),
+        }).where(eq(issueReports.id, id));
+
+        await db.insert(issueReportMessages).values({
+            issueId: id,
+            authorType: 'admin',
+            authorId: admin.id,
+            body: "🚀 We've queued this fix to promote from staging to production — it should be live shortly.",
+            status: null,
+        });
+
+        return json(200, { ok: true, devProdStatus: 'queued' });
+    }
+
     // ── POST ?action=request-conflict-fix: investigate + auto-resolve a failed merge ─
     // Super-admin only. Only valid once a merge attempt has actually failed. The local
     // watcher (see scripts/dev-issue-fixer.mjs) claims it, merges the base branch into
@@ -368,6 +406,8 @@ export default withLambda(async (event) => {
                 devPrUrl: issueReports.devPrUrl,
                 devSqlStatus: issueReports.devSqlStatus,
                 devMergeStatus: issueReports.devMergeStatus,
+                devProdStatus: issueReports.devProdStatus,
+                devProdAt: issueReports.devProdAt,
                 devRunnerId: issueReports.devRunnerId,
                 devRunnerHeartbeat: issueReports.devRunnerHeartbeat,
                 reporterEmail: users.email,
@@ -400,6 +440,8 @@ export default withLambda(async (event) => {
                 devPrUrl: r.devPrUrl,
                 devSqlStatus: r.devSqlStatus,
                 devMergeStatus: r.devMergeStatus,
+                devProdStatus: r.devProdStatus,
+                devProdAt: r.devProdAt,
                 devRunnerId: r.devRunnerId,
                 devRunnerHeartbeat: r.devRunnerHeartbeat,
                 reporterName: [r.reporterFirst, r.reporterLast].filter(Boolean).join(' ') || r.reporterEmail || `User #${r.userId}`,

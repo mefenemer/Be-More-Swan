@@ -1263,12 +1263,20 @@ export const issueReports = pgTable("issue_reports", {
   devMergeStatus: text("dev_merge_status"),
   devMergedAt: timestamp("dev_merged_at"),
   devMergeResult: text("dev_merge_result"),  // gh output / error from the merge attempt
+
+  // Promotion of the staging-verified fix to production — requested from the ticket
+  // (super-admin "Push to prod") and performed by the local watcher, which pushes
+  // staging → main (prod deploys from main). null | 'queued' | 'promoting' | 'promoted' | 'failed'
+  devProdStatus: text("dev_prod_status"),
+  devProdAt: timestamp("dev_prod_at"),
+  devProdResult: text("dev_prod_result"),    // git/gh output or error from the promotion
 }, (t) => [
   index("issue_reports_user_idx").on(t.userId, t.createdAt),
   index("issue_reports_org_idx").on(t.organisationId),
   index("issue_reports_status_idx").on(t.status, t.createdAt),
   index("issue_reports_handoff_idx").on(t.devHandoffStatus, t.devHandoffAt),
   index("issue_reports_merge_idx").on(t.devMergeStatus, t.devHandoffAt),
+  index("issue_reports_prod_idx").on(t.devProdStatus, t.devHandoffAt),
 ]);
 
 // Issue Report Messages Table — threaded admin status updates + user replies.
