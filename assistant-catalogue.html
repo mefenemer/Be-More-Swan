@@ -397,10 +397,10 @@
     // (Previously this called loadView('onboarding'), but there is no 'onboarding'
     // workspace route, so the click silently did nothing.)
     const ROLE_ONBOARDING_PAGE = {
-      social_media: 'onboarding-social-media.html',
-      paid_ads:     'onboarding-performance.html',
-      data_entry:   'onboarding-inventory.html',
-      custom:       'onboarding-custom.html',
+      social_media_manager: 'onboarding-social-media.html',
+      paid_ads:             'onboarding-performance.html',
+      data_entry:           'onboarding-inventory.html',
+      custom:               'onboarding-custom.html',
     };
     sessionStorage.setItem('intended_role_key', roleKey);
     window.location.href = ROLE_ONBOARDING_PAGE[roleKey] || 'onboarding.html';
