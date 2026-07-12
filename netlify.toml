@@ -57,6 +57,15 @@
   to = "/.netlify/functions/widget-api"
   status = 200
 
+# Stripe webhook: stable public path so the Stripe endpoint URL isn't tied to Netlify's internal
+# /.netlify/functions/ path. Rewrite (status 200) — a 3xx would break delivery because Stripe does
+# NOT follow redirects. MUST be configured on the apex host (bemoreswan.com); www 308-redirects to
+# apex and would fail. Set the Stripe endpoint to https://bemoreswan.com/api/stripe/webhook.
+[[redirects]]
+  from = "/api/stripe/webhook"
+  to = "/.netlify/functions/stripe-webhook"
+  status = 200
+
 [build]
   # Rebuild the Tailwind stylesheet from input.css on every deploy so style.css can never
   # drift from the markup (a stale committed style.css silently drops classes and breaks layouts).
