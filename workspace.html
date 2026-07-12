@@ -3296,10 +3296,10 @@ function formatCurrency(amount, currency) {
     // and hands them straight to the next step in the Setup Wizard slide-over.
     window._onAgreementsComplete = function _onAgreementsComplete() {
       window.showToast?.('Step 4: Compliance & Data Use completed — next up: choose your assistant.', { icon: '✅', duration: 6000 });
-      window.fireConfetti?.();
-      // Re-sync the wizard (compliance now ticks) and open it so the next step is front-and-centre.
+      // Re-sync the wizard — compliance now ticks, and refresh() itself fires the confetti
+      // and opens the drawer for the newly-completed step (see celebrate() in the
+      // SetupWizard controller), so no need to duplicate either here.
       window.SetupWizard?.refresh?.();
-      setTimeout(() => window.SetupWizard?.open?.(), 500);
     };
 
     window.renderMyAgreements();
@@ -6998,10 +6998,22 @@ async function gpSubmitReject() {
   const label  = document.getElementById('setup-wizard-progress-label');
   if (!drawer || !fab || !body) return;
 
-  let last = null;          // previous snapshot { key: done } for completion diffing
+  // Several steps (e.g. "onboard your assistant") complete on a standalone full-page
+  // wizard (onboarding-*.html) that navigates back here with a fresh JS context, so a
+  // plain in-memory `last`/`celebratedGoLive` would reset to null/false right as the
+  // completion needs detecting — silently swallowing that step's celebration (no prior
+  // snapshot to diff against). Persist both in sessionStorage, same pattern as COLLAPSE_KEY
+  // above, so the diff survives the full-page hop.
+  const LAST_KEY = 'swan_wizard_last_snapshot';
+  const GO_LIVE_KEY = 'swan_wizard_celebrated_go_live';
+  const readLast = () => { try { return JSON.parse(sessionStorage.getItem(LAST_KEY)); } catch { return null; } };
+  const writeLast = (val) => { try { val === null ? sessionStorage.removeItem(LAST_KEY) : sessionStorage.setItem(LAST_KEY, JSON.stringify(val)); } catch { /* non-fatal */ } };
+  const writeGoLive = (val) => { try { val ? sessionStorage.setItem(GO_LIVE_KEY, '1') : sessionStorage.removeItem(GO_LIVE_KEY); } catch { /* non-fatal */ } };
+
+  let last = readLast();    // previous snapshot { key: done } for completion diffing
   let lastData = null;      // last full payload (re-render on open)
   let isOpen = false;
-  let celebratedGoLive = false;
+  let celebratedGoLive = sessionStorage.getItem(GO_LIVE_KEY) === '1';
 
   const tick = '<span class="flex items-center justify-center w-7 h-7 rounded-full bg-emerald-600 text-white shrink-0"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg></span>';
 
@@ -7263,15 +7275,23 @@ async function gpSubmitReject() {
   }
 
   // Compare against the previous snapshot and celebrate any step that just flipped done.
+  // Returns true when a step newly completed, so refresh() can also surface the drawer —
+  // this is the single place EVERY step-completion path funnels through (onNavigate,
+  // autoOpen refreshes, bespoke per-step handlers), so it must fire the full toast +
+  // confetti + open treatment itself rather than leaving that to individual call sites,
+  // which is why the celebration used to appear only for the handful of steps whose
+  // caller happened to also confetti/open manually.
   function celebrate(data) {
     const prev = last || {};
     let newlyDone = false;
     (data.steps || []).forEach(s => { if (s.done && prev[s.key] === false) newlyDone = true; });
     if (newlyDone && !data.allDone) {
       window.showToast?.('Great job — you\'re one step closer! 🎉', { icon: '✅' });
+      window.fireConfetti?.();
     }
     if (data.allDone && !celebratedGoLive && last !== null) {
       celebratedGoLive = true;
+      writeGoLive(true);
       window.showToast?.('Your assistant is live! 🎉', { icon: '🎉' });
       window.fireConfetti?.();
       // The new-assistant journey is finished — drop back to normal (org-global) behaviour.
@@ -7279,6 +7299,8 @@ async function gpSubmitReject() {
     }
     last = {};
     (data.steps || []).forEach(s => { last[s.key] = s.done; });
+    writeLast(last);
+    return newlyDone;
   }
 
   async function fetchState() {
@@ -7300,7 +7322,7 @@ async function gpSubmitReject() {
     const data = await fetchState();
     if (!data) return;
     const firstLoad = last === null;
-    celebrate(data);          // sets `last`; also fires celebrations on subsequent loads
+    const newlyDone = celebrate(data);  // sets `last`; also fires celebrations on subsequent loads
     lastData = data;
     render(data);
 
@@ -7311,6 +7333,18 @@ async function gpSubmitReject() {
     // they can still re-open from My Account (US8 AC2).
     if ((data.allDone && celebratedGoLive && !isOpen) || (data.dismissed && !isOpen && firstLoad)) {
       setOpen(false); showFab(false); return;
+    }
+
+    // A step just completed — bring the drawer to the front so the next step is
+    // immediately visible, regardless of which call site (onNavigate, a bespoke
+    // per-step handler, etc.) triggered this refresh. Previously only refresh(...
+    // {autoOpen:true}) calls opened the drawer, so most step completions (which route
+    // through onNavigate(), which never passes autoOpen) celebrated with a toast but
+    // left the drawer closed.
+    if (newlyDone && !data.allDone && !isOpen) {
+      setOpen(true);
+      showFab(false);
+      return;
     }
 
     if (opts.autoOpen && !data.allDone && !data.dismissed && !collapsedPref && !isOpen) {
@@ -7382,6 +7416,7 @@ async function gpSubmitReject() {
     sessionStorage.setItem(SINCE_D_KEY, String(base?.maxDraftId ?? 0));
     // Reset celebration/diff baselines so the fresh journey is tracked from scratch.
     last = null; celebratedGoLive = false;
+    writeLast(null); writeGoLive(false);
     await refresh();   // now scoped to the new assistant (steps 6-8 reset)
     open();
     if (window.loadView) window.loadView('catalog');
