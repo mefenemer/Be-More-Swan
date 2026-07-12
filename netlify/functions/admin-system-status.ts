@@ -112,9 +112,27 @@ const SERVICES: ServiceDef[] = [
         key: 'resend', name: 'Resend', category: 'Email', tier: 'critical',
         purpose: 'Transactional email (verification, password reset, invites). Users cannot complete signup without it.',
         consoleUrl: 'https://resend.com/overview', envVars: ['RESEND_API_KEY', 'FROM_EMAIL'],
-        check: async () => process.env.RESEND_API_KEY
-            ? pingOk('https://api.resend.com/domains', { Authorization: `Bearer ${process.env.RESEND_API_KEY}` })
-            : 'n/a',
+        // A least-privilege "Sending access" Resend key can send email but is rejected on /domains
+        // with name 'restricted_api_key' — the key is valid, so treat that as reachable. Only a
+        // genuinely invalid/expired key (any other 401/403) or a network failure is an error.
+        check: async () => {
+            if (!process.env.RESEND_API_KEY) return 'n/a';
+            try {
+                const ctrl = new AbortController();
+                const t = setTimeout(() => ctrl.abort(), 3500);
+                const res = await fetch('https://api.resend.com/domains', {
+                    headers: { Authorization: `Bearer ${process.env.RESEND_API_KEY}` },
+                    signal: ctrl.signal,
+                });
+                clearTimeout(t);
+                if (res.ok) return 'ok';
+                if (res.status === 401 || res.status === 403) {
+                    const body: any = await res.json().catch(() => ({}));
+                    return body?.name === 'restricted_api_key' ? 'ok' : 'error';
+                }
+                return 'error';
+            } catch { return 'error'; }
+        },
     },
     {
         key: 'app-url', name: 'App base URL', category: 'Config', tier: 'critical',
@@ -203,11 +221,16 @@ export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return json(405, { error: 'Method Not Allowed' });
     if (!(await requireSuperAdmin(event))) return json(403, { error: 'Forbidden' });
 
-    // Deployment environment (Netlify): CONTEXT='production' on the production deploy;
-    // branch/preview deploys (e.g. the staging branch) are everything else.
-    const context = process.env.CONTEXT || '';
-    const branch = process.env.BRANCH || '';
-    const environment = (context === 'production' || branch === 'main') ? 'production' : 'staging';
+    // Deployment environment. CONTEXT/BRANCH are build-time Netlify vars and are often absent
+    // at function RUNTIME, so we also derive from the request host, which IS available at
+    // runtime. Production is served from bemoreswan.com; every other host (netlify.app
+    // branch/preview subdomains) is treated as staging.
+    const host = (event.headers?.host || event.headers?.['x-forwarded-host'] || '').toLowerCase();
+    const isProdHost = host === 'bemoreswan.com' || host === 'www.bemoreswan.com';
+    const environment =
+        (process.env.CONTEXT === 'production' || process.env.BRANCH === 'main' || isProdHost)
+            ? 'production'
+            : 'staging';
 
     const services = await Promise.all(SERVICES.map(async (s) => {
         const configured = s.envVars.length === 0 ? null : s.envVars.some(v => Boolean(process.env[v]));
