@@ -73,7 +73,11 @@ function upgradeRequired(reason: string | undefined, extra: Record<string, unkno
 /**
  * Resolve the org's monthly task limit from its plan (active preferred, then past_due —
  * a lapsed plan keeps its limits through the grace window, mirroring check-capacity.ts)
- * and atomically consume one credit. No plan row / no master plan = uncapped.
+ * and atomically consume one credit.
+ *
+ * No active/past_due plan = HARD BLOCK: the free trial was removed (product decision), so
+ * an org with no paid plan can run no tasks at all — a null limit no longer means unlimited.
+ * A master plan whose monthlyTaskLimit is null is still a legitimately uncapped paid tier.
  */
 async function consumeTaskCredit(db: ReturnType<typeof getDb>, organisationId: number) {
     const [plan] = await db
@@ -85,10 +89,16 @@ async function consumeTaskCredit(db: ReturnType<typeof getDb>, organisationId: n
         .orderBy(asc(plans.status), asc(plans.startedAt))
         .limit(1);
 
+    // No plan at all → paywall. Without this, a no-plan org resolves to limit=null and
+    // atomicCapCheck would wave every task through as "unlimited".
+    if (!plan) {
+        return { allowed: false, limitMessage: 'Choose a plan to activate your assistant and start running tasks.' };
+    }
+
     return atomicCapCheck({
         organisationId,
         counterKey: 'taskCount',
-        limit: plan?.monthlyTaskLimit ?? null,
+        limit: plan.monthlyTaskLimit ?? null,
     });
 }
 

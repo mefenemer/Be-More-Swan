@@ -13,7 +13,7 @@
 //      so a stale "Update payment" card disappears the moment the payment actually succeeds.
 //
 // Auto-resolve is wired only for ACCOUNT-STATE actions whose condition is global to the
-// user (billing/trial/connection). Per-item actions (post approvals, per-post publish
+// user (billing/connection). Per-item actions (post approvals, per-post publish
 // failures) are intentionally left on resolve-on-click: clearing all of a type on one
 // success would wrongly dismiss a still-open sibling item.
 
@@ -50,7 +50,7 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     // critical_action — billing / account / security blockers (undismissible)
     billing_payment_failed: 'critical_action', missing_stripe_sub: 'critical_action',
     stripe_cancelled_but_db_active: 'critical_action', subscription_paused: 'critical_action',
-    assistants_paused_downgrade: 'critical_action', trial_expired: 'critical_action',
+    assistants_paused_downgrade: 'critical_action',
     tier_mismatch: 'critical_action', run_budget_suspended: 'critical_action',
     task_limit_reached: 'critical_action', billing_cancelled: 'critical_action',
     security: 'critical_action', agent_anomaly: 'critical_action',
@@ -59,7 +59,7 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     // suggested_action — important, do-something, dismissible
     onboarding_prompt: 'suggested_action', onboarding_incomplete: 'suggested_action',
     hitl_approval_required: 'suggested_action', review_red_urgency: 'suggested_action',
-    trial_expiring_soon: 'suggested_action', task_limit_warning: 'suggested_action',
+    task_limit_warning: 'suggested_action',
     // Abuse Prevention US2: an admin is asked to invite someone who hit a connection collision.
     workspace_access_request: 'suggested_action',
     // Abuse Prevention US4: an owner is asked to invite someone who signed up on their domain.
@@ -120,9 +120,9 @@ export const PAYMENT_RESTORED_TYPES = [
 ];
 
 // An upgrade (or any move to a higher tier with active billing) clears the
-// trial / capacity / downgrade prompts that were nudging the user to upgrade.
+// capacity / downgrade prompts that were nudging the user to upgrade.
 export const PLAN_UPGRADED_TYPES = [
-    'trial_expiring_soon', 'trial_expired', 'tier_mismatch',
+    'tier_mismatch',
     'assistants_paused_downgrade', 'task_limit_reached', 'task_limit_warning',
     ...PAYMENT_RESTORED_TYPES,
 ];
@@ -156,7 +156,7 @@ export const resolvesOnClick = (type: string): boolean =>
 // Only these types trigger a fallback email if they go unseen (AC4.2/4.3). AC4.4 (squelch
 // state_change/informational/celebratory) is satisfied automatically because every type here
 // is critical/suggested. The list is deliberately CONSERVATIVE: it excludes urgent types that
-// ALREADY send their own email at creation (billing dunning, trial-expiry, review-urgency,
+// ALREADY send their own email at creation (billing dunning, review-urgency,
 // instagram token refresh) so the worker can never double-send. Expand only after confirming a
 // type has no existing email path. Worker also guards on fallback_email_sent_at to send once.
 export const EMAIL_FALLBACK_TYPES = [

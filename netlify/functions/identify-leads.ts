@@ -14,57 +14,15 @@ export default withLambda(async () => {
     const now = new Date();
     let leadsCreated = 0;
     let leadsUpdated = 0;
+    // Free trial removed (product decision): the former "trial expiry" lead pattern is gone —
+    // there are no trial plans to expire.
     const patternCounts: Record<string, number> = {
-        trial_expiry: 0,
         never_onboarded: 0,
         cancellation_approaching: 0,
         upgrade_candidates: 0,
     };
 
     try {
-        // ── (a) TRIAL EXPIRY: trial plans expiring within 7 days, no active paid plan ──
-        const trialCutoff = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-        const trialRows = await db
-            .select({
-                userId: plans.userId,
-                organisationId: plans.organisationId,
-                email: users.email,
-                planName: plans.planName,
-                expiresAt: plans.expiresAt,
-            })
-            .from(plans)
-            .innerJoin(users, eq(plans.userId, users.id))
-            .where(
-                and(
-                    eq(plans.planType, 'trial'),
-                    eq(plans.status, 'active'),
-                    lte(plans.expiresAt, trialCutoff),
-                    gte(plans.expiresAt, now),
-                )
-            );
-
-        for (const row of trialRows) {
-            if (!row.userId || !row.email) continue;
-            const res = await db.insert(leads)
-                .values({
-                    email: row.email,
-                    opportunityReason: `Trial expiring — ${row.planName}`,
-                    action: 'trial_expiry_identified',
-                    leadType: 'trial_expiry',
-                    source: 'data_analysis_job',
-                    userId: row.userId,
-                    organisationId: row.organisationId,
-                    priority: 'high',
-                })
-                .onConflictDoUpdate({
-                    target: [leads.email, leads.opportunityReason],
-                    set: { updatedAt: new Date() },
-                })
-                .returning({ id: leads.id });
-            if (res[0]) leadsCreated++;
-            patternCounts.trial_expiry++;
-        }
-
         // ── (b) NEVER ONBOARDED: registered >48h ago, zero assistants, zero task runs ──
         const fortyEightHoursAgo = new Date(now.getTime() - 48 * 60 * 60 * 1000);
         const neverOnboardedRows = await db
@@ -171,7 +129,6 @@ export default withLambda(async () => {
             FROM plans p
             INNER JOIN users u ON p.user_id = u.id
             WHERE p.status = 'active'
-              AND p.plan_type != 'trial'
               AND (
                 SELECT COUNT(DISTINCT DATE(tr.created_at))
                 FROM task_runs tr

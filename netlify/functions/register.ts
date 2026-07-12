@@ -3,7 +3,7 @@ import { Handler } from '@netlify/functions';
 import { eq, and } from 'drizzle-orm';
 import * as crypto from 'crypto';
 import { getDb } from '../../db/client';
-import { users, organisations, userOrganisations, userProfiles, plans, masterPlans, userReferrals, referralInvites } from '../../db/schema';
+import { users, organisations, userOrganisations, userProfiles, userReferrals, referralInvites } from '../../db/schema';
 import { sendMagicLinkEmail } from '../../src/utils/email';
 import { checkRateLimit, getClientIp } from '../../src/utils/rate-limit';
 import { isRegistrationLocked } from '../../src/utils/platform-config';
@@ -67,7 +67,6 @@ export default withLambda(async (event) => {
         const lastName = body.lastName?.trim();
         const businessName = body.businessName?.trim() || `${firstName}'s Workspace`;
         const priceId = body.priceId?.trim() || null;
-        const isTrial = body.trial === true || body.trial === 'true'; // US-GAP-8.1.1 SC1
         const attributionRef = body.attributionRef?.trim() || null; // US-AUD-5.3.1 SC5
         const referralRef = body.referralRef?.trim() || null;        // US-GAP-8.2: workspace referral code
         // US4 (Domain Consolidation): set once the user has seen the consolidation prompt and
@@ -101,12 +100,6 @@ export default withLambda(async (event) => {
             console.log(`[Security] Blocked duplicate registration attempt for: ${email}`);
             return { statusCode: 200, body: JSON.stringify({ success: true }) };
         }
-
-        // US-GAP-8.1.1 SC8: One trial per email — check historical user records
-        // (Even if the user deleted their account, the email may have had a trial before)
-        // We check `plans` via the deleted user's email match via users join — but since
-        // we do a hard-delete cascade, check instead via a dedicated trialHistory or
-        // rely on the existingUsers check above (returning users just see the login flow).
 
         // --- US4: CORPORATE DOMAIN CONSOLIDATION ---
         // Before creating anything, if this is a non-public business email whose domain already
@@ -221,42 +214,17 @@ export default withLambda(async (event) => {
                 },
             });
 
-            // BUG-P2-5: Trial masterPlan catalog row must exist before registration runs.
-            // The upsert was removed from here — it belongs in db/seed-catalog.ts so it
-            // only runs once at deploy time, not on every registration request.
-            // Members joining an existing org share that org's plan — only start a trial
-            // for a brand-new org.
-            if (isTrial && !joinOrg) {
-                const [trialMasterPlan] = await tx
-                    .select({ id: masterPlans.id })
-                    .from(masterPlans)
-                    .where(eq(masterPlans.tierKey, 'trial'))
-                    .limit(1);
-
-                if (!trialMasterPlan) {
-                    throw new Error('Trial plan not seeded. Run db/seed-catalog.ts before accepting trial registrations.');
-                }
-
-                const trialExpiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000); // 14 days
-
-                await tx.insert(plans).values({
-                    userId: newUser.id,
-                    organisationId: orgId,
-                    masterPlanId: trialMasterPlan.id,
-                    planName: 'Free Trial',
-                    planType: 'trial',
-                    status: 'active',
-                    expiresAt: trialExpiresAt,
-                });
-            }
-
+            // No plan is created at registration. The free trial was removed (product
+            // decision): after verifying their email, a brand-new user lands hard-gated on
+            // the workspace plan picker (verify.ts → ?action=select-plan) and must choose a
+            // paid plan before they can hire an assistant or run any task.
             return newUser;
         });
 
         // Send the First-Time Verification Email — baseUrl was resolved above (prefers BASE_URL env,
         // falls back to the request host for deploy previews). Resolved before the DB transaction
         // so a missing config fails fast rather than orphaning a half-created user.
-        const magicLink = `${baseUrl}/verify-account.html?token=${plainToken}${priceId ? `&priceId=${encodeURIComponent(priceId)}` : ''}${isTrial ? '&trial=true' : ''}`;
+        const magicLink = `${baseUrl}/verify-account.html?token=${plainToken}${priceId ? `&priceId=${encodeURIComponent(priceId)}` : ''}`;
 
         // Verification email is BEST-EFFORT: the account + workspace are already committed
         // above, so a transient email failure (Resend outage, unverified domain, missing key)

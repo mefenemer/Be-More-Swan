@@ -23,7 +23,7 @@ type Db = ReturnType<typeof getDb>;
 export const IMAGE_CREDIT_COST = 1;
 export const VIDEO_CREDIT_COST = 5;
 // Video generation is restricted to premium tiers (decided 2026-06-24). Image generation
-// is available on any paid tier with credits (trial has 0 credits, so it's image-gated too).
+// is available on any paid tier with credits.
 export const VIDEO_TIERS = ['saver', 'employee'] as const;
 export function tierCanGenerateVideo(tierKey: string | null | undefined): boolean {
     return !!tierKey && (VIDEO_TIERS as readonly string[]).includes(tierKey);

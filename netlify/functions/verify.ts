@@ -230,7 +230,6 @@ export default withLambda(async (event) => {
                 .where(eq(aiAssistants.userId, user.id))
                 .limit(1);
 
-            const hasAnyPlan      = !!existingPlan;
             const hasActivePlan   = existingPlan?.status === 'active';
             const hasPastDuePlan  = existingPlan?.status === 'past_due';
             const hasAnyAssistant = !!existingAssistant;
@@ -292,7 +291,10 @@ export default withLambda(async (event) => {
             // send to workspace so they can see their existing setup and take action.
             // The workspace will show a payment warning banner via check-capacity.ts.
             if (hasAnyAssistant) {
-                const suffix = hasPastDuePlan ? '?alert=payment_overdue' : (hasAnyPlan ? '?alert=subscription_ended' : '?alert=no_plan');
+                // Free trial removed: a user can no longer reach "has assistants but never had a
+                // plan" through normal signup, so the former no_plan case collapses into the
+                // subscription-ended banner (server-side gates still block hiring/tasks).
+                const suffix = hasPastDuePlan ? '?alert=payment_overdue' : '?alert=subscription_ended';
                 return {
                     statusCode: 200,
                     headers: getHeaders(sessionCookie),

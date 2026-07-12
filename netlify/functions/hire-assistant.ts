@@ -19,7 +19,7 @@
 // erroring — re-saving onboardingContext is idempotent and audit-logged server-side.
 
 import { Handler } from '@netlify/functions';
-import { and, asc, count, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, or, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     aiAssistants,
@@ -102,14 +102,26 @@ export default withLambda(async (event) => {
 
         // ── 3. Capacity gate (server-side twin of check-capacity's client gate) ───
         // Assistants in provisioning/ready_for_work/working occupy a plan seat.
+        // Scope by org OR user: an org member shares the owner's plan (which is keyed to
+        // the owner's userId + the org id), so a userId-only lookup would wrongly find no
+        // plan for members of a paid workspace.
         const [planRow] = await db
             .select({ assistantLimit: masterPlans.assistantLimit })
             .from(plans)
             .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
-            .where(and(eq(plans.userId, userId), inArray(plans.status, ['active', 'past_due'])))
+            .where(and(
+                or(eq(plans.userId, userId), eq(plans.organisationId, orgId)),
+                inArray(plans.status, ['active', 'past_due']),
+            ))
             .orderBy(asc(plans.status), asc(plans.startedAt))
             .limit(1);
-        let assistantLimit: number | null = planRow?.assistantLimit ?? null;
+        // No active/past_due plan → HARD BLOCK. The free trial was removed (product decision):
+        // a user with no paid plan can hire no assistants. Previously a missing plan resolved
+        // to assistantLimit=null and skipped the gate entirely, granting unlimited free hires.
+        if (!planRow) {
+            return json(402, { error: 'Choose a plan to hire your first assistant.', code: 'NO_PLAN' });
+        }
+        let assistantLimit: number | null = planRow.assistantLimit ?? null;
         if (assistantLimit !== null) {
             const [org] = await db
                 .select({ bonusAssistants: organisations.bonusAssistants })
