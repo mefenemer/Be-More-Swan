@@ -115,7 +115,7 @@ export default withLambda(async (event) => {
     // runs on the env-routed connection (db/client.ts).
     const env = resolveEnvironment(event.headers, { allowSandbox: adminRole === 'super_admin' });
 
-    return runWithEnvironment(env, async () => {
+    const result = await runWithEnvironment<any>(env, async () => {
     const db = getDb();
 
     try {
@@ -2439,4 +2439,12 @@ export default withLambda(async (event) => {
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal Server Error' }) };
     }
     });
+
+    // AC 2.2: tell the frontend which environment actually served this request. A
+    // super_admin can request 'sandbox' via X-Environment yet still be silently routed
+    // to 'live' (unprovisioned SANDBOX_DATABASE_URL, AC 3.3) — without this header the
+    // Live/Sandbox toggle looks like it does nothing, because the data really doesn't
+    // change. The frontend uses it to warn the admin instead of lying about the active env.
+    result.headers = { ...(result.headers || {}), 'X-Resolved-Env': env };
+    return result;
 });
