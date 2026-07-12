@@ -7,9 +7,10 @@ config({ path: path.resolve(process.cwd(), '.env') });
 import { Handler } from '@netlify/functions';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
-import { eq } from 'drizzle-orm';
-import { users, masterPlans } from '../../db/schema';
+import { eq, and } from 'drizzle-orm';
+import { users, masterPlans, plans, payments, notifications } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { resolveActionNotifications, PAYMENT_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const connectionString = process.env.NETLIFY_DATABASE_URL;
@@ -101,12 +102,46 @@ export default withLambda(async (event) => {
         ? `Annual subscription (${Math.round((1 - ANNUAL_DISCOUNT) * 100)}% off)`
         : 'Monthly subscription';
 
-    // 3. CREATE STRIPE CUSTOMER
-    const customer = await stripe.customers.create({
-      email: user.email,
-      name: [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email,
-      metadata: { auraUserId: user.id.toString() },
-    });
+    // 3. RESOLVE STRIPE CUSTOMER — reuse an existing one for this user so repeated
+    // checkout inits (page reloads, re-applying a promo) don't spawn duplicate Stripe
+    // customers. customers.list by email is immediately consistent (unlike the search
+    // index), so a customer created moments ago is found on the very next call.
+    const customerName = [user.firstName, user.lastName].filter(Boolean).join(' ') || user.email;
+    let customer: Stripe.Customer;
+    const existingCustomers = await stripe.customers.list({ email: user.email, limit: 1 });
+    if (existingCustomers.data.length > 0) {
+      customer = existingCustomers.data[0];
+      // Ensure our linking metadata is present (customers created elsewhere may lack it).
+      if (customer.metadata?.auraUserId !== user.id.toString()) {
+        customer = await stripe.customers.update(customer.id, {
+          metadata: { ...customer.metadata, auraUserId: user.id.toString() },
+        });
+      }
+    } else {
+      customer = await stripe.customers.create({
+        email: user.email,
+        name: customerName,
+        metadata: { auraUserId: user.id.toString() },
+      });
+    }
+
+    // Cancel abandoned incomplete subscriptions from earlier inits in THIS checkout.
+    // Each promo re-apply / reload creates a fresh default_incomplete subscription;
+    // only the one the user actually confirms should survive. Clean them up now
+    // instead of waiting ~23h for Stripe to auto-expire them. Only 'incomplete' subs
+    // are touched, so active / past_due subscriptions are never affected.
+    try {
+      const staleSubs = await stripe.subscriptions.list({
+        customer: customer.id,
+        status: 'incomplete',
+        limit: 100,
+      });
+      for (const stale of staleSubs.data) {
+        await stripe.subscriptions.cancel(stale.id);
+      }
+    } catch (cleanupErr: any) {
+      console.warn('[create-subscription] Could not cancel stale incomplete subscriptions:', cleanupErr?.message);
+    }
 
     // 4. CREATE THE SUBSCRIPTION — single source of truth for the charge.
     // ── Single-subscription pattern ─────────────────────────────────────────────
@@ -160,8 +195,85 @@ export default withLambda(async (event) => {
 
     const latestInvoice = subscription.latest_invoice as Stripe.Invoice;
     const clientSecret = latestInvoice?.confirmation_secret?.client_secret ?? null;
+
+    // ── £0 case (100%-off promo) ────────────────────────────────────────────────
+    // When a fully-discounting promo makes the first invoice £0, Stripe finalises
+    // and pays it automatically — so there is no PaymentIntent, no confirmation
+    // secret for the browser to confirm, and no payment_intent.succeeded webhook
+    // will ever fire. Provision the plan HERE, server-side, and tell the frontend
+    // no card step is needed. (invoice.paid for the initial subscription_create
+    // invoice is deliberately skipped by the webhook, so there is no double-write.)
     if (!clientSecret) {
-      throw new Error('Stripe did not return a client secret for the subscription invoice.');
+      const amountDue = typeof latestInvoice?.amount_due === 'number' ? latestInvoice.amount_due : null;
+      if (amountDue !== 0) {
+        // No secret AND a non-zero amount is a genuine Stripe failure, not a £0 checkout.
+        throw new Error('Stripe did not return a client secret for the subscription invoice.');
+      }
+
+      // If an active plan already exists for this org, treat as already-provisioned.
+      const [existingPlan] = await db
+        .select({ id: plans.id })
+        .from(plans)
+        .where(and(eq(plans.organisationId, orgId), eq(plans.status, 'active')))
+        .limit(1);
+
+      if (!existingPlan) {
+        try {
+          const [newPlan] = await db.insert(plans).values({
+            userId:               user.id,
+            organisationId:       orgId,
+            masterPlanId:         masterPlan.id,
+            planName:             masterPlan.name,
+            planType:             'subscription',
+            status:               'active',
+            stripeCustomerId:     customer.id,
+            stripeSubscriptionId: subscription.id,
+          }).returning();
+
+          await db.insert(payments).values({
+            userId:            user.id,
+            organisationId:    orgId,
+            planId:            newPlan.id,
+            masterPlanId:      masterPlan.id,
+            amount:            '0.00',
+            currency:          'GBP',
+            status:            'completed',
+            externalPaymentId: subscription.id,
+            description:       `${masterPlan.name} — first payment (100% promo)`,
+          });
+
+          await db.insert(notifications).values({
+            userId:  user.id,
+            type:    'billing',
+            title:   'Subscription Active — Set Up Your Assistant',
+            message: 'Your subscription is active. Click "Resume Setup" on your dashboard to build your Digital Assistant now.',
+            isRead:  false,
+          });
+
+          await resolveActionNotifications(db, user.id, PAYMENT_RESTORED_TYPES);
+        } catch (provErr: any) {
+          // Unique constraint = a concurrent path already created the active plan; that's fine.
+          if (provErr?.code !== '23505' && !provErr?.message?.includes('plans_one_active_per_org_unique')) {
+            throw provErr;
+          }
+        }
+      }
+
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          data: {
+            requiresPayment:   false,
+            planName:          masterPlan.name,
+            amountGbp:         '0.00',
+            originalAmountGbp: baseChargeGbp.toString(),
+            discountAmountGbp: discountAmountGbp !== null ? discountAmountGbp.toString() : null,
+            tier:              tierKey,
+            billingCycle,
+            billingCycleLabel,
+          },
+        }),
+      };
     }
 
     // Stamp our metadata onto the invoice's PaymentIntent so the existing
@@ -191,6 +303,7 @@ export default withLambda(async (event) => {
       statusCode: 200,
       body: JSON.stringify({
         data: {
+          requiresPayment:     true,
           clientSecret,
           publishableKey:      process.env.STRIPE_PUBLISHABLE_KEY,
           planName:            masterPlan.name,

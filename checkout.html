@@ -71,12 +71,25 @@
 
           <div id="summary-features" class="space-y-2 mb-5"></div>
 
-          <!-- Promo codes are entered on Stripe's secure payment page (allow_promotion_codes) -->
+          <!-- SC1: Promo code input (collapsible) -->
           <div class="border-t border-gray-100 pt-4 pb-1">
-            <p class="text-xs text-gray-500 flex items-center gap-1.5">
-              <span class="text-emerald-600">🏷️</span>
-              Got a promo code? You can add it on the secure payment page.
-            </p>
+            <button id="promo-toggle" type="button"
+                    onclick="document.getElementById('promo-section').classList.toggle('hidden')"
+                    class="text-xs text-emerald-700 font-semibold hover:underline focus:outline-none">
+              Have a promo code?
+            </button>
+            <div id="promo-section" class="hidden mt-3 space-y-2">
+              <div class="flex gap-2">
+                <input id="promo-input" type="text" placeholder="Enter code"
+                       class="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 uppercase tracking-widest"
+                       oninput="this.value=this.value.toUpperCase()" />
+                <button id="promo-apply-btn" type="button" onclick="window._applyPromo()"
+                        class="px-4 py-2 bg-emerald-700 text-white text-xs font-bold rounded-lg hover:bg-emerald-800 transition whitespace-nowrap">
+                  Apply
+                </button>
+              </div>
+              <p id="promo-feedback" class="text-xs font-medium hidden"></p>
+            </div>
           </div>
 
           <div class="border-t border-gray-100 pt-5 space-y-2">
@@ -131,23 +144,14 @@
         </div>
       </div>
 
-      <!-- PAYMENT CONFIRM -->
+      <!-- PAYMENT FORM -->
       <div class="lg:col-span-3">
         <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
-          <h1 class="text-2xl font-extrabold text-gray-900 mb-1">Review &amp; continue</h1>
-          <p class="text-sm text-gray-500 mb-6">You'll enter your card details and any promo code on Stripe's secure payment page. Your assistant is built on your dashboard afterwards.</p>
+          <h1 class="text-2xl font-extrabold text-gray-900 mb-1">Complete your payment</h1>
+          <p class="text-sm text-gray-500 mb-6">Your assistant will be built on your dashboard after payment.</p>
 
           <form id="payment-form">
-            <div class="mb-6 p-4 bg-gray-50 border border-gray-100 rounded-xl space-y-1.5">
-              <div class="flex justify-between text-sm">
-                <span class="text-gray-500">Plan</span>
-                <span id="confirm-plan-name" class="font-semibold text-gray-900">—</span>
-              </div>
-              <div class="flex justify-between text-sm">
-                <span class="text-gray-500" id="confirm-cycle-label">Monthly subscription</span>
-                <span id="confirm-price" class="font-semibold text-gray-900">—</span>
-              </div>
-            </div>
+            <div id="payment-element" class="mb-6"></div>
 
             <div id="payment-error" class="hidden mb-4 p-4 bg-red-50 border border-red-200 rounded-lg flex items-start gap-3">
               <svg class="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -168,12 +172,12 @@
 
             <button id="submit-btn" type="submit"
               class="w-full flex items-center justify-center gap-2 px-6 py-4 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-base rounded-xl shadow-md transition disabled:opacity-60 disabled:cursor-not-allowed">
-              <span id="submit-text">Continue to Secure Payment</span>
+              <span id="submit-text">Start My Subscription</span>
               <div id="submit-spinner" class="hidden w-5 h-5 border-2 border-white/40 border-t-white rounded-full animate-spin"></div>
             </button>
 
             <p id="checkout-tos-copy" class="text-center text-xs text-gray-400 mt-4">
-              By continuing, you agree to Be More Swan's
+              By confirming, you agree to Be More Swan's
               <a href="terms_of_service.html" class="underline hover:text-gray-600">Terms of Service</a>
               and authorise this recurring charge. <span id="checkout-renewal-disclosure">Your subscription renews automatically. Cancel anytime from Settings → Billing.</span>
             </p>
@@ -186,17 +190,192 @@
 </main>
 
 <script>
-  // Checkout now hands off to Stripe's hosted Checkout page (create-plan-checkout-intent).
-  // Card details AND promo codes are entered there — a 100%-off code produces a £0 invoice
-  // that still fires checkout.session.completed and activates the plan. This page only
-  // resolves the plan, shows a summary, and redirects.
-  const ANNUAL_DISCOUNT = 0.80;
+  // Promo code state (SC5: one code per checkout — applying replaces previous)
+  let _promoState = null; // { promotionCodeId, codeName, discountDisplay, discountAmountDisplay, discountedAmountGbp, originalAmountGbp }
+  let _currentTier = 'saver';
+  let _currentCycle = 'monthly';
+  let _stripeElements = null;
+  let _stripeInstance = null;
+  let _isFreeCheckout = false; // true once a 100%-off promo makes the plan £0 (already provisioned server-side)
 
-  // Marketing (pricing.html) uses slugs starter/pro_team/business; the DB master_plans rows
-  // are keyed buster/saver/employee. Map the former onto the latter (both accepted).
-  const TIER_ALIAS = { starter: 'saver', pro_team: 'buster', business: 'employee' };
+  // SC2: Validate promo code via backend
+  window._applyPromo = async function () {
+    const code    = document.getElementById('promo-input').value.trim();
+    const feedEl  = document.getElementById('promo-feedback');
+    const btn     = document.getElementById('promo-apply-btn');
+    feedEl.classList.add('hidden');
 
-  const fmtGbp = (n) => '£' + Number(n).toFixed(2).replace(/\.00$/, '');
+    if (!code) {
+      feedEl.textContent = 'Please enter a promo code.';
+      feedEl.className   = 'text-xs font-medium text-red-600';
+      feedEl.classList.remove('hidden');
+      return;
+    }
+
+    btn.disabled     = true;
+    btn.textContent  = 'Checking…';
+    try {
+      const res  = await fetch('/.netlify/functions/validate-promo', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ code, tier: _currentTier, billingCycle: _currentCycle }),
+      });
+      const data = await res.json();
+
+      if (!data.valid) {
+        feedEl.textContent = data.error || 'This code is not valid or has expired.';
+        feedEl.className   = 'text-xs font-medium text-red-600';
+        feedEl.classList.remove('hidden');
+        _promoState = null;
+        _updateSummaryPricing(null);
+        return;
+      }
+
+      // SC5: Replace previous code
+      _promoState = data;
+      feedEl.textContent = `✓ Code "${data.codeName}" applied — ${data.discountDisplay} off!`;
+      feedEl.className   = 'text-xs font-medium text-emerald-700';
+      feedEl.classList.remove('hidden');
+
+      // SC4: Update summary to show discount
+      _updateSummaryPricing(data);
+
+      // Re-initialise checkout with the new (discounted) amount
+      await _reinitialisePaymentIntent();
+
+    } catch {
+      feedEl.textContent = 'Network error. Please try again.';
+      feedEl.className   = 'text-xs font-medium text-red-600';
+      feedEl.classList.remove('hidden');
+    } finally {
+      btn.disabled    = false;
+      btn.textContent = 'Apply';
+    }
+  };
+
+  // SC4: Update the pricing rows in the order summary
+  function _updateSummaryPricing(promo) {
+    const discountRow    = document.getElementById('discount-row');
+    const discountAmount = document.getElementById('discount-amount');
+    const discountLabel  = document.getElementById('discount-label');
+    const summaryTotal   = document.getElementById('summary-total');
+    const summaryPrice   = document.getElementById('summary-price');
+    const summaryPriceOg = document.getElementById('summary-price-original');
+
+    if (promo) {
+      const origFormatted      = '£' + parseFloat(promo.originalAmountGbp).toFixed(2).replace(/\.00$/, '');
+      const discountedFormatted = '£' + parseFloat(promo.discountedAmountGbp).toFixed(2).replace(/\.00$/, '');
+
+      summaryPrice.textContent  = origFormatted;
+      summaryPrice.classList.remove('hidden');
+      summaryPrice.classList.add('line-through', 'text-gray-400');
+      summaryPriceOg.textContent = discountedFormatted;
+      summaryPriceOg.classList.add('text-emerald-700', 'font-extrabold');
+
+      discountLabel.textContent  = `Promo (${promo.codeName}) ${promo.discountDisplay}`;
+      discountAmount.textContent = promo.discountAmountDisplay;
+      discountRow.classList.remove('hidden');
+      discountRow.classList.add('flex');
+
+      summaryTotal.textContent = discountedFormatted;
+    } else {
+      summaryPrice.classList.add('hidden');
+      discountRow.classList.add('hidden');
+      discountRow.classList.remove('flex');
+    }
+  }
+
+  // Re-create the PaymentIntent with updated amount (after promo applied)
+  async function _reinitialisePaymentIntent() {
+    if (!_stripeInstance) return;
+    const params      = new URLSearchParams(window.location.search);
+    const tier        = params.get('tier') || 'saver';
+    const billingCycle = params.get('cycle') || sessionStorage.getItem('billing_cycle') || 'monthly';
+
+    try {
+      const res = await fetch('/.netlify/functions/create-subscription', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          tier,
+          billingCycle,
+          promotionCodeId: _promoState?.promotionCodeId || null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) return;
+
+      // 100%-off promo → £0 due. The subscription is already active (provisioned
+      // server-side), so there is nothing to confirm — switch to the no-payment state.
+      if (json.data?.requiresPayment === false) {
+        _enterFreeCheckoutState();
+        return;
+      }
+      if (!json.data?.clientSecret) return;
+
+      // Reinitialise Stripe Elements with new clientSecret
+      _stripeElements = _stripeInstance.elements({
+        clientSecret: json.data.clientSecret,
+        appearance:   _stripeAppearance,
+      });
+      _stripeElements.create('payment', {
+        layout: { type: 'tabs', defaultCollapsed: false },
+        fields: { billingDetails: { address: 'auto' } },
+      }).mount('#payment-element');
+    } catch (err) {
+      console.warn('[checkout] Failed to reinitialise PaymentIntent after promo:', err);
+    }
+  }
+
+  // Switch the checkout into its "no payment due" state after a 100%-off promo.
+  // The plan is already active server-side, so we tear down the card form and LOCK
+  // the promo box — re-applying a different code now would spin up a second
+  // subscription. The submit button becomes a plain "continue to dashboard".
+  function _enterFreeCheckoutState() {
+    _isFreeCheckout = true;
+
+    const payEl = document.getElementById('payment-element');
+    if (payEl) { payEl.innerHTML = ''; payEl.style.display = 'none'; }
+
+    const annualAck = document.getElementById('annual-ack-block');
+    if (annualAck) { annualAck.classList.add('hidden'); annualAck.style.display = 'none'; }
+
+    const promoInput = document.getElementById('promo-input');
+    const promoBtn   = document.getElementById('promo-apply-btn');
+    if (promoInput) promoInput.disabled = true;
+    if (promoBtn)   promoBtn.disabled   = true;
+
+    document.getElementById('payment-error')?.classList.add('hidden');
+
+    if (payEl && !document.getElementById('free-checkout-note')) {
+      const freeNote = document.createElement('div');
+      freeNote.id = 'free-checkout-note';
+      freeNote.className = 'mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-800 font-medium';
+      freeNote.textContent = 'No payment due today — your promo code covers the full amount. Your subscription is active.';
+      payEl.parentNode?.insertBefore(freeNote, payEl);
+    }
+
+    const submitText = document.getElementById('submit-text');
+    if (submitText) submitText.textContent = 'Continue to Dashboard';
+  }
+
+  const _stripeAppearance = {
+    theme: 'stripe',
+    variables: {
+      colorPrimary:     '#059669',
+      colorBackground:  '#ffffff',
+      colorText:        '#1f2937',
+      colorDanger:      '#ef4444',
+      fontFamily:       'ui-sans-serif, system-ui, sans-serif',
+      fontSizeBase:     '15px',
+      borderRadius:     '8px',
+    },
+    rules: {
+      '.Input':       { border: '1px solid #e5e7eb', boxShadow: 'none', padding: '12px' },
+      '.Input:focus': { border: '1px solid #059669', boxShadow: '0 0 0 3px rgba(5,150,105,0.15)' },
+      '.Label':       { fontWeight: '600', color: '#374151', marginBottom: '6px' },
+    },
+  };
 
   const PLAN_INFO = {
     buster: {
@@ -234,43 +413,47 @@
 
   async function initCheckout() {
     const params       = new URLSearchParams(window.location.search);
-    const rawTier      = (params.get('tier') || 'saver').toLowerCase();
-    const tierKey      = TIER_ALIAS[rawTier] || rawTier;   // resolve to a DB master_plans tier_key
+    const tier         = params.get('tier') || 'saver';
     // Billing cycle: URL param takes priority, fall back to sessionStorage, then default 'monthly'
     const billingCycle = params.get('cycle') || sessionStorage.getItem('billing_cycle') || 'monthly';
-    const planInfo     = PLAN_INFO[rawTier] || PLAN_INFO[tierKey] || PLAN_INFO.saver;
+    const planInfo     = PLAN_INFO[tier] || PLAN_INFO.saver;
 
-    // Resolve the plan (id + live price) from the public catalogue.
-    let plan;
+    _currentTier  = tier;
+    _currentCycle = billingCycle;
+
+    let checkoutData;
     try {
-      const res  = await fetch('/.netlify/functions/get-plans');
+      const res = await fetch('/.netlify/functions/create-subscription', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tier, billingCycle }),
+      });
       const json = await res.json();
-      if (!res.ok || !Array.isArray(json.plans)) { showError('Could not load plans. Please try again.'); return; }
-      plan = json.plans.find(p => p.tierKey === tierKey);
-      if (!plan) { showError('That plan is not available. Please choose a plan from the pricing page.'); return; }
+      if (!res.ok) { showError(json.detail || json.error || 'Failed to initialise checkout.'); return; }
+      checkoutData = json.data;
     } catch {
       showError('Connection failed. Please check your internet and try again.');
       return;
     }
 
-    // Compute the displayed price. Annual = 12 × monthly × 0.8, billed once a year.
-    const monthlyGbp = parseFloat(plan.monthlyPriceGbp);
-    // Annual = advertised total: round the discounted monthly to a whole unit, then ×12
-    // (matches pricing.html, e.g. £349 → £279/mo → £3,348/yr).
-    const displayGbp = billingCycle === 'annual'
-      ? Math.round(monthlyGbp * ANNUAL_DISCOUNT) * 12
-      : monthlyGbp;
-    const formatted  = fmtGbp(displayGbp) + (billingCycle === 'annual' ? '/yr' : '/mo');
-    const cycleLabel = billingCycle === 'annual' ? 'Annual subscription' : 'Monthly subscription';
+    // Defensive: a £0 plan at initial load (no promo) shouldn't happen, but if the
+    // backend reports no payment is due, the plan is already active — go to dashboard.
+    if (checkoutData.requiresPayment === false) {
+      window.location.href = `${window.location.origin}/workspace.html?payment=success`;
+      return;
+    }
+
+    const { clientSecret, publishableKey, planName, amountGbp, billingCycleLabel } = checkoutData;
+    if (!clientSecret || !publishableKey) { showError('Payment configuration missing. Please contact support.'); return; }
 
     // Populate summary
-    document.getElementById('summary-plan-name').textContent        = plan.name || planInfo.label;
-    document.getElementById('summary-price-original').textContent    = formatted;
-    document.getElementById('summary-total').textContent            = formatted;
-    document.getElementById('subscription-cycle-label').textContent  = cycleLabel;
-    document.getElementById('confirm-plan-name').textContent         = plan.name || planInfo.label;
-    document.getElementById('confirm-price').textContent             = formatted;
-    document.getElementById('confirm-cycle-label').textContent       = cycleLabel;
+    const priceNum  = parseFloat(amountGbp || '0');
+    const formatted = '£' + priceNum.toFixed(2).replace(/\.00$/, '');
+    const cycleLabel = billingCycleLabel || (billingCycle === 'annual' ? 'Annual subscription' : 'Monthly subscription');
+    document.getElementById('summary-plan-name').textContent      = planName || planInfo.label;
+    document.getElementById('summary-price-original').textContent = formatted + (billingCycle === 'annual' ? '/yr' : '/mo');
+    document.getElementById('summary-total').textContent          = formatted;
+    document.getElementById('subscription-cycle-label').textContent = cycleLabel;
 
     // US-LEGAL-1.5: Update renewal disclosure with actual renewal date, amount, and cancel path
     const renewalDate = new Date();
@@ -282,7 +465,7 @@
     const renewalDateStr = renewalDate.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
     const disclosureEl = document.getElementById('checkout-renewal-disclosure');
     if (disclosureEl) {
-      disclosureEl.textContent = `Your subscription renews on ${renewalDateStr} for ${formatted}. Cancel anytime from Settings → Billing.`;
+      disclosureEl.textContent = `Your subscription renews on ${renewalDateStr} for ${formatted}${billingCycle === 'annual' ? '/yr' : '/mo'}. Cancel anytime from Settings → Billing.`;
     }
     document.getElementById('summary-features').innerHTML = planInfo.features.map(f => `
       <div class="flex items-center gap-2.5 text-sm text-gray-600">
@@ -295,6 +478,16 @@
       </div>
     `).join('');
 
+    // Mount Stripe Elements
+    _stripeInstance = Stripe(publishableKey);
+    _stripeElements = _stripeInstance.elements({ clientSecret, appearance: _stripeAppearance });
+
+    // Request billing address so Stripe Tax can determine VAT liability (P3)
+    _stripeElements.create('payment', {
+      layout: { type: 'tabs', defaultCollapsed: false },
+      fields: { billingDetails: { address: 'auto' } },
+    }).mount('#payment-element');
+
     document.getElementById('page-loading').classList.add('hidden');
     document.getElementById('checkout-content').classList.remove('hidden');
     document.getElementById('checkout-content').classList.add('grid');
@@ -306,9 +499,7 @@
       annualAckBlock.classList.remove('hidden');
     }
 
-    // Submit → create a Stripe-hosted Checkout session and redirect. Card details and promo
-    // codes (incl. 100%-off) are handled on Stripe's page; the plan is activated by the
-    // checkout.session.completed webhook — including for £0 invoices.
+    // Submit
     const form = document.getElementById('payment-form');
     const submitBtn = document.getElementById('submit-btn');
     const submitText = document.getElementById('submit-text');
@@ -319,6 +510,12 @@
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
 
+      // £0 checkout (100%-off promo): the plan is already active — no payment to confirm.
+      if (_isFreeCheckout) {
+        window.location.href = `${window.location.origin}/workspace.html?payment=success`;
+        return;
+      }
+
       // Gate annual plans behind the acknowledgment checkbox
       if (billingCycle === 'annual' && !annualAckCheckbox.checked) {
         errorMsg.textContent = 'Please read and accept the annual billing acknowledgment before proceeding.';
@@ -328,27 +525,24 @@
       }
 
       submitBtn.disabled = true;
-      submitText.textContent = 'Redirecting…';
+      submitText.textContent = 'Processing…';
       submitSpinner.classList.remove('hidden');
       errorDiv.classList.add('hidden');
 
-      try {
-        const res = await fetch('/.netlify/functions/create-plan-checkout-intent', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ planId: plan.id, billingCycle, currency: 'GBP' }),
-        });
-        const json = await res.json();
-        if (!res.ok || !json.url) {
-          throw new Error(json.error || 'Failed to start checkout.');
-        }
-        window.location.href = json.url;   // hand off to Stripe's hosted page
-        return;
-      } catch (err) {
-        submitBtn.disabled = false;
-        submitText.textContent = 'Continue to Secure Payment';
-        submitSpinner.classList.add('hidden');
-        errorMsg.textContent = err.message || 'Something went wrong. Please try again.';
+      const { error } = await _stripeInstance.confirmPayment({
+        elements: _stripeElements,
+        confirmParams: {
+          return_url: `${window.location.origin}/workspace.html?payment=success`,
+        },
+      });
+
+      // Only reached on error
+      submitBtn.disabled = false;
+      submitText.textContent = 'Start My Subscription';
+      submitSpinner.classList.add('hidden');
+
+      if (error) {
+        errorMsg.textContent = error.message || 'Payment failed. Please check your details and try again.';
         errorDiv.classList.remove('hidden');
         errorDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
       }
