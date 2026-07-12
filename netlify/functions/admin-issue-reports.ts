@@ -492,6 +492,21 @@ export default withLambda(async (event) => {
                 .where(eq(issueReports.id, id));
         }
 
+        // Putting a ticket On Hold cancels a still-QUEUED AI handoff, otherwise the local
+        // runner claims it (its claim query keys off dev_handoff_status, not the visible
+        // status) and its result overwrites the status straight back out of On Hold. The
+        // compare-and-swap on dev_handoff_status='queued' only cancels a handoff nobody has
+        // started: if a runner claimed it (→ 'in_progress') in the meantime the WHERE misses,
+        // so we never yank a fix out from under an active runner.
+        let handoffCancelled = false;
+        if (newStatus === 'on_hold') {
+            const cancelled = await db.update(issueReports)
+                .set({ devHandoffStatus: null, devHandoffAt: null, devResult: null, updatedAt: new Date() })
+                .where(and(eq(issueReports.id, id), eq(issueReports.devHandoffStatus, 'queued')))
+                .returning({ id: issueReports.id });
+            handoffCancelled = cancelled.length > 0;
+        }
+
         // Promoting to the roadmap creates (or refreshes) a Feature Roadmap item carrying the
         // chosen priority. Idempotent — re-promoting the same issue won't duplicate it.
         if (newStatus === 'roadmap') {
@@ -509,11 +524,13 @@ export default withLambda(async (event) => {
 
         // Record the supporting message / status change in the thread.
         if (message || newStatus) {
+            const autoBody = `We've updated this to "${ISSUE_STATUS_LABEL[finalStatus]}".` +
+                (handoffCancelled ? ' The queued AI auto-fix has been cancelled.' : '');
             await db.insert(issueReportMessages).values({
                 issueId: id,
                 authorType: 'admin',
                 authorId: admin.id,
-                body: message || `We've updated this to "${ISSUE_STATUS_LABEL[finalStatus]}".`,
+                body: message || autoBody,
                 status: newStatus,
             });
         }
@@ -522,7 +539,7 @@ export default withLambda(async (event) => {
         await notifyIssueUser(db, { userId: issue.userId, issueId: id, status: finalStatus, adminMessage: message, headers: event.headers })
             .catch((e) => console.error('[admin-issue-reports] user notify failed:', e?.message || e));
 
-        return json(200, { ok: true, status: finalStatus });
+        return json(200, { ok: true, status: finalStatus, handoffCancelled });
     }
 
     return json(405, { error: 'Method Not Allowed.' });
