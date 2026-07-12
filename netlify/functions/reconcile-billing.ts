@@ -29,7 +29,8 @@ const PRICE_TO_TIER: Record<string, string> = {
     'price_1TgGP8E7lvVYjk1BRBeEZVd6': 'saver',
     'price_1TgGPfE7lvVYjk1B1CQrS6pE': 'employee',
     // Live
-    'price_1Tg6f1CuS8qyNSsFxeUsfi4a': 'buster',
+    'price_1TsGFNCuS8qyNSsFOeV5bjI2': 'buster',   // current live Buster price
+    'price_1Tg6f1CuS8qyNSsFxeUsfi4a': 'buster',   // legacy Buster price — keep so pre-price-change subs still map
     'price_1Tg6fQCuS8qyNSsF5DKmEqMu': 'saver',
     'price_1Tg6fiCuS8qyNSsF787zwCwh': 'employee',
 };

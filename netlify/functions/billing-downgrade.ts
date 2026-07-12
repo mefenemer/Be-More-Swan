@@ -26,7 +26,7 @@ const STRIPE_PRICE_IDS: Record<string, string> = isTestMode
         employee: 'price_1TgGPfE7lvVYjk1B1CQrS6pE',
     }
     : {
-        buster:   'price_1Tg6f1CuS8qyNSsFxeUsfi4a',
+        buster:   'price_1TsGFNCuS8qyNSsFOeV5bjI2',
         saver:    'price_1Tg6fQCuS8qyNSsF5DKmEqMu',
         employee: 'price_1Tg6fiCuS8qyNSsF787zwCwh',
     };
