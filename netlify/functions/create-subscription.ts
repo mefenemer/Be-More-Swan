@@ -50,6 +50,25 @@ export default withLambda(async (event) => {
       return { statusCode: 403, body: JSON.stringify({ error: 'Account not active.' }) };
     }
 
+    // Double-charge guard: if this org already has an active plan, do NOT create another
+    // Stripe subscription (confirming its card would charge the customer a second time while
+    // the webhook's plan insert would collide on plans_one_active_per_org_unique). Report
+    // no-payment-due so the frontend routes the already-subscribed user to their dashboard,
+    // matching the £0 already-provisioned response shape.
+    const [activePlan] = await db
+      .select({ id: plans.id, planName: plans.planName })
+      .from(plans)
+      .where(and(eq(plans.organisationId, orgId), eq(plans.status, 'active')))
+      .limit(1);
+    if (activePlan) {
+      return {
+        statusCode: 200,
+        body: JSON.stringify({
+          data: { requiresPayment: false, alreadySubscribed: true, planName: activePlan.planName },
+        }),
+      };
+    }
+
     const { tier, billingCycle: rawCycle, promotionCodeId } = JSON.parse(event.body || '{}');
     if (!tier) return { statusCode: 400, body: JSON.stringify({ error: 'Missing tier.' }) };
 
@@ -159,16 +178,29 @@ export default withLambda(async (event) => {
     let subscriptionItem: Stripe.SubscriptionCreateParams.Item;
     if (billingCycle === 'annual') {
       // Annual plans bill a 12-month lump sum (already discounted in baseChargeGbp) once a year.
-      // dahlia API requires price_data.product (an ID); create the product explicitly.
-      const annualProduct = await stripe.products.create({ name: masterPlan.name });
-      subscriptionItem = {
-        price_data: {
-          currency: 'gbp',
-          product: annualProduct.id,
-          unit_amount: Math.round(baseChargeGbp * 100),
-          recurring: { interval: 'year' },
-        },
-      };
+      // Reuse a stable annual Price identified by a lookup_key rather than minting a fresh
+      // Product + inline price_data on every call — otherwise page reloads / promo re-applies
+      // litter the live Stripe catalog with duplicate products. The amount is encoded in the
+      // key, so if the annual price ever changes a new Price is created transparently.
+      const annualUnitAmount = Math.round(baseChargeGbp * 100);
+      const annualLookupKey  = `${tierKey}_annual_gbp_${annualUnitAmount}`;
+      const existingAnnual   = await stripe.prices.list({ lookup_keys: [annualLookupKey], active: true, limit: 1 });
+      let annualPriceId: string;
+      if (existingAnnual.data.length > 0) {
+        annualPriceId = existingAnnual.data[0].id;
+      } else {
+        const annualProduct = await stripe.products.create({ name: `${masterPlan.name} (Annual)` });
+        const annualPrice   = await stripe.prices.create({
+          currency:            'gbp',
+          product:             annualProduct.id,
+          unit_amount:         annualUnitAmount,
+          recurring:           { interval: 'year' },
+          lookup_key:          annualLookupKey,
+          transfer_lookup_key: true,
+        });
+        annualPriceId = annualPrice.id;
+      }
+      subscriptionItem = { price: annualPriceId };
     } else {
       subscriptionItem = { price: stripePriceId };
     }
@@ -217,6 +249,12 @@ export default withLambda(async (event) => {
         .where(and(eq(plans.organisationId, orgId), eq(plans.status, 'active')))
         .limit(1);
 
+      // Track whether THIS subscription became the org's active plan. A £0 subscription
+      // goes straight to `active` (not `incomplete`), so the stale-sub cleanup above won't
+      // reap it; if we don't attach it to a plan we must cancel it here, or a concurrent /
+      // repeat £0 submit leaves duplicate active £0 subscriptions on the customer.
+      let attachedSubscription = false;
+
       if (!existingPlan) {
         try {
           const [newPlan] = await db.insert(plans).values({
@@ -251,11 +289,22 @@ export default withLambda(async (event) => {
           });
 
           await resolveActionNotifications(db, user.id, PAYMENT_RESTORED_TYPES);
+          attachedSubscription = true;
         } catch (provErr: any) {
           // Unique constraint = a concurrent path already created the active plan; that's fine.
           if (provErr?.code !== '23505' && !provErr?.message?.includes('plans_one_active_per_org_unique')) {
             throw provErr;
           }
+        }
+      }
+
+      // Already provisioned (existing plan or a concurrent submit won the race): this £0
+      // subscription is redundant — cancel it so the customer isn't left with duplicates.
+      if (!attachedSubscription) {
+        try {
+          await stripe.subscriptions.cancel(subscription.id);
+        } catch (cancelErr: any) {
+          console.warn('[create-subscription] Could not cancel redundant £0 subscription:', cancelErr?.message);
         }
       }
 
