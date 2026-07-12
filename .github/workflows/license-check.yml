@@ -12,6 +12,11 @@ on:
       - 'package.json'
       - 'package-lock.json'
 
+# No write access needed: this workflow only scans and reports. It never
+# pushes back to the repo, so the default read-only token is sufficient.
+permissions:
+  contents: read
+
 jobs:
   license-scan:
     name: Scan dependency licenses
@@ -69,12 +74,29 @@ jobs:
       - name: Generate THIRD-PARTY-NOTICES
         run: node scripts/generate-notices.js
 
-      # ── Commit THIRD-PARTY-NOTICES if changed ────────────────────────────────
-      - name: Commit updated notices (push to main/test only)
-        if: github.event_name == 'push'
+      # ── Upload the freshly generated notices as a build artifact ─────────────
+      # Makes the regenerated file downloadable from the workflow run regardless
+      # of whether it matches what's committed.
+      - name: Upload THIRD-PARTY-NOTICES artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: third-party-notices
+          path: THIRD-PARTY-NOTICES
+
+      # ── Report (non-blocking) if committed notices drifted ───────────────────
+      # We deliberately do NOT fail here. THIRD-PARTY-NOTICES is platform-
+      # dependent (npm installs OS/arch-specific native binaries — @esbuild/*,
+      # @napi-rs/canvas-*, @tailwindcss/oxide-*, @parcel/watcher-*), so a file
+      # generated on a Mac dev machine can never byte-match one generated on the
+      # Linux CI runner. A hard gate would therefore stay red forever. Instead we
+      # surface drift as a warning and publish the freshly generated file as an
+      # artifact (uploaded above) for anyone who needs the canonical copy.
+      - name: Report THIRD-PARTY-NOTICES drift (non-blocking)
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add THIRD-PARTY-NOTICES
-          git diff --cached --quiet || git commit -m "chore: update THIRD-PARTY-NOTICES [skip ci]"
-          git push
+          if git diff --cached --quiet; then
+            echo "THIRD-PARTY-NOTICES is up to date."
+          else
+            echo "::warning::THIRD-PARTY-NOTICES differs from the freshly generated file. Download the 'third-party-notices' artifact from this run for the current copy. (Note: output is platform-specific — regenerate on Linux to byte-match CI.)"
+            git diff --cached --stat -- THIRD-PARTY-NOTICES
+          fi
