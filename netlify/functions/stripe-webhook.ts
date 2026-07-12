@@ -39,8 +39,16 @@ export default withLambda(async (event) => {
     const sig = event.headers['stripe-signature'];
     let stripeEvent: Stripe.Event;
 
+    // constructEvent must see the EXACT raw bytes Stripe signed. Netlify base64-encodes
+    // the body for some content types; decode it first (mirrors webhook-intake.ts). When
+    // isBase64Encoded is false — the current application/json case — this is event.body
+    // unchanged, so there is no behaviour change today, only a guard if that ever flips.
+    const rawBody = event.isBase64Encoded && event.body
+        ? Buffer.from(event.body, 'base64').toString('utf8')
+        : (event.body || '');
+
     try {
-        stripeEvent = stripe.webhooks.constructEvent(event.body!, sig!, webhookSecret);
+        stripeEvent = stripe.webhooks.constructEvent(rawBody, sig!, webhookSecret);
     } catch (err: any) {
         return { statusCode: 400, body: `Webhook Error: ${err.message}` };
     }
