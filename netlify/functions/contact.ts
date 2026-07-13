@@ -5,7 +5,7 @@
 
 import { Handler } from '@netlify/functions';
 import { Resend } from 'resend';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, leads, leadReplies } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -64,12 +64,14 @@ export default withLambda(async (event) => {
             const [existingUser] = await db.select({ id: users.id })
                 .from(users).where(eq(users.email, resolvedEmail)).limit(1);
 
-            // Each submission is preserved. The first opens the lead (message → useCase, the
-            // "original request"); repeat submissions on the same email+topic append to the
-            // correspondence thread instead of overwriting, and reflag the lead for attention.
+            // One enquiry record per contact (email): the first message from a person opens the
+            // record (message → useCase, the "original request"); every later submission — any
+            // topic — appends to that contact's correspondence thread and reflags it for
+            // attention, so nothing is ever overwritten. Matches inbound-email.ts threading.
             const [existingLead] = await db.select({ id: leads.id })
                 .from(leads)
-                .where(and(eq(leads.email, resolvedEmail), eq(leads.opportunityReason, subject!)))
+                .where(and(eq(leads.email, resolvedEmail), inArray(leads.leadType, ['contact_form', 'inbound_email'])))
+                .orderBy(desc(leads.createdAt))
                 .limit(1);
 
             if (existingLead) {
@@ -77,7 +79,7 @@ export default withLambda(async (event) => {
                     leadId: existingLead.id,
                     direction: 'inbound',
                     authorId: null,
-                    body: message,
+                    body: `${subject}\n\n${message}`,
                 });
                 await db.update(leads)
                     .set({ status: 'notification_pending', updatedAt: new Date() })

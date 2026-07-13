@@ -145,10 +145,7 @@ export default withLambda(async (event: HandlerEvent) => {
             source: 'inbound_email',
             useCase: messageBody,
             priority: 'medium',
-        }).onConflictDoUpdate({
-            target: [leads.email, leads.opportunityReason],
-            set: { useCase: messageBody, updatedAt: new Date() },
-        });
+        }).onConflictDoNothing(); // find-by-email above already handles repeats; never overwrite
 
         console.log('[inbound-email] created new lead', JSON.stringify({ sender: senderEmail, subject }));
         return { statusCode: 200, body: 'Lead created.' };
