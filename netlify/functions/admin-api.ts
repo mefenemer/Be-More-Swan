@@ -1900,18 +1900,22 @@ export default withLambda(async (event) => {
             if (denied) return denied;
             const search = qs.search || '';
             const type   = qs.type || '';
-            // People who reached out or signed up — enquiries + waitlist (not system signals).
-            const conds: any[] = [inArray(leads.leadType, ['contact_form', 'inbound_email', 'waitlist_interest'])];
+            const opp    = qs.opp || '';   // optional leadType (opportunity/signal) filter
+            // Contacts is the single CRM: every lead row is a person (enquiries, waitlist, and the
+            // system-detected sales signals that used to live in the now-removed Sales Pipeline).
+            const conds: any[] = [];
             if (type) conds.push(eq(leads.contactType, type));
+            if (opp)  conds.push(eq(leads.leadType, opp));
             if (search) conds.push(or(
                 ilike(leads.email, `%${search}%`), ilike(leads.name, `%${search}%`), ilike(leads.company, `%${search}%`),
             ));
             const rows = await db.select({
                 id: leads.id, name: leads.name, email: leads.email, company: leads.company,
                 phone: leads.phone, contactType: leads.contactType, status: leads.status,
+                leadType: leads.leadType, priority: leads.priority,
                 tags: leads.tags, useCase: leads.useCase, opportunityReason: leads.opportunityReason,
                 createdAt: leads.createdAt, updatedAt: leads.updatedAt,
-            }).from(leads).where(and(...conds)).orderBy(desc(leads.updatedAt)).limit(500);
+            }).from(leads).where(conds.length ? and(...conds) : undefined).orderBy(desc(leads.updatedAt)).limit(500);
             // One contact per person: a person can have several lead rows (a contact form + a
             // waitlist signup, etc.). Ordered by last activity, so we keep the most recent per email.
             const seen = new Set<string>();

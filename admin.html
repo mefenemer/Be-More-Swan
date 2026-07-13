@@ -871,64 +871,6 @@
         </div>
       </section>
 
-      <!-- ── US-SALES-1.1 Part 5: Sales Pipeline ──────────────────────── -->
-      <section id="view-sales-pipeline" class="admin-view hidden">
-        <div class="flex items-center justify-between mb-5">
-          <div>
-            <h2 class="text-lg font-bold text-gray-900">Sales Pipeline</h2>
-            <p class="text-sm text-gray-500 mt-0.5">All captured leads and requests — contact-form enquiries, inbound emails, role requests, enterprise enquiries, and more. Click a name to view the thread and reply.</p>
-          </div>
-          <button onclick="loadSalesPipeline()" class="text-sm px-4 py-2 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700">Refresh</button>
-        </div>
-
-        <!-- Filters -->
-        <div class="flex flex-wrap gap-2 mb-4">
-          <select id="sp-filter-type" onchange="loadSalesPipeline()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-            <option value="">All types</option>
-            <option value="enterprise_enquiry">Enterprise enquiry</option>
-            <option value="role_request">Role request</option>
-            <option value="cancellation_intent">Cancellation intent</option>
-            <option value="upgrade_intent">Upgrade intent</option>
-            <option value="never_onboarded">Never onboarded</option>
-            <option value="waitlist_interest">Waitlist interest</option>
-            <option value="contact_form">Contact form</option>
-            <option value="inbound_email">Inbound email</option>
-            <option value="payment_recovery">Payment recovery</option>
-          </select>
-          <select id="sp-filter-priority" onchange="loadSalesPipeline()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-            <option value="">All priorities</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </select>
-          <select id="sp-filter-status" onchange="loadSalesPipeline()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-            <option value="">All statuses</option>
-            <option value="notification_pending">New</option>
-            <option value="contacted">Contacted</option>
-            <option value="qualified">Qualified</option>
-            <option value="converted">Converted</option>
-            <option value="closed_lost">Closed lost</option>
-          </select>
-          <input id="sp-filter-search" type="text" placeholder="Search email or name…" oninput="loadSalesPipeline()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none w-52">
-        </div>
-
-        <div id="sales-pipeline-body">
-          <p class="text-gray-400 text-sm">Loading…</p>
-        </div>
-
-        <!-- Lead detail + correspondence slide-over -->
-        <div id="lead-detail-panel" class="hidden fixed inset-0 z-40">
-          <div class="absolute inset-0 bg-black/40" onclick="closeLeadPanel()"></div>
-          <div class="absolute right-0 top-0 bottom-0 w-full max-w-lg bg-white shadow-2xl overflow-y-auto">
-            <div class="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between z-10">
-              <h2 id="lead-panel-title" class="font-bold text-gray-900">Request Detail</h2>
-              <button onclick="closeLeadPanel()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">&times;</button>
-            </div>
-            <div id="lead-detail-body" class="p-6 space-y-5"></div>
-          </div>
-        </div>
-      </section>
-
       <!-- ── CRM Contacts (contact-centric 3-pane) ─────────────────────── -->
       <section id="view-contacts" class="admin-view hidden">
         <div class="flex flex-col lg:flex-row gap-4 lg:h-[calc(100vh-150px)] lg:min-h-[540px]">
@@ -949,6 +891,18 @@
                 <button data-ctype="client" onclick="_contactsSetType('client')" class="ct-filter text-xs font-semibold px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Clients</button>
                 <button data-ctype="other" onclick="_contactsSetType('other')" class="ct-filter text-xs font-semibold px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Other</button>
               </div>
+              <select id="contacts-opp-filter" onchange="_contactsSetOpp(this.value)" class="w-full mt-2 text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+                <option value="">All opportunities</option>
+                <option value="waitlist_interest">Future Assistant Opportunity</option>
+                <option value="role_request">Assistant Request</option>
+                <option value="enterprise_enquiry">Enterprise Enquiry</option>
+                <option value="upgrade_intent">Upgrade Opportunity</option>
+                <option value="cancellation_intent">Churn Risk</option>
+                <option value="never_onboarded">Not Onboarded</option>
+                <option value="payment_recovery">Payment Recovery</option>
+                <option value="contact_form">Enquiry</option>
+                <option value="inbound_email">Inbound Email</option>
+              </select>
             </div>
             <div id="contacts-list" class="flex-1 overflow-y-auto min-h-[240px]">
               <p class="p-4 text-sm text-gray-400 animate-pulse">Loading…</p>
@@ -2034,7 +1988,7 @@ const VIEW_LABELS = {
   reconciliation: 'Stripe Reconciliation', dunning: 'Dunning Queue',
   'manage-admins': 'Admin Accounts', 'kill-switches': 'Emergency Controls',
   gamification: 'Gamification Settings', 'session-timeout': 'Session Timeout', 'reward-audits': 'Reward Audits',
-  'feature-flags': 'Feature Flags', 'sales-pipeline': 'Sales Pipeline', contacts: 'Contacts',
+  'feature-flags': 'Feature Flags', contacts: 'Contacts',
   'breach-response': 'Breach Response', 'master-data': 'Master Data',
   workspaces: 'Workspaces', 'workspace-detail': 'Workspace Detail',
   'blueprint-inspector': 'Blueprint Inspector', sandbox: 'Sandbox Environment',
@@ -2051,7 +2005,6 @@ const ADMIN_CATS = {
     { view: 'users',    icon: '👥', label: 'All Users' },
     { view: 'contacts', icon: '👤', label: 'Contacts' },
     { view: 'tickets',  icon: '🎫', label: 'Support Tickets' },
-    { view: 'sales-pipeline', icon: '💼', label: 'Sales Pipeline' },
   ]},
   billing: { label: 'Billing', roles: ['admin','super_admin','billing_admin'], children: [
     { view: 'reconciliation', icon: '🔄', label: 'Stripe Reconciliation' },
@@ -2317,7 +2270,6 @@ function adminNav(view) {
   if (view === 'dunning')         loadDunningQueue();
   if (view === 'disputes')        loadDisputes();
   if (view === 'manage-admins')   loadManageAdmins();
-  if (view === 'sales-pipeline')  loadSalesPipeline();
   if (view === 'contacts')        loadContacts();
   if (view === 'kill-switches')   loadKillSwitches();
   if (view === 'gamification')    loadGamificationSettings();
@@ -5800,228 +5752,20 @@ async function loadDisputes() {
   } catch(e) { body.innerHTML = `<p class="text-red-500">${e.message}</p>`; }
 }
 
-// ── US-SALES-1.1 Part 5: Sales Pipeline ──────────────────────────────────────
+// Priority + pipeline-status vocab — retained from the retired Sales Pipeline; now drives the
+// sales-tracking controls in the Contacts detail panel.
 const SP_PRIORITY_BADGE = {
   high:   'bg-red-100 text-red-800',
   medium: 'bg-amber-100 text-amber-800',
   low:    'bg-gray-100 text-gray-600',
 };
-const SP_TYPE_BADGE = {
-  enterprise_enquiry:  'bg-purple-100 text-purple-800',
-  role_request:        'bg-blue-100 text-blue-800',
-  cancellation_intent: 'bg-red-100 text-red-800',
-  upgrade_intent:      'bg-emerald-100 text-emerald-800',
-  never_onboarded:     'bg-gray-100 text-gray-700',
-  waitlist_interest:   'bg-sky-100 text-sky-800',
-  contact_form:        'bg-indigo-100 text-indigo-800',
-  inbound_email:       'bg-teal-100 text-teal-800',
-  payment_recovery:    'bg-rose-100 text-rose-800',
-};
 const SP_STATUS_OPTIONS = ['notification_pending','contacted','qualified','converted','closed_lost'];
 const SP_STATUS_LABELS  = { notification_pending:'New', contacted:'Contacted', qualified:'Qualified', converted:'Converted', closed_lost:'Closed lost' };
-
-async function loadSalesPipeline() {
-  const el = document.getElementById('sales-pipeline-body');
-  el.innerHTML = '<p class="text-gray-400 text-sm animate-pulse">Loading…</p>';
-  try {
-    const leadType = document.getElementById('sp-filter-type').value;
-    const priority = document.getElementById('sp-filter-priority').value;
-    const status   = document.getElementById('sp-filter-status').value;
-    const search   = document.getElementById('sp-filter-search').value.trim();
-    const params   = new URLSearchParams({ resource: 'sales-pipeline' });
-    if (leadType) params.set('leadType', leadType);
-    if (priority) params.set('priority', priority);
-    if (status)   params.set('status', status);
-    if (search)   params.set('search', search);
-
-    const data = await api(`/.netlify/functions/admin-api?${params}`);
-    const leads = data.leads || [];
-    if (!leads.length) { el.innerHTML = '<p class="text-gray-400 text-sm">No leads match the current filters.</p>'; return; }
-
-    const now = Date.now();
-    const rows = leads.map(l => {
-      const isUrgent = l.leadType === 'cancellation_intent' && l.createdAt && (now - new Date(l.createdAt).getTime()) < 86400000;
-      const typeBadge = SP_TYPE_BADGE[l.leadType] || 'bg-gray-100 text-gray-700';
-      const priBadge  = SP_PRIORITY_BADGE[l.priority] || 'bg-gray-100 text-gray-600';
-      const statusOpts = SP_STATUS_OPTIONS.map(s =>
-        `<option value="${s}" ${l.status === s ? 'selected' : ''}>${SP_STATUS_LABELS[s]}</option>`
-      ).join('');
-      return `
-        <tr class="border-b border-gray-100 hover:bg-gray-50">
-          <td class="px-4 py-3 text-sm">
-            <button onclick="openLeadDetail(${l.id})" class="font-semibold text-emerald-700 hover:underline text-left">${_escH(l.name || l.email)}</button>
-            ${l.name ? `<div class="text-xs text-gray-400">${_escH(l.email)}</div>` : ''}
-            ${isUrgent ? '<span class="mt-1 inline-block text-xs font-bold bg-red-600 text-white px-1.5 py-0.5 rounded">Urgent</span>' : ''}
-          </td>
-          <td class="px-4 py-3"><span class="text-xs font-semibold px-2 py-0.5 rounded-full ${typeBadge}">${(l.leadType||'—').replace(/_/g,' ')}</span></td>
-          <td class="px-4 py-3 text-xs text-gray-500">${l.source ? l.source.replace(/_/g,' ') : '—'}</td>
-          <td class="px-4 py-3"><span class="text-xs font-semibold px-2 py-0.5 rounded-full ${priBadge}">${l.priority || '—'}</span></td>
-          <td class="px-4 py-3">
-            <select onchange="updateLeadStatus(${l.id}, this.value)" class="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:ring-2 focus:ring-emerald-500 focus:outline-none">${statusOpts}</select>
-          </td>
-          <td class="px-4 py-3 text-xs text-gray-500 max-w-xs">
-            <input type="text" value="${_escH(l.salesNotes||'')}" placeholder="Add notes…"
-              onblur="saveLeadNotes(${l.id}, this.value)"
-              class="w-full border border-transparent hover:border-gray-200 focus:border-gray-300 rounded px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-400 bg-transparent">
-          </td>
-          <td class="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">${l.createdAt ? new Date(l.createdAt).toLocaleDateString('en-GB') : '—'}</td>
-        </tr>`;
-    }).join('');
-
-    el.innerHTML = `
-      <div class="overflow-x-auto rounded-xl border border-gray-200">
-        <table class="w-full text-sm">
-          <thead class="bg-gray-50 text-xs text-gray-500 uppercase tracking-wider">
-            <tr>
-              <th class="px-4 py-3 text-left">Contact</th>
-              <th class="px-4 py-3 text-left">Type</th>
-              <th class="px-4 py-3 text-left">Source</th>
-              <th class="px-4 py-3 text-left">Priority</th>
-              <th class="px-4 py-3 text-left">Status</th>
-              <th class="px-4 py-3 text-left">Notes</th>
-              <th class="px-4 py-3 text-left">Created</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-      <p class="text-xs text-gray-400 mt-2">${leads.length} lead${leads.length === 1 ? '' : 's'} shown</p>`;
-  } catch(e) {
-    el.innerHTML = `<p class="text-red-500 text-sm">Failed to load: ${e.message}</p>`;
-  }
-}
-
-async function updateLeadStatus(leadId, newStatus) {
-  try {
-    const res = await fetch('/.netlify/functions/admin-api?resource=lead-status', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ resource: 'lead-status', leadId, status: newStatus }),
-    });
-    if (!res.ok) { const d = await res.json(); alert('Error: ' + d.error); }
-  } catch(e) { alert('Request failed: ' + e.message); }
-}
-
-async function saveLeadNotes(leadId, notes) {
-  try {
-    await fetch('/.netlify/functions/admin-api?resource=lead-notes', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ resource: 'lead-notes', leadId, salesNotes: notes }),
-    });
-  } catch { /* silent */ }
-}
-
-// ── CRM contact-request detail + threaded replies ─────────────────────────────
-let _leadPanelId = null;
-
-async function openLeadDetail(leadId) {
-  _leadPanelId = leadId;
-  const panel = document.getElementById('lead-detail-panel');
-  const bodyEl = document.getElementById('lead-detail-body');
-  panel.classList.remove('hidden');
-  bodyEl.innerHTML = '<p class="text-gray-400 text-sm animate-pulse">Loading…</p>';
-  try {
-    const data = await api(`/.netlify/functions/admin-api?resource=lead-detail&id=${leadId}`);
-    renderLeadDetail(data.lead, data.thread || []);
-  } catch (e) {
-    bodyEl.innerHTML = `<p class="text-red-500 text-sm">Failed to load: ${_escH(e.message)}</p>`;
-  }
-}
-
-function closeLeadPanel() {
-  document.getElementById('lead-detail-panel').classList.add('hidden');
-  _leadPanelId = null;
-}
-
-function renderLeadDetail(lead, thread) {
-  document.getElementById('lead-panel-title').textContent = lead.name || lead.email;
-  const typeBadge = SP_TYPE_BADGE[lead.leadType] || 'bg-gray-100 text-gray-700';
-  const when = d => d ? new Date(d).toLocaleString('en-GB') : '';
-
-  const threadHtml = thread.length ? thread.map(r => {
-    const inbound  = r.direction === 'inbound';
-    const internal = r.direction === 'internal';
-    const box = internal ? 'bg-amber-50 border-amber-200'
-              : inbound  ? 'bg-gray-50 border-gray-200'
-                         : 'bg-emerald-50 border-emerald-200';
-    const who = internal ? `Internal note${r.authorName ? ' · ' + _escH(r.authorName) : ''}`
-              : inbound  ? _escH(lead.name || lead.email)
-                         : `You${r.authorName ? ' · ' + _escH(r.authorName) : ''}`;
-    return `
-      <div class="border ${box} rounded-xl px-4 py-3">
-        <div class="flex justify-between items-center mb-1">
-          <span class="text-xs font-bold text-gray-600">${who}</span>
-          <span class="text-xs text-gray-400">${when(r.createdAt)}</span>
-        </div>
-        <div class="text-sm text-gray-700 whitespace-pre-wrap">${_escH(r.body)}</div>
-      </div>`;
-  }).join('') : '<p class="text-xs text-gray-400">No replies yet.</p>';
-
-  document.getElementById('lead-detail-body').innerHTML = `
-    <div class="flex flex-wrap items-center gap-2">
-      <span class="text-xs font-semibold px-2 py-0.5 rounded-full ${typeBadge}">${(lead.leadType||'—').replace(/_/g,' ')}</span>
-      <span class="text-xs text-gray-400">${lead.source ? _escH(lead.source.replace(/_/g,' ')) : ''}</span>
-    </div>
-    <div class="text-sm">
-      <a href="mailto:${_escH(lead.email)}" class="text-emerald-700 hover:underline">${_escH(lead.email)}</a>
-      ${lead.company ? `<span class="text-gray-400"> · ${_escH(lead.company)}</span>` : ''}
-    </div>
-
-    <div class="border border-gray-200 rounded-xl p-4 bg-white">
-      <p class="text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Original request</p>
-      <p class="text-sm font-semibold text-gray-900 mb-2">${_escH(lead.opportunityReason || '—')}</p>
-      <p class="text-sm text-gray-600 whitespace-pre-wrap">${_escH(lead.useCase || '(no message)')}</p>
-      <p class="text-xs text-gray-400 mt-3">Received ${when(lead.createdAt)}</p>
-    </div>
-
-    <div>
-      <p class="text-xs font-bold uppercase tracking-wide text-gray-400 mb-2">Correspondence</p>
-      <div class="space-y-2">${threadHtml}</div>
-    </div>
-
-    <div class="border-t border-gray-100 pt-4">
-      <textarea id="lead-reply-body" rows="4" placeholder="Write a reply to the requester…"
-        class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none resize-y"></textarea>
-      <p id="lead-reply-error" class="hidden text-xs text-red-600 mt-2"></p>
-      <div class="flex items-center gap-2 mt-3">
-        <button id="lead-reply-send" onclick="sendLeadReply('outbound')"
-          class="px-4 py-2 bg-emerald-700 text-white text-sm font-bold rounded-lg hover:bg-emerald-800 disabled:opacity-60">Send reply</button>
-        <button onclick="sendLeadReply('internal')"
-          class="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-200">Add internal note</button>
-      </div>
-      <p class="text-xs text-gray-400 mt-2">Replies are emailed to the requester from ${_escH('hello@bemoreswan.com')}. Internal notes stay private.</p>
-    </div>`;
-}
-
-async function sendLeadReply(direction) {
-  const bodyEl = document.getElementById('lead-reply-body');
-  const errEl  = document.getElementById('lead-reply-error');
-  const sendBtn = document.getElementById('lead-reply-send');
-  const message = (bodyEl.value || '').trim();
-  errEl.classList.add('hidden');
-  if (!message) { errEl.textContent = 'Please write a message first.'; errEl.classList.remove('hidden'); return; }
-  if (sendBtn) sendBtn.disabled = true;
-  try {
-    const res = await fetch('/.netlify/functions/admin-api?resource=lead-reply', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ resource: 'lead-reply', leadId: _leadPanelId, body: message, direction }),
-    });
-    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'Failed to send.'); }
-    await openLeadDetail(_leadPanelId); // refresh thread
-    loadSalesPipeline();                // reflect status/contacted change in the table
-  } catch (e) {
-    errEl.textContent = e.message;
-    errEl.classList.remove('hidden');
-  } finally {
-    if (sendBtn) sendBtn.disabled = false;
-  }
-}
 
 // ── CRM Contacts (contact-centric 3-pane) ─────────────────────────────────────
 let _contactsCache = [];
 let _contactsType = '';
+let _contactsOpp = '';
 let _selectedContactId = null;
 let _contactsDebounce = null;
 
@@ -6031,6 +5775,26 @@ const CT_TYPE_PILL = {
   client:     { label: 'Client',     cls: 'bg-emerald-100 text-emerald-800', dot: 'bg-emerald-500' },
   other:      { label: 'Other',      cls: 'bg-gray-100 text-gray-600',       dot: 'bg-gray-400' },
 };
+// Opportunity/signal badge derived from the lead's leadType — the "why they're a contact" layer
+// that Contacts absorbed from the retired Sales Pipeline. The contactType pill (above) says who
+// they are; this says what they want. Order/labels are the single source of truth for both the
+// list badge and the toolbar's opportunity filter.
+const CT_OPP_BADGE = {
+  waitlist_interest:   { label: 'Future Assistant Opportunity', cls: 'bg-sky-100 text-sky-800' },
+  role_request:        { label: 'Assistant Request',            cls: 'bg-blue-100 text-blue-800' },
+  enterprise_enquiry:  { label: 'Enterprise Enquiry',           cls: 'bg-purple-100 text-purple-800' },
+  upgrade_intent:      { label: 'Upgrade Opportunity',          cls: 'bg-emerald-100 text-emerald-800' },
+  cancellation_intent: { label: 'Churn Risk',                   cls: 'bg-red-100 text-red-800' },
+  never_onboarded:     { label: 'Not Onboarded',                cls: 'bg-orange-100 text-orange-800' },
+  payment_recovery:    { label: 'Payment Recovery',             cls: 'bg-rose-100 text-rose-800' },
+  contact_form:        { label: 'Enquiry',                      cls: 'bg-gray-100 text-gray-600' },
+  inbound_email:       { label: 'Inbound Email',                cls: 'bg-gray-100 text-gray-600' },
+};
+function _ctOppBadge(leadType) {
+  const o = CT_OPP_BADGE[leadType];
+  if (!o) return '';
+  return `<span class="inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded-full ${o.cls}">${o.label}</span>`;
+}
 const CT_AVATAR_COLORS = ['bg-emerald-500','bg-sky-500','bg-violet-500','bg-amber-500','bg-rose-500','bg-teal-500','bg-indigo-500'];
 function _ctInitials(name, email) {
   const s = (name || email || '?').trim();
@@ -6050,6 +5814,7 @@ async function loadContacts() {
     const search = document.getElementById('contacts-search').value.trim();
     const params = new URLSearchParams({ resource: 'contacts' });
     if (_contactsType) params.set('type', _contactsType);
+    if (_contactsOpp) params.set('opp', _contactsOpp);
     if (search) params.set('search', search);
     const data = await api(`/.netlify/functions/admin-api?${params}`);
     _contactsCache = data.contacts || [];
@@ -6067,6 +5832,7 @@ function _contactsSetType(t) {
   });
   loadContacts();
 }
+function _contactsSetOpp(v) { _contactsOpp = v; loadContacts(); }
 
 function renderContactList(contacts) {
   const el = document.getElementById('contacts-list');
@@ -6080,6 +5846,7 @@ function renderContactList(contacts) {
         <span class="min-w-0 flex-1">
           <span class="block font-semibold text-sm text-gray-900 truncate">${_escH(c.name || c.email)}</span>
           <span class="block text-xs text-gray-400 truncate">${_escH(c.email)}</span>
+          ${_ctOppBadge(c.leadType) ? `<span class="mt-1 block">${_ctOppBadge(c.leadType)}</span>` : ''}
         </span>
         <span class="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${pill.cls}"><span class="w-1.5 h-1.5 rounded-full ${pill.dot}"></span>${pill.label}</span>
       </button>`;
@@ -6129,6 +5896,7 @@ function renderContactDetail(lead, thread, tasks) {
         <span class="w-20 h-20 rounded-full ${_ctAvatarColor(lead.email)} text-white text-2xl font-bold flex items-center justify-center mb-3">${_escH(_ctInitials(lead.name, lead.email))}</span>
         <h2 class="text-xl font-extrabold text-gray-900">${_escH(lead.name || '—')}</h2>
         <a href="mailto:${_escH(lead.email)}" class="text-sm text-emerald-700 hover:underline">${_escH(lead.email)}</a>
+        ${_ctOppBadge(lead.leadType) ? `<div class="mt-2">${_ctOppBadge(lead.leadType)}</div>` : ''}
         <div class="mt-2 flex items-center gap-1">
           ${Object.keys(CT_TYPE_PILL).map(k => `<button onclick="_ctSetType('${k}')" class="text-xs font-semibold px-2.5 py-1 rounded-lg ${lead.contactType === k ? CT_TYPE_PILL[k].cls : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}">${CT_TYPE_PILL[k].label}</button>`).join('')}
         </div>
@@ -6213,6 +5981,18 @@ function renderContactInfo(lead) {
         <div id="ci-tags" class="flex flex-wrap gap-1">${tags.length ? tags.map(t => `<span class="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-700 rounded-full px-2 py-0.5">${_escH(t)}<button onclick="_ctRemoveTag('${_escH(t).replace(/'/g, "\\'")}')" class="text-gray-400 hover:text-red-500">×</button></span>`).join('') : '<span class="text-xs text-gray-400">No tags</span>'}</div></div>
       <button onclick="_ctSaveInfo()" class="w-full px-4 py-2 bg-emerald-700 text-white text-sm font-bold rounded-lg hover:bg-emerald-800">Save changes</button>
       <p id="ci-saved" class="hidden text-xs text-emerald-600 text-center">Saved ✓</p>
+
+      <!-- Sales tracking (absorbed from the retired Sales Pipeline) -->
+      <div class="pt-5 mt-1 border-t border-gray-100 space-y-4">
+        <div><label class="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Opportunity</label>
+          <div class="flex items-center gap-2">${_ctOppBadge(lead.leadType) || '<span class="text-xs text-gray-400">—</span>'}${lead.source ? `<span class="text-xs text-gray-400">· ${_escH(lead.source.replace(/_/g,' '))}</span>` : ''}</div></div>
+        <div><label class="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Priority</label>
+          <span class="text-xs font-semibold px-2 py-0.5 rounded-full ${SP_PRIORITY_BADGE[lead.priority] || 'bg-gray-100 text-gray-600'}">${lead.priority || '—'}</span></div>
+        <div><label class="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Pipeline status</label>
+          <select onchange="_ctSetStatus(this.value)" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">${SP_STATUS_OPTIONS.map(s => `<option value="${s}" ${lead.status === s ? 'selected' : ''}>${SP_STATUS_LABELS[s]}</option>`).join('')}</select></div>
+        <div><label class="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Sales notes</label>
+          <textarea onblur="_ctSaveNotes(this.value)" rows="3" placeholder="Add notes…" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none resize-y">${_escH(lead.salesNotes || '')}</textarea></div>
+      </div>
     </div>`;
 }
 
@@ -6257,6 +6037,15 @@ async function _ctToggleTask(taskId, done) {
 async function _ctSetType(type) {
   try { await _ctPost('contact-update', { leadId: _selectedContactId, contactType: type }); await openContact(_selectedContactId); loadContacts(); }
   catch (e) { alert('Failed: ' + e.message); }
+}
+// Pipeline status + sales notes, reusing the endpoints the retired Sales Pipeline used.
+async function _ctSetStatus(status) {
+  try { await _ctPost('lead-status', { leadId: _selectedContactId, status }); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+async function _ctSaveNotes(salesNotes) {
+  try { await _ctPost('lead-notes', { leadId: _selectedContactId, salesNotes }); }
+  catch { /* silent, matches old pipeline behaviour */ }
 }
 async function _ctSaveInfo() {
   const payload = {

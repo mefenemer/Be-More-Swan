@@ -7,6 +7,7 @@ import { Handler } from '@netlify/functions';
 import { eq, and, lt, lte, gte, isNull, sql, ne } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, plans, aiAssistants, taskRuns, leads, leadAnalysisRuns } from '../../db/schema';
+import { lookupContact } from '../../src/utils/contact-type';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async () => {
@@ -61,6 +62,10 @@ export default withLambda(async () => {
         `);
 
         for (const row of neverOnboardedSql) {
+            // These are all registered users — classify (registered/client) rather than defaulting
+            // to 'lead' so the Contacts pill is accurate. Set on insert only; never override an
+            // existing record's tier on conflict.
+            const { contactType } = await lookupContact(db, row.email);
             const res = await db.insert(leads)
                 .values({
                     email: row.email,
@@ -70,6 +75,7 @@ export default withLambda(async () => {
                     source: 'data_analysis_job',
                     userId: row.id,
                     priority: 'medium',
+                    contactType,
                 })
                 .onConflictDoUpdate({
                     target: [leads.email, leads.opportunityReason],
@@ -102,6 +108,7 @@ export default withLambda(async () => {
 
         for (const row of cancellingRows) {
             if (!row.userId || !row.email) continue;
+            const { contactType } = await lookupContact(db, row.email);
             const res = await db.insert(leads)
                 .values({
                     email: row.email,
@@ -112,6 +119,7 @@ export default withLambda(async () => {
                     userId: row.userId,
                     organisationId: row.organisationId,
                     priority: 'high',
+                    contactType,
                 })
                 .onConflictDoUpdate({
                     target: [leads.email, leads.opportunityReason],
@@ -150,6 +158,7 @@ export default withLambda(async () => {
         `);
 
         for (const row of upgradeCandidates) {
+            const { contactType } = await lookupContact(db, row.email);
             const res = await db.insert(leads)
                 .values({
                     email: row.email,
@@ -160,6 +169,7 @@ export default withLambda(async () => {
                     userId: row.user_id,
                     organisationId: row.org_id,
                     priority: 'medium',
+                    contactType,
                 })
                 .onConflictDoUpdate({
                     target: [leads.email, leads.opportunityReason],
