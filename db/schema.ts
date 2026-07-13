@@ -147,7 +147,7 @@ export const leads = pgTable('leads', {
   resolvedAt: timestamp('resolved_at'),
   // CRM Contacts view fields (db/crm-contacts.sql)
   phone: text('phone'),
-  contactType: text('contact_type').notNull().default('lead'), // 'lead' | 'client' | 'other'
+  contactType: text('contact_type').notNull().default('lead'), // 'lead' | 'registered' | 'client' | 'other'
   tags: jsonb('tags').$type<string[]>().notNull().default([]),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),

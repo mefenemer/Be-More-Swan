@@ -16,6 +16,7 @@ import Busboy from 'busboy';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { leads, leadReplies } from '../../db/schema';
+import { lookupContact, promoteContactType } from '../../src/utils/contact-type';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const INBOUND_TOKEN = process.env.INBOUND_PARSE_TOKEN;
@@ -106,9 +107,11 @@ export default withLambda(async (event: HandlerEvent) => {
 
     try {
         const db = getDb();
+        // A registered user is an existing customer → 'client'; anyone else → 'lead'.
+        const { userId: leadUserId, contactType } = await lookupContact(db, senderEmail);
 
         // Thread onto the most recent enquiry from this sender, if one exists.
-        const [existing] = await db.select({ id: leads.id, status: leads.status })
+        const [existing] = await db.select({ id: leads.id, status: leads.status, contactType: leads.contactType })
             .from(leads)
             .where(and(
                 eq(leads.email, senderEmail),
@@ -126,8 +129,12 @@ export default withLambda(async (event: HandlerEvent) => {
             });
             // A fresh inbound message always flags the lead for attention and bumps updatedAt,
             // so it resurfaces to the top of the (activity-sorted) Sales Pipeline as "New".
+            // Upgrade the record's tier if we now know more (lead → registered → client);
+            // never downgrade or override a manual 'other'.
+            const nextType = promoteContactType(existing.contactType, contactType);
+            const promote = nextType !== existing.contactType;
             await db.update(leads)
-                .set({ status: 'notification_pending', updatedAt: new Date() })
+                .set({ status: 'notification_pending', updatedAt: new Date(), ...(promote ? { contactType: nextType } : {}) })
                 .where(eq(leads.id, existing.id));
             console.log('[inbound-email] threaded onto existing lead', JSON.stringify({ leadId: existing.id, sender: senderEmail }));
             return { statusCode: 200, body: 'Threaded onto existing lead.' };
@@ -145,6 +152,8 @@ export default withLambda(async (event: HandlerEvent) => {
             source: 'inbound_email',
             useCase: messageBody,
             priority: 'medium',
+            contactType,
+            userId: leadUserId,
         }).onConflictDoNothing(); // find-by-email above already handles repeats; never overwrite
 
         console.log('[inbound-email] created new lead', JSON.stringify({ sender: senderEmail, subject }));

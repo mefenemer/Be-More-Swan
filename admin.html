@@ -945,6 +945,7 @@
               <div id="contacts-type-filter" class="flex gap-1 mt-2">
                 <button data-ctype="" onclick="_contactsSetType('')" class="ct-filter text-xs font-semibold px-2.5 py-1 rounded-lg bg-emerald-600 text-white">All</button>
                 <button data-ctype="lead" onclick="_contactsSetType('lead')" class="ct-filter text-xs font-semibold px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Leads</button>
+                <button data-ctype="registered" onclick="_contactsSetType('registered')" class="ct-filter text-xs font-semibold px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Registered</button>
                 <button data-ctype="client" onclick="_contactsSetType('client')" class="ct-filter text-xs font-semibold px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Clients</button>
                 <button data-ctype="other" onclick="_contactsSetType('other')" class="ct-filter text-xs font-semibold px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Other</button>
               </div>
@@ -6025,9 +6026,10 @@ let _selectedContactId = null;
 let _contactsDebounce = null;
 
 const CT_TYPE_PILL = {
-  lead:   { label: 'Lead',   cls: 'bg-amber-100 text-amber-800',     dot: 'bg-amber-500' },
-  client: { label: 'Client', cls: 'bg-emerald-100 text-emerald-800', dot: 'bg-emerald-500' },
-  other:  { label: 'Other',  cls: 'bg-gray-100 text-gray-600',       dot: 'bg-gray-400' },
+  lead:       { label: 'Lead',       cls: 'bg-amber-100 text-amber-800',     dot: 'bg-amber-500' },
+  registered: { label: 'Registered', cls: 'bg-sky-100 text-sky-800',         dot: 'bg-sky-500' },
+  client:     { label: 'Client',     cls: 'bg-emerald-100 text-emerald-800', dot: 'bg-emerald-500' },
+  other:      { label: 'Other',      cls: 'bg-gray-100 text-gray-600',       dot: 'bg-gray-400' },
 };
 const CT_AVATAR_COLORS = ['bg-emerald-500','bg-sky-500','bg-violet-500','bg-amber-500','bg-rose-500','bg-teal-500','bg-indigo-500'];
 function _ctInitials(name, email) {

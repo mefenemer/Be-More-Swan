@@ -7,7 +7,8 @@ import { Handler } from '@netlify/functions';
 import { Resend } from 'resend';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, leads, leadReplies } from '../../db/schema';
+import { leads, leadReplies } from '../../db/schema';
+import { lookupContact, promoteContactType } from '../../src/utils/contact-type';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
@@ -61,14 +62,14 @@ export default withLambda(async (event) => {
         try {
             const db = getDb();
             const resolvedEmail = email.trim().toLowerCase();
-            const [existingUser] = await db.select({ id: users.id })
-                .from(users).where(eq(users.email, resolvedEmail)).limit(1);
+            // A registered user is an existing customer → 'client'; anyone else → 'lead'.
+            const { userId: leadUserId, contactType } = await lookupContact(db, resolvedEmail);
 
             // One enquiry record per contact (email): the first message from a person opens the
             // record (message → useCase, the "original request"); every later submission — any
             // topic — appends to that contact's correspondence thread and reflags it for
             // attention, so nothing is ever overwritten. Matches inbound-email.ts threading.
-            const [existingLead] = await db.select({ id: leads.id })
+            const [existingLead] = await db.select({ id: leads.id, contactType: leads.contactType })
                 .from(leads)
                 .where(and(eq(leads.email, resolvedEmail), inArray(leads.leadType, ['contact_form', 'inbound_email'])))
                 .orderBy(desc(leads.createdAt))
@@ -81,8 +82,12 @@ export default withLambda(async (event) => {
                     authorId: null,
                     body: `New contact form submission — ${subject}\n\n${message}`,
                 });
+                // Upgrade the record's tier if we now know more (lead → registered → client);
+                // never downgrade or override a manual 'other'.
+                const nextType = promoteContactType(existingLead.contactType, contactType);
+                const promote = nextType !== existingLead.contactType;
                 await db.update(leads)
-                    .set({ status: 'notification_pending', updatedAt: new Date() })
+                    .set({ status: 'notification_pending', updatedAt: new Date(), ...(promote ? { contactType: nextType } : {}) })
                     .where(eq(leads.id, existingLead.id));
             } else {
                 await db.insert(leads).values({
@@ -93,7 +98,8 @@ export default withLambda(async (event) => {
                     source: source || 'contact_form',
                     useCase: message,
                     priority: 'medium',
-                    userId: existingUser?.id ?? null,
+                    contactType,
+                    userId: leadUserId,
                 }).onConflictDoNothing(); // guard a race on the (email, opportunity) unique key
             }
         } catch (leadErr) {

@@ -1900,7 +1900,8 @@ export default withLambda(async (event) => {
             if (denied) return denied;
             const search = qs.search || '';
             const type   = qs.type || '';
-            const conds: any[] = [inArray(leads.leadType, ['contact_form', 'inbound_email'])];
+            // People who reached out or signed up — enquiries + waitlist (not system signals).
+            const conds: any[] = [inArray(leads.leadType, ['contact_form', 'inbound_email', 'waitlist_interest'])];
             if (type) conds.push(eq(leads.contactType, type));
             if (search) conds.push(or(
                 ilike(leads.email, `%${search}%`), ilike(leads.name, `%${search}%`), ilike(leads.company, `%${search}%`),
@@ -1910,8 +1911,16 @@ export default withLambda(async (event) => {
                 phone: leads.phone, contactType: leads.contactType, status: leads.status,
                 tags: leads.tags, useCase: leads.useCase, opportunityReason: leads.opportunityReason,
                 createdAt: leads.createdAt, updatedAt: leads.updatedAt,
-            }).from(leads).where(and(...conds)).orderBy(desc(leads.updatedAt)).limit(300);
-            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contacts: rows }) };
+            }).from(leads).where(and(...conds)).orderBy(desc(leads.updatedAt)).limit(500);
+            // One contact per person: a person can have several lead rows (a contact form + a
+            // waitlist signup, etc.). Ordered by last activity, so we keep the most recent per email.
+            const seen = new Set<string>();
+            const contacts = rows.filter(r => {
+                const k = (r.email || '').toLowerCase();
+                if (seen.has(k)) return false;
+                seen.add(k); return true;
+            });
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contacts }) };
         }
 
         // GET ?resource=contact-detail&id=N → contact + message thread + tasks
@@ -1943,7 +1952,7 @@ export default withLambda(async (event) => {
             if (b.name !== undefined)    updates.name = b.name || null;
             if (b.company !== undefined) updates.company = b.company || null;
             if (b.phone !== undefined)   updates.phone = b.phone || null;
-            if (b.contactType && ['lead', 'client', 'other'].includes(b.contactType)) updates.contactType = b.contactType;
+            if (b.contactType && ['lead', 'registered', 'client', 'other'].includes(b.contactType)) updates.contactType = b.contactType;
             if (Array.isArray(b.tags))   updates.tags = b.tags.map((t: any) => String(t)).slice(0, 20);
             await db.update(leads).set(updates).where(eq(leads.id, b.leadId));
             return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
