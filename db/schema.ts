@@ -1207,6 +1207,26 @@ export const ticketReplies = pgTable("ticket_replies", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Lead Replies Table — threaded correspondence for a CRM lead / contact request (db/lead-replies.sql).
+// Mirrors ticketReplies but for the leads pipeline, where the "customer" may be an anonymous
+// prospect (contact form / inbound email) with no users row — so authorId is nullable and
+// direction records who sent it. Inbound emails land here via the inbound-email webhook;
+// admin replies are emailed out (Sales Pipeline reply box). Internal notes never leave the CRM.
+export const leadReplies = pgTable("lead_replies", {
+  id: serial("id").primaryKey(),
+  leadId: integer("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
+  // 'inbound'  = from the prospect (contact form / received email)
+  // 'outbound' = admin reply emailed to the prospect
+  // 'internal' = private admin note (never emailed)
+  direction: text("direction").notNull().default("inbound"),
+  // Admin author for outbound/internal; null for inbound (anonymous prospect).
+  authorId: integer("author_id").references(() => users.id, { onDelete: "set null" }),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // Issue Reports Table — testing-phase "Report an Issue" submissions (db/issue-reports.sql).
 // Captures the user's description, WHERE they were when they reported (sourceLocation/
 // sourceUrl) and an optional screenshot stored inline as a base64 data URL. Stored against

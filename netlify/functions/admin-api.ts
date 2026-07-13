@@ -34,6 +34,7 @@ import {
     agentAnomalies, agentAnomalyThresholds, taskRuns,
     legalHolds, jwtBlocklist, stripeDisputes, storageUsage, helpArticles,
     rewardAudits, userOrganisations, assistantFeatures,
+    leadReplies,
 } from '../../db/schema';
 import { ASSISTANT_FEATURES, isAssistantFeatureKey } from '../../src/config/assistant-features';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
@@ -1811,6 +1812,82 @@ export default withLambda(async (event) => {
             const { leadId, salesNotes } = body;
             if (!leadId) return { statusCode: 400, body: JSON.stringify({ error: 'leadId required.' }) };
             await db.update(leads).set({ salesNotes: salesNotes ?? null, updatedAt: new Date() }).where(eq(leads.id, leadId));
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
+        }
+
+        // ── CRM contact-request management: lead detail + threaded replies ────
+        // GET ?resource=lead-detail&id=N → lead row + full correspondence thread
+        if (event.httpMethod === 'GET' && resource === 'lead-detail') {
+            const denied = requirePermission(adminRole, 'view_billing_history');
+            if (denied) return denied;
+            const leadId = parseInt(qs.id || '');
+            if (!leadId) return { statusCode: 400, body: JSON.stringify({ error: 'id required.' }) };
+
+            const [lead] = await db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
+            if (!lead) return { statusCode: 404, body: JSON.stringify({ error: 'Lead not found.' }) };
+
+            const thread = await db.select({
+                id: leadReplies.id,
+                direction: leadReplies.direction,
+                body: leadReplies.body,
+                createdAt: leadReplies.createdAt,
+                authorName: sql<string>`trim(coalesce(${users.firstName}, '') || ' ' || coalesce(${users.lastName}, ''))`,
+            })
+            .from(leadReplies)
+            .leftJoin(users, eq(users.id, leadReplies.authorId))
+            .where(eq(leadReplies.leadId, leadId))
+            .orderBy(leadReplies.createdAt);
+
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lead, thread }) };
+        }
+
+        // POST ?resource=lead-reply { leadId, body, direction } → store a reply.
+        // direction 'outbound' emails the prospect via Resend and marks the lead contacted;
+        // 'internal' is a private note that never leaves the CRM.
+        if (event.httpMethod === 'POST' && resource === 'lead-reply') {
+            const denied = requirePermission(adminRole, 'view_billing_history');
+            if (denied) return denied;
+            const payload = JSON.parse(event.body || '{}');
+            const leadId = parseInt(payload.leadId);
+            const messageBody = (payload.body || '').trim();
+            const direction = payload.direction === 'internal' ? 'internal' : 'outbound';
+            if (!leadId || !messageBody) return { statusCode: 400, body: JSON.stringify({ error: 'leadId and body are required.' }) };
+
+            const [lead] = await db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
+            if (!lead) return { statusCode: 404, body: JSON.stringify({ error: 'Lead not found.' }) };
+
+            // Email the prospect for outbound replies (internal notes stay private).
+            if (direction === 'outbound') {
+                if (!resend) return { statusCode: 503, body: JSON.stringify({ error: 'Email is not configured (RESEND_API_KEY unset).' }) };
+                const subject = lead.opportunityReason ? `Re: ${lead.opportunityReason}` : 'Re: your enquiry';
+                await resend.emails.send({
+                    from: FROM_EMAIL,
+                    to: lead.email,
+                    replyTo: 'support@bemoreswan.com',
+                    subject,
+                    html: `
+<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:24px auto;color:#374151;font-size:15px;line-height:1.7">
+  <div style="white-space:pre-wrap">${messageBody.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+  <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">
+  <p style="font-size:13px;color:#9ca3af">Be More Swan · <a href="https://bemoreswan.com" style="color:#10b981">bemoreswan.com</a></p>
+</div>`,
+                });
+            }
+
+            await db.insert(leadReplies).values({
+                leadId,
+                direction,
+                authorId: adminId,
+                body: messageBody,
+            });
+
+            // Outbound contact advances the pipeline status + timestamp.
+            if (direction === 'outbound') {
+                await db.update(leads)
+                    .set({ status: 'contacted', lastContactedAt: new Date(), updatedAt: new Date() })
+                    .where(eq(leads.id, leadId));
+            }
+
             return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
         }
 

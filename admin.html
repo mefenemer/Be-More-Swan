@@ -876,7 +876,7 @@
         <div class="flex items-center justify-between mb-5">
           <div>
             <h2 class="text-lg font-bold text-gray-900">Sales Pipeline</h2>
-            <p class="text-sm text-gray-500 mt-0.5">All captured leads — role requests, enterprise enquiries, cancellation risk, upgrade candidates, and more.</p>
+            <p class="text-sm text-gray-500 mt-0.5">All captured leads and requests — contact-form enquiries, inbound emails, role requests, enterprise enquiries, and more. Click a name to view the thread and reply.</p>
           </div>
           <button onclick="loadSalesPipeline()" class="text-sm px-4 py-2 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700">Refresh</button>
         </div>
@@ -892,6 +892,7 @@
             <option value="never_onboarded">Never onboarded</option>
             <option value="waitlist_interest">Waitlist interest</option>
             <option value="contact_form">Contact form</option>
+            <option value="inbound_email">Inbound email</option>
             <option value="payment_recovery">Payment recovery</option>
           </select>
           <select id="sp-filter-priority" onchange="loadSalesPipeline()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
@@ -913,6 +914,18 @@
 
         <div id="sales-pipeline-body">
           <p class="text-gray-400 text-sm">Loading…</p>
+        </div>
+
+        <!-- Lead detail + correspondence slide-over -->
+        <div id="lead-detail-panel" class="hidden fixed inset-0 z-40">
+          <div class="absolute inset-0 bg-black/40" onclick="closeLeadPanel()"></div>
+          <div class="absolute right-0 top-0 bottom-0 w-full max-w-lg bg-white shadow-2xl overflow-y-auto">
+            <div class="sticky top-0 bg-white border-b border-gray-100 px-6 py-4 flex items-center justify-between z-10">
+              <h2 id="lead-panel-title" class="font-bold text-gray-900">Request Detail</h2>
+              <button onclick="closeLeadPanel()" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">&times;</button>
+            </div>
+            <div id="lead-detail-body" class="p-6 space-y-5"></div>
+          </div>
         </div>
       </section>
 
@@ -5758,6 +5771,7 @@ const SP_TYPE_BADGE = {
   never_onboarded:     'bg-gray-100 text-gray-700',
   waitlist_interest:   'bg-sky-100 text-sky-800',
   contact_form:        'bg-indigo-100 text-indigo-800',
+  inbound_email:       'bg-teal-100 text-teal-800',
   payment_recovery:    'bg-rose-100 text-rose-800',
 };
 const SP_STATUS_OPTIONS = ['notification_pending','contacted','qualified','converted','closed_lost'];
@@ -5792,7 +5806,7 @@ async function loadSalesPipeline() {
       return `
         <tr class="border-b border-gray-100 hover:bg-gray-50">
           <td class="px-4 py-3 text-sm">
-            <div class="font-semibold text-gray-900">${_escH(l.name || l.email)}</div>
+            <button onclick="openLeadDetail(${l.id})" class="font-semibold text-emerald-700 hover:underline text-left">${_escH(l.name || l.email)}</button>
             ${l.name ? `<div class="text-xs text-gray-400">${_escH(l.email)}</div>` : ''}
             ${isUrgent ? '<span class="mt-1 inline-block text-xs font-bold bg-red-600 text-white px-1.5 py-0.5 rounded">Urgent</span>' : ''}
           </td>
@@ -5836,7 +5850,7 @@ async function loadSalesPipeline() {
 
 async function updateLeadStatus(leadId, newStatus) {
   try {
-    const res = await fetch('/.netlify/functions/admin-api', {
+    const res = await fetch('/.netlify/functions/admin-api?resource=lead-status', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ resource: 'lead-status', leadId, status: newStatus }),
@@ -5847,12 +5861,119 @@ async function updateLeadStatus(leadId, newStatus) {
 
 async function saveLeadNotes(leadId, notes) {
   try {
-    await fetch('/.netlify/functions/admin-api', {
+    await fetch('/.netlify/functions/admin-api?resource=lead-notes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ resource: 'lead-notes', leadId, salesNotes: notes }),
     });
   } catch { /* silent */ }
+}
+
+// ── CRM contact-request detail + threaded replies ─────────────────────────────
+let _leadPanelId = null;
+
+async function openLeadDetail(leadId) {
+  _leadPanelId = leadId;
+  const panel = document.getElementById('lead-detail-panel');
+  const bodyEl = document.getElementById('lead-detail-body');
+  panel.classList.remove('hidden');
+  bodyEl.innerHTML = '<p class="text-gray-400 text-sm animate-pulse">Loading…</p>';
+  try {
+    const data = await api(`/.netlify/functions/admin-api?resource=lead-detail&id=${leadId}`);
+    renderLeadDetail(data.lead, data.thread || []);
+  } catch (e) {
+    bodyEl.innerHTML = `<p class="text-red-500 text-sm">Failed to load: ${_escH(e.message)}</p>`;
+  }
+}
+
+function closeLeadPanel() {
+  document.getElementById('lead-detail-panel').classList.add('hidden');
+  _leadPanelId = null;
+}
+
+function renderLeadDetail(lead, thread) {
+  document.getElementById('lead-panel-title').textContent = lead.name || lead.email;
+  const typeBadge = SP_TYPE_BADGE[lead.leadType] || 'bg-gray-100 text-gray-700';
+  const when = d => d ? new Date(d).toLocaleString('en-GB') : '';
+
+  const threadHtml = thread.length ? thread.map(r => {
+    const inbound  = r.direction === 'inbound';
+    const internal = r.direction === 'internal';
+    const box = internal ? 'bg-amber-50 border-amber-200'
+              : inbound  ? 'bg-gray-50 border-gray-200'
+                         : 'bg-emerald-50 border-emerald-200';
+    const who = internal ? `Internal note${r.authorName ? ' · ' + _escH(r.authorName) : ''}`
+              : inbound  ? _escH(lead.name || lead.email)
+                         : `You${r.authorName ? ' · ' + _escH(r.authorName) : ''}`;
+    return `
+      <div class="border ${box} rounded-xl px-4 py-3">
+        <div class="flex justify-between items-center mb-1">
+          <span class="text-xs font-bold text-gray-600">${who}</span>
+          <span class="text-xs text-gray-400">${when(r.createdAt)}</span>
+        </div>
+        <div class="text-sm text-gray-700 whitespace-pre-wrap">${_escH(r.body)}</div>
+      </div>`;
+  }).join('') : '<p class="text-xs text-gray-400">No replies yet.</p>';
+
+  document.getElementById('lead-detail-body').innerHTML = `
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="text-xs font-semibold px-2 py-0.5 rounded-full ${typeBadge}">${(lead.leadType||'—').replace(/_/g,' ')}</span>
+      <span class="text-xs text-gray-400">${lead.source ? _escH(lead.source.replace(/_/g,' ')) : ''}</span>
+    </div>
+    <div class="text-sm">
+      <a href="mailto:${_escH(lead.email)}" class="text-emerald-700 hover:underline">${_escH(lead.email)}</a>
+      ${lead.company ? `<span class="text-gray-400"> · ${_escH(lead.company)}</span>` : ''}
+    </div>
+
+    <div class="border border-gray-200 rounded-xl p-4 bg-white">
+      <p class="text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Original request</p>
+      <p class="text-sm font-semibold text-gray-900 mb-2">${_escH(lead.opportunityReason || '—')}</p>
+      <p class="text-sm text-gray-600 whitespace-pre-wrap">${_escH(lead.useCase || '(no message)')}</p>
+      <p class="text-xs text-gray-400 mt-3">Received ${when(lead.createdAt)}</p>
+    </div>
+
+    <div>
+      <p class="text-xs font-bold uppercase tracking-wide text-gray-400 mb-2">Correspondence</p>
+      <div class="space-y-2">${threadHtml}</div>
+    </div>
+
+    <div class="border-t border-gray-100 pt-4">
+      <textarea id="lead-reply-body" rows="4" placeholder="Write a reply to the requester…"
+        class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none resize-y"></textarea>
+      <p id="lead-reply-error" class="hidden text-xs text-red-600 mt-2"></p>
+      <div class="flex items-center gap-2 mt-3">
+        <button id="lead-reply-send" onclick="sendLeadReply('outbound')"
+          class="px-4 py-2 bg-emerald-700 text-white text-sm font-bold rounded-lg hover:bg-emerald-800 disabled:opacity-60">Send reply</button>
+        <button onclick="sendLeadReply('internal')"
+          class="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-200">Add internal note</button>
+      </div>
+      <p class="text-xs text-gray-400 mt-2">Replies are emailed to the requester from ${_escH('hello@bemoreswan.com')}. Internal notes stay private.</p>
+    </div>`;
+}
+
+async function sendLeadReply(direction) {
+  const bodyEl = document.getElementById('lead-reply-body');
+  const errEl  = document.getElementById('lead-reply-error');
+  const sendBtn = document.getElementById('lead-reply-send');
+  const message = (bodyEl.value || '').trim();
+  errEl.classList.add('hidden');
+  if (!message) { errEl.textContent = 'Please write a message first.'; errEl.classList.remove('hidden'); return; }
+  if (sendBtn) sendBtn.disabled = true;
+  try {
+    const res = await fetch('/.netlify/functions/admin-api?resource=lead-reply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ resource: 'lead-reply', leadId: _leadPanelId, body: message, direction }),
+    });
+    if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'Failed to send.'); }
+    await openLeadDetail(_leadPanelId); // refresh thread
+    loadSalesPipeline();                // reflect status/contacted change in the table
+  } catch (e) {
+    errEl.textContent = e.message;
+    errEl.classList.remove('hidden');
+  } finally {
+    if (sendBtn) sendBtn.disabled = false;
+  }
 }
 
 // ── US-ADM-2.3.1: Billing Reconciliation Queue ────────────────────────────────
