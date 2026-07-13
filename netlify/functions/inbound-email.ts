@@ -65,6 +65,16 @@ export default withLambda(async (event: HandlerEvent) => {
         return { statusCode: 400, body: 'Could not parse payload.' };
     }
 
+    console.log('[inbound-email] received', JSON.stringify({
+        ct: (event.headers['content-type'] || event.headers['Content-Type'] || '').slice(0, 50),
+        b64: event.isBase64Encoded,
+        keys: Object.keys(fields),
+        from: fields.from,
+        envelope: fields.envelope,
+        spam_score: fields.spam_score,
+        subject: fields.subject,
+    }));
+
     // Resolve the sender: the SMTP envelope is the most trustworthy, then the From header.
     let senderEmail = '';
     try {
@@ -75,12 +85,14 @@ export default withLambda(async (event: HandlerEvent) => {
     if (!senderEmail) senderEmail = fromHeader.email;
     if (!senderEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(senderEmail)) {
         // Nothing we can attribute — ack so SendGrid doesn't retry.
+        console.log('[inbound-email] skipped: no usable sender', JSON.stringify({ from: fields.from, envelope: fields.envelope }));
         return { statusCode: 200, body: 'No usable sender; skipped.' };
     }
 
     // Spam gate — ack (200) so SendGrid treats it as delivered, but never surface it.
     const spamScore = parseFloat(fields.spam_score || '');
     if (!Number.isNaN(spamScore) && spamScore > SPAM_THRESHOLD) {
+        console.log('[inbound-email] dropped as spam', JSON.stringify({ sender: senderEmail, spamScore }));
         return { statusCode: 200, body: 'Dropped as spam.' };
     }
 
@@ -117,6 +129,7 @@ export default withLambda(async (event: HandlerEvent) => {
             await db.update(leads)
                 .set({ updatedAt: new Date(), ...(reopen ? { status: 'notification_pending' } : {}) })
                 .where(eq(leads.id, existing.id));
+            console.log('[inbound-email] threaded onto existing lead', JSON.stringify({ leadId: existing.id, sender: senderEmail }));
             return { statusCode: 200, body: 'Threaded onto existing lead.' };
         }
 
@@ -137,6 +150,7 @@ export default withLambda(async (event: HandlerEvent) => {
             set: { useCase: messageBody, updatedAt: new Date() },
         });
 
+        console.log('[inbound-email] created new lead', JSON.stringify({ sender: senderEmail, subject }));
         return { statusCode: 200, body: 'Lead created.' };
     } catch (err) {
         console.error('[inbound-email] db error:', err);
