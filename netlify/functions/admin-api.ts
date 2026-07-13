@@ -1782,11 +1782,13 @@ export default withLambda(async (event) => {
                 company: leads.company,
                 useCase: leads.useCase,
                 createdAt: leads.createdAt,
+                updatedAt: leads.updatedAt,
                 lastContactedAt: leads.lastContactedAt,
             })
             .from(leads)
             .where(conditions.length ? and(...conditions) : undefined)
-            .orderBy(desc(leads.createdAt))
+            // Sort by last activity so leads with a fresh inbound email/reply resurface to the top.
+            .orderBy(desc(leads.updatedAt))
             .limit(200);
 
             return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leads: rows }) };

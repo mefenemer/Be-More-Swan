@@ -124,10 +124,10 @@ export default withLambda(async (event: HandlerEvent) => {
                 authorId: null,
                 body: `${subject}\n\n${messageBody}`,
             });
-            // A fresh message on a parked lead reopens it for attention.
-            const reopen = existing.status === 'converted' || existing.status === 'closed_lost';
+            // A fresh inbound message always flags the lead for attention and bumps updatedAt,
+            // so it resurfaces to the top of the (activity-sorted) Sales Pipeline as "New".
             await db.update(leads)
-                .set({ updatedAt: new Date(), ...(reopen ? { status: 'notification_pending' } : {}) })
+                .set({ status: 'notification_pending', updatedAt: new Date() })
                 .where(eq(leads.id, existing.id));
             console.log('[inbound-email] threaded onto existing lead', JSON.stringify({ leadId: existing.id, sender: senderEmail }));
             return { statusCode: 200, body: 'Threaded onto existing lead.' };
