@@ -392,7 +392,7 @@ function renderCard(a) {
         </div>
         <div class="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center gap-3">
           <div class="flex items-center gap-2">
-            <button onclick="_notifyToggle(${a.id}, ${notifyOn})"
+            <button onclick="_notifyClick(${a.id}, ${notifyOn})"
               data-notify-btn="${a.id}"
               class="${notifyOn ? 'bg-emerald-500' : 'bg-gray-300'} relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
               role="switch" aria-checked="${notifyOn}">
@@ -492,6 +492,18 @@ async function loadCatalog() {
 }
 
 // ── US-AUD-2.3.1: Notify Me toggle ──────────────────────────────────────────
+// Toggle click → opting IN opens the email popup (waitlist modal), which captures the
+// address into the Sales Pipeline via capture-lead. Opting OUT (already on) just disables.
+function _notifyClick(masterAssistantId, currentlyOn) {
+  if (currentlyOn) {
+    _notifyToggle(masterAssistantId, currentlyOn);
+    return;
+  }
+  const a = _all.find(x => x.id === masterAssistantId);
+  openWaitlist(masterAssistantId, a ? a.name : '', false);
+}
+window._notifyClick = _notifyClick;
+
 async function _notifyToggle(masterAssistantId, currentlyOn) {
   const enable = !currentlyOn;
   try {
@@ -629,7 +641,9 @@ document.getElementById('waitlist-submit').addEventListener('click', async () =>
     const idx = _all.findIndex(a => a.id === _waitlistPending.id);
     if (idx !== -1) {
       _all[idx].onWaitlist = true;
+      _all[idx].notifyEnabled = true;
       _all[idx].waitlistCount = (_all[idx].waitlistCount || 0) + 1;
+      renderGrid(); // reflect the "on" toggle behind the modal
     }
 
     // SC1/SC4: Show queue position + referral link in success state
