@@ -79,7 +79,7 @@ export default withLambda(async (event) => {
                     leadId: existingLead.id,
                     direction: 'inbound',
                     authorId: null,
-                    body: `${subject}\n\n${message}`,
+                    body: `New contact form submission — ${subject}\n\n${message}`,
                 });
                 await db.update(leads)
                     .set({ status: 'notification_pending', updatedAt: new Date() })

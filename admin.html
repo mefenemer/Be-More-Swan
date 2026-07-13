@@ -6093,6 +6093,9 @@ async function openContact(id) {
     const data = await api(`/.netlify/functions/admin-api?resource=contact-detail&id=${id}`);
     renderContactDetail(data.lead, data.thread || [], data.tasks || []);
     renderContactInfo(data.lead);
+    // Scroll the detail pane back to the top so the avatar/header is fully visible.
+    const pane = document.getElementById('contact-detail');
+    if (pane && pane.parentElement) pane.parentElement.scrollTop = 0;
   } catch (e) {
     document.getElementById('contact-detail').innerHTML = `<div class="p-6 text-sm text-red-500">Failed to load: ${_escH(e.message)}</div>`;
   }
