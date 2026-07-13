@@ -34,7 +34,7 @@ import {
     agentAnomalies, agentAnomalyThresholds, taskRuns,
     legalHolds, jwtBlocklist, stripeDisputes, storageUsage, helpArticles,
     rewardAudits, userOrganisations, assistantFeatures,
-    leadReplies,
+    leadReplies, contactTasks,
 } from '../../db/schema';
 import { ASSISTANT_FEATURES, isAssistantFeatureKey } from '../../src/config/assistant-features';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
@@ -1890,6 +1890,86 @@ export default withLambda(async (event) => {
                     .where(eq(leads.id, leadId));
             }
 
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
+        }
+
+        // ── CRM Contacts view ────────────────────────────────────────────────
+        // GET ?resource=contacts[&search=&type=] → contact list (enquiry leads, one per email)
+        if (event.httpMethod === 'GET' && resource === 'contacts') {
+            const denied = requirePermission(adminRole, 'view_billing_history');
+            if (denied) return denied;
+            const search = qs.search || '';
+            const type   = qs.type || '';
+            const conds: any[] = [inArray(leads.leadType, ['contact_form', 'inbound_email'])];
+            if (type) conds.push(eq(leads.contactType, type));
+            if (search) conds.push(or(
+                ilike(leads.email, `%${search}%`), ilike(leads.name, `%${search}%`), ilike(leads.company, `%${search}%`),
+            ));
+            const rows = await db.select({
+                id: leads.id, name: leads.name, email: leads.email, company: leads.company,
+                phone: leads.phone, contactType: leads.contactType, status: leads.status,
+                tags: leads.tags, useCase: leads.useCase, opportunityReason: leads.opportunityReason,
+                createdAt: leads.createdAt, updatedAt: leads.updatedAt,
+            }).from(leads).where(and(...conds)).orderBy(desc(leads.updatedAt)).limit(300);
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contacts: rows }) };
+        }
+
+        // GET ?resource=contact-detail&id=N → contact + message thread + tasks
+        if (event.httpMethod === 'GET' && resource === 'contact-detail') {
+            const denied = requirePermission(adminRole, 'view_billing_history');
+            if (denied) return denied;
+            const id = parseInt(qs.id || '');
+            if (!id) return { statusCode: 400, body: JSON.stringify({ error: 'id required.' }) };
+            const [lead] = await db.select().from(leads).where(eq(leads.id, id)).limit(1);
+            if (!lead) return { statusCode: 404, body: JSON.stringify({ error: 'Contact not found.' }) };
+            const thread = await db.select({
+                id: leadReplies.id, direction: leadReplies.direction, body: leadReplies.body,
+                createdAt: leadReplies.createdAt,
+                authorName: sql<string>`trim(coalesce(${users.firstName}, '') || ' ' || coalesce(${users.lastName}, ''))`,
+            }).from(leadReplies).leftJoin(users, eq(users.id, leadReplies.authorId))
+              .where(eq(leadReplies.leadId, id)).orderBy(leadReplies.createdAt);
+            const tasks = await db.select().from(contactTasks)
+              .where(eq(contactTasks.leadId, id)).orderBy(contactTasks.done, desc(contactTasks.createdAt));
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lead, thread, tasks }) };
+        }
+
+        // POST ?resource=contact-update → edit name/company/phone/type/tags
+        if (event.httpMethod === 'POST' && resource === 'contact-update') {
+            const denied = requirePermission(adminRole, 'view_billing_history');
+            if (denied) return denied;
+            const b = JSON.parse(event.body || '{}');
+            if (!b.leadId) return { statusCode: 400, body: JSON.stringify({ error: 'leadId required.' }) };
+            const updates: Record<string, any> = { updatedAt: new Date() };
+            if (b.name !== undefined)    updates.name = b.name || null;
+            if (b.company !== undefined) updates.company = b.company || null;
+            if (b.phone !== undefined)   updates.phone = b.phone || null;
+            if (b.contactType && ['lead', 'client', 'other'].includes(b.contactType)) updates.contactType = b.contactType;
+            if (Array.isArray(b.tags))   updates.tags = b.tags.map((t: any) => String(t)).slice(0, 20);
+            await db.update(leads).set(updates).where(eq(leads.id, b.leadId));
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
+        }
+
+        // POST ?resource=contact-task → add a task
+        if (event.httpMethod === 'POST' && resource === 'contact-task') {
+            const denied = requirePermission(adminRole, 'view_billing_history');
+            if (denied) return denied;
+            const b = JSON.parse(event.body || '{}');
+            if (!b.leadId || !(b.title || '').trim()) return { statusCode: 400, body: JSON.stringify({ error: 'leadId and title required.' }) };
+            await db.insert(contactTasks).values({
+                leadId: b.leadId, title: b.title.trim(), dueDate: (b.dueDate || '').trim() || null, createdBy: adminId,
+            });
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
+        }
+
+        // POST ?resource=contact-task-toggle → complete/reopen a task
+        if (event.httpMethod === 'POST' && resource === 'contact-task-toggle') {
+            const denied = requirePermission(adminRole, 'view_billing_history');
+            if (denied) return denied;
+            const b = JSON.parse(event.body || '{}');
+            if (!b.taskId) return { statusCode: 400, body: JSON.stringify({ error: 'taskId required.' }) };
+            await db.update(contactTasks)
+                .set({ done: !!b.done, completedAt: b.done ? new Date() : null })
+                .where(eq(contactTasks.id, b.taskId));
             return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
         }
 

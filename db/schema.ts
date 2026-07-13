@@ -145,11 +145,27 @@ export const leads = pgTable('leads', {
   salesNotes: text('sales_notes'),
   lastContactedAt: timestamp('last_contacted_at'),
   resolvedAt: timestamp('resolved_at'),
+  // CRM Contacts view fields (db/crm-contacts.sql)
+  phone: text('phone'),
+  contactType: text('contact_type').notNull().default('lead'), // 'lead' | 'client' | 'other'
+  tags: jsonb('tags').$type<string[]>().notNull().default([]),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({
   emailRoleUnique: unique('email_role_unique').on(t.email, t.opportunityReason)
 }));
+
+// Contact Tasks — per-contact to-do items shown in the Contacts activity timeline (db/crm-contacts.sql).
+export const contactTasks = pgTable('contact_tasks', {
+  id: serial('id').primaryKey(),
+  leadId: integer('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  done: boolean('done').notNull().default(false),
+  dueDate: text('due_date'),
+  createdBy: integer('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+});
 
 // Plans table — subscription or service plans associated with a user
 export const plans = pgTable("plans", {

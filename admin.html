@@ -929,6 +929,46 @@
         </div>
       </section>
 
+      <!-- ── CRM Contacts (contact-centric 3-pane) ─────────────────────── -->
+      <section id="view-contacts" class="admin-view hidden">
+        <div class="flex flex-col lg:flex-row gap-4 lg:h-[calc(100vh-150px)] lg:min-h-[540px]">
+
+          <!-- LEFT: people list -->
+          <aside class="lg:w-72 shrink-0 bg-white border border-gray-200 rounded-2xl flex flex-col overflow-hidden">
+            <div class="p-3 border-b border-gray-100">
+              <div class="flex items-center justify-between mb-2">
+                <h2 class="text-sm font-bold text-gray-900">Contacts</h2>
+                <button onclick="loadContacts()" title="Refresh" class="text-gray-400 hover:text-emerald-600 text-sm">↻</button>
+              </div>
+              <input id="contacts-search" placeholder="Search name, email, company…" oninput="_contactsSearchDebounced()"
+                class="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+              <div id="contacts-type-filter" class="flex gap-1 mt-2">
+                <button data-ctype="" onclick="_contactsSetType('')" class="ct-filter text-xs font-semibold px-2.5 py-1 rounded-lg bg-emerald-600 text-white">All</button>
+                <button data-ctype="lead" onclick="_contactsSetType('lead')" class="ct-filter text-xs font-semibold px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Leads</button>
+                <button data-ctype="client" onclick="_contactsSetType('client')" class="ct-filter text-xs font-semibold px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Clients</button>
+                <button data-ctype="other" onclick="_contactsSetType('other')" class="ct-filter text-xs font-semibold px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Other</button>
+              </div>
+            </div>
+            <div id="contacts-list" class="flex-1 overflow-y-auto min-h-[240px]">
+              <p class="p-4 text-sm text-gray-400 animate-pulse">Loading…</p>
+            </div>
+          </aside>
+
+          <!-- CENTER: contact detail -->
+          <main class="flex-1 bg-white border border-gray-200 rounded-2xl overflow-y-auto min-h-[320px]">
+            <div id="contact-detail" class="h-full flex items-center justify-center text-gray-400 text-sm">
+              Select a contact to see their activity.
+            </div>
+          </main>
+
+          <!-- RIGHT: contact info -->
+          <aside class="lg:w-72 shrink-0 bg-white border border-gray-200 rounded-2xl overflow-y-auto">
+            <div id="contact-info" class="p-5 text-sm text-gray-400">No contact selected.</div>
+          </aside>
+
+        </div>
+      </section>
+
       <section id="view-kill-switches" class="admin-view hidden">
         <div class="bg-red-50 border border-red-200 rounded-2xl p-4 mb-6 flex items-start gap-3">
           <span class="text-2xl">🚨</span>
@@ -1993,7 +2033,7 @@ const VIEW_LABELS = {
   reconciliation: 'Stripe Reconciliation', dunning: 'Dunning Queue',
   'manage-admins': 'Admin Accounts', 'kill-switches': 'Emergency Controls',
   gamification: 'Gamification Settings', 'session-timeout': 'Session Timeout', 'reward-audits': 'Reward Audits',
-  'feature-flags': 'Feature Flags', 'sales-pipeline': 'Sales Pipeline',
+  'feature-flags': 'Feature Flags', 'sales-pipeline': 'Sales Pipeline', contacts: 'Contacts',
   'breach-response': 'Breach Response', 'master-data': 'Master Data',
   workspaces: 'Workspaces', 'workspace-detail': 'Workspace Detail',
   'blueprint-inspector': 'Blueprint Inspector', sandbox: 'Sandbox Environment',
@@ -2008,6 +2048,7 @@ const ADMIN_CATS = {
   ]},
   users: { label: 'Users', roles: ['admin','super_admin','support_agent'], children: [
     { view: 'users',    icon: '👥', label: 'All Users' },
+    { view: 'contacts', icon: '👤', label: 'Contacts' },
     { view: 'tickets',  icon: '🎫', label: 'Support Tickets' },
     { view: 'sales-pipeline', icon: '💼', label: 'Sales Pipeline' },
   ]},
@@ -2276,6 +2317,7 @@ function adminNav(view) {
   if (view === 'disputes')        loadDisputes();
   if (view === 'manage-admins')   loadManageAdmins();
   if (view === 'sales-pipeline')  loadSalesPipeline();
+  if (view === 'contacts')        loadContacts();
   if (view === 'kill-switches')   loadKillSwitches();
   if (view === 'gamification')    loadGamificationSettings();
   if (view === 'session-timeout') loadSessionTimeoutSettings();
@@ -5974,6 +6016,268 @@ async function sendLeadReply(direction) {
   } finally {
     if (sendBtn) sendBtn.disabled = false;
   }
+}
+
+// ── CRM Contacts (contact-centric 3-pane) ─────────────────────────────────────
+let _contactsCache = [];
+let _contactsType = '';
+let _selectedContactId = null;
+let _contactsDebounce = null;
+
+const CT_TYPE_PILL = {
+  lead:   { label: 'Lead',   cls: 'bg-amber-100 text-amber-800',     dot: 'bg-amber-500' },
+  client: { label: 'Client', cls: 'bg-emerald-100 text-emerald-800', dot: 'bg-emerald-500' },
+  other:  { label: 'Other',  cls: 'bg-gray-100 text-gray-600',       dot: 'bg-gray-400' },
+};
+const CT_AVATAR_COLORS = ['bg-emerald-500','bg-sky-500','bg-violet-500','bg-amber-500','bg-rose-500','bg-teal-500','bg-indigo-500'];
+function _ctInitials(name, email) {
+  const s = (name || email || '?').trim();
+  const parts = s.split(/\s+/);
+  return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase() || s[0].toUpperCase();
+}
+function _ctAvatarColor(key) {
+  let h = 0; for (const c of (key || '')) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return CT_AVATAR_COLORS[h % CT_AVATAR_COLORS.length];
+}
+function _ctWhen(d) { return d ? new Date(d).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : ''; }
+
+async function loadContacts() {
+  const el = document.getElementById('contacts-list');
+  el.innerHTML = '<p class="p-4 text-sm text-gray-400 animate-pulse">Loading…</p>';
+  try {
+    const search = document.getElementById('contacts-search').value.trim();
+    const params = new URLSearchParams({ resource: 'contacts' });
+    if (_contactsType) params.set('type', _contactsType);
+    if (search) params.set('search', search);
+    const data = await api(`/.netlify/functions/admin-api?${params}`);
+    _contactsCache = data.contacts || [];
+    renderContactList(_contactsCache);
+  } catch (e) {
+    el.innerHTML = `<p class="p-4 text-sm text-red-500">Failed to load: ${_escH(e.message)}</p>`;
+  }
+}
+function _contactsSearchDebounced() { clearTimeout(_contactsDebounce); _contactsDebounce = setTimeout(loadContacts, 250); }
+function _contactsSetType(t) {
+  _contactsType = t;
+  document.querySelectorAll('#contacts-type-filter .ct-filter').forEach(b => {
+    const on = (b.dataset.ctype || '') === t;
+    b.className = 'ct-filter text-xs font-semibold px-2.5 py-1 rounded-lg ' + (on ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200');
+  });
+  loadContacts();
+}
+
+function renderContactList(contacts) {
+  const el = document.getElementById('contacts-list');
+  if (!contacts.length) { el.innerHTML = '<p class="p-4 text-sm text-gray-400">No contacts found.</p>'; return; }
+  el.innerHTML = contacts.map(c => {
+    const pill = CT_TYPE_PILL[c.contactType] || CT_TYPE_PILL.lead;
+    const sel = c.id === _selectedContactId;
+    return `
+      <button onclick="openContact(${c.id})" class="w-full text-left flex items-center gap-3 px-3 py-2.5 border-b border-gray-50 hover:bg-gray-50 transition ${sel ? 'bg-emerald-50' : ''}">
+        <span class="w-9 h-9 rounded-full ${_ctAvatarColor(c.email)} text-white text-xs font-bold flex items-center justify-center shrink-0">${_escH(_ctInitials(c.name, c.email))}</span>
+        <span class="min-w-0 flex-1">
+          <span class="block font-semibold text-sm text-gray-900 truncate">${_escH(c.name || c.email)}</span>
+          <span class="block text-xs text-gray-400 truncate">${_escH(c.email)}</span>
+        </span>
+        <span class="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${pill.cls}"><span class="w-1.5 h-1.5 rounded-full ${pill.dot}"></span>${pill.label}</span>
+      </button>`;
+  }).join('');
+}
+
+async function openContact(id) {
+  _selectedContactId = id;
+  renderContactList(_contactsCache); // refresh selection highlight
+  document.getElementById('contact-detail').innerHTML = '<div class="h-full flex items-center justify-center text-gray-400 text-sm animate-pulse">Loading…</div>';
+  document.getElementById('contact-info').innerHTML = '<p class="p-1 text-gray-400">Loading…</p>';
+  try {
+    const data = await api(`/.netlify/functions/admin-api?resource=contact-detail&id=${id}`);
+    renderContactDetail(data.lead, data.thread || [], data.tasks || []);
+    renderContactInfo(data.lead);
+  } catch (e) {
+    document.getElementById('contact-detail').innerHTML = `<div class="p-6 text-sm text-red-500">Failed to load: ${_escH(e.message)}</div>`;
+  }
+}
+
+function renderContactDetail(lead, thread, tasks) {
+  const pill = CT_TYPE_PILL[lead.contactType] || CT_TYPE_PILL.lead;
+  const openTasks = tasks.filter(t => !t.done), doneTasks = tasks.filter(t => t.done);
+
+  const taskRow = t => `
+    <label class="flex items-start gap-2 py-1.5 group cursor-pointer">
+      <input type="checkbox" ${t.done ? 'checked' : ''} onchange="_ctToggleTask(${t.id}, this.checked)" class="mt-0.5 accent-emerald-600 cursor-pointer">
+      <span class="text-sm ${t.done ? 'text-gray-400 line-through' : 'text-gray-700'}">${_escH(t.title)}${t.dueDate ? ` <span class="text-xs text-gray-400">· ${_escH(t.dueDate)}</span>` : ''}</span>
+    </label>`;
+
+  const msgRow = r => {
+    const inbound = r.direction === 'inbound', internal = r.direction === 'internal';
+    const box = internal ? 'bg-amber-50 border-amber-200' : inbound ? 'bg-gray-50 border-gray-200' : 'bg-emerald-50 border-emerald-200';
+    const who = internal ? `Internal note${r.authorName ? ' · ' + _escH(r.authorName) : ''}` : inbound ? _escH(lead.name || lead.email) : `You${r.authorName ? ' · ' + _escH(r.authorName) : ''}`;
+    return `<div class="border ${box} rounded-xl px-4 py-3">
+      <div class="flex justify-between items-center mb-1"><span class="text-xs font-bold text-gray-600">${who}</span><span class="text-xs text-gray-400">${_ctWhen(r.createdAt)}</span></div>
+      <div class="text-sm text-gray-700 whitespace-pre-wrap">${_escH(r.body)}</div></div>`;
+  };
+
+  document.getElementById('contact-detail').innerHTML = `
+    <div class="p-6">
+      <!-- identity -->
+      <div class="flex flex-col items-center text-center border-b border-gray-100 pb-6">
+        <span class="w-20 h-20 rounded-full ${_ctAvatarColor(lead.email)} text-white text-2xl font-bold flex items-center justify-center mb-3">${_escH(_ctInitials(lead.name, lead.email))}</span>
+        <h2 class="text-xl font-extrabold text-gray-900">${_escH(lead.name || '—')}</h2>
+        <a href="mailto:${_escH(lead.email)}" class="text-sm text-emerald-700 hover:underline">${_escH(lead.email)}</a>
+        <div class="mt-2 flex items-center gap-1">
+          ${Object.keys(CT_TYPE_PILL).map(k => `<button onclick="_ctSetType('${k}')" class="text-xs font-semibold px-2.5 py-1 rounded-lg ${lead.contactType === k ? CT_TYPE_PILL[k].cls : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}">${CT_TYPE_PILL[k].label}</button>`).join('')}
+        </div>
+        <!-- quick actions -->
+        <div class="mt-5 flex items-center justify-center gap-2 flex-wrap">
+          ${_ctQuickAction('_ctFocusReply()', 'Email', 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z')}
+          ${_ctQuickAction('_ctFocusNote()', 'Note', 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z')}
+          ${_ctQuickAction('_ctFocusTask()', 'Task', 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7l2 2 4-4')}
+          ${_ctQuickAction('_ctAddTag()', 'Tag', 'M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-5 5a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z')}
+          ${lead.phone ? _ctQuickActionLink('tel:' + encodeURIComponent(lead.phone), 'Call', 'M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z') : ''}
+        </div>
+      </div>
+
+      <!-- Tasks -->
+      <div class="py-5 border-b border-gray-100">
+        <h3 class="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-gray-400 mb-2">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7l2 2 4-4"/></svg>
+          Tasks ${openTasks.length ? `<span class="text-emerald-600">(${openTasks.length} open)</span>` : ''}
+        </h3>
+        <div>${openTasks.map(taskRow).join('') || '<p class="text-xs text-gray-400 py-1">No open tasks.</p>'}</div>
+        ${doneTasks.length ? `<details class="mt-1"><summary class="text-xs text-gray-400 cursor-pointer">${doneTasks.length} completed</summary>${doneTasks.map(taskRow).join('')}</details>` : ''}
+        <div class="flex gap-2 mt-2">
+          <input id="ct-task-input" placeholder="Add a task…" onkeydown="if(event.key==='Enter')_ctAddTask()" class="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+          <button onclick="_ctAddTask()" class="text-sm px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg font-semibold hover:bg-gray-200">Add</button>
+        </div>
+      </div>
+
+      <!-- Messages -->
+      <div class="py-5">
+        <h3 class="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-gray-400 mb-3">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          Messages
+        </h3>
+        ${lead.useCase ? `<div class="border border-gray-200 rounded-xl p-4 bg-white mb-2">
+          <p class="text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Original request${lead.opportunityReason ? ` · ${_escH(lead.opportunityReason)}` : ''}</p>
+          <p class="text-sm text-gray-600 whitespace-pre-wrap">${_escH(lead.useCase)}</p>
+          <p class="text-xs text-gray-400 mt-2">${_ctWhen(lead.createdAt)}</p></div>` : ''}
+        <div class="space-y-2">${thread.map(msgRow).join('')}</div>
+
+        <div class="mt-4">
+          <textarea id="ct-reply-body" rows="3" placeholder="Write a reply or an internal note…" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none resize-y"></textarea>
+          <p id="ct-reply-error" class="hidden text-xs text-red-600 mt-1"></p>
+          <div class="flex items-center gap-2 mt-2">
+            <button id="ct-reply-send" onclick="_ctSend('outbound')" class="px-4 py-2 bg-emerald-700 text-white text-sm font-bold rounded-lg hover:bg-emerald-800 disabled:opacity-60">Send email reply</button>
+            <button onclick="_ctSend('internal')" class="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-200">Add internal note</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function _ctQuickAction(onclick, label, path) {
+  return `<button onclick="${onclick}" class="flex flex-col items-center gap-1 w-16 group">
+    <span class="w-10 h-10 rounded-full bg-gray-100 group-hover:bg-emerald-100 flex items-center justify-center transition">
+      <svg class="w-5 h-5 text-gray-600 group-hover:text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${path}"/></svg>
+    </span><span class="text-xs text-gray-500">${label}</span></button>`;
+}
+function _ctQuickActionLink(href, label, path) {
+  return `<a href="${href}" class="flex flex-col items-center gap-1 w-16 group">
+    <span class="w-10 h-10 rounded-full bg-gray-100 group-hover:bg-emerald-100 flex items-center justify-center transition">
+      <svg class="w-5 h-5 text-gray-600 group-hover:text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${path}"/></svg>
+    </span><span class="text-xs text-gray-500">${label}</span></a>`;
+}
+
+function renderContactInfo(lead) {
+  const tags = Array.isArray(lead.tags) ? lead.tags : [];
+  document.getElementById('contact-info').innerHTML = `
+    <div class="flex items-center gap-2 mb-5">
+      <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <h3 class="font-bold text-gray-900">Contact info</h3>
+    </div>
+    <div class="space-y-4">
+      <div><label class="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Name</label>
+        <input id="ci-name" value="${_escH(lead.name || '')}" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none"></div>
+      <div><label class="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Company</label>
+        <input id="ci-company" value="${_escH(lead.company || '')}" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none"></div>
+      <div><label class="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Phone</label>
+        <input id="ci-phone" value="${_escH(lead.phone || '')}" placeholder="—" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none"></div>
+      <div><label class="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Email</label>
+        <p class="text-sm text-gray-700 break-all">${_escH(lead.email)}</p></div>
+      <div><label class="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Tags</label>
+        <div id="ci-tags" class="flex flex-wrap gap-1">${tags.length ? tags.map(t => `<span class="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-700 rounded-full px-2 py-0.5">${_escH(t)}<button onclick="_ctRemoveTag('${_escH(t).replace(/'/g, "\\'")}')" class="text-gray-400 hover:text-red-500">×</button></span>`).join('') : '<span class="text-xs text-gray-400">No tags</span>'}</div></div>
+      <button onclick="_ctSaveInfo()" class="w-full px-4 py-2 bg-emerald-700 text-white text-sm font-bold rounded-lg hover:bg-emerald-800">Save changes</button>
+      <p id="ci-saved" class="hidden text-xs text-emerald-600 text-center">Saved ✓</p>
+    </div>`;
+}
+
+// Quick-action focus helpers
+function _ctFocusReply() { const t = document.getElementById('ct-reply-body'); if (t) { t.focus(); t.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }
+function _ctFocusNote()  { _ctFocusReply(); }
+function _ctFocusTask()  { const t = document.getElementById('ct-task-input'); if (t) { t.focus(); t.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }
+
+async function _ctPost(resource, payload) {
+  const res = await fetch(`/.netlify/functions/admin-api?resource=${resource}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resource, ...payload }),
+  });
+  if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'Request failed.'); }
+  return res.json().catch(() => ({}));
+}
+
+async function _ctSend(direction) {
+  const bodyEl = document.getElementById('ct-reply-body'), errEl = document.getElementById('ct-reply-error'), btn = document.getElementById('ct-reply-send');
+  const message = (bodyEl.value || '').trim();
+  errEl.classList.add('hidden');
+  if (!message) { errEl.textContent = 'Please write a message first.'; errEl.classList.remove('hidden'); return; }
+  if (btn) btn.disabled = true;
+  try {
+    await _ctPost('lead-reply', { leadId: _selectedContactId, body: message, direction });
+    await openContact(_selectedContactId);
+    loadContacts();
+  } catch (e) { errEl.textContent = e.message; errEl.classList.remove('hidden'); }
+  finally { if (btn) btn.disabled = false; }
+}
+
+async function _ctAddTask() {
+  const input = document.getElementById('ct-task-input');
+  const title = (input.value || '').trim();
+  if (!title) return;
+  try { await _ctPost('contact-task', { leadId: _selectedContactId, title }); await openContact(_selectedContactId); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+async function _ctToggleTask(taskId, done) {
+  try { await _ctPost('contact-task-toggle', { taskId, done }); await openContact(_selectedContactId); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+async function _ctSetType(type) {
+  try { await _ctPost('contact-update', { leadId: _selectedContactId, contactType: type }); await openContact(_selectedContactId); loadContacts(); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+async function _ctSaveInfo() {
+  const payload = {
+    leadId: _selectedContactId,
+    name: document.getElementById('ci-name').value.trim(),
+    company: document.getElementById('ci-company').value.trim(),
+    phone: document.getElementById('ci-phone').value.trim(),
+  };
+  try {
+    await _ctPost('contact-update', payload);
+    const s = document.getElementById('ci-saved'); s.classList.remove('hidden'); setTimeout(() => s.classList.add('hidden'), 1500);
+    loadContacts();
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+function _ctCurrentTags() { const c = _contactsCache.find(x => x.id === _selectedContactId); return Array.isArray(c?.tags) ? c.tags.slice() : []; }
+async function _ctAddTag() {
+  const tag = (prompt('Add a tag') || '').trim();
+  if (!tag) return;
+  const tags = _ctCurrentTags(); if (!tags.includes(tag)) tags.push(tag);
+  try { await _ctPost('contact-update', { leadId: _selectedContactId, tags }); await openContact(_selectedContactId); loadContacts(); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+async function _ctRemoveTag(tag) {
+  const tags = _ctCurrentTags().filter(t => t !== tag);
+  try { await _ctPost('contact-update', { leadId: _selectedContactId, tags }); await openContact(_selectedContactId); loadContacts(); }
+  catch (e) { alert('Failed: ' + e.message); }
 }
 
 // ── US-ADM-2.3.1: Billing Reconciliation Queue ────────────────────────────────
