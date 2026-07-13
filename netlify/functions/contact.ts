@@ -5,9 +5,9 @@
 
 import { Handler } from '@netlify/functions';
 import { Resend } from 'resend';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, leads } from '../../db/schema';
+import { users, leads, leadReplies } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
@@ -63,19 +63,37 @@ export default withLambda(async (event) => {
             const resolvedEmail = email.trim().toLowerCase();
             const [existingUser] = await db.select({ id: users.id })
                 .from(users).where(eq(users.email, resolvedEmail)).limit(1);
-            await db.insert(leads).values({
-                email: resolvedEmail,
-                opportunityReason: subject!,
-                action: 'contact_form_submission',
-                leadType: 'contact_form',
-                source: source || 'contact_form',
-                useCase: message,
-                priority: 'medium',
-                userId: existingUser?.id ?? null,
-            }).onConflictDoUpdate({
-                target: [leads.email, leads.opportunityReason],
-                set: { useCase: message, updatedAt: new Date() },
-            });
+
+            // Each submission is preserved. The first opens the lead (message → useCase, the
+            // "original request"); repeat submissions on the same email+topic append to the
+            // correspondence thread instead of overwriting, and reflag the lead for attention.
+            const [existingLead] = await db.select({ id: leads.id })
+                .from(leads)
+                .where(and(eq(leads.email, resolvedEmail), eq(leads.opportunityReason, subject!)))
+                .limit(1);
+
+            if (existingLead) {
+                await db.insert(leadReplies).values({
+                    leadId: existingLead.id,
+                    direction: 'inbound',
+                    authorId: null,
+                    body: message,
+                });
+                await db.update(leads)
+                    .set({ status: 'notification_pending', updatedAt: new Date() })
+                    .where(eq(leads.id, existingLead.id));
+            } else {
+                await db.insert(leads).values({
+                    email: resolvedEmail,
+                    opportunityReason: subject!,
+                    action: 'contact_form_submission',
+                    leadType: 'contact_form',
+                    source: source || 'contact_form',
+                    useCase: message,
+                    priority: 'medium',
+                    userId: existingUser?.id ?? null,
+                }).onConflictDoNothing(); // guard a race on the (email, opportunity) unique key
+            }
         } catch (leadErr) {
             console.error('[contact] lead capture failed (non-fatal):', leadErr);
         }
