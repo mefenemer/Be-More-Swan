@@ -154,9 +154,26 @@
     return modal;
   }
 
+  // Lock/unlock background page scroll so the site behind the modal can't be
+  // interacted with while it's open. The scroll container is <html> on these
+  // pages (body is a flex column), so lock the document element and body both.
+  // Restores whatever inline `overflow` each had before.
+  let _prevHtmlOverflow = '', _prevBodyOverflow = '';
+  function lockScroll() {
+    _prevHtmlOverflow = document.documentElement.style.overflow;
+    _prevBodyOverflow = document.body.style.overflow;
+    document.documentElement.style.overflow = 'hidden';
+    document.body.style.overflow = 'hidden';
+  }
+  function unlockScroll() {
+    document.documentElement.style.overflow = _prevHtmlOverflow;
+    document.body.style.overflow = _prevBodyOverflow;
+  }
+
   function close() {
     const modal = document.getElementById('assistant-detail-modal');
     if (modal) modal.classList.add('hidden');
+    unlockScroll();
   }
 
   function open(roleKey, opts) {
@@ -220,6 +237,7 @@
     }
 
     modal.classList.remove('hidden');
+    lockScroll();
   }
 
   window.AssistantDetailModal = { open, close };
