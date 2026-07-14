@@ -11,6 +11,16 @@
  *
  * Usage:
  *   const content = window.AssistantRoleContent['lead_qualifier'];
+ *
+ * Optional per-role `video` (renders a capability video in the detail modal):
+ *   video: {
+ *     url:   null | 'https://www.youtube.com/embed/ID'   // YouTube/Vimeo embed URL,
+ *                 | '/videos/social-media-manager.mp4',  //   or a self-hosted file
+ *     title: 'Watch the … in action',   // caption shown over the poster
+ *     poster: '/images/….jpg',          // optional; falls back to a branded gradient
+ *   }
+ *   While `url` is null the modal shows a production-ready placeholder slot; set
+ *   `url` to go live (the modal picks <iframe> vs <video> from the extension).
  */
 (function () {
   'use strict';
@@ -28,6 +38,15 @@
       iconColor: 'pink',
       tagline: 'Consistent, on-brand content — without the daily grind.',
       description: 'Plans, writes, and schedules branded content across all your social channels. Every post lands in your Review for approval, so nothing goes out without your sign-off.',
+      // Capability video (see the `video` shape note at the top of this file).
+      // Placeholder for now: the modal shows a branded 16:9 slot with a play
+      // affordance. Drop in a `url` (YouTube/Vimeo embed URL or a self-hosted
+      // .mp4/.webm) to go live — the player wires itself up, no code change.
+      video: {
+        url: null,
+        title: 'Watch the Social Media Manager in action',
+        // poster: '/images/…',  // optional still; falls back to a branded gradient
+      },
       keyFeatures: [
         'Automated Content Drafting & Scheduling',
         'Human-in-the-loop Review',
