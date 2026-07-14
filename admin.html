@@ -5860,7 +5860,7 @@ async function openContact(id) {
   document.getElementById('contact-info').innerHTML = '<p class="p-1 text-gray-400">Loading…</p>';
   try {
     const data = await api(`/.netlify/functions/admin-api?resource=contact-detail&id=${id}`);
-    renderContactDetail(data.lead, data.thread || [], data.tasks || [], data.client || null, data.tickets || []);
+    renderContactDetail(data.lead, data.thread || [], data.tasks || [], data.client || null, data.tickets || [], data.issues || []);
     renderContactInfo(data.lead, data.client || null);
     // Scroll the detail pane back to the top so the avatar/header is fully visible.
     const pane = document.getElementById('contact-detail');
@@ -5870,7 +5870,7 @@ async function openContact(id) {
   }
 }
 
-function renderContactDetail(lead, thread, tasks, client, tickets) {
+function renderContactDetail(lead, thread, tasks, client, tickets, issues) {
   const pill = CT_TYPE_PILL[lead.contactType] || CT_TYPE_PILL.lead;
   // Prefer the client's account name for the header so it matches the read-only Contact info.
   const displayName = (client && client.accountName) || lead.name || '';
@@ -5915,6 +5915,8 @@ function renderContactDetail(lead, thread, tasks, client, tickets) {
       ${_ctClientSection(client)}
 
       ${_ctSupportSection(tickets, client)}
+
+      ${_ctIssuesSection(issues, client)}
 
       <!-- Tasks -->
       <div class="py-5 border-b border-gray-100">
@@ -6033,6 +6035,30 @@ function _ctSupportSection(tickets, client) {
         Support requests ${open ? `<span class="text-emerald-600">(${open} open)</span>` : `<span class="text-gray-400">(${tickets.length})</span>`}
       </h3>
       <div class="space-y-2">${tickets.length ? tickets.map(row).join('') : '<p class="text-xs text-gray-400 py-1">No support requests raised yet.</p>'}</div>
+    </div>`;
+}
+
+// Issues Reported — in-app bug reports this account has filed, newest first. Each row opens
+// the existing Issue Reports modal (openIssuePanel) to view/manage. Same visibility rule as
+// Support requests: shown for any account (client), hidden for pure prospects.
+function _ctIssuesSection(issues, client) {
+  issues = Array.isArray(issues) ? issues : [];
+  if (!issues.length && !client) return '';
+  const open = issues.filter(i => !['closed', 'roadmap'].includes(i.status)).length;
+  const row = i => `<button onclick="openIssuePanel(${i.id})" class="w-full text-left border border-gray-200 rounded-xl px-3 py-2.5 hover:bg-gray-50 transition flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <p class="text-sm font-semibold text-gray-800 truncate">${_escH(i.description || '(no description)')}${i.hasImage ? ' 📎' : ''}</p>
+        <p class="text-xs text-gray-400 mt-0.5">#${i.id}${i.sourceLocation ? ` · ${_escH(i.sourceLocation)}` : ''} · ${age(i.createdAt)}</p>
+      </div>
+      <div class="shrink-0">${_irBadge(i.status)}</div>
+    </button>`;
+  return `
+    <div class="py-5 border-b border-gray-100">
+      <h3 class="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-gray-400 mb-3">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-2.99l-6.93-12a2 2 0 00-3.48 0l-6.93 12A2 2 0 005.07 19z"/></svg>
+        Issues reported ${open ? `<span class="text-emerald-600">(${open} open)</span>` : `<span class="text-gray-400">(${issues.length})</span>`}
+      </h3>
+      <div class="space-y-2">${issues.length ? issues.map(row).join('') : '<p class="text-xs text-gray-400 py-1">No issues reported yet.</p>'}</div>
     </div>`;
 }
 

@@ -34,7 +34,7 @@ import {
     agentAnomalies, agentAnomalyThresholds, taskRuns,
     legalHolds, jwtBlocklist, stripeDisputes, storageUsage, helpArticles,
     rewardAudits, userOrganisations, assistantFeatures,
-    leadReplies, contactTasks,
+    leadReplies, contactTasks, issueReports,
 } from '../../db/schema';
 import { ASSISTANT_FEATURES, isAssistantFeatureKey } from '../../src/config/assistant-features';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
@@ -1951,6 +1951,7 @@ export default withLambda(async (event) => {
             // derived upgrade-opportunity verdict + reasons. Null for pure prospects.
             let client: any = null;
             let tickets: any[] = [];
+            let issues: any[] = [];
             if (lead.email) {
                 const [snap] = await db.execute<{
                     user_id: number; first_name: string | null; last_name: string | null;
@@ -2052,10 +2053,21 @@ export default withLambda(async (event) => {
                     }).from(supportTickets)
                       .where(eq(supportTickets.userId, snap.user_id))
                       .orderBy(desc(supportTickets.createdAt)).limit(50);
+
+                    // Issues Reported — in-app bug reports this account has filed, newest first.
+                    // Reuses the Issue Reports modal (openIssuePanel) for view/manage.
+                    issues = await db.select({
+                        id: issueReports.id, description: issueReports.description,
+                        sourceLocation: issueReports.sourceLocation, status: issueReports.status,
+                        createdAt: issueReports.createdAt,
+                        hasImage: sql<boolean>`(${issueReports.imageData} IS NOT NULL)`,
+                    }).from(issueReports)
+                      .where(eq(issueReports.userId, snap.user_id))
+                      .orderBy(desc(issueReports.createdAt)).limit(50);
                 }
             }
 
-            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lead, thread, tasks, client, tickets }) };
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lead, thread, tasks, client, tickets, issues }) };
         }
 
         // POST ?resource=contact-update → edit name/company/phone/type/tags
