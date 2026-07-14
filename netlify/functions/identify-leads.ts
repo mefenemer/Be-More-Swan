@@ -180,6 +180,46 @@ export default withLambda(async () => {
             patternCounts.upgrade_candidates++;
         }
 
+        // ── RE-CLASSIFY EXISTING CONTACTS (upgrade-only) ───────────────────────
+        // lookupContact only stamps contact_type on insert, and every write path
+        // conflict-updates just updated_at — so a contact captured as 'lead' stays 'lead'
+        // even after that email registers or starts paying. Nightly, recompute the correct
+        // auto-tier and move each row UP the ladder (lead < registered < client) only.
+        // Never downgrade; never touch the manual 'other' tier. Mirrors promoteContactType().
+        const reclassified = await db.execute<{ id: number }>(sql`
+            WITH computed AS (
+                SELECT
+                    l.id,
+                    l.contact_type AS stored,
+                    CASE
+                        WHEN u.id IS NULL THEN 'lead'
+                        WHEN EXISTS (
+                            SELECT 1 FROM plans p
+                            WHERE p.user_id = u.id AND p.status IN ('active','past_due')
+                        ) THEN 'client'
+                        ELSE 'registered'
+                    END AS correct
+                FROM leads l
+                LEFT JOIN users u ON lower(u.email) = lower(l.email)
+                WHERE l.contact_type IN ('lead','registered','client')
+            ),
+            ranked AS (
+                SELECT id, correct,
+                    CASE stored  WHEN 'lead' THEN 0 WHEN 'registered' THEN 1 WHEN 'client' THEN 2 END AS stored_rank,
+                    CASE correct WHEN 'lead' THEN 0 WHEN 'registered' THEN 1 WHEN 'client' THEN 2 END AS correct_rank
+                FROM computed
+            )
+            UPDATE leads l
+            SET contact_type = r.correct, updated_at = NOW()
+            FROM ranked r
+            WHERE l.id = r.id AND r.correct_rank > r.stored_rank
+            RETURNING l.id
+        `);
+        if (reclassified.length) {
+            leadsUpdated += reclassified.length;
+            console.log(`[identify-leads] reclassified ${reclassified.length} contact(s) to a higher tier`);
+        }
+
         // ── Write run summary ──────────────────────────────────────────────────
         await db.insert(leadAnalysisRuns).values({
             leadsCreated,

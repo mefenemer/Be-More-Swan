@@ -1943,7 +1943,119 @@ export default withLambda(async (event) => {
               .where(eq(leadReplies.leadId, id)).orderBy(leadReplies.createdAt);
             const tasks = await db.select().from(contactTasks)
               .where(eq(contactTasks.leadId, id)).orderBy(contactTasks.done, desc(contactTasks.createdAt));
-            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lead, thread, tasks }) };
+
+            // ── Client at-a-glance panel ───────────────────────────────────────
+            // When this contact's email maps to a user account, surface the live
+            // account snapshot the Super Admin needs without leaving Contacts:
+            // plan, plan end date, payment status, active-assistant count, and a
+            // derived upgrade-opportunity verdict + reasons. Null for pure prospects.
+            let client: any = null;
+            let tickets: any[] = [];
+            if (lead.email) {
+                const [snap] = await db.execute<{
+                    user_id: number; first_name: string | null; last_name: string | null;
+                    org_name: string | null;
+                    plan_name: string | null; plan_status: string | null;
+                    started_at: Date | null; expires_at: Date | null; grace_period_ends_at: Date | null;
+                    cancelled_at: Date | null; master_plan_name: string | null;
+                    assistant_limit: number | null; monthly_task_limit: number | null;
+                    active_assistants: number; tasks_this_month: number;
+                }>(sql`
+                    SELECT
+                        u.id AS user_id, u.first_name, u.last_name,
+                        org.name AS org_name,
+                        p.plan_name, p.status AS plan_status,
+                        p.started_at, p.expires_at, p.grace_period_ends_at, p.cancelled_at,
+                        mp.name AS master_plan_name,
+                        mp.assistant_limit, mp.monthly_task_limit,
+                        (SELECT COUNT(*)::int FROM ai_assistants aa
+                           WHERE aa.user_id = u.id AND aa.is_active = true) AS active_assistants,
+                        (SELECT COUNT(*)::int FROM task_runs tr
+                           JOIN ai_assistants aa2 ON tr.assistant_id = aa2.id
+                           WHERE aa2.user_id = u.id
+                             AND tr.created_at >= date_trunc('month', NOW())) AS tasks_this_month
+                    FROM users u
+                    LEFT JOIN LATERAL (
+                        SELECT * FROM plans pp WHERE pp.user_id = u.id
+                        ORDER BY (pp.status IN ('active','past_due')) DESC, pp.created_at DESC
+                        LIMIT 1
+                    ) p ON true
+                    LEFT JOIN master_plans mp ON mp.id = p.master_plan_id
+                    LEFT JOIN organisations org ON org.id = p.organisation_id
+                    WHERE lower(u.email) = lower(${lead.email})
+                    LIMIT 1
+                `);
+
+                if (snap) {
+                    const status = snap.plan_status || null;
+                    // Plan end date + label depend on lifecycle stage.
+                    let endDate: Date | null = null;
+                    let endLabel = '—';
+                    if (status === 'active')                 { endDate = snap.expires_at;          endLabel = endDate ? 'Renews' : 'No renewal date'; }
+                    else if (status === 'past_due')          { endDate = snap.grace_period_ends_at; endLabel = 'Grace period ends'; }
+                    else if (status === 'cancelling' || status === 'downgrading')
+                                                              { endDate = snap.cancelled_at || snap.expires_at; endLabel = 'Ends'; }
+                    else if (status === 'cancelled' || status === 'expired')
+                                                              { endDate = snap.cancelled_at || snap.expires_at; endLabel = 'Ended'; }
+
+                    // Derived upgrade-opportunity verdict.
+                    const reasons: string[] = [];
+                    const taskLimit = snap.monthly_task_limit;
+                    const asstLimit = snap.assistant_limit;
+                    const tasks = snap.tasks_this_month || 0;
+                    const assts = snap.active_assistants || 0;
+                    const paid = status === 'active' || status === 'past_due';
+                    if (paid && taskLimit && tasks >= taskLimit * 0.8) {
+                        const pct = Math.round((tasks / taskLimit) * 100);
+                        reasons.push(`High task usage — ${tasks} of ${taskLimit} monthly tasks used (${pct}%)`);
+                    }
+                    if (paid && asstLimit && assts >= asstLimit) {
+                        reasons.push(`At assistant capacity — ${assts} of ${asstLimit} assistants active`);
+                    }
+                    if (!paid && assts > 0) {
+                        reasons.push(`Active but on no paid plan — ${assts} assistant${assts === 1 ? '' : 's'} running: conversion opportunity`);
+                    }
+
+                    const accountName = [snap.first_name, snap.last_name].filter(Boolean).join(' ').trim() || null;
+
+                    client = {
+                        userId: snap.user_id,
+                        // Account identity — the source of truth for a client's name/company.
+                        accountName,
+                        accountCompany: snap.org_name || null,
+                        plan: snap.master_plan_name || snap.plan_name || (paid ? 'Paid plan' : 'No paid plan'),
+                        planStatus: status,             // 'active' | 'past_due' | 'cancelling' | 'cancelled' | 'expired' | null
+                        paymentStatus: !status ? 'No plan'
+                            : status === 'active' ? 'Paid'
+                            : status === 'past_due' ? 'Payment failed'
+                            : status === 'cancelling' ? 'Cancelling'
+                            : status === 'downgrading' ? 'Downgrading'
+                            : status === 'cancelled' ? 'Cancelled'
+                            : status === 'expired' ? 'Expired' : status,
+                        planEndDate: endDate,
+                        planEndLabel: endLabel,
+                        activeAssistants: assts,
+                        assistantLimit: asstLimit,
+                        tasksThisMonth: tasks,
+                        monthlyTaskLimit: taskLimit,
+                        upgradeOpportunity: reasons.length > 0,
+                        upgradeReasons: reasons,
+                    };
+
+                    // Support Request History — every ticket this account has raised,
+                    // newest first, for the in-panel list + reuse of the ticket modal.
+                    tickets = await db.select({
+                        id: supportTickets.id, subject: supportTickets.subject,
+                        category: supportTickets.category, status: supportTickets.status,
+                        priority: supportTickets.priority, createdAt: supportTickets.createdAt,
+                        slaBreachedAt: supportTickets.slaBreachedAt,
+                    }).from(supportTickets)
+                      .where(eq(supportTickets.userId, snap.user_id))
+                      .orderBy(desc(supportTickets.createdAt)).limit(50);
+                }
+            }
+
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lead, thread, tasks, client, tickets }) };
         }
 
         // POST ?resource=contact-update → edit name/company/phone/type/tags
