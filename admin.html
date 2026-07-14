@@ -5914,7 +5914,7 @@ function renderContactDetail(lead, thread, tasks, client, tickets) {
 
       ${_ctClientSection(client)}
 
-      ${_ctSupportSection(tickets)}
+      ${_ctSupportSection(tickets, client)}
 
       <!-- Tasks -->
       <div class="py-5 border-b border-gray-100">
@@ -6009,8 +6009,12 @@ function _ctClientSection(c) {
 
 // Support Request History — the account's support tickets, newest first. Each row opens
 // the existing ticket modal (openTicketPanel) to view/manage. Hidden for contacts with no tickets.
-function _ctSupportSection(tickets) {
-  if (!Array.isArray(tickets) || !tickets.length) return '';
+function _ctSupportSection(tickets, client) {
+  tickets = Array.isArray(tickets) ? tickets : [];
+  // Show the section for any contact with an account (client), even with zero tickets —
+  // a Super Admin should see "no requests yet" rather than a missing panel. Hide it only
+  // for pure prospects, who can't raise tickets (support_tickets.userId is required).
+  if (!tickets.length && !client) return '';
   const open = tickets.filter(t => !['resolved', 'closed'].includes(t.status)).length;
   const row = t => {
     const sla = t.slaBreachedAt ? ' <span class="text-red-600 font-bold">· SLA breached</span>' : '';
@@ -6028,7 +6032,7 @@ function _ctSupportSection(tickets) {
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
         Support requests ${open ? `<span class="text-emerald-600">(${open} open)</span>` : `<span class="text-gray-400">(${tickets.length})</span>`}
       </h3>
-      <div class="space-y-2">${tickets.map(row).join('')}</div>
+      <div class="space-y-2">${tickets.length ? tickets.map(row).join('') : '<p class="text-xs text-gray-400 py-1">No support requests raised yet.</p>'}</div>
     </div>`;
 }
 
