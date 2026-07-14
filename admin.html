@@ -1739,6 +1739,19 @@
   /* Legacy flat nav buttons (kept for any JS still referencing them) */
   .admin-nav-btn { display: none; }
 
+  /* Contact detail — collapsible sections (native <details>, chevron rotates on open) */
+  .contact-section > summary { list-style: none; }
+  .contact-section > summary::-webkit-details-marker { display: none; }
+  .contact-section > summary { outline: none; }
+  .contact-section[open] > summary .contact-section-chev { transform: rotate(180deg); }
+  /* Collapse the body when closed (this stack's <details> doesn't hide it natively). */
+  .contact-section:not([open]) > .ct-sec-body { display: none; }
+  /* Contact detail — message bubbles (client left, Super Admin right) */
+  .ct-msg-row { display: flex; }
+  .ct-msg-row.ct-out { justify-content: flex-end; }
+  .ct-msg-row.ct-in { justify-content: flex-start; }
+  .ct-bubble { max-width: 80%; }
+
   /* Two-tier nav — US-ADM-1.4.1 */
   .admin-cat-btn { color: #9ca3af; border-left: 3px solid transparent; }
   .admin-cat-btn:hover { background: rgba(255,255,255,.06); color: #fff; }
@@ -5887,13 +5900,22 @@ function renderContactDetail(lead, thread, tasks, client, tickets, issues) {
       <span class="text-sm ${t.done ? 'text-gray-400 line-through' : 'text-gray-700'}">${_escH(t.title)}${t.dueDate ? ` <span class="text-xs text-gray-400">· ${_escH(t.dueDate)}</span>` : ''}</span>
     </label>`;
 
+  // Internal notes span full width (amber); client messages sit on the left, Super Admin
+  // replies on the right — chat-bubble style via the .ct-msg-row / .ct-bubble CSS.
   const msgRow = r => {
-    const inbound = r.direction === 'inbound', internal = r.direction === 'internal';
-    const box = internal ? 'bg-amber-50 border-amber-200' : inbound ? 'bg-gray-50 border-gray-200' : 'bg-emerald-50 border-emerald-200';
-    const who = internal ? `Internal note${r.authorName ? ' · ' + _escH(r.authorName) : ''}` : inbound ? _escH(lead.name || lead.email) : `You${r.authorName ? ' · ' + _escH(r.authorName) : ''}`;
-    return `<div class="border ${box} rounded-xl px-4 py-3">
-      <div class="flex justify-between items-center mb-1"><span class="text-xs font-bold text-gray-600">${who}</span><span class="text-xs text-gray-400">${_ctWhen(r.createdAt)}</span></div>
-      <div class="text-sm text-gray-700 whitespace-pre-wrap">${_escH(r.body)}</div></div>`;
+    if (r.direction === 'internal') {
+      return `<div class="border bg-amber-50 border-amber-200 rounded-xl px-4 py-3">
+        <div class="flex justify-between items-center gap-3 mb-1"><span class="text-xs font-bold text-amber-700">Internal note${r.authorName ? ' · ' + _escH(r.authorName) : ''}</span><span class="text-xs text-gray-400">${_ctWhen(r.createdAt)}</span></div>
+        <div class="text-sm text-gray-700 whitespace-pre-wrap">${_escH(r.body)}</div></div>`;
+    }
+    const inbound = r.direction === 'inbound';
+    const who = inbound ? _escH(lead.name || lead.email) : `You${r.authorName ? ' · ' + _escH(r.authorName) : ''}`;
+    const box = inbound ? 'bg-gray-100 border-gray-200' : 'bg-emerald-50 border-emerald-200';
+    return `<div class="ct-msg-row ${inbound ? 'ct-in' : 'ct-out'}">
+      <div class="ct-bubble border ${box} rounded-2xl px-4 py-2.5">
+        <div class="flex justify-between items-center gap-3 mb-1"><span class="text-xs font-bold text-gray-600">${who}</span><span class="text-xs text-gray-400">${_ctWhen(r.createdAt)}</span></div>
+        <div class="text-sm text-gray-700 whitespace-pre-wrap">${_escH(r.body)}</div>
+      </div></div>`;
   };
 
   const detailPane = document.getElementById('contact-detail');
@@ -5927,33 +5949,22 @@ function renderContactDetail(lead, thread, tasks, client, tickets, issues) {
 
       ${_ctIssuesSection(issues, client)}
 
-      <!-- Tasks -->
-      <div class="py-5 border-b border-gray-100">
-        <h3 class="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-gray-400 mb-2">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7l2 2 4-4"/></svg>
-          Tasks ${openTasks.length ? `<span class="text-emerald-600">(${openTasks.length} open)</span>` : ''}
-        </h3>
-        <div>${openTasks.map(taskRow).join('') || '<p class="text-xs text-gray-400 py-1">No open tasks.</p>'}</div>
+      ${_ctSection(
+        'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7l2 2 4-4',
+        'Tasks',
+        openTasks.length ? `<span class="text-emerald-600">(${openTasks.length} open)</span>` : '',
+        `<div>${openTasks.map(taskRow).join('') || '<p class="text-xs text-gray-400 py-1">No open tasks.</p>'}</div>
         ${doneTasks.length ? `<details class="mt-1"><summary class="text-xs text-gray-400 cursor-pointer">${doneTasks.length} completed</summary>${doneTasks.map(taskRow).join('')}</details>` : ''}
         <div class="flex gap-2 mt-2">
           <input id="ct-task-input" placeholder="Add a task…" onkeydown="if(event.key==='Enter')_ctAddTask()" class="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
           <button onclick="_ctAddTask()" class="text-sm px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg font-semibold hover:bg-gray-200">Add</button>
-        </div>
-      </div>
+        </div>`
+      )}
 
-      <!-- Messages -->
-      <div class="py-5">
-        <h3 class="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-gray-400 mb-3">
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-          Messages
-        </h3>
-        ${lead.useCase ? `<div class="border border-gray-200 rounded-xl p-4 bg-white mb-2">
-          <p class="text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Original request${lead.opportunityReason ? ` · ${_escH(lead.opportunityReason)}` : ''}</p>
-          <p class="text-sm text-gray-600 whitespace-pre-wrap">${_escH(lead.useCase)}</p>
-          <p class="text-xs text-gray-400 mt-2">${_ctWhen(lead.createdAt)}</p></div>` : ''}
-        <div class="space-y-2">${thread.map(msgRow).join('')}</div>
-
-        <div class="mt-4">
+      ${_ctSection(
+        'M8 12h.01M12 12h.01M16 12h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+        'Messages', '',
+        `<div class="mb-4">
           <textarea id="ct-reply-body" rows="3" placeholder="Write a reply or an internal note…" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none resize-y"></textarea>
           <p id="ct-reply-error" class="hidden text-xs text-red-600 mt-1"></p>
           <div class="flex items-center gap-2 mt-2">
@@ -5961,8 +5972,32 @@ function renderContactDetail(lead, thread, tasks, client, tickets, issues) {
             <button onclick="_ctSend('internal')" class="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-200">Add internal note</button>
           </div>
         </div>
-      </div>
+        <div class="space-y-2">${[...thread].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(msgRow).join('')}</div>
+        ${lead.useCase ? `<div class="border border-gray-200 rounded-xl p-4 bg-white mt-2">
+          <p class="text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Original request${lead.opportunityReason ? ` · ${_escH(lead.opportunityReason)}` : ''}</p>
+          <p class="text-sm text-gray-600 whitespace-pre-wrap">${_escH(lead.useCase)}</p>
+          <p class="text-xs text-gray-400 mt-2">${_ctWhen(lead.createdAt)}</p></div>` : ''}`,
+        { last: true }
+      )}
     </div>`;
+}
+
+// Collapsible section wrapper for the contact detail pane. Uses a native <details> so the
+// open/closed state needs no JS; the header mirrors the old <h3> styling and the chevron
+// rotates on open via the `.contact-section` CSS. `count` is optional trailing header HTML.
+function _ctSection(iconPath, title, count, body, opts) {
+  opts = opts || {};
+  const border = opts.last ? '' : 'border-b border-gray-100';
+  return `
+    <details ${opts.open === false ? '' : 'open'} class="contact-section py-5 ${border}">
+      <summary class="flex items-center gap-2 cursor-pointer select-none">
+        <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"/></svg>
+        <span class="text-xs font-bold uppercase tracking-wide text-gray-400">${title}</span>
+        ${count || ''}
+        <svg class="contact-section-chev w-4 h-4 text-gray-300 ml-auto shrink-0 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+      </summary>
+      <div class="ct-sec-body mt-3">${body}</div>
+    </details>`;
 }
 
 // Client at-a-glance panel — only rendered when the contact maps to a user account.
@@ -6001,21 +6036,18 @@ function _ctClientSection(c) {
         No upgrade signals — healthy on current plan
       </div>`;
 
-  return `
-    <div class="py-5 border-b border-gray-100">
-      <h3 class="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-gray-400 mb-3">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        Client — at a glance
-      </h3>
-      <div class="grid grid-cols-2 gap-2">
+  return _ctSection(
+    'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
+    'At a Glance', '',
+    `<div class="grid grid-cols-2 gap-2">
         ${stat('Plan', _escH(c.plan))}
         ${stat('Payment', `<span class="inline-flex text-xs font-semibold px-2 py-0.5 rounded-md ${payCls}">${_escH(c.paymentStatus)}</span>`)}
         ${stat(_escH(c.planEndLabel || 'Plan end'), fmtDate(c.planEndDate))}
         ${stat('Active assistants', assts)}
         ${stat('Tasks this month', tasksUsed)}
       </div>
-      ${upgrade}
-    </div>`;
+      ${upgrade}`
+  );
 }
 
 // Support Request History — the account's support tickets, newest first. Each row opens
@@ -6037,14 +6069,12 @@ function _ctSupportSection(tickets, client) {
       <div class="flex flex-col items-end gap-1 shrink-0">${statusBadge(t.status)}${priorityBadge(t.priority)}</div>
     </button>`;
   };
-  return `
-    <div class="py-5 border-b border-gray-100">
-      <h3 class="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-gray-400 mb-3">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z"/></svg>
-        Support requests ${open ? `<span class="text-emerald-600">(${open} open)</span>` : `<span class="text-gray-400">(${tickets.length})</span>`}
-      </h3>
-      <div class="space-y-2">${tickets.length ? tickets.map(row).join('') : '<p class="text-xs text-gray-400 py-1">No support requests raised yet.</p>'}</div>
-    </div>`;
+  return _ctSection(
+    'M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z',
+    'Support requests',
+    open ? `<span class="text-emerald-600">(${open} open)</span>` : `<span class="text-gray-400">(${tickets.length})</span>`,
+    `<div class="space-y-2">${tickets.length ? tickets.map(row).join('') : '<p class="text-xs text-gray-400 py-1">No support requests raised yet.</p>'}</div>`
+  );
 }
 
 // Issues Reported — in-app bug reports this account has filed, newest first. Each row opens
@@ -6061,14 +6091,12 @@ function _ctIssuesSection(issues, client) {
       </div>
       <div class="shrink-0">${_irBadge(i.status)}</div>
     </button>`;
-  return `
-    <div class="py-5 border-b border-gray-100">
-      <h3 class="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-gray-400 mb-3">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-2.99l-6.93-12a2 2 0 00-3.48 0l-6.93 12A2 2 0 005.07 19z"/></svg>
-        Issues reported ${open ? `<span class="text-emerald-600">(${open} open)</span>` : `<span class="text-gray-400">(${issues.length})</span>`}
-      </h3>
-      <div class="space-y-2">${issues.length ? issues.map(row).join('') : '<p class="text-xs text-gray-400 py-1">No issues reported yet.</p>'}</div>
-    </div>`;
+  return _ctSection(
+    'M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-2.99l-6.93-12a2 2 0 00-3.48 0l-6.93 12A2 2 0 005.07 19z',
+    'Issues reported',
+    open ? `<span class="text-emerald-600">(${open} open)</span>` : `<span class="text-gray-400">(${issues.length})</span>`,
+    `<div class="space-y-2">${issues.length ? issues.map(row).join('') : '<p class="text-xs text-gray-400 py-1">No issues reported yet.</p>'}</div>`
+  );
 }
 
 function _ctQuickAction(onclick, label, path) {
