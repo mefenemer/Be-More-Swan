@@ -5856,17 +5856,22 @@ function renderContactList(contacts) {
 async function openContact(id) {
   _selectedContactId = id;
   renderContactList(_contactsCache); // refresh selection highlight
-  document.getElementById('contact-detail').innerHTML = '<div class="h-full flex items-center justify-center text-gray-400 text-sm animate-pulse">Loading…</div>';
+  const detailPane = document.getElementById('contact-detail');
+  // Loading/empty states are centred; the flex-centring classes must be dropped before real
+  // content is injected, or the detail block shrinks to content width and is vertically
+  // centred (top cut off). renderContactDetail resets this; restore it for the spinner here.
+  detailPane.className = 'h-full flex items-center justify-center text-gray-400 text-sm';
+  detailPane.innerHTML = '<div class="animate-pulse">Loading…</div>';
   document.getElementById('contact-info').innerHTML = '<p class="p-1 text-gray-400">Loading…</p>';
   try {
     const data = await api(`/.netlify/functions/admin-api?resource=contact-detail&id=${id}`);
     renderContactDetail(data.lead, data.thread || [], data.tasks || [], data.client || null, data.tickets || [], data.issues || []);
     renderContactInfo(data.lead, data.client || null);
     // Scroll the detail pane back to the top so the avatar/header is fully visible.
-    const pane = document.getElementById('contact-detail');
-    if (pane && pane.parentElement) pane.parentElement.scrollTop = 0;
+    if (detailPane.parentElement) detailPane.parentElement.scrollTop = 0;
   } catch (e) {
-    document.getElementById('contact-detail').innerHTML = `<div class="p-6 text-sm text-red-500">Failed to load: ${_escH(e.message)}</div>`;
+    detailPane.className = '';
+    detailPane.innerHTML = `<div class="p-6 text-sm text-red-500">Failed to load: ${_escH(e.message)}</div>`;
   }
 }
 
@@ -5891,7 +5896,11 @@ function renderContactDetail(lead, thread, tasks, client, tickets, issues) {
       <div class="text-sm text-gray-700 whitespace-pre-wrap">${_escH(r.body)}</div></div>`;
   };
 
-  document.getElementById('contact-detail').innerHTML = `
+  const detailPane = document.getElementById('contact-detail');
+  // Drop the empty/loading state's `flex items-center justify-center` so the injected content
+  // fills the pane width and flows from the top instead of shrinking and centring.
+  detailPane.className = '';
+  detailPane.innerHTML = `
     <div class="p-6">
       <!-- identity -->
       <div class="flex flex-col items-center text-center border-b border-gray-100 pb-6">
