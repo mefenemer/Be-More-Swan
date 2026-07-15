@@ -2,6 +2,12 @@
 
 Epic: Canva Integration for BMS Content Library (US1–US4).
 
+> **US4 superseded 2026-07-15.** The AI-assistant half now goes via Canva's remote MCP server
+> rather than the media resolver described in §5 — see [canva-mcp-architecture.md](./canva-mcp-architecture.md).
+> US1–US3 (connector, browse, import over Connect REST) are unchanged and still correct.
+> §5 below remains relevant only if assistants also need to *use imported assets* from the
+> Content Library; the resolver's `provider IS NULL` bug (§5.1) still applies to that path.
+
 This plan is written against the actual codebase, which differs from the brief in several
 load-bearing ways. Read section 0 before costing anything.
 
