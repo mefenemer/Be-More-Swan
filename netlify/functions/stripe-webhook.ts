@@ -2,7 +2,7 @@ import { Handler } from '@netlify/functions';
 import Stripe from 'stripe';
 import { eq, and, inArray, desc, sql } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
-import { payments, plans, aiAssistants, onboardingDrafts, notifications, users, masterPlans, planPrices, invoices, processedWebhookEvents, userReferrals, platformConfig, stripeDisputes, userOrganisations, userProfiles } from '../../db/schema';
+import { payments, plans, aiAssistants, onboardingDrafts, notifications, users, masterPlans, invoices, processedWebhookEvents, userReferrals, platformConfig, stripeDisputes, userOrganisations, userProfiles } from '../../db/schema';
 import { sendEmail, buildAnnualRenewalEmail, buildDunningEmail } from '../../src/utils/email';
 import { resolveActionNotifications, PAYMENT_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { recordCardFingerprint } from '../../src/utils/billing-fingerprint';
