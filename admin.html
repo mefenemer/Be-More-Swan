@@ -884,13 +884,13 @@
               </div>
               <input id="contacts-search" placeholder="Search name, email, company…" oninput="_contactsSearchDebounced()"
                 class="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-              <div id="contacts-type-filter" class="flex gap-1 mt-2">
-                <button data-ctype="" onclick="_contactsSetType('')" class="ct-filter text-xs font-semibold px-2.5 py-1 rounded-lg bg-emerald-600 text-white">All</button>
-                <button data-ctype="lead" onclick="_contactsSetType('lead')" class="ct-filter text-xs font-semibold px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Leads</button>
-                <button data-ctype="registered" onclick="_contactsSetType('registered')" class="ct-filter text-xs font-semibold px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Registered</button>
-                <button data-ctype="client" onclick="_contactsSetType('client')" class="ct-filter text-xs font-semibold px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Clients</button>
-                <button data-ctype="other" onclick="_contactsSetType('other')" class="ct-filter text-xs font-semibold px-2.5 py-1 rounded-lg bg-gray-100 text-gray-600 hover:bg-gray-200">Other</button>
-              </div>
+              <select id="contacts-type-filter" onchange="_contactsSetType(this.value)" class="w-full mt-2 text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+                <option value="">All types</option>
+                <option value="lead">Leads</option>
+                <option value="registered">Registered</option>
+                <option value="client">Clients</option>
+                <option value="other">Other</option>
+              </select>
               <select id="contacts-opp-filter" onchange="_contactsSetOpp(this.value)" class="w-full mt-2 text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
                 <option value="">All opportunities</option>
                 <option value="waitlist_interest">Future Assistant Opportunity</option>
@@ -5839,10 +5839,6 @@ async function loadContacts() {
 function _contactsSearchDebounced() { clearTimeout(_contactsDebounce); _contactsDebounce = setTimeout(loadContacts, 250); }
 function _contactsSetType(t) {
   _contactsType = t;
-  document.querySelectorAll('#contacts-type-filter .ct-filter').forEach(b => {
-    const on = (b.dataset.ctype || '') === t;
-    b.className = 'ct-filter text-xs font-semibold px-2.5 py-1 rounded-lg ' + (on ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200');
-  });
   loadContacts();
 }
 function _contactsSetOpp(v) { _contactsOpp = v; loadContacts(); }
@@ -5858,7 +5854,7 @@ function renderContactList(contacts) {
         <span class="w-9 h-9 rounded-full ${_ctAvatarColor(c.email)} text-white text-xs font-bold flex items-center justify-center shrink-0">${_escH(_ctInitials(c.name, c.email))}</span>
         <span class="min-w-0 flex-1">
           <span class="block font-semibold text-sm text-gray-900 truncate">${_escH(c.name || c.email)}</span>
-          <span class="block text-xs text-gray-400 truncate">${_escH(c.email)}</span>
+          <span class="block text-xs text-gray-400 break-all">${_escH(c.email)}</span>
           ${_ctOppBadge(c.leadType) ? `<span class="mt-1 block">${_ctOppBadge(c.leadType)}</span>` : ''}
         </span>
         <span class="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${pill.cls}"><span class="w-1.5 h-1.5 rounded-full ${pill.dot}"></span>${pill.label}</span>
