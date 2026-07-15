@@ -330,9 +330,39 @@ window.showComplianceModals = function showComplianceModals(force) {
         <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
         Prefer your assistant to draft it? Generate a post
       </button>
-      <div class="flex gap-2">
-        <button id="gpw-submit-btn" onclick="gpwSubmit()" class="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Add to Review</button>
+      <!-- Step 1: create the draft(s). No review step — the next screen chooses how it's scheduled. -->
+      <div id="gpw-create-actions" class="flex gap-2">
+        <button id="gpw-submit-btn" onclick="gpwSubmit()" class="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Next: choose scheduling</button>
         <button onclick="closeGeneratePostSheet()" class="px-5 py-2.5 border border-gray-300 text-gray-700 text-sm font-bold rounded-xl hover:bg-gray-50 transition cursor-pointer">Cancel</button>
+      </div>
+
+      <!-- Step 2: scheduling choice (shown after the draft is created). Human writes → no review;
+           they choose here whether the assistant schedules it, they pick a time, or it posts now. -->
+      <div id="gpw-schedule-actions" class="hidden">
+        <p class="text-sm font-semibold text-gray-800 mb-2">Your post is ready. How should it go out?</p>
+        <div class="flex flex-col gap-2">
+          <button onclick="gpwSchedule('approve')" class="w-full py-2.5 border border-emerald-600 text-emerald-700 hover:bg-emerald-50 text-sm font-bold rounded-xl transition cursor-pointer inline-flex items-center justify-center gap-1.5">
+            <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
+            Let <span id="gpw-assistant-name">your assistant</span> schedule it
+          </button>
+          <button onclick="gpwSchedule('reschedule')" class="w-full py-2.5 border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-bold rounded-xl transition cursor-pointer">Pick a time myself</button>
+          <button onclick="gpwSchedule('publish_now')" class="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer">Post now</button>
+        </div>
+        <!-- Date/time picker (revealed by "Pick a time myself") -->
+        <div id="gpw-schedule-picker" class="hidden mt-3">
+          <label class="block text-xs font-semibold text-gray-700 mb-1">Scheduled date &amp; time</label>
+          <input id="gpw-schedule-input" type="datetime-local" class="w-full text-sm border border-gray-300 rounded-xl px-3 py-2 mb-2 focus:outline-none focus:ring-2 focus:ring-emerald-400">
+          <div class="flex gap-2">
+            <button onclick="gpwConfirmSchedule()" class="flex-1 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer">Confirm Schedule</button>
+            <button onclick="document.getElementById('gpw-schedule-picker').classList.add('hidden')" class="py-2 px-3 text-sm font-semibold text-gray-600 border border-gray-300 rounded-xl hover:bg-gray-50 transition cursor-pointer">Back</button>
+          </div>
+        </div>
+        <!-- Connect notice — scheduling/publishing needs a live connection for each draft's platform. -->
+        <div id="gpw-connect-notice" class="hidden mt-3 flex items-start gap-2.5 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+          <svg class="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m9.656.656a4 4 0 010-5.656l3-3a4 4 0 015.656 5.656l-1.5 1.5"/></svg>
+          <span class="flex-1"><span id="gpw-connect-notice-text">Connect the platform to schedule or publish this post.</span></span>
+          <button type="button" onclick="gpGoConnect()" class="shrink-0 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg transition cursor-pointer">Connect</button>
+        </div>
       </div>
     </div>
 
@@ -430,10 +460,18 @@ window.showComplianceModals = function showComplianceModals(force) {
       <span class="flex-1"><span id="gp-connect-notice-text">Connect this platform to schedule or publish this post.</span></span>
       <button type="button" onclick="gpGoConnect()" class="shrink-0 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg transition cursor-pointer">Connect</button>
     </div>
-    <div id="gen-post-approve-actions" class="hidden flex gap-2 mt-2">
-      <button id="gp-approve-now-btn" onclick="gpApprovePost()" class="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-700">Post Now</button>
-      <button id="gp-approve-schedule-btn" onclick="gpSchedulePost()" class="flex-1 py-2.5 border border-emerald-600 text-emerald-700 hover:bg-emerald-50 text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent">Schedule for Later</button>
-      <button onclick="gpRejectPost()" class="py-2.5 px-3 border border-red-300 text-red-600 hover:bg-red-50 text-sm font-bold rounded-xl transition cursor-pointer">Reject</button>
+    <div id="gen-post-approve-actions" class="hidden mt-2 space-y-2">
+      <!-- Co-authored drafts get the same no-review scheduling choice as write-your-own: let the
+           assistant slot it, pick a time, or post now. Reject discards the draft. -->
+      <button id="gp-approve-assistant-btn" onclick="gpAssistantSchedule()" class="w-full py-2.5 border border-emerald-600 text-emerald-700 hover:bg-emerald-50 text-sm font-bold rounded-xl transition cursor-pointer inline-flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent">
+        <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
+        Let your assistant schedule it
+      </button>
+      <div class="flex gap-2">
+        <button id="gp-approve-now-btn" onclick="gpApprovePost()" class="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-700">Post Now</button>
+        <button id="gp-approve-schedule-btn" onclick="gpSchedulePost()" class="flex-1 py-2.5 border border-emerald-600 text-emerald-700 hover:bg-emerald-50 text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent">Schedule for Later</button>
+        <button onclick="gpRejectPost()" class="py-2.5 px-3 border border-red-300 text-red-600 hover:bg-red-50 text-sm font-bold rounded-xl transition cursor-pointer">Reject</button>
+      </div>
     </div>
     <!-- Schedule for later picker (shown when Schedule for Later is clicked) -->
     <div id="gen-post-schedule-picker" class="hidden mt-2">
@@ -5330,6 +5368,7 @@ let _gpCap = null;                 // cached capacity (connected platforms + AI 
 let _gpwSelectedPlatforms = [];    // write-your-own: multi-select
 let _gpwSelectedAssets = [];       // write-your-own: chosen My Content asset ids
 let _gpwAssetsById = {};           // write-your-own: id → asset object (for the live preview)
+let _gpwCreatedPosts = [];         // write-your-own: [{id, platform}] created, awaiting a scheduling choice
 let _gpHasMedia = false;           // work-with-AI: whether the current draft has an image attached
 
 // Opens the sheet on the single "write your own" composer. From there the user can hand the draft to
@@ -5396,7 +5435,7 @@ function gpBackToChooser() {
     document.getElementById('gen-post-preview')?.classList.add('hidden');
     document.getElementById('gen-post-approve-actions')?.classList.add('hidden');
     document.getElementById('gp-connect-notice')?.classList.add('hidden');
-    ['gp-approve-now-btn', 'gp-approve-schedule-btn'].forEach(id => {
+    ['gp-approve-now-btn', 'gp-approve-schedule-btn', 'gp-approve-assistant-btn'].forEach(id => {
         const b = document.getElementById(id); if (b) b.disabled = false;
     });
     document.getElementById('gen-post-schedule-picker')?.classList.add('hidden');
@@ -5423,8 +5462,14 @@ function gpBackToChooser() {
     document.getElementById('gpw-platform-meta')?.classList.add('hidden');
     document.getElementById('gpw-live-preview')?.classList.add('hidden');
     gpSetPanelStatus('gpw-status', '');
+    // Reset the two-step scheduling flow back to step 1.
+    _gpwCreatedPosts = [];
+    document.getElementById('gpw-schedule-actions')?.classList.add('hidden');
+    document.getElementById('gpw-schedule-picker')?.classList.add('hidden');
+    document.getElementById('gpw-connect-notice')?.classList.add('hidden');
+    document.getElementById('gpw-create-actions')?.classList.remove('hidden');
     const wBtn = document.getElementById('gpw-submit-btn');
-    if (wBtn) { wBtn.disabled = false; wBtn.textContent = 'Add to Review'; }
+    if (wBtn) { wBtn.disabled = false; wBtn.textContent = 'Next: choose scheduling'; }
 }
 
 // Reveal a mode's panel. 'ai' enforces the monthly AI generation limit first.
@@ -5659,7 +5704,7 @@ function gpEnsureMediaBeforeApproval() {
 // Reject stays enabled since discarding a draft needs no connection.
 async function gpApplyApprovalConnectGate(platform) {
     const connected = await rqEnsurePlatformConnection(platform);
-    ['gp-approve-now-btn', 'gp-approve-schedule-btn'].forEach(id => {
+    ['gp-approve-now-btn', 'gp-approve-schedule-btn', 'gp-approve-assistant-btn'].forEach(id => {
         const b = document.getElementById(id); if (b) b.disabled = !connected;
     });
     const notice = document.getElementById('gp-connect-notice');
@@ -5682,6 +5727,19 @@ async function gpApprovePost() {
     document.getElementById('gen-post-approve-actions')?.classList.add('hidden');
     document.getElementById('gen-post-preview')?.classList.add('hidden');
     setTimeout(closeGeneratePostSheet, 1500);
+}
+
+// "Let your assistant schedule it" (co-author panel): approve with no explicit time, so approve-post
+// lands the draft in the next free slot of the assistant's posting cadence (pickOptimalSlot).
+async function gpAssistantSchedule() {
+    if (!_gpCurrentPostId) return;
+    if (!gpEnsureMediaBeforeApproval()) return;
+    if (!(await gpApplyApprovalConnectGate(_gpDraftPlatform || _gpSelectedPlatform))) return;
+    if (!(await sdApprove(_gpCurrentPostId, 'approve'))) return;
+    gpSetStatus('Your assistant scheduled the post into its next available slot.');
+    document.getElementById('gen-post-approve-actions')?.classList.add('hidden');
+    document.getElementById('gen-post-preview')?.classList.add('hidden');
+    setTimeout(closeGeneratePostSheet, 1800);
 }
 
 async function gpSchedulePost() {
@@ -5981,19 +6039,19 @@ async function gpwSubmit() {
             if (picker?.classList.contains('hidden')) gpwToggleMediaPicker();
         };
         if (_gpwSelectedPlatforms.includes('instagram')) {
-            gpSetPanelStatus('gpw-status', 'Instagram requires an image. Add one from My Content before adding to the queue.', 'error');
+            gpSetPanelStatus('gpw-status', 'Instagram requires an image. Add one from My Content before scheduling.', 'error');
             openMediaPicker();
             return;
         }
-        if (!window.confirm("You haven't added an image. Posts with images perform better — add to the queue without one?")) {
+        if (!window.confirm("You haven't added an image. Posts with images perform better — continue without one?")) {
             openMediaPicker();
             return;
         }
     }
 
     const btn = document.getElementById('gpw-submit-btn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
-    gpSetPanelStatus('gpw-status', 'Adding to your Review…');
+    if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+    gpSetPanelStatus('gpw-status', 'Creating your post…');
     try {
         const res = await fetch('/.netlify/functions/create-manual-post', {
             method: 'POST',
@@ -6009,21 +6067,96 @@ async function gpwSubmit() {
         const d = await res.json().catch(() => ({}));
         if (!res.ok) {
             gpSetPanelStatus('gpw-status', d.error || 'Could not create the post.', 'error');
-            if (btn) { btn.disabled = false; btn.textContent = 'Add to Review'; }
+            if (btn) { btn.disabled = false; btn.textContent = 'Next: choose scheduling'; }
             return;
         }
-        const n = (d.created || []).length;
-        gpSetPanelStatus('gpw-status', `Added ${n} draft${n === 1 ? '' : 's'} to your Review.`);
-        if (typeof refreshPendingBadge === 'function') refreshPendingBadge();
-        // Refresh whichever Review Queue view is currently mounted — the global Review Queue
-        // page (Social tab) and/or the assistant-detail page's own scoped Review Queue tab.
-        if (typeof rqLoadItems === 'function') { try { rqLoadItems('pending_approval', 'social'); } catch { /* ignore */ } }
-        if (typeof window.detailRqRefresh === 'function') { try { window.detailRqRefresh(); } catch { /* ignore */ } }
-        setTimeout(closeGeneratePostSheet, 1500);
+        // Draft(s) created — no review step. Move to the scheduling choice: the human writes it,
+        // then decides here whether the assistant slots it, they pick a time, or it posts now.
+        _gpwCreatedPosts = (d.created || []).map(c => ({ id: c.id, platform: c.platform }));
+        const meta = await gpResolveAssistantMeta(_gpCurrentAssistantId).catch(() => null);
+        const nameEl = document.getElementById('gpw-assistant-name');
+        if (nameEl) nameEl.textContent = meta?.name || 'your assistant';
+        gpSetPanelStatus('gpw-status', 'Your post is ready — choose how it goes out below.');
+        document.getElementById('gpw-create-actions')?.classList.add('hidden');
+        document.getElementById('gpw-schedule-actions')?.classList.remove('hidden');
     } catch {
         gpSetPanelStatus('gpw-status', 'Network error — please try again.', 'error');
-        if (btn) { btn.disabled = false; btn.textContent = 'Add to Review'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Next: choose scheduling'; }
     }
+}
+
+// Scheduling choice for write-your-own drafts (no review step). 'approve' lets the assistant slot it
+// into its next cadence opening, 'reschedule' opens a datetime picker, 'publish_now' posts immediately.
+async function gpwSchedule(action) {
+    if (action === 'reschedule') {
+        const picker = document.getElementById('gpw-schedule-input');
+        if (picker) {
+            const min = new Date(Date.now() + 5 * 60 * 1000);
+            picker.min = min.toISOString().slice(0, 16);
+            picker.value = new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16);
+        }
+        document.getElementById('gpw-schedule-picker')?.classList.remove('hidden');
+        return;
+    }
+    await _gpwApplyScheduleAction(action);
+}
+
+async function gpwConfirmSchedule() {
+    const picker = document.getElementById('gpw-schedule-input');
+    const rescheduleAt = picker?.value;
+    if (!rescheduleAt) { gpSetPanelStatus('gpw-status', 'Please choose a date and time.', 'error'); return; }
+    if (new Date(rescheduleAt) <= new Date()) { gpSetPanelStatus('gpw-status', 'Scheduled time must be in the future.', 'error'); return; }
+    await _gpwApplyScheduleAction('reschedule', rescheduleAt);
+}
+
+// Drive the chosen approve-post action across every created draft (one per selected platform). Any
+// platform without a live connection comes back 422 PLATFORM_NOT_CONNECTED — surface a connect prompt
+// listing those platforms; the drafts stay saved so the user can connect and retry.
+async function _gpwApplyScheduleAction(action, rescheduleAt) {
+    if (!_gpwCreatedPosts.length) return;
+    document.getElementById('gpw-connect-notice')?.classList.add('hidden');
+    gpSetPanelStatus('gpw-status', action === 'publish_now' ? 'Publishing…' : 'Scheduling…');
+
+    let scheduled = 0;
+    const needConnect = [];
+    let lastError = null;
+    for (const post of _gpwCreatedPosts) {
+        try {
+            const res = await fetch('/.netlify/functions/approve-post', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ postId: post.id, action, rescheduleAt }),
+            });
+            const d = await res.json().catch(() => ({}));
+            if (res.ok) { scheduled++; continue; }
+            if (d.code === 'PLATFORM_NOT_CONNECTED') { needConnect.push(d.platform || post.platform); continue; }
+            lastError = d.error || 'Could not schedule this post.';
+        } catch { lastError = 'Network error — please try again.'; }
+    }
+
+    // Drop the successfully-scheduled posts so a retry only re-hits the ones that failed.
+    _gpwCreatedPosts = _gpwCreatedPosts.filter(p => needConnect.includes(p.platform));
+
+    if (typeof refreshPendingBadge === 'function') refreshPendingBadge();
+    if (typeof rqLoadItems === 'function') { try { rqLoadItems('pending_approval', 'social'); } catch { /* ignore */ } }
+    if (typeof window.detailRqRefresh === 'function') { try { window.detailRqRefresh(); } catch { /* ignore */ } }
+    if (typeof window.calRefresh === 'function') { try { window.calRefresh(); } catch { /* ignore */ } }
+
+    if (needConnect.length) {
+        document.getElementById('gpw-schedule-picker')?.classList.add('hidden');
+        const labels = [...new Set(needConnect)].map(p => (p === 'x' ? 'X' : p.charAt(0).toUpperCase() + p.slice(1)));
+        const noticeText = document.getElementById('gpw-connect-notice-text');
+        if (noticeText) noticeText.textContent = `Connect your ${labels.join(', ')} account${labels.length > 1 ? 's' : ''} to schedule ${labels.length > 1 ? 'these posts' : 'this post'}. Your draft${labels.length > 1 ? 's are' : ' is'} saved in the meantime.`;
+        document.getElementById('gpw-connect-notice')?.classList.remove('hidden');
+        gpSetPanelStatus('gpw-status', scheduled ? `Scheduled ${scheduled} post${scheduled === 1 ? '' : 's'}; the rest need a connection.` : (lastError || 'Connect the platform to continue.'), scheduled ? '' : 'error');
+        return;
+    }
+
+    if (lastError && !scheduled) { gpSetPanelStatus('gpw-status', lastError, 'error'); return; }
+
+    const verb = action === 'publish_now' ? 'queued to publish now' : action === 'approve' ? 'scheduled by your assistant' : 'scheduled';
+    gpSetPanelStatus('gpw-status', `Your post${scheduled === 1 ? ' is' : 's are'} ${verb}.`);
+    setTimeout(closeGeneratePostSheet, 1600);
 }
 
 // ── Ask Swan to improve ─────────────────────────────────────────────────────────────────────────

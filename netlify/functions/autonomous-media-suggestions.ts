@@ -27,22 +27,19 @@ import { FalContentPolicyError } from '../../src/lib/fal-gateway';
 import { resolveMediaForPost } from '../../src/utils/media-resolver';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { SMM_ROLE_KEYS } from '../../src/constants/roles';
-import { AUTONOMOUS_DRAFT_PLATFORMS } from '../../src/utils/publish-policy';
+import { AUTONOMOUS_DRAFT_PLATFORMS, resolveAutonomousDraftPlatforms, type AutonomousDraftPlatform } from '../../src/utils/publish-policy';
+import { platformFormat } from '../../src/config/platform-formats';
 import { decideAutoPublish, describeDecision } from '../../src/utils/auto-publish-runtime';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
-// Only Instagram has a live publisher today. Sourced from publish-policy.ts so the settings UI
-// (which reads the same list via get-assistant-context) can never offer a toggle for a platform
-// this drafter doesn't actually draft for.
-const PLATFORM = AUTONOMOUS_DRAFT_PLATFORMS[0];
-const ASPECT = '4:5' as const;       // Instagram feed-friendly
 const IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
 
 interface DraftCopy { caption: string; hashtags: string; imagePrompt: string; }
 
-// Ask the LLM for caption + hashtags + a visual prompt in one call.
-async function draftCopy(orgName: string, assistantName: string): Promise<DraftCopy> {
-    const system = `You are ${assistantName}, the social media manager for "${orgName}". Write one engaging, on-brand Instagram post. Respond ONLY with minified JSON: {"caption": string, "hashtags": string (space-separated, 3-6 tags), "imagePrompt": string (a vivid photographic description for an AI image generator, no text/words in image)}.`;
+// Ask the LLM for caption + hashtags + a visual prompt in one call, tailored to the platform.
+async function draftCopy(orgName: string, assistantName: string, platform: AutonomousDraftPlatform): Promise<DraftCopy> {
+    const label = platformFormat(platform).label;
+    const system = `You are ${assistantName}, the social media manager for "${orgName}". Write one engaging, on-brand ${label} post. Respond ONLY with minified JSON: {"caption": string, "hashtags": string (space-separated, 3-6 tags), "imagePrompt": string (a vivid photographic description for an AI image generator, no text/words in image)}.`;
     const res = await gatewayGenerate({
         system,
         messages: [{ role: 'user', content: 'Draft a post for an upcoming empty slot in the content calendar.' }],
@@ -111,12 +108,21 @@ export default withLambda(async (event) => {
         const horizonDays = a.horizonDays ?? 7;
         const windowEnd = new Date(now.getTime() + horizonDays * 24 * 60 * 60 * 1000);
 
-        // Which upcoming days already have a planned post for this assistant?
+        // Draft for each platform the assistant targets (∩ the platforms a drafter exists for);
+        // legacy assistants with no recognised platforms keep the Instagram-only behaviour.
+        const targetPlatforms = resolveAutonomousDraftPlatforms(a.onboardingContext);
+        const platforms: AutonomousDraftPlatform[] = targetPlatforms.length ? targetPlatforms : ['instagram'];
+
+      for (const platform of platforms) {
+        const fmt = platformFormat(platform);
+
+        // Which upcoming days already have a planned post for this assistant on THIS platform?
         const coveredRows = await db
             .select({ publishDate: scheduledPosts.publishDate })
             .from(scheduledPosts)
             .where(and(
                 eq(scheduledPosts.assistantId, a.id),
+                eq(scheduledPosts.platform, platform),
                 gte(scheduledPosts.publishDate, now),
                 lte(scheduledPosts.publishDate, windowEnd),
                 sql`status IN ('draft','in_review','approved','scheduled','pending_approval')`,
@@ -126,7 +132,7 @@ export default withLambda(async (event) => {
         const gapDay = firstGapDay(covered, horizonDays, now);
         if (!gapDay) { skippedNoGap++; continue; }
 
-        const copy = await draftCopy(a.orgName || 'our brand', a.name);
+        const copy = await draftCopy(a.orgName || 'our brand', a.name, platform);
 
         // AI generation source — encapsulates the autonomous credit hold/settle + the generation-job
         // ledger, so the resolver only pays for AI when it actually reaches that source. A reached cap
@@ -137,14 +143,14 @@ export default withLambda(async (event) => {
 
             const [job] = await db.insert(mediaGenerationJobs).values({
                 organisationId: a.organisationId, userId: a.userId, assistantId: a.id,
-                mediaType: 'image', prompt: copy.imagePrompt, aspectRatio: ASPECT,
+                mediaType: 'image', prompt: copy.imagePrompt, aspectRatio: fmt.aspectRatio,
                 model: IMAGE_MODEL, creditCost: IMAGE_CREDIT_COST, isAutonomous: true, status: 'processing',
             }).returning({ id: mediaGenerationJobs.id });
 
             try {
                 const assetId = await generateAndPersistImage(db, {
                     orgId: a.organisationId, userId: a.userId,
-                    prompt: copy.imagePrompt, aspectRatio: ASPECT, generationJobId: job.id,
+                    prompt: copy.imagePrompt, aspectRatio: fmt.aspectRatio, generationJobId: job.id,
                 });
                 await settleHold(db, { orgId: a.organisationId, amount: IMAGE_CREDIT_COST, success: true, mediaType: 'image', userId: a.userId, jobId: job.id, isAutonomous: true });
                 await db.update(mediaGenerationJobs).set({ status: 'completed', resultAssetIds: [assetId], updatedAt: new Date() }).where(eq(mediaGenerationJobs.id, job.id));
@@ -193,7 +199,7 @@ export default withLambda(async (event) => {
         const gate = await decideAutoPublish(db, {
             assistantId: a.id,
             organisationId: a.organisationId,
-            platform: PLATFORM,
+            platform,
             caption: copy.caption,
             mediaSource: resolved.source,
             onboardingContext: a.onboardingContext,
@@ -212,7 +218,7 @@ export default withLambda(async (event) => {
 
         const [post] = await db.insert(scheduledPosts).values({
             userId: a.userId, organisationId: a.organisationId, assistantId: a.id,
-            platform: PLATFORM, postFormat: 'image', publishDate: gapDay,
+            platform, postFormat: 'image', publishDate: gapDay,
             caption: copy.caption, hashtags: copy.hashtags || null,
             contentAssetIds: [assetId],
             connectionId: gate.connectionId,
@@ -220,7 +226,7 @@ export default withLambda(async (event) => {
             // Marks the post unattended and counts toward the rolling weekly ceiling.
             autoPublishedAt: gate.status === 'scheduled' ? new Date() : null,
             ownerLabel: `AI: ${a.name}`,
-            generationReason: `Drafted to fill an empty ${PLATFORM} slot on ${dateLabel} (media from ${sourceLabel}). ${gateLabel}`,
+            generationReason: `Drafted to fill an empty ${platform} slot on ${dateLabel} (media from ${sourceLabel}). ${gateLabel}`,
             generatedAt: new Date(),
             // Persist the scorer's verdict inline — the drafter calls scoreCaption directly, so
             // there's no separate score-post-confidence round-trip to fill these in. Null when the
@@ -246,6 +252,7 @@ export default withLambda(async (event) => {
             draftedByUser.set(a.userId, (draftedByUser.get(a.userId) || 0) + 1);
         }
         drafted++;
+      } // end per-platform loop
     }
 
     // US8 in-app alert: one summary notification per user ("drafted N new posts for your review").

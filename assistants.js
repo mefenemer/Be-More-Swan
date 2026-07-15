@@ -2221,6 +2221,9 @@ function _detailHydrate(data) {
     _detailSetVal('edit_reference_url', ctx.reference_style_url || '');
     _hydratePlatformStrategy(data);
     _hydrateAutoPublish(data);
+    // AI-media auto-publish opt-in (Autopilot card). Off unless explicitly stored true.
+    const allowAiMediaEl = document.getElementById('edit_allow_ai_media');
+    if (allowAiMediaEl) allowAiMediaEl.checked = ctx.allowAiMediaAutoPublish === true;
     // workflowText is Be More Swan IP — not displayed to the user
 
     // Radios — trigger / source.
@@ -2554,6 +2557,8 @@ function _detailCollect(currentData) {
         reference_style_url: document.getElementById('edit_reference_url')?.value || '',
         platform_strategy: _collectPlatformStrategy(currentData.context?.platform_strategy),
         publishPolicy: _collectPublishPolicy(currentData.context?.publishPolicy),
+        // AI-media auto-publish opt-in (Autopilot card). Read from the toggle; default off.
+        allowAiMediaAutoPublish: document.getElementById('edit_allow_ai_media')?.checked === true,
         primary_platforms: platforms,
     };
 

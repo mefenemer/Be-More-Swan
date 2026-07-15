@@ -21,6 +21,7 @@ import { FalContentPolicyError } from '../../src/lib/fal-gateway';
 import { DISCLOSURE } from '../../src/config/compliance';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { decideAutoPublish, describeDecision } from '../../src/utils/auto-publish-runtime';
+import { platformFormat } from '../../src/config/platform-formats';
 import type { MediaSource } from '../../src/utils/publish-policy';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -332,7 +333,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 // autonomous cap). holdCredits refuses when the balance is short — the throw makes the
                 // resolver treat AI as unavailable and fall through (or report exhausted → no media).
                 // Only fires for image posts: the resolver skips 'ai' for video (async gen path).
-                const aspect = format === 'story' ? '9:16' : '4:5';
+                const aspect = format === 'story' ? '9:16' : platformFormat(platform).aspectRatio;
                 const generateAi = async (): Promise<number> => {
                     const hold = await holdCredits(db, { orgId: job.organisation_id, amount: IMAGE_CREDIT_COST });
                     if (!hold.ok) throw new Error('insufficient_ai_credits');

@@ -14,6 +14,8 @@ import type { getDb } from '../../db/client';
 import { aiBlueprints, scheduledPosts, contentGenerationJobs, contentAssets, notifications } from '../../db/schema';
 import { resolvePostingSchedule, computeScheduleSlots } from '../config/posting-cadence';
 import { assembleBlueprint } from './blueprint';
+import { resolveAutonomousDraftPlatforms, type AutonomousDraftPlatform } from './publish-policy';
+import { normalizePlatform } from '../config/platform-formats';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -80,9 +82,16 @@ export async function enqueueScheduleGapFill(
 
     const windowEnd = slots[slots.length - 1];
 
-    // Posts already planned within the window, counted per calendar day.
+    // Autopilot drafts one post per slot PER platform the assistant targets (primary_platforms ∩ the
+    // platforms a drafter exists for). Legacy assistants with no recognised platforms keep the single
+    // stream (platform === null → process-content-jobs resolves the org's fallback connection).
+    const targetPlatforms = resolveAutonomousDraftPlatforms(assistant.onboardingContext);
+    const multi = targetPlatforms.length > 0;
+    const platformsToDraft: (AutonomousDraftPlatform | null)[] = multi ? targetPlatforms : [null];
+
+    // Posts already planned within the window.
     const plannedRows = await db
-        .select({ publishDate: scheduledPosts.publishDate })
+        .select({ publishDate: scheduledPosts.publishDate, platform: scheduledPosts.platform })
         .from(scheduledPosts)
         .where(and(
             eq(scheduledPosts.assistantId, assistant.id),
@@ -93,30 +102,43 @@ export async function enqueueScheduleGapFill(
 
     // Generation jobs still in flight that already target a slot in the window.
     const inflightRows = await db
-        .select({ targetPublishDate: contentGenerationJobs.targetPublishDate })
+        .select({ targetPublishDate: contentGenerationJobs.targetPublishDate, platform: contentGenerationJobs.platform })
         .from(contentGenerationJobs)
         .where(and(
             eq(contentGenerationJobs.assistantId, assistant.id),
             inArray(contentGenerationJobs.status, ['queued', 'processing']),
         ));
 
-    // Per-day coverage counts (a day with two preferred times needs two posts to be "covered").
+    // Coverage counts keyed by (platform-bucket, calendar day). In single-stream mode the bucket is
+    // always 'any' (a post on any platform covers the day, preserving the historical behaviour); in
+    // multi-platform mode each platform is tracked independently so an Instagram post doesn't count
+    // as covering a LinkedIn slot. A day with two preferred times needs two posts to be "covered".
+    const bucketOf = (plat: string | null): string => multi ? (normalizePlatform(plat) ?? '__other__') : 'any';
+    const covKey = (bucket: string, d: Date): string => `${bucket}|${UTC_DAY(d)}`;
     const coverage = new Map<string, number>();
-    const bump = (d: Date | null) => {
+    const bump = (bucket: string, d: Date | null) => {
         if (!d) return;
-        const key = UTC_DAY(new Date(d));
+        const key = covKey(bucket, new Date(d));
         coverage.set(key, (coverage.get(key) ?? 0) + 1);
     };
-    plannedRows.forEach(r => bump(r.publishDate));
-    inflightRows.forEach(r => bump(r.targetPublishDate));
+    plannedRows.forEach(r => bump(bucketOf(r.platform), r.publishDate));
+    inflightRows.forEach(r => {
+        // A legacy in-flight job carries no platform; in multi mode we can't tell which platform it
+        // will resolve to, so count it conservatively against every target platform that day.
+        if (multi && r.platform == null) targetPlatforms.forEach(tp => bump(tp, r.targetPublishDate));
+        else bump(bucketOf(r.platform), r.targetPublishDate);
+    });
 
-    // Walk desired slots in chronological order; collect only the per-day deficit.
-    const uncovered: Date[] = [];
-    for (const slot of slots) {
-        const key = UTC_DAY(slot);
-        const remaining = coverage.get(key) ?? 0;
-        if (remaining > 0) { coverage.set(key, remaining - 1); continue; } // already covered
-        uncovered.push(slot);
+    // Walk desired slots in chronological order, once per target platform; collect only the deficit.
+    const uncovered: Array<{ slot: Date; platform: AutonomousDraftPlatform | null }> = [];
+    for (const platform of platformsToDraft) {
+        const bucket = multi ? platform! : 'any';
+        for (const slot of slots) {
+            const key = covKey(bucket, slot);
+            const remaining = coverage.get(key) ?? 0;
+            if (remaining > 0) { coverage.set(key, remaining - 1); continue; } // already covered
+            uncovered.push({ slot, platform });
+        }
     }
     if (!uncovered.length) return { enqueued: 0, reason: 'fully_covered' };
 
@@ -137,7 +159,7 @@ export async function enqueueScheduleGapFill(
     }
 
     let enqueued = 0;
-    for (const slot of uncovered) {
+    for (const { slot, platform } of uncovered) {
         await db.insert(contentGenerationJobs).values({
             jobId: randomUUID(),
             blueprintId: bp.id,
@@ -148,6 +170,8 @@ export async function enqueueScheduleGapFill(
             attempt: 0,
             maxAttempts: 3,
             triggerType: 'scheduled',
+            // Per-platform in multi mode; null lets process-content-jobs resolve the fallback platform.
+            platform: platform ?? null,
             targetPublishDate: slot,
         });
         enqueued++;
