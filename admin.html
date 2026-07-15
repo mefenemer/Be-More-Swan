@@ -688,9 +688,9 @@
           <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
             <table class="w-full text-sm admin-responsive-table">
               <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide">
-                <tr><th class="px-4 py-3 text-left">Plan</th><th class="px-4 py-3 text-left">Currency</th><th class="px-4 py-3 text-right">Monthly</th><th class="px-4 py-3 text-right">Annual</th><th class="px-4 py-3 text-left">Actions</th></tr>
+                <tr><th class="px-4 py-3 text-left">Plan</th><th class="px-4 py-3 text-left">Currency</th><th class="px-4 py-3 text-right">Monthly</th><th class="px-4 py-3 text-left">Stripe Price ID</th><th class="px-4 py-3 text-center">Active</th><th class="px-4 py-3 text-left">Actions</th></tr>
               </thead>
-              <tbody id="md-plan-prices-tbody"><tr><td colspan="5" class="px-5 py-8 text-center text-gray-400">Loading…</td></tr></tbody>
+              <tbody id="md-plan-prices-tbody"><tr><td colspan="6" class="px-5 py-8 text-center text-gray-400">Loading…</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -7253,13 +7253,14 @@ const MD_FIELDS = {
     { key: 'features',          label: 'Features (JSON)',   type: 'json',   placeholder: '{ "unlock_trending_audio": true, "bonus_assistants": 1 }' },
     { key: 'isActive',          label: 'Active',            type: 'checkbox' },
   ],
+  // Keys must match the plan_prices columns the API reads (master-data-api.ts → handlePlanPrices).
+  // There is no annual price and no per-interval Stripe id on this table — one row per plan+currency.
   'plan-prices': [
-    { key: 'masterPlanId',      label: 'Master Plan ID',    type: 'number', required: true },
-    { key: 'currency',          label: 'Currency',          type: 'text',   required: true, placeholder: 'GBP' },
-    { key: 'monthlyPricePence', label: 'Monthly (pence)',   type: 'number', required: true },
-    { key: 'annualPricePence',  label: 'Annual (pence)',    type: 'number' },
-    { key: 'stripePriceIdMonthly', label: 'Stripe Monthly Price ID', type: 'text' },
-    { key: 'stripePriceIdAnnual',  label: 'Stripe Annual Price ID',  type: 'text' },
+    { key: 'masterPlanId',           label: 'Master Plan ID',   type: 'number', required: true },
+    { key: 'currency',               label: 'Currency',         type: 'text',   required: true, placeholder: 'GBP' },
+    { key: 'monthlyPriceMajorUnit',  label: 'Monthly Price (major unit, e.g. 29.00)', type: 'number', required: true },
+    { key: 'stripePriceId',          label: 'Stripe Price ID',  type: 'text',   placeholder: 'price_…' },
+    { key: 'isActive',               label: 'Active',           type: 'checkbox' },
   ],
   'master-assistants': [
     { key: 'name',              label: 'Name',              type: 'text',   required: true },
@@ -7316,6 +7317,14 @@ async function mdLoadTab(tab) {
 
   const resource = MD_TAB_RESOURCE[tab];
   if (!resource) return;
+  // plan_prices rows carry only master_plan_id; warm the plans cache so the Plan column can
+  // show names when this tab is opened before Plans.
+  if (tab === 'plan-prices' && !_mdCache['plans']) {
+    try {
+      const pd = await api(MD_API + '?resource=master-plans');
+      _mdCache['plans'] = pd.data || pd.records || pd || [];
+    } catch { /* fall back to raw ids */ }
+  }
   const tbodyId = 'md-' + tab + '-tbody';
   const tbody = document.getElementById(tbodyId);
   if (!tbody) return;
@@ -7406,6 +7415,27 @@ async function mdApplyHelpSeed() {
   }
 }
 
+// Resolve a master_plan_id to its plan name using the plans tab cache; falls back to the raw
+// id when plans have not been loaded yet (plan_prices stores only the foreign key).
+function _mdPlanName(planId) {
+  if (planId == null) return '';
+  const plan = (_mdCache['plans'] || []).find(p => p.id == planId);
+  return plan ? _escH(plan.name || plan.tierKey || ('#' + planId)) : ('#' + planId);
+}
+
+// plan_prices.monthly_price_major_unit is major units (29.00), not pence, and arrives from
+// drizzle numeric() as a string.
+function _mdMoney(currency, majorUnit) {
+  if (majorUnit == null || majorUnit === '') return '—';
+  const n = Number(majorUnit);
+  if (!isFinite(n)) return '—';
+  try {
+    return new Intl.NumberFormat('en-GB', { style: 'currency', currency: currency || 'GBP' }).format(n);
+  } catch {
+    return `${n.toFixed(2)} ${currency || ''}`.trim();   // unknown/blank ISO code
+  }
+}
+
 function mdRenderRow(tab, r) {
   const editBtn = `<button onclick='mdOpenEdit("${tab}", ${JSON.stringify(r.id ?? r.key ?? r.code ?? '').replace(/'/g,"\\'")})'
     class="text-xs text-indigo-600 hover:underline font-semibold mr-2">Edit</button>`;
@@ -7413,7 +7443,7 @@ function mdRenderRow(tab, r) {
                            : '<span class="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs">Inactive</span>';
   const delBtn = (dbTable, id, lbl) => `<button onclick='openCascadeDeleteSheet("${dbTable}",${JSON.stringify(id)},"${String(lbl).replace(/"/g,"&quot;")}",()=>mdLoadTab(_mdActiveTab))' class="text-xs text-red-500 hover:underline font-semibold">Delete</button>`;
   if (tab === 'plans') { const priceBtn = `<button onclick='managePriceOpen(${JSON.stringify(r.id)})' class="text-xs text-emerald-600 hover:underline font-semibold mr-2">Manage Price</button>`; return `<tr class="border-t border-gray-100"><td class="px-4 py-3 font-medium">${r.name||''}</td><td class="px-4 py-3 text-gray-500">${r.tierKey||''}</td><td class="px-4 py-3 text-right font-mono">£${(r.monthlyPriceGbp||0)}</td><td class="px-4 py-3 text-center">${activeChip(r.isActive)}</td><td class="px-4 py-3 flex gap-2">${priceBtn}${editBtn}${delBtn('master_plans',r.id,r.name||'Plan')}</td></tr>`; }
-  if (tab === 'plan-prices') return `<tr class="border-t border-gray-100"><td class="px-4 py-3">${r.masterPlanId||''}</td><td class="px-4 py-3 font-mono font-bold">${r.currency||''}</td><td class="px-4 py-3 text-right font-mono">${r.monthlyPricePence!=null?r.monthlyPricePence+'p':'-'}</td><td class="px-4 py-3 text-right font-mono">${r.annualPricePence!=null?r.annualPricePence+'p':'-'}</td><td class="px-4 py-3 flex gap-2">${editBtn}${delBtn('plan_prices',r.id,(r.currency||'')+'price')}</td></tr>`;
+  if (tab === 'plan-prices') return `<tr class="border-t border-gray-100"><td class="px-4 py-3">${_mdPlanName(r.masterPlanId)}</td><td class="px-4 py-3 font-mono font-bold">${r.currency||''}</td><td class="px-4 py-3 text-right font-mono">${_mdMoney(r.currency, r.monthlyPriceMajorUnit)}</td><td class="px-4 py-3 font-mono text-xs text-gray-500">${r.stripePriceId||'—'}</td><td class="px-4 py-3 text-center">${activeChip(r.isActive)}</td><td class="px-4 py-3 flex gap-2">${editBtn}${delBtn('plan_prices',r.id,(r.currency||'')+' price')}</td></tr>`;
   if (tab === 'assistants') return `<tr class="border-t border-gray-100"><td class="px-4 py-3 font-medium">${r.name||''}</td><td class="px-4 py-3 text-gray-500">${r.category||''}</td><td class="px-4 py-3 text-gray-500">${r.riskClassification||''}</td><td class="px-4 py-3 text-center">${activeChip(r.isActive)}</td><td class="px-4 py-3 flex gap-2">${editBtn}${delBtn('master_assistants',r.id,r.name||'Assistant')}</td></tr>`;
   if (tab === 'assistant-versions') return `<tr class="border-t border-gray-100"><td class="px-4 py-3">${r.masterAssistantId||''}</td><td class="px-4 py-3 text-center font-mono">v${r.versionNumber||''}</td><td class="px-4 py-3 text-gray-500 max-w-xs truncate">${r.changeNote||''}</td><td class="px-4 py-3 text-gray-400 text-xs">${r.createdAt?new Date(r.createdAt).toLocaleDateString('en-GB'):''}</td></tr>`;
   if (tab === 'feature-flags-md') return `<tr class="border-t border-gray-100"><td class="px-4 py-3 font-mono text-xs">${r.key||''}</td><td class="px-4 py-3 text-gray-500 max-w-xs truncate">${r.description||''}</td><td class="px-4 py-3 text-center">${activeChip(r.isActive)}</td><td class="px-4 py-3 text-center font-mono">${r.rolloutPercentage??0}%</td><td class="px-4 py-3 flex gap-2">${editBtn}${delBtn('feature_flags',r.key,r.key||'Flag')}</td></tr>`;
