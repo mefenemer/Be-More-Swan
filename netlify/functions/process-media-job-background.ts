@@ -9,39 +9,19 @@
 // which comfortably covers Hailuo 2.3 generation. Triggered fire-and-forget by generate-ai-video.ts.
 
 import { HandlerEvent } from '@netlify/functions';
-import crypto from 'crypto';
 import { eq } from 'drizzle-orm';
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { getDb } from '../../db/client';
 import { contentAssets, mediaGenerationJobs, notifications } from '../../db/schema';
 import { status as falStatus, result as falResult, extractVideo, falConfigured, FalContentPolicyError } from '../../src/lib/fal-gateway';
 import { settleHold } from '../../src/utils/ai-credits';
+import { persistRemoteMediaToR2, r2IsConfigured } from '../../src/lib/media-persist';
 import { withLambda } from '@netlify/aws-lambda-compat';
-
-const R2_ENDPOINT = process.env.R2_ENDPOINT;
-const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
-const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
-const R2_BUCKET = process.env.R2_BUCKET_NAME;
-const r2Configured = !!(R2_ENDPOINT && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_BUCKET);
 
 const POLL_INTERVAL_MS = 5_000;
 const POLL_TIMEOUT_MS = 12 * 60 * 1000;   // 12 min, under the 15-min background ceiling
 const MOCK_VIDEO_URL = 'https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4';
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
-
-async function persistVideoToR2(orgId: number, url: string, contentType: string): Promise<{ storageKey: string; fileSize: number }> {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`Could not download generated video (${res.status}).`);
-    const bytes = Buffer.from(await res.arrayBuffer());
-    const storageKey = `content/org-${orgId}/generated/${crypto.randomUUID()}.mp4`;
-    const s3 = new S3Client({
-        region: 'auto', endpoint: R2_ENDPOINT,
-        credentials: { accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY! },
-    });
-    await s3.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: storageKey, Body: bytes, ContentType: contentType || 'video/mp4' }));
-    return { storageKey, fileSize: bytes.byteLength };
-}
 
 export default withLambda(async (event: HandlerEvent) => {
     let jobId: number;
@@ -97,8 +77,10 @@ export default withLambda(async (event: HandlerEvent) => {
         let storageKey: string | null = null;
         let externalUrl: string | null = null;
         let fileSize: number | null = null;
-        if (r2Configured) {
-            const stored = await persistVideoToR2(orgId, videoUrl, videoContentType);
+        if (r2IsConfigured()) {
+            const stored = await persistRemoteMediaToR2({
+                orgId, url: videoUrl, contentType: videoContentType || 'video/mp4', label: 'generated video',
+            });
             storageKey = stored.storageKey;
             fileSize = stored.fileSize;
         } else {

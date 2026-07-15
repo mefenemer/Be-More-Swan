@@ -142,6 +142,7 @@
     + '          <button id="bs-feature-library" class="bs-btn bs-btn-ghost">Choose from Library</button>'
     + '          <button id="bs-feature-upload" class="bs-btn bs-btn-ghost">Upload</button>'
     + '          <button id="bs-feature-pexels" class="bs-btn bs-btn-ghost">Stock photo</button>'
+    + '          <button id="bs-feature-canva" class="bs-btn bs-btn-ghost">Canva</button>'
     + '          <button id="bs-feature-ai" class="bs-btn bs-btn-ghost">AI generate</button>'
     + '          <button id="bs-feature-remove" class="bs-btn bs-btn-ghost bs-hidden">Remove</button>'
     + '          <input type="file" id="bs-feature-upload-input" class="bs-hidden" accept="image/png,image/jpeg,image/gif,image/webp">'
@@ -151,6 +152,7 @@
     + '          <button id="bs-inline-library" class="bs-btn bs-btn-ghost">Library</button>'
     + '          <button id="bs-inline-upload" class="bs-btn bs-btn-ghost">Upload</button>'
     + '          <button id="bs-inline-pexels" class="bs-btn bs-btn-ghost">Stock</button>'
+    + '          <button id="bs-inline-canva" class="bs-btn bs-btn-ghost">Canva</button>'
     + '          <button id="bs-inline-ai" class="bs-btn bs-btn-ghost">AI</button>'
     + '          <input type="file" id="bs-inline-upload-input" class="bs-hidden" accept="image/png,image/jpeg,image/gif,image/webp">'
     + '        </div>'
@@ -462,6 +464,26 @@
       });
     });
   }
+  // Canva imports land in content_assets like any other source, so once the picker reports back
+  // there is nothing Canva-specific left to do — routeImage attaches the asset exactly as the
+  // Library and Upload paths do. assetType 'image' keeps video designs out: a feature or inline
+  // image can't be an mp4.
+  function openCanva() {
+    if (!state.postId || !window.CanvaBrowser) return;
+    mediaEls.picker.classList.add('bs-hidden');
+    mediaEls.aiForm.classList.add('bs-hidden');
+    mediaEls.pexelsForm.classList.add('bs-hidden');
+    window.CanvaBrowser.open({
+      assetType: 'image',
+      multiple: false,
+      onImported: function (assetIds) {
+        if (!assetIds || !assetIds.length) return;
+        // A multi-page design yields several assets; attach the first and leave the rest in the
+        // library rather than stuffing every page into the post.
+        routeImage({ assetId: assetIds[0] });
+      },
+    });
+  }
   function openAiForm() {
     mediaEls.picker.classList.add('bs-hidden');
     mediaEls.pexelsForm.classList.add('bs-hidden');
@@ -700,9 +722,10 @@
       upload: el('bs-feature-upload'), uploadInput: el('bs-feature-upload-input'),
       aiForm: el('bs-ai-form'), aiPrompt: el('bs-ai-prompt'), aiGo: el('bs-ai-go'),
       pexelsForm: el('bs-pexels-form'), pexelsQuery: el('bs-pexels-query'), pexelsGo: el('bs-pexels-go'),
-      picker: el('bs-media-picker'),
+      picker: el('bs-media-picker'), canva: el('bs-feature-canva'),
       inlineLibrary: el('bs-inline-library'), inlinePexels: el('bs-inline-pexels'), inlineAi: el('bs-inline-ai'),
       inlineUpload: el('bs-inline-upload'), inlineUploadInput: el('bs-inline-upload-input'),
+      inlineCanva: el('bs-inline-canva'),
     };
 
     mediaEls.remove.addEventListener('click', function () {
@@ -716,6 +739,8 @@
     mediaEls.inlineAi.addEventListener('click', function () { state.mediaTarget = 'inline'; openAiForm(); });
     mediaEls.pexels.addEventListener('click', function () { state.mediaTarget = 'feature'; openPexelsForm(); });
     mediaEls.inlinePexels.addEventListener('click', function () { state.mediaTarget = 'inline'; openPexelsForm(); });
+    mediaEls.canva.addEventListener('click', function () { state.mediaTarget = 'feature'; openCanva(); });
+    mediaEls.inlineCanva.addEventListener('click', function () { state.mediaTarget = 'inline'; openCanva(); });
     mediaEls.upload.addEventListener('click', function () { state.mediaTarget = 'feature'; mediaEls.uploadInput.click(); });
     mediaEls.inlineUpload.addEventListener('click', function () { state.mediaTarget = 'inline'; mediaEls.inlineUploadInput.click(); });
     mediaEls.uploadInput.addEventListener('change', handleUploadInput);

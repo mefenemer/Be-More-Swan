@@ -2647,6 +2647,32 @@ export const mediaGenerationJobs = pgTable("media_generation_jobs", {
   index("media_generation_jobs_status_idx").on(t.status),
 ]);
 
+// Canva connector, US3: one row per design being imported into the Content Library.
+// Canonical DDL: db/canva-import.sql (apply manually as owner — no db:push).
+// Canva's export API is asynchronous, so import is a job: export → poll → download → R2.
+// A multi-page design exports one image per page, so one job can yield several assets.
+export const canvaImportJobs = pgTable("canva_import_jobs", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+
+  designId: text("design_id").notNull(),                           // Canva design id being exported
+  designTitle: text("design_title"),                               // title at selection time (names the assets)
+  designType: text("design_type"),                                 // Canva design_type, decides mp4 vs png export
+  exportJobId: text("export_job_id"),                              // Canva export job id, set once created
+
+  // Lifecycle: queued → processing → completed | failed
+  status: text("status").notNull().default("queued"),
+  resultAssetIds: jsonb("result_asset_ids").default([]),           // content_assets.id[] persisted to R2
+  errorMessage: text("error_message"),
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("canva_import_jobs_org_idx").on(t.organisationId),
+  index("canva_import_jobs_status_idx").on(t.status),
+]);
+
 // ── Chat Persistence (Digital Assistant Orchestrator) ────────────────────────
 // Canonical DDL: db/chat-sessions.sql (apply manually as owner — no db:push).
 // One session = one conversation thread between a user and a per-org assistant

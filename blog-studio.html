@@ -17,6 +17,9 @@
     works: it loads the shared module and opens the modal full-screen over a blank page.
   -->
   <script src="./src/components/markdown-editor.js"></script>
+  <!-- The Blog Studio's media pickers include Canva; without this the button is a silent no-op
+       on this page (workspace.html loads it alongside its own Create Post sheet). -->
+  <script src="./src/components/canva-browser.js"></script>
   <script src="./src/components/blog-studio-modal.js"></script>
   <script>
     (function () {

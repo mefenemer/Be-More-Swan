@@ -309,7 +309,11 @@ window.showComplianceModals = function showComplianceModals(force) {
           <button type="button" id="gpw-media-toggle" onclick="gpwToggleMediaPicker()" class="text-xs font-semibold text-emerald-700 hover:text-emerald-800 transition cursor-pointer">Add media</button>
         </div>
         <div id="gpw-media-picker" class="hidden border border-gray-200 rounded-xl p-2 max-h-48 overflow-y-auto">
-          <div class="flex justify-end mb-2">
+          <div class="flex justify-end gap-2 mb-2">
+            <button type="button" onclick="gpwBrowseCanva()" class="px-2 py-1 text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer flex items-center gap-1">
+              <span>🎨</span>
+              <span>Canva</span>
+            </button>
             <button type="button" onclick="gpwUpload()" class="px-2 py-1 text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer flex items-center gap-1">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
               <span>Upload</span>
@@ -4152,6 +4156,10 @@ function formatCurrency(amount, currency) {
 <script src="/my-content.js"></script>
 <script src="/src/components/platform-post-preview.js"></script>
 <script src="/src/components/confidence-badge.js"></script>
+<!-- Canva design picker — shared by the Create Post sheet's media section and the Blog Studio's
+     feature/inline image pickers. Imports land in content_assets, so both hosts just refresh
+     the library grid they already render. -->
+<script src="/src/components/canva-browser.js"></script>
 <!-- Role-aware post-hire dashboard config — assistant-detail.html KPI cards + module
      visibility, keyed by roleKey (consumed by _applyDashboardRegistry in assistants.js). -->
 <script src="/src/components/assistant-dashboard-registry.js"></script>
@@ -5995,6 +6003,25 @@ function gpwToggleAsset(cell, id) {
 
 function gpwUpload() {
     document.getElementById('gpw-upload-input')?.click();
+}
+
+// Import from Canva, then behave exactly as an upload does: refresh the library grid and
+// auto-select what just arrived, so the designs are already attached to the draft.
+function gpwBrowseCanva() {
+    if (!window.CanvaBrowser) return;
+    window.CanvaBrowser.open({
+        assetType: 'any',
+        multiple: true,
+        onImported: async (assetIds) => {
+            const picker = document.getElementById('gpw-media-picker');
+            if (picker) delete picker.dataset.loaded;
+            await gpwLoadMedia();
+            assetIds.forEach(id => {
+                const cell = document.querySelector(`.gpw-media-cell[data-asset-id="${id}"]`);
+                if (cell && !_gpwSelectedAssets.includes(id)) gpwToggleAsset(cell, id);
+            });
+        },
+    });
 }
 
 async function gpwUploadSelected(e) {

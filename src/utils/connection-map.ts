@@ -7,11 +7,17 @@
 // (e.g. a Social Media Manager must not reach HR/CRM connectors).
 //
 // EXTENSIBLE: add an assistant by adding its roleKey to ROLE_CONNECTIONS; add a
-// connector by tagging its category in CONNECTOR_CATEGORY. Only social connectors
-// exist today — the other categories are declared ahead of their connectors so the
-// policy is ready the moment they land. Consider moving this to the DB (a category
-// column on the connector catalog + a role→category table) once non-social
-// connectors start shipping.
+// connector by tagging its category in CONNECTOR_CATEGORY. Live connectors today are
+// the social ones plus Canva ('design'); the remaining categories are declared ahead of
+// their connectors so the policy is ready the moment they land. Consider moving this to
+// the DB (a category column on the connector catalog + a role→category table) as more
+// connectors ship.
+//
+// A category only renders in the assistant Connections tab if integrations.js can draw a
+// card for it — PLATFORMS for social, SOURCES for inbound sources. Tagging a connector
+// here without a matching catalog entry there makes it vanish from the UI rather than
+// appear as "coming soon" (supportedToolsForAssistant marks the category available, which
+// is exactly what suppresses the coming-soon card).
 
 // Connector serviceName (lowercased) → category.
 export const CONNECTOR_CATEGORY: Record<string, string> = {
@@ -23,6 +29,9 @@ export const CONNECTOR_CATEGORY: Record<string, string> = {
     threads: 'social',
     tiktok: 'social',
     youtube: 'social',
+    // Inbound source, not an action target: assistants pull designs OUT of Canva and never
+    // write back. Rendered by _sourceCard() in integrations.js, not _platformCard().
+    canva: 'design',
 };
 
 // Assistant roleKey (aiAssistants.configuration.type) → allowed connection categories.
@@ -34,7 +43,7 @@ export const ROLE_CONNECTIONS: Record<string, string[]> = {
     // Legacy-only role with no catalog twin (kept canonical; hidden from the catalog)
     paid_ads:                  ['social'],
     // Catalog roleKeys (seed-catalog.ts)
-    social_media_manager:      ['social'],
+    social_media_manager:      ['social', 'design'],
     review_reputation_manager: ['reviews', 'social'],
     inbox_manager:             ['email'],
     calendar_coordinator:      ['calendar', 'email'],
@@ -43,7 +52,7 @@ export const ROLE_CONNECTIONS: Record<string, string[]> = {
     lead_qualifier:            ['crm', 'email'],
     crm_enricher:              ['crm'],
     seo_content_strategist:    ['cms', 'search_console', 'knowledge'],
-    blog_writer:               ['cms', 'search_console', 'knowledge'],
+    blog_writer:               ['cms', 'search_console', 'knowledge', 'design'],
     newsletter_editor:         ['email', 'cms'],
     vendor_communications_rep: ['email'],
     inventory_tracker:         ['inventory'],
@@ -63,6 +72,7 @@ export const ROLE_CONNECTIONS: Record<string, string[]> = {
 // policy (which categories a role may use) stays in ROLE_CONNECTIONS above.
 export const CATEGORY_LABELS: Record<string, { label: string; description: string }> = {
     social:         { label: 'Social Media',        description: 'Publish and manage posts across your social channels.' },
+    design:         { label: 'Design',              description: 'Bring your Canva designs into your Content Library.' },
     reviews:        { label: 'Reviews & Reputation', description: 'Monitor and respond to customer reviews.' },
     email:          { label: 'Email',               description: 'Read, triage, and send email on your behalf.' },
     calendar:       { label: 'Calendar',            description: 'Read availability and schedule events.' },
@@ -109,13 +119,13 @@ export interface AssistantRole {
 function categoriesFromName(roleName?: string | null): Set<string> {
     const r = (roleName || '').toLowerCase();
     const c = new Set<string>();
-    if (/social|community|brand|post/.test(r)) c.add('social');
+    if (/social|community|brand|post/.test(r)) { c.add('social'); c.add('design'); }
     if (/review|reputation/.test(r)) { c.add('reviews'); c.add('social'); }
     if (/inbox|email|mail/.test(r)) c.add('email');
     if (/calendar|schedul/.test(r)) c.add('calendar');
     if (/crm|lead|sales/.test(r)) c.add('crm');
     if (/support|ticket|helpdesk/.test(r)) { c.add('support'); c.add('chat'); }
-    if (/seo|content|cms/.test(r)) c.add('cms');
+    if (/seo|content|cms|blog/.test(r)) { c.add('cms'); c.add('design'); }
     if (/project|sprint|stand-?up|status/.test(r)) c.add('project_mgmt');
     if (/invoice|account|expense|billing|receivable/.test(r)) { c.add('accounting'); c.add('payments'); }
     return c;
