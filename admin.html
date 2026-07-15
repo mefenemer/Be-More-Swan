@@ -7213,18 +7213,9 @@ window.addEventListener('popstate', (e) => {
   adminNav(view);
 });
 
-// Boot: restore from URL param or default to dashboard
-(function bootAdmin() {
-  const params = new URLSearchParams(location.search);
-  const initialView = params.get('view') || 'dashboard';
-  const cat = Object.keys(ADMIN_CATS).find(k => ADMIN_CATS[k].children.some(c => c.view === initialView));
-  if (cat && cat !== 'dashboard') {
-    adminCatNav(cat);
-    adminNav(initialView);
-  } else {
-    adminCatNav('dashboard');
-  }
-})();
+// Boot runs at the END of this script (see bootAdmin below): adminNav() reads let-declared
+// state such as _mdActiveTab, which stays in the temporal dead zone until its declaration
+// further down has been evaluated. Booting from here threw on any deep link to ?view=master-data.
 
 // ── US-ADM-1.5.1: Bottom sheet helper ────────────────────────────────────────
 function openBottomSheet(id) {
@@ -7733,6 +7724,20 @@ function closeMoreDrawer() {
   document.getElementById('admin-more-drawer').classList.remove('open');
   document.getElementById('admin-more-btn').setAttribute('aria-expanded', 'false');
 }
+
+// Boot: restore from URL param or default to dashboard. Must stay last in this script — it is
+// the only top-level statement that CALLS into the code above rather than declaring it.
+(function bootAdmin() {
+  const params = new URLSearchParams(location.search);
+  const initialView = params.get('view') || 'dashboard';
+  const cat = Object.keys(ADMIN_CATS).find(k => ADMIN_CATS[k].children.some(c => c.view === initialView));
+  if (cat && cat !== 'dashboard') {
+    adminCatNav(cat);
+    adminNav(initialView);
+  } else {
+    adminCatNav('dashboard');
+  }
+})();
 </script>
 
 <!-- US-ADM-1.5.1: Bottom tab bar (mobile <768px) — 4 tabs + More -->
