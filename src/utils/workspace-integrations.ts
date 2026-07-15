@@ -20,9 +20,9 @@ import { storeSecret, getSecret, deleteSecret } from './vault';
 
 type Db = ReturnType<typeof getDb>;
 
-export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail' | 'threads' | 'tiktok' | 'youtube' | 'wordpresscom' | 'searchconsole' | 'jira' | 'asana';
+export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail' | 'threads' | 'tiktok' | 'youtube' | 'wordpresscom' | 'searchconsole' | 'jira' | 'asana' | 'canva';
 
-export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail', 'threads', 'tiktok', 'youtube', 'wordpresscom', 'searchconsole', 'jira', 'asana'];
+export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail', 'threads', 'tiktok', 'youtube', 'wordpresscom', 'searchconsole', 'jira', 'asana', 'canva'];
 
 export function isIntegrationProvider(value: unknown): value is IntegrationProvider {
     return typeof value === 'string' && (INTEGRATION_PROVIDERS as string[]).includes(value);
@@ -352,6 +352,22 @@ async function refreshProviderToken(provider: IntegrationProvider, refreshToken:
         return { accessToken: data.access_token, refreshToken: data.refresh_token ?? null, expiresInSec: data.expires_in ?? 3600 };
     }
 
+    if (provider === 'canva') {
+        const credentials = Buffer.from(`${process.env.CANVA_CLIENT_ID ?? ''}:${process.env.CANVA_CLIENT_SECRET ?? ''}`).toString('base64');
+        const res = await fetch('https://api.canva.com/rest/v1/oauth/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Basic ${credentials}` },
+            body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken }),
+        });
+        const data: { access_token?: string; refresh_token?: string; expires_in?: number } = await res.json().catch(() => ({}));
+        if (!res.ok || !data.access_token) throw new IntegrationError('refresh_failed', 'Canva token refresh was rejected.', 401);
+        // Canva refresh tokens are SINGLE-USE and always rotate — the one we just sent is now
+        // dead, so a missing refresh_token in the response would strand the connection. Treat
+        // that as a failure rather than falling back to the stored (now-spent) token.
+        if (!data.refresh_token) throw new IntegrationError('refresh_failed', 'Canva did not return a rotated refresh token — please reconnect it.', 401);
+        return { accessToken: data.access_token, refreshToken: data.refresh_token, expiresInSec: data.expires_in ?? null };
+    }
+
     // Slack: only used when token rotation is enabled on the app (otherwise bot tokens
     // never expire and this path is never reached — expiresAt stays null).
     const res = await fetch('https://slack.com/api/oauth.v2.access', {
@@ -437,6 +453,7 @@ const PROVIDER_LABELS: Record<IntegrationProvider, string> = {
     searchconsole: 'Google Search Console',
     jira: 'Jira',
     asana: 'Asana',
+    canva: 'Canva',
 };
 
 export function providerLabel(provider: IntegrationProvider): string {

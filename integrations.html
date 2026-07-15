@@ -259,6 +259,21 @@
       tagline: 'Your Social Media Manager uploads Shorts and long-form videos with SEO-optimised titles, descriptions and tags.',
       usedBy: 'Social Media Manager',
     },
+    // ── Content sources ──
+    // Canva is an INBOUND source, not an action target: nothing is ever written back to it.
+    {
+      id: 'canva',
+      name: 'Canva',
+      emoji: '🎨',
+      // bg-teal-100 is already in the compiled style.css; bg-cyan-100 is NOT, and an
+      // uncompiled Tailwind class renders as no background at all.
+      iconBg: 'bg-teal-100',
+      tagline: 'Bring your Canva designs into your Content Library, so your Social Media Manager and Blog Writer can use them in posts and articles.',
+      usedBy: 'Social Media Manager · Blog Writer',
+      // Read-only source: assistants pull assets OUT of Canva and never write back, so the
+      // "sync actions to it" copy the action-target connectors use doesn't apply.
+      inbound: true,
+    },
   ];
 
   const grid = document.getElementById('integrations-grid');
@@ -277,9 +292,13 @@
 
   // ── OAuth redirect result banners ────────────────────────────────────────────
   const params = new URLSearchParams(window.location.search);
-  const providerName = (id) => (PROVIDERS.find((p) => p.id === id) || { name: id || 'the tool' }).name;
+  const providerOf = (id) => PROVIDERS.find((p) => p.id === id) || null;
+  const providerName = (id) => (providerOf(id) || { name: id || 'the tool' }).name;
   if (params.get('connected')) {
-    showBanner('success', providerName(params.get('connected')) + ' connected — your assistants can now sync actions to it.');
+    const p = providerOf(params.get('connected'));
+    showBanner('success', providerName(params.get('connected')) + (p && p.inbound
+      ? ' connected — you can now browse your designs and add them to your Content Library.'
+      : ' connected — your assistants can now sync actions to it.'));
   } else if (params.get('oauth_error')) {
     const reasons = {
       access_denied: 'you cancelled the authorisation',
@@ -411,7 +430,13 @@
     const btn = e.target.closest('[data-disconnect]');
     if (!btn) return;
     const id = btn.getAttribute('data-disconnect');
-    if (!window.confirm('Disconnect ' + providerName(id) + '? Assistants will no longer be able to sync actions to it.')) return;
+    const dp = providerOf(id);
+    const warning = dp && dp.inbound
+      // Imported assets are copies held in our own storage, so they survive a disconnect —
+      // say so, or "Disconnect" reads like it will delete the user's library.
+      ? '? Designs you have already added to your Content Library will stay there.'
+      : '? Assistants will no longer be able to sync actions to it.';
+    if (!window.confirm('Disconnect ' + providerName(id) + warning)) return;
     btn.disabled = true;
     btn.textContent = 'Disconnecting…';
     try {

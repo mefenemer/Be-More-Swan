@@ -36,7 +36,7 @@
 // /v3/company/{realmId}, so the realmId is persisted as the row's tenantId.
 
 import { Handler, HandlerEvent } from '@netlify/functions';
-import { randomBytes } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { getDb } from '../../db/client';
 import { storeSecret, getSecret, deleteSecret } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
@@ -85,6 +85,11 @@ const SCOPES: Record<IntegrationProvider, string> = {
     // Asana's classic OAuth grants full task read/write on consent — the scope param is omitted
     // (its authorize URL below sends no scope), so this stays empty like Notion/Intercom.
     asana: '',
+    // Canva Connect (Content Library import): READ-ONLY. design:meta:read lists/searches designs,
+    // folder:read + asset:read walk the folder tree, design:content:read is what the export job
+    // requires. Never request *:write — we only ever read out of Canva. The card's account label
+    // comes from /users/me/profile, which needs NO scope, so profile:read is deliberately absent.
+    canva: 'design:meta:read design:content:read folder:read asset:read',
 };
 
 /**
@@ -198,6 +203,16 @@ export default withLambda(async (event) => {
             if (!zendeskSubdomain) return redirect('/integrations.html?oauth_error=missing_subdomain&provider=zendesk');
         }
 
+        // Canva mandates PKCE (S256). The code_verifier is a SECRET — it rides in the
+        // server-side vault entry alongside the CSRF token (same place the Zendesk subdomain
+        // travels) and must never appear in `state`, which is client-visible.
+        let codeVerifier: string | null = null;
+        let codeChallenge: string | null = null;
+        if (provider === 'canva') {
+            codeVerifier = randomBytes(32).toString('base64url');
+            codeChallenge = createHash('sha256').update(codeVerifier).digest('base64url');
+        }
+
         // CSRF held server-side (vault) with TTL; state carries only routing info.
         const csrf = randomBytes(32).toString('hex');
         await storeSecret(db, `oauth_csrf:${userId}:${provider}`, {
@@ -205,6 +220,7 @@ export default withLambda(async (event) => {
             expiresAt: Date.now() + CSRF_TTL_MS,
             organisationId: String(organisationId),
             ...(zendeskSubdomain ? { zendeskSubdomain } : {}),
+            ...(codeVerifier ? { codeVerifier } : {}),
         });
 
         const redirectUri = `${baseUrl}/api/oauth/${provider}/callback`;
@@ -251,6 +267,10 @@ export default withLambda(async (event) => {
             // Asana 3LO — no scope param (classic full-access grant). refresh token comes back
             // automatically; there is no offline flag to set.
             authUrl = `https://app.asana.com/-/oauth_authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
+        } else if (provider === 'canva') {
+            // Canva Connect requires PKCE — code_challenge_method is always S256; the matching
+            // verifier is replayed from the vault at callback.
+            authUrl = `https://www.canva.com/api/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.canva)}&code_challenge=${codeChallenge}&code_challenge_method=S256&state=${state}`;
         } else if (provider === 'slack') {
             authUrl = `https://slack.com/oauth/v2/authorize?client_id=${clientId}&scope=${encodeURIComponent(SCOPES.slack)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`;
         } else {
@@ -274,7 +294,7 @@ export default withLambda(async (event) => {
 
         // Verify + consume the server-side CSRF entry (one-time use, 10-minute TTL).
         const csrfKey = `oauth_csrf:${userId}:${provider}`;
-        const stored = await getSecret(db, csrfKey).catch(() => null) as { csrf?: string; expiresAt?: number; organisationId?: string; zendeskSubdomain?: string } | null;
+        const stored = await getSecret(db, csrfKey).catch(() => null) as { csrf?: string; expiresAt?: number; organisationId?: string; zendeskSubdomain?: string; codeVerifier?: string } | null;
         await deleteSecret(db, csrfKey).catch(() => {});
         if (!stored || stored.csrf !== state.csrf || !stored.expiresAt || Date.now() > stored.expiresAt) {
             return redirect(`/integrations.html?oauth_error=csrf_fail&provider=${provider}`);
@@ -821,6 +841,45 @@ export default withLambda(async (event) => {
                     tenantId: tokenData.team?.id ?? null,
                     externalAccountName: tokenData.team?.name ?? null,
                     scopes: tokenData.scope ?? SCOPES.slack,
+                });
+            } else if (provider === 'canva') {
+                // PKCE: replay the verifier stashed in the vault at connect. Without it Canva
+                // rejects the exchange, so a missing verifier is a hard fail, not a fallback.
+                if (!stored.codeVerifier) return redirect(`/integrations.html?oauth_error=csrf_fail&provider=canva`);
+
+                const credentials = Buffer.from(`${process.env.CANVA_CLIENT_ID ?? ''}:${process.env.CANVA_CLIENT_SECRET ?? ''}`).toString('base64');
+                const tokenRes = await fetch('https://api.canva.com/rest/v1/oauth/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Basic ${credentials}` },
+                    body: new URLSearchParams({
+                        grant_type: 'authorization_code',
+                        code,
+                        code_verifier: stored.codeVerifier,
+                        redirect_uri: redirectUri,
+                    }),
+                });
+                const tokenData: { access_token?: string; refresh_token?: string; expires_in?: number; scope?: string } = await tokenRes.json().catch(() => ({}));
+                if (!tokenData.access_token) return redirect(`/integrations.html?oauth_error=token_exchange&provider=canva`);
+
+                // Friendly card label (US1 AC3). Display-only and best-effort — a failure here
+                // must not sink an otherwise good connection.
+                let accountName: string | null = null;
+                try {
+                    const meRes = await fetch('https://api.canva.com/rest/v1/users/me/profile', {
+                        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+                    });
+                    const me: { profile?: { display_name?: string } } = await meRes.json().catch(() => ({}));
+                    accountName = me.profile?.display_name ?? null;
+                } catch { /* label stays null */ }
+
+                await saveIntegration(db, {
+                    organisationId, userId, provider: 'canva',
+                    accessToken: tokenData.access_token,
+                    refreshToken: tokenData.refresh_token ?? null,
+                    expiresInSec: tokenData.expires_in ?? null,
+                    tenantId: null,
+                    externalAccountName: accountName,
+                    scopes: tokenData.scope ?? SCOPES.canva,
                 });
             } else {
                 // Provider is in the union but its callback isn't wired yet (e.g. asana → step 4).
