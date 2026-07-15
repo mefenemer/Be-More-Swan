@@ -791,6 +791,36 @@
         });
     }
 
+    // Single source of truth: pull the live GBP prices from the DB (get-plans → master_plans)
+    // so a price change in the Admin Portal shows here without editing this file. GBP only is
+    // managed centrally today; the hardcoded values below stay as pre-fetch fallbacks and for
+    // the other display currencies. Annual = round(monthly × 0.8), matching checkout.
+    // Card slot → master_plans.tierKey. Fixed by product identity (NOT price order, which the
+    // Admin can change): t1 = The Workflow Saver, t2 = The Busywork Buster, t3 = The Digital Employee.
+    const GBP_TIER_ORDER = ['saver', 'buster', 'employee'];
+    async function syncLivePricesGBP() {
+        try {
+            const r = await fetch('/.netlify/functions/get-plans');
+            if (!r.ok) return;
+            const { plans } = await r.json();
+            if (!Array.isArray(plans)) return;
+            const byTier = {};
+            plans.forEach(p => { if (p.tierKey) byTier[p.tierKey] = Number(p.monthlyPriceGbp); });
+            const gbp = CURRENCY_CONFIG.GBP;
+            GBP_TIER_ORDER.forEach((tk, i) => {
+                const m = byTier[tk];
+                if (!(m > 0)) return; // keep hardcoded fallback if this tier is missing
+                const annual = Math.round(m * 0.8); // monthly-equivalent shown on annual cards
+                gbp.monthly[i] = m;
+                gbp.annual[i] = annual;
+                gbp.annualTotal[i] = annual * 12;
+                const tKey = 't' + (i + 1);
+                BILLING_CONFIG.monthly[tKey] = { price: '£' + m.toLocaleString('en-GB'), note: 'Billed monthly · cancel any time' };
+                BILLING_CONFIG.annual[tKey]  = { price: '£' + annual.toLocaleString('en-GB'), note: `Billed £${(annual * 12).toLocaleString('en-GB')} annually · cancel any time` };
+            });
+        } catch { /* non-critical — fall back to the hardcoded prices */ }
+    }
+
     const BILLING_CONFIG = {
         monthly: {
             t1: { price: '£29',  note: 'Billed monthly · cancel any time' },
@@ -933,6 +963,10 @@
         loadComponent('footer-placeholder', './components/footer.html');
         setupMobileMenu();
         if (window.i18n) window.i18n.apply();
+
+        // Pull live GBP prices from the DB before first render so the Admin Portal is the single
+        // source of truth for pricing shown here.
+        await syncLivePricesGBP();
 
         // US-I18N-2.1 SC2: Detect currency from geo-IP if not already stored
         if (!localStorage.getItem('aura_currency')) {

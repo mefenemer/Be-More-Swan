@@ -7,6 +7,9 @@
 // Supported resources (via ?resource= query param):
 //   master-plans        GET (list) | POST (create) | PATCH ?id=N (update) | DELETE ?id=N
 //   plan-prices         GET ?planId=N | POST | PATCH ?id=N | DELETE ?id=N
+//   plan-price-change   POST { planId, newPriceGbp, effectiveFrom? } — single-source price change
+//                       (immediate or scheduled); writes dated plan_price_history + syncs Stripe.
+//   plan-price-history  GET ?planId=N — dated price audit trail (newest first)
 //   master-assistants   GET (list) | POST | PATCH ?id=N (update fields; systemPrompt → new version)
 //   assistant-versions  GET ?assistantId=N | POST (create new version for assistant)
 //   feature-flags       GET | POST | PATCH ?key=K | DELETE ?key=K
@@ -27,12 +30,14 @@ import {
     users,
     masterPlans,
     planPrices,
+    planPriceHistory,
     masterAssistants,
     assistantVersions,
     featureFlags,
     platformConfig,
     supportedLanguages,
 } from '../../db/schema';
+import { applyPlanPrice } from '../../src/utils/plan-pricing';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { isAdminRole } from '../../src/utils/rbac';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -155,9 +160,12 @@ async function handleMasterPlans(event: any, adminId: number, role: string, ip?:
         const [prev] = await db.select().from(masterPlans).where(eq(masterPlans.id, id)).limit(1);
         if (!prev) return notFound();
 
+        // Price changes go through the shared applyPlanPrice() helper (mints a new Stripe price,
+        // archives the old, writes dated plan_price_history) — see handlePlanPriceChange for the
+        // scheduling-aware entry point. Here we keep the plain Edit modal working: an inline price
+        // edit applies immediately. monthly_price_gbp is written by the helper, not in `updates`.
         const updates: any = {};
         if (name !== undefined) updates.name = name;
-        if (monthlyPriceGbp !== undefined) updates.monthlyPriceGbp = monthlyPriceGbp;
         if (assistantLimit !== undefined) updates.assistantLimit = assistantLimit;
         if (monthlyTaskLimit !== undefined) updates.monthlyTaskLimit = monthlyTaskLimit;
         if (monthlyTokenLimit !== undefined) updates.monthlyTokenLimit = monthlyTokenLimit;
@@ -166,31 +174,27 @@ async function handleMasterPlans(event: any, adminId: number, role: string, ip?:
         if (isActive !== undefined) updates.isActive = isActive;
         if (features !== undefined) updates.features = features;
 
-        // Stripe sync runs BEFORE the DB write so a failure leaves the DB unchanged.
         const priceChanged = monthlyPriceGbp !== undefined && Number(monthlyPriceGbp) !== Number(prev.monthlyPriceGbp);
         const archiving = isActive === false && prev.isActive === true;
-        let newStripePriceId: string | null = null;
+
+        // Stripe sync runs BEFORE the DB write so a failure leaves the DB unchanged.
         try {
-            if (stripe && prev.stripeProductId) {
-                if (priceChanged) {
-                    // AC1.2.2: mint a NEW price, archive the OLD one — never overwrite (legacy subs keep billing on it).
-                    const [gbpPrice] = await db.select().from(planPrices)
-                        .where(and(eq(planPrices.masterPlanId, id), eq(planPrices.currency, 'GBP'))).limit(1);
-                    const newPrice = await stripe.prices.create({
-                        product: prev.stripeProductId,
-                        unit_amount: Math.round(Number(monthlyPriceGbp) * 100),
-                        currency: 'gbp',
-                        recurring: { interval: 'month' },
-                    });
-                    if (gbpPrice?.stripePriceId) await stripe.prices.update(gbpPrice.stripePriceId, { active: false }).catch(() => {});
-                    newStripePriceId = newPrice.id;
-                }
-                if (archiving) {
-                    // AC1.2.1: deactivate the plan's Stripe prices so no new sign-ups can use them.
-                    const prices = await db.select().from(planPrices).where(eq(planPrices.masterPlanId, id));
-                    for (const p of prices) {
-                        if (p.stripePriceId) await stripe.prices.update(p.stripePriceId, { active: false }).catch(() => {});
-                    }
+            if (priceChanged) {
+                // Immediate change: seed a history row then promote it live (DB + Stripe) via the helper.
+                const [histRow] = await db.insert(planPriceHistory).values({
+                    masterPlanId: id, currency: 'GBP', monthlyPriceMajorUnit: String(monthlyPriceGbp),
+                    effectiveFrom: new Date(), status: 'active', createdBy: adminId,
+                }).returning();
+                await applyPlanPrice(db, stripe, {
+                    plan: { id, stripeProductId: prev.stripeProductId },
+                    currency: 'GBP', newPriceGbp: monthlyPriceGbp, historyRowId: histRow.id,
+                });
+            }
+            if (archiving && stripe && prev.stripeProductId) {
+                // AC1.2.1: deactivate the plan's Stripe prices so no new sign-ups can use them.
+                const prices = await db.select().from(planPrices).where(eq(planPrices.masterPlanId, id));
+                for (const p of prices) {
+                    if (p.stripePriceId) await stripe.prices.update(p.stripePriceId, { active: false }).catch(() => {});
                 }
             }
         } catch (err: any) {
@@ -198,14 +202,10 @@ async function handleMasterPlans(event: any, adminId: number, role: string, ip?:
             return { statusCode: 502, body: JSON.stringify({ error: `Stripe sync failed — no changes saved: ${err?.message || 'unknown error'}` }) };
         }
 
-        const [row] = await db.update(masterPlans).set(updates).where(eq(masterPlans.id, id)).returning();
+        const [row] = Object.keys(updates).length
+            ? await db.update(masterPlans).set(updates).where(eq(masterPlans.id, id)).returning()
+            : await db.select().from(masterPlans).where(eq(masterPlans.id, id)).limit(1);
 
-        // Point the GBP price row at the freshly minted Stripe price (and mark the old DB row inactive).
-        if (newStripePriceId) {
-            await db.update(planPrices)
-                .set({ stripePriceId: newStripePriceId, monthlyPriceMajorUnit: monthlyPriceGbp })
-                .where(and(eq(planPrices.masterPlanId, id), eq(planPrices.currency, 'GBP')));
-        }
         if (archiving) {
             await db.update(planPrices).set({ isActive: false }).where(eq(planPrices.masterPlanId, id));
         }
@@ -273,6 +273,79 @@ async function handlePlanPrices(event: any, adminId: number, role: string, ip?: 
     }
 
     return { statusCode: 405, body: 'Method Not Allowed' };
+}
+
+// ── Plan price change + history (single-source price management) ──────────────
+// POST plan-price-change { planId, newPriceGbp, effectiveFrom? } — immediate or scheduled.
+// GET  plan-price-history ?planId=N — dated audit trail (newest first).
+
+async function handlePlanPriceChange(event: any, adminId: number, ip?: string, ua?: string) {
+    const db = getDb();
+    if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
+
+    const body = JSON.parse(event.body || '{}');
+    const planId = Number(body.planId);
+    const newPriceGbp = Number(body.newPriceGbp);
+    if (!planId || !Number.isFinite(newPriceGbp) || newPriceGbp <= 0) {
+        return badRequest('planId and a positive newPriceGbp are required.');
+    }
+
+    const [plan] = await db.select().from(masterPlans).where(eq(masterPlans.id, planId)).limit(1);
+    if (!plan) return notFound();
+
+    // Blank / past effectiveFrom → apply now; a future timestamp → schedule it.
+    const now = new Date();
+    let effectiveFrom = now;
+    if (body.effectiveFrom) {
+        const parsed = new Date(body.effectiveFrom);
+        if (isNaN(parsed.getTime())) return badRequest('effectiveFrom is not a valid date.');
+        effectiveFrom = parsed;
+    }
+    const scheduled = effectiveFrom.getTime() > now.getTime() + 30_000; // >30s out = future
+
+    if (scheduled) {
+        // One pending change at a time per plan+currency — replace any existing scheduled row.
+        await db.delete(planPriceHistory).where(and(
+            eq(planPriceHistory.masterPlanId, planId),
+            eq(planPriceHistory.currency, 'GBP'),
+            eq(planPriceHistory.status, 'scheduled'),
+        ));
+        const [row] = await db.insert(planPriceHistory).values({
+            masterPlanId: planId, currency: 'GBP', monthlyPriceMajorUnit: String(newPriceGbp),
+            effectiveFrom, status: 'scheduled', createdBy: adminId,
+        }).returning();
+        void insertAdminAuditLog({ adminId, action: 'record_delete', targetType: 'plan_price', targetId: row.id, newState: row, ipAddress: ip, userAgent: ua, reason: 'admin_update' });
+        return { statusCode: 201, body: JSON.stringify({ scheduled: true, row }) };
+    }
+
+    // Immediate: seed a history row then promote it live (DB + Stripe) via the shared helper.
+    const [histRow] = await db.insert(planPriceHistory).values({
+        masterPlanId: planId, currency: 'GBP', monthlyPriceMajorUnit: String(newPriceGbp),
+        effectiveFrom: now, status: 'active', createdBy: adminId,
+    }).returning();
+    try {
+        await applyPlanPrice(db, stripe, {
+            plan: { id: planId, stripeProductId: plan.stripeProductId },
+            currency: 'GBP', newPriceGbp, historyRowId: histRow.id,
+        });
+    } catch (err: any) {
+        // Roll the just-inserted history row back so a Stripe failure leaves no orphan.
+        await db.delete(planPriceHistory).where(eq(planPriceHistory.id, histRow.id)).catch(() => {});
+        console.error('[master-data] plan-price-change Stripe sync failed:', err?.message);
+        return { statusCode: 502, body: JSON.stringify({ error: `Stripe sync failed — price not changed: ${err?.message || 'unknown error'}` }) };
+    }
+    void insertAdminAuditLog({ adminId, action: 'record_delete', targetType: 'plan_price', targetId: histRow.id, newState: { planId, newPriceGbp }, ipAddress: ip, userAgent: ua, reason: 'admin_update' });
+    return { statusCode: 200, body: JSON.stringify({ scheduled: false, planId, newPriceGbp }) };
+}
+
+async function handlePlanPriceHistory(event: any) {
+    const db = getDb();
+    if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
+    const planId = event.queryStringParameters?.planId ? Number(event.queryStringParameters.planId) : null;
+    const rows = planId
+        ? await db.select().from(planPriceHistory).where(eq(planPriceHistory.masterPlanId, planId)).orderBy(desc(planPriceHistory.effectiveFrom))
+        : await db.select().from(planPriceHistory).orderBy(desc(planPriceHistory.effectiveFrom)).limit(200);
+    return { statusCode: 200, body: JSON.stringify(rows) };
 }
 
 async function handleMasterAssistants(event: any, adminId: number, ip?: string, ua?: string) {
@@ -542,12 +615,14 @@ export default withLambda(async (event) => {
     switch (resource) {
         case 'master-plans':       return handleMasterPlans(event, adminId, role, ip, ua);
         case 'plan-prices':        return handlePlanPrices(event, adminId, role, ip, ua);
+        case 'plan-price-change':  return handlePlanPriceChange(event, adminId, ip, ua);
+        case 'plan-price-history': return handlePlanPriceHistory(event);
         case 'master-assistants':  return handleMasterAssistants(event, adminId, ip, ua);
         case 'assistant-versions': return handleAssistantVersions(event, adminId, ip, ua);
         case 'feature-flags':        return handleFeatureFlags(event, adminId, role, ip, ua);
         case 'platform-config':      return handlePlatformConfig(event, adminId, ip, ua);
         case 'supported-languages':  return handleSupportedLanguages(event, adminId, ip, ua);
         default:
-            return { statusCode: 400, body: JSON.stringify({ error: 'resource param required: master-plans | plan-prices | master-assistants | assistant-versions | feature-flags | platform-config | supported-languages' }) };
+            return { statusCode: 400, body: JSON.stringify({ error: 'resource param required: master-plans | plan-prices | plan-price-change | plan-price-history | master-assistants | assistant-versions | feature-flags | platform-config | supported-languages' }) };
     }
 });

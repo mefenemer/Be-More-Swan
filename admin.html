@@ -826,6 +826,42 @@
             <button onclick="mdCloseForm()" class="px-4 py-2 border border-gray-200 text-gray-600 text-sm font-semibold rounded-lg hover:bg-gray-50 transition">Cancel</button>
           </div>
         </div>
+
+        <!-- Manage Price panel — single-source price management (immediate or scheduled) + history -->
+        <div id="md-price-panel" class="hidden mt-5 bg-white rounded-2xl border border-indigo-200 p-6">
+          <div class="flex items-start justify-between mb-4">
+            <div>
+              <h3 class="text-sm font-bold text-gray-800">Manage Price — <span id="mp-plan-name"></span></h3>
+              <p class="text-xs text-gray-500 mt-1">Current live price: <span id="mp-current" class="font-mono font-bold text-gray-700">—</span> <span id="mp-current-since" class="text-gray-400"></span></p>
+            </div>
+            <button onclick="managePriceClose()" class="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-bold text-gray-500 mb-1">New monthly price (GBP) <span class="text-red-500">*</span></label>
+              <input id="mp-new-price" type="number" min="0" step="0.01" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-gray-500 mb-1">Effective date <span class="text-gray-400 font-normal">(blank = apply now)</span></label>
+              <input id="mp-effective-from" type="datetime-local" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none">
+            </div>
+          </div>
+          <p class="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">⚠️ Applies to <strong>new</strong> subscribers only. Existing subscribers keep their current price until they change plan (handled separately). Saving mints a new Stripe price and archives the old one.</p>
+          <div class="flex gap-3 mt-4">
+            <button id="mp-save-btn" onclick="managePriceSave()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition">Save price</button>
+            <button onclick="managePriceClose()" class="px-4 py-2 border border-gray-200 text-gray-600 text-sm font-semibold rounded-lg hover:bg-gray-50 transition">Cancel</button>
+            <span id="mp-status" class="self-center text-xs"></span>
+          </div>
+          <h4 class="text-xs font-bold text-gray-500 uppercase tracking-wide mt-6 mb-2">Price history</h4>
+          <div class="border border-gray-100 rounded-xl overflow-x-auto">
+            <table class="w-full text-xs">
+              <thead class="bg-gray-50 text-gray-500 font-bold uppercase tracking-wide">
+                <tr><th class="px-3 py-2 text-right">Price</th><th class="px-3 py-2 text-left">From</th><th class="px-3 py-2 text-left">To</th><th class="px-3 py-2 text-center">Status</th><th class="px-3 py-2 text-left">Stripe price</th></tr>
+              </thead>
+              <tbody id="mp-history-tbody"><tr><td colspan="5" class="px-3 py-4 text-center text-gray-400">Loading…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
       </section>
 
       <!-- ── US-ADM-3.2.1: Emergency Controls / Kill Switches ────────── -->
@@ -7385,7 +7421,7 @@ function mdRenderRow(tab, r) {
   const activeChip = v => v ? '<span class="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold">Active</span>'
                            : '<span class="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs">Inactive</span>';
   const delBtn = (dbTable, id, lbl) => `<button onclick='openCascadeDeleteSheet("${dbTable}",${JSON.stringify(id)},"${String(lbl).replace(/"/g,"&quot;")}",()=>mdLoadTab(_mdActiveTab))' class="text-xs text-red-500 hover:underline font-semibold">Delete</button>`;
-  if (tab === 'plans') return `<tr class="border-t border-gray-100"><td class="px-4 py-3 font-medium">${r.name||''}</td><td class="px-4 py-3 text-gray-500">${r.tierKey||''}</td><td class="px-4 py-3 text-right font-mono">£${(r.monthlyPriceGbp||0)}</td><td class="px-4 py-3 text-center">${activeChip(r.isActive)}</td><td class="px-4 py-3 flex gap-2">${editBtn}${delBtn('master_plans',r.id,r.name||'Plan')}</td></tr>`;
+  if (tab === 'plans') { const priceBtn = `<button onclick='managePriceOpen(${JSON.stringify(r.id)})' class="text-xs text-emerald-600 hover:underline font-semibold mr-2">Manage Price</button>`; return `<tr class="border-t border-gray-100"><td class="px-4 py-3 font-medium">${r.name||''}</td><td class="px-4 py-3 text-gray-500">${r.tierKey||''}</td><td class="px-4 py-3 text-right font-mono">£${(r.monthlyPriceGbp||0)}</td><td class="px-4 py-3 text-center">${activeChip(r.isActive)}</td><td class="px-4 py-3 flex gap-2">${priceBtn}${editBtn}${delBtn('master_plans',r.id,r.name||'Plan')}</td></tr>`; }
   if (tab === 'plan-prices') return `<tr class="border-t border-gray-100"><td class="px-4 py-3">${r.masterPlanId||''}</td><td class="px-4 py-3 font-mono font-bold">${r.currency||''}</td><td class="px-4 py-3 text-right font-mono">${r.monthlyPricePence!=null?r.monthlyPricePence+'p':'-'}</td><td class="px-4 py-3 text-right font-mono">${r.annualPricePence!=null?r.annualPricePence+'p':'-'}</td><td class="px-4 py-3 flex gap-2">${editBtn}${delBtn('plan_prices',r.id,(r.currency||'')+'price')}</td></tr>`;
   if (tab === 'assistants') return `<tr class="border-t border-gray-100"><td class="px-4 py-3 font-medium">${r.name||''}</td><td class="px-4 py-3 text-gray-500">${r.category||''}</td><td class="px-4 py-3 text-gray-500">${r.riskClassification||''}</td><td class="px-4 py-3 text-center">${activeChip(r.isActive)}</td><td class="px-4 py-3 flex gap-2">${editBtn}${delBtn('master_assistants',r.id,r.name||'Assistant')}</td></tr>`;
   if (tab === 'assistant-versions') return `<tr class="border-t border-gray-100"><td class="px-4 py-3">${r.masterAssistantId||''}</td><td class="px-4 py-3 text-center font-mono">v${r.versionNumber||''}</td><td class="px-4 py-3 text-gray-500 max-w-xs truncate">${r.changeNote||''}</td><td class="px-4 py-3 text-gray-400 text-xs">${r.createdAt?new Date(r.createdAt).toLocaleDateString('en-GB'):''}</td></tr>`;
@@ -7462,6 +7498,83 @@ function mdCloseForm() {
   document.getElementById('md-form-panel').classList.add('hidden');
   _mdEditId = null;
   _mdEditResource = null;
+}
+
+// ── Manage Price (single-source price management) ───────────────────────────
+let _mpPlanId = null;
+
+function managePriceOpen(planId) {
+  _mpPlanId = planId;
+  const plan = (_mdCache['plans'] || []).find(p => p.id == planId) || {};
+  document.getElementById('mp-plan-name').textContent = plan.name || ('Plan ' + planId);
+  document.getElementById('mp-current').textContent = '£' + (plan.monthlyPriceGbp || 0);
+  document.getElementById('mp-current-since').textContent = '';
+  document.getElementById('mp-new-price').value = '';
+  document.getElementById('mp-effective-from').value = '';
+  document.getElementById('mp-status').textContent = '';
+  document.getElementById('md-form-panel').classList.add('hidden');
+  const panel = document.getElementById('md-price-panel');
+  panel.classList.remove('hidden');
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  managePriceLoadHistory(planId);
+}
+
+function _mpFmt(ts) { return ts ? new Date(ts).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : ''; }
+
+async function managePriceLoadHistory(planId) {
+  const tbody = document.getElementById('mp-history-tbody');
+  tbody.innerHTML = '<tr><td colspan="5" class="px-3 py-4 text-center text-gray-400">Loading…</td></tr>';
+  try {
+    const rows = await api(MD_API + '?resource=plan-price-history&planId=' + encodeURIComponent(planId));
+    const list = Array.isArray(rows) ? rows : (rows.data || []);
+    const chip = s => s === 'active'    ? '<span class="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full font-bold">Active</span>'
+                    : s === 'scheduled' ? '<span class="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full font-bold">Scheduled</span>'
+                    :                      '<span class="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full">Superseded</span>';
+    // Reflect the live 'active' row + its start date in the header.
+    const active = list.find(r => r.status === 'active');
+    if (active) document.getElementById('mp-current-since').textContent = '· since ' + _mpFmt(active.effectiveFrom);
+    tbody.innerHTML = list.length ? list.map(r => `<tr class="border-t border-gray-50">
+      <td class="px-3 py-2 text-right font-mono">£${Number(r.monthlyPriceMajorUnit).toFixed(2)}</td>
+      <td class="px-3 py-2">${_mpFmt(r.effectiveFrom)}</td>
+      <td class="px-3 py-2 text-gray-400">${r.effectiveTo ? _mpFmt(r.effectiveTo) : '—'}</td>
+      <td class="px-3 py-2 text-center">${chip(r.status)}</td>
+      <td class="px-3 py-2 font-mono text-gray-400 truncate max-w-[10rem]">${r.stripePriceId || '—'}</td></tr>`).join('')
+      : '<tr><td colspan="5" class="px-3 py-4 text-center text-gray-400">No history yet.</td></tr>';
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="5" class="px-3 py-4 text-center text-red-400">Failed to load: ' + (e.message || e) + '</td></tr>';
+  }
+}
+
+async function managePriceSave() {
+  const price = Number(document.getElementById('mp-new-price').value);
+  if (!(price > 0)) { alert('Enter a positive monthly price.'); return; }
+  const effRaw = document.getElementById('mp-effective-from').value; // '' or 'YYYY-MM-DDTHH:mm' (local)
+  const body = { planId: _mpPlanId, newPriceGbp: price };
+  if (effRaw) body.effectiveFrom = new Date(effRaw).toISOString();
+  const btn = document.getElementById('mp-save-btn');
+  const status = document.getElementById('mp-status');
+  btn.disabled = true; status.textContent = 'Saving…'; status.className = 'self-center text-xs text-gray-500';
+  try {
+    const res = await api(MD_API + '?resource=plan-price-change', { method: 'POST', body: JSON.stringify(body) });
+    status.textContent = res && res.scheduled ? '✓ Scheduled' : '✓ Applied';
+    status.className = 'self-center text-xs text-emerald-600 font-semibold';
+    document.getElementById('mp-new-price').value = '';
+    document.getElementById('mp-effective-from').value = '';
+    await managePriceLoadHistory(_mpPlanId);
+    await mdLoadTab('plans'); // refresh the live price shown in the plans table
+    const plan = (_mdCache['plans'] || []).find(p => p.id == _mpPlanId);
+    if (plan) document.getElementById('mp-current').textContent = '£' + (plan.monthlyPriceGbp || 0);
+  } catch (e) {
+    status.textContent = '✗ ' + (e.message || e);
+    status.className = 'self-center text-xs text-red-500 font-semibold';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function managePriceClose() {
+  document.getElementById('md-price-panel').classList.add('hidden');
+  _mpPlanId = null;
 }
 
 // Load master data when the view is opened

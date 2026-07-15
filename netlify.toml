@@ -137,6 +137,10 @@ node_bundler = "esbuild"
 [functions.reconcile-billing]
   schedule = "0 2 * * *"
 
+# Single-source price management: flip scheduled plan price changes live — every 15 min
+[functions.activate-scheduled-prices]
+  schedule = "*/15 * * * *"
+
 # US-SALES-1.1 Part 4: Nightly lead identification — 03:00 UTC every day
 [functions.identify-leads]
   schedule = "0 3 * * *"

@@ -794,6 +794,26 @@ export const planPrices = pgTable("plan_prices", {
   planCurrencyUnique: unique("plan_currency_unique").on(t.masterPlanId, t.currency),
 }));
 
+// Plan price history — dated audit trail of every subscription price change (SQL: db/plan-price-history.sql).
+// master_plans.monthlyPriceGbp + the GBP planPrices row hold the CURRENT live price; this table records
+// how it changed over time (start/end dates) and holds scheduled future prices until the activation worker
+// (activate-scheduled-prices.ts) flips them live. One 'active' row per plan+currency at a time.
+export const planPriceHistory = pgTable("plan_price_history", {
+  id: serial("id").primaryKey(),
+  masterPlanId: integer("master_plan_id").notNull().references(() => masterPlans.id, { onDelete: "cascade" }),
+  currency: text("currency").notNull().default("GBP"),               // ISO 4217; GBP is canonical
+  monthlyPriceMajorUnit: numeric("monthly_price_major_unit", { precision: 10, scale: 2 }).notNull(),
+  stripePriceId: text("stripe_price_id"),                            // Stripe price minted for this point; null until active
+  effectiveFrom: timestamp("effective_from").notNull(),             // when this price becomes / became live
+  effectiveTo: timestamp("effective_to"),                           // null = live or still pending; set when superseded
+  status: text("status").notNull().default("active"),               // 'scheduled' | 'active' | 'superseded'
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("plan_price_history_plan_idx").on(t.masterPlanId, t.currency),
+  index("plan_price_history_due_idx").on(t.status, t.effectiveFrom),
+]);
+
 // Task runs — one row per automated task execution; used for monthly volume tracking (SC3)
 export const taskRuns = pgTable("task_runs", {
   id: serial().primaryKey(),
