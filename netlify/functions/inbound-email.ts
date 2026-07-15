@@ -90,11 +90,16 @@ export default withLambda(async (event: HandlerEvent) => {
         return { statusCode: 200, body: 'No usable sender; skipped.' };
     }
 
-    // Spam gate — ack (200) so SendGrid treats it as delivered, but never surface it.
+    // Spam handling — we do NOT drop on a high score. Support mail reaches this webhook via a
+    // Google → SendGrid forward, which breaks SPF/DKIM alignment and pushes spam_score up for
+    // perfectly legitimate customer enquiries. Silently dropping them would lose real support
+    // requests with no trace. Instead we still record the message but flag it 'possible-spam'
+    // (a visible, removable Contacts tag) and drop its priority, so a human triages rather than
+    // the pipeline discarding it blind.
     const spamScore = parseFloat(fields.spam_score || '');
-    if (!Number.isNaN(spamScore) && spamScore > SPAM_THRESHOLD) {
-        console.log('[inbound-email] dropped as spam', JSON.stringify({ sender: senderEmail, spamScore }));
-        return { statusCode: 200, body: 'Dropped as spam.' };
+    const flaggedSpam = !Number.isNaN(spamScore) && spamScore > SPAM_THRESHOLD;
+    if (flaggedSpam) {
+        console.log('[inbound-email] flagged possible spam (recorded, not dropped)', JSON.stringify({ sender: senderEmail, spamScore }));
     }
 
     const subject = (fields.subject || '').trim() || 'Inbound email';
@@ -111,7 +116,7 @@ export default withLambda(async (event: HandlerEvent) => {
         const { userId: leadUserId, contactType } = await lookupContact(db, senderEmail);
 
         // Thread onto the most recent enquiry from this sender, if one exists.
-        const [existing] = await db.select({ id: leads.id, status: leads.status, contactType: leads.contactType })
+        const [existing] = await db.select({ id: leads.id, status: leads.status, contactType: leads.contactType, tags: leads.tags })
             .from(leads)
             .where(and(
                 eq(leads.email, senderEmail),
@@ -133,8 +138,17 @@ export default withLambda(async (event: HandlerEvent) => {
             // never downgrade or override a manual 'other'.
             const nextType = promoteContactType(existing.contactType, contactType);
             const promote = nextType !== existing.contactType;
+            // Tag the thread 'possible-spam' if this message tripped the score and the tag
+            // isn't already there; never remove a tag a human may have cleared and re-added.
+            const currentTags = existing.tags ?? [];
+            const addSpamTag = flaggedSpam && !currentTags.includes('possible-spam');
             await db.update(leads)
-                .set({ status: 'notification_pending', updatedAt: new Date(), ...(promote ? { contactType: nextType } : {}) })
+                .set({
+                    status: 'notification_pending',
+                    updatedAt: new Date(),
+                    ...(promote ? { contactType: nextType } : {}),
+                    ...(addSpamTag ? { tags: [...currentTags, 'possible-spam'] } : {}),
+                })
                 .where(eq(leads.id, existing.id));
             console.log('[inbound-email] threaded onto existing lead', JSON.stringify({ leadId: existing.id, sender: senderEmail }));
             return { statusCode: 200, body: 'Threaded onto existing lead.' };
@@ -151,7 +165,8 @@ export default withLambda(async (event: HandlerEvent) => {
             leadType: 'inbound_email',
             source: 'inbound_email',
             useCase: messageBody,
-            priority: 'medium',
+            priority: flaggedSpam ? 'low' : 'medium',
+            tags: flaggedSpam ? ['possible-spam'] : [],
             contactType,
             userId: leadUserId,
         }).onConflictDoNothing(); // find-by-email above already handles repeats; never overwrite
