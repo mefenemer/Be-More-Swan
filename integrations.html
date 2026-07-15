@@ -302,6 +302,7 @@
   } else if (params.get('oauth_error')) {
     const reasons = {
       access_denied: 'you cancelled the authorisation',
+      provider_error: 'the provider rejected the request',
       not_configured: 'this integration is not configured on the server yet',
       csrf_fail: 'the sign-in link expired — please try again',
       token_exchange: 'the provider rejected the token exchange',
@@ -311,7 +312,9 @@
       missing_subdomain: 'no valid Zendesk subdomain was given — enter the bit before .zendesk.com and try again',
     };
     const code = params.get('oauth_error');
-    showBanner('error', 'Could not connect ' + providerName(params.get('provider')) + ' — ' + (reasons[code] || code) + '.');
+    const reason = params.get('reason'); // the provider's raw error, when we have one
+    const detail = reason && code === 'provider_error' ? ' (' + reason + ')' : '';
+    showBanner('error', 'Could not connect ' + providerName(params.get('provider')) + ' — ' + (reasons[code] || code) + detail + '.');
   }
   if (params.get('connected') || params.get('oauth_error')) {
     window.history.replaceState({}, '', window.location.pathname); // don't re-trigger on refresh

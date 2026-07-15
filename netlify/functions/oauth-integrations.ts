@@ -282,8 +282,15 @@ export default withLambda(async (event) => {
 
     // ── CALLBACK: exchange the code, persist tokens, bounce back to settings ───
     if (action === 'callback') {
-        const { code, state: rawState, error } = event.queryStringParameters ?? {};
-        if (error) return redirect(`/integrations.html?oauth_error=access_denied&provider=${provider}`);
+        const { code, state: rawState, error, error_description } = event.queryStringParameters ?? {};
+        if (error) {
+            // Don't flatten every provider error to "you cancelled": only a genuine user-decline
+            // is access_denied. invalid_scope / invalid_client / server_error etc. are config
+            // problems the user needs to see (and we need in the logs) to fix them.
+            console.error(`[oauth ${provider}] authorize callback returned error=${error}${error_description ? ` (${error_description})` : ''}`);
+            const oauthError = error === 'access_denied' ? 'access_denied' : 'provider_error';
+            return redirect(`/integrations.html?oauth_error=${oauthError}&provider=${provider}&reason=${encodeURIComponent(error_description || error)}`);
+        }
         if (!code || !rawState) return redirect(`/integrations.html?oauth_error=missing_params&provider=${provider}`);
 
         const state = parseState(rawState);
