@@ -22,20 +22,6 @@ const pgClient = postgres(connectionString);
 const db = drizzle({ client: pgClient });
 const stripe = new Stripe(stripeSecret, { apiVersion: '2026-05-27.dahlia' });
 
-// Stripe price IDs keyed by tier — test and live environments
-const isTestMode = stripeSecret.startsWith('sk_test_');
-const STRIPE_PRICE_IDS: Record<string, string> = isTestMode
-  ? {
-      buster:   'price_1TgGNFE7lvVYjk1BAsnhUzBp',
-      saver:    'price_1TgGP8E7lvVYjk1BRBeEZVd6',
-      employee: 'price_1TgGPfE7lvVYjk1B1CQrS6pE',
-    }
-  : {
-      buster:   'price_1TsGFNCuS8qyNSsFOeV5bjI2',
-      saver:    'price_1Tg6fQCuS8qyNSsF5DKmEqMu',
-      employee: 'price_1Tg6fiCuS8qyNSsF787zwCwh',
-    };
-
 export default withLambda(async (event) => {
   if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
@@ -83,11 +69,6 @@ export default withLambda(async (event) => {
       .where(eq(masterPlans.tierKey, tierKey))
       .limit(1);
     if (!masterPlan) return { statusCode: 400, body: JSON.stringify({ error: 'Invalid plan tier.' }) };
-
-    const stripePriceId = STRIPE_PRICE_IDS[tierKey];
-    if (!stripePriceId) {
-      return { statusCode: 400, body: JSON.stringify({ error: `No Stripe price configured for tier: ${tierKey}` }) };
-    }
 
     // Compute charge amount based on billing cycle
     const monthlyGbp    = Number(masterPlan.monthlyPriceGbp);
@@ -175,19 +156,19 @@ export default withLambda(async (event) => {
     // invoices, so the first period was charged two or three times. Creating the
     // subscription up front (and having the webhook/confirm-payment reuse it rather
     // than create new ones) eliminates that double-charge.
-    let subscriptionItem: Stripe.SubscriptionCreateParams.Item;
+    // Resolve the Stripe Price for this subscription. BOTH cycles derive their amount from
+    // master_plans.monthly_price_gbp — the single source the Admin → Plans tab updates — so this
+    // path can never drift from the Plans tab (no hardcoded price IDs). A stable lookup_key that
+    // encodes the amount means repeated checkout inits (reloads, promo re-applies) reuse the same
+    // Price, and a price change is picked up transparently: a new amount → new lookup_key → new Price.
+    let stripePriceId: string;
     if (billingCycle === 'annual') {
       // Annual plans bill a 12-month lump sum (already discounted in baseChargeGbp) once a year.
-      // Reuse a stable annual Price identified by a lookup_key rather than minting a fresh
-      // Product + inline price_data on every call — otherwise page reloads / promo re-applies
-      // litter the live Stripe catalog with duplicate products. The amount is encoded in the
-      // key, so if the annual price ever changes a new Price is created transparently.
       const annualUnitAmount = Math.round(baseChargeGbp * 100);
       const annualLookupKey  = `${tierKey}_annual_gbp_${annualUnitAmount}`;
       const existingAnnual   = await stripe.prices.list({ lookup_keys: [annualLookupKey], active: true, limit: 1 });
-      let annualPriceId: string;
       if (existingAnnual.data.length > 0) {
-        annualPriceId = existingAnnual.data[0].id;
+        stripePriceId = existingAnnual.data[0].id;
       } else {
         const annualProduct = await stripe.products.create({ name: `${masterPlan.name} (Annual)` });
         const annualPrice   = await stripe.prices.create({
@@ -198,12 +179,32 @@ export default withLambda(async (event) => {
           lookup_key:          annualLookupKey,
           transfer_lookup_key: true,
         });
-        annualPriceId = annualPrice.id;
+        stripePriceId = annualPrice.id;
       }
-      subscriptionItem = { price: annualPriceId };
     } else {
-      subscriptionItem = { price: stripePriceId };
+      // Monthly: find-or-create a stable Price at the current master_plans monthly amount, on the
+      // plan's own Stripe product (backfilled). Falls back to a fresh product only if the plan has
+      // no product id yet.
+      const monthlyUnitAmount = Math.round(monthlyGbp * 100);
+      const monthlyLookupKey  = `${tierKey}_monthly_gbp_${monthlyUnitAmount}`;
+      const existingMonthly   = await stripe.prices.list({ lookup_keys: [monthlyLookupKey], active: true, limit: 1 });
+      if (existingMonthly.data.length > 0) {
+        stripePriceId = existingMonthly.data[0].id;
+      } else {
+        const monthlyProductId = masterPlan.stripeProductId
+          ?? (await stripe.products.create({ name: masterPlan.name, metadata: { tierKey } })).id;
+        const monthlyPrice = await stripe.prices.create({
+          currency:            'gbp',
+          product:             monthlyProductId,
+          unit_amount:         monthlyUnitAmount,
+          recurring:           { interval: 'month' },
+          lookup_key:          monthlyLookupKey,
+          transfer_lookup_key: true,
+        });
+        stripePriceId = monthlyPrice.id;
+      }
     }
+    const subscriptionItem: Stripe.SubscriptionCreateParams.Item = { price: stripePriceId };
 
     const subscription = await stripe.subscriptions.create({
       customer: customer.id,
