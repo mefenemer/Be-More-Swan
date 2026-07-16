@@ -1,10 +1,11 @@
 /**
  * db/seed-assistant-content.ts
  *
- * Value-preserving migration for DB-driven assistant content. Transcribes the CURRENT hard-coded
- * src/config/assistant-role-content.js into:
- *   1. master_assistants copy columns (tagline, key_features, integrations, video) for the 7 roles
- *      that had a hardcoded entry, so the detail page renders identically to the old static one.
+ * Seeds DB-driven assistant content into:
+ *   1. master_assistants copy columns (tagline, key_features, integrations, video) — for the 7
+ *      MIGRATED roles this is a value-preserving transcription of the hard-coded
+ *      src/config/assistant-role-content.js, so the detail page renders identically to the old
+ *      static one; the other 12 are AUTHORED copy for roles that never had any (see that array).
  *   2. assistant_feature_defs catalog rows, transcribed from the ASSISTANT_FEATURES list that used
  *      to live in src/config/assistant-features.ts.
  *
@@ -17,10 +18,9 @@
  * name/category/iconKey/iconColor were duplicated in the hardcoded file too, but master_assistants is
  * already the live source for those on the catalogue grid — this seed does NOT touch them.
  *
- * The 13 catalog roles with no hardcoded entry keep empty tagline/key_features. That is intentional:
- * they never had a detail page (the `hasDetail` gate hid it), and the renderer now degrades instead.
- *
- * Idempotent: upserts catalog rows by `key`, and only writes copy columns for the 7 known roles.
+ * Idempotent: upserts catalog rows by `key`, and only writes copy columns for the roles listed here.
+ * Re-running reprints the description-divergence report and restores any admin edit back to these
+ * values — so once copy is being maintained in the admin UI, update this file too or stop running it.
  *
  * Run with:  npx tsx db/seed-assistant-content.ts
  * (Requires NETLIFY_DATABASE_URL / DATABASE_URL. Apply db/assistant-content.sql first.)
@@ -44,14 +44,19 @@ const db = drizzle({ client });
 interface RoleContent {
     roleKey: string;
     tagline: string;
-    description: string;                                  // detail-page copy; may differ from the DB's
+    // Only set for the 7 MIGRATED roles, where the detail page's copy differed from the DB's and has
+    // to win to keep the page identical. Omitted for authored copy, which leaves the DB description
+    // (already the live card copy) alone.
+    description?: string;
     keyFeatures: string[];
     integrations: string[];
     video?: { url: string | null; title: string; poster?: string };
 }
 
+// ── 1. MIGRATED ────────────────────────────────────────────────────────────────
 // Transcribed verbatim from src/config/assistant-role-content.js (deleted by this change).
-const CONTENT: RoleContent[] = [
+// Do not reword here — this array exists to prove the migration changed nothing on the page.
+const MIGRATED: RoleContent[] = [
     {
         roleKey: 'social_media_manager',
         tagline: 'Consistent, on-brand content — without the daily grind.',
@@ -133,6 +138,94 @@ const CONTENT: RoleContent[] = [
     },
 ];
 
+// ── 2. AUTHORED ────────────────────────────────────────────────────────────────
+// Copy for the 12 roles that never had any — they were invisible behind the old `hasDetail` gate, so
+// exposing their detail pages surfaced the gap. Drafted and approved 2026-07-16.
+//
+// `description` is deliberately omitted for every role here: the DB already has one (it's what the
+// catalogue card renders) and it's good. This array only fills the blanks.
+//
+// ⚠️ INTEGRATIONS ARE FORWARD-LOOKING. Every role here is comingSoon, and several named integrations
+// have NO connector built yet — marked "not built" below. This matches existing shipped copy (the
+// Social Media Manager card names Facebook/Instagram/LinkedIn, none of which have connectors), but it
+// is a marketing promise, not a capability list. Revisit before any of these roles goes live.
+const AUTHORED: RoleContent[] = [
+    {
+        roleKey: 'calendar_coordinator',
+        tagline: 'Your day, arranged before you open your laptop.',
+        keyFeatures: ['Cross-Time-Zone Scheduling', 'Daily Agenda Briefings', 'Conflict & Buffer Protection'],
+        integrations: ['Google Calendar', 'Outlook Calendar', 'Slack'],   // Calendar providers not built
+    },
+    {
+        roleKey: 'document_organizer',
+        tagline: 'A filing cabinet that files itself.',
+        keyFeatures: ['Automatic Renaming & Tagging', 'Rule-Based Folder Routing', 'Duplicate & Clutter Detection'],
+        integrations: ['Google Drive', 'Dropbox', 'OneDrive', 'Notion'],  // only Notion built
+    },
+    {
+        roleKey: 'inbox_manager',
+        tagline: 'Reach the bottom of your inbox — without reading all of it.',
+        keyFeatures: ['Drafted Replies in Your Voice', 'Automatic Triage & Categorisation', 'Urgent-Issue Escalation'],
+        integrations: ['Gmail', 'Outlook', 'Slack'],                      // Outlook not built
+    },
+    {
+        roleKey: 'client_onboarding_guide',
+        tagline: "Every client's first week, handled.",
+        keyFeatures: ['Automated Welcome Sequences', 'Missing-Form Chasing', 'Kick-Off Call Scheduling'],
+        integrations: ['Gmail', 'Google Calendar', 'HubSpot', 'Slack'],   // Google Calendar not built
+    },
+    {
+        roleKey: 'review_reputation_manager',
+        tagline: 'Your reputation, defended around the clock.',
+        keyFeatures: ['Multi-Platform Review Monitoring', 'Drafted Responses for Approval', 'Sentiment & Trend Alerts'],
+        integrations: ['Trustpilot', 'Google Business Profile', 'Slack'], // review platforms not built
+    },
+    {
+        roleKey: 'sql_data_analyst',
+        tagline: 'Ask your data a question. Get an answer, not a ticket.',
+        keyFeatures: ['Plain-English Querying', 'Instant Charts & Summaries', 'Read-Only, Scoped Access'],
+        integrations: ['Stripe', 'PostgreSQL', 'Xero', 'QuickBooks'],     // Stripe is billing-only; no user DB connector
+    },
+    {
+        roleKey: 'competitor_intel_analyst',
+        tagline: 'Know exactly how you stack up — every week, without asking.',
+        keyFeatures: ['Weekly Competitor Sweeps', 'Auto-Updated Battle Cards', 'Pricing & Positioning Change Alerts'],
+        integrations: ['G2', 'HubSpot', 'Notion', 'Slack'],               // G2 not built
+    },
+    {
+        roleKey: 'newsletter_editor',
+        tagline: 'A newsletter worth opening — without the weekly scramble.',
+        keyFeatures: ['Curated Industry Round-Ups', 'Ready-to-Send Campaign Formatting', 'Human-in-the-loop Review'],
+        integrations: ['Mailchimp', 'Gmail', 'Slack'],                    // Mailchimp not built
+    },
+    {
+        roleKey: 'rfp_proposal_responder',
+        tagline: 'Turn weeks of enterprise paperwork into a same-day reply.',
+        keyFeatures: ['Answer Reuse from Past Wins', 'Security Questionnaire Drafting', 'Source-Linked Citations'],
+        integrations: ['Notion', 'Google Drive', 'Salesforce', 'Slack'],  // Google Drive not built
+    },
+    {
+        roleKey: 'seo_content_strategist',
+        tagline: 'Rank for what your buyers actually search.',
+        keyFeatures: ['Keyword Research & Clustering', 'SEO-Optimised Drafting', 'Search Console Feedback Loop'],
+        integrations: ['Google Search Console', 'WordPress', 'Notion'],   // all three built
+    },
+    {
+        roleKey: 'sop_writer',
+        tagline: "Document the process while you're doing it.",
+        keyFeatures: ['Voice Note & Screen Recording Capture', 'Step-by-Step Manual Formatting', 'Version-Controlled Updates'],
+        integrations: ['Notion', 'Google Drive', 'Slack'],                // Google Drive not built
+    },
+    {
+        roleKey: 'status_report_generator',
+        tagline: 'Leadership updated. Without the Sunday-night write-up.',
+        keyFeatures: ['Automatic Data Pull from Your Boards', 'Executive-Ready Summaries', 'Risk & Slippage Flagging'],
+        integrations: ['Jira', 'Asana', 'Monday.com', 'Slack'],           // Monday.com not built
+    },
+];
+
+const CONTENT: RoleContent[] = [...MIGRATED, ...AUTHORED];
+
 // Transcribed verbatim from src/config/assistant-features.ts (ASSISTANT_FEATURES removed by this change).
 // Order here IS the display order.
 const FEATURE_DEFS = [
@@ -174,8 +267,8 @@ async function main() {
     }
     console.log('✓ Feature catalog upserted.');
 
-    // 2. Copy columns for the 7 roles that had hardcoded content.
-    console.log(`\nSeeding copy for ${CONTENT.length} roles…`);
+    // 2. Copy columns: MIGRATED roles (verbatim from the deleted file) + AUTHORED roles (new copy).
+    console.log(`\nSeeding copy for ${CONTENT.length} roles (${MIGRATED.length} migrated, ${AUTHORED.length} authored)…`);
     const diffs: Array<{ roleKey: string; db: string; file: string }> = [];
     let missing = 0;
 
@@ -184,13 +277,14 @@ async function main() {
             .where(eq(masterAssistants.roleKey, c.roleKey)).limit(1);
         if (!ma) { console.warn(`⚠  master assistant '${c.roleKey}' not found — skipping.`); missing++; continue; }
 
-        if ((ma.description ?? '') !== c.description) {
+        if (c.description !== undefined && (ma.description ?? '') !== c.description) {
             diffs.push({ roleKey: c.roleKey, db: ma.description ?? '(null)', file: c.description });
         }
 
         await db.update(masterAssistants).set({
             tagline: c.tagline,
-            description: c.description,          // detail-page copy wins — see the docblock
+            // Only the migrated roles carry a description — authored copy leaves the DB's alone.
+            ...(c.description !== undefined ? { description: c.description } : {}),
             keyFeatures: c.keyFeatures,
             integrations: c.integrations,
             video: c.video ?? null,
