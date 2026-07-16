@@ -17,19 +17,6 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 const jwtSecret    = process.env.JWT_SECRET!;
 const stripeSecret = process.env.STRIPE_SECRET_KEY!;
 const stripe       = new Stripe(stripeSecret, { apiVersion: '2026-05-27.dahlia' });
-const isTestMode   = stripeSecret?.startsWith('sk_test_');
-
-const STRIPE_PRICE_IDS: Record<string, string> = isTestMode
-    ? {
-        buster:   'price_1TgGNFE7lvVYjk1BAsnhUzBp',
-        saver:    'price_1TgGP8E7lvVYjk1BRBeEZVd6',
-        employee: 'price_1TgGPfE7lvVYjk1B1CQrS6pE',
-    }
-    : {
-        buster:   'price_1TsGFNCuS8qyNSsFOeV5bjI2',
-        saver:    'price_1Tg6fQCuS8qyNSsF5DKmEqMu',
-        employee: 'price_1Tg6fiCuS8qyNSsF787zwCwh',
-    };
 
 function parseSession(event: any): number | null {
     const match = (event.headers.cookie || '').match(/aura_session=([^;]+)/);
@@ -202,11 +189,8 @@ export default withLambda(async (event) => {
         return { statusCode: 400, body: JSON.stringify({ error: 'No Stripe subscription on record. Please contact support.' }) };
     }
 
-    const targetPriceId = STRIPE_PRICE_IDS[targetTierKey];
-    if (!targetPriceId) {
-        return { statusCode: 400, body: JSON.stringify({ error: `No Stripe price configured for tier: ${targetTierKey}` }) };
-    }
-
+    // Note: the downgrade is scheduled via cancel_at_period_end + pendingDowngradeTierKey metadata
+    // below — it does not swap the Stripe price here, so no price id is needed.
     try {
         const sub = await stripe.subscriptions.retrieve(activePlan.stripeSubscriptionId, { expand: ['items'] });
         const currentItemId = sub.items.data[0]?.id;

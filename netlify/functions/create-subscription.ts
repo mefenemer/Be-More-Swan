@@ -11,6 +11,7 @@ import { eq, and } from 'drizzle-orm';
 import { users, masterPlans, plans, payments, notifications } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { resolveActionNotifications, PAYMENT_RESTORED_TYPES } from '../../src/utils/notification-actions';
+import { resolveMonthlyPriceId } from '../../src/utils/stripe-price';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const connectionString = process.env.NETLIFY_DATABASE_URL;
@@ -182,27 +183,9 @@ export default withLambda(async (event) => {
         stripePriceId = annualPrice.id;
       }
     } else {
-      // Monthly: find-or-create a stable Price at the current master_plans monthly amount, on the
-      // plan's own Stripe product (backfilled). Falls back to a fresh product only if the plan has
-      // no product id yet.
-      const monthlyUnitAmount = Math.round(monthlyGbp * 100);
-      const monthlyLookupKey  = `${tierKey}_monthly_gbp_${monthlyUnitAmount}`;
-      const existingMonthly   = await stripe.prices.list({ lookup_keys: [monthlyLookupKey], active: true, limit: 1 });
-      if (existingMonthly.data.length > 0) {
-        stripePriceId = existingMonthly.data[0].id;
-      } else {
-        const monthlyProductId = masterPlan.stripeProductId
-          ?? (await stripe.products.create({ name: masterPlan.name, metadata: { tierKey } })).id;
-        const monthlyPrice = await stripe.prices.create({
-          currency:            'gbp',
-          product:             monthlyProductId,
-          unit_amount:         monthlyUnitAmount,
-          recurring:           { interval: 'month' },
-          lookup_key:          monthlyLookupKey,
-          transfer_lookup_key: true,
-        });
-        stripePriceId = monthlyPrice.id;
-      }
+      // Monthly: resolve via the shared helper — derives the amount from master_plans and reuses a
+      // stable Price by lookup_key (the single source shared with billing-upgrade).
+      stripePriceId = await resolveMonthlyPriceId(stripe, masterPlan);
     }
     const subscriptionItem: Stripe.SubscriptionCreateParams.Item = { price: stripePriceId };
 
