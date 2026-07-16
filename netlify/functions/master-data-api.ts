@@ -12,6 +12,8 @@
 //   plan-price-history  GET ?planId=N — dated price audit trail (newest first)
 //   master-assistants   GET (list) | POST | PATCH ?id=N (update fields; systemPrompt → new version)
 //   assistant-versions  GET ?assistantId=N | POST (create new version for assistant)
+//   assistant-feature-defs   GET | POST | PATCH ?id=N | DELETE ?id=N — capability catalog (metadata)
+//   assistant-feature-values GET | PATCH { updates[] } — the per-assistant capability matrix
 //   feature-flags       GET | POST | PATCH ?key=K | DELETE ?key=K
 //   platform-config     GET | POST (upsert) ?key=K | DELETE ?key=K
 //
@@ -35,13 +37,15 @@ import {
     plans,
     masterAssistants,
     assistantVersions,
+    assistantFeatureDefs,
+    assistantFeatures,
     featureFlags,
     platformConfig,
     supportedLanguages,
 } from '../../db/schema';
 import { applyPlanPrice } from '../../src/utils/plan-pricing';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
-import { isAdminRole } from '../../src/utils/rbac';
+import { isAdminRole, requirePermission } from '../../src/utils/rbac';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -369,6 +373,35 @@ async function handlePlanPriceHistory(event: any) {
     return { statusCode: 200, body: JSON.stringify(rows) };
 }
 
+// ── Master Assistants ───────────────────────────────────────────────────────────
+// master_assistants is the single source of truth for assistant copy. The detail page used to read
+// src/config/assistant-role-content.js instead, which re-declared these fields and drifted; the copy
+// columns below (tagline/keyFeatures/integrations/video) replaced it. See db/assistant-content.sql.
+
+/**
+ * Normalise a list field (keyFeatures / integrations) from the admin form.
+ * The textarea posts one item per line; the API also accepts a JSON array. Blank lines are dropped.
+ */
+function normaliseStringList(raw: unknown): string[] | null {
+    const items = typeof raw === 'string' ? raw.split('\n')
+        : Array.isArray(raw) ? raw
+        : null;
+    if (!items) return null;
+    return items.map(i => String(i).trim()).filter(Boolean);
+}
+
+/** Normalise the video slot. A blank url is kept as null so the modal renders its placeholder. */
+function normaliseVideo(raw: unknown): { url: string | null; title: string; poster?: string } | null {
+    if (raw == null || raw === '') return null;
+    if (typeof raw !== 'object') return null;
+    const v = raw as Record<string, unknown>;
+    const url = typeof v.url === 'string' && v.url.trim() ? v.url.trim() : null;
+    const title = typeof v.title === 'string' ? v.title.trim() : '';
+    const poster = typeof v.poster === 'string' && v.poster.trim() ? v.poster.trim() : undefined;
+    if (!url && !title && !poster) return null;   // fully blank = no video slot at all
+    return poster ? { url, title, poster } : { url, title };
+}
+
 async function handleMasterAssistants(event: any, adminId: number, ip?: string, ua?: string) {
     const db = getDb();
     const method = event.httpMethod;
@@ -381,12 +414,16 @@ async function handleMasterAssistants(event: any, adminId: number, ip?: string, 
 
     if (method === 'POST') {
         const body = JSON.parse(event.body || '{}');
-        const { roleKey, name, description, category, iconKey, iconColor, systemPrompt } = body;
+        const { roleKey, name, description, category, iconKey, iconColor, tagline, systemPrompt } = body;
         if (!roleKey || !name) return badRequest('roleKey, name required.');
 
         const [assistant] = await db.insert(masterAssistants).values({
             roleKey, name, description, category: category || 'Administration',
             iconKey: iconKey || 'document', iconColor: iconColor || 'blue',
+            tagline: tagline || null,
+            keyFeatures: normaliseStringList(body.keyFeatures) ?? [],
+            integrations: normaliseStringList(body.integrations) ?? [],
+            video: normaliseVideo(body.video),
         }).returning();
 
         // Create initial version if systemPrompt provided
@@ -410,14 +447,29 @@ async function handleMasterAssistants(event: any, adminId: number, ip?: string, 
 
         const { systemPrompt, ...otherFields } = body;
         const updates: any = {};
-        const allowed = ['name', 'description', 'category', 'iconKey', 'iconColor', 'comingSoon', 'isActive', 'lifecycleState', 'riskClassification', 'milestoneTasksRequired', 'specialCategoryClauseEnabled', 'replacementAssistantId'];
+        // roleKey is deliberately absent: it's the join key across ai_assistants.configuration->>'type',
+        // the cron role lists and the onboarding schemas, so renaming it would strand hired assistants.
+        // It's set once at create and read-only thereafter (the form disables it on edit).
+        const allowed = ['name', 'description', 'tagline', 'category', 'iconKey', 'iconColor', 'comingSoon', 'isActive', 'lifecycleState', 'riskClassification', 'milestoneTasksRequired', 'specialCategoryClauseEnabled', 'replacementAssistantId'];
         for (const key of allowed) {
             if (otherFields[key] !== undefined) updates[key] = otherFields[key];
         }
+
+        // List/object copy fields need normalising rather than a straight copy.
+        for (const key of ['keyFeatures', 'integrations']) {
+            if (otherFields[key] === undefined) continue;
+            const list = normaliseStringList(otherFields[key]);
+            if (!list) return badRequest(`${key} must be an array of strings or a newline-separated string.`);
+            updates[key] = list;
+        }
+        if (otherFields.video !== undefined) updates.video = normaliseVideo(otherFields.video);
+
         updates.updatedAt = new Date();
 
-        // systemPrompt edit always creates a new immutable version row
-        if (systemPrompt !== undefined) {
+        // systemPrompt edit always creates a new immutable version row. The form's textarea is never
+        // populated from assistant_versions, so it posts '' on every unrelated save — guard on
+        // non-empty or each copy edit would mint a spurious empty version.
+        if (typeof systemPrompt === 'string' && systemPrompt.trim()) {
             const [lastVersion] = await db
                 .select({ versionNumber: assistantVersions.versionNumber })
                 .from(assistantVersions)
@@ -436,7 +488,7 @@ async function handleMasterAssistants(event: any, adminId: number, ip?: string, 
         }
 
         const [row] = await db.update(masterAssistants).set(updates).where(eq(masterAssistants.id, id)).returning();
-        void insertAdminAuditLog({ adminId, action: 'assistant_state_change', targetType: 'master_assistant', targetId: id, previousState: prev, newState: { ...row, newVersionCreated: systemPrompt !== undefined }, ipAddress: ip, userAgent: ua, reason: 'admin_update' });
+        void insertAdminAuditLog({ adminId, action: 'assistant_state_change', targetType: 'master_assistant', targetId: id, previousState: prev, newState: { ...row, newVersionCreated: updates.currentVersionId !== undefined }, ipAddress: ip, userAgent: ua, reason: 'admin_update' });
         return { statusCode: 200, body: JSON.stringify(row) };
     }
 
@@ -815,6 +867,145 @@ async function handlePlanFeatureValues(event: any, adminId: number, ip?: string,
     return { statusCode: 405, body: 'Method Not Allowed' };
 }
 
+// ── Assistant Features (DB-driven capability catalog + per-assistant matrix) ─────
+// Mirrors the Plan Features pair above: assistant_feature_defs is the catalog (metadata only),
+// the VALUES live in assistant_features (one row per master_assistant × key; absent row = off).
+// Replaces the hardcoded ASSISTANT_FEATURES list, so a new capability no longer needs a deploy.
+// Unlike plan features there is no applyMode — capabilities have no subscriber cohort to freeze.
+
+async function handleAssistantFeatureDefs(event: any, adminId: number, role: string, ip?: string, ua?: string) {
+    const permErr = requirePermission(role, 'feature_flags');
+    if (permErr) return permErr;
+
+    const db = getDb();
+    const method = event.httpMethod;
+    const id = event.queryStringParameters?.id ? Number(event.queryStringParameters.id) : null;
+
+    if (method === 'GET') {
+        const rows = await db.select().from(assistantFeatureDefs)
+            .orderBy(asc(assistantFeatureDefs.category), asc(assistantFeatureDefs.displayOrder));
+        return { statusCode: 200, body: JSON.stringify(rows) };
+    }
+
+    if (method === 'POST') {
+        const body = JSON.parse(event.body || '{}');
+        const { key, label, category } = body;
+        if (!key || !label || !category) return badRequest('key, label, category required.');
+        const [row] = await db.insert(assistantFeatureDefs).values({
+            key, label, category,
+            description: body.description ?? null,
+            displayOrder: body.displayOrder ?? 0,
+            isEnabled: body.isEnabled ?? true,
+        }).returning();
+        void insertAdminAuditLog({ adminId, action: 'record_delete', targetType: 'assistant_feature_def', targetId: row.id, newState: row, ipAddress: ip, userAgent: ua, reason: 'admin_create' });
+        return { statusCode: 201, body: JSON.stringify(row) };
+    }
+
+    if (method === 'PATCH') {
+        if (!id) return badRequest('id required.');
+        const body = JSON.parse(event.body || '{}');
+        const [prev] = await db.select().from(assistantFeatureDefs).where(eq(assistantFeatureDefs.id, id)).limit(1);
+        if (!prev) return notFound();
+        const updates: any = { updatedAt: new Date() };
+        // `key` is omitted: it's the join key into assistant_features, so renaming it would orphan
+        // every stored value. Delete and re-create instead.
+        for (const k of ['label', 'description', 'category', 'displayOrder', 'isEnabled']) {
+            if (body[k] !== undefined) updates[k] = body[k];
+        }
+        const [row] = await db.update(assistantFeatureDefs).set(updates).where(eq(assistantFeatureDefs.id, id)).returning();
+        void insertAdminAuditLog({ adminId, action: 'record_delete', targetType: 'assistant_feature_def', targetId: id, previousState: prev, newState: row, ipAddress: ip, userAgent: ua, reason: 'admin_update' });
+        return { statusCode: 200, body: JSON.stringify(row) };
+    }
+
+    if (method === 'DELETE') {
+        if (role !== 'super_admin') return forbidden('super_admin required to delete assistant features.');
+        if (!id) return badRequest('id required.');
+        const [prev] = await db.select().from(assistantFeatureDefs).where(eq(assistantFeatureDefs.id, id)).limit(1);
+        if (!prev) return notFound();
+        // Drop the stored values too — an orphaned assistant_features row would silently resurrect the
+        // capability if the key were ever re-created.
+        await db.delete(assistantFeatures).where(eq(assistantFeatures.featureKey, prev.key));
+        await db.delete(assistantFeatureDefs).where(eq(assistantFeatureDefs.id, id));
+        void insertAdminAuditLog({ adminId, action: 'record_delete', targetType: 'assistant_feature_def', targetId: id, previousState: prev, ipAddress: ip, userAgent: ua, reason: 'admin_delete' });
+        return { statusCode: 200, body: JSON.stringify({ ok: true }) };
+    }
+
+    return { statusCode: 405, body: 'Method Not Allowed' };
+}
+
+async function handleAssistantFeatureValues(event: any, adminId: number, role: string, ip?: string, ua?: string) {
+    const permErr = requirePermission(role, 'feature_flags');
+    if (permErr) return permErr;
+
+    const db = getDb();
+    const method = event.httpMethod;
+
+    const defs = await db.select().from(assistantFeatureDefs)
+        .orderBy(asc(assistantFeatureDefs.category), asc(assistantFeatureDefs.displayOrder));
+
+    if (method === 'GET') {
+        const assistants = await db.select({
+            id: masterAssistants.id,
+            name: masterAssistants.name,
+            roleKey: masterAssistants.roleKey,
+            lifecycleState: masterAssistants.lifecycleState,
+        }).from(masterAssistants).where(eq(masterAssistants.isActive, true)).orderBy(masterAssistants.name);
+
+        const rows = await db.select({
+            masterAssistantId: assistantFeatures.masterAssistantId,
+            featureKey: assistantFeatures.featureKey,
+            enabled: assistantFeatures.enabled,
+        }).from(assistantFeatures);
+
+        const byAssistant = new Map<number, Record<string, boolean>>();
+        for (const r of rows) {
+            const m = byAssistant.get(r.masterAssistantId) || {};
+            m[r.featureKey] = r.enabled;
+            byAssistant.set(r.masterAssistantId, m);
+        }
+
+        // Absent row = disabled — backfill every known key so the UI renders a full grid.
+        const values: Record<number, Record<string, boolean>> = {};
+        for (const a of assistants) {
+            values[a.id] = Object.fromEntries(defs.map(d => [d.key, byAssistant.get(a.id)?.[d.key] ?? false]));
+        }
+
+        return { statusCode: 200, body: JSON.stringify({ features: defs, assistants, values }) };
+    }
+
+    if (method === 'PATCH') {
+        const body = JSON.parse(event.body || '{}');
+        const updates: Array<{ assistantId: number; key: string; value: unknown }> = Array.isArray(body.updates) ? body.updates : [];
+        if (!updates.length) return badRequest('updates[] required.');
+
+        const defByKey = new Map(defs.map(d => [d.key, d]));
+        for (const u of updates) {
+            if (!defByKey.has(u.key)) return badRequest(`Unknown feature key: ${u.key}.`);
+            if (!Number.isInteger(Number(u.assistantId))) return badRequest(`Invalid assistantId: ${u.assistantId}.`);
+        }
+
+        for (const u of updates) {
+            const enabled = u.value === true || u.value === 'true';
+            await db.insert(assistantFeatures)
+                .values({ masterAssistantId: Number(u.assistantId), featureKey: u.key, enabled, updatedBy: adminId })
+                .onConflictDoUpdate({
+                    target: [assistantFeatures.masterAssistantId, assistantFeatures.featureKey],
+                    set: { enabled, updatedBy: adminId, updatedAt: new Date() },
+                });
+        }
+
+        void insertAdminAuditLog({
+            adminId, action: 'record_delete', targetType: 'assistant_features', targetId: 0,
+            newState: { changes: updates.map(u => ({ assistantId: u.assistantId, key: u.key, value: u.value === true || u.value === 'true' })) },
+            ipAddress: ip, userAgent: ua, reason: 'admin_update',
+        });
+
+        return { statusCode: 200, body: JSON.stringify({ ok: true, applied: updates.length }) };
+    }
+
+    return { statusCode: 405, body: 'Method Not Allowed' };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Main handler
 // ─────────────────────────────────────────────────────────────────────────────
@@ -835,6 +1026,8 @@ export default withLambda(async (event) => {
         case 'plan-price-history': return handlePlanPriceHistory(event);
         case 'plan-feature-defs':   return handlePlanFeatureDefs(event, adminId, role, ip, ua);
         case 'plan-feature-values': return handlePlanFeatureValues(event, adminId, ip, ua);
+        case 'assistant-feature-defs':   return handleAssistantFeatureDefs(event, adminId, role, ip, ua);
+        case 'assistant-feature-values': return handleAssistantFeatureValues(event, adminId, role, ip, ua);
         case 'master-assistants':  return handleMasterAssistants(event, adminId, ip, ua);
         case 'assistant-versions': return handleAssistantVersions(event, adminId, ip, ua);
         case 'feature-flags':        return handleFeatureFlags(event, adminId, role, ip, ua);

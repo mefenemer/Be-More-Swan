@@ -252,14 +252,6 @@
         </div>
       </section>
 
-      <!-- ── Assistant Features ─────────────────────────────────────── -->
-      <section id="view-assistant-features" class="admin-view hidden">
-        <p class="text-sm text-gray-500 mb-5">Choose which features each assistant type exposes to customers. Toggling a box takes effect immediately — customers see the feature only if one of their active assistants is a type with it enabled (some features also require a specific plan tier).</p>
-        <div id="assistant-features-grid" class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
-          <div class="px-5 py-8 text-center text-gray-400">Loading…</div>
-        </div>
-      </section>
-
       <!-- ── Analytics ──────────────────────────────────────────────── -->
       <section id="view-analytics" class="admin-view hidden">
         <!-- Date range filter (US9 Sc3) -->
@@ -656,6 +648,7 @@
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="plans" onclick="mdSwitchTab('plans')">Plans</button>
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="plan-features" onclick="mdSwitchTab('plan-features')">Plan Features</button>
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="assistants" onclick="mdSwitchTab('assistants')">Assistants</button>
+          <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="assistant-features" onclick="mdSwitchTab('assistant-features')">Assistant Features</button>
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="assistant-versions" onclick="mdSwitchTab('assistant-versions')">Versions</button>
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="feature-flags-md" onclick="mdSwitchTab('feature-flags-md')">Flag Definitions</button>
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="languages" onclick="mdSwitchTab('languages')">Languages</button>
@@ -709,6 +702,25 @@
               </thead>
               <tbody id="md-assistants-tbody"><tr><td colspan="5" class="px-5 py-8 text-center text-gray-400">Loading…</td></tr></tbody>
             </table>
+          </div>
+        </div>
+
+        <!-- Assistant Features tab — capability matrix (feature rows × assistant columns).
+             Distinct from the "Key Features" marketing bullets on the Assistants tab: these are
+             capability gates (AI image/video generation), enforced by assistant-capabilities.ts. -->
+        <div id="md-pane-assistant-features" class="md-pane hidden">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <h2 class="text-sm font-bold text-gray-700">Assistant Features</h2>
+              <p class="text-xs text-gray-400 mt-0.5">Switch each capability on or off per assistant type, or disable one entirely. Gates what a hired assistant can actually do.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="afOpenAddFeature()" class="px-3 py-1.5 bg-gray-100 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-200 transition">+ Add Feature</button>
+              <button id="af-save-btn" onclick="afSave()" disabled class="px-3 py-1.5 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition disabled:opacity-40 disabled:cursor-not-allowed">Save changes</button>
+            </div>
+          </div>
+          <div id="md-assistant-features-body" class="bg-white rounded-2xl border border-gray-200 overflow-x-auto p-1">
+            <div class="px-5 py-8 text-center text-gray-400">Loading…</div>
           </div>
         </div>
 
@@ -2033,7 +2045,7 @@ function debounce(fn, ms) {
 // ── Navigation — US-ADM-1.4.1 Two-tier nav ───────────────────────────────────
 const VIEW_LABELS = {
   dashboard: 'Dashboard', users: 'All Users', tickets: 'Support Tickets',
-  catalog: 'Assistant Catalog', 'assistant-features': 'Assistant Features', analytics: 'Analytics', 'model-config': 'AI Model Config',
+  catalog: 'Assistant Catalog', analytics: 'Analytics', 'model-config': 'AI Model Config',
   logs: 'System Logs', 'audit-log': 'Audit Log', 'security-abuse': 'Security & Abuse', cogs: 'COGS Dashboard',
   reconciliation: 'Stripe Reconciliation', dunning: 'Dunning Queue',
   'manage-admins': 'Admin Accounts', 'kill-switches': 'Emergency Controls',
@@ -2064,7 +2076,8 @@ const ADMIN_CATS = {
   ]},
   assistants: { label: 'Assistants', roles: ['admin','super_admin','platform_admin'], children: [
     { view: 'catalog',              icon: '🤖', label: 'Assistant Catalog' },
-    { view: 'assistant-features',   icon: '🎚️', label: 'Assistant Features' },
+    // Assistant Features moved to Master Data → Assistant Features, where its catalog is now
+    // DB-driven and sits alongside the assistant copy fields it relates to.
     { view: 'model-config',         icon: '⚙️', label: 'AI Model Config' },
     { view: 'blueprint-inspector',  icon: '🔬', label: 'Blueprint Inspector' },
   ]},
@@ -2309,7 +2322,6 @@ function adminNav(view) {
   if (view === 'users')        loadUsers();
   if (view === 'tickets')      loadTickets();
   if (view === 'catalog')      loadCatalog();
-  if (view === 'assistant-features') loadAssistantFeatures();
   if (view === 'analytics')    { loadAnalytics(); loadChurnSignals(); }
   if (view === 'model-config') loadModelConfig();
   if (view === 'logs')         loadLogs();
@@ -5127,59 +5139,6 @@ async function toggleCatalogStatus(id, currentlyComingSoon) {
   } catch(e) { alert(e.message); }
 }
 
-// ── Assistant Features — per-type capability matrix ────────────────────────────
-async function loadAssistantFeatures() {
-  const el = document.getElementById('assistant-features-grid');
-  el.innerHTML = '<div class="px-5 py-8 text-center text-gray-400 animate-pulse">Loading…</div>';
-  try {
-    const d = await api('/.netlify/functions/admin-api?resource=assistant-features');
-    const features = d.features || [];
-    const assistants = d.assistants || [];
-
-    const head = `<th class="px-5 py-3 text-left">Assistant Type</th>` +
-      features.map(f => `<th class="px-4 py-3 text-center" title="${escapeHtmlJs(f.description)}">${escapeHtmlJs(f.label)}</th>`).join('');
-
-    const rows = assistants.map(a => {
-      const cells = features.map(f => {
-        const on = !!(a.features && a.features[f.key]);
-        return `<td class="px-4 py-3 text-center">
-          <input type="checkbox" ${on ? 'checked' : ''}
-            onchange="toggleAssistantFeature(${a.id}, '${f.key}', this.checked, this)"
-            class="w-4 h-4 accent-emerald-600 cursor-pointer">
-        </td>`;
-      }).join('');
-      return `<tr class="border-t border-gray-50 hover:bg-gray-50 transition">
-        <td class="px-5 py-3">
-          <div class="font-medium">${escapeHtmlJs(a.name)}</div>
-          <div class="text-xs text-gray-400">${escapeHtmlJs(a.roleKey || '')}</div>
-        </td>${cells}
-      </tr>`;
-    }).join('');
-
-    el.innerHTML = `<table class="w-full text-sm">
-      <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase"><tr>${head}</tr></thead>
-      <tbody>${rows || `<tr><td class="px-5 py-8 text-center text-gray-400" colspan="${features.length + 1}">No assistant types found.</td></tr>`}</tbody>
-    </table>`;
-  } catch(e) {
-    el.innerHTML = `<div class="px-5 py-5 text-red-500 text-sm">${escapeHtmlJs(e.message)}</div>`;
-  }
-}
-
-async function toggleAssistantFeature(masterAssistantId, featureKey, enabled, input) {
-  if (input) input.disabled = true;
-  try {
-    await api(`/.netlify/functions/admin-api?resource=assistant-features&id=${masterAssistantId}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ featureKey, enabled }),
-    });
-  } catch(e) {
-    alert(e.message);
-    if (input) input.checked = !enabled; // revert optimistic toggle on failure
-  } finally {
-    if (input) input.disabled = false;
-  }
-}
-
 // ── System Logs ───────────────────────────────────────────────────────────────
 let _logsPage = 0;
 async function loadLogs() {
@@ -7255,12 +7214,33 @@ const MD_FIELDS = {
     { key: 'isMostPopular',     label: 'Most Popular (shows the pill — only one plan)', type: 'checkbox' },
     { key: 'isActive',          label: 'Active',            type: 'checkbox' },
   ],
+  // Everything the public assistant catalogue, detail modal and detail page render lives here —
+  // these fields ARE the marketing copy (there is no hardcoded fallback any more).
   'master-assistants': [
     { key: 'name',              label: 'Name',              type: 'text',   required: true },
-    { key: 'roleKey',           label: 'Role Key',          type: 'text',   required: true },
+    // The join key across ai_assistants.configuration->>'type', the cron role lists and the
+    // onboarding schemas. Set once at create; renaming it would strand every hired assistant.
+    { key: 'roleKey',           label: 'Role Key',          type: 'text',   required: true, readOnlyOnEdit: true,
+      help: 'Set once at creation — hired assistants are matched on this.' },
     { key: 'category',          label: 'Category',          type: 'text' },
-    { key: 'systemPrompt',      label: 'System Prompt',     type: 'textarea' },
+    { key: 'tagline',           label: 'Tagline',           type: 'text',   placeholder: 'Consistent, on-brand content — without the daily grind.' },
+    { key: 'description',       label: 'Description',       type: 'textarea', placeholder: 'Plans, writes, and schedules branded content…' },
+    { key: 'iconKey',           label: 'Icon Key',          type: 'text',   placeholder: 'megaphone' },
+    { key: 'iconColor',         label: 'Icon Colour',       type: 'text',   placeholder: 'pink' },
+    { key: 'keyFeatures',       label: 'Key Features',      type: 'list',   help: 'One per line. Shown as the bullet list on the detail page.' },
+    { key: 'integrations',      label: 'Integrations',      type: 'list',   help: 'One per line. Shown as the integration chips.' },
+    { key: 'video.url',         label: 'Video URL',         type: 'text',   placeholder: 'https://www.youtube.com/embed/ID  or  /videos/smm.mp4',
+      help: 'Leave blank to show the branded placeholder slot.' },
+    { key: 'video.title',       label: 'Video Caption',     type: 'text',   placeholder: 'Watch the Social Media Manager in action' },
+    { key: 'video.poster',      label: 'Video Poster',      type: 'text',   placeholder: '/images/smm-poster.jpg' },
+    { key: 'systemPrompt',      label: 'System Prompt',     type: 'textarea',
+      help: 'Leave blank to keep the current prompt. Any text here creates a new immutable version.' },
     { key: 'riskClassification', label: 'Risk',             type: 'text' },
+    { key: 'milestoneTasksRequired', label: 'Milestone Tasks Required', type: 'number' },
+    // comingSoon is deliberately NOT here. Clearing it launches a role, and that has to go through
+    // master-assistants.ts so the waitlist launch-notification fan-out fires. Editing it here would
+    // write master_assistants directly and launch the role silently. Use Assistants → Assistant
+    // Catalog, which is the surface that owns launch/lifecycle state.
     { key: 'isActive',          label: 'Active',            type: 'checkbox' },
   ],
   'feature-flags': [
@@ -7309,6 +7289,8 @@ async function mdLoadTab(tab) {
   if (tab === 'help-articles') { await mdLoadHelpArticles(); return; }
   // Plan Features tab renders a matrix (features × plans), not the standard CRUD table.
   if (tab === 'plan-features') { await mdLoadPlanFeatures(); return; }
+  // Assistant Features likewise renders a matrix (assistants × capabilities).
+  if (tab === 'assistant-features') { await mdLoadAssistantFeatures(); return; }
 
   const resource = MD_TAB_RESOURCE[tab];
   if (!resource) return;
@@ -7591,6 +7573,164 @@ async function pfSubmitAddFeature() {
   }
 }
 
+// ── Assistant Features matrix (DB-driven capability catalog) ────────────────
+// The capability gates enforced by src/utils/assistant-capabilities.ts — NOT the "Key Features"
+// marketing bullets, which are per-assistant copy on the Assistants tab.
+//
+// Orientation is transposed vs the Plan Features matrix: there are many assistants and few
+// capabilities, so assistants are ROWS and capabilities are COLUMNS (3 columns beats 20). The
+// behaviours are the same — dirty-cell batching, an immediate per-def Enabled toggle, add-def modal.
+// No apply-mode chooser: capabilities have no subscriber cohort, so changes are always live.
+let _afData = null;                 // { features:[], assistants:[], values:{[assistantId]:{[key]:bool}} }
+let _afDirty = {};                  // { "assistantId::key": bool } — pending edits
+
+async function mdLoadAssistantFeatures() {
+  const host = document.getElementById('md-assistant-features-body');
+  if (!host) return;
+  host.innerHTML = '<div class="px-5 py-8 text-center text-gray-400">Loading…</div>';
+  _afDirty = {};
+  afUpdateSaveBtn();
+  try {
+    _afData = await api(MD_API + '?resource=assistant-feature-values');
+    afRenderMatrix();
+  } catch (e) {
+    host.innerHTML = '<div class="px-5 py-8 text-center text-red-400">Failed to load: ' + escAdm(e.message || e) + '</div>';
+  }
+}
+
+function afRenderMatrix() {
+  const host = document.getElementById('md-assistant-features-body');
+  if (!host || !_afData) return;
+  const { features, assistants, values } = _afData;
+  if (!features.length) {
+    host.innerHTML = '<div class="px-5 py-8 text-center text-gray-400">No feature definitions yet. Apply db/assistant-content.sql and run db/seed-assistant-content.ts, or add one.</div>';
+    return;
+  }
+  if (!assistants.length) {
+    host.innerHTML = '<div class="px-5 py-8 text-center text-gray-400">No active assistants.</div>';
+    return;
+  }
+
+  // Header row 1 — category bands spanning their features.
+  let bands = '<th></th>';
+  let i = 0;
+  while (i < features.length) {
+    let j = i;
+    while (j < features.length && features[j].category === features[i].category) j++;
+    bands += `<th colspan="${j - i}" class="px-3 pt-3 pb-1 text-center text-[10px] font-bold uppercase tracking-wider text-gray-400 border-b border-gray-100">${escAdm(features[i].category)}</th>`;
+    i = j;
+  }
+
+  // Header row 2 — one column per capability, each with its own global Enabled toggle.
+  const cols = features.map(def => {
+    const toggle = `<button onclick="afToggleEnabled(${def.id}, ${def.isEnabled ? 'false' : 'true'})" `
+      + `class="mt-1 px-2 py-0.5 text-[10px] font-bold rounded-full ${def.isEnabled ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}">`
+      + `${def.isEnabled ? 'Enabled' : 'Disabled'}</button>`;
+    return `<th class="px-3 py-2 text-center align-top ${def.isEnabled ? '' : 'opacity-50'}" title="${escAdm(def.description || '')}">`
+      + `<div class="font-bold text-gray-600 text-xs whitespace-nowrap">${escAdm(def.label)}</div>`
+      + `<div class="text-[10px] font-normal text-gray-400 font-mono">${escAdm(def.key)}</div>${toggle}</th>`;
+  }).join('');
+
+  const rows = assistants.map(a => {
+    const cells = features.map(def => {
+      const on = (values[a.id] || {})[def.key] === true;
+      const dis = def.isEnabled ? '' : 'disabled';
+      return `<td class="px-3 py-2.5 text-center align-middle ${def.isEnabled ? '' : 'opacity-50'}">`
+        + `<input type="checkbox" id="af-${a.id}-${escAdm(def.key)}" ${on ? 'checked' : ''} ${dis} `
+        + `onchange="afEdit(${a.id}, '${escAdm(def.key)}', this.checked)" class="w-4 h-4 cursor-pointer accent-emerald-600"></td>`;
+    }).join('');
+    const beta = a.lifecycleState === 'beta' ? ' <span class="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-[10px] font-bold align-middle">beta</span>' : '';
+    return `<tr class="border-t border-gray-100">`
+      + `<td class="px-4 py-2.5 align-top"><div class="font-medium text-gray-800 text-sm">${escAdm(a.name)}${beta}</div>`
+      + `<div class="text-[11px] text-gray-400 font-mono">${escAdm(a.roleKey)}</div></td>${cells}</tr>`;
+  }).join('');
+
+  host.innerHTML = `<table class="w-full text-sm"><thead class="border-b border-gray-200">`
+    + `<tr>${bands}</tr><tr><th class="px-4 py-2 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Assistant</th>${cols}</tr>`
+    + `</thead><tbody>${rows}</tbody></table>`;
+}
+
+function afEdit(assistantId, key, value) {
+  _afDirty[assistantId + '::' + key] = value;
+  afUpdateSaveBtn();
+}
+
+function afUpdateSaveBtn() {
+  const btn = document.getElementById('af-save-btn');
+  if (!btn) return;
+  const n = Object.keys(_afDirty).length;
+  btn.disabled = n === 0;
+  btn.textContent = n ? `Save ${n} change${n === 1 ? '' : 's'}` : 'Save changes';
+}
+
+async function afToggleEnabled(id, newVal) {
+  try {
+    await api(MD_API + '?resource=assistant-feature-defs&id=' + id, { method: 'PATCH', body: JSON.stringify({ isEnabled: newVal }) });
+    showToast('Feature ' + (newVal ? 'enabled' : 'disabled') + '.', 'success');
+    await mdLoadAssistantFeatures();
+  } catch (e) {
+    showToast('Failed: ' + (e.message || e), 'error');
+  }
+}
+
+async function afSave() {
+  const updates = Object.entries(_afDirty).map(([k, value]) => {
+    const idx = k.indexOf('::');
+    return { assistantId: Number(k.slice(0, idx)), key: k.slice(idx + 2), value };
+  });
+  if (!updates.length) return;
+  try {
+    const r = await api(MD_API + '?resource=assistant-feature-values', { method: 'PATCH', body: JSON.stringify({ updates }) });
+    showToast(`Saved ${r.applied} change(s) — live immediately.`, 'success');
+    await mdLoadAssistantFeatures();
+  } catch (e) {
+    showToast('Save failed: ' + (e.message || e), 'error');
+  }
+}
+
+// Add a new capability definition (compact modal).
+function afOpenAddFeature() {
+  const ov = document.createElement('div');
+  ov.id = 'af-add-overlay';
+  ov.className = 'fixed inset-0 bg-black/40 flex items-center justify-center z-50';
+  ov.innerHTML = `<div class="bg-white rounded-2xl shadow-xl max-w-lg w-full mx-4 p-6">
+    <h3 class="text-base font-bold text-gray-800 mb-4">Add assistant capability</h3>
+    <div class="grid grid-cols-2 gap-3 text-sm">
+      <label class="col-span-2 block"><span class="text-xs font-semibold text-gray-500">Key (snake_case)</span><input id="af-add-key" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg" placeholder="e.g. ai_audio_generation"></label>
+      <label class="col-span-2 block"><span class="text-xs font-semibold text-gray-500">Label</span><input id="af-add-label" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg"></label>
+      <label class="col-span-2 block"><span class="text-xs font-semibold text-gray-500">Description</span><input id="af-add-desc" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg"></label>
+      <label class="block"><span class="text-xs font-semibold text-gray-500">Category</span><input id="af-add-cat" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg" placeholder="e.g. Media"></label>
+    </div>
+    <p class="text-[11px] text-gray-400 mt-3">Adding a key here surfaces the column. A capability only takes effect once the matching call site gates on <code>orgHasAssistantFeature</code>.</p>
+    <div class="mt-5 flex justify-end gap-2">
+      <button onclick="afCloseAddFeature()" class="px-4 py-2 text-sm font-semibold text-gray-500 hover:text-gray-700">Cancel</button>
+      <button onclick="afSubmitAddFeature()" class="px-4 py-2 text-sm font-bold text-white bg-gray-900 rounded-lg hover:bg-black">Add</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+}
+function afCloseAddFeature() { document.getElementById('af-add-overlay')?.remove(); }
+
+async function afSubmitAddFeature() {
+  const key = document.getElementById('af-add-key').value.trim();
+  const label = document.getElementById('af-add-label').value.trim();
+  const category = document.getElementById('af-add-cat').value.trim();
+  if (!key || !label || !category) { showToast('Key, label and category are required.', 'error'); return; }
+  const body = {
+    key, label, category,
+    description: document.getElementById('af-add-desc').value.trim() || null,
+    displayOrder: (_afData?.features?.length || 0) + 100,
+  };
+  try {
+    await api(MD_API + '?resource=assistant-feature-defs', { method: 'POST', body: JSON.stringify(body) });
+    afCloseAddFeature();
+    showToast('Capability added.', 'success');
+    await mdLoadAssistantFeatures();
+  } catch (e) {
+    showToast('Failed to add: ' + (e.message || e), 'error');
+  }
+}
+
 function mdRenderRow(tab, r) {
   const editBtn = `<button onclick='mdOpenEdit("${tab}", ${JSON.stringify(r.id ?? r.key ?? r.code ?? '').replace(/'/g,"\\'")})'
     class="text-xs text-indigo-600 hover:underline font-semibold mr-2">Edit</button>`;
@@ -7620,6 +7760,18 @@ function mdOpenEdit(tab, id) {
   mdRenderForm(tab, record);
 }
 
+// A field key may be a dotted path into a nested jsonb column (e.g. 'video.url').
+function mdGetPath(obj, path) {
+  return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
+}
+function mdSetPath(obj, path, val) {
+  const keys = path.split('.');
+  const last = keys.pop();
+  let cur = obj;
+  for (const k of keys) { if (cur[k] == null || typeof cur[k] !== 'object') cur[k] = {}; cur = cur[k]; }
+  cur[last] = val;
+}
+
 function mdRenderForm(tab, record) {
   const resource = MD_TAB_RESOURCE[tab];
   const fields = MD_FIELDS[resource] || [];
@@ -7627,12 +7779,18 @@ function mdRenderForm(tab, record) {
   document.getElementById('md-form-title').textContent = (isEdit ? 'Edit' : 'Add') + ' — ' + (document.querySelector('.md-tab[data-tab="' + tab + '"]')?.textContent || tab);
   const isPlan = tab === 'plans' && isEdit;
   document.getElementById('md-plan-warning').classList.toggle('hidden', !isPlan);
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   document.getElementById('md-form-fields').innerHTML = fields.map(f => {
-    const val = record[f.key] ?? '';
+    const val = mdGetPath(record, f.key) ?? '';
+    const req = f.required ? ' <span class="text-red-500">*</span>' : '';
+    const help = f.help ? `<p class="text-xs text-gray-400 mt-1">${f.help}</p>` : '';
+    const locked = isEdit && f.readOnlyOnEdit;
     if (f.type === 'checkbox') return `<label class="flex items-center gap-2 sm:col-span-2"><input type="checkbox" id="md-f-${f.key}" class="w-4 h-4 accent-indigo-600" ${val ? 'checked' : ''}><span class="text-sm text-gray-700">${f.label}</span></label>`;
-    if (f.type === 'textarea') return `<div class="sm:col-span-2"><label class="block text-xs font-bold text-gray-500 mb-1">${f.label}${f.required?' <span class=\'text-red-500\'>*</span>':''}</label><textarea id="md-f-${f.key}" rows="4" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none font-mono text-xs">${val}</textarea></div>`;
-    if (f.type === 'json') { const jv = val && typeof val === 'object' ? JSON.stringify(val, null, 2) : (val || ''); return `<div class="sm:col-span-2"><label class="block text-xs font-bold text-gray-500 mb-1">${f.label}</label><textarea id="md-f-${f.key}" rows="4" placeholder="${(f.placeholder||'').replace(/"/g,'&quot;')}" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none font-mono text-xs">${jv}</textarea></div>`; }
-    return `<div><label class="block text-xs font-bold text-gray-500 mb-1">${f.label}${f.required?' <span class="text-red-500">*</span>':''}</label><input id="md-f-${f.key}" type="${f.type}" value="${String(val).replace(/"/g,'&quot;')}" placeholder="${f.placeholder||''}" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none"></div>`;
+    // 'list' → a string[] jsonb column, edited one item per line.
+    if (f.type === 'list') { const lv = Array.isArray(val) ? val.join('\n') : (val || ''); return `<div class="sm:col-span-2"><label class="block text-xs font-bold text-gray-500 mb-1">${f.label}</label><textarea id="md-f-${f.key}" rows="4" placeholder="${(f.placeholder||'').replace(/"/g,'&quot;')}" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none">${esc(lv)}</textarea>${help}</div>`; }
+    if (f.type === 'textarea') return `<div class="sm:col-span-2"><label class="block text-xs font-bold text-gray-500 mb-1">${f.label}${req}</label><textarea id="md-f-${f.key}" rows="4" placeholder="${(f.placeholder||'').replace(/"/g,'&quot;')}" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none font-mono text-xs">${esc(val)}</textarea>${help}</div>`;
+    if (f.type === 'json') { const jv = val && typeof val === 'object' ? JSON.stringify(val, null, 2) : (val || ''); return `<div class="sm:col-span-2"><label class="block text-xs font-bold text-gray-500 mb-1">${f.label}</label><textarea id="md-f-${f.key}" rows="4" placeholder="${(f.placeholder||'').replace(/"/g,'&quot;')}" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none font-mono text-xs">${esc(jv)}</textarea>${help}</div>`; }
+    return `<div><label class="block text-xs font-bold text-gray-500 mb-1">${f.label}${req}</label><input id="md-f-${f.key}" type="${f.type}" value="${String(val).replace(/"/g,'&quot;')}" placeholder="${f.placeholder||''}" ${locked ? 'disabled' : ''} class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none ${locked ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}">${help}</div>`;
   }).join('');
   document.getElementById('md-form-panel').classList.remove('hidden');
   document.getElementById('md-form-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -7641,24 +7799,29 @@ function mdRenderForm(tab, record) {
 async function mdSaveRecord() {
   const resource = _mdEditResource;
   const fields = MD_FIELDS[resource] || [];
+  const isEdit = _mdEditId != null;
   const body = {};
   for (const f of fields) {
     const el = document.getElementById('md-f-' + f.key);
     if (!el) continue;
-    if (f.type === 'checkbox') body[f.key] = el.checked;
-    else if (f.type === 'number') body[f.key] = el.value !== '' ? Number(el.value) : null;
+    // A locked field is disabled in the form and must not be sent — the API drops it anyway.
+    if (isEdit && f.readOnlyOnEdit) continue;
+    let value;
+    if (f.type === 'checkbox') value = el.checked;
+    else if (f.type === 'number') value = el.value !== '' ? Number(el.value) : null;
+    else if (f.type === 'list') value = el.value.split('\n').map(s => s.trim()).filter(Boolean);
     else if (f.type === 'json') {
-      try { body[f.key] = el.value.trim() ? JSON.parse(el.value) : {}; }
+      try { value = el.value.trim() ? JSON.parse(el.value) : {}; }
       catch { alert(f.label + ' must be valid JSON.'); el.focus(); return; }
     }
-    else body[f.key] = el.value;
-    if (f.required && (body[f.key] === '' || body[f.key] === null)) {
+    else value = el.value;
+    if (f.required && (value === '' || value === null)) {
       alert(f.label + ' is required.');
       el.focus();
       return;
     }
+    mdSetPath(body, f.key, value);
   }
-  const isEdit = _mdEditId != null;
   const url = MD_API + '?resource=' + resource + (isEdit ? '&id=' + encodeURIComponent(_mdEditId) : '');
   try {
     await api(url, { method: isEdit ? 'PATCH' : 'POST', body: JSON.stringify(body) });

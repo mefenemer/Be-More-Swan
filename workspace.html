@@ -4190,9 +4190,10 @@ function formatCurrency(amount, currency) {
 <!-- Role-specific onboarding schemas — the catalogue's Hire Role buttons route any roleKey
      defined here to assistant-setup.html (schema-driven wizard) instead of onboarding.html. -->
 <script src="/src/config/assistant-onboarding-schemas.js"></script>
-<!-- Role marketing copy + shared detail modal — the catalogue opens the modal
-     for any roleKey defined in assistant-role-content.js. -->
-<script src="/src/config/assistant-role-content.js"></script>
+<!-- Role marketing copy (read from master_assistants via the API) + shared detail modal —
+     the catalogue primes this registry from the list it already fetches, then opens the modal
+     for any roleKey. -->
+<script src="/src/config/assistant-content.js"></script>
 <!-- Role-specific Mandate "Quick Start Suggestions" — clickable bottleneck prompts
      rendered into assistant-detail.html ▸ Profile ▸ Mandate by _renderMandateSuggestions(). -->
 <script src="/src/config/mandate-suggestions.js"></script>

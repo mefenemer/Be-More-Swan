@@ -57,7 +57,11 @@ const DEFS: Def[] = [
       category: 'Capacity', valueType: 'number', storageTarget: 'column', columnName: 'assistantLimit', unlimitedLabel: 'Custom', enterpriseValue: 'Custom' },
     { key: 'monthly_task_limit', label: 'Completed Tasks / Month', description: 'Each action your assistant completes counts as one task',
       category: 'Capacity', valueType: 'number', storageTarget: 'column', columnName: 'monthlyTaskLimit', unlimitedLabel: 'Custom', enterpriseValue: 'Custom' },
-    { key: 'app_connections', label: 'App Connections', description: 'The tools and platforms your assistants can connect to and work within',
+    // Drives the pricing-card "Apps" stat box AND the per-assistant connection limit enforced by
+    // check-capacity. Column-stored so an admin edit in the matrix moves both together.
+    { key: 'app_connection_limit', label: 'App Connections', description: 'The number of apps and tools your assistants can connect to',
+      category: 'Capacity', valueType: 'number', storageTarget: 'column', columnName: 'appConnectionLimit', unlimitedLabel: 'Custom', enterpriseValue: 'Custom' },
+    { key: 'app_connections', label: 'App Connection Details', description: 'The tools and platforms your assistants can connect to and work within',
       category: 'Capacity', valueType: 'text', storageTarget: 'feature', enterpriseValue: 'Bespoke app limits & custom internal system integrations',
       values: { saver: 'Connect up to 2 everyday apps', buster: 'Connect up to 5 standard apps to power your digital department', employee: 'Connect up to 15 apps (unlocks Premium Tool integrations like CRM and e-commerce)' } },
 

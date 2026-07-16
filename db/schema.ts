@@ -913,6 +913,14 @@ export const masterAssistants = pgTable("master_assistants", {
   category: text("category").notNull().default("Administration"),
   iconKey: text("icon_key").notNull().default("document"),
   iconColor: text("icon_color").notNull().default("blue"),
+  // Detail-page marketing copy (SQL: db/assistant-content.sql; seed: db/seed-assistant-content.ts).
+  // These replaced src/config/assistant-role-content.js, which used to re-declare name/description/
+  // icons here AND own these four — two sources of truth that had already drifted apart. Admin-edited
+  // via Master Data → Assistants; served publicly by netlify/functions/master-assistants.ts.
+  tagline: text("tagline"),                                        // one-line hook under the name
+  keyFeatures: jsonb("key_features").notNull().default([]),        // string[] — the bullet list
+  integrations: jsonb("integrations").notNull().default([]),       // string[] — the integration chips
+  video: jsonb("video"),                                           // {url, title, poster} | null; null url = placeholder slot
   comingSoon: boolean("coming_soon").notNull().default(false),
   // US-AUD-2.3.1 SC2: task completions required to unlock early access (null = no milestone gate)
   milestoneTasksRequired: integer("milestone_tasks_required").default(25),
@@ -935,9 +943,27 @@ export const masterAssistants = pgTable("master_assistants", {
   check("master_assistants_lifecycle_check", sql`${t.lifecycleState} IN ('draft', 'review', 'beta', 'live', 'deprecated', 'archived')`),
 ]);
 
+// Assistant capability catalog — which capability keys exist, how they're labelled and grouped.
+// (SQL: db/assistant-content.sql; seed: db/seed-assistant-content.ts). Metadata only: the VALUES live
+// in assistant_features (one row per master_assistant × key). Mirrors the plan_features pattern, and
+// replaces the hardcoded ASSISTANT_FEATURES list that used to live in src/config/assistant-features.ts,
+// so adding a capability no longer needs a deploy. Admins edit these via Master Data → Assistant
+// Features. No analogue of plans.feature_overrides: capability changes have no subscriber cohort.
+export const assistantFeatureDefs = pgTable("assistant_feature_defs", {
+  id: serial("id").primaryKey(),
+  key: text("key").notNull().unique(),                    // e.g. 'ai_image_generation'
+  label: text("label").notNull(),                         // matrix column header
+  description: text("description"),                       // column tooltip / admin help text
+  category: text("category").notNull(),                   // matrix section header: 'Media' | 'Engagement' | ...
+  displayOrder: integer("display_order").notNull().default(0),
+  isEnabled: boolean("is_enabled").notNull().default(true), // false = globally disabled (hidden, treated as off)
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Per-assistant feature capabilities — admin-managed, keyed by assistant TYPE.
 // One row per (master_assistant, feature_key); absent row = disabled. Feature keys are the
-// canonical list in src/config/assistant-features.ts. Gates user-facing capabilities
+// enabled rows of assistant_feature_defs. Gates user-facing capabilities
 // (e.g. AI image/video generation) via src/utils/assistant-capabilities.ts.
 // DDL + SMM seed: db/assistant-features.sql (apply manually — no db:push).
 export const assistantFeatures = pgTable("assistant_features", {

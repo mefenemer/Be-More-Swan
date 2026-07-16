@@ -289,6 +289,13 @@ export default withLambda(async (event) => {
             iconKey: r.iconKey,
             iconColor: r.iconColor,
             comingSoon: r.comingSoon,
+            // Detail-page copy. This used to come from the hardcoded src/config/assistant-role-content.js,
+            // which covered only 7 of the ~20 catalog roles and had drifted from the DB's description.
+            // Serving it here makes the card and the detail page read the same row.
+            tagline: r.tagline,
+            keyFeatures: r.keyFeatures ?? [],
+            integrations: r.integrations ?? [],
+            video: r.video ?? null,
             beta: r.lifecycleState === 'beta', // UI can badge these as Beta Program early access
             waitlistCount: countMap[r.id] || 0,
             onWaitlist: callerId ? userSet.has(r.id) : false,

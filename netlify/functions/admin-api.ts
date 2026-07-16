@@ -33,10 +33,9 @@ import {
     billingOverrides, payments, assistantVersions,
     agentAnomalies, agentAnomalyThresholds, taskRuns,
     legalHolds, jwtBlocklist, stripeDisputes, storageUsage, helpArticles,
-    rewardAudits, userOrganisations, assistantFeatures,
+    rewardAudits, userOrganisations,
     leadReplies, contactTasks, issueReports,
 } from '../../db/schema';
-import { ASSISTANT_FEATURES, isAssistantFeatureKey } from '../../src/config/assistant-features';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { resolveEnvironment, runWithEnvironment } from '../../src/utils/env-context';
 import { sendMagicLinkEmail } from '../../src/utils/email';
@@ -418,84 +417,6 @@ export default withLambda(async (event) => {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ assistant: updated }),
             };
-        }
-
-        // ── Assistant feature capabilities (per assistant TYPE) ───────────────
-        // The matrix behind the admin "Assistant Features" page. Feature keys are the SoT in
-        // src/config/assistant-features.ts; enabled state is stored per (type, key).
-        if (resource === 'assistant-features') {
-            const permErr = requirePermission(adminRole, 'feature_flags');
-            if (permErr) return permErr;
-
-            if (event.httpMethod === 'GET') {
-                const assistants = await db
-                    .select({
-                        id: masterAssistants.id,
-                        name: masterAssistants.name,
-                        roleKey: masterAssistants.roleKey,
-                        lifecycleState: masterAssistants.lifecycleState,
-                    })
-                    .from(masterAssistants)
-                    .orderBy(masterAssistants.name);
-
-                const rows = await db
-                    .select({
-                        masterAssistantId: assistantFeatures.masterAssistantId,
-                        featureKey: assistantFeatures.featureKey,
-                        enabled: assistantFeatures.enabled,
-                    })
-                    .from(assistantFeatures);
-
-                const byAssistant = new Map<number, Record<string, boolean>>();
-                for (const r of rows) {
-                    const m = byAssistant.get(r.masterAssistantId) || {};
-                    m[r.featureKey] = r.enabled;
-                    byAssistant.set(r.masterAssistantId, m);
-                }
-
-                // Absent row = disabled — backfill every known feature key so the UI renders a
-                // full grid without guessing.
-                const result = assistants.map(a => ({
-                    ...a,
-                    features: Object.fromEntries(
-                        ASSISTANT_FEATURES.map(f => [f.key, byAssistant.get(a.id)?.[f.key] ?? false]),
-                    ),
-                }));
-
-                return {
-                    statusCode: 200,
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ features: ASSISTANT_FEATURES, assistants: result }),
-                };
-            }
-
-            if (event.httpMethod === 'PATCH') {
-                const id = parseInt(qs.id || '');
-                if (!id) return { statusCode: 400, body: JSON.stringify({ error: 'id required.' }) };
-
-                const body = JSON.parse(event.body || '{}');
-                const { featureKey, enabled } = body;
-                if (!isAssistantFeatureKey(featureKey)) {
-                    return { statusCode: 400, body: JSON.stringify({ error: 'Unknown featureKey.' }) };
-                }
-                if (typeof enabled !== 'boolean') {
-                    return { statusCode: 400, body: JSON.stringify({ error: 'enabled (boolean) required.' }) };
-                }
-
-                await db.insert(assistantFeatures)
-                    .values({ masterAssistantId: id, featureKey, enabled, updatedBy: adminId })
-                    .onConflictDoUpdate({
-                        target: [assistantFeatures.masterAssistantId, assistantFeatures.featureKey],
-                        set: { enabled, updatedBy: adminId, updatedAt: new Date() },
-                    });
-                await audit(db, adminId, 'UPDATE', 'assistant_features', `${id}:${featureKey}`, { enabled });
-
-                return {
-                    statusCode: 200,
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ success: true }),
-                };
-            }
         }
 
         // ── POST: send passwordless login link to user (US6 Sc2) ─────────────

@@ -116,18 +116,20 @@
                     <p id="card-note-t1" class="text-xs text-gray-400 mt-1">Billed monthly · cancel any time</p>
                 </div>
                 <div class="p-6 flex-grow flex flex-col">
-                    <!-- Capacity stat boxes — pink -->
+                    <!-- Capacity stat boxes — pink. DB-driven: renderPlanCards() fills these from
+                         get-plans → master_plans (assistantLimit / monthlyTaskLimit / appConnectionLimit).
+                         The static numbers are only a pre-fetch fallback. -->
                     <div class="grid grid-cols-3 gap-2 mb-6">
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">1</div>
-                            <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistant</div>
+                            <div id="stat-asst-t1" class="text-xl font-extrabold pk-stat-num">1</div>
+                            <div id="stat-asst-lbl-t1" class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistant</div>
                         </div>
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">500</div>
+                            <div id="stat-task-t1" class="text-xl font-extrabold pk-stat-num">500</div>
                             <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Tasks/mo</div>
                         </div>
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">2</div>
+                            <div id="stat-app-t1" class="text-xl font-extrabold pk-stat-num">2</div>
                             <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Apps</div>
                         </div>
                     </div>
@@ -170,15 +172,15 @@
                 <div class="p-6 flex-grow flex flex-col">
                     <div class="grid grid-cols-3 gap-2 mb-6">
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">3</div>
-                            <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistants</div>
+                            <div id="stat-asst-t2" class="text-xl font-extrabold pk-stat-num">3</div>
+                            <div id="stat-asst-lbl-t2" class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistants</div>
                         </div>
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">2.5k</div>
+                            <div id="stat-task-t2" class="text-xl font-extrabold pk-stat-num">2.5k</div>
                             <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Tasks/mo</div>
                         </div>
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">5</div>
+                            <div id="stat-app-t2" class="text-xl font-extrabold pk-stat-num">5</div>
                             <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Apps</div>
                         </div>
                     </div>
@@ -219,15 +221,15 @@
                 <div class="p-6 flex-grow flex flex-col">
                     <div class="grid grid-cols-3 gap-2 mb-6">
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">10</div>
-                            <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistants</div>
+                            <div id="stat-asst-t3" class="text-xl font-extrabold pk-stat-num">10</div>
+                            <div id="stat-asst-lbl-t3" class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistants</div>
                         </div>
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">10k</div>
+                            <div id="stat-task-t3" class="text-xl font-extrabold pk-stat-num">10k</div>
                             <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Tasks/mo</div>
                         </div>
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">15</div>
+                            <div id="stat-app-t3" class="text-xl font-extrabold pk-stat-num">15</div>
                             <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Apps</div>
                         </div>
                     </div>
@@ -266,15 +268,15 @@
                 <div class="p-6 flex-grow flex flex-col">
                     <div class="grid grid-cols-3 gap-2 mb-6">
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">∞</div>
-                            <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistants</div>
+                            <div id="stat-asst-t4" class="text-xl font-extrabold pk-stat-num">∞</div>
+                            <div id="stat-asst-lbl-t4" class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistants</div>
                         </div>
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">∞</div>
+                            <div id="stat-task-t4" class="text-xl font-extrabold pk-stat-num">∞</div>
                             <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Tasks/mo</div>
                         </div>
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num" style="font-size:1rem;">Bespoke</div>
+                            <div id="stat-app-t4" class="text-xl font-extrabold pk-stat-num" style="font-size:1rem;">Bespoke</div>
                             <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Apps</div>
                         </div>
                     </div>
@@ -928,6 +930,26 @@
         if (el && val != null && String(val).trim() !== '') el.textContent = String(val);
     }
 
+    // ── Capacity stat boxes (pink) ───────────────────────────────────────────
+    // Compact task counts the way the original static copy read them: 500 → "500",
+    // 2500 → "2.5k", 10000 → "10k".
+    function fmtStatCount(n, compact) {
+        if (!compact || n < 1000) return String(n);
+        return (Math.round((n / 1000) * 10) / 10) + 'k';
+    }
+    // A null/blank limit means UNLIMITED (that's how enforcement reads it), so — unlike
+    // setCardText — null is a real value here and must overwrite the static fallback.
+    function setStatBox(id, value, unlimitedText, compact) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const n = Number(value);
+        const isNum = value !== null && value !== undefined && value !== '' && Number.isFinite(n);
+        const text = isNum ? fmtStatCount(n, compact) : unlimitedText;
+        el.textContent = text;
+        // "Bespoke" only fits at the smaller size; a real number gets the full-size type back.
+        el.style.fontSize = (!isNum && text.length > 3) ? '1rem' : '';
+    }
+
     function renderPlanCards(cards) {
         if (!Array.isArray(cards)) return;
         for (const plan of cards) {
@@ -937,6 +959,16 @@
             setCardText('card-name-' + slot, plan.name);
             setCardText('card-desc-' + slot, plan.description);
             setCardText('tbl-name-'  + slot, plan.name);
+            // Capacity stat boxes — straight from the master_plans capacity columns, so an admin
+            // edit in Master Data → Plan Features moves the pink boxes with no code change.
+            // Contact-sales (Enterprise) has no numeric limits: apps read "Bespoke", the rest "∞".
+            const unlimitedApps = plan.isContactSales ? 'Bespoke' : '∞';
+            setStatBox('stat-asst-' + slot, plan.assistantLimit, '∞', false);
+            setStatBox('stat-task-' + slot, plan.monthlyTaskLimit, '∞', true);
+            setStatBox('stat-app-'  + slot, plan.appConnectionLimit, unlimitedApps, false);
+            // "1 Assistant" vs "3 Assistants".
+            const asstLbl = document.getElementById('stat-asst-lbl-' + slot);
+            if (asstLbl) asstLbl.textContent = Number(plan.assistantLimit) === 1 ? 'Assistant' : 'Assistants';
             // Most-Popular pill (card + comparison-table header). The DB guarantees at most one plan
             // is flagged, so clearing then setting per plan yields a single pill overall.
             const cardPill = document.getElementById('card-pill-' + slot);

@@ -1,9 +1,12 @@
 /**
  * src/components/assistant-detail-modal.js
  *
- * Shared "assistant detail" modal — shows the marketing copy from
- * src/config/assistant-role-content.js (tagline, description, key features,
+ * Shared "assistant detail" modal — shows the marketing copy (tagline, description, key features,
  * integrations) for a roleKey, plus a configurable CTA.
+ *
+ * Copy comes from window.AssistantContent (src/config/assistant-content.js), which reads
+ * master_assistants via the API. Callers must prime or load it first — the catalogue pages already
+ * fetch that list, so they pass it to AssistantContent.prime() rather than re-fetching.
  *
  * Used by:
  *   - assistants.html (public library; CTA → setup wizard or pricing)
@@ -177,7 +180,7 @@
   }
 
   function open(roleKey, opts) {
-    const c = (window.AssistantRoleContent || {})[roleKey];
+    const c = window.AssistantContent && window.AssistantContent.get(roleKey);
     if (!c) return;
     opts = opts || {};
 
@@ -208,21 +211,21 @@
           <div class="w-12 h-12 rounded-xl ${iconClass} flex items-center justify-center mb-4">${iconSvg}</div>
           <span class="inline-block px-3 py-1 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold uppercase tracking-wider">Available Now</span>
         </div>
-        <p class="text-sm text-gray-500 font-medium mb-1">${escHtml(c.category)}</p>
+        <p class="text-sm text-gray-500 font-medium mb-1">${escHtml(c.category || '')}</p>
         <h2 class="text-2xl font-extrabold text-gray-900 leading-tight mb-2">${escHtml(c.name)}</h2>
-        <p class="text-base font-bold text-emerald-700 mb-4">${escHtml(c.tagline)}</p>
+        ${c.tagline ? `<p class="text-base font-bold text-emerald-700 mb-4">${escHtml(c.tagline)}</p>` : ''}
 
         ${buildVideo(c)}
 
-        <p class="text-sm text-gray-600 leading-relaxed mb-6">${escHtml(c.description)}</p>
+        ${c.description ? `<p class="text-sm text-gray-600 leading-relaxed mb-6">${escHtml(c.description)}</p>` : ''}
 
-        <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Key Features</h3>
-        <ul class="space-y-1.5 mb-6">${features}</ul>
+        ${features ? `<h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Key Features</h3>
+        <ul class="space-y-1.5 mb-6">${features}</ul>` : ''}
 
-        <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Integrations</h3>
+        ${apps ? `<h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2">Integrations</h3>
         <div class="flex flex-wrap gap-1.5 items-center">
           <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mr-0.5">Works with</span>${apps}
-        </div>
+        </div>` : ''}
       </div>
       <div class="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center gap-3 rounded-b-2xl">
         <span class="text-xs font-bold text-gray-500 uppercase tracking-wider">Included in Plan</span>

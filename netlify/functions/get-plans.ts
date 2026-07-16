@@ -31,6 +31,8 @@ export default withLambda(async (event) => {
             tierDescription: masterPlans.tierDescription,
             description: masterPlans.description,
             isMostPopular: masterPlans.isMostPopular,
+            isContactSales: masterPlans.isContactSales, // card stat boxes render "Bespoke" instead of ∞
+
             monthlyPriceGbp: masterPlans.monthlyPriceGbp,
             assistantLimit: masterPlans.assistantLimit,
             monthlyTaskLimit: masterPlans.monthlyTaskLimit,
