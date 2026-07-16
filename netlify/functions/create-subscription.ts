@@ -8,7 +8,8 @@ import { Handler } from '@netlify/functions';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import { eq, and } from 'drizzle-orm';
-import { users, masterPlans, plans, payments, notifications } from '../../db/schema';
+import { users, masterPlans, plans, payments } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { requireTenant } from '../../src/utils/tenant';
 import { resolveActionNotifications, PAYMENT_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { resolveMonthlyPriceId } from '../../src/utils/stripe-price';
@@ -264,13 +265,7 @@ export default withLambda(async (event) => {
             description:       `${masterPlan.name} — first payment (100% promo)`,
           });
 
-          await db.insert(notifications).values({
-            userId:  user.id,
-            type:    'billing',
-            title:   'Subscription Active — Set Up Your Assistant',
-            message: 'Your subscription is active. Click "Resume Setup" on your dashboard to build your Digital Assistant now.',
-            isRead:  false,
-          });
+          await createNotification(db, 'subscription_active_setup', { userId: user.id, isRead: false });
 
           await resolveActionNotifications(db, user.id, PAYMENT_RESTORED_TYPES);
           attachedSubscription = true;

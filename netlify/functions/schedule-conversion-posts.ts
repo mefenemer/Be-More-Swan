@@ -15,7 +15,8 @@ import { Handler } from '@netlify/functions';
 import { and, eq, desc, sql, inArray } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { getDb } from '../../db/client';
-import { aiAssistants, masterAssistants, aiBlueprints, contentGenerationJobs, notifications } from '../../db/schema';
+import { aiAssistants, masterAssistants, aiBlueprints, contentGenerationJobs } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { postsPerWeekFor } from '../../src/config/posting-cadence';
 import { SMM_ROLE_KEYS } from '../../src/constants/roles';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -102,13 +103,11 @@ export default withLambda(async (event) => {
             triggerType: 'conversion',
         });
 
-        await db.insert(notifications).values({
+        await createNotification(db, 'post_generation_queued_conversion', {
             userId: assistant.userId,
-            type: 'post_generation_queued',
-            title: 'Generating a conversion post…',
-            message: `${assistant.name} is drafting a conversion post to invite your audience to work with you. It'll appear in your review queue shortly.`,
+            context: { assistant: { name: assistant.name } },
             metadata: { jobId, triggerType: 'conversion', assistantId: assistant.id },
-        }).catch(() => {});
+        });
 
         enqueued++;
     }

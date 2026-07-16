@@ -10,7 +10,8 @@ import Stripe from 'stripe';
 import jwt from 'jsonwebtoken';
 import { eq, and, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, plans, masterPlans, aiAssistants, notifications, userOrganisations } from '../../db/schema';
+import { users, plans, masterPlans, aiAssistants, userOrganisations } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { checkImpersonationBlock } from '../../src/utils/impersonation-guard';
 import { resolveMonthlyPriceId } from '../../src/utils/stripe-price';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -105,13 +106,7 @@ export default withLambda(async (event) => {
                 .set({ status: 'active', updatedAt: new Date() })
                 .where(eq(plans.id, planToCancel.id));
 
-            await db.insert(notifications).values({
-                userId,
-                type: 'downgrade_cancelled',
-                title: 'Scheduled downgrade cancelled',
-                message: 'Your plan will continue at its current tier — no change has been made.',
-                isRead: false,
-            });
+            await createNotification(db, 'downgrade_cancelled', { userId, isRead: false });
 
             return { statusCode: 200, body: JSON.stringify({ success: true, action: 'downgrade_cancelled' }) };
         } catch (err: any) {
@@ -259,11 +254,9 @@ export default withLambda(async (event) => {
 
         // Notify user
         const periodEnd = new Date(currentPeriodEndUnix * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
-        await db.insert(notifications).values({
+        await createNotification(db, 'downgrade_scheduled', {
             userId,
-            type: 'downgrade_scheduled',
-            title: `Downgrade to ${targetMp.name} scheduled`,
-            message: `Your plan will downgrade to ${targetMp.name} on ${periodEnd}. Your current plan remains active until then.`,
+            context: { plan: { name: targetMp.name }, billing: { period_end: periodEnd } },
             isRead: false,
         });
 

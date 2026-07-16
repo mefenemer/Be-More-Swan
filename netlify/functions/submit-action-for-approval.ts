@@ -25,8 +25,9 @@ import jwt from 'jsonwebtoken';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
-    users, taskRuns, pendingActions, actionPolicies, notifications,
+    users, taskRuns, pendingActions, actionPolicies,
 } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -129,13 +130,11 @@ export default withLambda(async (event) => {
                 expiresAt,
             }).returning({ id: pendingActions.id });
 
-            await db.insert(notifications).values({
+            await createNotification(db, 'action_rate_limited', {
                 userId,
-                type: 'action_rate_limited',
-                title: 'Publishing rate limit reached',
-                message: `Rate limit reached for ${actionType} actions in run #${taskRunId}. Review and release pending actions in your workspace.`,
+                context: { action: { type: actionType }, run: { id: taskRunId } },
                 metadata: { taskRunId, assistantId: assistantId ?? null },
-            }).catch(() => {});
+            });
 
             return {
                 statusCode: 200,
@@ -172,13 +171,15 @@ export default withLambda(async (event) => {
         ? `⛔ Blast-radius action blocked pending HITL approval.`
         : `⚠ Hard-to-reverse action blocked pending HITL approval.`;
 
-    await db.insert(notifications).values({
+    await createNotification(db, 'hitl_approval_required', {
         userId,
-        type: 'hitl_approval_required',
-        title: `Approval required: ${actionType}`,
-        message: `${warning} Run #${taskRunId} proposes: ${actionType}${affectedRecordCount ? ` (${affectedRecordCount} records affected)` : ''}. Expires in 24 hours.`,
+        context: { action: {
+            type: actionType,
+            warning,
+            record_clause: affectedRecordCount ? ` (${affectedRecordCount} records affected)` : '',
+        }, run: { id: taskRunId } },
         metadata: { taskRunId, pendingActionId: pending.id, assistantId: assistantId ?? null },
-    }).catch(() => {});
+    });
 
     return {
         statusCode: 200,

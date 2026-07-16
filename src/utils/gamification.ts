@@ -10,7 +10,8 @@
 
 import { and, count, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { leads, scheduledPosts, taskRuns, organisations, rewardAudits, notifications } from '../../db/schema';
+import { leads, scheduledPosts, taskRuns, organisations, rewardAudits } from '../../db/schema';
+import { createNotification } from './notify';
 import { getTimeMultipliers, getMilestones, areRewardsPaused } from './platform-config';
 
 type Db = ReturnType<typeof getDb>;
@@ -74,12 +75,9 @@ async function grant(
             if (inserted.length === 0) return; // already granted — skip
 
             await apply(tx as unknown as Db);
-            await tx.insert(notifications).values({
+            await createNotification(tx as unknown as Db, 'milestone_unlocked', {
                 userId: notifyUserId,
-                type: 'milestone',
-                title: 'Milestone Unlocked',
-                message,
-                isRead: false,
+                context: { milestone: { message } },
             });
         });
     } catch (e) {

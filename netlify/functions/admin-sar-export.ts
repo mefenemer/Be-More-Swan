@@ -23,6 +23,7 @@ import {
     userNotifications, onboardingDrafts, scheduledPosts,
     gdprErasureLog, tosAcceptances, dpaAcceptances, userOrganisations,
 } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -173,11 +174,9 @@ export default withLambda(async (event) => {
     const downloadUrl = `${BASE_URL}/.netlify/functions/sar-download?token=${downloadToken}`;
 
     // ── 6. Notify the requesting admin ────────────────────────────────────
-    await db.insert(notifications).values({
-        userId:  adminId,
-        type:    'system',
-        title:   `📦 SAR Export Ready — ${user.email}`,
-        message: `The Subject Access Request data package for ${user.email} is ready. Download it within 72 hours.`,
+    await createNotification(db, 'sar_export_ready', {
+        userId: adminId,
+        context: { sar: { user_email: user.email } },
         metadata: { downloadUrl, expiresAt: expiresAt.toISOString(), targetUserId },
     });
 

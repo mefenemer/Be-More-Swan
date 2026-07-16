@@ -1492,6 +1492,7 @@
               </div>
             </div>
             <div class="flex items-center gap-2">
+              <button onclick="restoreEmailTemplate()" id="et-restore-btn" class="hidden px-3 py-2 text-sm font-semibold border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition">Restore to default</button>
               <button onclick="sendEmailTest()" id="et-test-btn" class="px-3 py-2 text-sm font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition">Send test to me</button>
               <button onclick="saveEmailTemplate()" id="et-save-btn" class="px-4 py-2 text-sm font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition">Save</button>
             </div>
@@ -1526,14 +1527,27 @@
 
               <div>
                 <div class="flex items-center justify-between mb-1">
-                  <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide">Body</label>
+                  <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs font-bold">
+                    <button type="button" id="et-tab-rich" onclick="setEmailBodyTab('rich')" class="px-3 py-1 bg-emerald-600 text-white">Rich text</button>
+                    <button type="button" id="et-tab-plain" onclick="setEmailBodyTab('plain')" class="px-3 py-1 bg-white text-gray-600">Plain text</button>
+                  </div>
                   <select id="et-var-picker" onchange="insertEmailVariable(this.value); this.value='';"
                           class="text-xs border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white">
                     <option value="">Insert variable…</option>
                   </select>
                 </div>
-                <div id="et-quill" style="min-height:240px;background:#fff;"></div>
-                <p class="text-xs text-gray-400 mt-1">Use fallbacks for optional fields, e.g. <code>{{user.first_name | "there"}}</code>.</p>
+                <!-- Rich text (HTML body) -->
+                <div id="et-body-rich">
+                  <div id="et-quill" style="min-height:240px;background:#fff;"></div>
+                  <p class="text-xs text-gray-400 mt-1">Use fallbacks for optional fields, e.g. <code>{{user.first_name | "there"}}</code>.</p>
+                </div>
+                <!-- Plain text (alternative part) -->
+                <div id="et-body-plain" class="hidden">
+                  <textarea id="et-body-text" rows="11" oninput="scheduleEtPreview()"
+                            class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                            placeholder="Leave blank to auto-generate the plain-text part from the HTML body."></textarea>
+                  <p class="text-xs text-gray-400 mt-1">Sent to text-only mail clients. Blank = auto-derived from the HTML above at send time.</p>
+                </div>
               </div>
             </div>
 
@@ -1550,6 +1564,105 @@
               <div class="bg-gray-100 rounded-xl p-4 flex justify-center">
                 <iframe id="et-pv-frame" title="Email preview" style="width:600px;max-width:100%;height:560px;border:0;background:#fff;border-radius:8px;transition:width .2s;"></iframe>
               </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── US-COMMS-2: Notification Templates (in-app) ───────────────────── -->
+      <section id="view-notification-templates" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <!-- List -->
+        <div id="nt-list-pane">
+          <div class="mb-6">
+            <h2 class="text-lg font-extrabold text-gray-900">Notification Templates</h2>
+            <p class="text-sm text-gray-500 mt-0.5">Edit the copy for in-app notifications shown in users' Action Center and inbox. Dynamic fields like <code>{{assistant.name}}</code> are filled in when the notification fires.</p>
+          </div>
+          <div id="nt-list" class="text-gray-500 text-sm">Loading…</div>
+        </div>
+
+        <!-- Editor -->
+        <div id="nt-editor-pane" class="hidden">
+          <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
+            <div class="flex items-center gap-3">
+              <button onclick="closeNotifEditor()" class="text-gray-400 hover:text-gray-700 text-sm font-semibold">← Back</button>
+              <div>
+                <h2 id="nt-editor-title" class="text-lg font-extrabold text-gray-900">Edit Notification</h2>
+                <p class="text-xs text-gray-400 mt-0.5"><span id="nt-editor-category"></span> · <span class="text-gray-400">In-App</span> · <code id="nt-editor-key" class="text-gray-500"></code></p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="restoreNotifTemplate()" id="nt-restore-btn" class="hidden px-3 py-2 text-sm font-semibold border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition">Restore to default</button>
+              <button onclick="saveNotifTemplate()" id="nt-save-btn" class="px-4 py-2 text-sm font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition">Save</button>
+            </div>
+          </div>
+
+          <div id="nt-status" class="hidden mb-4 text-sm rounded-lg px-3 py-2"></div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Left: editor controls -->
+            <div class="space-y-4">
+              <div id="nt-active-row" class="flex items-center justify-between bg-white border border-gray-200 rounded-xl px-4 py-3">
+                <div>
+                  <p class="text-sm font-bold text-gray-800">Active</p>
+                  <p class="text-xs text-gray-400">When off, this notification will not be created.</p>
+                </div>
+                <label class="inline-flex items-center cursor-pointer">
+                  <input type="checkbox" id="nt-active" class="sr-only peer">
+                  <div class="relative w-11 h-6 bg-gray-200 peer-checked:bg-emerald-600 rounded-full peer transition after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition peer-checked:after:translate-x-5"></div>
+                </label>
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Title</label>
+                <input id="nt-title" type="text" oninput="scheduleNotifPreview()"
+                       class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
+              </div>
+
+              <div>
+                <div class="flex items-center justify-between mb-1">
+                  <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs font-bold">
+                    <button type="button" id="nt-tab-source" onclick="setNotifBodyTab('source')" class="px-3 py-1 bg-emerald-600 text-white">Plain text</button>
+                    <button type="button" id="nt-tab-preview" onclick="setNotifBodyTab('preview')" class="px-3 py-1 bg-white text-gray-600">Rich preview</button>
+                  </div>
+                  <select id="nt-var-picker" onchange="insertNotifVariable(this.value); this.value='';"
+                          class="text-xs border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white">
+                    <option value="">Insert variable…</option>
+                  </select>
+                </div>
+                <!-- Plain text source -->
+                <div id="nt-body-source">
+                  <textarea id="nt-message" rows="6" oninput="scheduleNotifPreview()"
+                            class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"></textarea>
+                  <p class="text-xs text-gray-400 mt-1">Plain text, with optional light formatting (<code>&lt;strong&gt;</code>, <code>&lt;em&gt;</code>). Use fallbacks, e.g. <code>{{assistant.name | "your assistant"}}</code>.</p>
+                </div>
+                <!-- Rich preview (rendered message) -->
+                <div id="nt-body-preview" class="hidden">
+                  <div id="nt-message-rendered" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-600 bg-gray-50 min-h-[8rem]"></div>
+                  <p class="text-xs text-gray-400 mt-1">How the message renders, with dummy data in place of variables.</p>
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Available variables</label>
+                <div id="nt-var-list" class="flex flex-wrap gap-1.5 text-xs"></div>
+              </div>
+            </div>
+
+            <!-- Right: live preview card -->
+            <div>
+              <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Live Preview</label>
+              <div class="bg-gray-100 rounded-xl p-4">
+                <div class="bg-white rounded-xl border border-gray-200 p-4 flex gap-3">
+                  <div class="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-lg">🔔</div>
+                  <div class="min-w-0 flex-1">
+                    <p class="text-xs font-bold text-gray-400 mb-0.5">Be More Swan</p>
+                    <p id="nt-pv-title" class="text-sm font-bold text-gray-900"></p>
+                    <p id="nt-pv-message" class="text-sm text-gray-500 mt-0.5"></p>
+                    <p class="text-xs text-gray-400 mt-1">just now</p>
+                  </div>
+                </div>
+              </div>
+              <p class="text-xs text-gray-400 mt-2">Preview uses sample data; the live notification uses real values when it fires.</p>
             </div>
           </div>
         </div>
@@ -2054,7 +2167,8 @@ const VIEW_LABELS = {
   'breach-response': 'Breach Response', 'master-data': 'Master Data',
   workspaces: 'Workspaces', 'workspace-detail': 'Workspace Detail',
   'blueprint-inspector': 'Blueprint Inspector', sandbox: 'Sandbox Environment',
-  'email-templates': 'Manage Emails', systems: 'Systems & Connections',
+  'email-templates': 'Manage Emails', 'notification-templates': 'Notification Templates',
+  systems: 'Systems & Connections',
   'issue-reports': 'Issue Reports', 'feature-roadmap': 'Feature Requests',
 };
 
@@ -2098,8 +2212,9 @@ const ADMIN_CATS = {
     { view: 'audit-log',      icon: '🔐', label: 'Audit Log' },
     { view: 'security-abuse', icon: '🚩', label: 'Security & Abuse' },
   ]},
-  communications: { label: 'Communications', roles: ['admin','super_admin','platform_admin'], children: [
+  communications: { label: 'Communications', roles: ['super_admin'], children: [
     { view: 'email-templates', icon: '✉️', label: 'Manage Emails' },
+    { view: 'notification-templates', icon: '🔔', label: 'Notification Templates' },
   ]},
   compliance: { label: 'Compliance', roles: ['admin','super_admin'], children: [
     { view: 'breach-response', icon: '🚨', label: 'Breach Response' },
@@ -2346,6 +2461,7 @@ function adminNav(view) {
   if (view === 'sandbox')             loadSandboxPanel();
   if (view === 'systems')             loadSystemStatus();
   if (view === 'email-templates')     loadEmailTemplates();
+  if (view === 'notification-templates') loadNotificationTemplates();
   if (view === 'issue-reports')       loadIssueReports();
   if (view === 'feature-roadmap')     loadFeatureRoadmap();
 }
@@ -2357,6 +2473,7 @@ let _etCurrent = null;       // { triggerKey, name, category, locked, transactio
 let _etVariables = [];
 let _etPreviewMode = 'desktop';
 let _etPreviewTimer = null;
+let _etBodyTab = 'rich';     // 'rich' (Quill/HTML) | 'plain' (text override)
 
 async function loadEmailTemplates() {
   closeEmailEditor();
@@ -2411,6 +2528,10 @@ async function openEmailEditor(key) {
     document.getElementById('et-editor-key').textContent = template.triggerKey;
     document.getElementById('et-subject').value = template.subject || '';
     document.getElementById('et-preheader').value = template.preheader || '';
+    document.getElementById('et-body-text').value = template.bodyText || '';
+    // Restore-to-default only makes sense once an admin override exists (AC7).
+    document.getElementById('et-restore-btn').classList.toggle('hidden', !template.edited);
+    setEmailBodyTab('rich');
     hideEtStatus();
 
     // Active toggle — locked/critical templates can't be deactivated (AC3.2.2).
@@ -2468,11 +2589,30 @@ function initEtQuill(html) {
 }
 
 function insertEmailVariable(key) {
-  if (!key || !_etQuill) return;
-  const range = _etQuill.getSelection(true);
-  _etQuill.insertText(range ? range.index : _etQuill.getLength(), `{{${key}}}`, 'user');
-  _etQuill.focus();
+  if (!key) return;
+  const tag = `{{${key}}}`;
+  if (_etBodyTab === 'plain') {
+    const ta = document.getElementById('et-body-text');
+    const at = ta.selectionStart ?? ta.value.length;
+    ta.value = ta.value.slice(0, at) + tag + ta.value.slice(ta.selectionEnd ?? at);
+    ta.focus();
+    ta.selectionStart = ta.selectionEnd = at + tag.length;
+  } else if (_etQuill) {
+    const range = _etQuill.getSelection(true);
+    _etQuill.insertText(range ? range.index : _etQuill.getLength(), tag, 'user');
+    _etQuill.focus();
+  }
   scheduleEtPreview();
+}
+
+// Rich text (HTML body) ⇄ Plain text (alternative part) — two views, both editable (AC3).
+function setEmailBodyTab(mode) {
+  _etBodyTab = mode;
+  document.getElementById('et-body-rich').classList.toggle('hidden', mode !== 'rich');
+  document.getElementById('et-body-plain').classList.toggle('hidden', mode !== 'plain');
+  const r = document.getElementById('et-tab-rich'), p = document.getElementById('et-tab-plain');
+  r.className = 'px-3 py-1 ' + (mode === 'rich' ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600');
+  p.className = 'px-3 py-1 ' + (mode === 'plain' ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600');
 }
 
 function setEmailPreviewMode(mode) {
@@ -2494,6 +2634,7 @@ async function refreshEmailPreview() {
     triggerKey: _etCurrent.triggerKey,
     subject: document.getElementById('et-subject').value,
     bodyHtml: _etQuill ? _etQuill.root.innerHTML : '',
+    bodyText: document.getElementById('et-body-text').value,
     preheader: document.getElementById('et-preheader').value,
   };
   try {
@@ -2518,17 +2659,58 @@ async function saveEmailTemplate() {
         triggerKey: _etCurrent.triggerKey,
         subject: document.getElementById('et-subject').value,
         bodyHtml: _etQuill ? _etQuill.root.innerHTML : '',
+        bodyText: document.getElementById('et-body-text').value,
         preheader: document.getElementById('et-preheader').value,
         isActive: document.getElementById('et-active').checked,
       }),
     });
     const data = await res.json();
+    if (res.status === 422) { showEtStatus('error', mergeVarError(data)); return; }
     if (!res.ok) throw new Error(data.error || 'save failed');
+    _etCurrent.edited = true;
+    document.getElementById('et-restore-btn').classList.remove('hidden');
     showEtStatus('success', 'Saved. This copy is now live.');
   } catch (e) {
     showEtStatus('error', e.message || 'Failed to save.');
   } finally {
     btn.disabled = false; btn.textContent = 'Save';
+  }
+}
+
+// Turn a 422 validation payload into a readable message (AC5).
+function mergeVarError(data) {
+  const parts = [];
+  if (data.unknown && data.unknown.length) parts.push(`unknown variable(s): ${data.unknown.map(v => `{{${v}}}`).join(', ')}`);
+  if (data.malformed && data.malformed.length) parts.push(`malformed tag(s): ${data.malformed.join(', ')}`);
+  return (data.error || 'Template has variables that will not render.') + (parts.length ? ` — ${parts.join('; ')}` : '');
+}
+
+async function restoreEmailTemplate() {
+  if (!_etCurrent) return;
+  if (!confirm('Restore this email to the original system default? Your edits will be discarded.')) return;
+  const btn = document.getElementById('et-restore-btn');
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${ET_API}?resource=restore`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ triggerKey: _etCurrent.triggerKey }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'restore failed');
+    const t = data.template;
+    document.getElementById('et-subject').value = t.subject || '';
+    document.getElementById('et-preheader').value = t.preheader || '';
+    document.getElementById('et-body-text').value = t.bodyText || '';
+    document.getElementById('et-active').checked = t.isActive;
+    if (_etQuill) _etQuill.clipboard.dangerouslyPasteHTML(t.bodyHtml || '');
+    _etCurrent.edited = false;
+    btn.classList.add('hidden');
+    refreshEmailPreview();
+    showEtStatus('success', 'Restored to the system default.');
+  } catch (e) {
+    showEtStatus('error', e.message || 'Failed to restore.');
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -2574,6 +2756,207 @@ function showEtStatus(kind, msg) {
 }
 function hideEtStatus() { document.getElementById('et-status').classList.add('hidden'); }
 function escapeHtmlJs(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+// ── US-COMMS-2: Notification Templates (in-app editor) ───────────────────────
+const NT_API = '/.netlify/functions/admin-notification-templates';
+let _ntCurrent = null;        // { templateKey, name, category, edited }
+let _ntVariables = [];
+let _ntBodyTab = 'source';    // 'source' (textarea) | 'preview' (rendered)
+let _ntActiveField = 'message'; // last-focused editable — where Insert Variable lands
+let _ntPreviewTimer = null;
+
+async function loadNotificationTemplates() {
+  closeNotifEditor();
+  const el = document.getElementById('nt-list');
+  el.innerHTML = 'Loading…';
+  try {
+    const res = await fetch(`${NT_API}?resource=list`);
+    if (!res.ok) throw new Error('list failed');
+    const { templates } = await res.json();
+
+    const groups = {};
+    templates.forEach(t => { (groups[t.category] ||= []).push(t); });
+
+    el.innerHTML = Object.keys(groups).sort().map(cat => `
+      <div class="mb-6">
+        <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">${escapeHtmlJs(cat)}</h3>
+        <div class="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
+          ${groups[cat].map(t => `
+            <button onclick="openNotifEditor('${t.templateKey}')" class="w-full text-left px-4 py-3 hover:bg-gray-50 transition flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <p class="text-sm font-semibold text-gray-800 truncate">${escapeHtmlJs(t.name)}</p>
+                <p class="text-xs text-gray-400 truncate">${escapeHtmlJs(t.title)}</p>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <span class="text-[10px] font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded-full">${escapeHtmlJs(t.channel)}</span>
+                ${t.edited ? '<span class="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">Edited</span>' : ''}
+                ${!t.isActive ? '<span class="text-[10px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full">Off</span>' : ''}
+                <span class="text-gray-300">›</span>
+              </div>
+            </button>`).join('')}
+        </div>
+      </div>`).join('');
+  } catch {
+    el.innerHTML = '<p class="text-rose-600 text-sm">Failed to load notification templates.</p>';
+  }
+}
+
+async function openNotifEditor(key) {
+  try {
+    const res = await fetch(`${NT_API}?resource=get&key=${encodeURIComponent(key)}`);
+    if (!res.ok) throw new Error('get failed');
+    const { template, variables } = await res.json();
+    _ntCurrent = template;
+    _ntVariables = variables || [];
+
+    document.getElementById('nt-list-pane').classList.add('hidden');
+    document.getElementById('nt-editor-pane').classList.remove('hidden');
+    document.getElementById('nt-editor-title').textContent = template.name;
+    document.getElementById('nt-editor-category').textContent = template.category;
+    document.getElementById('nt-editor-key').textContent = template.templateKey;
+    document.getElementById('nt-title').value = template.title || '';
+    document.getElementById('nt-message').value = template.message || '';
+    document.getElementById('nt-active').checked = template.isActive;
+    document.getElementById('nt-restore-btn').classList.toggle('hidden', !template.edited);
+
+    // Variable picker + reference chips (AC4).
+    const picker = document.getElementById('nt-var-picker');
+    picker.innerHTML = '<option value="">Insert variable…</option>' +
+      _ntVariables.map(v => `<option value="${v.key}">${escapeHtmlJs(v.label)}</option>`).join('');
+    const chips = document.getElementById('nt-var-list');
+    chips.innerHTML = _ntVariables.length
+      ? _ntVariables.map(v => `<button type="button" onclick="insertNotifVariable('${v.key}')" title="${escapeHtmlJs(v.label)}" class="font-mono px-2 py-0.5 rounded-md bg-gray-100 text-gray-600 hover:bg-emerald-50 hover:text-emerald-700 border border-gray-200">{{${escapeHtmlJs(v.key)}}}</button>`).join('')
+      : '<span class="text-gray-400">This notification has no dynamic variables.</span>';
+
+    // Track which field Insert Variable should target.
+    _ntActiveField = 'message';
+    document.getElementById('nt-title').onfocus = () => { _ntActiveField = 'title'; };
+    document.getElementById('nt-message').onfocus = () => { _ntActiveField = 'message'; };
+
+    setNotifBodyTab('source');
+    hideNtStatus();
+    refreshNotifPreview();
+  } catch {
+    showNtStatus('error', 'Failed to open this template.');
+  }
+}
+
+function setNotifBodyTab(mode) {
+  _ntBodyTab = mode;
+  document.getElementById('nt-body-source').classList.toggle('hidden', mode !== 'source');
+  document.getElementById('nt-body-preview').classList.toggle('hidden', mode !== 'preview');
+  const s = document.getElementById('nt-tab-source'), p = document.getElementById('nt-tab-preview');
+  s.className = 'px-3 py-1 ' + (mode === 'source' ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600');
+  p.className = 'px-3 py-1 ' + (mode === 'preview' ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600');
+  if (mode === 'preview') refreshNotifPreview();
+}
+
+function insertNotifVariable(key) {
+  if (!key) return;
+  const tag = `{{${key}}}`;
+  const ta = document.getElementById(_ntActiveField === 'title' ? 'nt-title' : 'nt-message');
+  const at = ta.selectionStart ?? ta.value.length;
+  ta.value = ta.value.slice(0, at) + tag + ta.value.slice(ta.selectionEnd ?? at);
+  ta.focus();
+  ta.selectionStart = ta.selectionEnd = at + tag.length;
+  scheduleNotifPreview();
+}
+
+function scheduleNotifPreview() {
+  clearTimeout(_ntPreviewTimer);
+  _ntPreviewTimer = setTimeout(refreshNotifPreview, 300);
+}
+
+async function refreshNotifPreview() {
+  if (!_ntCurrent) return;
+  const payload = {
+    templateKey: _ntCurrent.templateKey,
+    title: document.getElementById('nt-title').value,
+    message: document.getElementById('nt-message').value,
+  };
+  try {
+    const res = await fetch(`${NT_API}?resource=preview`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (!res.ok) return;
+    const { title, message } = await res.json();
+    // Server renders with dummy data and escapes interpolated values; safe to set as HTML.
+    document.getElementById('nt-pv-title').innerHTML = title || '';
+    document.getElementById('nt-pv-message').innerHTML = message || '';
+    document.getElementById('nt-message-rendered').innerHTML = message || '<span class="text-gray-400">No message.</span>';
+  } catch { /* preview is best-effort */ }
+}
+
+async function saveNotifTemplate() {
+  if (!_ntCurrent) return;
+  const btn = document.getElementById('nt-save-btn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const res = await fetch(`${NT_API}?resource=save`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        templateKey: _ntCurrent.templateKey,
+        title: document.getElementById('nt-title').value,
+        message: document.getElementById('nt-message').value,
+        isActive: document.getElementById('nt-active').checked,
+      }),
+    });
+    const data = await res.json();
+    if (res.status === 422) { showNtStatus('error', mergeVarError(data)); return; }
+    if (!res.ok) throw new Error(data.error || 'save failed');
+    _ntCurrent.edited = true;
+    document.getElementById('nt-restore-btn').classList.remove('hidden');
+    showNtStatus('success', 'Saved. This copy is now live for all future notifications.');
+  } catch (e) {
+    showNtStatus('error', e.message || 'Failed to save.');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save';
+  }
+}
+
+async function restoreNotifTemplate() {
+  if (!_ntCurrent) return;
+  if (!confirm('Restore this notification to the original system default? Your edits will be discarded.')) return;
+  const btn = document.getElementById('nt-restore-btn');
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${NT_API}?resource=restore`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ templateKey: _ntCurrent.templateKey }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'restore failed');
+    const t = data.template;
+    document.getElementById('nt-title').value = t.title || '';
+    document.getElementById('nt-message').value = t.message || '';
+    document.getElementById('nt-active').checked = t.isActive;
+    _ntCurrent.edited = false;
+    btn.classList.add('hidden');
+    refreshNotifPreview();
+    showNtStatus('success', 'Restored to the system default.');
+  } catch (e) {
+    showNtStatus('error', e.message || 'Failed to restore.');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function closeNotifEditor() {
+  _ntCurrent = null;
+  const ed = document.getElementById('nt-editor-pane');
+  const list = document.getElementById('nt-list-pane');
+  if (ed) ed.classList.add('hidden');
+  if (list) list.classList.remove('hidden');
+}
+
+function showNtStatus(kind, msg) {
+  const el = document.getElementById('nt-status');
+  el.textContent = msg;
+  el.className = 'mb-4 text-sm rounded-lg px-3 py-2 ' +
+    (kind === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700');
+  el.classList.remove('hidden');
+}
+function hideNtStatus() { document.getElementById('nt-status').classList.add('hidden'); }
 
 // ── US-ADM-4.3.1/4.3.2: Blueprint Inspector ─────────────────────────────────
 

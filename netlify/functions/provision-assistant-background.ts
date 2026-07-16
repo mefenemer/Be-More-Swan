@@ -12,7 +12,8 @@
 import { Handler } from '@netlify/functions';
 import { and, eq } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
-import { aiAssistants, auditLogs, dpaAcceptances, masterAssistants, notifications, organisations, plans, riskAssessments, users, supportTickets } from '../../db/schema';
+import { aiAssistants, auditLogs, dpaAcceptances, masterAssistants, organisations, plans, riskAssessments, users, supportTickets } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { sendEmail, sendTemplatedEmail } from '../../src/utils/email';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { requireTosAcceptance, checkProhibitedUsePatterns } from '../../src/utils/tos-gate';
@@ -209,11 +210,9 @@ export default withLambda(async (event) => {
         // ── US2 Sc3: "Provisioning complete" in-app notification ─────────────
         if (updated?.userId) {
             try {
-                await db.insert(notifications).values({
+                await createNotification(db, 'provisioning_complete', {
                     userId: updated.userId,
-                    type: 'provisioning_complete',
-                    title: 'Ready for Work',
-                    message: `${updated.name} is provisioned and ready for work. Open it and Initiate Kick-Off to put it to work.`,
+                    context: { assistant: { name: updated.name } },
                 });
             } catch (notifErr) {
                 console.warn('[provision-assistant-background] Notification insert failed (non-blocking):', notifErr);

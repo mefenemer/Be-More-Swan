@@ -171,6 +171,95 @@ export function sampleContext(): MergeContext {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Save-time validation (US-COMMS-2 AC5)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Any {{...}} span, however malformed — the net that VAR_PATTERN's matches are subtracted from. */
+const ANY_TAG_PATTERN = /\{\{[^{}]*\}\}/g;
+
+export interface MergeValidation {
+    /** Well-formed tags naming a variable the caller will never supply. */
+    unknown: string[];
+    /** {{...}} spans the merge engine cannot parse — these would ship to users verbatim. */
+    malformed: string[];
+}
+
+/**
+ * Check admin-authored copy for merge tags that would not render.
+ *
+ * Two distinct failures, reported separately because they read very differently to an admin:
+ *   • malformed — `{{user first_name}}`, `{{ }}`: VAR_PATTERN won't match, so the literal
+ *     braces reach the recipient's inbox/feed.
+ *   • unknown   — `{{user.middle_name}}`: well-formed, but nothing supplies it, so it
+ *     silently renders as "" (or its fallback) and the sentence quietly loses a word.
+ *
+ * An unclosed `{{` with no closing braces is caught by the leftover-brace check, not by
+ * ANY_TAG_PATTERN (which requires a closing `}}`).
+ */
+export function validateMergeVars(text: string, allowedKeys: string[]): MergeValidation {
+    const unknown = new Set<string>();
+    const malformed = new Set<string>();
+    if (!text) return { unknown: [], malformed: [] };
+
+    const allowed = new Set(allowedKeys);
+
+    // Well-formed tags: collect their paths and blank them out of the scratch copy so that
+    // whatever {{...}} remains is, by definition, something the engine won't parse.
+    let remaining = text;
+    for (const m of text.matchAll(new RegExp(VAR_PATTERN.source, 'g'))) {
+        const path = m[1];
+        if (!allowed.has(path)) unknown.add(path);
+        remaining = remaining.replace(m[0], '');
+    }
+    for (const m of remaining.matchAll(ANY_TAG_PATTERN)) {
+        malformed.add(m[0]);
+    }
+    // Unbalanced opener, e.g. "Hi {{user.first_name".
+    if (/\{\{/.test(remaining.replace(ANY_TAG_PATTERN, ''))) malformed.add('{{');
+
+    return { unknown: [...unknown], malformed: [...malformed] };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// HTML → plain text (US-COMMS-2 AC3)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Derive a readable plain-text part from body HTML, used when an admin hasn't authored an
+ * explicit text override. Block tags become line breaks and links keep their href, so the
+ * text part stays useful rather than a wall of stripped words.
+ *
+ * Merge tags are preserved verbatim — this runs BEFORE the merge pass at send time.
+ */
+export function htmlToPlainText(html: string): string {
+    if (!html) return '';
+    return html
+        // Links first: "<a href="X">label</a>" → "label (X)" — dropping the URL would strand
+        // the reader on a text-only client with no way to reach the CTA.
+        .replace(/<a\b[^>]*href\s*=\s*("([^"]*)"|'([^']*)')[^>]*>([\s\S]*?)<\/a>/gi,
+            (_m, _q, dq, sq, label) => {
+                const url = dq ?? sq ?? '';
+                const text = label.replace(/<[^>]+>/g, '').trim();
+                return url && text !== url ? `${text} (${url})` : text || url;
+            })
+        .replace(/<\s*(script|style)\b[^>]*>[\s\S]*?<\s*\/\s*\1\s*>/gi, '')
+        .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+        .replace(/<\s*\/\s*(p|div|h[1-6]|tr|li)\s*>/gi, '\n')
+        .replace(/<\s*li\b[^>]*>/gi, '• ')
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/gi, ' ')
+        .replace(/&amp;/gi, '&')
+        .replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>')
+        .replace(/&quot;/gi, '"')
+        .replace(/&#39;/gi, "'")
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .split('\n').map((l) => l.trim()).join('\n')
+        .trim();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 

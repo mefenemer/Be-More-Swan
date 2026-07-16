@@ -16,9 +16,10 @@ import { eq, and, inArray, sql } from 'drizzle-orm';
 import Stripe from 'stripe';
 import { getDb } from '../../db/client';
 import {
-    plans, organisations, masterPlans, users, notifications,
+    plans, organisations, masterPlans, users,
     billingReconciliationLog, usageCounters, taskRuns,
 } from '../../db/schema';
+import { createNotifications } from '../../src/utils/notify';
 import { getPeriodStart } from '../../src/utils/atomic-cap-check';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -252,17 +253,11 @@ async function runReconciliation(): Promise<void> {
                 .from(users)
                 .where(eq(users.role, 'super_admin'));
 
-            const notifValues = superAdmins.map(admin => ({
-                userId: admin.id,
-                type:    'billing_alert' as const,
-                title:   `⚠️ Billing Reconciliation: ${mismatches.length} mismatch${mismatches.length === 1 ? '' : 'es'} found`,
-                message: `The nightly Stripe↔DB reconciliation detected ${mismatches.length} plan mismatch${mismatches.length === 1 ? '' : 'es'}. Open the Reconciliation Queue in the Admin Portal to review and sync.`,
+            const mismatchPhrase = `${mismatches.length} mismatch${mismatches.length === 1 ? '' : 'es'}`;
+            await createNotifications(db, 'billing_reconciliation_mismatch', superAdmins.map(a => a.id), {
+                context: { reconciliation: { mismatch_phrase: mismatchPhrase } },
                 metadata: { mismatchCount: mismatches.length, runAt: new Date().toISOString() },
-            }));
-
-            if (notifValues.length > 0) {
-                await db.insert(notifications).values(notifValues);
-            }
+            });
 
             console.warn(`[reconcile-billing] ⚠️ ${mismatches.length} mismatch(es) found and flagged.`);
         } else {
@@ -291,15 +286,10 @@ async function runReconciliation(): Promise<void> {
                 .from(users)
                 .where(eq(users.role, 'super_admin'));
 
-            if (superAdmins.length > 0) {
-                await db2.insert(notifications).values(superAdmins.map(a => ({
-                    userId:  a.id,
-                    type:    'billing_alert' as const,
-                    title:   '🚨 Billing Reconciliation Job Failed',
-                    message: `The nightly reconciliation job failed with error: ${errorMessage}. Investigate within 4 hours.`,
-                    metadata: { error: errorMessage, runAt: new Date().toISOString() },
-                })));
-            }
+            await createNotifications(db2, 'billing_reconciliation_failed', superAdmins.map(a => a.id), {
+                context: { job: { error: errorMessage } },
+                metadata: { error: errorMessage, runAt: new Date().toISOString() },
+            });
         } catch (innerErr) {
             console.error('[reconcile-billing] Also failed to write failure log:', innerErr);
         }

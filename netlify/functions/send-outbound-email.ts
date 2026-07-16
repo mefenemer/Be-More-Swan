@@ -21,7 +21,8 @@ import jwt from 'jsonwebtoken';
 import { and, eq } from 'drizzle-orm';
 import { Resend } from 'resend';
 import { getDb } from '../../db/client';
-import { taskRuns, aiAssistants, integrationAuthorizations, agentRunEvents, notifications } from '../../db/schema';
+import { taskRuns, aiAssistants, integrationAuthorizations, agentRunEvents } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { injectAiFooter, FOOTER_VERSION } from '../../src/utils/ai-email-footer';
 import { getSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
@@ -138,13 +139,11 @@ export default withLambda(async (event) => {
     });
 
     // In-app notification confirming send
-    await db.insert(notifications).values({
+    await createNotification(db, 'outbound_email_sent', {
         userId,
-        type:    'system',
-        title:   `Email sent by ${assistant.name}`,
-        message: `An outbound email was sent to ${to} with subject "${subject}". AI disclosure footer v${FOOTER_VERSION} was appended.`,
+        context: { assistant: { name: assistant.name }, email: { to, subject, footer_version: FOOTER_VERSION } },
         metadata: { emailId, assistantId, footerVersion: FOOTER_VERSION, taskRunId },
-    }).catch(() => {});
+    });
 
     return {
         statusCode: 200,

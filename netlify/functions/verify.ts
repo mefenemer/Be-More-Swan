@@ -3,6 +3,7 @@ import { Handler, HandlerResponse } from '@netlify/functions';
 import { eq, and, gt, inArray, isNull } from 'drizzle-orm';
 import * as crypto from 'crypto';
 import { getDb } from '../../db/client';
+import { createNotification } from '../../src/utils/notify';
 import { users, plans, aiAssistants, onboardingDrafts, notifications, userProfiles } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
 import { getEmailStrings } from '../../src/utils/email-i18n';
@@ -93,25 +94,11 @@ export default withLambda(async (event) => {
 
         // ── US3 Sc3 + US2 Sc1: Welcome + onboard prompt on first login ───────
         if (isFirstLogin) {
-            try {
-                await db.insert(notifications).values([
-                    {
-                        userId: user.id,
-                        type: 'welcome',
-                        title: 'Welcome to Be More Swan!',
-                        message: 'Thanks for registering and welcome to Be More Swan. Your workspace is ready.',
-                    },
-                    {
-                        userId: user.id,
-                        type: 'onboarding_prompt',
-                        title: 'Finish setting up your workspace',
-                        message: "Open the Setup Wizard to build your AI assistant — it walks you through every step, from your business details to going live.",
-                        metadata: { action: 'open_wizard', ctaLabel: 'Open Setup Wizard' },
-                    },
-                ]);
-            } catch (notifErr) {
-                console.warn('[verify] Welcome notification insert failed (non-blocking):', notifErr);
-            }
+            await createNotification(db, 'welcome_verified', { userId: user.id });
+            await createNotification(db, 'onboarding_prompt', {
+                userId: user.id,
+                metadata: { action: 'open_wizard', ctaLabel: 'Open Setup Wizard' },
+            });
 
             // US-GAP-6.1.1 SC1/SC2: Welcome email — sent exactly once (SC3: gated by isFirstLogin)
             // SC4: arrives before the 24h onboarding reminder (onboarding-reminder.ts fires at 24h)
@@ -241,12 +228,7 @@ export default withLambda(async (event) => {
                             ))
                             .limit(1);
                         if (!existingReminder) {
-                            await db.insert(notifications).values({
-                                userId: user.id,
-                                type: 'onboarding_incomplete',
-                                title: 'Complete your assistant setup',
-                                message: 'You have not yet completed the onboarding of your digital assistant. Pick up where you left off.',
-                            });
+                            await createNotification(db, 'onboarding_incomplete', { userId: user.id });
                         }
                     } catch { /* non-blocking */ }
 

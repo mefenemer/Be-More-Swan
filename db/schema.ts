@@ -468,11 +468,33 @@ export const emailTemplates = pgTable("email_templates", {
   category: text("category").notNull().default("General"), // Onboarding | Billing | Security | …
   subject: text("subject").notNull(),                 // supports {{merge}} tags
   bodyHtml: text("body_html").notNull(),              // inner body only — wrapped at send time
+  // Plain-text alternative part. NULL = derive from bodyHtml at send time (htmlToPlainText);
+  // a non-NULL value is an admin-authored override. Requires db/notification-templates.sql.
+  bodyText: text("body_text"),
   preheader: text("preheader"),                       // inbox preview text
   // Governance (full UI is Feature 3; columns ship now so the send path can respect them).
   isActive: boolean("is_active").notNull().default(true),
   locked: boolean("locked").notNull().default(false), // critical triggers can't be deactivated
   transactional: boolean("transactional").notNull().default(false), // omit unsubscribe link
+  updatedByAdminId: integer("updated_by_admin_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ── US-COMMS-2: Admin-editable in-app notification templates ────────────────
+// One row per piece of in-app copy, created lazily on first admin edit. Defaults & the
+// render-time fallback live in src/utils/notification-templates-catalog.ts.
+//
+// Keyed on templateKey, NOT on notifications.type: `type` is reused across call sites
+// ('system' backs 10 distinct notifications) and drives category/priority routing, so it
+// can't identify one piece of copy. The type a template stamps stays code-owned in the
+// catalog. Requires db/notification-templates.sql applied before deploy.
+export const notificationTemplates = pgTable("notification_templates", {
+  id: serial().primaryKey(),
+  templateKey: text("template_key").notNull().unique(), // e.g. 'assistant_hired' | 'org_invite_accepted'
+  title: text("title").notNull(),                       // supports {{merge}} tags
+  message: text("message"),                             // supports {{merge}} tags + inline HTML
+  isActive: boolean("is_active").notNull().default(true),
   updatedByAdminId: integer("updated_by_admin_id").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),

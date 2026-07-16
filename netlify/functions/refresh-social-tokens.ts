@@ -14,7 +14,8 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { systemConnections, scheduledPosts, notifications, users, auditLogs, userOrganisations } from '../../db/schema';
+import { systemConnections, scheduledPosts, users, auditLogs, userOrganisations } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { storeSecret, getSecret } from '../../src/utils/vault';
 import { sendEmail } from '../../src/utils/email';
 import { resolveActionNotifications, CONNECTION_RESTORED_TYPES } from '../../src/utils/notification-actions';
@@ -187,11 +188,11 @@ async function handleRefreshFailure(db: ReturnType<typeof getDb>, conn: Conn, ms
         .where(eq(userOrganisations.organisationId, conn.organisationId)).limit(1);
 
     if (orgUser) {
-        await db.insert(notifications).values({
+        await createNotification(db, 'social_token_refresh_failed', {
             userId: orgUser.id,
-            type: `${conn.serviceName}_token_refresh_failed`,
-            title: `${label} connection expired`,
-            message: `Your ${label} account needs to be reconnected. Any scheduled posts will not be published until you reconnect.`,
+            // Computed type so resolve-on-reconnect can match a single platform (see notify.ts).
+            typeOverride: `${conn.serviceName}_token_refresh_failed`,
+            context: { platform: { label } },
             metadata: { connectionId: conn.id },
         });
         await sendEmail({

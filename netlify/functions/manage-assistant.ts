@@ -9,6 +9,7 @@ import { Handler } from '@netlify/functions';
 import { eq, and, inArray, count, asc, isNull } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
 import { aiAssistants, taskRuns, notifications, masterPlans, organisations, plans } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { effectiveLimit, type FeatureOverrides } from '../../src/utils/plan-features';
 import { requireTenant } from '../../src/utils/tenant';
 import { transitionAssistantStatus } from '../../src/utils/assistant-lifecycle';
@@ -115,14 +116,12 @@ export default withLambda(async (event) => {
                             eq(notifications.assistantId, id),
                             isNull(notifications.resolvedAt),
                         )).catch(() => {});
-                    await db.insert(notifications).values({
+                    await createNotification(db, 'assistant_reinstated', {
                         userId: ctx.userId,
-                        type: 'assistant_reinstated',
-                        title: `"${existing.name}" has been reinstated`,
-                        message: `"${existing.name}" is back in your active workspace.`,
+                        context: { assistant: { name: existing.name } },
                         metadata: { assistantId: id },
                         assistantId: id,
-                    }).catch(() => {});
+                    });
 
                     return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ok: true, lifecycleStatus: 'paused' }) };
                 }
@@ -193,14 +192,12 @@ export default withLambda(async (event) => {
                 // Issue #191: notify the user, with a link to the archived assistant's detail page
                 // (where the reinstate banner lives) and the deletion deadline spelled out.
                 const deletionDateLabel = scheduledDeletionAt.toISOString().slice(0, 10);
-                await db.insert(notifications).values({
+                await createNotification(db, 'assistant_archived', {
                     userId: ctx.userId,
-                    type: 'assistant_archived',
-                    title: `"${existing.name}" has been archived`,
-                    message: `"${existing.name}" has been archived and removed from your active workspace. You have until ${deletionDateLabel} (${ARCHIVE_GRACE_PERIOD_DAYS} days) to reinstate it, subject to your plan's assistant limit. After that date, this assistant and all of its associated data will be permanently deleted and cannot be recovered.`,
+                    context: { assistant: { name: existing.name }, archive: { deletion_date: deletionDateLabel, grace_days: ARCHIVE_GRACE_PERIOD_DAYS } },
                     metadata: { assistantId: id, scheduledDeletionAt: scheduledDeletionAt.toISOString() },
                     assistantId: id,
-                }).catch(() => {});
+                });
 
                 return {
                     statusCode: 200,

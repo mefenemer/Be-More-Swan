@@ -6,7 +6,8 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, lt, lte, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { systemConnections, scheduledPosts, notifications, users, auditLogs, userOrganisations } from '../../db/schema';
+import { systemConnections, scheduledPosts, users, auditLogs, userOrganisations } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { storeSecret, getSecret } from '../../src/utils/vault';
 import { sendEmail } from '../../src/utils/email';
 import { resolveActionNotifications, CONNECTION_RESTORED_TYPES } from '../../src/utils/notification-actions';
@@ -102,11 +103,8 @@ async function refreshToken(db: ReturnType<typeof getDb>, conn: {
             .where(eq(userOrganisations.organisationId, conn.organisationId)).limit(1);
 
         if (orgUser) {
-            await db.insert(notifications).values({
+            await createNotification(db, 'instagram_token_refresh_failed', {
                 userId: orgUser.id,
-                type: 'instagram_token_refresh_failed',
-                title: 'Instagram connection expired',
-                message: `Your Instagram account needs to be reconnected. Your scheduled posts will not be published until you reconnect.`,
                 metadata: { connectionId: conn.id, assistantId: conn.assistantId },
             });
             await sendEmail({

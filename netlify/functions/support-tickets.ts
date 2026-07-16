@@ -3,7 +3,8 @@ import { HandlerEvent } from '@netlify/functions';
 import { eq, desc } from 'drizzle-orm';
 import { Resend } from 'resend';
 import { getDb } from '../../db/client';
-import { users, supportTickets, notifications } from '../../db/schema';
+import { users, supportTickets } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { logAuditEvent } from '../../src/utils/audit';
 import { checkRateLimit } from '../../src/utils/rate-limit';
 import { checkEarlySupportTicket } from '../../src/utils/churn';
@@ -70,12 +71,9 @@ export default withLambda(async (event: HandlerEvent) => {
             }).returning();
 
             // FIXED: Removed 'referenceId' to match your strict Drizzle schema
-            await db.insert(notifications).values({
+            await createNotification(db, 'ticket_created', {
                 userId: userId,
-                title: `Ticket #${newTicket.id} Created`,
-                message: `Your support request "${newTicket.subject}" has been logged successfully.`,
-                type: 'ticket_created',
-                isRead: false
+                context: { ticket: { id: newTicket.id, subject: newTicket.subject } },
             });
 
             // Audit Log

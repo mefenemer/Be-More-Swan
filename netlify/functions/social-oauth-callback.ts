@@ -6,7 +6,8 @@
 import { Handler } from '@netlify/functions';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { systemConnections, notifications, auditLogs, users, userOrganisations } from '../../db/schema';
+import { systemConnections, auditLogs, users, userOrganisations } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { storeSecret, getSecret, deleteSecret } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
@@ -114,7 +115,7 @@ export default withLambda(async (event) => {
             await db.insert(systemConnections).values({ organisationId, userId, assistantId, serviceName: 'linkedin', connectionType: 'oauth', vaultRefKey: refKey, externalUserId: linkedinId, tokenExpiresAt, status: 'active', isActive: true, scopes });
         }
 
-        await db.insert(notifications).values({ userId, type: 'linkedin_connected', title: existing ? 'LinkedIn reconnected' : 'LinkedIn connected', message: 'LinkedIn connected successfully. Your assistant can now post on your behalf.', metadata: assistantId ? { assistantId } : null });
+        await createNotification(db, existing ? 'linkedin_reconnected' : 'linkedin_connected', { userId, metadata: assistantId ? { assistantId } : null });
         // Connection is live again — clear any open "reconnect" action items.
         await resolveActionNotifications(db, userId, CONNECTION_RESTORED_TYPES);
         await db.insert(auditLogs).values({ actionType: existing ? 'linkedin_reconnected' : 'linkedin_connected', resourceType: 'system_connections', resourceId: linkedinId, newState: { organisationId } });
@@ -178,7 +179,7 @@ export default withLambda(async (event) => {
             await db.insert(systemConnections).values({ organisationId, userId, assistantId, serviceName: 'x', connectionType: 'oauth', vaultRefKey: refKey, externalUserId: xUsername || xUserId, tokenExpiresAt, status: 'active', isActive: true, scopes });
         }
 
-        await db.insert(notifications).values({ userId, type: 'x_connected', title: existing ? 'X reconnected' : 'X connected', message: 'X (Twitter) connected successfully. Your assistant can now post on your behalf.', metadata: assistantId ? { assistantId } : null });
+        await createNotification(db, existing ? 'x_reconnected' : 'x_connected', { userId, metadata: assistantId ? { assistantId } : null });
         await db.insert(auditLogs).values({ actionType: existing ? 'x_reconnected' : 'x_connected', resourceType: 'system_connections', resourceId: xUserId, newState: { organisationId, username: xUsername } });
 
         return { statusCode: 302, headers: { Location: `/workspace.html?oauth_success=x${assistantId ? `&assistantId=${assistantId}` : ''}` }, body: '' };

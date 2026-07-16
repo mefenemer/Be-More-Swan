@@ -9,8 +9,9 @@ import { getDb } from '../../db/client';
 import {
     contentGenerationJobs, aiBlueprints, aiAssistants,
     scheduledPosts, scheduledPostAssets, contentAssets, mediaGenerationJobs,
-    notifications, auditLogs, organisations, systemConnections,
+    auditLogs, organisations, systemConnections,
 } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmark';
 import { creditLine } from '../../src/utils/pexels';
@@ -473,36 +474,24 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             if (autoPublished) {
                 // Nothing to review — it's already scheduled. Point at the calendar, where the user
                 // can still change or cancel it before its publish date arrives.
-                await db.insert(notifications).values({
+                await createNotification(db, 'ai_auto_publish_post', {
                     userId: job.user_id,
-                    type: 'ai_auto_publish',
-                    title: `${assistantLabel}: ${platformLabel} post scheduled automatically`,
-                    message: `Autopilot scheduled a ${platformLabel} post without review. Open the calendar to change or cancel it before it goes live.`,
+                    context: { assistant: { name: assistantLabel }, platform: { label: platformLabel } },
                     metadata: { jobId: job.job_id, postId: post.id, reason: 'auto_publish', assistantId: job.assistant_id },
                 });
             } else if (mediaExhaustedReason) {
                 // The draft is ready but has no media. Send ONE actionable notice instead of the generic
                 // "draft ready", flagging the AI-credit case explicitly so the fix (top up) is obvious.
                 const outOfCredits = mediaExhaustedReason === 'ai_credits_exhausted';
-                await db.insert(notifications).values({
+                await createNotification(db, outOfCredits ? 'draft_ready_no_credits' : 'draft_ready_no_media', {
                     userId: job.user_id,
-                    type: 'ai_review',
-                    title: outOfCredits
-                        ? `${assistantLabel}: draft ready — out of AI credits`
-                        : `${assistantLabel}: draft ready — media needed`,
-                    message: outOfCredits
-                        ? `Your ${platformLabel} post draft is ready to review, but we couldn't generate an AI image — your AI credit balance is empty. Top up credits or add media in Review.`
-                        : `Your ${platformLabel} post draft is ready to review, but we couldn't source any media for it. Check the assistant's Media Sources settings or add media in Review.`,
+                    context: { assistant: { name: assistantLabel }, platform: { label: platformLabel } },
                     metadata: { jobId: job.job_id, postId: post.id, reason: mediaExhaustedReason, assistantId: job.assistant_id },
                 });
             } else {
-                await db.insert(notifications).values({
+                await createNotification(db, job.trigger_type === 'on_demand' ? 'post_draft_ready_on_demand' : 'post_draft_ready', {
                     userId: job.user_id,
-                    type: 'post_draft_ready',
-                    title: `${assistantLabel}: ${platformLabel} post draft ready`,
-                    message: job.trigger_type === 'on_demand'
-                        ? 'Your on-demand post draft is ready to review.'
-                        : `Your ${platformLabel} post draft is ready to review.`,
+                    context: { assistant: { name: assistantLabel }, platform: { label: platformLabel } },
                     metadata: { jobId: job.job_id, postId: post.id, assistantId: job.assistant_id },
                 });
             }
@@ -517,11 +506,8 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             await db.execute(
                 `UPDATE content_generation_jobs SET status = 'failed', error_message = '${errorMessage.replace(/'/g, "''")}', updated_at = now() WHERE id = ${job.id}`
             );
-            await db.insert(notifications).values({
+            await createNotification(db, 'post_generation_failed', {
                 userId: job.user_id,
-                type: 'post_generation_failed',
-                title: 'Post generation failed',
-                message: 'We were unable to generate your post. Please try again or contact support if the issue persists.',
                 metadata: { jobId: job.job_id, error: errorMessage, assistantId: job.assistant_id },
             });
             await db.insert(auditLogs).values({ actionType: 'post_generation_failed', resourceType: 'content_generation_jobs', resourceId: job.job_id, userId: job.user_id, newState: { errorMessage, attempt } });

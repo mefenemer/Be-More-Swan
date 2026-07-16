@@ -27,7 +27,7 @@ import { getDb, withUpdatedAt } from '../../db/client';
 import {
     users, userProfiles, plans, aiAssistants,
     supportTickets, masterAssistants, waitlist,
-    leads, auditLogs, notifications, aiModelConfig,
+    leads, auditLogs, aiModelConfig,
     gdprErasureLog, adminAuditLog, aiUsageLog, aiModelPricing,
     organisations, billingReconciliationLog, masterPlans, platformConfig, featureFlags,
     billingOverrides, payments, assistantVersions,
@@ -36,6 +36,7 @@ import {
     rewardAudits, userOrganisations,
     leadReplies, contactTasks, issueReports,
 } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { resolveEnvironment, runWithEnvironment } from '../../src/utils/env-context';
 import { sendMagicLinkEmail } from '../../src/utils/email';
@@ -1445,13 +1446,11 @@ export default withLambda(async (event) => {
                 const otherSuperAdmins = await db.select({ id: users.id }).from(users)
                     .where(and(eq(users.role, 'super_admin'), sql`${users.id} != ${adminId}`));
                 for (const sa of otherSuperAdmins) {
-                    await db.insert(notifications).values({
+                    await createNotification(db, 'super_admin_promotion_approval', {
                         userId: sa.id,
-                        type: 'system',
-                        title: '🔐 Super Admin Promotion Requires Your Approval',
-                        message: `A request to promote ${targetUser.email} to super_admin has been initiated. Your approval is required within 24 hours. Request ID: ${requestId}`,
+                        context: { promotion: { target_email: targetUser.email, request_id: requestId } },
                         metadata: { requestId, targetEmail: targetUser.email, initiatorId: adminId, expiresAt },
-                    }).catch(() => {});
+                    });
                 }
 
                 await insertAdminAuditLog({

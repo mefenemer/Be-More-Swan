@@ -7,6 +7,7 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
+import { createNotification } from '../../src/utils/notify';
 import { organisations, systemConnections, aiAssistants, notifications, onboardingDrafts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -107,12 +108,7 @@ export default withLambda(async (event) => {
             // Replace the onboarding prompts with a single "Setup complete" notification.
             try {
                 await clearOnboardingNudges(db, ctx.userId);
-                await db.insert(notifications).values({
-                    userId: ctx.userId,
-                    type: 'setup_complete',
-                    title: 'Setup complete 🎉',
-                    message: 'Your business profile and assistant are ready — your assistant is now working for you.',
-                });
+                await createNotification(db, 'setup_complete', { userId: ctx.userId });
             } catch (notifErr) {
                 console.warn('[get-onboarding-progress] setup-complete notification swap failed (non-blocking):', notifErr);
             }

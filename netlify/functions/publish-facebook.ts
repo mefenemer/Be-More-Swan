@@ -17,7 +17,8 @@
 
 import { Handler } from '@netlify/functions';
 import { getDb } from '../../db/client';
-import { scheduledPosts, publishCronLog, notifications } from '../../db/schema';
+import { scheduledPosts, publishCronLog } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { resolvePostImage, publishFacebook, resolveFacebookPageCredentials, type DriverResult } from '../../src/utils/social-publish';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -101,11 +102,9 @@ export default withLambda(async () => {
             );
             await recordPostedAssets(db, { orgId: post.organisation_id, userId: post.user_id, scheduledPostId: post.id })
                 .catch(e => console.warn(`[publish-facebook] recordPostedAssets failed for post ${post.id}:`, e?.message || e));
-            await db.insert(notifications).values({
+            await createNotification(db, 'post_published', {
                 userId: post.user_id,
-                type: 'post_published',
-                title: 'Post published to Facebook',
-                message: 'Your post has been published to Facebook.',
+                context: { platform: { label: 'Facebook' } },
                 metadata: { postId: post.id, platform: 'facebook', platformPostId: result.id, assistantId: post.assistant_id },
             });
             succeeded++;
@@ -130,11 +129,9 @@ async function handleFailure(db: ReturnType<typeof getDb>, post: PostRow, reason
         await db.execute(
             `UPDATE scheduled_posts SET status = 'failed', failure_reason = '${esc(JSON.stringify(reason))}', attempt_count = ${attempt}, updated_at = now() WHERE id = ${post.id}`
         );
-        await db.insert(notifications).values({
+        await createNotification(db, 'post_publish_failed', {
             userId: post.user_id,
-            type: 'post_publish_failed',
-            title: 'Post failed to publish',
-            message: `Publishing to Facebook failed: ${reason.errorMessage}`,
+            context: { platform: { label: 'Facebook' }, failure: { reason: reason.errorMessage } },
             metadata: { postId: post.id, platform: 'facebook', reason, assistantId: post.assistant_id },
         });
     } else {

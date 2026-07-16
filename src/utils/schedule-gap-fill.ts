@@ -12,6 +12,7 @@ import { and, eq, gte, lte, desc, sql, inArray, isNull, ne } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import type { getDb } from '../../db/client';
 import { aiBlueprints, scheduledPosts, contentGenerationJobs, contentAssets, notifications } from '../../db/schema';
+import { createNotification } from './notify';
 import { resolvePostingSchedule, computeScheduleSlots } from '../config/posting-cadence';
 import { assembleBlueprint } from './blueprint';
 import { resolveAutonomousDraftPlatforms, type AutonomousDraftPlatform } from './publish-policy';
@@ -219,11 +220,9 @@ async function notifyEmptyLibrarySkip(db: Db, assistant: GapFillAssistant): Prom
         .limit(1);
     if (recent) return;
 
-    await db.insert(notifications).values({
+    await createNotification(db, 'content_library_empty', {
         userId: assistant.userId,
-        type: 'content_library_empty',
-        title: `${assistant.name}: add media to keep posts flowing`,
-        message: `${assistant.name} skipped its scheduled drafts because My Content has no available media and the Empty-Library Draft Fallback is turned off. Upload new media, or switch the fallback on so it can draft with AI or stock imagery for you to review.`,
+        context: { assistant: { name: assistant.name } },
         metadata: { assistantId: assistant.id, reason: 'empty_library_fallback_off' },
     });
 }

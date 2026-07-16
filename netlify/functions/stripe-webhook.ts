@@ -3,6 +3,7 @@ import Stripe from 'stripe';
 import { eq, and, inArray, desc, sql } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
 import { payments, plans, aiAssistants, onboardingDrafts, notifications, users, masterPlans, invoices, processedWebhookEvents, userReferrals, platformConfig, stripeDisputes, userOrganisations, userProfiles } from '../../db/schema';
+import { createNotification, createNotifications } from '../../src/utils/notify';
 import { sendEmail, buildAnnualRenewalEmail, buildDunningEmail } from '../../src/utils/email';
 import { resolveActionNotifications, PAYMENT_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { recordCardFingerprint } from '../../src/utils/billing-fingerprint';
@@ -158,14 +159,11 @@ export default withLambda(async (event) => {
             stripePaymentIntentId: typeof session.payment_intent === 'string' ? session.payment_intent : null,
         });
         if (sessInv) {
-            await db.insert(notifications).values({
+            await createNotification(db, 'invoice_ready', {
                 userId: userIdInt,
-                type: 'invoice_ready',
-                title: `Your invoice for ${planName} is ready`,
-                message: `Invoice ${sessInv.invoiceNumber} has been generated for your ${planName} subscription. View it in your Invoice History.`,
-                isRead: false,
+                context: { plan: { name: planName }, invoice: { number: sessInv.invoiceNumber } },
                 metadata: { invoiceId: sessInv.id, invoiceNumber: sessInv.invoiceNumber, action: 'view_invoices' },
-            }).catch(() => {});
+            });
         }
 
         // US-ONB-2.2.1: reset welcome flag + persistent welcome notification (AC15/AC16)
@@ -173,14 +171,10 @@ export default withLambda(async (event) => {
             .set({ firstLoginWelcomeSeen: false, updatedAt: new Date() })
             .where(eq(userProfiles.userId, userIdInt))
             .catch(() => {});
-        await db.insert(notifications).values({
+        await createNotification(db, 'welcome_paid', {
             userId: userIdInt,
-            type: 'welcome',
-            title: 'Welcome to Be More Swan!',
-            message: 'Your workspace is ready. Open the Setup Wizard to build your AI assistant and go live.',
-            isRead: false,
             metadata: { action: 'open_wizard', ctaLabel: 'Open Setup Wizard' },
-        }).catch(() => {});
+        });
 
         // Referral Program Expansion: earn a referral TOKEN (not an instant £10 credit).
         // The token matures after the 14-day refund window and is then spendable in the
@@ -197,12 +191,8 @@ export default withLambda(async (event) => {
                     .set({ status: 'qualified', qualifiedAt: new Date() })
                     .where(eq(userReferrals.id, pendingReferral.id));
 
-                await db.insert(notifications).values({
+                await createNotification(db, 'referral_reward', {
                     userId: pendingReferral.referrerId,
-                    type: 'referral_reward',
-                    title: '🎉 Referral Token Earned',
-                    message: 'A friend you referred just made their first payment — you\'ve earned a referral token! It unlocks after their 14-day refund window. Save up 5 for a free assistant, or redeem 1 for £10 credit.',
-                    isRead: false,
                     metadata: { referralId: pendingReferral.id },
                 });
             }
@@ -337,38 +327,25 @@ export default withLambda(async (event) => {
         // ── Notifications ─────────────────────────────────────────
         // 1. Invoice ready notification
         if (inv) {
-            await db.insert(notifications).values({
+            await createNotification(db, 'invoice_ready', {
                 userId: userIdInt,
-                type: 'invoice_ready',
-                title: `Your invoice for ${planName} is ready`,
-                message: `Invoice ${inv.invoiceNumber} has been generated for your ${planName} subscription. View it in your Invoice History.`,
-                isRead: false,
+                context: { plan: { name: planName }, invoice: { number: inv.invoiceNumber } },
                 metadata: { invoiceId: inv.id, invoiceNumber: inv.invoiceNumber, action: 'view_invoices' },
             });
         }
 
         // 2. Onboarding nudge
-        await db.insert(notifications).values({
-            userId: userIdInt,
-            type: 'billing',
-            title: 'Payment Successful — Set Up Your Assistant',
-            message: 'Your subscription is active. Click "Resume Setup" on your dashboard to build your Digital Assistant now.',
-            isRead: false,
-        });
+        await createNotification(db, 'payment_successful_setup', { userId: userIdInt });
 
         // 3. US-ONB-2.2.1: Reset firstLoginWelcomeSeen + insert persistent welcome notification (AC15/AC16)
         await db.update(userProfiles)
             .set({ firstLoginWelcomeSeen: false, updatedAt: new Date() })
             .where(eq(userProfiles.userId, userIdInt))
             .catch(() => {});
-        await db.insert(notifications).values({
+        await createNotification(db, 'welcome_paid', {
             userId: userIdInt,
-            type: 'welcome',
-            title: 'Welcome to Be More Swan!',
-            message: 'Your workspace is ready. Open the Setup Wizard to build your AI assistant and go live.',
-            isRead: false,
             metadata: { action: 'open_wizard', ctaLabel: 'Open Setup Wizard' },
-        }).catch(() => {});
+        });
 
         // ── Referral Program Expansion: earn a referral TOKEN ────────
         // The referred friend's first payment qualifies the referral. We no longer apply
@@ -386,12 +363,8 @@ export default withLambda(async (event) => {
                     .set({ status: 'qualified', qualifiedAt: new Date() })
                     .where(eq(userReferrals.id, pendingReferral.id));
 
-                await db.insert(notifications).values({
+                await createNotification(db, 'referral_reward', {
                     userId: pendingReferral.referrerId,
-                    type: 'referral_reward',
-                    title: '🎉 Referral Token Earned',
-                    message: 'A friend you referred just made their first payment — you\'ve earned a referral token! It unlocks after their 14-day refund window. Save up 5 for a free assistant, or redeem 1 for £10 credit.',
-                    isRead: false,
                     metadata: { referralId: pendingReferral.id },
                 });
             }
@@ -431,12 +404,9 @@ export default withLambda(async (event) => {
             const alreadySent = existing.some(n => (n as any).metadata?.invoiceId === invoice.id);
 
             if (!alreadySent) {
-                await db.insert(notifications).values({
+                await createNotification(db, 'billing_renewal_due', {
                     userId,
-                    type: 'billing_renewal_due',
-                    title: 'Subscription Renewal Due Soon',
-                    message: `Your subscription will renew on ${renewalDay}${amount ? ` for ${amount}` : ''}. Make sure your payment details are up to date.`,
-                    isRead: false,
+                    context: { billing: { renewal_day: renewalDay, amount_suffix: amount ? ` for ${amount}` : '' } },
                     metadata: {
                         invoiceId: invoice.id,
                         customerId: invoice.customer,
@@ -571,12 +541,9 @@ export default withLambda(async (event) => {
 
             // ── Invoice ready notification ────────────────────────
             if (renewInv) {
-                await db.insert(notifications).values({
+                await createNotification(db, 'invoice_ready_renewal', {
                     userId,
-                    type: 'invoice_ready',
-                    title: `Your invoice for ${renewPlanRecord?.planName ?? 'your subscription'} is ready`,
-                    message: `Invoice ${renewInv.invoiceNumber} has been generated. View it in your Invoice History.`,
-                    isRead: false,
+                    context: { plan: { name: renewPlanRecord?.planName ?? 'your subscription' }, invoice: { number: renewInv.invoiceNumber } },
                     metadata: { invoiceId: renewInv.id, invoiceNumber: renewInv.invoiceNumber, action: 'view_invoices' },
                 });
             }
@@ -610,12 +577,12 @@ export default withLambda(async (event) => {
 
             // In-app notification: Subscription renewed
             if (billingReason === 'subscription_cycle') {
-                await db.insert(notifications).values({
+                await createNotification(db, 'billing_renewed', {
                     userId,
-                    type: 'billing_renewed',
-                    title: 'Subscription Renewed',
-                    message: `Your subscription has been renewed successfully${amount ? ` — ${amount} charged` : ''}${periodEnd ? `. Active until ${periodEnd}.` : '.'}`,
-                    isRead: false,
+                    context: { billing: {
+                        charged_suffix: amount ? ` — ${amount} charged` : '',
+                        until_suffix: periodEnd ? `. Active until ${periodEnd}.` : '.',
+                    } },
                     metadata: {
                         invoiceId: invoice.id,
                         amountPaid: invoice.amount_paid,
@@ -624,14 +591,9 @@ export default withLambda(async (event) => {
                 });
             } else {
                 // Manual payment / other invoice paid (covers grace-period recovery payments)
-                await db.insert(notifications).values({
+                await createNotification(db, maybePastDuePlan ? 'billing_payment_received_restored' : 'billing_payment_received', {
                     userId,
-                    type: 'billing_payment_received',
-                    title: maybePastDuePlan ? 'Payment Received — Assistants Restored' : 'Payment Received',
-                    message: maybePastDuePlan
-                        ? `A payment of ${amount || 'your invoice'} has been received. Your account is back to active and your assistants have been re-enabled.`
-                        : `A payment of ${amount || 'your invoice'} has been received and your account is up to date.`,
-                    isRead: false,
+                    context: { billing: { amount: amount || 'your invoice' } },
                     metadata: {
                         invoiceId: invoice.id,
                         amountPaid: invoice.amount_paid,
@@ -690,12 +652,9 @@ export default withLambda(async (event) => {
                     ? `Your assistants will continue running for 7 days while we retry. `
                     : nextTry ? `We will try again on ${nextTry}. ` : '';
 
-            await db.insert(notifications).values({
+            await createNotification(db, attemptCount >= 3 ? 'billing_payment_failed_paused' : 'billing_payment_failed', {
                 userId,
-                type: 'billing_payment_failed',
-                title: `Payment Failed${attemptCount >= 3 ? ' — Assistants Paused' : ''}`,
-                message: `We were unable to charge ${amount || 'your account'} for your subscription. ${urgency}Update your payment details in the Billing section.`,
-                isRead: false,
+                context: { billing: { amount: amount || 'your account', urgency } },
                 metadata: {
                     invoiceId: invoice.id,
                     amountDue: invoice.amount_due,
@@ -783,14 +742,11 @@ export default withLambda(async (event) => {
 
             // Notify the affected user (if found)
             if (affectedUserId) {
-                await db.insert(notifications).values({
+                await createNotification(db, 'payment_dispute_opened', {
                     userId: affectedUserId,
-                    type:   'system',
-                    title:  '⚠️ Payment Dispute Opened',
-                    message: `A dispute of ${amountGbp} has been opened on your account. Our team will be in touch. Evidence deadline: ${deadline}.`,
-                    isRead: false,
+                    context: { billing: { amount: amountGbp }, dispute: { deadline } },
                     metadata: { disputeId: dispute.id, reason: dispute.reason, chargeId },
-                }).catch(() => {});
+                });
             }
 
             // Persist dispute record to DB for admin portal disputes tab
@@ -824,17 +780,16 @@ export default withLambda(async (event) => {
                 .from(users)
                 .where(eq(users.role, 'super_admin'));
 
-            // BUG-P1-1: Non-critical (in-app pings) — log errors but don't return 5xx
-            for (const admin of superAdmins) {
-                await db.insert(notifications).values({
-                    userId:  admin.id,
-                    type:    'system',
-                    title:   `🚨 Dispute Opened — ${amountGbp}`,
-                    message: `Dispute ID: ${dispute.id}. Reason: ${dispute.reason || 'unknown'}. Affected user ID: ${affectedUserId ?? 'unknown'}. Evidence deadline: ${deadline}.`,
-                    isRead: false,
-                    metadata: { disputeId: dispute.id, reason: dispute.reason, amountGbp, chargeId, affectedUserId, deadline },
-                }).catch(err => console.error('[stripe-webhook] Super-admin dispute notification failed:', { adminId: admin.id, disputeId: dispute.id, err: (err as any)?.message }));
-            }
+            // BUG-P1-1: Non-critical (in-app pings) — createNotifications logs & swallows internally.
+            await createNotifications(db, 'admin_dispute_opened', superAdmins.map(a => a.id), {
+                context: { billing: { amount: amountGbp }, dispute: {
+                    id: dispute.id,
+                    reason: dispute.reason || 'unknown',
+                    user_id: affectedUserId ?? 'unknown',
+                    deadline,
+                } },
+                metadata: { disputeId: dispute.id, reason: dispute.reason, amountGbp, chargeId, affectedUserId, deadline },
+            });
         } catch (dispErr) {
             console.warn('[stripe-webhook] dispute.created handling error (non-blocking):', dispErr);
         }
@@ -880,13 +835,10 @@ export default withLambda(async (event) => {
                                 .catch(err => console.warn('[stripe-webhook] schedule release after downgrade failed (non-blocking):', (err as any)?.message));
                         }
 
-                        await db.insert(notifications).values({
+                        await createNotification(db, 'downgrade_complete', {
                             userId,
-                            type: 'downgrade_complete',
-                            title: `Downgrade to ${newMasterPlan.name} complete`,
-                            message: `Your plan has switched to ${newMasterPlan.name}. Your new limits are now active.`,
-                            isRead: false,
-                        }).catch(() => {});
+                            context: { plan: { name: newMasterPlan.name } },
+                        });
                     }
                 }
 
@@ -909,12 +861,12 @@ export default withLambda(async (event) => {
                             .set({ isActive: false, provisioningStatus: 'paused_limit', updatedAt: new Date() })
                             .where(and(eq(aiAssistants.userId, userId), inArray(aiAssistants.id, pauseIds)));
 
-                        await db.insert(notifications).values({
+                        await createNotification(db, 'assistants_paused_downgrade', {
                             userId,
-                            type: 'assistants_paused_downgrade',
-                            title: 'Assistants Paused — Plan Limit Reached',
-                            message: `Your plan change reduced your assistant limit to ${newMasterPlan.assistantLimit}. The following assistant${excess > 1 ? 's have' : ' has'} been paused: ${pausedNames}. You can delete or swap assistants from your workspace.`,
-                            isRead: false,
+                            context: { plan: { assistant_limit: newMasterPlan.assistantLimit }, paused: {
+                                assistant_phrase: excess > 1 ? 'assistants have' : 'assistant has',
+                                names: pausedNames,
+                            } },
                             metadata: { pausedIds: pauseIds, newLimit: newMasterPlan.assistantLimit },
                         });
                     }
@@ -953,12 +905,8 @@ export default withLambda(async (event) => {
                 .set(withUpdatedAt({ isActive: false, provisioningStatus: 'paused_payment' as const }))
                 .where(and(eq(aiAssistants.userId, userId), eq(aiAssistants.isActive, true)));
 
-            await db.insert(notifications).values({
+            await createNotification(db, 'billing_cancelled', {
                 userId,
-                type: 'billing_cancelled',
-                title: 'Subscription Cancelled — Assistants Paused',
-                message: 'Your subscription has been cancelled and your Digital Assistants have been paused. You can re-subscribe at any time from the Billing area to restore full access.',
-                isRead: false,
                 metadata: { subscriptionId: sub.id },
             });
         }

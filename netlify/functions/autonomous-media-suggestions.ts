@@ -18,8 +18,9 @@ import { and, eq, gte, lte, sql, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     aiAssistants, masterAssistants, scheduledPosts, scheduledPostAssets,
-    mediaGenerationJobs, notifications, organisations,
+    mediaGenerationJobs, organisations,
 } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { generateAndPersistImage } from '../../src/lib/media-persist';
 import { holdAutonomousCredits, settleHold, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
@@ -257,33 +258,34 @@ export default withLambda(async (event) => {
 
     // US8 in-app alert: one summary notification per user ("drafted N new posts for your review").
     for (const [uid, n] of draftedByUser) {
-        await db.insert(notifications).values({
-            userId: uid, type: 'ai_review',
-            title: 'New AI drafts ready for review',
-            message: `Your AI assistant drafted ${n} new post${n === 1 ? '' : 's'} for your review.`,
+        await createNotification(db, 'ai_review_batch', {
+            userId: uid,
+            context: { batch: { post_count: `${n} new post${n === 1 ? '' : 's'}` } },
             metadata: { count: n },
-        }).catch(() => {});
+        });
     }
 
     // Auto-publish alert: these skipped the review queue, so tell the user what was scheduled
     // on their behalf rather than asking them to review it.
     for (const [uid, n] of autoScheduledByUser) {
-        await db.insert(notifications).values({
-            userId: uid, type: 'ai_auto_publish',
-            title: 'New posts scheduled automatically',
-            message: `Your AI assistant scheduled ${n} new post${n === 1 ? '' : 's'} automatically. Open the calendar to change or cancel ${n === 1 ? 'it' : 'them'} before ${n === 1 ? 'it goes' : 'they go'} live.`,
+        await createNotification(db, 'ai_auto_publish_batch', {
+            userId: uid,
+            context: { batch: {
+                post_count: `${n} new post${n === 1 ? '' : 's'}`,
+                them: n === 1 ? 'it' : 'them',
+                they_go: n === 1 ? 'it goes' : 'they go',
+            } },
             metadata: { count: n, reason: 'auto_publish' },
-        }).catch(() => {});
+        });
     }
 
     // AC2.3 in-app alert: assistants whose enabled media sources all came back empty.
     for (const [uid, n] of exhaustedByUser) {
-        await db.insert(notifications).values({
-            userId: uid, type: 'ai_review',
-            title: 'Media needed for auto-drafts',
-            message: `Your AI assistant couldn't source media for ${n} planned post${n === 1 ? '' : 's'}. Check the assistant's Media Sources settings or add to your content library.`,
+        await createNotification(db, 'ai_review_media_needed', {
+            userId: uid,
+            context: { batch: { post_count: `${n} planned post${n === 1 ? '' : 's'}` } },
             metadata: { count: n, reason: 'media_exhausted' },
-        }).catch(() => {});
+        });
     }
 
     return {

@@ -10,8 +10,9 @@ import type { Handler } from '@netlify/functions';
 import { and, eq, gte, lt, sql, desc } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
 import {
-    agentRunEvents, taskRuns, aiAssistants, biasIncidents, biasSamplingReports, notifications, users,
+    agentRunEvents, taskRuns, aiAssistants, biasIncidents, biasSamplingReports, users,
 } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { sendEmail } from '../../src/utils/email';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -141,13 +142,11 @@ const handler = async () => {
                 .limit(1);
 
             if (asst?.userId) {
-                await db.insert(notifications).values({
+                await createNotification(db, 'bias_flag_suspended', {
                     userId: asst.userId,
-                    type:   'system',
-                    title:  `Bias flag raised — ${asst.name} suspended`,
-                    message: `A ${anomaly.metric} distributional skew of ${anomaly.skewPct}% was detected in your assistant "${asst.name}". It has been suspended pending investigation (Incident #${incident.id}). Please review the bias audit report in your admin dashboard.`,
+                    context: { assistant: { name: asst.name }, bias: { metric: anomaly.metric, skew_pct: anomaly.skewPct, incident_id: incident.id } },
                     metadata: { incidentId: incident.id, metric: anomaly.metric, skewPct: anomaly.skewPct },
-                }).catch(() => {});
+                });
             }
         }
     }

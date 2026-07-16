@@ -12,7 +12,8 @@ import { Handler } from '@netlify/functions';
 import { and, desc, eq } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { getDb } from '../../db/client';
-import { aiBlueprints, auditLogs, contentGenerationJobs, notifications, scheduledPosts } from '../../db/schema';
+import { aiBlueprints, auditLogs, contentGenerationJobs, scheduledPosts } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -110,13 +111,10 @@ export default withLambda(async (event) => {
         newState: { feedback, jobId, requestedAt: now.toISOString() },
     }).catch(() => {});
 
-    await db.insert(notifications).values({
+    await createNotification(db, 'post_revision_queued', {
         userId,
-        type: 'post_generation_queued',
-        title: 'Revising your post…',
-        message: 'Your feedback was sent to the assistant. The revised draft will be ready to review shortly.',
         metadata: { jobId, originalPostId: postId, assistantId: post.assistantId },
-    }).catch(() => {});
+    });
 
     return {
         statusCode: 202,

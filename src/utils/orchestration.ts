@@ -26,6 +26,7 @@ import {
     aiAssistants,
     notifications,
 } from '../../db/schema';
+import { createNotification } from './notify';
 import { getActiveTierKeyByOrg } from './plan-features';
 
 type Db = ReturnType<typeof getDb>;
@@ -126,11 +127,9 @@ export async function fireOrchestrations(db: Db, opts: FireOrchestrationsOpts): 
                             ))
                             .limit(1);
                         if (!seen) {
-                            await db.insert(notifications).values({
+                            await createNotification(db, 'orchestration_limit_reached', {
                                 userId,
-                                type:    'orchestration_limit_reached',
-                                title:   'Daily hand-off limit reached',
-                                message: `Your assistants have reached today's cross-assistant hand-off limit (${cap}). Further hand-offs are paused until tomorrow.`,
+                                context: { handoff: { cap } },
                                 metadata: { cap, tierKey, date: dayStart.toISOString().slice(0, 10) },
                             });
                         }
@@ -176,11 +175,9 @@ export async function fireOrchestrations(db: Db, opts: FireOrchestrationsOpts): 
             // 6. Tell the user a hand-off happened (non-critical).
             const targetName = nameById.get(link.targetAssistantId) ?? 'another assistant';
             try {
-                await db.insert(notifications).values({
+                await createNotification(db, 'orchestration_handoff', {
                     userId,
-                    type:    'orchestration_handoff',
-                    title:   `${sourceName} handed off to ${targetName}`,
-                    message: `${targetName} is now working on: ${link.targetAction}.`,
+                    context: { handoff: { source_name: sourceName, target_name: targetName, target_action: link.targetAction } },
                     metadata: { linkId: link.id, runId: run.id, sourcePostId, targetJobId: jobId },
                 });
             } catch { /* notification failure must not abort the remaining hand-offs */ }

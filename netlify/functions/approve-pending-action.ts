@@ -10,7 +10,8 @@ import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { pendingActions, notifications } from '../../db/schema';
+import { pendingActions } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -72,13 +73,11 @@ export default withLambda(async (event) => {
         .where(eq(pendingActions.id, pendingActionId));
 
     if (decision === 'rejected') {
-        await db.insert(notifications).values({
+        await createNotification(db, 'action_rejected', {
             userId,
-            type: 'action_rejected',
-            title: `Action rejected: ${action.actionType}`,
-            message: `You rejected the pending ${action.actionType} action for run #${action.taskRunId}. Reason: ${rejectionReason}`,
+            context: { action: { type: action.actionType, rejection_reason: rejectionReason }, run: { id: action.taskRunId } },
             metadata: { pendingActionId, assistantId: action.assistantId },
-        }).catch(() => {});
+        });
     }
 
     return {

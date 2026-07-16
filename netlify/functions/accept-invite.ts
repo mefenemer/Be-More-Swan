@@ -12,7 +12,8 @@ import * as crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, userOrganisations, organisations, notifications } from '../../db/schema';
+import { users, userOrganisations, organisations } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET!;
@@ -128,13 +129,11 @@ export default withLambda(async (event) => {
         .from(organisations).where(eq(organisations.id, orgId)).limit(1);
     const orgName = org?.name || 'your new workspace';
 
-    await db.insert(notifications).values({
-        userId:  user.id,
-        type:    'org_joined',
-        title:   `Welcome to ${orgName}!`,
-        message: `You've successfully joined ${orgName} as a ${assignedRole}.`,
+    await createNotification(db, 'org_joined', {
+        userId: user.id,
+        context: { org: { name: orgName, role: assignedRole } },
         metadata: { orgId, role: assignedRole },
-    }).catch(() => {});
+    });
 
     // Issue a session JWT + redirect to workspace
     const token = jwt.sign({ userId: user.id, activeOrganisationId: orgId }, jwtSecret, { expiresIn: '7d' });

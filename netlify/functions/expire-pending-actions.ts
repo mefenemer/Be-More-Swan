@@ -5,7 +5,8 @@
 import type { Handler } from '@netlify/functions';
 import { and, eq, lt } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { pendingActions, notifications } from '../../db/schema';
+import { pendingActions } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 async function runExpiry() {
@@ -17,16 +18,14 @@ async function runExpiry() {
         .where(and(eq(pendingActions.status, 'pending'), lt(pendingActions.expiresAt, now)))
         .returning({ id: pendingActions.id, userId: pendingActions.userId, actionType: pendingActions.actionType, taskRunId: pendingActions.taskRunId, assistantId: pendingActions.assistantId });
 
-    if (expired.length > 0) {
-        // Notify each deployer whose actions expired
-        const notifValues = expired.map(a => ({
+    // Notify each deployer whose actions expired. Per-row copy differs (actionType/runId), so
+    // one createNotification per expired action rather than a single fan-out.
+    for (const a of expired) {
+        await createNotification(db, 'action_expired', {
             userId: a.userId!,
-            type: 'action_expired' as const,
-            title: `Pending action expired: ${a.actionType}`,
-            message: `The ${a.actionType} action for run #${a.taskRunId} was not approved within 24 hours and has been automatically cancelled.`,
+            context: { action: { type: a.actionType }, run: { id: a.taskRunId } },
             metadata: { pendingActionId: a.id, assistantId: a.assistantId },
-        }));
-        await db.insert(notifications).values(notifValues).catch(() => {});
+        });
     }
 
     console.log(`[expire-pending-actions] Expired ${expired.length} pending action(s).`);

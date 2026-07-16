@@ -12,7 +12,8 @@ import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { eq, and, gte, count, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { promptProbeAttempts, users, notifications } from '../../db/schema';
+import { promptProbeAttempts, users } from '../../db/schema';
+import { createNotifications } from '../../src/utils/notify';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -78,15 +79,9 @@ export default withLambda(async (event) => {
             .where(inArray(users.role as any, ['super_admin', 'platform_admin']));
 
         if (admins.length > 0) {
-            await db.insert(notifications).values(
-                admins.map(a => ({
-                    userId: a.id,
-                    type: 'security',
-                    title: `Prompt extraction probe flagged: ${displayName}`,
-                    message: `User ${displayName} has triggered ${total} probe attempt(s) in the last 24 hours. Review account and consider rate-limiting or suspending access.`,
-                    isRead: false,
-                }))
-            ).catch(() => {});
+            await createNotifications(db, 'prompt_probe_flagged', admins.map(a => a.id), {
+                context: { probe: { user_label: displayName, attempt_count: total } },
+            });
         }
     }
 

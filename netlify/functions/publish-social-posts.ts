@@ -12,7 +12,8 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts, systemConnections, rateLimitStates, publishCronLog, notifications } from '../../db/schema';
+import { scheduledPosts, systemConnections, rateLimitStates, publishCronLog } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { getSecret } from '../../src/utils/vault';
 import { resolvePostImage, refreshXToken, publishX, publishLinkedIn, type DriverResult } from '../../src/utils/social-publish';
 import { recordPostedAssets } from '../../src/utils/pexels';
@@ -125,11 +126,9 @@ export default withLambda(async () => {
             // covers autonomous posts that bypass manual approval). Never blocks publish success.
             await recordPostedAssets(db, { orgId: post.organisation_id, userId: post.user_id, scheduledPostId: post.id })
                 .catch(e => console.warn(`[publish-social-posts] recordPostedAssets failed for post ${post.id}:`, e?.message || e));
-            await db.insert(notifications).values({
+            await createNotification(db, 'post_published', {
                 userId: post.user_id,
-                type: 'post_published',
-                title: `Post published to ${LABEL[post.platform]}`,
-                message: `Your post has been published to ${LABEL[post.platform]}.`,
+                context: { platform: { label: LABEL[post.platform] } },
                 metadata: { postId: post.id, platform: post.platform, platformPostId: result.id, assistantId: post.assistant_id },
             });
             // Orchestration (Phase 5): this assistant just published — hand off to any linked
@@ -178,11 +177,9 @@ async function handleFailure(db: ReturnType<typeof getDb>, post: PostRow, reason
         await db.execute(
             `UPDATE scheduled_posts SET status = 'failed', failure_reason = '${esc(JSON.stringify(reason))}', attempt_count = ${attempt}, updated_at = now() WHERE id = ${post.id}`
         );
-        await db.insert(notifications).values({
+        await createNotification(db, 'post_publish_failed', {
             userId: post.user_id,
-            type: 'post_publish_failed',
-            title: 'Post failed to publish',
-            message: `Publishing to ${LABEL[post.platform]} failed: ${reason.errorMessage}`,
+            context: { platform: { label: LABEL[post.platform] }, failure: { reason: reason.errorMessage } },
             metadata: { postId: post.id, platform: post.platform, reason, assistantId: post.assistant_id },
         });
     } else {

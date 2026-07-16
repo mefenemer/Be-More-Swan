@@ -12,7 +12,6 @@ import {
   organisations,
   userProfiles,
   aiAssistants,
-  notifications,
   masterAssistants,
   onboardingDrafts,
   dpaAcceptances,
@@ -22,6 +21,7 @@ import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmar
 import { checkRateLimit } from '../../src/utils/rate-limit';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
+import { createNotification } from '../../src/utils/notify';
 import { isEuCountry } from '../../src/config/compliance';
 import { normalizeMediaSources, type MediaSource } from '../../src/utils/media-sources';
 import { formatPlatformStrategyBrief } from '../../src/utils/platform-strategy-brief';
@@ -303,11 +303,9 @@ export default withLambda(async (event): Promise<HandlerResponse> => {
       await db.delete(onboardingDrafts).where(eq(onboardingDrafts.userId, existingUser.id));
     }
 
-    await db.insert(notifications).values({
+    await createNotification(db, 'assistant_setup_received', {
       userId: existingUser.id,
-      type: 'system',
-      title: 'Assistant Setup Received',
-      message: `${targetName} is being built. We'll notify you when it's ready.`,
+      context: { assistant: { name: targetName } },
       isRead: false,
     });
 

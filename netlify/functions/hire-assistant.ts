@@ -26,12 +26,12 @@ import {
     dpaAcceptances,
     masterAssistants,
     masterPlans,
-    notifications,
     organisations,
     plans,
     taskRuns,
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { createNotification } from '../../src/utils/notify';
 import { effectiveLimit, type FeatureOverrides } from '../../src/utils/plan-features';
 import { checkRateLimit } from '../../src/utils/rate-limit';
 import { CURRENT_DPA_VERSION } from './accept-dpa';
@@ -194,18 +194,12 @@ export default withLambda(async (event) => {
             provisioningStatus: 'complete', // lifecycle trigger derives 'working' — chattable immediately
         }).returning({ id: aiAssistants.id });
 
-        // Best-effort welcome notification (non-blocking, same tone as onboarding.ts).
-        try {
-            await db.insert(notifications).values({
-                userId,
-                type: 'system',
-                title: `${master.name} has joined your team`,
-                message: `${master.name} is hired and ready — finish its setup to put it to work.`,
-                metadata: { assistantId: created.id, roleKey: master.roleKey },
-            });
-        } catch (notifErr) {
-            console.warn('[hire-assistant] Notification insert failed (non-blocking):', notifErr);
-        }
+        // Best-effort welcome notification (non-blocking; createNotification swallows errors).
+        await createNotification(db, 'assistant_hired', {
+            userId,
+            context: { assistant: { name: master.name } },
+            metadata: { assistantId: created.id, roleKey: master.roleKey },
+        });
 
         return json(200, { assistantId: created.id, name: master.name, roleKey: master.roleKey });
     } catch (err: any) {

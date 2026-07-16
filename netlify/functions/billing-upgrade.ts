@@ -10,7 +10,8 @@ import Stripe from 'stripe';
 import jwt from 'jsonwebtoken';
 import { eq, and, gt } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, plans, masterPlans, notifications, processedWebhookEvents, userOrganisations } from '../../db/schema';
+import { users, plans, masterPlans, processedWebhookEvents, userOrganisations } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { sendEmail } from '../../src/utils/email';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
 import { resolveActionNotifications, PLAN_UPGRADED_TYPES } from '../../src/utils/notification-actions';
@@ -240,11 +241,9 @@ export default withLambda(async (event) => {
             .where(eq(plans.id, currentPlan.id));
 
         // SC4a: in-app notification
-        await db.insert(notifications).values({
+        await createNotification(db, 'plan_upgraded', {
             userId,
-            type: 'plan_upgraded',
-            title: `Plan upgraded to ${targetMp.name}`,
-            message: `Your plan has been upgraded to ${targetMp.name}. Your new limits are active immediately.`,
+            context: { plan: { name: targetMp.name } },
             isRead: false,
         });
 

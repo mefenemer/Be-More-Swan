@@ -12,7 +12,8 @@ import jwt from 'jsonwebtoken';
 import { Resend } from 'resend';
 import { eq, and, asc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, supportTickets, ticketReplies, notifications, auditLogs } from '../../db/schema';
+import { users, supportTickets, ticketReplies, auditLogs } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -210,11 +211,9 @@ export default withLambda(async (event) => {
 
                 // In-app notification to the customer
                 try {
-                    await db.insert(notifications).values({
+                    await createNotification(db, 'ticket_reply', {
                         userId: ticket.userId,
-                        type: 'ticket_reply',
-                        title: `New reply on Ticket #${ticketId}`,
-                        message: `Support has responded to your request: "${ticket.subject}".`,
+                        context: { ticket: { id: ticketId, subject: ticket.subject } },
                     });
                 } catch { /* non-blocking */ }
             }

@@ -940,6 +940,9 @@
   .min-h-0 {
     min-height: calc(var(--spacing) * 0);
   }
+  .min-h-\[8rem\] {
+    min-height: 8rem;
+  }
   .min-h-\[24rem\] {
     min-height: 24rem;
   }

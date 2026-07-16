@@ -7,6 +7,7 @@ import {
     renderMasterTemplate,
     renderMergeVars,
     sanitiseBodyHtml,
+    htmlToPlainText,
     type MergeContext,
 } from './email-template';
 import { getTemplateDefault } from './email-templates-catalog';
@@ -24,10 +25,12 @@ interface SendEmailParams {
     to: string;
     subject: string;
     html: string;
+    /** Plain-text alternative part (US-COMMS-2 AC3). Omitted → HTML-only, as before. */
+    text?: string;
 }
 
 // sendEmail is an alias for sendMagicLinkEmail used by most Netlify functions
-export const sendEmail = async ({ to, subject, html }: SendEmailParams) => {
+export const sendEmail = async ({ to, subject, html, text }: SendEmailParams) => {
     if (!resend) {
         console.warn(`[DEV MODE] RESEND_API_KEY missing. Simulated email to ${to}`);
         return null;
@@ -37,7 +40,7 @@ export const sendEmail = async ({ to, subject, html }: SendEmailParams) => {
     // rejected send); only network/runtime problems throw. Normalise both into `error` so
     // the real reason is always logged verbatim and never silently swallowed.
     const { data, error } = await resend.emails
-        .send({ from: 'Be More Swan <noreply@bemoreswan.com>', to, subject, html })
+        .send({ from: 'Be More Swan <noreply@bemoreswan.com>', to, subject, html, ...(text ? { text } : {}) })
         .catch((err: any) => ({ data: null, error: { name: 'ResendException', message: err?.message ?? String(err) } }));
 
     if (error) {
@@ -109,6 +112,8 @@ export const sendMagicLinkEmail = async ({ to, subject, html }: SendEmailParams)
 export interface RenderedTemplate {
     subject: string;
     html: string;
+    /** Plain-text alternative part — admin override if set, else derived from the HTML. */
+    text: string;
     /** False when an admin has deactivated a non-critical template — callers should skip sending. */
     isActive: boolean;
     /** True when resolved from the in-code catalog (DB row missing/unseeded). */
@@ -118,6 +123,8 @@ export interface RenderedTemplate {
 interface TemplateSource {
     subject: string;
     bodyHtml: string;
+    /** NULL = derive from bodyHtml; a value here is an admin-authored override. */
+    bodyText: string | null;
     preheader: string | null;
     transactional: boolean;
     isActive: boolean;
@@ -132,6 +139,7 @@ async function loadTemplateSource(triggerKey: string): Promise<{ src: TemplateSo
             .select({
                 subject: emailTemplates.subject,
                 bodyHtml: emailTemplates.bodyHtml,
+                bodyText: emailTemplates.bodyText,
                 preheader: emailTemplates.preheader,
                 transactional: emailTemplates.transactional,
                 isActive: emailTemplates.isActive,
@@ -140,7 +148,7 @@ async function loadTemplateSource(triggerKey: string): Promise<{ src: TemplateSo
             .where(eq(emailTemplates.triggerKey, triggerKey))
             .limit(1);
         if (row && row.subject && row.bodyHtml) {
-            return { src: { ...row, preheader: row.preheader ?? null }, usedFallback: false };
+            return { src: { ...row, bodyText: row.bodyText ?? null, preheader: row.preheader ?? null }, usedFallback: false };
         }
     } catch (err: any) {
         const msg: string = err?.message || '';
@@ -156,6 +164,7 @@ async function loadTemplateSource(triggerKey: string): Promise<{ src: TemplateSo
         src: {
             subject: def.subject,
             bodyHtml: def.bodyHtml,
+            bodyText: null, // catalog entries carry HTML only — the text part is derived
             preheader: def.preheader ?? null,
             transactional: !!def.transactional,
             isActive: true, // catalog defaults are always considered active
@@ -171,7 +180,7 @@ async function loadTemplateSource(triggerKey: string): Promise<{ src: TemplateSo
 export async function renderTemplate(
     triggerKey: string,
     vars: MergeContext = {},
-    opts: { overrideSubject?: string; overrideBody?: string; transactional?: boolean } = {},
+    opts: { overrideSubject?: string; overrideBody?: string; overrideText?: string; transactional?: boolean } = {},
 ): Promise<RenderedTemplate | null> {
     const { src, usedFallback } = await loadTemplateSource(triggerKey);
     if (!src && opts.overrideBody === undefined) return null;
@@ -182,10 +191,17 @@ export async function renderTemplate(
 
     // Subjects are plain text (don't HTML-escape); bodies are HTML (sanitise admin input).
     const subject = renderMergeVars(subjectRaw, vars, false);
-    const body = renderMergeVars(sanitiseBodyHtml(bodyRaw), vars, false);
+    const sanitisedBody = sanitiseBodyHtml(bodyRaw);
+    const body = renderMergeVars(sanitisedBody, vars, false);
     const html = renderMasterTemplate(body, { preheader: src?.preheader ?? undefined, transactional });
 
-    return { subject, html, isActive: src?.isActive ?? true, usedFallback };
+    // Text part: an admin override wins, otherwise derive from the same body the HTML part
+    // used, so the two can't drift. Derive BEFORE merging so tags survive the tag-stripper,
+    // then merge — hence htmlToPlainText on the raw body, not on the rendered one.
+    const textRaw = opts.overrideText ?? src?.bodyText ?? htmlToPlainText(sanitisedBody);
+    const text = renderMergeVars(textRaw, vars, false);
+
+    return { subject, html, text, isActive: src?.isActive ?? true, usedFallback };
 }
 
 export interface SendTemplatedParams {
@@ -210,5 +226,5 @@ export async function sendTemplatedEmail({ triggerKey, to, vars = {} }: SendTemp
         console.log(`[email] Template "${triggerKey}" is inactive — skipping send to ${to}.`);
         return null;
     }
-    return sendEmail({ to, subject: rendered.subject, html: rendered.html });
+    return sendEmail({ to, subject: rendered.subject, html: rendered.html, text: rendered.text });
 }

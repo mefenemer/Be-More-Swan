@@ -19,8 +19,9 @@ import { eq, and } from 'drizzle-orm';
 import Stripe from 'stripe';
 import { getDb } from '../../db/client';
 import {
-    users, plans, masterPlans, billingOverrides, notifications, userOrganisations,
+    users, plans, masterPlans, billingOverrides, userOrganisations,
 } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { sendEmail } from '../../src/utils/email';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -231,13 +232,11 @@ export default withLambda(async (event) => {
                     ? `Your subscription has been paused and will automatically resume on ${resumeDateDisplay}.`
                     : 'Your subscription has been paused. Contact support to resume.';
 
-                await db.insert(notifications).values({
-                    userId:  uid,
-                    type:    'billing',
-                    title:   'Your subscription has been paused',
-                    message: pauseMessage,
+                await createNotification(db, 'subscription_paused_admin', {
+                    userId: uid,
+                    context: { pause: { message: pauseMessage } },
                     metadata: { pausedBy: adminId, resumeDate: resumeDateIso || null },
-                }).catch(() => {});
+                });
 
                 // AC requirement: also send email notification
                 sendEmail({

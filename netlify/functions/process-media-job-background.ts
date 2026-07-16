@@ -11,7 +11,8 @@
 import { HandlerEvent } from '@netlify/functions';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { contentAssets, mediaGenerationJobs, notifications } from '../../db/schema';
+import { contentAssets, mediaGenerationJobs } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { status as falStatus, result as falResult, extractVideo, falConfigured, FalContentPolicyError } from '../../src/lib/fal-gateway';
 import { settleHold } from '../../src/utils/ai-credits';
 import { persistRemoteMediaToR2, r2IsConfigured } from '../../src/lib/media-persist';
@@ -103,13 +104,10 @@ export default withLambda(async (event: HandlerEvent) => {
             .where(eq(mediaGenerationJobs.id, jobId));
 
         // US2 completion notification.
-        await db.insert(notifications).values({
+        await createNotification(db, 'media_ready', {
             userId: ownerId,
-            type: 'media_ready',
-            title: 'Your AI video is ready',
-            message: 'Your generated video has been added to My Content.',
             metadata: { assetId: asset.id, jobId: job.id },
-        }).catch(() => {});
+        });
 
         return { statusCode: 200, body: 'completed' };
     } catch (err) {

@@ -2,7 +2,8 @@ import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { eq, and, or, isNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { systemConnections, scheduledPosts, notifications, users, userOrganisations, auditLogs } from '../../db/schema';
+import { systemConnections, scheduledPosts, users, userOrganisations, auditLogs } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { storeSecret, deleteSecret, buildRefKey } from '../../src/utils/vault';
 import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
@@ -296,13 +297,9 @@ export default withLambda(async (event) => {
             // Notification for all social platforms
             const platformLabel: Record<string, string> = { instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X (Twitter)' };
             const label = platformLabel[svcForPost] ?? conn?.serviceName ?? 'Platform';
-            await db.insert(notifications).values({
+            await createNotification(db, cancelledCount > 0 ? 'social_disconnected_posts_cancelled' : 'social_disconnected', {
                 userId: currentUserId,
-                type: 'social_oauth_revoked',
-                title: `${label} disconnected`,
-                message: cancelledCount > 0
-                    ? `${label} disconnected. ${cancelledCount} scheduled post${cancelledCount !== 1 ? 's have' : ' has'} been cancelled. Reconnect to resume publishing.`
-                    : `${label} disconnected successfully.`,
+                context: { platform: { label }, cancelled: { post_count: `${cancelledCount} scheduled post${cancelledCount !== 1 ? 's have' : ' has'}` } },
                 metadata: { connectionId: connIdInt, platform: svcForPost, cancelledCount, assistantId: conn?.assistantId ?? null },
             });
 
