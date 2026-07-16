@@ -339,7 +339,23 @@
         const role = document.querySelector('input[name="category"]:checked').value;
         const bizName = document.getElementById('business_name').value;
 
-        // NEW: Map the internal route value to the human-readable Assistant Name
+        // Map the category radio value to the canonical roleKey (db/seed-catalog.ts namespace).
+        // This is what identifies the role to the backend — a display name must never be used for
+        // that, because master_assistants.name is admin-editable and a rename would break the match.
+        // Keys are the actual radio values above; 'community_mgmt' is the retired SMM key that
+        // db/rolekey-namespace-unification.sql folded into social_media_manager.
+        // Unmapped ('inbox', 'reporting') fall through to '' — both radios are disabled anyway.
+        const routeToRoleKey = {
+            'community_mgmt': 'social_media_manager',
+            'paid_ads': 'paid_ads',
+            'data_entry': 'data_entry',
+            'custom': 'custom'
+        };
+
+        // Display name only — shown in the wizard copy, never used to look a role up.
+        // NOTE: keyed on 'social_media', which is not one of the radio values, so the SMM branch has
+        // always fallen through to the generic default. Left as-is: the SMM radio is disabled and
+        // routeMap below has the same mismatch, so this page's SMM path is dead either way.
         const assistantNameMap = {
             'social_media': 'Social Media Manager',
             'paid_ads': 'Performance Marketer',
@@ -351,7 +367,8 @@
         // Save all data to session storage so child pages (and the backend) can use it
         sessionStorage.setItem('aura_client_name', nameInput.value);
         sessionStorage.setItem('aura_business_name', bizName);
-        sessionStorage.setItem('aura_assistant_name', assistantDisplayName); // NEW!
+        sessionStorage.setItem('aura_assistant_name', assistantDisplayName); // display only
+        sessionStorage.setItem('aura_role_key', routeToRoleKey[role] || ''); // identity — sent to onboarding.ts
 
         if(currentTierKey) sessionStorage.setItem('aura_tier', currentTierKey);
 

@@ -156,7 +156,22 @@ export default withLambda(async (event): Promise<HandlerResponse> => {
     const body = JSON.parse(event.body || '{}');
     const { clientName, businessName, assistantName, customAssistantName, rawInputs, onboardingContext, consents, hourlyRateGbp, draftId, mediaSources, aiDisclosure } = body;
 
-    if (assistantName === 'Social Media Manager') {
+    // The wizard now sends the canonical roleKey (onboarding.html → aura_role_key). `assistantName`
+    // is a DISPLAY name and must never be used to identify a role: master_assistants.name is
+    // admin-editable, so keying off it means a rename silently changes behaviour.
+    // LEGACY_NAME_TO_ROLEKEY only covers sessions that started before roleKey was sent.
+    const LEGACY_NAME_TO_ROLEKEY: Record<string, string> = {
+      'Social Media Manager':     'social_media_manager',
+      'The Social Media Manager': 'social_media_manager',
+      'Performance Marketer':     'paid_ads',
+      'Inventory & Order Manager':'data_entry',
+      'Operations Manager':       'custom',
+    };
+    const resolvedRoleKey: string | null =
+      (typeof body.roleKey === 'string' && body.roleKey.trim()) ? body.roleKey.trim()
+      : LEGACY_NAME_TO_ROLEKEY[assistantName || ''] ?? null;
+
+    if (resolvedRoleKey === 'social_media_manager') {
       if (!onboardingContext?.target_audience || !onboardingContext?.content_pillars || !onboardingContext?.tone_of_voice || !onboardingContext?.primary_platforms?.length) {
         return { statusCode: 400, body: JSON.stringify({ error: 'Missing required Social Media Manager context fields (Audience, Pillars, Tone, or Platforms).' }) };
       }
@@ -210,28 +225,24 @@ export default withLambda(async (event): Promise<HandlerResponse> => {
       throw new Error('Failed to generate Assistant Blueprint due to missing or invalid data.');
     }
 
-    // 5. LOOK UP MASTER ASSISTANT
-    // The wizards send a display name (sessionStorage aura_assistant_name, set by
-    // onboarding.html). Resolve it to the canonical roleKey (db/seed-catalog.ts namespace —
-    // see db/rolekey-namespace-unification.sql) and look the row up by that natural key;
-    // a pure name match would have broken when the merged SMM row took the catalog name
-    // 'The Social Media Manager'. Unknown names fall back to a name match so future roles
-    // keep working without touching this map.
-    const NAME_TO_ROLEKEY: Record<string, string> = {
-      'Social Media Manager':     'social_media_manager',
-      'The Social Media Manager': 'social_media_manager',
-      'Performance Marketer':     'paid_ads',
-      'Inventory & Order Manager':'data_entry',
-      'Operations Manager':       'custom',
-    };
-    const wantedRoleKey = NAME_TO_ROLEKEY[assistantName || 'Social Media Manager'];
-    const [assistantRecord] = wantedRoleKey
-      ? await db.select().from(masterAssistants)
-          .where(eq(masterAssistants.roleKey, wantedRoleKey))
-          .limit(1)
-      : await db.select().from(masterAssistants)
-          .where(eq(masterAssistants.name, assistantName || 'Social Media Manager'))
-          .limit(1);
+    // 5. LOOK UP MASTER ASSISTANT — by roleKey only (resolved above).
+    // This used to fall back to `WHERE master_assistants.name = <display name>`. Since name became
+    // admin-editable, a rename made that lookup return nothing — and the code then carried on and
+    // created the assistant with masterAssistantId: null, jobRole 'General Assistant' and
+    // configuration.type 'custom', permanently severing the master link and landing it on the wrong
+    // dashboard registry, silently. Fail loudly instead: a role we can't identify is a bug, not a
+    // custom assistant.
+    if (!resolvedRoleKey) {
+      console.error('Onboarding: could not resolve a roleKey.', { assistantName, roleKey: body.roleKey });
+      return { statusCode: 400, body: JSON.stringify({ error: 'Could not identify which assistant to set up. Please restart the setup wizard.' }) };
+    }
+    const [assistantRecord] = await db.select().from(masterAssistants)
+      .where(eq(masterAssistants.roleKey, resolvedRoleKey))
+      .limit(1);
+    if (!assistantRecord) {
+      console.error('Onboarding: no master_assistants row for roleKey.', { resolvedRoleKey });
+      return { statusCode: 400, body: JSON.stringify({ error: 'That assistant is not available. Please restart the setup wizard.' }) };
+    }
 
     // Resolve the Visual Strategy → Media Source priority list. Validate/de-dupe what the
     // client sent; null when nothing was sent so the resolver applies its DEFAULT_ORDER.
@@ -247,13 +258,15 @@ export default withLambda(async (event): Promise<HandlerResponse> => {
       const [inserted] = await db.insert(aiAssistants).values({
         organisationId: orgId,
         userId: existingUser.id,
-        masterAssistantId: assistantRecord?.id || null,
+        masterAssistantId: assistantRecord.id,
         name: targetName,
         model: 'gpt-4o',
-        aiAssistantJobRole: assistantRecord?.name || 'General Assistant',
+        // Hire-time snapshot of the role label — a legacy fallback only. Every read coalesces
+        // master_assistants.name over this (see get-assistants.ts), so a later rename still lands.
+        aiAssistantJobRole: assistantRecord.name,
         systemPrompt: secureSystemPrompt,
         configuration: {
-          type: assistantRecord ? assistantRecord.roleKey : 'custom',
+          type: assistantRecord.roleKey,
           active: true,
           inputs: rawInputs || {},
         },

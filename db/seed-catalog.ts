@@ -2,8 +2,15 @@
  * db/seed-catalog.ts
  *
  * Upserts every master assistant role into the database.
- * Safe to re-run — uses ON CONFLICT (role_key) DO UPDATE so existing
- * records get refreshed with the latest description / metadata.
+ *
+ * Safe to re-run, and INSERT-ONLY for master assistants: ON CONFLICT (role_key) DO NOTHING.
+ * It seeds roles that don't exist yet; it never edits one that does.
+ *
+ * This used to DO UPDATE every field, which silently reverted admin work on each run — a role rename
+ * or copy edit made in Admin → Master Data → Assistants was undone, and because isActive is the
+ * soft-delete field (src/utils/delete-tiers.ts), a soft-deleted role came back to life. Those fields
+ * are now admin-owned and the DB is their source of truth: change them in the admin UI, not here.
+ * The values below therefore only matter for a role's FIRST insert (and for fresh environments).
  *
  * Run with:
  *   npx tsx db/seed-catalog.ts
@@ -32,7 +39,7 @@ const CATALOG = [
     {
         roleKey: 'inbox_manager',
         name: 'The Inbox Manager',
-        description: 'Drafts replies to standard emails, categorizes incoming messages, and highlights urgent issues — eliminating email fatigue before your day begins.',
+        description: 'Drafts replies to standard emails, categorises incoming messages, and highlights urgent issues — eliminating email fatigue before your day begins.',
         category: 'Administration',
         iconKey: 'mail',
         iconColor: 'blue',
@@ -61,7 +68,7 @@ const CATALOG = [
     },
     {
         roleKey: 'document_organizer',
-        name: 'The Document Organizer',
+        name: 'The Document Organiser',
         description: 'Automatically renames, tags, and files loose documents, PDFs, and assets into the correct cloud folders — your digital filing cabinet, always tidy.',
         category: 'Administration',
         iconKey: 'document',
@@ -510,18 +517,12 @@ async function seedCatalog() {
         await db
             .insert(masterAssistants)
             .values(role)
-            .onConflictDoUpdate({
-                target: masterAssistants.roleKey,
-                set: {
-                    name:        sql`excluded.name`,
-                    description: sql`excluded.description`,
-                    category:    sql`excluded.category`,
-                    iconKey:     sql`excluded.icon_key`,
-                    iconColor:   sql`excluded.icon_color`,
-                    comingSoon:  sql`excluded.coming_soon`,
-                    isActive:    sql`excluded.is_active`,
-                },
-            });
+            // Insert-only: an existing role is left exactly as the admin left it. Every field this
+            // seed sets is admin-editable (name/description/icons/category via Master Data →
+            // Assistants, comingSoon via the Assistant Catalog, and isActive IS the soft-delete
+            // field — see src/utils/delete-tiers.ts), so a DO UPDATE reverted renames and copy edits
+            // and resurrected soft-deleted roles on every run.
+            .onConflictDoNothing({ target: masterAssistants.roleKey });
         console.log(`  ✓ ${role.name}`);
     }
 

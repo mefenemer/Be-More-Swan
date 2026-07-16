@@ -54,8 +54,13 @@ interface RoleContent {
 }
 
 // ── 1. MIGRATED ────────────────────────────────────────────────────────────────
-// Transcribed verbatim from src/config/assistant-role-content.js (deleted by this change).
-// Do not reword here — this array exists to prove the migration changed nothing on the page.
+// Transcribed from src/config/assistant-role-content.js (deleted by this change) to keep the detail
+// page identical through the migration.
+//
+// Since anglicised to house style (British spelling) where the old hardcoded file used US spelling —
+// see the `lead_qualifier` note. That was a deliberate, reviewed copy decision; it is no longer a
+// byte-for-byte transcription. Any further rewording should happen in Admin → Master Data →
+// Assistants, and be mirrored here only so a fresh environment starts from the same copy.
 const MIGRATED: RoleContent[] = [
     {
         roleKey: 'social_media_manager',
@@ -84,10 +89,11 @@ const MIGRATED: RoleContent[] = [
     {
         roleKey: 'lead_qualifier',
         tagline: 'Stop chasing cold leads. Let AI find your next best customer.',
-        description: 'Researches inbound leads, scores them based on your Ideal Customer Profile (ICP), and drafts personalized outreach emails—so your sales team only talks to winners.',
+        // Anglicised from the migrated copy's "personalized" — house style is British spelling.
+        description: 'Researches inbound leads, scores them based on your Ideal Customer Profile (ICP), and drafts personalised outreach emails — so your sales team only talks to winners.',
         keyFeatures: [
             'Automated Lead Scoring',
-            'Personalized Outreach Drafting',
+            'Personalised Outreach Drafting',
             'Handoff to CRM Enricher for missing data',
         ],
         integrations: ['HubSpot', 'Salesforce', 'LinkedIn', 'Gmail'],
