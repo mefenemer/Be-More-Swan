@@ -47,7 +47,7 @@ export default withLambda(async (event) => {
 
         const stripe = new Stripe(stripeSecret, { apiVersion: '2026-05-27.dahlia' });
         const body = JSON.parse(event.body || '{}');
-        const { token: plainToken, priceId } = body;
+        const { token: plainToken, tier: pendingTier } = body;
         // US-ONB-2.1.2 AC9: safe relative post-login redirect (must start with / to prevent open redirect)
         const postLoginRedirect: string | undefined = typeof body.redirect === 'string' && body.redirect.startsWith('/') && !body.redirect.startsWith('//') ? body.redirect : undefined;
 
@@ -157,18 +157,9 @@ export default withLambda(async (event) => {
         const baseUrl = resolveBaseUrl(event.headers);
         if (!baseUrl) return { statusCode: 500, body: 'Server misconfigured.' };
 
-        // Map Stripe price IDs → tier keys (test + live environments)
-        const priceToTier: Record<string, string> = {
-            // Test price IDs
-            'price_1TgGNFE7lvVYjk1BAsnhUzBp': 'buster',
-            'price_1TgGP8E7lvVYjk1BRBeEZVd6': 'saver',
-            'price_1TgGPfE7lvVYjk1B1CQrS6pE': 'employee',
-            // Live price IDs
-            'price_1TsGFNCuS8qyNSsFOeV5bjI2': 'buster',   // current live Buster price
-            'price_1Tg6f1CuS8qyNSsFxeUsfi4a': 'buster',   // legacy Buster price — keep so pre-price-change subs still map
-            'price_1Tg6fQCuS8qyNSsF5DKmEqMu': 'saver',
-            'price_1Tg6fiCuS8qyNSsF787zwCwh': 'employee',
-        };
+        // Valid subscription tier keys (master_plans.tier_key). A new registration carries the
+        // chosen tier straight through the magic link (?tier=…); a returning-user login carries none.
+        const VALID_TIERS = ['saver', 'buster', 'employee'];
 
         // Onboarding path → HTML page map (mirrors onboarding-reminder.ts)
         const ONBOARDING_PAGE: Record<string, string> = {
@@ -179,7 +170,7 @@ export default withLambda(async (event) => {
             'performance':   'onboarding-performance.html',
         };
 
-        // If no priceId — this is a returning user logging in (not a new registration).
+        // If no pending tier — this is a returning user logging in (not a new registration).
         // Priority order:
         //   0. super_admin / admin role                    → admin portal
         //   1. active plan + incomplete onboarding draft   → resume onboarding step
@@ -188,7 +179,7 @@ export default withLambda(async (event) => {
         //   4. past_due plan (grace period) + assistants   → workspace with billing warning
         //   5. cancelled / no plan + existing assistants   → workspace (can view, not use)
         //   6. no plan + no assistants                     → pricing
-        if (!priceId || !priceToTier[priceId]) {
+        if (!pendingTier || !VALID_TIERS.includes(pendingTier)) {
             // Case 0: Admin / superuser
             // US-ADM-5.2.2: Dual-role — if the admin also has an active workspace plan, send them
             // to workspace.html (the Admin Portal launcher appears in the sidebar).
@@ -312,11 +303,10 @@ export default withLambda(async (event) => {
             };
         }
 
-        const tierKey = priceToTier[priceId];
         return {
             statusCode: 200,
             headers: getHeaders(sessionCookie),
-            body: JSON.stringify({ success: true, redirect: `${baseUrl}/checkout.html?tier=${tierKey}` })
+            body: JSON.stringify({ success: true, redirect: `${baseUrl}/checkout.html?tier=${pendingTier}` })
         };
     } catch (error: any) {
         // BUG-P1-5: Log full error server-side; never return internal detail to the client.

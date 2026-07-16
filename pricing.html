@@ -862,13 +862,6 @@
         updatePriceDisplay();
     };
 
-    // Monthly price IDs (test env) — used when billing_cycle = 'monthly'
-    const PRICE_IDS = {
-        starter:  'price_1TgGNFE7lvVYjk1BAsnhUzBp',
-        pro_team: 'price_1TgGP8E7lvVYjk1BRBeEZVd6',
-        business: 'price_1TgGPfE7lvVYjk1B1CQrS6pE',
-    };
-
     function getCookie(name) {
         const v = `; ${document.cookie}`;
         const p = v.split(`; ${name}=`);
@@ -885,16 +878,20 @@
         } catch { return false; }
     }
 
+    // Card CTA identifiers → canonical master_plans tier keys. The cards use legacy labels
+    // (starter/pro_team/business); the system + Stripe speak saver/buster/employee. Anchored on
+    // the advertised price: starter £29 = saver, pro_team £99 = buster, business £349 = employee.
+    const CARD_TIER = { starter: 'saver', pro_team: 'buster', business: 'employee' };
     window.choosePlan = function (tier) {
         if (tier === 'enterprise') { openEnterpriseModal(); return; }
+        const planTier = CARD_TIER[tier] || tier; // normalise to the canonical system tier
         const cycle = _billingCycle || 'monthly';
         sessionStorage.setItem('billing_cycle', cycle);
         sessionStorage.setItem('aura_currency', _currency); // US-I18N-2.1 SC3: pass currency to checkout
         if (isLoggedIn()) {
-            window.location.href = 'checkout.html?tier=' + tier + '&cycle=' + cycle + '&currency=' + _currency;
+            window.location.href = 'checkout.html?tier=' + planTier + '&cycle=' + cycle + '&currency=' + _currency;
         } else {
-            sessionStorage.setItem('pending_price_id', PRICE_IDS[tier] || PRICE_IDS.pro_team);
-            sessionStorage.setItem('pending_tier', tier);
+            sessionStorage.setItem('pending_tier', planTier);
             window.location.href = 'register.html';
         }
     };

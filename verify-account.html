@@ -35,7 +35,7 @@
     // 1. Extract the token from the URL (?token=XYZ)
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('token');
-    const priceId = urlParams.get('priceId');
+    const tier = urlParams.get('tier');
     // US-ONB-2.1.2 AC9: post-login redirect preserved through magic-link URL
     const redirect = urlParams.get('redirect');
 
@@ -56,7 +56,7 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           token: token,
-          priceId: priceId, // Read from URL param — survives email client cross-tab navigation
+          tier: tier, // Read from URL param — survives email client cross-tab navigation
           redirect: redirect || undefined, // US-ONB-2.1.2 AC9: post-login redirect destination
         })
       });

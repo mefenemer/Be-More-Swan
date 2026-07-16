@@ -66,7 +66,7 @@ export default withLambda(async (event) => {
         const firstName = body.firstName?.trim();
         const lastName = body.lastName?.trim();
         const businessName = body.businessName?.trim() || `${firstName}'s Workspace`;
-        const priceId = body.priceId?.trim() || null;
+        const planTier = body.planTier?.trim() || null;
         const attributionRef = body.attributionRef?.trim() || null; // US-AUD-5.3.1 SC5
         const referralRef = body.referralRef?.trim() || null;        // US-GAP-8.2: workspace referral code
         // US4 (Domain Consolidation): set once the user has seen the consolidation prompt and
@@ -224,7 +224,7 @@ export default withLambda(async (event) => {
         // Send the First-Time Verification Email — baseUrl was resolved above (prefers BASE_URL env,
         // falls back to the request host for deploy previews). Resolved before the DB transaction
         // so a missing config fails fast rather than orphaning a half-created user.
-        const magicLink = `${baseUrl}/verify-account.html?token=${plainToken}${priceId ? `&priceId=${encodeURIComponent(priceId)}` : ''}`;
+        const magicLink = `${baseUrl}/verify-account.html?token=${plainToken}${planTier ? `&tier=${encodeURIComponent(planTier)}` : ''}`;
 
         // Verification email is BEST-EFFORT: the account + workspace are already committed
         // above, so a transient email failure (Resend outage, unverified domain, missing key)

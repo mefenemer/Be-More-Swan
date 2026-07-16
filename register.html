@@ -112,7 +112,7 @@
 <!-- Footer Placeholder -->
 <div id="footer-placeholder"></div>
 <script>
-  // Clear any stale auth session on page load, but preserve pending_price_id in sessionStorage
+  // Clear any stale auth session on page load, but preserve pending_tier in sessionStorage
   document.addEventListener("DOMContentLoaded", () => {
     localStorage.clear();
     document.cookie = "aura_session=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
@@ -161,11 +161,11 @@
 
     try {
       sessionStorage.setItem('aura_pending_email', email);
-      const priceId = sessionStorage.getItem('pending_price_id');
+      const planTier = sessionStorage.getItem('pending_tier');
       const response = await fetch('/.netlify/functions/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ firstName, lastName, email, businessName, priceId, attributionRef: sessionStorage.getItem('attribution_ref') || undefined, referralRef: sessionStorage.getItem('referral_ref') || undefined })
+        body: JSON.stringify({ firstName, lastName, email, businessName, planTier, attributionRef: sessionStorage.getItem('attribution_ref') || undefined, referralRef: sessionStorage.getItem('referral_ref') || undefined })
       });
 
       const data = await response.json();
@@ -239,12 +239,12 @@
     btn.innerText = 'Setting up...';
     try {
       sessionStorage.setItem('aura_pending_email', pendingSignup.email);
-      const priceId = sessionStorage.getItem('pending_price_id');
+      const planTier = sessionStorage.getItem('pending_tier');
       const response = await fetch('/.netlify/functions/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...pendingSignup, priceId, forceNewWorkspace: true,
+          ...pendingSignup, planTier, forceNewWorkspace: true,
           attributionRef: sessionStorage.getItem('attribution_ref') || undefined,
           referralRef: sessionStorage.getItem('referral_ref') || undefined,
         }),
