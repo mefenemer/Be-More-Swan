@@ -154,6 +154,23 @@ window._intConnectSource = function (sourceId) {
     if (source) window.location.href = source.oauthUrl;
 };
 
+// Canva is the only source with a picker, so this is deliberately Canva-specific rather than
+// dispatching on sourceId — a second source would need its own browser anyway.
+// Imports land in My Content, not on this tab, so there is nothing here to re-render: confirm
+// what arrived and name where it went, otherwise the modal just closes and looks like a no-op.
+// CanvaBrowser is loaded by workspace.html, which hosts this tab as a fragment.
+window._intBrowseCanvaDesigns = function () {
+    if (!window.CanvaBrowser) return;
+    window.CanvaBrowser.open({
+        // Count items, not designs: the importer writes one asset per PAGE, so a 2-page
+        // presentation lands as 2 items and "2 designs" would contradict what the user picked.
+        onImported: (assetIds) => {
+            const n = assetIds.length;
+            window.showToast?.(`${n} item${n > 1 ? 's' : ''} imported to My Content.`, { icon: '✅' });
+        },
+    });
+};
+
 let _connToDelete = null;
 let _userConnections = [];
 
@@ -700,7 +717,7 @@ function _sourceCard(source, conn) {
         const healthPill = (isConnected && health.problem) ? _healthBadge(health) : '';
         const primary = !isActive
             ? connectBtn
-            : `<button type="button" onclick="window.CanvaBrowser && window.CanvaBrowser.open({})" class="w-full px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition cursor-pointer">Browse designs</button>`;
+            : `<button type="button" onclick="window._intBrowseCanvaDesigns()" class="w-full px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition cursor-pointer">Browse designs</button>`;
         const manage = isConnected
             ? `<details class="mt-1">
                    <summary class="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 select-none">Manage connection</summary>
