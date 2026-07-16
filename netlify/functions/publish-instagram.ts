@@ -90,8 +90,6 @@ export default withLambda(async () => {
 
     await Promise.allSettled(posts.map(async post => {
         try {
-            if (!post.connection_id) throw new Error('No Instagram connection linked to this post.');
-
             // Check rate limit state for this org
             const [rl] = await db
                 .select({ rateLimitedUntil: rateLimitStates.rateLimitedUntil })
@@ -107,13 +105,20 @@ export default withLambda(async () => {
                 return;
             }
 
-            // Fetch connection + token
+            // Resolve connection — by id, else the org's active Instagram connection.
+            const connWhere = post.connection_id
+                ? eq(systemConnections.id, post.connection_id)
+                : and(
+                    eq(systemConnections.organisationId, post.organisation_id),
+                    eq(systemConnections.serviceName, 'instagram'),
+                    eq(systemConnections.isActive, true),
+                  );
             const [conn] = await db
                 .select({ vaultRefKey: systemConnections.vaultRefKey, externalUserId: systemConnections.externalUserId })
                 .from(systemConnections)
-                .where(eq(systemConnections.id, post.connection_id))
+                .where(connWhere)
                 .limit(1);
-            if (!conn?.vaultRefKey) throw new Error('No vault token for connection.');
+            if (!conn?.vaultRefKey) throw new Error('No active Instagram connection for this post.');
 
             const secretData = await getSecret(db, conn.vaultRefKey);
             const token = secretData?.token as string | undefined;

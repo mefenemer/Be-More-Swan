@@ -135,6 +135,10 @@ export default withLambda(async (event) => {
                 slack:         ['channels:read', 'chat:write', 'files:write'],
             };
 
+            // Canonical form. service_name is persisted lowercase everywhere (the OAuth callbacks
+            // write literals like 'instagram'), and every consumer — publish-instagram,
+            // publish-social-posts, findTenantCollision — matches on a lowercase literal. A raw
+            // "Instagram" from this generic path would be invisible to all of them.
             const serviceKey = serviceName.toLowerCase();
             if (scopes && Array.isArray(scopes)) {
                 const allowed = ALLOWED_SCOPES[serviceKey];
@@ -160,16 +164,16 @@ export default withLambda(async (event) => {
                 .from(systemConnections)
                 .where(and(
                     eq(systemConnections.userId, currentUserId),
-                    eq(systemConnections.serviceName, serviceName),
+                    eq(systemConnections.serviceName, serviceKey),
                     ...(currentOrgId ? [eq(systemConnections.organisationId, currentOrgId)] : []),
                 ))
                 .limit(1);
 
             // US1 AC1.3: block if this account/handle is already live in another workspace.
             if (handle && currentOrgId) {
-                const collision = await findTenantCollision(db, { serviceName, externalUserId: handle, organisationId: currentOrgId });
+                const collision = await findTenantCollision(db, { serviceName: serviceKey, externalUserId: handle, organisationId: currentOrgId });
                 if (collision) {
-                    await recordCollisionAttempt(db, { requestingOrgId: currentOrgId, existingOrgId: collision.organisationId, serviceName, externalUserId: handle });
+                    await recordCollisionAttempt(db, { requestingOrgId: currentOrgId, existingOrgId: collision.organisationId, serviceName: serviceKey, externalUserId: handle });
                     return { statusCode: 409, body: JSON.stringify({
                         error: `This ${serviceName} account is already connected to another Be More Swan workspace. To use it, you must join the existing workspace or disconnect it from the other account.`,
                         code: 'TENANT_COLLISION',
@@ -178,7 +182,7 @@ export default withLambda(async (event) => {
             }
 
             const scopeString = Array.isArray(scopes) && scopes.length ? scopes.join(' ') : null;
-            const refKey = buildRefKey(currentUserId, serviceName, 'apikey');
+            const refKey = buildRefKey(currentUserId, serviceKey, 'apikey');
             await storeSecret(db, refKey, { token: apiKey });
 
             if (existing.length > 0) {
@@ -202,7 +206,7 @@ export default withLambda(async (event) => {
                 await db.insert(systemConnections).values({
                     userId: currentUserId,
                     organisationId: currentOrgId,
-                    serviceName,
+                    serviceName: serviceKey,
                     connectionType,
                     vaultRefKey: refKey,
                     externalUserId: handle || null,
