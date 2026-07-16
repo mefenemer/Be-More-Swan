@@ -26,9 +26,21 @@ async function seed() {
         // 1. Seed the Master Plans
         console.log('Seeding Master Plans...');
         await db.insert(masterPlans).values([
-            { tierKey: 'buster', name: 'The Busywork Buster', monthlyPriceGbp: '20.00' },
-            { tierKey: 'saver', name: 'The Workflow Saver', monthlyPriceGbp: '50.00' },
-            { tierKey: 'employee', name: 'The Digital Employee', monthlyPriceGbp: '100.00' }
+            { tierKey: 'saver', name: 'The Workflow Saver', monthlyPriceGbp: '50.00',
+              tierDescription: 'Tier 1 · Best for Solo Operators',
+              description: 'Reclaim hours every day. Hand your most draining task to a helper that never takes a day off.' },
+            { tierKey: 'buster', name: 'The Busywork Buster', monthlyPriceGbp: '20.00',
+              tierDescription: 'Tier 2 · Best for Scaling Founders',
+              description: 'Scale your business with autonomous goal tracking, advanced analytics, and your own mini digital department.',
+              isMostPopular: true },
+            { tierKey: 'employee', name: 'The Digital Employee', monthlyPriceGbp: '100.00',
+              tierDescription: 'Tier 3 · Best for Teams',
+              description: 'A complete digital workforce built for growing businesses and collaborative teams.' },
+            // Enterprise: non-purchasable (contact-sales) so its pricing card is admin-editable too.
+            { tierKey: 'enterprise', name: 'Custom Enterprise', monthlyPriceGbp: '1199.00',
+              tierDescription: 'Tier 4 · Enterprise',
+              description: 'Bespoke digital architecture for complex corporate environments.',
+              isContactSales: true },
         ]).onConflictDoNothing({ target: masterPlans.tierKey });
         // ^ onConflictDoNothing prevents duplicate errors if you run this twice!
 

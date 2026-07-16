@@ -770,6 +770,17 @@ export const masterPlans = pgTable("master_plans", {
   id: serial().primaryKey(),
   tierKey: text("tier_key").notNull().unique(),
   name: text("name").notNull(),
+  // Pricing-card marketing copy — DB-driven so the Super Admin (Master Data → Plans) controls
+  // every visible plan-card field, and pricing.html / the comparison table render from here.
+  // tierDescription = the eyebrow line ("Tier 2 · Best for Scaling Founders").
+  // description = the italic sub-heading blurb. isMostPopular = the "Most Popular" pill (at most
+  // one plan; the admin API clears the flag on every other plan when one is set true).
+  tierDescription: text("tier_description"),
+  description: text("description"),
+  isMostPopular: boolean("is_most_popular").notNull().default(false),
+  // Contact-sales tier (Enterprise): displayed on pricing.html but NOT purchasable — excluded from
+  // get-plans' plan picker (like 'trial') so it never fires a self-serve Stripe checkout.
+  isContactSales: boolean("is_contact_sales").notNull().default(false),
   monthlyPriceGbp: numeric("monthly_price_gbp", { precision: 10, scale: 2 }).notNull(),
   // Capacity limits — enforced at runtime; null = unlimited
   assistantLimit: integer("assistant_limit"),           // max active AI assistants (total per account)

@@ -116,7 +116,8 @@ async function handleMasterPlans(event: any, adminId: number, role: string, ip?:
 
     if (method === 'POST') {
         const body = JSON.parse(event.body || '{}');
-        const { tierKey, name, monthlyPriceGbp, assistantLimit, monthlyTaskLimit, monthlyTokenLimit, appConnectionLimit, seatLimit, features } = body;
+        const { tierKey, name, monthlyPriceGbp, assistantLimit, monthlyTaskLimit, monthlyTokenLimit, appConnectionLimit, seatLimit, features,
+            tierDescription, description, isMostPopular } = body;
         const interval = body.interval === 'year' ? 'year' : 'month'; // AC1.1.1 billing cycle
         if (!tierKey || !name || !monthlyPriceGbp) return badRequest('tierKey, name, monthlyPriceGbp required.');
 
@@ -125,6 +126,9 @@ async function handleMasterPlans(event: any, adminId: number, role: string, ip?:
         const [row] = await db.insert(masterPlans).values({
             tierKey, name, monthlyPriceGbp, assistantLimit, monthlyTaskLimit, monthlyTokenLimit, appConnectionLimit, seatLimit,
             features: features ?? {},
+            tierDescription: tierDescription || null,
+            description: description || null,
+            isMostPopular: !!isMostPopular,
         }).returning();
 
         try {
@@ -151,6 +155,12 @@ async function handleMasterPlans(event: any, adminId: number, role: string, ip?:
             return { statusCode: 502, body: JSON.stringify({ error: `Stripe sync failed — plan not created: ${err?.message || 'unknown error'}` }) };
         }
 
+        // At most one plan may hold the "Most Popular" pill — clear it on every other plan.
+        // Runs only after the Stripe push succeeds so a rollback can't strand the previous flag.
+        if (isMostPopular) {
+            await db.update(masterPlans).set({ isMostPopular: false }).where(ne(masterPlans.id, row.id));
+        }
+
         void insertAdminAuditLog({ adminId, action: 'record_delete', targetType: 'master_plan', targetId: row.id, newState: row, ipAddress: ip, userAgent: ua, reason: 'admin_create' });
         return { statusCode: 201, body: JSON.stringify(row) };
     }
@@ -158,7 +168,8 @@ async function handleMasterPlans(event: any, adminId: number, role: string, ip?:
     if (method === 'PATCH') {
         if (!id) return badRequest('id required.');
         const body = JSON.parse(event.body || '{}');
-        const { name, monthlyPriceGbp, assistantLimit, monthlyTaskLimit, monthlyTokenLimit, appConnectionLimit, seatLimit, isActive, features } = body;
+        const { name, monthlyPriceGbp, assistantLimit, monthlyTaskLimit, monthlyTokenLimit, appConnectionLimit, seatLimit, isActive, features,
+            tierDescription, description, isMostPopular } = body;
         const [prev] = await db.select().from(masterPlans).where(eq(masterPlans.id, id)).limit(1);
         if (!prev) return notFound();
 
@@ -175,6 +186,9 @@ async function handleMasterPlans(event: any, adminId: number, role: string, ip?:
         if (seatLimit !== undefined) updates.seatLimit = seatLimit;
         if (isActive !== undefined) updates.isActive = isActive;
         if (features !== undefined) updates.features = features;
+        if (tierDescription !== undefined) updates.tierDescription = tierDescription || null;
+        if (description !== undefined) updates.description = description || null;
+        if (isMostPopular !== undefined) updates.isMostPopular = !!isMostPopular;
 
         const priceChanged = monthlyPriceGbp !== undefined && Number(monthlyPriceGbp) !== Number(prev.monthlyPriceGbp);
         const archiving = isActive === false && prev.isActive === true;
@@ -210,6 +224,11 @@ async function handleMasterPlans(event: any, adminId: number, role: string, ip?:
 
         if (archiving) {
             await db.update(planPrices).set({ isActive: false }).where(eq(planPrices.masterPlanId, id));
+        }
+
+        // At most one plan may hold the "Most Popular" pill — clear it on every other plan.
+        if (updates.isMostPopular === true) {
+            await db.update(masterPlans).set({ isMostPopular: false }).where(ne(masterPlans.id, id));
         }
 
         void insertAdminAuditLog({ adminId, action: 'record_delete', targetType: 'master_plan', targetId: id, previousState: prev, newState: row, ipAddress: ip, userAgent: ua, reason: 'admin_update' });

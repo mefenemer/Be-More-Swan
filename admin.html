@@ -7245,12 +7245,14 @@ const MD_TAB_RESOURCE = {
 
 const MD_FIELDS = {
   'master-plans': [
-    { key: 'name',              label: 'Name',              type: 'text',   required: true },
-    { key: 'description',       label: 'Description',       type: 'text' },
+    { key: 'name',              label: 'Plan Name',         type: 'text',   required: true },
+    { key: 'tierDescription',   label: 'Tier Description',  type: 'text',   placeholder: 'Tier 2 · Best for Scaling Founders' },
+    { key: 'description',       label: 'Plan Description',  type: 'textarea', placeholder: 'Scale your business with autonomous goal tracking…' },
     { key: 'monthlyPriceGbp',   label: 'Monthly Price (GBP)', type: 'number', required: true },
     { key: 'interval',          label: 'Billing Cycle (month/year)', type: 'text', placeholder: 'month' },
     { key: 'tierKey',           label: 'Tier Key',          type: 'text',   required: true },
     { key: 'features',          label: 'Features (JSON)',   type: 'json',   placeholder: '{ "unlock_trending_audio": true, "bonus_assistants": 1 }' },
+    { key: 'isMostPopular',     label: 'Most Popular (shows the pill — only one plan)', type: 'checkbox' },
     { key: 'isActive',          label: 'Active',            type: 'checkbox' },
   ],
   'master-assistants': [
