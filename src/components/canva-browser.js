@@ -189,6 +189,7 @@
   function keepItem(item) {
     if (!item) return false;
     if (item.kind === 'folder') return !_query;   // folders are meaningless in search results
+    if (item.kind === 'asset') return true;       // never importable, but shown greyed out
     if (_opts.assetType !== 'image') return true;
     return !/video|animation|reel|short/i.test(String(item.designType || ''));
   }
@@ -240,7 +241,8 @@
     }
 
     var cells = _items.map(function (item) {
-      return item.kind === 'folder' ? folderCell(item) : designCell(item);
+      if (item.kind === 'folder') return folderCell(item);
+      return item.kind === 'asset' ? assetCell(item) : designCell(item);
     });
     var more = _continuation
       ? '<div class="col-span-full pt-2 pb-1 text-center">' +
@@ -289,6 +291,22 @@
       '  </span>' +
       '  <span class="block text-[11px] font-semibold text-gray-600 truncate mt-1">' + esc(item.name) + '</span>' +
       '</button>';
+  }
+
+  // Uploaded images can't be imported (Canva exports designs only — see canva-browse.ts toItem).
+  // Shown greyed out rather than dropped, so a file the user can see in Canva doesn't vanish here
+  // with no explanation.
+  function assetCell(item) {
+    var thumb = item.thumbnailUrl
+      ? '<img src="' + esc(item.thumbnailUrl) + '" alt="' + esc(item.name) + '" class="w-full h-full object-cover opacity-40" loading="lazy">'
+      : '<div class="w-full h-full flex items-center justify-center text-gray-300 text-xl">🖼️</div>';
+    return '<div class="text-left cursor-not-allowed" title="Only Canva designs can be imported — this is an uploaded image, not a design.">' +
+      '  <span class="relative block aspect-square rounded-xl overflow-hidden border-2 border-transparent bg-gray-100">' +
+      thumb +
+      '    <span class="absolute inset-x-1.5 bottom-1.5 text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-gray-900/75 text-white text-center">Designs only</span>' +
+      '  </span>' +
+      '  <span class="block text-[11px] font-semibold text-gray-400 truncate mt-1">' + esc(item.name) + '</span>' +
+      '</div>';
   }
 
   function renderFooter() {
@@ -345,7 +363,9 @@
         return;
       }
       var item = _items.find(function (i) { return String(i.id) === id; });
-      if (!item) return;
+      // Assets have no cell that calls this, but a selected asset would queue an import that is
+      // certain to 404 — so refuse here too rather than rely on the render staying correct.
+      if (!item || item.kind === 'asset') return;
       _selected.set(id, { id: id, title: item.name, designType: item.designType || '' });
     }
     renderBody();

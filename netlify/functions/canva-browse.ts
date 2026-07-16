@@ -29,7 +29,7 @@ function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-/** Canva design/folder item → the minimal shape the picker grid needs. */
+/** Canva design/folder/asset item → the minimal shape the picker grid needs. */
 function toItem(raw: any): Record<string, unknown> | null {
     if (!raw) return null;
 
@@ -55,8 +55,14 @@ function toItem(raw: any): Record<string, unknown> | null {
             updatedAt: design.updated_at ?? null,
         };
     }
+    // An uploaded image is an ASSET, not a design, and the two id spaces are not interchangeable:
+    // POST /exports takes a design id only, so an asset id 404s ("Design with id ... not found").
+    // Canva has no asset-download endpoint at any resolution — GET /assets/{id} returns metadata
+    // plus a 15-min thumbnail — so these can never be imported, via REST or MCP. Returned anyway,
+    // under their own kind, so the grid still matches what the user sees in Canva; the client
+    // renders `asset` non-selectable. Do NOT map these to kind 'design'.
     if (raw.type === 'image' && raw.image) {
-        return { kind: 'design', id: raw.image.id, name: raw.image.name || 'Untitled image', thumbnailUrl: raw.image.thumbnail?.url || null, pageCount: 1, updatedAt: raw.image.updated_at ?? null };
+        return { kind: 'asset', id: raw.image.id, name: raw.image.name || 'Untitled image', thumbnailUrl: raw.image.thumbnail?.url || null, updatedAt: raw.image.updated_at ?? null };
     }
     return null;
 }

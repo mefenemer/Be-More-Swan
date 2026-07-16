@@ -16,6 +16,13 @@
       "autoPort": false
     },
     {
+      "name": "component-harness-canva-picker",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4187", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/e21c6fc4-294c-467e-b91a-a4398c9b5544/scratchpad/demo"],
+      "port": 4187,
+      "autoPort": false
+    },
+    {
       "name": "static-preview",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "8890"],
