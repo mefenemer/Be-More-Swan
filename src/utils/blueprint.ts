@@ -93,7 +93,10 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
     const s1content = {
         assistantName: asst.name,
         customName: asst.name,
-        role: asst.aiAssistantJobRole ?? master?.name ?? null,
+        // master.name is the live, admin-editable role label; ai_assistant_job_role is only the
+        // hire-time snapshot, so it must come SECOND or a rename never reaches the blueprint.
+        // (hashParts above already includes master.updatedAt, so a rename re-hashes correctly.)
+        role: master?.name ?? asst.aiAssistantJobRole ?? null,
         category: master?.category ?? null,
         riskTier: master?.riskClassification ?? null,
     };

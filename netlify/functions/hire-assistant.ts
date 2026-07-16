@@ -19,7 +19,7 @@
 // erroring — re-saving onboardingContext is idempotent and audit-logged server-side.
 
 import { Handler } from '@netlify/functions';
-import { and, asc, count, eq, inArray, or, sql } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     aiAssistants,
@@ -147,10 +147,23 @@ export default withLambda(async (event) => {
 
         // ── 4. One instance per role name per org ─────────────────────────────────
         // Names are unique per organisation; the instance takes the catalogue name.
+        // Match on the master link, not the name. Keying this on LOWER(name) = LOWER(master.name)
+        // meant an admin renaming the role broke the check: the hired row still carried the OLD
+        // name, so nothing matched and the org could hire the same role twice (the
+        // ai_assistants_org_name_unique constraint also keys on name, so it wouldn't catch it
+        // either). masterAssistantId is stable across renames; the name fallback keeps legacy rows
+        // that predate the FK working.
         const [existing] = await db
             .select({ id: aiAssistants.id, provisioningStatus: aiAssistants.provisioningStatus, lifecycleStatus: aiAssistants.lifecycleStatus })
             .from(aiAssistants)
-            .where(and(eq(aiAssistants.organisationId, orgId), sql`LOWER(${aiAssistants.name}) = LOWER(${master.name})`))
+            .where(and(
+                eq(aiAssistants.organisationId, orgId),
+                or(
+                    eq(aiAssistants.masterAssistantId, master.id),
+                    sql`(${aiAssistants.configuration} ->> 'type') = ${master.roleKey}`,
+                    and(isNull(aiAssistants.masterAssistantId), sql`LOWER(${aiAssistants.name}) = LOWER(${master.name})`),
+                ),
+            ))
             .limit(1);
         if (existing) {
             // Abandoned pre-payment rows are safe to replace (same rule as onboarding.ts).

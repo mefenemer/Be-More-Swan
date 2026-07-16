@@ -6221,11 +6221,12 @@ async function gpAskSwanImprove() {
 }
 
 // Resolve an assistant's display name / role / roleKey for opening the chat modal. Cached per id so
-// repeat clicks don't refetch. Falls back to sensible SMM defaults if the lookup fails.
+// repeat clicks don't refetch. Falls back to a neutral placeholder if the lookup fails — it used to
+// default to the Social Media Manager, which mislabelled every other role whenever the fetch failed.
 let _gpAssistantMetaCache = {};
 async function gpResolveAssistantMeta(id) {
     if (_gpAssistantMetaCache[id]) return _gpAssistantMetaCache[id];
-    let meta = { name: 'Your assistant', role: 'Social Media Manager', roleKey: 'social_media_manager' };
+    let meta = { name: 'Your assistant', role: 'Digital Assistant', roleKey: null };
     try {
         const res = await fetch('/.netlify/functions/get-assistants');
         const data = res.ok ? await res.json() : { assistants: [] };

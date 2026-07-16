@@ -1,7 +1,7 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, gte, sql, count, inArray } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, contentGenerationJobs, goals, scheduledPosts, taskRuns, userProfiles, leads } from '../../db/schema';
+import { aiAssistants, contentGenerationJobs, goals, masterAssistants, scheduledPosts, taskRuns, userProfiles, leads } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
 import { parseRoiPeriod, roiPeriodStart } from '../../src/utils/roi-period';
@@ -20,8 +20,13 @@ export default withLambda(async (event) => {
         // RLS-enforced: tenant-data queries run under withTenant (app_user + app.current_org).
         const assistants = await withTenant(orgId, (tx) => tx.select({
             id: aiAssistants.id,
+            // The user's chosen name for THEIR assistant (e.g. "Sam") — stable, never follows a rename.
             name: aiAssistants.name,
-            role: aiAssistants.aiAssistantJobRole,
+            // The ROLE label (e.g. "The Social Media Manager"). master_assistants.name is the live
+            // source and is admin-editable; ai_assistants.ai_assistant_job_role is only a snapshot
+            // copied at hire time, so on its own it goes stale the moment an admin renames the role.
+            // Legacy rows with no masterAssistantId keep the snapshot as a fallback.
+            role: sql<string | null>`coalesce(${masterAssistants.name}, ${aiAssistants.aiAssistantJobRole})`,
             // roleKey drives the connection-relevance map (connection-map.js).
             // Stored in configuration.type at creation (onboarding.ts).
             roleKey: sql<string | null>`(${aiAssistants.configuration} ->> 'type')`,
@@ -29,7 +34,9 @@ export default withLambda(async (event) => {
             isActive: aiAssistants.isActive,
             // Canonical lifecycle state machine (assistant-lifecycle-epic).
             lifecycleStatus: aiAssistants.lifecycleStatus,
-        }).from(aiAssistants).where(eq(aiAssistants.organisationId, orgId)));
+        }).from(aiAssistants)
+            .leftJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
+            .where(eq(aiAssistants.organisationId, orgId)));
 
         const assistantIds = assistants.map(a => a.id);
 
