@@ -18,18 +18,30 @@ import { sendMagicLinkEmail } from '../../src/utils/email';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
-// Fire-and-forget the AI extraction job so the assistant learns from uploaded brand docs.
-function triggerExtraction(headers: Record<string, string | undefined>, assetId: number): void {
+// Trigger the AI extraction job so the assistant learns from uploaded brand docs. MUST be awaited:
+// on Lambda the runtime freezes as soon as the handler returns, so an un-awaited fetch gets frozen
+// mid-flight and never reaches the worker. Posting to a -background function returns 202 before the
+// work runs, so the await only costs the trigger round-trip; the AbortController caps a stalled one.
+async function triggerExtraction(headers: Record<string, string | undefined>, assetId: number): Promise<void> {
     const baseUrl = resolveBaseUrl(headers);
     if (!baseUrl) {
         console.error('[storage-confirm-upload] Could not resolve base URL — extraction not triggered for asset', assetId);
         return;
     }
-    fetch(`${baseUrl}/.netlify/functions/process-asset-background`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assetId }),
-    }).catch(err => console.error('[storage-confirm-upload] Failed to trigger extraction:', err));
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5_000);
+    try {
+        await fetch(`${baseUrl}/.netlify/functions/process-asset-background`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ assetId }),
+            signal: controller.signal,
+        });
+    } catch (err) {
+        console.error('[storage-confirm-upload] Failed to trigger extraction:', err);
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 const JWT_SECRET  = process.env.JWT_SECRET;
@@ -169,7 +181,7 @@ export default withLambda(async (event) => {
     // Mock mode — skip R2 HEAD check
     if (!R2_ENDPOINT || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET) {
         await db.update(workspaceAssets).set({ status: 'confirmed', updatedAt: new Date() }).where(eq(workspaceAssets.id, assetId));
-        triggerExtraction(event.headers, assetId);
+        await triggerExtraction(event.headers, assetId);
         return { statusCode: 200, body: JSON.stringify({ assetId, assetType: asset.assetType, fileSizeBytes: asset.fileSizeBytes, mock: true }) };
     }
 
@@ -206,7 +218,7 @@ export default withLambda(async (event) => {
     }
 
     // Kick off AI context extraction now the object is confirmed in R2.
-    triggerExtraction(event.headers, assetId);
+    await triggerExtraction(event.headers, assetId);
 
     return {
         statusCode: 200,

@@ -3,8 +3,10 @@
 //
 //   POST { designs: [{ id, title }] }  → validate → create job rows → trigger worker → { jobIds }
 //
-// Returns immediately (202). The real work — export, poll, download, R2, content_assets — runs in
-// canva-import-background, and the picker polls canva-import-status for progress.
+// Returns 202 once the background worker has been dispatched (the trigger POST returns as soon as
+// Netlify accepts the invocation, before the work runs). The real work — export, poll, download,
+// R2, content_assets — runs in canva-import-background, and the picker polls canva-import-status
+// for progress. See triggerWorker for why the dispatch must be awaited.
 //
 // The batch is capped because Canva rate-limits export creation hard (20/min, 75/5min, 500/24h per
 // user). The worker throttles too, but refusing an oversized selection up front gives the user a
@@ -23,15 +25,32 @@ function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-// Kick the background worker (fire-and-forget). Mirrors triggerWorker in generate-ai-video.ts.
-function triggerWorker(headers: Record<string, string | undefined>, jobIds: number[]): void {
+// Kick the background worker. MUST be awaited: this runs on AWS Lambda, which freezes the
+// execution environment the instant the handler returns. An un-awaited fetch (the old
+// fire-and-forget pattern) gets frozen mid-flight and the request never actually reaches the
+// worker, so the jobs sit 'queued' forever and the picker spins until it times out. Posting to a
+// -background function returns 202 immediately — before the 15-min work runs — so awaiting adds
+// only the trigger round-trip. The AbortController caps that so a stalled trigger can't hold the
+// client's request open. Returns whether the worker was successfully dispatched.
+async function triggerWorker(headers: Record<string, string | undefined>, jobIds: number[]): Promise<boolean> {
     const baseUrl = resolveBaseUrl(headers);
-    if (!baseUrl) { console.error('[canva-import] no base URL — worker not triggered for jobs', jobIds); return; }
-    fetch(`${baseUrl}/.netlify/functions/canva-import-background`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobIds }),
-    }).catch(err => console.error('[canva-import] failed to trigger worker:', err));
+    if (!baseUrl) { console.error('[canva-import] no base URL — worker not triggered for jobs', jobIds); return false; }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5_000);
+    try {
+        const res = await fetch(`${baseUrl}/.netlify/functions/canva-import-background`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jobIds }),
+            signal: controller.signal,
+        });
+        return res.ok;
+    } catch (err) {
+        console.error('[canva-import] failed to trigger worker:', err);
+        return false;
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 export default withLambda(async (event) => {
@@ -80,7 +99,12 @@ export default withLambda(async (event) => {
         })),
     ).returning({ id: canvaImportJobs.id, designId: canvaImportJobs.designId });
 
-    triggerWorker(event.headers as Record<string, string | undefined>, rows.map(r => r.id));
+    const dispatched = await triggerWorker(event.headers as Record<string, string | undefined>, rows.map(r => r.id));
+    if (!dispatched) {
+        // The rows are queued but the worker was never reached, so nothing will ever process them.
+        // Tell the client now rather than letting the picker poll a stuck import until it times out.
+        return json(502, { error: 'Could not start the import — please try again in a moment.' });
+    }
 
     return json(202, { jobs: rows.map(r => ({ jobId: r.id, designId: r.designId })) });
 });
