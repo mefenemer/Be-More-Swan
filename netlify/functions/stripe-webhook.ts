@@ -856,6 +856,39 @@ export default withLambda(async (event) => {
                     .where(eq(masterPlans.id, newMasterPlanId))
                     .limit(1);
 
+                // ── Scheduled downgrade took effect ─────────────────────────────
+                // billing-downgrade switches the price at period end via a Stripe subscription
+                // schedule and marks the plan 'downgrading'. When the new phase activates, its
+                // metadata (masterPlanId/tier) lands on the subscription and fires THIS event.
+                // Flip the plan record to the target tier + 'active', then release the now-spent
+                // schedule so a later item-level upgrade isn't blocked by a lingering schedule.
+                if (newMasterPlan) {
+                    const [downgradingPlan] = await db
+                        .select({ id: plans.id })
+                        .from(plans)
+                        .where(and(eq(plans.stripeSubscriptionId, sub.id), eq(plans.status, 'downgrading')))
+                        .limit(1);
+
+                    if (downgradingPlan) {
+                        await db.update(plans)
+                            .set({ masterPlanId: newMasterPlanId, planName: newMasterPlan.name, status: 'active', updatedAt: new Date() })
+                            .where(eq(plans.id, downgradingPlan.id));
+
+                        if (typeof sub.schedule === 'string') {
+                            await stripe.subscriptionSchedules.release(sub.schedule)
+                                .catch(err => console.warn('[stripe-webhook] schedule release after downgrade failed (non-blocking):', (err as any)?.message));
+                        }
+
+                        await db.insert(notifications).values({
+                            userId,
+                            type: 'downgrade_complete',
+                            title: `Downgrade to ${newMasterPlan.name} complete`,
+                            message: `Your plan has switched to ${newMasterPlan.name}. Your new limits are now active.`,
+                            isRead: false,
+                        }).catch(() => {});
+                    }
+                }
+
                 if (newMasterPlan?.assistantLimit !== null && newMasterPlan?.assistantLimit !== undefined) {
                     // Count currently active assistants
                     const activeAssistants = await db
@@ -893,6 +926,20 @@ export default withLambda(async (event) => {
     if (stripeEvent.type === 'customer.subscription.deleted') {
         const sub    = stripeEvent.data.object as Stripe.Subscription;
         const userId = await _resolveUserIdFromSub(sub);
+
+        // Scheduled downgrades now use a subscription schedule (not cancel_at_period_end), so a
+        // deletion carrying pendingDowngrade metadata is a LEGACY downgrade that was scheduled the
+        // old way — cancelling it drops the customer instead of downgrading them. Surface it loudly
+        // so ops can re-subscribe them onto the intended tier; a deleted subscription can't be revived.
+        if (sub.metadata?.pendingDowngradeMasterPlanId) {
+            console.error('[stripe-webhook] LEGACY pending-downgrade subscription was cancelled at period end — customer needs re-subscribing to target tier:', {
+                subscriptionId: sub.id,
+                userId,
+                pendingDowngradeMasterPlanId: sub.metadata.pendingDowngradeMasterPlanId,
+                pendingDowngradeTierKey: sub.metadata.pendingDowngradeTierKey,
+            });
+        }
+
         if (userId) {
             // Mark plans as cancelled — capture cancelledAt for win-back email scheduling (US-GAP-4.2.1)
             const cancelledNow = new Date();
