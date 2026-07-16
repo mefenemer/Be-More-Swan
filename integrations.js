@@ -531,15 +531,42 @@ function _connStatusRow(platform, conn) {
         </div>`;
 }
 
+// Status row for an inbound source (SOURCES). Same shell as _connStatusRow, minus the
+// switch: connecting a source is workspace-wide, so there is no per-assistant on/off to
+// show. A connected source is simply available to the assistant.
+function _sourceStatusRow(source, conn) {
+    const health = _connHealth(conn);
+    const isActive = !!conn && conn.status === 'active';
+    const sub = !conn ? 'Connect it to import designs'
+        : health.problem ? health.label
+        : 'Designs available';
+    const subTone = !conn ? 'text-gray-400' : health.problem ? 'text-amber-700' : 'text-emerald-700';
+    const control = isActive
+        ? ''
+        : `<button type="button" onclick="window._openBriefDrawer && window._openBriefDrawer('platforms')" class="shrink-0 px-2.5 py-1 text-xs font-bold rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">${conn ? 'Reconnect' : 'Connect'}</button>`;
+    return `
+        <div class="flex items-center justify-between gap-3 py-2">
+            <div class="flex items-center gap-2.5 min-w-0">
+                <span class="w-8 h-8 rounded-lg ${source.iconBg} ${source.iconText} flex items-center justify-center text-base shrink-0">${source.emoji}</span>
+                <div class="min-w-0">
+                    <p class="text-sm font-bold text-gray-900 truncate">${_esc(source.label)}</p>
+                    <p class="text-xs font-semibold ${subTone} truncate">${_esc(sub)}</p>
+                </div>
+            </div>
+            ${control}
+        </div>`;
+}
+
 // Rendered from whatever _loadConnections last fetched, so it never issues its own request.
-// Self-hides for roles with no connector platforms (their integrations are recipes in the
+// Self-hides for roles with no connectors at all (their integrations are recipes in the
 // Connections drawer's "Synced actions" list, which carry their own enable toggles).
 window._renderConnectionsStatusCard = function () {
     const card = document.getElementById('connections-status-card');
     if (!card) return;
     const list = document.getElementById('connections-status-list');
     const platforms = _assistantScoped ? _relevantPlatforms() : [];
-    if (!list || !platforms.length) {
+    const sources = _assistantScoped ? _relevantSources() : [];
+    if (!list || (!platforms.length && !sources.length)) {
         card.classList.add('hidden');
         window._syncStatusRow && window._syncStatusRow();
         return;
@@ -549,26 +576,41 @@ window._renderConnectionsStatusCard = function () {
     const rows = platforms.map(p => ({ p, conn: _userConnections.find(c => _serviceMatchesPlatform(c.serviceName, p.id)) }));
     const connected = rows.filter(r => r.conn && r.conn.status === 'active');
     const enabled = connected.filter(r => _assistantSelectedIds.has(r.conn.id));
+    const sourceRows = sources.map(s => ({ s, conn: _userConnections.find(c => String(c.serviceName).toLowerCase() === s.id) }));
+    const activeSources = sourceRows.filter(r => r.conn && r.conn.status === 'active');
 
     const pill = document.getElementById('connections-pill');
     if (pill) {
-        const ok = connected.length > 0;
-        pill.textContent = ok ? `${enabled.length} of ${connected.length} on` : '● None connected';
+        // A connected source has no switch, so it counts as on the moment it is connected.
+        const onCount = enabled.length + activeSources.length;
+        const connectedCount = connected.length + activeSources.length;
+        pill.textContent = connectedCount ? `${onCount} of ${connectedCount} on` : '● None connected';
         pill.className = 'inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full ' +
-            (enabled.length ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500');
+            (onCount ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500');
     }
     const headline = document.getElementById('connections-headline');
     if (headline) {
-        headline.textContent = !connected.length
-            ? 'No channels connected yet'
-            : !enabled.length
-            ? 'Connected — but no channel is switched on for this assistant'
-            : `Posting to ${_listPhrase(enabled.map(r => r.p.label))}`;
+        const parts = [];
+        if (enabled.length) parts.push(`Posting to ${_listPhrase(enabled.map(r => r.p.label))}`);
+        if (activeSources.length) parts.push(`Designs from ${_listPhrase(activeSources.map(r => r.s.label))}`);
+        headline.textContent = (!connected.length && !activeSources.length)
+            ? (sources.length ? 'Nothing connected yet' : 'No channels connected yet')
+            : parts.length
+            ? parts.join(' · ')
+            : 'Connected — but no channel is switched on for this assistant';
+    }
+    // The card's footnote is about the per-channel switch, which only platform rows have.
+    const subtext = document.getElementById('connections-subtext');
+    if (subtext) {
+        subtext.textContent = platforms.length
+            ? 'Switch a channel off and this assistant stops posting there. The account stays connected for your other assistants.'
+            : 'Connections are shared across your workspace — connecting here connects for your other assistants too.';
     }
     // A toggle re-renders the list it lives in, so the switch the user just flipped is replaced
     // mid-interaction. Put focus back on its successor, or keyboard users lose their place.
     const focused = list.contains(document.activeElement) ? document.activeElement.getAttribute('aria-label') : null;
-    list.innerHTML = rows.map(r => _connStatusRow(r.p, r.conn)).join('');
+    list.innerHTML = rows.map(r => _connStatusRow(r.p, r.conn)).join('')
+        + sourceRows.map(r => _sourceStatusRow(r.s, r.conn)).join('');
     if (focused) list.querySelector(`input[aria-label="${focused}"]`)?.focus();
     window._syncStatusRow && window._syncStatusRow();
 };

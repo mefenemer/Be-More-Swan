@@ -274,7 +274,8 @@
        pool: switching one off here stops this assistant posting there, it does not disconnect the
        account. Rows + toggles are rendered by _renderConnectionsStatusCard() in integrations.js,
        which owns the connection state and the _intToggleUseForAssistant persistence; the card
-       self-hides for roles with no connector platforms. -->
+       self-hides for roles with no connectors at all. Inbound sources (Canva) list here too,
+       without a switch — connecting one is workspace-wide, not per-assistant. -->
   <div id="connections-status-card" class="hidden">
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 h-full">
       <div class="flex items-start justify-between gap-4 flex-wrap">
@@ -289,7 +290,7 @@
               <span id="connections-save-status" class="text-xs font-bold text-emerald-600 transition-all"></span>
             </div>
             <p id="connections-headline" class="text-sm text-gray-700 mt-1 font-semibold"></p>
-            <p class="text-xs text-gray-500 mt-0.5">Switch a channel off and this assistant stops posting there. The account stays connected for your other assistants.</p>
+            <p id="connections-subtext" class="text-xs text-gray-500 mt-0.5">Switch a channel off and this assistant stops posting there. The account stays connected for your other assistants.</p>
           </div>
         </div>
         <button type="button" onclick="window._openBriefDrawer && window._openBriefDrawer('platforms')" class="shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Manage connections</button>

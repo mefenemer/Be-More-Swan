@@ -13,7 +13,7 @@ import { eq, and, desc } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { getDb } from '../../db/client';
 import { users, aiAssistants, aiBlueprints, contentGenerationJobs, scheduledPosts } from '../../db/schema';
-import { isAdminRole } from '../../src/utils/rbac';
+import { hasPermission } from '../../src/utils/rbac';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -38,7 +38,7 @@ async function requireAdmin(event: any): Promise<{ userId: number; name: string 
     catch (_e) { return null; }
     const db = getDb();
     const [row] = await db.select({ role: users.role, firstName: users.firstName, lastName: users.lastName }).from(users).where(eq(users.id, userId)).limit(1);
-    if (!row || !isAdminRole(row.role)) return null;
+    if (!hasPermission(row?.role, 'run_test_generation')) return null;
     const name = [row.firstName, row.lastName].filter(Boolean).join(' ') || `Admin #${userId}`;
     return { userId, name };
 }

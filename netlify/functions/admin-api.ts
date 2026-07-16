@@ -40,7 +40,7 @@ import { createNotification } from '../../src/utils/notify';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { resolveEnvironment, runWithEnvironment } from '../../src/utils/env-context';
 import { sendMagicLinkEmail } from '../../src/utils/email';
-import { isAdminRole, hasPermission, requirePermission } from '../../src/utils/rbac';
+import { isAdminRole, hasPermission, requirePermission, permissionsForRole } from '../../src/utils/rbac';
 import { checkImpersonationBlock } from '../../src/utils/impersonation-guard';
 import { SPECIAL_CATEGORY_CLAUSE } from './get-dpa-content';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -109,12 +109,25 @@ export default withLambda(async (event) => {
     const [_adminRoleRow] = await authDb.select({ role: users.role }).from(users).where(eq(users.id, adminId)).limit(1);
     const adminRole = _adminRoleRow?.role ?? null;
 
+    // ── GET: my-permissions — the caller's own resolved permission set ────────
+    // The admin portal is a static page and cannot import rbac.ts, so it asks for
+    // its permissions rather than keeping a second copy of the matrix in JS. This
+    // is what stops the nav and the API drifting apart. Env-independent: roles are
+    // always resolved against live.
+    if (event.httpMethod === 'GET' && resource === 'my-permissions') {
+        return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: adminRole, permissions: permissionsForRole(adminRole) }),
+        };
+    }
+
     // Epic: Superadmin Environment Management — US2/US3.
-    // Resolve Live vs Sandbox for this request. Only super_admins may operate in
-    // sandbox; a missing/malformed X-Environment header, a non-super-admin, or an
-    // unprovisioned sandbox all fall back to live (AC 3.3). Every data query below
-    // runs on the env-routed connection (db/client.ts).
-    const env = resolveEnvironment(event.headers, { allowSandbox: adminRole === 'super_admin' });
+    // Resolve Live vs Sandbox for this request. Only roles clearing 'sandbox_access'
+    // may operate in sandbox; a missing/malformed X-Environment header, an
+    // insufficient role, or an unprovisioned sandbox all fall back to live (AC 3.3).
+    // Every data query below runs on the env-routed connection (db/client.ts).
+    const env = resolveEnvironment(event.headers, { allowSandbox: hasPermission(adminRole, 'sandbox_access') });
 
     const result = await runWithEnvironment<any>(env, async () => {
     const db = getDb();
@@ -675,9 +688,8 @@ export default withLambda(async (event) => {
         // Same Stripe card fingerprint active on ≥2 workspaces ⇒ possible account-splitting.
         // Superadmin-only (this exposes cross-workspace billing linkage).
         if (event.httpMethod === 'GET' && resource === 'security-abuse') {
-            if (adminRole !== 'super_admin') {
-                return { statusCode: 403, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Superadmin access required.' }) };
-            }
+            const permErr = requirePermission(adminRole, 'view_security_abuse');
+            if (permErr) return permErr;
             const rows = await db
                 .select({
                     id: organisations.id,
@@ -1000,9 +1012,8 @@ export default withLambda(async (event) => {
             }
 
             if (event.httpMethod === 'POST') {
-                if (adminRole !== 'super_admin') {
-                    return { statusCode: 403, body: JSON.stringify({ error: 'Only super admins can change the session timeout.' }) };
-                }
+                const permErr = requirePermission(adminRole, 'manage_session_timeout');
+                if (permErr) return permErr;
                 const body = JSON.parse(event.body || '{}');
                 const timeout = Number(body.inactivityTimeoutMinutes);
                 const countdown = Number(body.countdownMinutes);

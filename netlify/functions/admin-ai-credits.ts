@@ -4,7 +4,7 @@
 // GET  ?targetUserId=N   → { balance, held, ledger[] }  (resolves the user's org)
 // POST { targetUserId, delta, reason }  → grant (+) or deduct (−) credits; returns { balance }
 //
-// Cookie: aura_session (must be billing_admin, platform_admin, or super_admin).
+// Cookie: aura_session (role must clear 'manage_ai_credits' — billing_admin and above).
 // Unlike admin-billing-override, this needs no Stripe — credits are DB-only and per-environment.
 
 import { Handler } from '@netlify/functions';
@@ -15,9 +15,10 @@ import { users, userOrganisations, aiCreditLedger } from '../../db/schema';
 import { getBalance, adminAdjust } from '../../src/utils/ai-credits';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { requirePermission } from '../../src/utils/rbac';
 
 const jwtSecret = process.env.JWT_SECRET;
-const ALLOWED_ROLES = ['billing_admin', 'platform_admin', 'super_admin'];
+// Gate: rbac.ts is the single source of truth for admin authorisation.
 
 export default withLambda(async (event) => {
     if (!jwtSecret) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured.' }) };
@@ -39,9 +40,8 @@ export default withLambda(async (event) => {
 
     const db = getDb();
     const [adminUser] = await db.select({ role: users.role }).from(users).where(eq(users.id, adminId)).limit(1);
-    if (!adminUser || !ALLOWED_ROLES.includes(adminUser.role || '')) {
-        return { statusCode: 403, body: JSON.stringify({ error: `Requires one of: ${ALLOWED_ROLES.join(', ')}.` }) };
-    }
+    const denied = requirePermission(adminUser?.role, 'manage_ai_credits');
+    if (denied) return denied;
 
     // ── Resolve the target user's organisation ─────────────────────────────────
     const targetUserId = Number(event.queryStringParameters?.targetUserId ?? (safeJson(event.body)?.targetUserId));

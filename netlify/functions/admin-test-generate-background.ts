@@ -11,7 +11,7 @@ import jwt from 'jsonwebtoken';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, aiBlueprints, contentGenerationJobs, scheduledPosts } from '../../db/schema';
-import { isAdminRole } from '../../src/utils/rbac';
+import { hasPermission } from '../../src/utils/rbac';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmark';
 import { DISCLOSURE } from '../../src/config/compliance';
@@ -35,7 +35,7 @@ async function requireAdmin(event: any): Promise<number | null> {
     catch (_e) { return null; }
     const db = getDb();
     const [row] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
-    if (!row || !isAdminRole(row.role)) return null;
+    if (!hasPermission(row?.role, 'run_test_generation')) return null;
     return userId;
 }
 

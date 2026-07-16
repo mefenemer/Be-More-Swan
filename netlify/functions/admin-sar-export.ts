@@ -4,7 +4,7 @@
 //
 // POST /.netlify/functions/admin-sar-export
 //   Body: { targetUserId: number }
-//   Cookie: aura_session (must be billing_admin, platform_admin, or super_admin)
+//   Cookie: aura_session (role must clear 'sar_export' — billing_admin and above)
 //
 // Packages all personal data for a user, stores it in dataExportRequests with a
 // 72-hour signed download token, then notifies the requesting admin.
@@ -26,11 +26,12 @@ import {
 import { createNotification } from '../../src/utils/notify';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { requirePermission } from '../../src/utils/rbac';
 
 const jwtSecret = process.env.JWT_SECRET;
 const BASE_URL  = process.env.BASE_URL || 'https://bemoreswan.com';
 
-const ALLOWED_ROLES = ['billing_admin', 'platform_admin', 'super_admin'];
+// Gate: rbac.ts is the single source of truth for admin authorisation.
 
 export default withLambda(async (event) => {
     // Epic: Superadmin Environment Management — live-only admin action. Reject sandbox
@@ -66,9 +67,8 @@ export default withLambda(async (event) => {
         .where(eq(users.id, adminId))
         .limit(1);
 
-    if (!adminUser || !ALLOWED_ROLES.includes(adminUser.role || '')) {
-        return { statusCode: 403, body: JSON.stringify({ error: `Requires one of: ${ALLOWED_ROLES.join(', ')}.` }) };
-    }
+    const denied = requirePermission(adminUser?.role, 'sar_export');
+    if (denied) return denied;
 
     // ── 2. Validate request ────────────────────────────────────────────────
     let body: { targetUserId?: number };

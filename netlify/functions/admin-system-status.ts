@@ -13,6 +13,7 @@ import { S3Client, HeadBucketCommand } from '@aws-sdk/client-s3';
 import { getDb } from '../../db/client';
 import { users } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { hasPermission } from '../../src/utils/rbac';
 
 const jwtSecret = process.env.JWT_SECRET;
 const json = (statusCode: number, body: unknown) => ({
@@ -30,7 +31,7 @@ async function requireSuperAdmin(event: Parameters<Handler>[0]): Promise<boolean
     try {
         const db = getDb();
         const [row] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
-        return row?.role === 'super_admin';
+        return hasPermission(row?.role, 'view_system_status');
     } catch { return false; }
 }
 

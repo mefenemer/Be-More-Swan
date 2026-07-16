@@ -4,7 +4,7 @@
 //
 // POST /.netlify/functions/admin-gdpr-erase
 //   Body: { targetUserId: number, reason: string }
-//   Cookie: aura_session (must belong to super_admin or platform_admin)
+//   Cookie: aura_session (role must clear 'gdpr_erasure' — super_admin only)
 //
 // Performs anonymisation (not hard-delete) to satisfy 7-year financial record retention:
 //   - Overwrites PII fields on the users row
@@ -29,6 +29,7 @@ import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { sendEmail } from '../../src/utils/email';
 import { purgeUserAssets } from '../../src/utils/gdpr-asset-purge';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { requirePermission } from '../../src/utils/rbac';
 
 const jwtSecret    = process.env.JWT_SECRET;
 const stripe       = process.env.STRIPE_SECRET_KEY
@@ -66,9 +67,8 @@ export default withLambda(async (event) => {
         .where(eq(users.id, adminId))
         .limit(1);
 
-    if (!adminUser || !['super_admin', 'platform_admin'].includes(adminUser.role || '')) {
-        return { statusCode: 403, body: JSON.stringify({ error: 'Requires super_admin or platform_admin role.' }) };
-    }
+    const denied = requirePermission(adminUser?.role, 'gdpr_erasure');
+    if (denied) return denied;
 
     // ── 2. Parse and validate request ────────────────────────────────────────
     let body: { targetUserId?: number; reason?: string };

@@ -16,7 +16,7 @@ import postgres from 'postgres';
 import { and, eq, ne, desc, asc, sql, or, isNull, isNotNull, inArray, notInArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { issueReports, issueReportMessages, users } from '../../db/schema';
-import { isAdminRole, hasPermission } from '../../src/utils/rbac';
+import { hasPermission } from '../../src/utils/rbac';
 import { ISSUE_STATUS_LABEL, isIssueStatus, notifyIssueUser, maybeAdvanceToReadyToTest, type IssueStatus } from '../../src/utils/issue-reports';
 import { createRoadmapItemFromIssue, isRoadmapPriority, type RoadmapPriority } from '../../src/utils/feature-roadmap';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -37,7 +37,7 @@ async function requireAdmin(event: any): Promise<{ id: number; role: string } | 
     try { userId = (jwt.verify(match[1], jwtSecret) as { userId: number }).userId; } catch { return null; }
     const db = getDb();
     const [row] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
-    if (!row || !isAdminRole(row.role)) return null;
+    if (!hasPermission(row?.role, 'view_issue_reports')) return null;
     return { id: userId, role: row.role };
 }
 
@@ -225,8 +225,8 @@ export default withLambda(async (event) => {
     // Super-admin only. The local watcher claims the queued merge and runs `gh pr merge`;
     // a successful merge (plus any applied migration) is what advances the issue.
     if (event.httpMethod === 'POST' && action === 'request-merge' && id) {
-        if (admin.role !== 'super_admin') {
-            return json(403, { error: 'Merging to staging requires super-admin privilege.' });
+        if (!hasPermission(admin.role, 'deploy_code')) {
+            return json(403, { error: 'Merging to staging requires the deploy_code privilege.' });
         }
         const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
         if (!issue) return json(404, { error: 'Issue not found.' });
@@ -264,8 +264,8 @@ export default withLambda(async (event) => {
     // pushing staging → main (prod deploys from main); see admin-issue-handoff's
     // claim-promote / promote-result.
     if (event.httpMethod === 'POST' && action === 'request-prod-promote' && id) {
-        if (admin.role !== 'super_admin') {
-            return json(403, { error: 'Promoting to production requires super-admin privilege.' });
+        if (!hasPermission(admin.role, 'deploy_code')) {
+            return json(403, { error: 'Promoting to production requires the deploy_code privilege.' });
         }
         const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
         if (!issue) return json(404, { error: 'Issue not found.' });
@@ -303,8 +303,8 @@ export default withLambda(async (event) => {
     // PR merge — same as a normal merge, success moves the issue on to "Fixed & Ready
     // to Test".
     if (event.httpMethod === 'POST' && action === 'request-conflict-fix' && id) {
-        if (admin.role !== 'super_admin') {
-            return json(403, { error: 'Investigating a merge conflict requires super-admin privilege.' });
+        if (!hasPermission(admin.role, 'deploy_code')) {
+            return json(403, { error: 'Investigating a merge conflict requires the deploy_code privilege.' });
         }
         const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
         if (!issue) return json(404, { error: 'Issue not found.' });
@@ -336,8 +336,8 @@ export default withLambda(async (event) => {
     // any fix still gated on a pending DB migration — those must be run individually
     // from the ticket first.
     if (event.httpMethod === 'POST' && action === 'request-merge-all') {
-        if (admin.role !== 'super_admin') {
-            return json(403, { error: 'Merging to staging requires super-admin privilege.' });
+        if (!hasPermission(admin.role, 'deploy_code')) {
+            return json(403, { error: 'Merging to staging requires the deploy_code privilege.' });
         }
         const updated = await db.update(issueReports).set({
             devMergeStatus: 'queued',
