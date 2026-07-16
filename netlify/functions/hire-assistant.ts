@@ -32,6 +32,7 @@ import {
     taskRuns,
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { effectiveLimit, type FeatureOverrides } from '../../src/utils/plan-features';
 import { checkRateLimit } from '../../src/utils/rate-limit';
 import { CURRENT_DPA_VERSION } from './accept-dpa';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -106,7 +107,7 @@ export default withLambda(async (event) => {
         // the owner's userId + the org id), so a userId-only lookup would wrongly find no
         // plan for members of a paid workspace.
         const [planRow] = await db
-            .select({ assistantLimit: masterPlans.assistantLimit })
+            .select({ assistantLimit: masterPlans.assistantLimit, featureOverrides: plans.featureOverrides })
             .from(plans)
             .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
             .where(and(
@@ -121,7 +122,9 @@ export default withLambda(async (event) => {
         if (!planRow) {
             return json(402, { error: 'Choose a plan to hire your first assistant.', code: 'NO_PLAN' });
         }
-        let assistantLimit: number | null = planRow.assistantLimit ?? null;
+        // Plan Features: prefer a "new subscribers only" frozen snapshot over the live master limit.
+        let assistantLimit: number | null = effectiveLimit(
+            planRow.featureOverrides as FeatureOverrides | null, 'assistantLimit', planRow.assistantLimit ?? null);
         if (assistantLimit !== null) {
             const [org] = await db
                 .select({ bonusAssistants: organisations.bonusAssistants })

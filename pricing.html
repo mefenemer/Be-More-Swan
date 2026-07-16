@@ -361,7 +361,10 @@
                             </th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <!-- Plan Features: the rows below are a no-JS / pre-seed FALLBACK. When the DB-driven
+                         feature catalog loads (get-plans → featureCatalog), renderComparisonTable() below
+                         overwrites this tbody so the table is fully database-driven. -->
+                    <tbody id="cmp-tbody">
 
                         <!-- CAPACITY -->
                         <tr class="bg-gray-50/70 border-t border-gray-200">
@@ -802,8 +805,10 @@
         try {
             const r = await fetch('/.netlify/functions/get-plans');
             if (!r.ok) return;
-            const { plans } = await r.json();
+            const { plans, featureCatalog } = await r.json();
             if (!Array.isArray(plans)) return;
+            // Plan Features: render the DB-driven comparison table (overwrites the static fallback tbody).
+            renderComparisonTable(plans, featureCatalog);
             const byTier = {};
             plans.forEach(p => { if (p.tierKey) byTier[p.tierKey] = Number(p.monthlyPriceGbp); });
             const gbp = CURRENCY_CONFIG.GBP;
@@ -819,6 +824,82 @@
                 BILLING_CONFIG.annual[tKey]  = { price: '£' + annual.toLocaleString('en-GB'), note: `Billed £${(annual * 12).toLocaleString('en-GB')} annually · cancel any time` };
             });
         } catch { /* non-critical — fall back to the hardcoded prices */ }
+    }
+
+    // ── Plan Features: DB-driven comparison table ────────────────────────────
+    // Builds the whole comparison tbody from the catalog returned by get-plans, so an admin edit
+    // in the Portal (Master Data → Plan Features) shows here with no code change. Columns are the
+    // 3 purchasable tiers (saver/buster/employee) + the contact-sales "Custom Enterprise" column
+    // (feature.enterpriseValue). If the catalog is missing (pre-seed), the static fallback stays.
+    const CMP_CHECK = '<svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>';
+    const CMP_DASH  = '<span class="text-gray-300">—</span>';
+
+    function cmpEsc(s) {
+        return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    function cmpTruthy(v) {
+        if (v === true) return true;
+        const s = String(v).trim().toLowerCase();
+        return s === 'true' || s === '✓' || s === 'yes' || s === '1';
+    }
+    function cmpReadValue(plan, def) {
+        if (!plan) return null;
+        if (def.storageTarget === 'column' && def.columnName) return plan[def.columnName] ?? null;
+        return (plan.features || {})[def.key] ?? null;
+    }
+    // Render one cell's INNER html by value type. `emphasise` = the popular (buster) column styling.
+    function cmpCellInner(def, value, emphasise) {
+        if (def.valueType === 'boolean') return cmpTruthy(value) ? CMP_CHECK : CMP_DASH;
+        let text;
+        if (value === null || value === undefined || value === '') text = def.unlimitedLabel || '—';
+        else if (def.valueType === 'number') text = Number(value).toLocaleString('en-GB');
+        else text = value;
+        const cls = emphasise ? 'font-semibold pk-text-dark' : (def.valueType === 'number' ? 'font-bold text-gray-900' : 'text-gray-600');
+        return `<span class="${cls}">${cmpEsc(text)}</span>`;
+    }
+    function cmpEnterpriseInner(def) {
+        if (def.valueType === 'boolean') return cmpTruthy(def.enterpriseValue) ? CMP_CHECK : CMP_DASH;
+        return `<span class="text-gray-600">${cmpEsc(def.enterpriseValue || '—')}</span>`;
+    }
+
+    function renderComparisonTable(plans, featureCatalog) {
+        const tbody = document.getElementById('cmp-tbody');
+        if (!tbody || !Array.isArray(featureCatalog) || !featureCatalog.length) return; // keep static fallback
+        const byTier = {};
+        plans.forEach(p => { if (p.tierKey) byTier[p.tierKey] = p; });
+        // Fixed column order mirrors the pricing cards; enterprise is a static 4th column.
+        const cols = GBP_TIER_ORDER.map(tk => byTier[tk]);
+        const defs = featureCatalog.slice().sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+
+        let html = '';
+        let lastCategory = null;
+        for (const def of defs) {
+            if (def.category !== lastCategory) {
+                html += `<tr class="bg-gray-50/70 border-t border-gray-200"><td colspan="5" class="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-400">${cmpEsc(def.category)}</td></tr>`;
+                lastCategory = def.category;
+            }
+            html += '<tr class="border-t border-gray-100 hover:bg-gray-50/40">';
+            html += `<td class="px-6 py-3.5 text-gray-700"><span class="font-medium">${cmpEsc(def.label)}</span>` +
+                    (def.description ? `<br><span class="text-xs text-gray-400 font-normal">${cmpEsc(def.description)}</span>` : '') + '</td>';
+            cols.forEach((plan, i) => {
+                const emphasise = i === 1; // t2 (buster) = the "Popular" tinted column
+                const tint = emphasise ? ' pk-col-tint' : '';
+                html += `<td class="px-4 py-3.5 text-center align-middle${tint}">${cmpCellInner(def, cmpReadValue(plan, def), emphasise)}</td>`;
+            });
+            html += `<td class="px-4 py-3.5 text-center align-middle">${cmpEnterpriseInner(def)}</td>`;
+            html += '</tr>';
+        }
+
+        // CTA row — reproduces the static footer (choosePlan / openEnterpriseModal).
+        html += '<tr class="border-t-2 border-gray-200 bg-gray-50">' +
+            '<td class="px-6 py-5"></td>' +
+            '<td class="px-4 py-5 text-center"><a href="#" onclick="event.preventDefault(); choosePlan(\'starter\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Choose</a></td>' +
+            '<td class="px-4 py-5 text-center pk-col-tint"><a href="#" onclick="event.preventDefault(); choosePlan(\'pro_team\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Choose</a></td>' +
+            '<td class="px-4 py-5 text-center"><a href="#" onclick="event.preventDefault(); choosePlan(\'business\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Choose</a></td>' +
+            '<td class="px-4 py-5 text-center"><button onclick="openEnterpriseModal()" class="inline-block px-5 py-2 text-sm font-bold rounded-lg text-white bg-pink-600 hover:bg-pink-700 transition">Choose</button></td>' +
+            '</tr>';
+
+        tbody.innerHTML = html;
     }
 
     const BILLING_CONFIG = {

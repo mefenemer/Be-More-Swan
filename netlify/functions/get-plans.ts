@@ -7,7 +7,7 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, ne, asc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { masterPlans } from '../../db/schema';
+import { masterPlans, planFeatures } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const HEADERS = {
@@ -34,13 +34,34 @@ export default withLambda(async (event) => {
                 monthlyTokenLimit: masterPlans.monthlyTokenLimit,
                 appConnectionLimit: masterPlans.appConnectionLimit,
                 seatLimit: masterPlans.seatLimit,
+                storageLimitBytes: masterPlans.storageLimitBytes,
                 features: masterPlans.features, // AC2.1.2: dynamic feature checklist source
             })
             .from(masterPlans)
             .where(and(eq(masterPlans.isActive, true), ne(masterPlans.tierKey, 'trial')))
             .orderBy(asc(masterPlans.monthlyPriceGbp));
 
-        return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ plans }) };
+        // Plan Features: DB-driven comparison-table catalog (enabled rows only, in display order).
+        // pricing.html renders each row from a plan's typed column (storageTarget='column') or its
+        // features jsonb (storageTarget='feature'); a null value renders as unlimitedLabel.
+        const featureCatalog = await db
+            .select({
+                key: planFeatures.key,
+                label: planFeatures.label,
+                description: planFeatures.description,
+                category: planFeatures.category,
+                valueType: planFeatures.valueType,
+                storageTarget: planFeatures.storageTarget,
+                columnName: planFeatures.columnName,
+                unlimitedLabel: planFeatures.unlimitedLabel,
+                enterpriseValue: planFeatures.enterpriseValue,
+                displayOrder: planFeatures.displayOrder,
+            })
+            .from(planFeatures)
+            .where(eq(planFeatures.isEnabled, true))
+            .orderBy(asc(planFeatures.displayOrder));
+
+        return { statusCode: 200, headers: HEADERS, body: JSON.stringify({ plans, featureCatalog }) };
     } catch (err) {
         console.error('[get-plans]', err);
         return { statusCode: 500, headers: HEADERS, body: JSON.stringify({ error: 'Failed to load plans.' }) };

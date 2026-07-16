@@ -654,6 +654,7 @@
         <!-- Tab bar -->
         <div class="flex gap-1 overflow-x-auto mb-5 border-b border-gray-200 pb-0" id="md-tab-bar">
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="plans" onclick="mdSwitchTab('plans')">Plans</button>
+          <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="plan-features" onclick="mdSwitchTab('plan-features')">Plan Features</button>
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="assistants" onclick="mdSwitchTab('assistants')">Assistants</button>
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="assistant-versions" onclick="mdSwitchTab('assistant-versions')">Versions</button>
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="feature-flags-md" onclick="mdSwitchTab('feature-flags-md')">Flag Definitions</button>
@@ -675,6 +676,23 @@
               </thead>
               <tbody id="md-plans-tbody"><tr><td colspan="5" class="px-5 py-8 text-center text-gray-400">Loading…</td></tr></tbody>
             </table>
+          </div>
+        </div>
+
+        <!-- Plan Features tab — DB-driven pricing feature matrix (feature rows × plan columns) -->
+        <div id="md-pane-plan-features" class="md-pane hidden">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <h2 class="text-sm font-bold text-gray-700">Plan Features</h2>
+              <p class="text-xs text-gray-400 mt-0.5">Edit each feature's value per plan, or disable a feature entirely. Drives the pricing page and in-app feature limits.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="pfOpenAddFeature()" class="px-3 py-1.5 bg-gray-100 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-200 transition">+ Add Feature</button>
+              <button id="pf-save-btn" onclick="pfOpenApplyChooser()" disabled class="px-3 py-1.5 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition disabled:opacity-40 disabled:cursor-not-allowed">Save changes</button>
+            </div>
+          </div>
+          <div id="md-plan-features-body" class="bg-white rounded-2xl border border-gray-200 overflow-x-auto p-1">
+            <div class="px-5 py-8 text-center text-gray-400">Loading…</div>
           </div>
         </div>
 
@@ -7287,6 +7305,8 @@ function mdSwitchTab(tab) {
 async function mdLoadTab(tab) {
   // US-HELP-1.3.1: Help Articles tab has its own loader
   if (tab === 'help-articles') { await mdLoadHelpArticles(); return; }
+  // Plan Features tab renders a matrix (features × plans), not the standard CRUD table.
+  if (tab === 'plan-features') { await mdLoadPlanFeatures(); return; }
 
   const resource = MD_TAB_RESOURCE[tab];
   if (!resource) return;
@@ -7377,6 +7397,195 @@ async function mdApplyHelpSeed() {
     await mdLoadHelpArticles();
   } catch (e) {
     showToast('Seed failed: ' + (e.message || e), 'error');
+  }
+}
+
+// ── Plan Features matrix (DB-driven pricing features) ───────────────────────
+// Loads the feature catalog + per-plan values, renders an editable matrix, and saves changes
+// either retroactively (all existing accounts) or to new subscribers only (freezes existing ones).
+let _pfData = null;                 // { features:[], plans:[], values:{[planId]:{[key]:val}} }
+let _pfDirty = {};                  // { "planId::key": value } — pending edits
+
+async function mdLoadPlanFeatures() {
+  const host = document.getElementById('md-plan-features-body');
+  if (!host) return;
+  host.innerHTML = '<div class="px-5 py-8 text-center text-gray-400">Loading…</div>';
+  _pfDirty = {};
+  pfUpdateSaveBtn();
+  try {
+    _pfData = await api(MD_API + '?resource=plan-feature-values');
+    pfRenderMatrix();
+  } catch (e) {
+    host.innerHTML = '<div class="px-5 py-8 text-center text-red-400">Failed to load: ' + escAdm(e.message || e) + '</div>';
+  }
+}
+
+function pfRenderMatrix() {
+  const host = document.getElementById('md-plan-features-body');
+  if (!host || !_pfData) return;
+  const { features, plans, values } = _pfData;
+  if (!features.length) {
+    host.innerHTML = '<div class="px-5 py-8 text-center text-gray-400">No feature definitions yet. Apply db/plan-features.sql and run db/seed-plan-features.ts, or add one.</div>';
+    return;
+  }
+  const cols = plans.map(p => `<th class="px-3 py-3 text-center font-bold text-gray-600 whitespace-nowrap">${escAdm(p.name)}<div class="text-[10px] font-normal text-gray-400">${escAdm(p.tierKey)}</div></th>`).join('');
+  let rows = '';
+  let lastCat = null;
+  for (const def of features) {
+    if (def.category !== lastCat) {
+      rows += `<tr class="bg-gray-50"><td colspan="${plans.length + 2}" class="px-4 py-2 text-xs font-bold uppercase tracking-wider text-gray-400">${escAdm(def.category)}</td></tr>`;
+      lastCat = def.category;
+    }
+    const disabled = !def.isEnabled;
+    rows += `<tr class="border-t border-gray-100 ${disabled ? 'opacity-50' : ''}">`;
+    rows += `<td class="px-4 py-2.5 align-top"><div class="font-medium text-gray-800 text-sm">${escAdm(def.label)}</div>`
+          + `<div class="text-[11px] text-gray-400 font-mono">${escAdm(def.key)} · ${escAdm(def.valueType)} · ${escAdm(def.storageTarget)}${def.columnName ? '(' + escAdm(def.columnName) + ')' : ''}</div></td>`;
+    for (const p of plans) {
+      const val = (values[p.id] || {})[def.key];
+      rows += `<td class="px-3 py-2.5 text-center align-middle">${pfCellEditor(def, p.id, val, disabled)}</td>`;
+    }
+    // Per-feature Enabled toggle (row-level; PATCHes plan-feature-defs immediately).
+    rows += `<td class="px-3 py-2.5 text-center align-middle">`
+          + `<button onclick="pfToggleEnabled(${def.id}, ${def.isEnabled ? 'false' : 'true'})" `
+          + `class="px-2.5 py-1 text-[11px] font-bold rounded-full ${def.isEnabled ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}">`
+          + `${def.isEnabled ? 'Enabled' : 'Disabled'}</button></td>`;
+    rows += '</tr>';
+  }
+  host.innerHTML = `<table class="w-full text-sm"><thead class="text-xs uppercase tracking-wide border-b border-gray-200">`
+    + `<tr><th class="px-4 py-3 text-left font-bold text-gray-500">Feature</th>${cols}<th class="px-3 py-3 text-center font-bold text-gray-500">Status</th></tr>`
+    + `</thead><tbody>${rows}</tbody></table>`;
+}
+
+// Inline editor for one cell, keyed by planId::featureKey. Writes into _pfDirty on change.
+function pfCellEditor(def, planId, val, disabled) {
+  const id = `pf-${planId}-${escAdm(def.key)}`;
+  const dis = disabled ? 'disabled' : '';
+  if (def.valueType === 'boolean') {
+    const on = val === true || val === 'true';
+    return `<input type="checkbox" id="${id}" ${on ? 'checked' : ''} ${dis} onchange="pfEdit(${planId}, '${escAdm(def.key)}', this.checked)" class="w-4 h-4 cursor-pointer accent-emerald-600">`;
+  }
+  if (def.valueType === 'number') {
+    const v = (val === null || val === undefined) ? '' : val;
+    return `<input type="number" id="${id}" value="${escAdm(v)}" ${dis} placeholder="∞" onchange="pfEdit(${planId}, '${escAdm(def.key)}', this.value)" class="w-20 px-2 py-1 border border-gray-200 rounded text-center text-sm">`;
+  }
+  const v = (val === null || val === undefined) ? '' : val;
+  return `<input type="text" id="${id}" value="${escAdm(v)}" ${dis} onchange="pfEdit(${planId}, '${escAdm(def.key)}', this.value)" class="w-40 px-2 py-1 border border-gray-200 rounded text-sm">`;
+}
+
+function pfEdit(planId, key, value) {
+  _pfDirty[planId + '::' + key] = value;
+  pfUpdateSaveBtn();
+}
+
+function pfUpdateSaveBtn() {
+  const btn = document.getElementById('pf-save-btn');
+  if (!btn) return;
+  const n = Object.keys(_pfDirty).length;
+  btn.disabled = n === 0;
+  btn.textContent = n ? `Save ${n} change${n === 1 ? '' : 's'}` : 'Save changes';
+}
+
+async function pfToggleEnabled(id, newVal) {
+  try {
+    await api(MD_API + '?resource=plan-feature-defs&id=' + id, { method: 'PATCH', body: JSON.stringify({ isEnabled: newVal }) });
+    showToast('Feature ' + (newVal ? 'enabled' : 'disabled') + '.', 'success');
+    await mdLoadPlanFeatures();
+  } catch (e) {
+    showToast('Failed: ' + (e.message || e), 'error');
+  }
+}
+
+// Apply-mode chooser — the two required modes: retroactive vs new subscribers only.
+function pfOpenApplyChooser() {
+  if (!Object.keys(_pfDirty).length) return;
+  const n = Object.keys(_pfDirty).length;
+  const ov = document.createElement('div');
+  ov.id = 'pf-apply-overlay';
+  ov.className = 'fixed inset-0 bg-black/40 flex items-center justify-center z-50';
+  ov.innerHTML = `<div class="bg-white rounded-2xl shadow-xl max-w-md w-full mx-4 p-6">
+    <h3 class="text-base font-bold text-gray-800 mb-1">Apply ${n} feature change${n === 1 ? '' : 's'}</h3>
+    <p class="text-sm text-gray-500 mb-5">Choose who these changes affect.</p>
+    <div class="space-y-3">
+      <button onclick="pfSave('new')" class="w-full text-left px-4 py-3 rounded-xl border border-gray-200 hover:border-indigo-400 hover:bg-indigo-50 transition">
+        <div class="font-bold text-gray-800 text-sm">New subscribers only</div>
+        <div class="text-xs text-gray-500 mt-0.5">Existing subscribers keep their current values (frozen). Only future sign-ups get the new values.</div>
+      </button>
+      <button onclick="pfSave('retroactive')" class="w-full text-left px-4 py-3 rounded-xl border border-gray-200 hover:border-indigo-400 hover:bg-indigo-50 transition">
+        <div class="font-bold text-gray-800 text-sm">All existing accounts (retroactive)</div>
+        <div class="text-xs text-gray-500 mt-0.5">Applies immediately to every current subscriber as well as new ones.</div>
+      </button>
+    </div>
+    <div class="mt-5 text-right"><button onclick="pfCloseApplyChooser()" class="px-4 py-2 text-sm font-semibold text-gray-500 hover:text-gray-700">Cancel</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+}
+function pfCloseApplyChooser() {
+  document.getElementById('pf-apply-overlay')?.remove();
+}
+
+async function pfSave(applyMode) {
+  const updates = Object.entries(_pfDirty).map(([k, value]) => {
+    const idx = k.indexOf('::');
+    return { planId: Number(k.slice(0, idx)), key: k.slice(idx + 2), value };
+  });
+  pfCloseApplyChooser();
+  try {
+    const r = await api(MD_API + '?resource=plan-feature-values', { method: 'PATCH', body: JSON.stringify({ updates, applyMode }) });
+    const who = applyMode === 'new' ? `${r.affectedSubscribers} existing subscriber(s) frozen` : 'applied to all accounts';
+    showToast(`Saved ${r.applied} change(s) — ${who}.`, 'success');
+    await mdLoadPlanFeatures();
+  } catch (e) {
+    showToast('Save failed: ' + (e.message || e), 'error');
+  }
+}
+
+// Add a new feature definition (compact modal).
+function pfOpenAddFeature() {
+  const ov = document.createElement('div');
+  ov.id = 'pf-add-overlay';
+  ov.className = 'fixed inset-0 bg-black/40 flex items-center justify-center z-50';
+  ov.innerHTML = `<div class="bg-white rounded-2xl shadow-xl max-w-lg w-full mx-4 p-6">
+    <h3 class="text-base font-bold text-gray-800 mb-4">Add feature</h3>
+    <div class="grid grid-cols-2 gap-3 text-sm">
+      <label class="col-span-2 block"><span class="text-xs font-semibold text-gray-500">Key (snake_case)</span><input id="pf-add-key" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg" placeholder="e.g. priority_support"></label>
+      <label class="col-span-2 block"><span class="text-xs font-semibold text-gray-500">Label</span><input id="pf-add-label" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg"></label>
+      <label class="col-span-2 block"><span class="text-xs font-semibold text-gray-500">Description</span><input id="pf-add-desc" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg"></label>
+      <label class="block"><span class="text-xs font-semibold text-gray-500">Category</span><input id="pf-add-cat" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg" placeholder="e.g. Support"></label>
+      <label class="block"><span class="text-xs font-semibold text-gray-500">Value type</span><select id="pf-add-type" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg"><option value="boolean">boolean</option><option value="number">number</option><option value="text">text</option></select></label>
+      <label class="block"><span class="text-xs font-semibold text-gray-500">Enterprise (t4) value</span><input id="pf-add-ent" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg" placeholder="true / Custom / …"></label>
+      <label class="block"><span class="text-xs font-semibold text-gray-500">Unlimited label</span><input id="pf-add-unl" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg" placeholder="Custom (optional)"></label>
+    </div>
+    <p class="text-[11px] text-gray-400 mt-3">Stored in the plan's <code>features</code> map. To bind a capacity column instead, set it via the Plans tab.</p>
+    <div class="mt-5 flex justify-end gap-2">
+      <button onclick="pfCloseAddFeature()" class="px-4 py-2 text-sm font-semibold text-gray-500 hover:text-gray-700">Cancel</button>
+      <button onclick="pfSubmitAddFeature()" class="px-4 py-2 text-sm font-bold text-white bg-gray-900 rounded-lg hover:bg-black">Add</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+}
+function pfCloseAddFeature() { document.getElementById('pf-add-overlay')?.remove(); }
+
+async function pfSubmitAddFeature() {
+  const key = document.getElementById('pf-add-key').value.trim();
+  const label = document.getElementById('pf-add-label').value.trim();
+  const category = document.getElementById('pf-add-cat').value.trim();
+  if (!key || !label || !category) { showToast('Key, label and category are required.', 'error'); return; }
+  const body = {
+    key, label, category,
+    description: document.getElementById('pf-add-desc').value.trim() || null,
+    valueType: document.getElementById('pf-add-type').value,
+    storageTarget: 'feature',
+    enterpriseValue: document.getElementById('pf-add-ent').value.trim() || null,
+    unlimitedLabel: document.getElementById('pf-add-unl').value.trim() || null,
+    displayOrder: (_pfData?.features?.length || 0) + 100,
+  };
+  try {
+    await api(MD_API + '?resource=plan-feature-defs', { method: 'POST', body: JSON.stringify(body) });
+    pfCloseAddFeature();
+    showToast('Feature added.', 'success');
+    await mdLoadPlanFeatures();
+  } catch (e) {
+    showToast('Failed to add: ' + (e.message || e), 'error');
   }
 }
 

@@ -28,6 +28,7 @@ import { eq, and, gte, gt, count, sum, asc, or, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { plans, masterPlans, planPrices, aiAssistants, taskRuns, usageCounters, userOrganisations, users, systemConnections, organisations } from '../../db/schema';
 import { getPeriodStart } from '../../src/utils/atomic-cap-check';
+import { effectiveLimit, effectiveFeatures, type FeatureOverrides } from '../../src/utils/plan-features';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const stripe = process.env.STRIPE_SECRET_KEY
@@ -85,6 +86,7 @@ export default withLambda(async (event) => {
                 appConnectionLimit: masterPlans.appConnectionLimit,
                 seatLimit: masterPlans.seatLimit,
                 features: masterPlans.features,
+                featureOverrides: plans.featureOverrides,
             })
             .from(plans)
             .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
@@ -112,6 +114,7 @@ export default withLambda(async (event) => {
                     appConnectionLimit: masterPlans.appConnectionLimit,
                     seatLimit: masterPlans.seatLimit,
                     features: masterPlans.features,
+                    featureOverrides: plans.featureOverrides,
                 })
                 .from(plans)
                 .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
@@ -125,13 +128,16 @@ export default withLambda(async (event) => {
         // hard-gated. The frontend reads `noPlan` to show the non-dismissible plan picker,
         // and hire-assistant / chat-orchestrator enforce the same rule server-side.
         const noPlan = plan === null;
+        // Plan Features: a "new subscribers only" change freezes existing subscribers at their old
+        // values in plans.featureOverrides — prefer that snapshot over the live master_plans column.
+        const overrides = (plan as any)?.featureOverrides as FeatureOverrides | null;
         // Referral Program Expansion: bonus_assistants (earned via referral tokens) stacks on
         // top of the tier limit below, once orgId is resolved (AC2.2/AC4.2).
-        let assistantLimit: number | null = plan?.assistantLimit ?? null;
-        const monthlyTaskLimit: number | null = plan?.monthlyTaskLimit ?? null;
-        const monthlyTokenLimit: number | null = plan?.monthlyTokenLimit ?? null;
-        const appConnectionLimit: number | null = plan?.appConnectionLimit ?? null;
-        const seatLimit: number | null = plan?.seatLimit ?? null;
+        let assistantLimit: number | null = effectiveLimit(overrides, 'assistantLimit', plan?.assistantLimit ?? null);
+        const monthlyTaskLimit: number | null = effectiveLimit(overrides, 'monthlyTaskLimit', plan?.monthlyTaskLimit ?? null);
+        const monthlyTokenLimit: number | null = effectiveLimit(overrides, 'monthlyTokenLimit', plan?.monthlyTokenLimit ?? null);
+        const appConnectionLimit: number | null = effectiveLimit(overrides, 'appConnectionLimit', plan?.appConnectionLimit ?? null);
+        const seatLimit: number | null = effectiveLimit(overrides, 'seatLimit', plan?.seatLimit ?? null);
 
         // ── 2. Count seats (orgId resolved above) ────────────────────────
         // Add referral bonus assistants to the tier limit (null tier = unlimited, bonus moot).
@@ -326,7 +332,7 @@ export default withLambda(async (event) => {
                 assistantLimit,
                 bonusAssistants,
                 betaAccess,
-                features: (plan as any)?.features ?? {}, // AC3.2.4: active plan's feature unlocks
+                features: effectiveFeatures(overrides, (plan as any)?.features), // AC3.2.4: active plan's feature unlocks (snapshot-aware)
                 taskCount,
                 taskLimit: monthlyTaskLimit,
                 tokenUsage,

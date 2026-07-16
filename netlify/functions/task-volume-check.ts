@@ -11,6 +11,7 @@ import { Handler } from '@netlify/functions';
 import { eq, and, gte, count, isNotNull } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
 import { users, plans, masterPlans, taskRuns, notifications, aiAssistants } from '../../db/schema';
+import { effectiveLimit, type FeatureOverrides } from '../../src/utils/plan-features';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -30,6 +31,7 @@ export default withLambda(async (event) => {
                 tierKey: masterPlans.tierKey,
                 tierName: masterPlans.name,
                 monthlyTaskLimit: masterPlans.monthlyTaskLimit,
+                featureOverrides: plans.featureOverrides,
             })
             .from(plans)
             .innerJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
@@ -46,7 +48,9 @@ export default withLambda(async (event) => {
         let paused100  = 0;
 
         for (const plan of activePlans) {
-            const limit = plan.monthlyTaskLimit!;
+            // Plan Features: prefer a "new subscribers only" frozen snapshot over the live master limit.
+            const limit = effectiveLimit(plan.featureOverrides as FeatureOverrides | null, 'monthlyTaskLimit', plan.monthlyTaskLimit);
+            if (limit == null) continue;      // frozen as unlimited → no volume warnings
             if (plan.userId == null) continue; // plans.userId is nullable; skip org-only plans
             const userId = plan.userId;
 

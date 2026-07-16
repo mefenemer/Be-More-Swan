@@ -44,8 +44,13 @@ function ymd(d: Date): string {
 
 /** The active plan's monthly AI credit allowance for an org (0 if none / not configured). */
 export async function monthlyAllowance(db: Db, orgId: number): Promise<number> {
+    // Plan Features: a "new subscribers only" change freezes existing subscribers in
+    // plans.feature_overrides — when that snapshot exists its features map is authoritative,
+    // otherwise read the live master_plans.features (matches effectiveFeatures() in plan-features.ts).
     const rows = await db.execute<{ monthly_ai_credits: unknown }>(sql`
-        SELECT mp.features ->> 'monthly_ai_credits' AS monthly_ai_credits
+        SELECT CASE WHEN p.feature_overrides IS NOT NULL
+                    THEN p.feature_overrides -> 'features' ->> 'monthly_ai_credits'
+                    ELSE mp.features ->> 'monthly_ai_credits' END AS monthly_ai_credits
         FROM plans p
         JOIN master_plans mp ON mp.id = p.master_plan_id
         WHERE p.organisation_id = ${orgId} AND p.status = 'active'

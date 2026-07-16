@@ -232,6 +232,9 @@ export default withLambda(async (event) => {
                 masterPlanId: targetMp.id,
                 planName: targetMp.name,
                 status: 'active',
+                // Plan Features: moving to a new tier is a fresh binding — drop any frozen
+                // "new subscribers only" snapshot so the subscriber reads the new tier's live values.
+                featureOverrides: null,
                 updatedAt: new Date(),
             })
             .where(eq(plans.id, currentPlan.id));

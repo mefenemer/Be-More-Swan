@@ -21,6 +21,7 @@ import { aiAssistants, assistantRecords, chatMessages, chatSessions, kbArticles,
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { atomicCapCheck } from '../../src/utils/atomic-cap-check';
+import { effectiveLimit, type FeatureOverrides } from '../../src/utils/plan-features';
 import { embedTexts } from '../../src/utils/kb-embeddings';
 import { computeScheduleSlots, resolvePostingSchedule } from '../../src/config/posting-cadence';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -81,7 +82,7 @@ function upgradeRequired(reason: string | undefined, extra: Record<string, unkno
  */
 async function consumeTaskCredit(db: ReturnType<typeof getDb>, organisationId: number) {
     const [plan] = await db
-        .select({ monthlyTaskLimit: masterPlans.monthlyTaskLimit })
+        .select({ monthlyTaskLimit: masterPlans.monthlyTaskLimit, featureOverrides: plans.featureOverrides })
         .from(plans)
         .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
         .where(and(eq(plans.organisationId, organisationId), inArray(plans.status, ['active', 'past_due'])))
@@ -98,7 +99,8 @@ async function consumeTaskCredit(db: ReturnType<typeof getDb>, organisationId: n
     return atomicCapCheck({
         organisationId,
         counterKey: 'taskCount',
-        limit: plan.monthlyTaskLimit ?? null,
+        // Plan Features: prefer a "new subscribers only" frozen snapshot over the live master limit.
+        limit: effectiveLimit(plan.featureOverrides as FeatureOverrides | null, 'monthlyTaskLimit', plan.monthlyTaskLimit ?? null),
     });
 }
 

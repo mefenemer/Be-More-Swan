@@ -24,13 +24,15 @@
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import Stripe from 'stripe';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, asc, ne, inArray, isNull } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
 import {
     users,
     masterPlans,
     planPrices,
     planPriceHistory,
+    planFeatures,
+    plans,
     masterAssistants,
     assistantVersions,
     featureFlags,
@@ -599,6 +601,201 @@ async function handleSupportedLanguages(event: any, adminId: number, ip?: string
     return { statusCode: 405, body: 'Method Not Allowed' };
 }
 
+// ── Plan Features (DB-driven pricing feature catalog + per-plan value editor) ────
+// Hybrid storage: the catalog (plan_features) is metadata only. Values live in master_plans —
+// capacity as typed columns, everything else in the features jsonb. A change can be applied
+// retroactively (edit master_plans, clear snapshots) or to NEW subscribers only (freeze existing
+// subscribers in plans.feature_overrides first, then edit master_plans).
+
+// Only these master_plans columns may be written via a 'column'-storage feature (guards against
+// arbitrary column writes coming from a catalog row's column_name).
+const PLAN_LIMIT_COLUMNS = new Set([
+    'assistantLimit', 'monthlyTaskLimit', 'monthlyTokenLimit',
+    'appConnectionLimit', 'seatLimit', 'storageLimitBytes',
+]);
+
+/** Coerce an admin-supplied cell value to the storage type declared by the feature definition. */
+function coerceFeatureValue(valueType: string, raw: unknown): unknown {
+    if (valueType === 'boolean') return raw === true || raw === 'true';
+    if (valueType === 'number') {
+        if (raw === '' || raw === null || raw === undefined) return null;      // blank = unlimited
+        if (typeof raw === 'string' && raw.trim().toLowerCase() === 'unlimited') return null;
+        const n = Number(raw);
+        return Number.isFinite(n) ? n : null;
+    }
+    return raw == null ? null : String(raw);                                    // text
+}
+
+/** Build the frozen snapshot for a subscription from a master plan's current live values. */
+function snapshotFromMasterPlan(mp: typeof masterPlans.$inferSelect) {
+    return {
+        assistantLimit: mp.assistantLimit,
+        monthlyTaskLimit: mp.monthlyTaskLimit,
+        monthlyTokenLimit: mp.monthlyTokenLimit,
+        appConnectionLimit: mp.appConnectionLimit,
+        seatLimit: mp.seatLimit,
+        storageLimitBytes: mp.storageLimitBytes,
+        features: (mp.features as Record<string, unknown>) ?? {},
+    };
+}
+
+async function handlePlanFeatureDefs(event: any, adminId: number, role: string, ip?: string, ua?: string) {
+    const db = getDb();
+    const method = event.httpMethod;
+    const id = event.queryStringParameters?.id ? Number(event.queryStringParameters.id) : null;
+
+    if (method === 'GET') {
+        const rows = await db.select().from(planFeatures).orderBy(asc(planFeatures.category), asc(planFeatures.displayOrder));
+        return { statusCode: 200, body: JSON.stringify(rows) };
+    }
+
+    if (method === 'POST') {
+        const body = JSON.parse(event.body || '{}');
+        const { key, label, category } = body;
+        if (!key || !label || !category) return badRequest('key, label, category required.');
+        const [row] = await db.insert(planFeatures).values({
+            key, label, category,
+            description: body.description ?? null,
+            valueType: body.valueType ?? 'boolean',
+            storageTarget: body.storageTarget ?? 'feature',
+            columnName: body.columnName ?? null,
+            unlimitedLabel: body.unlimitedLabel ?? null,
+            enterpriseValue: body.enterpriseValue ?? null,
+            displayOrder: body.displayOrder ?? 0,
+            isEnabled: body.isEnabled ?? true,
+        }).returning();
+        void insertAdminAuditLog({ adminId, action: 'record_delete', targetType: 'plan_feature', targetId: row.id, newState: row, ipAddress: ip, userAgent: ua, reason: 'admin_create' });
+        return { statusCode: 201, body: JSON.stringify(row) };
+    }
+
+    if (method === 'PATCH') {
+        if (!id) return badRequest('id required.');
+        const body = JSON.parse(event.body || '{}');
+        const [prev] = await db.select().from(planFeatures).where(eq(planFeatures.id, id)).limit(1);
+        if (!prev) return notFound();
+        const updates: any = { updatedAt: new Date() };
+        for (const k of ['label', 'description', 'category', 'valueType', 'storageTarget', 'columnName', 'unlimitedLabel', 'enterpriseValue', 'displayOrder', 'isEnabled']) {
+            if (body[k] !== undefined) updates[k] = body[k];
+        }
+        const [row] = await db.update(planFeatures).set(updates).where(eq(planFeatures.id, id)).returning();
+        void insertAdminAuditLog({ adminId, action: 'record_delete', targetType: 'plan_feature', targetId: id, previousState: prev, newState: row, ipAddress: ip, userAgent: ua, reason: 'admin_update' });
+        return { statusCode: 200, body: JSON.stringify(row) };
+    }
+
+    if (method === 'DELETE') {
+        if (role !== 'super_admin') return forbidden('super_admin required to delete plan features.');
+        if (!id) return badRequest('id required.');
+        const [prev] = await db.select().from(planFeatures).where(eq(planFeatures.id, id)).limit(1);
+        if (!prev) return notFound();
+        await db.delete(planFeatures).where(eq(planFeatures.id, id));
+        void insertAdminAuditLog({ adminId, action: 'record_delete', targetType: 'plan_feature', targetId: id, previousState: prev, ipAddress: ip, userAgent: ua, reason: 'admin_delete' });
+        return { statusCode: 200, body: JSON.stringify({ ok: true }) };
+    }
+
+    return { statusCode: 405, body: 'Method Not Allowed' };
+}
+
+async function handlePlanFeatureValues(event: any, adminId: number, ip?: string, ua?: string) {
+    const db = getDb();
+    const method = event.httpMethod;
+
+    // Column definitions (metadata) shared by GET (rendering) and PATCH (write routing).
+    const defs = await db.select().from(planFeatures).orderBy(asc(planFeatures.category), asc(planFeatures.displayOrder));
+    // Editable plan columns = active, non-trial master plans ordered by price (mirrors pricing.html).
+    const planRows = await db.select().from(masterPlans)
+        .where(and(eq(masterPlans.isActive, true), ne(masterPlans.tierKey, 'trial')))
+        .orderBy(asc(masterPlans.monthlyPriceGbp));
+
+    const readValue = (mp: typeof masterPlans.$inferSelect, def: typeof planFeatures.$inferSelect) => {
+        if (def.storageTarget === 'column' && def.columnName) return (mp as any)[def.columnName] ?? null;
+        return ((mp.features as Record<string, unknown>) ?? {})[def.key] ?? null;
+    };
+
+    if (method === 'GET') {
+        const values: Record<number, Record<string, unknown>> = {};
+        for (const mp of planRows) {
+            values[mp.id] = {};
+            for (const def of defs) values[mp.id][def.key] = readValue(mp, def);
+        }
+        return { statusCode: 200, body: JSON.stringify({
+            features: defs,
+            plans: planRows.map(p => ({ id: p.id, tierKey: p.tierKey, name: p.name, monthlyPriceGbp: p.monthlyPriceGbp })),
+            values,
+        }) };
+    }
+
+    if (method === 'PATCH') {
+        const body = JSON.parse(event.body || '{}');
+        const applyMode = body.applyMode === 'new' ? 'new' : body.applyMode === 'retroactive' ? 'retroactive' : null;
+        const updates: Array<{ planId: number; key: string; value: unknown }> = Array.isArray(body.updates) ? body.updates : [];
+        if (!applyMode) return badRequest("applyMode must be 'new' or 'retroactive'.");
+        if (!updates.length) return badRequest('updates[] required.');
+
+        const defByKey = new Map(defs.map(d => [d.key, d]));
+        const planById = new Map(planRows.map(p => [p.id, p]));
+        // Group updates per plan.
+        const byPlan = new Map<number, Array<{ def: typeof planFeatures.$inferSelect; value: unknown }>>();
+        for (const u of updates) {
+            const def = defByKey.get(u.key);
+            const plan = planById.get(Number(u.planId));
+            if (!def || !plan) return badRequest(`Unknown plan or feature in update: plan ${u.planId}, key ${u.key}.`);
+            if (def.storageTarget === 'column' && !PLAN_LIMIT_COLUMNS.has(def.columnName || '')) {
+                return badRequest(`Feature '${def.key}' has an invalid column mapping.`);
+            }
+            if (!byPlan.has(plan.id)) byPlan.set(plan.id, []);
+            byPlan.get(plan.id)!.push({ def, value: coerceFeatureValue(def.valueType, u.value) });
+        }
+
+        let affectedSubscribers = 0;
+        for (const [planId, cells] of byPlan) {
+            const mp = planById.get(planId)!;
+
+            // 'new' → freeze the EXISTING cohort at the current (old) values BEFORE editing master_plans.
+            // Only stamp subscribers that aren't already frozen (a prior new-only change wins).
+            if (applyMode === 'new') {
+                const snapshot = snapshotFromMasterPlan(mp);
+                const frozen = await db.update(plans)
+                    .set({ featureOverrides: snapshot, updatedAt: new Date() })
+                    .where(and(
+                        eq(plans.masterPlanId, planId),
+                        inArray(plans.status, ['active', 'past_due']),
+                        isNull(plans.featureOverrides), // don't re-freeze an already-frozen (older cohort) subscriber
+                    ))
+                    .returning({ id: plans.id });
+                affectedSubscribers += frozen.length;
+            }
+
+            // Apply the new values to master_plans (column updates + features jsonb merge).
+            const colUpdates: Record<string, unknown> = {};
+            const featurePatch: Record<string, unknown> = { ...((mp.features as Record<string, unknown>) ?? {}) };
+            for (const { def, value } of cells) {
+                if (def.storageTarget === 'column' && def.columnName) colUpdates[def.columnName] = value;
+                else featurePatch[def.key] = value;
+            }
+            const setObj: Record<string, unknown> = { ...colUpdates };
+            if (cells.some(c => c.def.storageTarget !== 'column')) setObj.features = featurePatch;
+            const [updatedPlan] = await db.update(masterPlans).set(setObj).where(eq(masterPlans.id, planId)).returning();
+
+            // 'retroactive' → everyone reads live: clear any frozen snapshots for this plan.
+            if (applyMode === 'retroactive') {
+                await db.update(plans)
+                    .set({ featureOverrides: null, updatedAt: new Date() })
+                    .where(eq(plans.masterPlanId, planId));
+            }
+
+            void insertAdminAuditLog({
+                adminId, action: 'record_delete', targetType: 'master_plan', targetId: planId,
+                previousState: { features: mp.features }, newState: { applyMode, changes: cells.map(c => ({ key: c.def.key, value: c.value })), plan: updatedPlan },
+                ipAddress: ip, userAgent: ua, reason: applyMode === 'new' ? 'admin_update' : 'admin_update',
+            });
+        }
+
+        return { statusCode: 200, body: JSON.stringify({ ok: true, applied: updates.length, applyMode, affectedSubscribers }) };
+    }
+
+    return { statusCode: 405, body: 'Method Not Allowed' };
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Main handler
 // ─────────────────────────────────────────────────────────────────────────────
@@ -617,12 +814,14 @@ export default withLambda(async (event) => {
         case 'plan-prices':        return handlePlanPrices(event, adminId, role, ip, ua);
         case 'plan-price-change':  return handlePlanPriceChange(event, adminId, ip, ua);
         case 'plan-price-history': return handlePlanPriceHistory(event);
+        case 'plan-feature-defs':   return handlePlanFeatureDefs(event, adminId, role, ip, ua);
+        case 'plan-feature-values': return handlePlanFeatureValues(event, adminId, ip, ua);
         case 'master-assistants':  return handleMasterAssistants(event, adminId, ip, ua);
         case 'assistant-versions': return handleAssistantVersions(event, adminId, ip, ua);
         case 'feature-flags':        return handleFeatureFlags(event, adminId, role, ip, ua);
         case 'platform-config':      return handlePlatformConfig(event, adminId, ip, ua);
         case 'supported-languages':  return handleSupportedLanguages(event, adminId, ip, ua);
         default:
-            return { statusCode: 400, body: JSON.stringify({ error: 'resource param required: master-plans | plan-prices | plan-price-change | plan-price-history | master-assistants | assistant-versions | feature-flags | platform-config | supported-languages' }) };
+            return { statusCode: 400, body: JSON.stringify({ error: 'resource param required: master-plans | plan-prices | plan-price-change | plan-price-history | plan-feature-defs | plan-feature-values | master-assistants | assistant-versions | feature-flags | platform-config | supported-languages' }) };
     }
 });

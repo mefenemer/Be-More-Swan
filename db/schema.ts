@@ -187,6 +187,12 @@ export const plans = pgTable("plans", {
   stripeCustomerId: text("stripe_customer_id"),
   stripeSubscriptionId: text("stripe_subscription_id"),
   cancelledAt: timestamp("cancelled_at"),               // set when status transitions to 'cancelled' (US-GAP-4.2.1)
+  // Plan Features: frozen limits/features snapshot for the "new subscribers only" cohort. When set,
+  // enforcement prefers this over the live master_plans values, so an admin can change a plan for
+  // NEW subscribers without moving existing ones. null (default) = read live from master_plans.
+  // Shape: { assistantLimit, monthlyTaskLimit, monthlyTokenLimit, appConnectionLimit, seatLimit,
+  //          storageLimitBytes, features: { ... } }
+  featureOverrides: jsonb("feature_overrides"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
@@ -793,6 +799,33 @@ export const planPrices = pgTable("plan_prices", {
 }, (t) => ({
   planCurrencyUnique: unique("plan_currency_unique").on(t.masterPlanId, t.currency),
 }));
+
+// Plan feature catalog — the DB-driven definition of every row in the pricing.html comparison table.
+// (SQL: db/plan-features.sql; seed: db/seed-plan-features.ts). This is a metadata + rendering layer:
+// the VALUES live in master_plans (capacity as typed columns, everything else in the features jsonb);
+// each row here records WHERE a feature's value is stored (storageTarget/columnName) and HOW to render it
+// (valueType, unlimitedLabel). Admins edit these via Admin → Master Data → Plan Features, and pricing.html
+// renders the comparison table dynamically from this catalog.
+export const planFeatures = pgTable("plan_features", {
+  id: serial("id").primaryKey(),
+  key: text("key").notNull().unique(),                    // e.g. 'assistant_limit', 'monthly_ai_credits', 'ai_video_generation'
+  label: text("label").notNull(),                         // pricing-table row title
+  description: text("description"),                        // pricing-table row sub-caption
+  category: text("category").notNull(),                   // section header: 'Capacity' | 'AI Media Generation' | ...
+  valueType: text("value_type").notNull().default("boolean"), // 'number' | 'boolean' | 'text'
+  storageTarget: text("storage_target").notNull().default("feature"), // 'column' | 'feature'
+  columnName: text("column_name"),                        // master_plans column (camelCase key) when storageTarget='column'
+  unlimitedLabel: text("unlimited_label"),                // how to render a null value, e.g. 'Custom' | 'Unlimited'
+  // The pricing table's 4th column ("Custom Enterprise") is contact-sales — not a purchasable
+  // master_plan (excluded from get-plans so it never appears in the plan picker). Its per-feature
+  // display value is stored here so the whole comparison table stays DB-driven + admin-editable.
+  // Rendering: boolean → truthy ('true'/'✓'/'yes') = check, else dash; number/text → the text.
+  enterpriseValue: text("enterprise_value"),
+  displayOrder: integer("display_order").notNull().default(0),
+  isEnabled: boolean("is_enabled").notNull().default(true), // false = globally disabled (hidden from pricing, treated as off)
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
 
 // Plan price history — dated audit trail of every subscription price change (SQL: db/plan-price-history.sql).
 // master_plans.monthlyPriceGbp + the GBP planPrices row hold the CURRENT live price; this table records

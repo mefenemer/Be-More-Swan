@@ -871,7 +871,8 @@ export default withLambda(async (event) => {
 
                     if (downgradingPlan) {
                         await db.update(plans)
-                            .set({ masterPlanId: newMasterPlanId, planName: newMasterPlan.name, status: 'active', updatedAt: new Date() })
+                            // Plan Features: new tier = fresh binding — clear any frozen "new subscribers only" snapshot.
+                            .set({ masterPlanId: newMasterPlanId, planName: newMasterPlan.name, status: 'active', featureOverrides: null, updatedAt: new Date() })
                             .where(eq(plans.id, downgradingPlan.id));
 
                         if (typeof sub.schedule === 'string') {

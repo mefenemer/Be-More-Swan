@@ -9,6 +9,7 @@ import { Handler } from '@netlify/functions';
 import { eq, and, inArray, count, asc, isNull } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
 import { aiAssistants, taskRuns, notifications, masterPlans, organisations, plans } from '../../db/schema';
+import { effectiveLimit, type FeatureOverrides } from '../../src/utils/plan-features';
 import { requireTenant } from '../../src/utils/tenant';
 import { transitionAssistantStatus } from '../../src/utils/assistant-lifecycle';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -67,13 +68,15 @@ export default withLambda(async (event) => {
 
                     // Capacity gate — mirrors hire-assistant.ts's "server-side twin" of check-capacity.
                     const [planRow] = await tx
-                        .select({ assistantLimit: masterPlans.assistantLimit })
+                        .select({ assistantLimit: masterPlans.assistantLimit, featureOverrides: plans.featureOverrides })
                         .from(plans)
                         .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
                         .where(and(eq(plans.userId, ctx.userId), inArray(plans.status, ['active', 'past_due'])))
                         .orderBy(asc(plans.status), asc(plans.startedAt))
                         .limit(1);
-                    let assistantLimit: number | null = planRow?.assistantLimit ?? null;
+                    // Plan Features: prefer a "new subscribers only" frozen snapshot over the live master limit.
+                    let assistantLimit: number | null = effectiveLimit(
+                        planRow?.featureOverrides as FeatureOverrides | null, 'assistantLimit', planRow?.assistantLimit ?? null);
                     if (assistantLimit !== null) {
                         const [org] = await tx
                             .select({ bonusAssistants: organisations.bonusAssistants })
