@@ -128,3 +128,29 @@ export async function publishBlogPost(db: any, post: BlogPostRow, organisationId
 
     return updated;
 }
+
+// Retracts the NATIVE copy of `post` and returns the updated row: widget-api serves only
+// status='published', so flipping back to 'draft' takes it off the org's site immediately.
+// The caller has already loaded the row, org-scoped it, and confirmed status === 'published'.
+//
+// Deliberately non-destructive, so unpublish → republish is lossless and permalink-stable:
+//   · slug + publishedPayload stay put — republishing reuses the same URL and snapshot.
+//   · publishedAt stays — publishBlogPost's `post.publishedAt || now` then keeps the ORIGINAL
+//     publication date on republish rather than back-dating the post to the retraction.
+//   · content_provenance is left untouched — it attests what WAS published at a point in time,
+//     and retracting the post doesn't unmake that history.
+//
+// Syndicated copies are NOT retracted: the adapter interface has no unpublish (see
+// blog-destinations/types.ts), so external targets keep their own status in `destinations` and the
+// caller is responsible for telling the user they're still live.
+export async function unpublishBlogPost(db: any, post: BlogPostRow, organisationId: number): Promise<BlogPostRow> {
+    const destinations = { ...(post.destinations as Record<string, unknown> || {}), widget: 'unpublished' };
+
+    const [updated] = await db
+        .update(blogPosts)
+        .set({ status: 'draft', destinations, updatedAt: new Date() })
+        .where(and(eq(blogPosts.id, post.id), eq(blogPosts.organisationId, organisationId)))
+        .returning();
+
+    return updated;
+}

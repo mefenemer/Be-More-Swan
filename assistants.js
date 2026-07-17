@@ -871,6 +871,10 @@ function _rqBlogActions(p, statusKey) {
     } else if (statusKey === 'scheduled') {
         actions.push(btn('open', 'Open in Blog Studio', primary));
         actions.push(btn('unschedule', 'Unschedule', secondary));
+    } else if (statusKey === 'posted') {
+        // Live on the site — it can be taken back off (native copy only; see unpublish-blog.ts).
+        actions.push(btn('open', 'Open in Blog Studio', primary));
+        actions.push(btn('unpublish', 'Unpublish', secondary));
     } else {
         actions.push(btn('open', 'Open in Blog Studio', secondary));
     }
@@ -954,6 +958,33 @@ window._detailRqBlogAct = async function (btn, action) {
             const res = await fetch(`/.netlify/functions/blog-posts?id=${id}`, { method: 'DELETE' });
             if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Delete failed.');
             window.showToast?.('Blog draft deleted.');
+            _detailRqRenderGroups(_detailRqCurrentStatus);
+            const calHost = document.getElementById('assistant-calendar-host');
+            if (calHost) calHost.dataset.ready = '';
+        } catch (e) {
+            buttons.forEach((b) => { b.disabled = false; });
+            showErr(e.message || 'Something went wrong.');
+        }
+        return;
+    }
+
+    // Unpublish — takes the post off the org's own site and back to draft. Syndicated copies can't
+    // be retracted (no adapter unpublish), so say so up front and name the ones that stay live.
+    if (action === 'unpublish') {
+        if (!confirm('Take this post off your site? It goes back to a draft — the URL and its content are kept, '
+            + 'so you can publish it again later. Copies on other platforms stay live.')) return;
+        const buttons = card.querySelectorAll('button');
+        buttons.forEach((b) => { b.disabled = true; });
+        try {
+            const res = await fetch('/.netlify/functions/unpublish-blog', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body.error || 'Unpublish failed.');
+            const live = (body.stillLive || []).map((d) => d.target);
+            window.showToast?.(live.length
+                ? `Off your site — back to draft. Still live on ${live.join(', ')} — remove there separately.`
+                : 'Off your site — back to draft.');
             _detailRqRenderGroups(_detailRqCurrentStatus);
             const calHost = document.getElementById('assistant-calendar-host');
             if (calHost) calHost.dataset.ready = '';

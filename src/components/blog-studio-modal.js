@@ -291,6 +291,7 @@
     + '        </div>'
     + '        <div class="bs-row" style="margin-top:12px;">'
     + '          <button id="bs-unschedule" class="bs-btn bs-btn-ghost bs-hidden">Unschedule</button>'
+    + '          <button id="bs-unpublish" class="bs-btn bs-btn-ghost bs-hidden">Unpublish</button>'
     + '          <button id="bs-discard" class="bs-btn bs-btn-danger">Discard draft</button>'
     + '        </div>'
     + '        <div id="bs-action-status" class="bs-banner bs-hidden"></div>'
@@ -468,6 +469,8 @@
       if (post.status) setBanner('bs-action-status', 'Status: ' + post.status);
       // A post already on the calendar can be pulled back off it.
       if (post.status === 'scheduled') el('bs-unschedule').classList.remove('bs-hidden');
+      // A live post can be taken back off the site.
+      if (post.status === 'published') el('bs-unpublish').classList.remove('bs-hidden');
     }).catch(function () { setStatus('bs-save-status', ''); });
   }
 
@@ -816,8 +819,11 @@
       flushDraft().then(function () {
         return api('publish-blog', { method: 'POST', body: JSON.stringify({ id: state.postId }) });
       }).then(function (res) {
-        if (res.ok) setBanner('bs-action-status', 'Published ✓ (' + res.body.post.slug + ')');
-        else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not publish — please try again.', 'error');
+        if (res.ok) {
+          setBanner('bs-action-status', 'Published ✓ (' + res.body.post.slug + ')');
+          el('bs-unschedule').classList.add('bs-hidden');
+          el('bs-unpublish').classList.remove('bs-hidden');
+        } else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not publish — please try again.', 'error');
       });
     });
 
@@ -904,6 +910,26 @@
           setBanner('bs-action-status', 'Schedule cleared — back to draft.');
           el('bs-unschedule').classList.add('bs-hidden');
         } else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not clear the schedule.', 'error');
+      });
+    });
+
+    // Unpublish — takes the post off the org's own site only. Syndicated copies stay live (no
+    // adapter can retract them), so name the ones that do in the confirm AND in the result banner.
+    el('bs-unpublish').addEventListener('click', function () {
+      if (!state.postId) return;
+      if (!confirm('Take this post off your site? It goes back to a draft — the URL and its content '
+        + 'are kept, so you can publish it again later. Copies on other platforms stay live.')) return;
+      setBanner('bs-action-status', 'Unpublishing…');
+      api('unpublish-blog', { method: 'POST', body: JSON.stringify({ id: state.postId }) }).then(function (res) {
+        if (!res.ok) {
+          setBanner('bs-action-status', (res.body && res.body.error) || 'Could not unpublish this post.', 'error');
+          return;
+        }
+        var live = (res.body.stillLive || []).map(function (d) { return d.target; });
+        setBanner('bs-action-status', live.length
+          ? 'Off your site — back to draft. Still live on ' + live.join(', ') + ' — remove there separately.'
+          : 'Off your site — back to draft.');
+        el('bs-unpublish').classList.add('bs-hidden');
       });
     });
 
@@ -1047,6 +1073,7 @@
     el('bs-workspace').classList.add('bs-hidden');
     el('bs-brief').classList.remove('bs-hidden');
     el('bs-unschedule').classList.add('bs-hidden');
+    el('bs-unpublish').classList.add('bs-hidden');
     el('bs-schedule-picker').classList.add('bs-hidden');
     el('bs-schedule-at').value = '';
   }
