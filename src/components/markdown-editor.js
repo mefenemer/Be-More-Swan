@@ -129,6 +129,48 @@
     return COLUMNS_BLOCK_RE.test(String(raw == null ? '' : raw).trim());
   }
 
+  // Build the Markdown for one media item.
+  //
+  // A plain image with no caption stays plain `![alt](asset://N)` — the `:::media` directive is for
+  // what Markdown CANNOT express (video, audio, a caption), so existing drafts need no migration
+  // and stay byte-identical (plan §3.1).
+  //
+  //   media: { assetId, type?: 'image'|'video'|'audio', url?, alt?, caption?, align? }
+  function mediaRaw(media) {
+    const type = media.type === 'video' || media.type === 'audio' ? media.type : 'image';
+    const alt = String(media.alt || '').replace(/[[\]]/g, '');
+    // The attribute grammar is `key="value"` — a quote, brace or newline in author text would
+    // break out of it, so drop those rather than emit a directive that won't re-parse.
+    const clean = (v) => String(v || '').replace(/["}\r\n]/g, '').trim();
+    const caption = clean(media.caption);
+
+    if (type === 'image' && !caption) return '![' + alt + '](asset://' + media.assetId + ')';
+    return ':::media{asset=' + media.assetId + ' type=' + type
+      + (alt ? ' alt="' + clean(alt) + '"' : '')
+      + (caption ? ' caption="' + caption + '"' : '')
+      + (media.align ? ' align=' + clean(media.align) : '')
+      + '}';
+  }
+
+  // Append Markdown to the end of the Nth column's body within a `::::columns` raw string.
+  // Returns the new raw, or null if there is no such column (never a half-edited string).
+  //
+  // A columns row is one opaque block, so a drop into a column is a text edit rather than a tree
+  // operation. The pattern deliberately mirrors the tokenizer's own (marked-bms-directives.js) —
+  // if the two drift, the editor writes something the server won't parse back and the preview
+  // starts lying about what publishes.
+  const COLUMN_BODY_RE = /(:::column[ \t]*\n)([\s\S]*?)(\n:::[ \t]*)(?=\n|$)/g;
+  function spliceColumnRaw(raw, colIndex, md) {
+    let i = 0;
+    let hit = false;
+    const next = String(raw).replace(COLUMN_BODY_RE, function (m, open, body, close) {
+      if (i++ !== colIndex) return m;
+      hit = true;
+      return open + (body.trim() ? body + '\n\n' : '') + md + close;
+    });
+    return hit ? next : null;
+  }
+
   // Split Markdown into blocks on blank lines, but keep fenced code blocks — and column
   // containers — intact.
   //
@@ -596,30 +638,6 @@
       }
     }
 
-    // Insert media as its own block. The stable asset ref is the source of truth; `url` is only
-    // for immediate preview. Inserts after the last-selected block when known.
-    //
-    // A plain image with no caption stays plain `![alt](asset://N)` Markdown — the `:::media`
-    // directive is for what Markdown CANNOT express (video, audio, a caption), so existing drafts
-    // need no migration and stay byte-identical (plan §3.1).
-    //
-    //   media: { assetId, type?: 'image'|'video'|'audio', url?, alt?, caption?, align? }
-    function mediaRaw(media) {
-      const type = media.type === 'video' || media.type === 'audio' ? media.type : 'image';
-      const alt = String(media.alt || '').replace(/[[\]]/g, '');
-      // The attribute grammar is `key="value"` — a quote, brace or newline in author text would
-      // break out of it, so drop those rather than emit a directive that won't re-parse.
-      const clean = (v) => String(v || '').replace(/["}\r\n]/g, '').trim();
-      const caption = clean(media.caption);
-
-      if (type === 'image' && !caption) return '![' + alt + '](asset://' + media.assetId + ')';
-      return ':::media{asset=' + media.assetId + ' type=' + type
-        + (alt ? ' alt="' + clean(alt) + '"' : '')
-        + (caption ? ' caption="' + caption + '"' : '')
-        + (media.align ? ' align=' + clean(media.align) : '')
-        + '}';
-    }
-
     // Insert media at a GAP index: 0 puts it above the first block, blocks.length appends.
     //
     // The gap is anchored to the id of the block that should follow it, and re-resolved after
@@ -664,22 +682,10 @@
       return block.id;
     }
 
-    // Splice Markdown onto the end of the Nth column's body, in the block's RAW text.
-    //
-    // The columns row is one opaque block, so a drop into a column is a text edit rather than a
-    // tree operation. The pattern deliberately mirrors the tokenizer's own
-    // (marked-bms-directives.js) — if the two drift, the editor writes something the server won't
-    // parse back, and the preview starts lying about what publishes.
-    const COLUMN_BODY_RE = /(:::column[ \t]*\n)([\s\S]*?)(\n:::[ \t]*)(?=\n|$)/g;
+    // Mutating wrapper over the pure spliceColumnRaw: leaves the block untouched on a miss.
     function spliceIntoColumn(block, colIndex, md) {
-      let i = 0;
-      let hit = false;
-      const next = block.raw.replace(COLUMN_BODY_RE, function (m, open, body, close) {
-        if (i++ !== colIndex) return m;
-        hit = true;
-        return open + (body.trim() ? body + '\n\n' : '') + md + close;
-      });
-      if (!hit) return false;
+      const next = spliceColumnRaw(block.raw, colIndex, md);
+      if (next == null) return false;
       block.raw = next;
       return true;
     }
@@ -987,5 +993,14 @@
     };
   }
 
-  window.MarkdownEditor = { mount, MEDIA_MIME };
+  if (typeof window !== 'undefined') window.MarkdownEditor = { mount, MEDIA_MIME };
+
+  // The document model — how Markdown becomes blocks, and what the editor writes back — is pure
+  // and worth locking down, but mount() needs a DOM and this repo's tests are plain node scripts.
+  // Export the pure half so tests/markdown-editor-blocks.test.ts can reach it directly; the drag
+  // and click-to-edit halves stay browser-only by nature. Mirrors marked-bms-directives.js's
+  // dual export rather than inventing a second convention.
+  if (typeof module === 'object' && module.exports) {
+    module.exports = { splitBlocks, isMediaBlock, isColumnsBlock, mediaRaw, spliceColumnRaw, MEDIA_MIME };
+  }
 })();
