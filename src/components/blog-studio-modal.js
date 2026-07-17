@@ -35,6 +35,49 @@
   function el(id) { return document.getElementById(id); }
   function setStatus(id, msg) { var e = el(id); if (e) e.textContent = msg; }
 
+  // Coloured success/error banner — the Create Post sheet's gpSetPanelStatus, ported. Replaces the
+  // grey one-liners and alert()s so a failure actually reads as one.
+  function setBanner(id, msg, type) {
+    var e = el(id);
+    if (!e) return;
+    if (!msg) { e.className = 'bs-banner bs-hidden'; e.textContent = ''; return; }
+    e.className = 'bs-banner ' + (type === 'error' ? 'bs-banner-error' : 'bs-banner-ok');
+    e.textContent = msg;
+  }
+
+  // Voice dictation into a text field (mirrors gpStartVoice in workspace.html — the Blog Studio is
+  // loaded standalone too, so it can't borrow that page-scoped copy).
+  function startVoice(targetId, micId) {
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    var mic = el(micId);
+    if (!SR) { setBanner('bs-brief-status', 'Voice input is not supported in this browser. Try Chrome or Safari.', 'error'); return; }
+    var rec = new SR();
+    rec.lang = 'en-GB';
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    if (mic) mic.classList.add('bs-recording');
+    rec.onresult = function (e) {
+      var field = el(targetId);
+      if (!field) return;
+      var transcript = e.results[0][0].transcript;
+      field.value = (field.value ? field.value + ' ' : '') + transcript;
+    };
+    rec.onend = function () { if (mic) mic.classList.remove('bs-recording'); };
+    rec.onerror = function () { if (mic) mic.classList.remove('bs-recording'); };
+    rec.start();
+  }
+
+  // Live length readout for the body — the long-form equivalent of Create Post's per-platform
+  // counter chips. Thin posts are the blog failure mode, so the chip warns under 300 words.
+  function refreshReadout(md) {
+    var out = el('bs-readout');
+    if (!out) return;
+    var words = (md || '').replace(/[#*_`>\-\[\]()!]/g, ' ').split(/\s+/).filter(Boolean).length;
+    var mins = Math.max(1, Math.round(words / 200));
+    out.textContent = words + (words === 1 ? ' word · ' : ' words · ') + (words < 200 ? 'under a minute read' : '~' + mins + ' min read');
+    out.className = 'bs-chip' + (words > 0 && words < 300 ? ' bs-chip-warn' : '');
+  }
+
   // ── Gate helpers ─────────────────────────────────────────────────────────────────────────────
   // "Active" mirrors the social gate in workspace.html (get-assistants filter): not pending/failed/
   // blocked, and not archived.
@@ -71,6 +114,9 @@
     + '.bs-field{margin-bottom:12px;}'
     + '.bs-field label{display:block;font-size:12px;color:#6b7280;margin-bottom:4px;}'
     + '.bs-field input,.bs-field select,.bs-field textarea{width:100%;padding:8px;border:1px solid #d1d5db;border-radius:8px;font:inherit;}'
+    // ...but a checkbox is not a text field: the rule above stretched it across the row and pushed
+    // its label away. Keep it intrinsic and sit it next to the text it labels.
+    + '.bs-field input[type="checkbox"]{width:auto;padding:0;margin:0 6px 0 0;vertical-align:middle;accent-color:#ec4899;}'
     + '.bs-btn{padding:8px 14px;border-radius:8px;border:0;cursor:pointer;font-size:14px;}'
     + '.bs-btn-primary{background:#ec4899;color:#fff;}'
     + '.bs-btn-ghost{background:#f3f4f6;color:#111827;}'
@@ -90,7 +136,34 @@
     + '.bs-synd-row{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;}'
     + '.bs-synd-form{flex-basis:100%;margin-top:8px;}'
     + '.bs-linkbtn{background:none;border:0;color:#6b7280;font-size:12px;cursor:pointer;text-decoration:underline;padding:0;}'
-    + '.bs-linkbtn:hover{color:#ec4899;}';
+    + '.bs-linkbtn:hover{color:#ec4899;}'
+    // Feedback + composer affordances brought over from the Create Post sheet.
+    + '.bs-banner{font-size:13px;border-radius:10px;padding:10px 12px;border:1px solid;margin-top:12px;}'
+    + '.bs-banner-ok{background:#fdf2f8;color:#9d174d;border-color:#fbcfe8;}'
+    + '.bs-banner-error{background:#fef2f2;color:#991b1b;border-color:#fecaca;}'
+    + '.bs-textarea-wrap{position:relative;}'
+    + '.bs-mic{position:absolute;bottom:8px;right:8px;background:none;border:0;padding:0;cursor:pointer;'
+    + 'color:#9ca3af;line-height:0;}'
+    + '.bs-mic:hover{color:#ec4899;}'
+    + '.bs-mic.bs-recording{color:#ef4444;}'
+    + '.bs-textarea-wrap textarea{padding-right:34px;}'
+    + '.bs-chip{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;font-size:12px;border-radius:8px;'
+    + 'border:1px solid #e5e7eb;color:#4b5563;background:#f9fafb;}'
+    + '.bs-chip-warn{border-color:#fcd34d;color:#b45309;background:#fffbeb;}'
+    + '.bs-swan{display:inline-flex;align-items:center;gap:6px;background:none;border:0;padding:0;cursor:pointer;'
+    + 'font-size:12px;font-weight:600;color:#be185d;}'
+    + '.bs-swan:hover{color:#9d174d;}'
+    + '.bs-swan img{width:16px;height:16px;object-fit:contain;}'
+    + '.bs-btn-danger{background:#fff;color:#b91c1c;border:1px solid #fecaca;}'
+    + '.bs-btn-danger:hover{background:#fef2f2;}'
+    + '.bs-btn-outline{background:#fff;color:#be185d;border:1px solid #f9a8d4;}'
+    + '.bs-btn-outline:hover{background:#fdf2f8;}'
+    + '.bs-btn:disabled{opacity:.5;cursor:not-allowed;}'
+    + '.bs-ready-q{font-size:14px;font-weight:600;color:#1f2937;margin:0 0 8px;}'
+    + '.bs-stack{display:flex;flex-direction:column;gap:8px;}';
+
+  var MIC_SVG = '<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
+    + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4M12 3a4 4 0 014 4v4a4 4 0 01-8 0V7a4 4 0 014-4z"/></svg>';
 
   // Author is always the user (no "Written by"); the brief is Topic + Keywords + Voice + Notes.
   var MARKUP = ''
@@ -114,12 +187,17 @@
     + '      <label id="bs-save-tone-wrap" class="bs-status bs-hidden" style="margin-top:6px;">'
     + '        <input id="bs-save-tone" type="checkbox"> Save this as <span id="bs-save-tone-name"></span>&rsquo;s voice</label>'
     + '    </div>'
-    + '    <div class="bs-field"><label>Rough notes / transcript (optional)</label><textarea id="bs-notes" rows="3"></textarea></div>'
+    + '    <div class="bs-field"><label>Rough notes / transcript (optional)</label>'
+    + '      <div class="bs-textarea-wrap"><textarea id="bs-notes" rows="3" placeholder="Dictate or paste your notes…"></textarea>'
+    + '        <button type="button" id="bs-notes-mic" class="bs-mic" title="Dictate notes" aria-label="Dictate notes">' + MIC_SVG + '</button>'
+    + '      </div>'
+    + '    </div>'
     + '    <div class="bs-row">'
     + '      <button class="bs-btn bs-btn-ghost" data-path="blank">Start blank</button>'
     + '      <button class="bs-btn bs-btn-ghost" data-path="improve">Improve draft</button>'
     + '      <button class="bs-btn bs-btn-primary" data-path="generate">AI generate</button>'
     + '    </div>'
+    + '    <div id="bs-brief-status" class="bs-banner bs-hidden"></div>'
     + '  </div>'
     + '  <div id="bs-workspace" class="bs-grid bs-hidden">'
     + '    <div>'
@@ -183,23 +261,39 @@
     + '      </div>'
     + '    </div>'
     + '    <div>'
+    + '      <div class="bs-row" style="justify-content:space-between;margin-bottom:4px;">'
+    + '        <span id="bs-readout" class="bs-chip">0 words · under a minute read</span>'
+    + '        <button type="button" id="bs-swan-improve" class="bs-swan bs-hidden"'
+    + '          title="Ask your assistant to suggest improvements to this draft">'
+    + '          <img src="/images/BeMoreSwan_SwanAI.png" alt=""><span>Ask Swan to improve</span></button>'
+    + '      </div>'
     + '      <input id="bs-title" class="bs-title-input" placeholder="Post title">'
     + '      <div id="bs-editor" class="bs-editor"></div>'
     + '      <div class="bs-row" style="margin-top:16px;">'
     + '        <button id="bs-generate-hooks" class="bs-btn bs-btn-ghost">Generate A/B hooks</button>'
     + '        <button id="bs-generate-seo" class="bs-btn bs-btn-ghost">Generate SEO</button>'
-    + '        <button id="bs-publish" class="bs-btn bs-btn-primary">Publish</button>'
-    + '        <span id="bs-publish-status" class="bs-status"></span>'
     + '      </div>'
-    + '      <div class="bs-row" style="margin-top:16px;">'
-    + '        <button id="bs-approve" class="bs-btn bs-btn-primary">Approve &amp; Schedule</button>'
-    + '        <span id="bs-schedule-status" class="bs-status"></span>'
-    + '      </div>'
-    + '      <div class="bs-row" style="margin-top:8px;">'
-    + '        <span class="bs-status">Or set a specific time:</span>'
-    + '        <input id="bs-schedule-at" type="datetime-local" style="width:auto;">'
-    + '        <button id="bs-schedule" class="bs-btn bs-btn-ghost">Schedule</button>'
-    + '        <button id="bs-unschedule" class="bs-btn bs-btn-ghost bs-hidden">Unschedule</button>'
+    // Scheduling mirrors the Create Post sheet: one guided question, not three loose button rows.
+    + '      <div class="bs-panel" style="margin-top:16px;">'
+    + '        <p class="bs-ready-q">Your post is ready. How should it go out?</p>'
+    + '        <div class="bs-stack">'
+    + '          <button id="bs-approve" class="bs-btn bs-btn-outline">Let <span id="bs-approve-name">your assistant</span> schedule it</button>'
+    + '          <button id="bs-pick-time" class="bs-btn bs-btn-ghost">Pick a time myself</button>'
+    + '          <button id="bs-publish" class="bs-btn bs-btn-primary">Publish now</button>'
+    + '        </div>'
+    + '        <div id="bs-schedule-picker" class="bs-hidden" style="margin-top:12px;">'
+    + '          <div class="bs-field"><label>Scheduled date &amp; time</label>'
+    + '            <input id="bs-schedule-at" type="datetime-local"></div>'
+    + '          <div class="bs-row">'
+    + '            <button id="bs-schedule" class="bs-btn bs-btn-primary">Confirm schedule</button>'
+    + '            <button id="bs-schedule-back" class="bs-btn bs-btn-ghost">Back</button>'
+    + '          </div>'
+    + '        </div>'
+    + '        <div class="bs-row" style="margin-top:12px;">'
+    + '          <button id="bs-unschedule" class="bs-btn bs-btn-ghost bs-hidden">Unschedule</button>'
+    + '          <button id="bs-discard" class="bs-btn bs-btn-danger">Discard draft</button>'
+    + '        </div>'
+    + '        <div id="bs-action-status" class="bs-banner bs-hidden"></div>'
     + '      </div>'
     + '    </div>'
     + '  </div>'
@@ -235,6 +329,51 @@
     };
   }
 
+  // ── "Ask Swan to improve": hand the draft to the assistant in chat ────────────────────────────
+  // Same affordance as the Create Post sheet's gpAskSwanImprove. The chat modal lives in
+  // workspace.html, so on the standalone blog-studio.html page the button stays hidden.
+  function swanAvailable() {
+    return typeof window.openAssistantChatModal === 'function' && state.assistantId != null;
+  }
+  function syncSwanButton() {
+    var btn = el('bs-swan-improve');
+    if (btn) btn.classList.toggle('bs-hidden', !swanAvailable());
+  }
+  // blog-tone returns only { id, name, tone }; the chat modal also wants role/roleKey for its header
+  // and prompt, so resolve those from get-assistants (cached per id).
+  var metaCache = {};
+  function resolveAssistantMeta(id) {
+    if (metaCache[id]) return Promise.resolve(metaCache[id]);
+    var fallback = { name: 'Your assistant', role: 'Digital Assistant', roleKey: null };
+    return fetch('/.netlify/functions/get-assistants', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : { assistants: [] }; })
+      .then(function (d) {
+        var a = (d.assistants || []).filter(function (x) { return Number(x.id) === Number(id); })[0];
+        var meta = a ? { name: a.name || fallback.name, role: a.role || fallback.role, roleKey: a.roleKey || null } : fallback;
+        metaCache[id] = meta;
+        return meta;
+      })
+      .catch(function () { return fallback; });
+  }
+  function askSwanImprove() {
+    if (!swanAvailable()) return;
+    var title = el('bs-title').value.trim();
+    var md = state.editor ? state.editor.getMarkdown().trim() : '';
+    resolveAssistantMeta(state.assistantId).then(function (meta) {
+      var session = window.openAssistantChatModal(state.assistantId, meta.name, meta.role, meta.roleKey);
+      if (!md && !title) return;   // nothing to critique yet — just open the chat
+      // The body normally opens with the title as its own H1, so only prepend the title when it
+      // isn't already the first heading — otherwise the draft reads as if it were titled twice.
+      var firstHeading = (md.match(/^#\s+(.*)$/m) || [])[1];
+      var needsTitle = title && (!firstHeading || firstHeading.trim() !== title);
+      var parts = ['Here’s a draft blog post I’m working on. Please suggest improvements and give me a stronger version I can use.', ''];
+      if (needsTitle) parts.push('# ' + title, '');
+      parts.push(md || '(no body yet)');
+      var seed = parts.join('\n');
+      setTimeout(function () { try { if (session) session.sendMessage(seed); } catch (_) {} }, 60);
+    });
+  }
+
   function loadAssistants() {
     return api('blog-tone', { method: 'GET' }).then(function (res) {
       if (res.ok && Array.isArray(res.body.assistants)) {
@@ -266,8 +405,16 @@
       blogPostId: postId,
       initialMarkdown: md,
       title: title,
-      onChange: function () { setStatus('bs-save-status', 'Saving…'); setTimeout(function () { setStatus('bs-save-status', 'Saved'); }, 1400); },
+      onChange: function (nextMd) {
+        refreshReadout(nextMd);
+        setStatus('bs-save-status', 'Saving…');
+        setTimeout(function () { setStatus('bs-save-status', 'Saved'); }, 1400);
+      },
     });
+    refreshReadout(md);
+    syncSwanButton();
+    var a = selectedAssistant();
+    el('bs-approve-name').textContent = a && a.name ? a.name : 'your assistant';
     loadWidget();
     loadFeature();
     loadSyndication();
@@ -281,8 +428,9 @@
     if (voice.saveToProfile) {
       api('blog-tone', { method: 'POST', body: JSON.stringify({ assistantId: voice.assistantId, tone: voice.tone }) });
     }
+    setBanner('bs-brief-status', '');
     api('blog-posts', { method: 'POST', body: JSON.stringify({ title: title, assistantId: voice.assistantId }) }).then(function (res) {
-      if (!res.ok) { alert('Could not create post: ' + (res.body.error || '')); return; }
+      if (!res.ok) { setBanner('bs-brief-status', 'Could not create post: ' + (res.body.error || 'please try again.'), 'error'); return; }
       openWorkspace(res.body.post.id, title, seedMarkdown(path, voice.tone));
       if (path === 'generate') {
         setStatus('bs-save-status', 'Drafting…');
@@ -295,6 +443,7 @@
         }) }).then(function (gen) {
           if (gen.ok && gen.body.bodyMarkdown) {
             state.editor.setMarkdown(gen.body.bodyMarkdown);
+            refreshReadout(gen.body.bodyMarkdown);   // setMarkdown doesn't fire onChange
             setStatus('bs-save-status', 'Draft ready');
           } else {
             setStatus('bs-save-status', (gen.body && gen.body.error) || 'Draft failed');
@@ -312,7 +461,9 @@
       if (post.assistantId != null) state.assistantId = post.assistantId;
       openWorkspace(post.id, post.title || 'Untitled draft', post.bodyMarkdown || '');
       setStatus('bs-save-status', 'Saved');
-      if (post.status) setStatus('bs-publish-status', 'Status: ' + post.status);
+      if (post.status) setBanner('bs-action-status', 'Status: ' + post.status);
+      // A post already on the calendar can be pulled back off it.
+      if (post.status === 'scheduled') el('bs-unschedule').classList.remove('bs-hidden');
     }).catch(function () { setStatus('bs-save-status', ''); });
   }
 
@@ -617,17 +768,48 @@
     el('bms-blog-backdrop').addEventListener('mousedown', function (e) {
       if (e.target === el('bms-blog-backdrop')) closeBlogStudio();  // click the dimmed area to dismiss
     });
+    document.addEventListener('keydown', function (e) {
+      // Esc dismisses, unless the chat modal opened on top of us — it owns the key then.
+      if (e.key !== 'Escape' || !el('bms-blog-backdrop').classList.contains('bs-open')) return;
+      var chat = document.getElementById('chat-modal');
+      if (chat && !chat.classList.contains('hidden')) return;
+      closeBlogStudio();
+    });
 
     el('bs-title').addEventListener('blur', function () {
       if (!state.postId) return;
       api('save-blog-draft', { method: 'POST', body: JSON.stringify({ id: state.postId, title: this.value }) });
     });
 
+    el('bs-notes-mic').addEventListener('click', function () { startVoice('bs-notes', 'bs-notes-mic'); });
+    el('bs-swan-improve').addEventListener('click', askSwanImprove);
+
     el('bs-publish').addEventListener('click', function () {
       if (!state.postId) return;
-      setStatus('bs-publish-status', 'Publishing…');
+      setBanner('bs-action-status', 'Publishing…');
       api('publish-blog', { method: 'POST', body: JSON.stringify({ id: state.postId }) }).then(function (res) {
-        setStatus('bs-publish-status', res.ok ? 'Published ✓ (' + res.body.post.slug + ')' : (res.body.error || 'Failed'));
+        if (res.ok) setBanner('bs-action-status', 'Published ✓ (' + res.body.post.slug + ')');
+        else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not publish — please try again.', 'error');
+      });
+    });
+
+    // Reveal / hide the manual date-time picker ("Pick a time myself").
+    el('bs-pick-time').addEventListener('click', function () {
+      el('bs-schedule-picker').classList.remove('bs-hidden');
+      el('bs-schedule-at').focus();
+    });
+    el('bs-schedule-back').addEventListener('click', function () {
+      el('bs-schedule-picker').classList.add('bs-hidden');
+    });
+
+    // Discard — drafts only; blog-posts DELETE refuses a published post.
+    el('bs-discard').addEventListener('click', function () {
+      if (!state.postId) return;
+      if (!window.confirm('Discard this draft? This cannot be undone.')) return;
+      setBanner('bs-action-status', 'Discarding…');
+      api('blog-posts?id=' + encodeURIComponent(state.postId), { method: 'DELETE' }).then(function (res) {
+        if (res.ok) closeBlogStudio();
+        else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not discard this draft.', 'error');
       });
     });
 
@@ -661,51 +843,53 @@
     // Approve & schedule — the assistant picks the next free cadence slot (no manual date).
     el('bs-approve').addEventListener('click', function () {
       if (!state.postId) return;
-      setStatus('bs-schedule-status', 'Scheduling…');
+      setBanner('bs-action-status', 'Scheduling…');
       api('schedule-blog', { method: 'POST', body: JSON.stringify({ id: state.postId, action: 'approve' }) }).then(function (res) {
         if (res.ok && res.body.post) {
-          setStatus('bs-schedule-status', 'Approved — scheduled for ' + new Date(res.body.post.publishDate).toLocaleString());
+          setBanner('bs-action-status', 'Approved — scheduled for ' + new Date(res.body.post.publishDate).toLocaleString());
           el('bs-unschedule').classList.remove('bs-hidden');
-        } else setStatus('bs-schedule-status', (res.body && res.body.error) || 'Failed');
+        } else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not schedule this post.', 'error');
       });
     });
 
     el('bs-schedule').addEventListener('click', function () {
       if (!state.postId) return;
       var iso = localToISO(el('bs-schedule-at').value);
-      if (!iso) { setStatus('bs-schedule-status', 'Pick a date & time.'); return; }
-      setStatus('bs-schedule-status', 'Scheduling…');
+      if (!iso) { setBanner('bs-action-status', 'Pick a date & time.', 'error'); return; }
+      setBanner('bs-action-status', 'Scheduling…');
       api('schedule-blog', { method: 'POST', body: JSON.stringify({ id: state.postId, publishDate: iso }) }).then(function (res) {
         if (res.ok) {
-          setStatus('bs-schedule-status', 'Scheduled for ' + new Date(res.body.post.publishDate).toLocaleString());
+          setBanner('bs-action-status', 'Scheduled for ' + new Date(res.body.post.publishDate).toLocaleString());
+          el('bs-schedule-picker').classList.add('bs-hidden');
           el('bs-unschedule').classList.remove('bs-hidden');
-        } else setStatus('bs-schedule-status', (res.body && res.body.error) || 'Failed');
+        } else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not schedule this post.', 'error');
       });
     });
     el('bs-unschedule').addEventListener('click', function () {
       if (!state.postId) return;
       api('schedule-blog', { method: 'POST', body: JSON.stringify({ id: state.postId, action: 'unschedule' }) }).then(function (res) {
         if (res.ok) {
-          setStatus('bs-schedule-status', 'Schedule cleared — back to draft.');
+          setBanner('bs-action-status', 'Schedule cleared — back to draft.');
           el('bs-unschedule').classList.add('bs-hidden');
-        } else setStatus('bs-schedule-status', (res.body && res.body.error) || 'Failed');
+        } else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not clear the schedule.', 'error');
       });
     });
 
     el('bs-generate-hooks').addEventListener('click', function () {
       if (!state.postId) return;
-      setStatus('bs-publish-status', 'Generating hooks…');
+      setBanner('bs-action-status', 'Generating hooks…');
       api('generate-hooks', { method: 'POST', body: JSON.stringify({ blogPostId: state.postId }) }).then(function (res) {
-        setStatus('bs-publish-status', res.ok ? (res.body.hookVariants.length + ' hook variants ready') : (res.body.error || 'Failed'));
+        if (res.ok) setBanner('bs-action-status', res.body.hookVariants.length + ' hook variants ready');
+        else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not generate hooks.', 'error');
       });
     });
     el('bs-generate-seo').addEventListener('click', function () {
       if (!state.postId) return;
-      setStatus('bs-publish-status', 'Generating SEO…');
+      setBanner('bs-action-status', 'Generating SEO…');
       api('generate-seo', { method: 'POST', body: JSON.stringify({ blogPostId: state.postId }) }).then(function (res) {
-        if (!res.ok) { setStatus('bs-publish-status', res.body.error || 'Failed'); return; }
+        if (!res.ok) { setBanner('bs-action-status', (res.body && res.body.error) || 'Could not generate SEO.', 'error'); return; }
         var slugPart = res.body.urlSlug ? ('/' + res.body.urlSlug + ' · ') : '';
-        setStatus('bs-publish-status', 'SEO ready — ' + slugPart + res.body.tags.length + ' tags');
+        setBanner('bs-action-status', 'SEO ready — ' + slugPart + res.body.tags.length + ' tags');
       });
     });
 
@@ -713,7 +897,10 @@
       var theme = { accent: el('bs-accent').value, fontFamily: el('bs-font').value };
       api('save-widget-config', { method: 'POST', body: JSON.stringify({
         action: 'update', theme: theme, badgeEnabled: el('bs-badge').checked,
-      }) }).then(function (res) { alert(res.ok ? 'Theme saved.' : (res.body.error || 'Failed')); });
+      }) }).then(function (res) {
+        if (res.ok) setBanner('bs-action-status', 'Theme saved.');
+        else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not save the theme.', 'error');
+      });
     });
 
     mediaEls = {
@@ -823,10 +1010,13 @@
     state.postId = null;
     ['bs-topic', 'bs-keywords', 'bs-notes', 'bs-tone'].forEach(function (id) { var e = el(id); if (e) e.value = ''; });
     var st = el('bs-save-tone'); if (st) st.checked = false;
-    ['bs-save-status', 'bs-publish-status', 'bs-schedule-status', 'bs-media-status', 'bs-synd-status'].forEach(function (id) { setStatus(id, ''); });
+    ['bs-save-status', 'bs-media-status', 'bs-synd-status'].forEach(function (id) { setStatus(id, ''); });
+    ['bs-action-status', 'bs-brief-status'].forEach(function (id) { setBanner(id, ''); });
     el('bs-workspace').classList.add('bs-hidden');
     el('bs-brief').classList.remove('bs-hidden');
     el('bs-unschedule').classList.add('bs-hidden');
+    el('bs-schedule-picker').classList.add('bs-hidden');
+    el('bs-schedule-at').value = '';
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────────────────────────

@@ -4898,6 +4898,7 @@ window.openAssistantChatModal = function(assistantId, assistantName, assistantRo
 
     modal.classList.remove('hidden');
     modal.classList.add('flex');
+    return _chatModalSession;   // callers seed the conversation via session.sendMessage()
 };
 
 window.closeAssistantChatModal = function() {
