@@ -252,6 +252,12 @@
     + '          <button id="bs-pexels-go" class="bs-btn bs-btn-ghost" style="margin-top:8px;">Search</button></div>'
     + '        <div id="bs-media-picker" class="bs-media-picker bs-hidden"></div>'
     + '        <span id="bs-media-status" class="bs-status"></span>'
+    // Column layouts. Media can then be dragged into either side; the row stacks on a phone.
+    + '        <div style="margin-top:14px;font-size:12px;color:#6b7280;">Layout</div>'
+    + '        <div class="bs-row" style="margin-top:6px;">'
+    + '          <button id="bs-cols-2" class="bs-btn bs-btn-ghost">2 columns</button>'
+    + '          <button id="bs-cols-3" class="bs-btn bs-btn-ghost">3 columns</button>'
+    + '        </div>'
     + '      </div>'
     + '      <div class="bs-panel" style="margin-top:16px;">'
     + '        <h3>Syndicate</h3>'
@@ -1157,6 +1163,7 @@
       inlineLibrary: el('bs-inline-library'), inlinePexels: el('bs-inline-pexels'), inlineAi: el('bs-inline-ai'),
       inlineUpload: el('bs-inline-upload'), inlineUploadInput: el('bs-inline-upload-input'),
       inlineCanva: el('bs-inline-canva'),
+      cols2: el('bs-cols-2'), cols3: el('bs-cols-3'),
     };
 
     mediaEls.remove.addEventListener('click', function () {
@@ -1164,6 +1171,15 @@
       api('blog-media', { method: 'POST', body: JSON.stringify({ blogPostId: state.postId, action: 'detach', role: 'feature' }) })
         .then(function (res) { if (res.ok) renderFeature(res.body.feature); });
     });
+    // A column layout is body structure, not media, so it doesn't route through mediaTarget or the
+    // picker — it goes straight into the draft, after whichever block the author last touched.
+    function insertColumns(n) {
+      if (!state.editor) return;
+      state.editor.insertColumns(n);
+      setStatus('bs-media-status', 'Column layout added — drag media into a column, or click to edit the text.');
+    }
+    mediaEls.cols2.addEventListener('click', function () { insertColumns(2); });
+    mediaEls.cols3.addEventListener('click', function () { insertColumns(3); });
     mediaEls.library.addEventListener('click', function () { state.mediaTarget = 'feature'; openLibrary(); });
     mediaEls.inlineLibrary.addEventListener('click', function () { state.mediaTarget = 'inline'; openLibrary(); });
     mediaEls.ai.addEventListener('click', function () { state.mediaTarget = 'feature'; openAiForm(); });

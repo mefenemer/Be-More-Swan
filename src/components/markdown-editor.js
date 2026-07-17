@@ -121,12 +121,28 @@
     return MEDIA_BLOCK_RE.test(String(raw == null ? '' : raw).trim());
   }
 
-  // Split Markdown into blocks on blank lines, but keep fenced code blocks intact.
+  // A `::::columns` row is ONE block, however many blank lines its columns contain.
+  const COLUMNS_OPEN_RE = /^::::columns\{/;
+  const COLUMNS_CLOSE_RE = /^::::[ \t]*$/;
+  const COLUMNS_BLOCK_RE = /^::::columns\{/;
+  function isColumnsBlock(raw) {
+    return COLUMNS_BLOCK_RE.test(String(raw == null ? '' : raw).trim());
+  }
+
+  // Split Markdown into blocks on blank lines, but keep fenced code blocks — and column
+  // containers — intact.
+  //
+  // Blank lines are the block separator, and a column holds ordinary Markdown, which means it holds
+  // blank lines. Without the depth counter a two-paragraph column gets shredded into loose
+  // top-level blocks and the `::::columns` fence is stranded on its own — the layout is destroyed
+  // just by loading the draft (plan §3.6). Only `::::` counts: the tokenizer is deliberately
+  // non-recursive, so the inner `:::column` markers never nest.
   function splitBlocks(md) {
     const lines = String(md == null ? '' : md).replace(/\r\n/g, '\n').split('\n');
     const blocks = [];
     let buf = [];
     let inFence = false;
+    let depth = 0;
     const flush = () => {
       const raw = buf.join('\n').trim();
       if (raw) blocks.push(raw);
@@ -134,7 +150,11 @@
     };
     for (const line of lines) {
       if (/^\s*```/.test(line)) inFence = !inFence;
-      if (!inFence && line.trim() === '') { flush(); continue; }
+      else if (!inFence) {
+        if (COLUMNS_OPEN_RE.test(line)) depth++;
+        else if (COLUMNS_CLOSE_RE.test(line) && depth > 0) depth--;
+      }
+      if (!inFence && !depth && line.trim() === '') { flush(); continue; }
       buf.push(line);
     }
     flush();
@@ -230,6 +250,9 @@
       .bmsme-block[draggable="true"] { cursor:grab; }
       .bmsme-block[draggable="true"]:active { cursor:grabbing; }
       .bmsme-dragging { opacity:.4; }
+      /* A drop aimed inside a column targets that column, not a gap between blocks — so it gets an
+         outline instead of the insertion line. */
+      .bmsme-colhint { outline:2px dashed #ec4899; outline-offset:3px; border-radius:4px; }
     `;
     const el = document.createElement('style');
     el.id = STYLE_ID; el.textContent = css;
@@ -308,6 +331,10 @@
           // handing the drop a URL/file payload instead of our block id, so a reorder would read as
           // an external insert and duplicate the media.
           el.querySelectorAll('img, video, audio, a').forEach((n) => { n.draggable = false; });
+        } else if (isColumnsBlock(b.raw)) {
+          // Media inside a column isn't a block of its own, so there's nothing to reorder — stop
+          // its native image drag from starting a drag the drop handler would only ignore.
+          el.querySelectorAll('img, video, audio').forEach((n) => { n.draggable = false; });
         }
         root.appendChild(el);
       }
@@ -512,8 +539,18 @@
       let rawStart = block.raw.indexOf(sel.text);
       let rawEnd;
       let rawSelected;
-      if (rawStart === -1) { rawStart = 0; rawEnd = block.raw.length; rawSelected = block.raw; }
-      else { rawEnd = rawStart + sel.text.length; rawSelected = sel.text; }
+      if (rawStart === -1) {
+        // The whole-block fallback is fine for prose, but on a column layout it would hand the AI
+        // the raw `::::columns{…}` fence as its text and splice the reply back over the whole
+        // thing — the structure is gone and the author's other column with it. Prose INSIDE a
+        // column still rewrites normally: it matches verbatim, so it never reaches this branch.
+        if (isColumnsBlock(block.raw)) {
+          hideChrome();
+          window.alert('Select the words inside a column to rewrite them — a whole column layout can’t be rewritten at once.');
+          return;
+        }
+        rawStart = 0; rawEnd = block.raw.length; rawSelected = block.raw;
+      } else { rawEnd = rawStart + sel.text.length; rawSelected = sel.text; }
 
       hideChrome();
       const blockEl = root.querySelector('.bmsme-block[data-block-id="' + sel.blockId + '"]');
@@ -605,6 +642,48 @@
       return block.id;
     }
 
+    // Insert an empty column layout at a gap index. Columns are seeded with placeholder prose
+    // rather than left empty: an empty `.bms-column` has no height, so a blank grid renders as
+    // nothing at all and the author sees the button do nothing.
+    function insertColumnsAt(index, cols) {
+      const n = cols === 3 ? 3 : 2;
+      const names = ['Column one', 'Column two', 'Column three'];
+      const beforeId = (index >= 0 && index < blocks.length) ? blocks[index].id : null;
+      commitEdit();
+      let body = '';
+      for (let i = 0; i < n; i++) body += ':::column\n' + names[i] + '.\n:::\n';
+      const raw = '::::columns{cols=' + n + '}\n' + body + '::::';
+
+      let at = beforeId != null ? blocks.findIndex((b) => b.id === beforeId) : blocks.length;
+      if (at < 0) at = blocks.length;
+      const block = { id: uid(), raw };
+      blocks.splice(at, 0, block);
+      currentSel = null;
+      renderAll();
+      scheduleSave();
+      return block.id;
+    }
+
+    // Splice Markdown onto the end of the Nth column's body, in the block's RAW text.
+    //
+    // The columns row is one opaque block, so a drop into a column is a text edit rather than a
+    // tree operation. The pattern deliberately mirrors the tokenizer's own
+    // (marked-bms-directives.js) — if the two drift, the editor writes something the server won't
+    // parse back, and the preview starts lying about what publishes.
+    const COLUMN_BODY_RE = /(:::column[ \t]*\n)([\s\S]*?)(\n:::[ \t]*)(?=\n|$)/g;
+    function spliceIntoColumn(block, colIndex, md) {
+      let i = 0;
+      let hit = false;
+      const next = block.raw.replace(COLUMN_BODY_RE, function (m, open, body, close) {
+        if (i++ !== colIndex) return m;
+        hit = true;
+        return open + (body.trim() ? body + '\n\n' : '') + md + close;
+      });
+      if (!hit) return false;
+      block.raw = next;
+      return true;
+    }
+
     // Caret-anchored insert: media lands after the block the author last touched (the picker's
     // behaviour, unchanged). Resolve the anchor AFTER commitEdit for the reason above.
     function insertMediaImpl(media) {
@@ -671,6 +750,28 @@
     }
     function hideDropline() { dropline.style.display = 'none'; }
 
+    // Is the pointer inside a rendered column? If so the drop targets that column rather than a
+    // gap between top-level blocks.
+    function columnTargetAt(node) {
+      const colEl = node && node.closest ? node.closest('.bms-column') : null;
+      if (!colEl || !root.contains(colEl)) return null;
+      const blockEl = colEl.closest('.bmsme-block');
+      if (!blockEl) return null;
+      const cols = Array.from(blockEl.querySelectorAll('.bms-column'));
+      return { blockId: blockEl.getAttribute('data-block-id'), colIndex: cols.indexOf(colEl), el: colEl };
+    }
+    let colHint = null;
+    function highlightColumn(el) {
+      if (colHint === el) return;
+      clearColumnHint();
+      colHint = el;
+      if (colHint) colHint.classList.add('bmsme-colhint');
+    }
+    function clearColumnHint() {
+      if (colHint) colHint.classList.remove('bmsme-colhint');
+      colHint = null;
+    }
+
     // dragenter/dragleave fire once per descendant, so a plain dragleave would hide the line while
     // the pointer is still inside the editor. Count depth instead.
     let dragDepth = 0;
@@ -698,6 +799,7 @@
     function onDragEnd() {
       Array.from(root.querySelectorAll('.bmsme-dragging')).forEach((n) => n.classList.remove('bmsme-dragging'));
       hideDropline();
+      clearColumnHint();
       dragDepth = 0;
     }
     function onDragEnter(e) {
@@ -708,24 +810,32 @@
       const kind = dragKind(e.dataTransfer);
       if (!kind || !accepts(kind)) return;
       dragDepth = Math.max(0, dragDepth - 1);
-      if (!dragDepth) hideDropline();
+      if (!dragDepth) { hideDropline(); clearColumnHint(); }
     }
     function onDragOver(e) {
       const kind = dragKind(e.dataTransfer);
       if (!kind || !accepts(kind)) return;   // not ours — leave the page's own handling alone
       e.preventDefault();                    // required, or the browser refuses to fire `drop`
       e.dataTransfer.dropEffect = kind === 'block' ? 'move' : 'copy';
-      showDropline(gapIndexAt(e.clientY));
+      const col = columnTargetAt(e.target);
+      if (col) { hideDropline(); highlightColumn(col.el); }
+      else { clearColumnHint(); showDropline(gapIndexAt(e.clientY)); }
     }
 
     async function onDrop(e) {
       const kind = dragKind(e.dataTransfer);
       if (!kind || !accepts(kind)) return;
       e.preventDefault();
+      const col = columnTargetAt(e.target);
       onDragEnd();
       const index = gapIndexAt(e.clientY);
 
-      if (kind === 'block') { moveBlockTo(e.dataTransfer.getData(BLOCK_MIME), index); return; }
+      if (kind === 'block') {
+        const movingId = e.dataTransfer.getData(BLOCK_MIME);
+        if (col) moveBlockIntoColumn(movingId, col);
+        else moveBlockTo(movingId, index);
+        return;
+      }
 
       let payload;
       if (kind === 'media') {
@@ -737,11 +847,13 @@
         payload = { kind: 'files', files };
       }
 
-      // Anchor the gap across the await: attaching is a network round-trip and the author can keep
-      // typing (and re-splitting blocks) while it runs.
-      const beforeId = (index >= 0 && index < blocks.length) ? blocks[index].id : null;
-      showDropline(index);
-      pendingPill.style.top = (droplineY(index) + 4) + 'px';
+      // Anchor across the await: attaching is a network round-trip and the author can keep typing
+      // (and re-splitting blocks) while it runs. For a column drop the anchor is the columns block
+      // itself; for a gap drop it's the block that should follow the media.
+      const beforeId = col ? col.blockId
+        : ((index >= 0 && index < blocks.length) ? blocks[index].id : null);
+      if (!col) showDropline(index);
+      pendingPill.style.top = ((col ? col.el.getBoundingClientRect().top - root.getBoundingClientRect().top : droplineY(index)) + 4) + 'px';
       pendingPill.style.display = 'block';
       let media = null;
       try {
@@ -754,10 +866,43 @@
       // A drop must never write a directive pointing at an unattached asset (plan §4.3.3): if the
       // attach failed there is no assetId, so nothing goes into the Markdown at all.
       if (!media) return;
+      const list = (Array.isArray(media) ? media : [media]).filter(Boolean);
+      if (!list.length) return;
+
+      if (col) {
+        commitEdit();
+        const target = blocks.find((b) => b.id === col.blockId);
+        // The columns block can be gone by now — the author may have deleted it while the upload
+        // ran. Dropping the media at the end beats discarding what they just uploaded.
+        if (!target) { list.forEach((m) => insertMediaAt(blocks.length, m)); return; }
+        list.forEach((m) => {
+          if (m.url != null) assetUrls[m.assetId] = m.url;
+          spliceIntoColumn(target, col.colIndex, mediaRaw(m));
+        });
+        renderAll();
+        scheduleSave();
+        return;
+      }
 
       let at = beforeId != null ? blocks.findIndex((b) => b.id === beforeId) : blocks.length;
       if (at < 0) at = blocks.length;
-      (Array.isArray(media) ? media : [media]).forEach((m, k) => { if (m) insertMediaAt(at + k, m); });
+      list.forEach((m, k) => insertMediaAt(at + k, m));
+    }
+
+    // Drag an existing top-level media block into a column: splice its raw in, then drop the
+    // original block. Media already inside a column is not a block of its own, so it cannot be
+    // dragged back out — the opaque-block trade-off (see isColumnsBlock).
+    function moveBlockIntoColumn(blockId, col) {
+      if (!blockId || blockId === col.blockId) return;
+      commitEdit();
+      const from = blocks.findIndex((b) => b.id === blockId);
+      const target = blocks.find((b) => b.id === col.blockId);
+      if (from < 0 || !target) return;
+      const raw = blocks[from].raw;
+      if (!spliceIntoColumn(target, col.colIndex, raw)) return;   // leave the block where it is
+      blocks.splice(blocks.findIndex((b) => b.id === blockId), 1);
+      renderAll();
+      scheduleSave();
     }
 
     // Wire events.
@@ -803,6 +948,13 @@
       // Positional insert. Exposed so a host can place media without a drag (the accessible path —
       // drag-and-drop is a pointer gesture and can't be the only way to position media).
       insertMediaAt,
+      // Insert a 2- or 3-column layout after the block the author last touched.
+      insertColumns(cols) {
+        const anchorId = currentSel && currentSel.blockId;
+        const at = anchorId ? blocks.findIndex((b) => b.id === anchorId) : -1;
+        return insertColumnsAt(at >= 0 ? at + 1 : blocks.length, cols);
+      },
+      insertColumnsAt,
       // Back-compat wrapper: insertImage predates video/audio and is still what existing callers
       // reach for. Kept thin rather than duplicated so there's one insert path to maintain.
       insertImage(img) {
