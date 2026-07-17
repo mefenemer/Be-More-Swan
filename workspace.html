@@ -5400,6 +5400,13 @@ let _gpHasMedia = false;           // work-with-AI: whether the current draft ha
 // the assistant for improvements (Ask Swan) or reveal the on-demand generator via its link. The AI
 // task-limit gate is enforced only when the generator is opened — writing your own is always free.
 async function openGeneratePostSheet() {
+    // A previous generation is still running in the background (sheet was closed while waiting) —
+    // don't clobber its poll interval, or it'll finish with nowhere to report the result.
+    if (_gpPollInterval && _gpCurrentJobId) {
+        window.showToast?.("Your assistant is still working on your last post — we'll let you know when it's ready.", { icon: '⏳' });
+        return;
+    }
+
     _gpCurrentAssistantId = window._currentAssistantId || null;
     _gpCurrentJobId = null;
     _gpCurrentPostId = null;
@@ -5647,7 +5654,12 @@ async function gpSubmit() {
         if (!res.ok) { gpSetStatus(d.error || 'Failed to queue generation.', 'error'); if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Generate'; } return; }
         _gpCurrentJobId = d.jobId;
         document.getElementById('gen-post-actions')?.classList.add('hidden');
-        gpSetStatus('Generating your post… This usually takes 20–40 seconds.');
+        gpSetStatus('');
+        // Close the sheet rather than block it on a 20–40s wait — the toast keeps the user
+        // informed and the sheet reopens (with the draft ready to review) once the job completes.
+        document.getElementById('gen-post-backdrop')?.classList.add('hidden');
+        document.getElementById('gen-post-sheet')?.classList.add('hidden');
+        window.showToast?.('Generating your post… This usually takes 20–40 seconds.', { icon: '✨' });
         _gpPollInterval = setInterval(gpPollJob, 4000);
     } catch {
         gpSetStatus('Network error — please try again.', 'error');
@@ -5663,10 +5675,20 @@ async function gpPollJob() {
         const { status, resultPostId, errorMessage } = await res.json();
         if (status === 'completed' && resultPostId) {
             clearInterval(_gpPollInterval);
+            _gpPollInterval = null;
+            _gpCurrentJobId = null;
             _gpCurrentPostId = resultPostId;
+            window.showToast?.('Your post is ready! Opening it for review…', { icon: '✅' });
+            document.getElementById('gen-post-backdrop')?.classList.remove('hidden');
+            document.getElementById('gen-post-sheet')?.classList.remove('hidden');
             await gpLoadPreview(resultPostId);
         } else if (status === 'failed') {
             clearInterval(_gpPollInterval);
+            _gpPollInterval = null;
+            _gpCurrentJobId = null;
+            window.showToast?.(errorMessage || 'Generation failed. Please try again.', { icon: '⚠️' });
+            document.getElementById('gen-post-backdrop')?.classList.remove('hidden');
+            document.getElementById('gen-post-sheet')?.classList.remove('hidden');
             gpSetStatus(errorMessage || 'Generation failed. Please try again.', 'error');
             document.getElementById('gen-post-actions')?.classList.remove('hidden');
             const submitBtn = document.getElementById('gen-post-submit-btn');
