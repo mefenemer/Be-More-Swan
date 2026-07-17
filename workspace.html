@@ -5647,7 +5647,7 @@ async function gpSubmit() {
         if (!res.ok) { gpSetStatus(d.error || 'Failed to queue generation.', 'error'); if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Generate'; } return; }
         _gpCurrentJobId = d.jobId;
         document.getElementById('gen-post-actions')?.classList.add('hidden');
-        gpSetStatus('Generating your post… This usually takes 20–40 seconds.');
+        gpSetStatus('Generating your post… This usually takes 30–60 seconds.');
         _gpPollInterval = setInterval(gpPollJob, 4000);
     } catch {
         gpSetStatus('Network error — please try again.', 'error');
