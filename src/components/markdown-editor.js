@@ -45,16 +45,45 @@
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
 
+  // DOMPurify's defaults already cover HTML5 media, but the blog directives depend on these
+  // surviving, so name them rather than rely on a library default we don't control.
+  // This is the editor's PREVIEW gate only — the security-critical gate is the server's
+  // sanitize-html allowlist in markdown-render.ts, which is what freezes published_payload.
+  const PURIFY_OPTS = {
+    ADD_TAGS: ['video', 'audio', 'source'],
+    ADD_ATTR: ['controls', 'preload', 'data-bms-asset', 'data-cols'],
+  };
+
   // Render one block's Markdown to sanitised HTML. Prefer marked + DOMPurify when the host page
   // has loaded them (workspace.html does); otherwise fall back to escaped plain text.
-  function renderBlock(md) {
+  // `inst` is the directive-aware marked instance built in mount() — see makeMarked.
+  function renderBlock(md, inst) {
     try {
-      if (window.marked && window.DOMPurify) {
-        const html = window.marked.parse(md, { gfm: true, breaks: false });
-        return window.DOMPurify.sanitize(html);
+      if (inst && window.DOMPurify) {
+        const html = inst.parse(md, { gfm: true, breaks: false });
+        return window.DOMPurify.sanitize(html, PURIFY_OPTS);
       }
     } catch (_) { /* fall through */ }
     return '<p>' + escapeHtml(md).replace(/\n/g, '<br>') + '</p>';
+  }
+
+  // An ISOLATED marked instance carrying the :::media / ::::columns extensions, so the preview is
+  // parsed by the SAME tokenizer that renders the published snapshot (see
+  // src/lib/marked-bms-directives.js and docs/blog-media-composition-plan.md §3.2). Registering on
+  // the page-wide `marked` instead would leak blog directives into every other consumer.
+  //
+  // `resolveUrl` is passed HERE and nowhere on the server: the author needs a real src to see their
+  // video, while the published payload must stay src-less so widget-api can resolve a fresh
+  // presigned URL per read. The URL is preview state — it never reaches body_markdown.
+  function makeMarked(resolveUrl) {
+    if (!window.marked || !window.BmsDirectives) return null;
+    const Ctor = window.marked.Marked;
+    if (!Ctor) return null;
+    try {
+      return window.BmsDirectives.install(new Ctor(), { resolveUrl: resolveUrl });
+    } catch (_) {
+      return null;   // fall back to escaped plain text rather than break the editor
+    }
   }
 
   // Split Markdown into blocks on blank lines, but keep fenced code blocks intact.
@@ -122,6 +151,17 @@
         font: inherit; color: inherit; background: transparent; resize: none; overflow: hidden;
         line-height: 1.6; }
       .bmsme-placeholder { color:#9ca3af; margin:0; }
+      /* Inline media preview. Mirrors widget.js's rules so the author sees roughly the shape they
+         will publish — same reasoning as sharing the tokenizer: the preview shouldn't lie. */
+      .bmsme-block img, .bmsme-block video { max-width:100%; height:auto; border-radius:8px; display:block; }
+      .bmsme-block audio { width:100%; display:block; margin:8px 0; }
+      .bmsme-block figure { margin:12px 0; }
+      .bmsme-block figcaption { font-size:13px; color:#6b7280; margin-top:6px; }
+      .bmsme-block .bms-columns { display:grid; gap:16px; margin:12px 0;
+        grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .bmsme-block .bms-columns[data-cols="3"] { grid-template-columns:repeat(3,minmax(0,1fr)); }
+      @media (max-width:640px) { .bmsme-block .bms-columns,
+        .bmsme-block .bms-columns[data-cols="3"] { grid-template-columns:minmax(0,1fr); } }
       .bmsme-toolbar { position: absolute; z-index: 40; display: flex; gap: 4px;
         background: #111827; color: #fff; padding: 4px; border-radius: 8px;
         box-shadow: 0 6px 24px rgba(0,0,0,.25); font-size: 13px; }
@@ -165,6 +205,10 @@
     const applyAssetUrls = (raw) =>
         String(raw).replace(/asset:\/\/(\d+)/g, (m, id) => (assetUrls[id] != null ? assetUrls[id] : m));
 
+    // Directive media (`:::media{asset=N}`) carries a bare id, not an `asset://N` URL, so
+    // applyAssetUrls can't reach it — the renderer asks for the preview URL through this instead.
+    const mdInst = makeMarked((assetId) => assetUrls[assetId] || null);
+
     const root = document.createElement('div');
     root.className = 'bmsme-root';
     container.innerHTML = '';
@@ -185,7 +229,7 @@
     // with no way in. The placeholder is chrome, never content — it is not part of the Markdown.
     function blockHtml(b) {
       return b.raw.trim()
-        ? renderBlock(applyAssetUrls(b.raw))
+        ? renderBlock(applyAssetUrls(b.raw), mdInst)
         : '<p class="bmsme-placeholder">' + escapeHtml(placeholder) + '</p>';
     }
 
@@ -456,6 +500,46 @@
       }
     }
 
+    // Insert media as its own block. The stable asset ref is the source of truth; `url` is only
+    // for immediate preview. Inserts after the last-selected block when known.
+    //
+    // A plain image with no caption stays plain `![alt](asset://N)` Markdown — the `:::media`
+    // directive is for what Markdown CANNOT express (video, audio, a caption), so existing drafts
+    // need no migration and stay byte-identical (plan §3.1).
+    //
+    //   media: { assetId, type?: 'image'|'video'|'audio', url?, alt?, caption?, align? }
+    function insertMediaImpl(media) {
+      if (!media || media.assetId == null) return;
+      commitEdit();   // fold any in-progress typing in before splicing the media block
+      if (media.url != null) assetUrls[media.assetId] = media.url;
+
+      const type = media.type === 'video' || media.type === 'audio' ? media.type : 'image';
+      const alt = String(media.alt || '').replace(/[[\]]/g, '');
+      // The attribute grammar is `key="value"` — a quote, brace or newline in author text would
+      // break out of it, so drop those rather than emit a directive that won't re-parse.
+      const clean = (v) => String(v || '').replace(/["}\r\n]/g, '').trim();
+      const caption = clean(media.caption);
+
+      let raw;
+      if (type === 'image' && !caption) {
+        raw = '![' + alt + '](asset://' + media.assetId + ')';
+      } else {
+        raw = ':::media{asset=' + media.assetId + ' type=' + type
+          + (alt ? ' alt="' + clean(alt) + '"' : '')
+          + (caption ? ' caption="' + caption + '"' : '')
+          + (media.align ? ' align=' + clean(media.align) : '')
+          + '}';
+      }
+
+      const block = { id: uid(), raw };
+      const anchorId = currentSel && currentSel.blockId;
+      const at = anchorId ? blocks.findIndex((b) => b.id === anchorId) : -1;
+      if (at >= 0) blocks.splice(at + 1, 0, block); else blocks.push(block);
+      currentSel = null;
+      renderAll();
+      scheduleSave();
+    }
+
     // Wire events.
     const onMouseUp = () => setTimeout(onSelect, 0);
     const onDocMouseDown = (e) => { if (!root.contains(e.target)) hideChrome(); };
@@ -489,20 +573,12 @@
         });
         if (changed) renderAll();
       },
-      // Append an inline image as its own block. The stable asset:// ref is the source of truth;
-      // `url` is only for immediate preview. Inserts after the last-selected block when known.
+      insertMedia: insertMediaImpl,
+      // Back-compat wrapper: insertImage predates video/audio and is still what existing callers
+      // reach for. Kept thin rather than duplicated so there's one insert path to maintain.
       insertImage(img) {
-        if (!img || img.assetId == null) return;
-        commitEdit();   // fold any in-progress typing in before splicing the image block
-        if (img.url != null) assetUrls[img.assetId] = img.url;
-        const alt = String(img.alt || '').replace(/[[\]]/g, '');
-        const block = { id: uid(), raw: '![' + alt + '](asset://' + img.assetId + ')' };
-        const anchorId = currentSel && currentSel.blockId;
-        const at = anchorId ? blocks.findIndex((b) => b.id === anchorId) : -1;
-        if (at >= 0) blocks.splice(at + 1, 0, block); else blocks.push(block);
-        currentSel = null;
-        renderAll();
-        scheduleSave();
+        if (!img) return;
+        insertMediaImpl({ ...img, type: 'image' });
       },
       destroy() {
         // Fold in any open edit and flush it synchronously — closing the modal mid-sentence must

@@ -4206,6 +4206,10 @@ function formatCurrency(amount, currency) {
 <script src="/src/config/mandate-suggestions.js"></script>
 <script src="/src/components/assistant-detail-modal.js"></script>
 <!-- Content Engine: Blog Studio native modal (self-injects markup; uses marked/DOMPurify above). -->
+<!-- The :::media / ::::columns tokenizer. The SAME file is imported server-side by
+     markdown-render.ts, so the Studio's preview can't disagree with what actually publishes
+     (docs/blog-media-composition-plan.md §3.2). Must load BEFORE markdown-editor.js. -->
+<script src="/src/lib/marked-bms-directives.js"></script>
 <script src="/src/components/markdown-editor.js"></script>
 <script src="/src/components/blog-studio-modal.js"></script>
 <script src="/calendar.js?v=20260625-approve-gate"></script>

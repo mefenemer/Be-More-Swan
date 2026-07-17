@@ -14,6 +14,8 @@ import { logAuditEvent } from '../../src/utils/audit';
 import { getBlogAdapter, isBlogDestinationId } from '../../src/utils/blog-destinations';
 import type { BlogDestinationId, BlogDestinationPost } from '../../src/utils/blog-destinations';
 import { resolveDestinationCreds } from '../../src/utils/blog-destinations/store';
+import { stripMediaForSyndication } from '../../src/utils/blog-publish';
+import { renderMarkdown } from '../../src/utils/markdown-render';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({ statusCode, body: JSON.stringify(body) });
@@ -54,15 +56,25 @@ export default withLambda(async (event: HandlerEvent) => {
     if (post.status !== 'published') return json(409, { error: 'Publish the post to your site before syndicating it.' });
     if (!post.bodyMarkdown?.trim()) return json(422, { error: 'This post has no body to publish.' });
 
-    const payloadHtml =
-        post.publishedPayload && typeof post.publishedPayload === 'object' && 'html' in post.publishedPayload
-            ? String((post.publishedPayload as { html?: unknown }).html ?? '') || null
-            : null;
+    // Syndicated copies are TEXT ONLY (docs/blog-media-composition-plan.md §3.5, decided): no hero,
+    // no inline images, no video/audio, columns unwrapped to stacked prose. Our media URLs are
+    // presigned/expiring and Pexels is hotlink-only under its ToS, so we hand external platforms no
+    // media rather than links that 404 or breach a licence — the same reasoning that already keeps
+    // `coverImageUrl` null below.
+    //
+    // Both fields are derived from ONE stripped source. bodyHtml can't just be nulled: the
+    // WordPress / WordPress.com / Ghost adapters send `bodyHtml || bodyMarkdown` into an HTML
+    // field, so dropping it would post raw Markdown to those three. And the published_payload
+    // snapshot is unusable here by construction — its media is deliberately src-less.
+    const syndicatedMarkdown = stripMediaForSyndication(post.bodyMarkdown);
+    if (!syndicatedMarkdown.trim()) {
+        return json(422, { error: 'This post is media-only. Add some text before syndicating it — external platforms receive text only.' });
+    }
 
     const projected: BlogDestinationPost = {
         title: post.title,
-        bodyMarkdown: post.bodyMarkdown,
-        bodyHtml: payloadHtml,
+        bodyMarkdown: syndicatedMarkdown,
+        bodyHtml: renderMarkdown(syndicatedMarkdown) || null,
         canonicalUrl: post.canonicalUrl ?? null,
         tags: Array.isArray(post.tags) ? (post.tags as unknown[]).map(String) : [],
         // Private-R2 heroes are presigned/expiring, so we never hand an external platform a URL that

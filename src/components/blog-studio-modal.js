@@ -130,8 +130,8 @@
     + '.bs-feature-empty{font-size:12px;color:#6b7280;border:1px dashed #d1d5db;border-radius:8px;padding:20px;text-align:center;}'
     + '.bs-feature-preview img{width:100%;border-radius:8px;display:block;}'
     + '.bs-media-picker{margin-top:12px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-height:260px;overflow:auto;}'
-    + '.bs-media-picker img{width:100%;height:72px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid transparent;}'
-    + '.bs-media-picker img:hover{border-color:#ec4899;}'
+    + '.bs-media-picker img,.bs-media-picker video{width:100%;height:72px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid transparent;background:#000;}'
+    + '.bs-media-picker img:hover,.bs-media-picker video:hover{border-color:#ec4899;}'
     + '.bs-media-empty{grid-column:1 / -1;font-size:12px;color:#6b7280;text-align:center;padding:12px;}'
     + '.bs-synd-row{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;}'
     + '.bs-synd-form{flex-basis:100%;margin-top:8px;}'
@@ -209,7 +209,14 @@
     + '          <option value="Georgia, serif">Serif</option>'
     + '          <option value="\'Inter\', sans-serif">Inter</option></select></div>'
     + '        <div class="bs-field"><label><input id="bs-badge" type="checkbox" checked> Show AI transparency badge</label></div>'
-    + '        <button id="bs-save-theme" class="bs-btn bs-btn-ghost">Save theme</button>'
+    // Where you republish the widget on your own site. Both fields let a post\'s canonical URL credit
+    // YOUR domain instead of our permalink — leave blank to use the Be More Swan permalink.
+    + '        <div class="bs-field"><label>Your site URL <span class="bs-status" style="font-weight:400;">(optional)</span></label>'
+    + '          <input id="bs-site-base" type="url" placeholder="https://acme.com"></div>'
+    + '        <div class="bs-field"><label>Post URL pattern</label>'
+    + '          <input id="bs-site-path" placeholder="/blog/{slug}">'
+    + '          <span class="bs-status" style="font-size:11px;">Must start with / and contain {slug}. Needed for canonical URLs to point at your site.</span></div>'
+    + '        <button id="bs-save-theme" class="bs-btn bs-btn-ghost">Save settings</button>'
     + '        <div style="margin-top:12px;"><label class="bs-status">Embed snippet</label>'
     + '          <div id="bs-snippet" class="bs-snippet">Create a widget to get your embed code.</div></div>'
     + '      </div>'
@@ -225,14 +232,17 @@
     + '          <button id="bs-feature-remove" class="bs-btn bs-btn-ghost bs-hidden">Remove</button>'
     + '          <input type="file" id="bs-feature-upload-input" class="bs-hidden" accept="image/png,image/jpeg,image/gif,image/webp">'
     + '        </div>'
-    + '        <div style="margin-top:14px;font-size:12px;color:#6b7280;">Inline body image</div>'
+    + '        <div style="margin-top:14px;font-size:12px;color:#6b7280;">Inline body media</div>'
     + '        <div class="bs-row" style="margin-top:6px;">'
     + '          <button id="bs-inline-library" class="bs-btn bs-btn-ghost">Library</button>'
     + '          <button id="bs-inline-upload" class="bs-btn bs-btn-ghost">Upload</button>'
     + '          <button id="bs-inline-pexels" class="bs-btn bs-btn-ghost">Stock</button>'
     + '          <button id="bs-inline-canva" class="bs-btn bs-btn-ghost">Canva</button>'
     + '          <button id="bs-inline-ai" class="bs-btn bs-btn-ghost">AI</button>'
-    + '          <input type="file" id="bs-inline-upload-input" class="bs-hidden" accept="image/png,image/jpeg,image/gif,image/webp">'
+    // Video is body-only: the hero input above stays images-only. MIME list mirrors
+    // content-upload-url.ts's ALLOWED_MIME_TYPES — widening it here without widening that would
+    // just move the rejection to a worse place.
+    + '          <input type="file" id="bs-inline-upload-input" class="bs-hidden" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm">'
     + '        </div>'
     + '        <div id="bs-ai-form" class="bs-field bs-hidden" style="margin-top:12px;">'
     + '          <input id="bs-ai-prompt" placeholder="Describe the image…">'
@@ -272,6 +282,25 @@
     + '      <div class="bs-row" style="margin-top:16px;">'
     + '        <button id="bs-generate-hooks" class="bs-btn bs-btn-ghost">Generate A/B hooks</button>'
     + '        <button id="bs-generate-seo" class="bs-btn bs-btn-ghost">Generate SEO</button>'
+    + '      </div>'
+    // Crawler-facing metadata (US 1.3). Generate SEO fills these in; the author can override before
+    // publishing. Saved via save-blog-draft; emitted server-side by the /b/:key/:slug permalink.
+    + '      <div class="bs-panel" style="margin-top:16px;">'
+    + '        <h3>SEO &amp; social preview</h3>'
+    + '        <div class="bs-field"><label>Search title <span id="bs-meta-title-count" class="bs-status" style="font-weight:400;"></span></label>'
+    + '          <input id="bs-meta-title" maxlength="120" placeholder="Shown as the clickable headline in Google"></div>'
+    + '        <div class="bs-field"><label>Search description <span id="bs-meta-desc-count" class="bs-status" style="font-weight:400;"></span></label>'
+    + '          <textarea id="bs-meta-desc" maxlength="320" rows="3" placeholder="The summary beneath the title in search results"></textarea></div>'
+    + '        <div class="bs-field"><label>Search visibility</label>'
+    + '          <select id="bs-robots">'
+    + '            <option value="index,follow">Indexed — show in search results (default)</option>'
+    + '            <option value="noindex,follow">Hidden from search — live but not indexed</option>'
+    + '            <option value="index,nofollow">Indexed, don\'t follow links</option>'
+    + '            <option value="noindex,nofollow">Fully hidden from search engines</option>'
+    + '          </select></div>'
+    + '        <div class="bs-field"><label>Canonical URL</label>'
+    + '          <div id="bs-canonical" class="bs-status" style="word-break:break-all;">Set when the post is published.</div></div>'
+    + '        <span id="bs-seo-status" class="bs-status"></span>'
     + '      </div>'
     // Scheduling mirrors the Create Post sheet: one guided question, not three loose button rows.
     + '      <div class="bs-panel" style="margin-top:16px;">'
@@ -397,7 +426,7 @@
   }
 
   // Reveal the editor workspace for a post (new or existing): mount the editor + side panels.
-  function openWorkspace(postId, title, md) {
+  function openWorkspace(postId, title, md, post) {
     state.postId = postId;
     el('bs-brief').classList.add('bs-hidden');
     el('bs-workspace').classList.remove('bs-hidden');
@@ -423,6 +452,7 @@
     loadFeature();
     loadSyndication();
     loadSearchConsole();
+    populateSeo(post);
     return state.editor;
   }
 
@@ -464,7 +494,7 @@
       if (!res.ok || !res.body.post) { setStatus('bs-save-status', ''); return; }
       var post = res.body.post;
       if (post.assistantId != null) state.assistantId = post.assistantId;
-      openWorkspace(post.id, post.title || 'Untitled draft', post.bodyMarkdown || '');
+      openWorkspace(post.id, post.title || 'Untitled draft', post.bodyMarkdown || '', post);
       setStatus('bs-save-status', 'Saved');
       if (post.status) setBanner('bs-action-status', 'Status: ' + post.status);
       // A post already on the calendar can be pulled back off it.
@@ -495,6 +525,25 @@
     if (theme.accent) el('bs-accent').value = theme.accent;
     if (theme.fontFamily) el('bs-font').value = theme.fontFamily;
     el('bs-badge').checked = cfg.badgeEnabled !== false;
+    el('bs-site-base').value = cfg.siteBaseUrl || '';
+    el('bs-site-path').value = cfg.sitePostPath || '';
+  }
+
+  // ── SEO metadata panel ─────────────────────────────────────────────────────────────────────────
+  // Google truncates around 60 chars (title) / 155 (description); show a live count that turns amber
+  // past those so the author can see when they overrun without a hard block.
+  function refreshSeoCounts() {
+    var t = el('bs-meta-title').value.length, d = el('bs-meta-desc').value.length;
+    var tc = el('bs-meta-title-count'), dc = el('bs-meta-desc-count');
+    tc.textContent = t + '/60'; tc.style.color = t > 60 ? '#b45309' : '';
+    dc.textContent = d + '/155'; dc.style.color = d > 155 ? '#b45309' : '';
+  }
+  function populateSeo(post) {
+    el('bs-meta-title').value = (post && post.metaTitle) || '';
+    el('bs-meta-desc').value = (post && post.metaDescription) || '';
+    el('bs-robots').value = (post && post.robots) || 'index,follow';
+    el('bs-canonical').textContent = (post && post.canonicalUrl) || 'Set when the post is published.';
+    refreshSeoCounts();
   }
 
   // ── Feature / inline media (reuses content-assets + generate-ai-image + pexels-search) ─────────
@@ -542,8 +591,12 @@
         else setStatus('bs-media-status', (res.body && res.body.error) || 'Failed');
       });
   }
-  // Attach an image as inline body media, then insert an asset:// block. `body` is { assetId } or
+  // Attach media as inline body media, then insert a block for it. `body` is { assetId } or
   // { pexelsCandidate }. Inline attach appends, so the new asset is the last inline[] item.
+  //
+  // The server's inline[] carries the asset's real assetType, so we hand that to insertMedia rather
+  // than assuming an image: a video needs a `:::media{type=video}` directive, and inserting it as
+  // `![](asset://N)` is exactly the bug that made attached videos render as nothing.
   function attachInline(body) {
     if (!state.postId || !state.editor) return;
     setStatus('bs-media-status', 'Adding…');
@@ -554,15 +607,23 @@
         var item = body.assetId != null
           ? (inline.filter(function (m) { return m.assetId === body.assetId; })[0] || inline[inline.length - 1])
           : inline[inline.length - 1];
-        if (item) state.editor.insertImage({ assetId: item.assetId, url: item.url, alt: item.name || '' });
+        if (item) state.editor.insertMedia({
+          assetId: item.assetId, url: item.url, alt: item.name || '', type: item.assetType || 'image',
+        });
         hidePicker(); setStatus('bs-media-status', '');
       });
   }
-  function routeImage(body) {
+  function routeMedia(body) {
     if (state.mediaTarget === 'inline') return attachInline(body);
     if (body.pexelsCandidate) return attachFeatureCandidate(body.pexelsCandidate);
     return attachFeature(body.assetId);
   }
+  // content_assets.assetType is the thing that decides how the body renders the media, so derive it
+  // from the file rather than assuming 'image' — an mp4 filed as an image renders as a broken <img>.
+  function assetTypeOf(mimeType) {
+    return /^video\//.test(String(mimeType || '')) ? 'video' : 'image';
+  }
+
   // Upload a new file straight into the content library, then attach it (issue #184 — the Blog
   // Writer's media picker needs its own upload entry point now that My Content isn't a nav item).
   function uploadContentAsset(file) {
@@ -577,7 +638,8 @@
           .then(function (r) { if (!r.ok) throw new Error('Upload failed.'); });
         return putPromise.then(function () {
           return api('content-assets', { method: 'POST', body: JSON.stringify({
-            name: file.name, assetType: 'image', mimeType: file.type, fileSize: file.size, storageKey: storageKey, storageUrl: storageUrl,
+            name: file.name, assetType: assetTypeOf(file.type), mimeType: file.type,
+            fileSize: file.size, storageKey: storageKey, storageUrl: storageUrl,
           }) });
         });
       })
@@ -595,7 +657,7 @@
     setStatus('bs-media-status', 'Uploading…');
     uploadContentAsset(file).then(function (asset) {
       setStatus('bs-media-status', '');
-      routeImage({ assetId: asset.id });
+      routeMedia({ assetId: asset.id });
     }).catch(function (err) {
       setStatus('bs-media-status', err.message || 'Upload failed. Please try again.');
     });
@@ -610,20 +672,36 @@
       if (!res.ok) { mediaEls.picker.innerHTML = '<div class="bs-media-empty">Could not load library.</div>'; return; }
       var groups = res.body.assets || {};
       var all = [].concat(groups.pending || [], groups.scheduled || [], groups.posted || []);
-      var images = all.filter(function (a) { return a.assetType === 'image' && (a.storageUrl || a.externalUrl); });
-      if (!images.length) { mediaEls.picker.innerHTML = '<div class="bs-media-empty">No images in your library yet.</div>'; return; }
+      // The hero must be an image (blog-media rejects anything else for the feature role), but the
+      // body can carry video too — so the inline picker offers both.
+      var inline = state.mediaTarget === 'inline';
+      var items = all.filter(function (a) {
+        if (!(a.storageUrl || a.externalUrl)) return false;
+        return a.assetType === 'image' || (inline && a.assetType === 'video');
+      });
+      if (!items.length) {
+        mediaEls.picker.innerHTML = '<div class="bs-media-empty">'
+          + (inline ? 'No images or videos in your library yet.' : 'No images in your library yet.')
+          + '</div>';
+        return;
+      }
       mediaEls.picker.innerHTML = '';
-      images.forEach(function (a) {
-        var img = document.createElement('img');
-        img.src = a.storageUrl || a.externalUrl;
-        img.alt = a.name || '';
-        img.addEventListener('click', function () { routeImage({ assetId: a.id }); });
-        mediaEls.picker.appendChild(img);
+      items.forEach(function (a) {
+        // A <video> with preload=metadata shows its first frame, which is a usable thumbnail —
+        // content_assets has no separate poster to fall back on.
+        var isVideo = a.assetType === 'video';
+        var tile = document.createElement(isVideo ? 'video' : 'img');
+        tile.src = a.storageUrl || a.externalUrl;
+        if (isVideo) { tile.preload = 'metadata'; tile.muted = true; }
+        else { tile.alt = a.name || ''; }
+        tile.title = a.name || '';
+        tile.addEventListener('click', function () { routeMedia({ assetId: a.id }); });
+        mediaEls.picker.appendChild(tile);
       });
     });
   }
   // Canva imports land in content_assets like any other source, so once the picker reports back
-  // there is nothing Canva-specific left to do — routeImage attaches the asset exactly as the
+  // there is nothing Canva-specific left to do — routeMedia attaches the asset exactly as the
   // Library and Upload paths do. assetType 'image' keeps video designs out: a feature or inline
   // image can't be an mp4.
   function openCanva() {
@@ -638,7 +716,7 @@
         if (!assetIds || !assetIds.length) return;
         // A multi-page design yields several assets; attach the first and leave the rest in the
         // library rather than stuffing every page into the post.
-        routeImage({ assetId: assetIds[0] });
+        routeMedia({ assetId: assetIds[0] });
       },
     });
   }
@@ -948,6 +1026,10 @@
         if (!res.ok) { setBanner('bs-action-status', (res.body && res.body.error) || 'Could not generate SEO.', 'error'); return; }
         var slugPart = res.body.urlSlug ? ('/' + res.body.urlSlug + ' · ') : '';
         setBanner('bs-action-status', 'SEO ready — ' + slugPart + res.body.tags.length + ' tags');
+        // Surface the freshly generated meta in the editable panel so the author can tweak it.
+        if (res.body.metaTitle) el('bs-meta-title').value = res.body.metaTitle;
+        if (res.body.metaDescription) el('bs-meta-desc').value = res.body.metaDescription;
+        refreshSeoCounts();
       });
     });
 
@@ -955,11 +1037,35 @@
       var theme = { accent: el('bs-accent').value, fontFamily: el('bs-font').value };
       api('save-widget-config', { method: 'POST', body: JSON.stringify({
         action: 'update', theme: theme, badgeEnabled: el('bs-badge').checked,
+        siteBaseUrl: el('bs-site-base').value.trim(), sitePostPath: el('bs-site-path').value.trim(),
       }) }).then(function (res) {
-        if (res.ok) setBanner('bs-action-status', 'Theme saved.');
-        else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not save the theme.', 'error');
+        if (res.ok) { setBanner('bs-action-status', 'Settings saved.'); applyWidget(res.body.config); }
+        else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not save settings.', 'error');
       });
     });
+
+    // ── SEO metadata overrides (US 1.3) — debounced autosave, mirrors the body autosave contract ──
+    function saveSeo() {
+      if (!state.postId) return;
+      setStatus('bs-seo-status', 'Saving…');
+      api('save-blog-draft', { method: 'POST', body: JSON.stringify({
+        id: state.postId,
+        metaTitle: el('bs-meta-title').value,
+        metaDescription: el('bs-meta-desc').value,
+        robots: el('bs-robots').value,
+      }) }).then(function (res) {
+        setStatus('bs-seo-status', res.ok ? 'Saved' : ((res.body && res.body.error) || 'Not saved'));
+      });
+    }
+    var seoTimer;
+    function seoChanged() {
+      refreshSeoCounts();
+      clearTimeout(seoTimer);
+      seoTimer = setTimeout(saveSeo, 900);
+    }
+    el('bs-meta-title').addEventListener('input', seoChanged);
+    el('bs-meta-desc').addEventListener('input', seoChanged);
+    el('bs-robots').addEventListener('change', saveSeo);
 
     mediaEls = {
       preview: el('bs-feature-preview'), library: el('bs-feature-library'), pexels: el('bs-feature-pexels'),
@@ -1010,7 +1116,7 @@
               setStatus('bs-media-status', 'Saving…');
               api('generate-ai-image', { method: 'POST', body: JSON.stringify({ action: 'select', jobId: jobId, index: im.index }) })
                 .then(function (sel) {
-                  if (sel.ok && sel.body.assetId) routeImage({ assetId: sel.body.assetId });
+                  if (sel.ok && sel.body.assetId) routeMedia({ assetId: sel.body.assetId });
                   else setStatus('bs-media-status', (sel.body && sel.body.error) || 'Could not save image');
                 });
             });
@@ -1037,7 +1143,7 @@
             img.src = c.url;
             img.alt = c.title || '';
             img.title = c.photographer ? ('Photo by ' + c.photographer + ' on Pexels') : '';
-            img.addEventListener('click', function () { routeImage({ pexelsCandidate: c }); });
+            img.addEventListener('click', function () { routeMedia({ pexelsCandidate: c }); });
             mediaEls.picker.appendChild(img);
           });
         });

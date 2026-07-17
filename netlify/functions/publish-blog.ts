@@ -12,6 +12,7 @@ import { getDb } from '../../db/client';
 import { blogPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { publishBlogPost } from '../../src/utils/blog-publish';
+import { resolveBaseUrl } from '../../src/utils/base-url';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event: HandlerEvent) => {
@@ -40,6 +41,7 @@ export default withLambda(async (event: HandlerEvent) => {
         return { statusCode: 400, body: JSON.stringify({ error: 'Cannot publish an empty post.' }) };
     }
 
-    const updated = await publishBlogPost(db, post, ctx.organisationId);
+    const baseUrl = resolveBaseUrl(event.headers as Record<string, string | undefined>);
+    const updated = await publishBlogPost(db, post, ctx.organisationId, baseUrl);
     return { statusCode: 200, body: JSON.stringify({ post: updated }) };
 });
