@@ -559,7 +559,7 @@
         <div class="flex items-start justify-between gap-4 p-5 border-b border-gray-100">
           <div>
             <h3 class="text-lg font-bold text-gray-900">Add a lead</h3>
-            <p class="text-sm text-gray-500 mt-0.5">The Lead Generator scores it against your ideal customer profile as it's saved.</p>
+            <p class="text-sm text-gray-500 mt-0.5">The Lead Generation Assistant scores it against your ideal customer profile as it's saved.</p>
           </div>
           <button type="button" data-add-close class="text-gray-400 hover:text-gray-600 text-2xl leading-none cursor-pointer">&times;</button>
         </div>

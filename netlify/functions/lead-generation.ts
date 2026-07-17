@@ -415,6 +415,6 @@ Return STRICT JSON only (no markdown), an array of exactly 3 objects:
         return json(400, { error: `Unknown action "${action}".` });
     } catch (err) {
         console.error('[lead-generation]', action, err);
-        return json(502, { error: 'The Lead Generator is having trouble right now — please try again in a moment.' });
+        return json(502, { error: 'The Lead Generation Assistant is having trouble right now — please try again in a moment.' });
     }
 });

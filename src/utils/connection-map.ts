@@ -4,7 +4,7 @@
 // This is a SECURITY control (data sandboxing): the Connections UI filters by it,
 // but enforcement lives here and is applied server-side in integrations.ts so a
 // crafted request cannot connect/list a service that is irrelevant to the assistant
-// (e.g. a Social Media Manager must not reach HR/CRM connectors).
+// (e.g. a Social Media Assistant must not reach HR/CRM connectors).
 //
 // EXTENSIBLE: add an assistant by adding its roleKey to ROLE_CONNECTIONS; add a
 // connector by tagging its category in CONNECTOR_CATEGORY. Live connectors today are
@@ -112,7 +112,7 @@ export function supportedToolsForAssistant(a: AssistantRole | null | undefined):
 
 export interface AssistantRole {
     roleKey?: string | null;
-    role?: string | null; // display name, e.g. "The Social Media Manager"
+    role?: string | null; // display name, e.g. "Social Media Assistant"
 }
 
 // Keyword fallback for assistants created before roleKey was stored, or custom roles.
@@ -122,7 +122,7 @@ function categoriesFromName(roleName?: string | null): Set<string> {
     if (/social|community|brand|post/.test(r)) { c.add('social'); c.add('design'); }
     if (/review|reputation/.test(r)) { c.add('reviews'); c.add('social'); }
     if (/inbox|email|mail/.test(r)) c.add('email');
-    if (/calendar|schedul/.test(r)) c.add('calendar');
+    if (/calendar|diary|schedul/.test(r)) c.add('calendar');
     if (/crm|lead|sales/.test(r)) c.add('crm');
     if (/support|ticket|helpdesk/.test(r)) { c.add('support'); c.add('chat'); }
     if (/seo|content|cms|blog/.test(r)) { c.add('cms'); c.add('design'); }
@@ -156,7 +156,7 @@ export function allowedServiceNames(a: AssistantRole | null | undefined, service
 
 // Connectors (from the known catalog) that are relevant to this assistant's role,
 // independent of whether a connection row exists yet in the DB. The Connections UI
-// uses this to decide which connector cards to render — a Social Media Manager must
+// uses this to decide which connector cards to render — a Social Media Assistant must
 // show its social connectors even before the user has connected (and thus created a
 // row for) any of them. Returns the full catalog for an unrestricted (unknown/custom)
 // role. Service names are the lowercased CONNECTOR_CATEGORY keys.

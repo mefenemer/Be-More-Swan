@@ -22,7 +22,7 @@ export default withLambda(async (event) => {
             id: aiAssistants.id,
             // The user's chosen name for THEIR assistant (e.g. "Sam") — stable, never follows a rename.
             name: aiAssistants.name,
-            // The ROLE label (e.g. "The Social Media Manager"). master_assistants.name is the live
+            // The ROLE label (e.g. "Social Media Assistant"). master_assistants.name is the live
             // source and is admin-editable; ai_assistants.ai_assistant_job_role is only a snapshot
             // copied at hire time, so on its own it goes stale the moment an admin renames the role.
             // Legacy rows with no masterAssistantId keep the snapshot as a fallback.

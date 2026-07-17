@@ -38,7 +38,7 @@ const CATALOG = [
     // ── 1. Administration ────────────────────────────────────────────────────
     {
         roleKey: 'inbox_manager',
-        name: 'The Inbox Manager',
+        name: 'Inbox Assistant',
         description: 'Drafts replies to standard emails, categorises incoming messages, and highlights urgent issues — eliminating email fatigue before your day begins.',
         category: 'Administration',
         iconKey: 'mail',
@@ -48,7 +48,7 @@ const CATALOG = [
     },
     {
         roleKey: 'calendar_coordinator',
-        name: 'The Calendar Coordinator',
+        name: 'Diary Assistant',
         description: 'Negotiates meeting times across different time zones and prepares daily schedule briefings so you never start the day lost.',
         category: 'Administration',
         iconKey: 'cog',
@@ -58,7 +58,7 @@ const CATALOG = [
     },
     {
         roleKey: 'travel_logistics_booker',
-        name: 'The Travel & Logistics Booker',
+        name: 'Travel Assistant',
         description: 'Sources flights, hotels, and creates itineraries based on your budget and preference guardrails — travel sorted without lifting a finger.',
         category: 'Administration',
         iconKey: 'globe',
@@ -68,7 +68,7 @@ const CATALOG = [
     },
     {
         roleKey: 'document_organizer',
-        name: 'The Document Organiser',
+        name: 'Document Filing Assistant',
         description: 'Automatically renames, tags, and files loose documents, PDFs, and assets into the correct cloud folders — your digital filing cabinet, always tidy.',
         category: 'Administration',
         iconKey: 'document',
@@ -80,7 +80,7 @@ const CATALOG = [
     // ── 2. Marketing & Sales ─────────────────────────────────────────────────
     {
         roleKey: 'social_media_manager',
-        name: 'The Social Media Manager',
+        name: 'Social Media Assistant',
         description: 'Plans, writes, and schedules branded content across all your social channels — consistent pipeline generation without the daily grind.',
         category: 'Marketing & Sales',
         iconKey: 'megaphone',
@@ -90,7 +90,7 @@ const CATALOG = [
     },
     {
         roleKey: 'lead_qualifier',
-        name: 'The Lead Generator',
+        name: 'Lead Generation Assistant',
         description: 'Researches inbound leads, scores them based on your company criteria, and drafts personalised outreach emails — so your sales team only calls the right people.',
         category: 'Marketing & Sales',
         iconKey: 'chart',
@@ -100,7 +100,7 @@ const CATALOG = [
     },
     {
         roleKey: 'seo_content_strategist',
-        name: 'The SEO Content Strategist',
+        name: 'SEO Assistant',
         description: 'Takes a rough topic, researches keywords, and drafts fully formatted, SEO-optimised blog posts — brand consistency at scale.',
         category: 'Marketing & Sales',
         iconKey: 'document',
@@ -110,7 +110,7 @@ const CATALOG = [
     },
     {
         roleKey: 'blog_writer',
-        name: 'The Blog Writer',
+        name: 'Blog Writing Assistant',
         description: 'Researches, drafts, and schedules long-form blog posts in your brand voice — then publishes them to your site via the native widget on a cadence you set. Review and approve; it handles the rest.',
         category: 'Marketing & Sales',
         iconKey: 'document',
@@ -120,7 +120,7 @@ const CATALOG = [
     },
     {
         roleKey: 'crm_enricher',
-        name: 'The CRM Enricher',
+        name: 'CRM Data Assistant',
         description: 'Scours the web to fill in missing contact details — LinkedIn profiles, company size, funding stage — for every new lead in your database.',
         category: 'Marketing & Sales',
         iconKey: 'cog',
@@ -130,7 +130,7 @@ const CATALOG = [
     },
     {
         roleKey: 'newsletter_editor',
-        name: 'The Newsletter Editor',
+        name: 'Newsletter Assistant',
         description: 'Curates weekly industry news and formats it into a ready-to-send email campaign — your audience stays informed without you reading everything.',
         category: 'Marketing & Sales',
         iconKey: 'mail',
@@ -140,7 +140,7 @@ const CATALOG = [
     },
     {
         roleKey: 'rfp_proposal_responder',
-        name: 'The RFP & Proposal Responder',
+        name: 'Proposal Writing Assistant',
         description: 'Uses RAG to search your past successful proposals and auto-drafts responses to new RFPs and security questionnaires — turns weeks of enterprise paperwork into a same-day turnaround.',
         category: 'Marketing & Sales',
         iconKey: 'document',
@@ -150,7 +150,7 @@ const CATALOG = [
     },
     {
         roleKey: 'competitor_intel_analyst',
-        name: 'The Competitor Intel Analyst',
+        name: 'Competitor Research Assistant',
         description: 'Scrapes competitor websites, pricing pages, and G2 reviews every week and compiles updated battle cards for your sales team — know exactly how you stack up, always.',
         category: 'Marketing & Sales',
         iconKey: 'globe',
@@ -162,7 +162,7 @@ const CATALOG = [
     // ── 3. Operations ────────────────────────────────────────────────────────
     {
         roleKey: 'vendor_communications_rep',
-        name: 'The Vendor Communications Rep',
+        name: 'Vendor Liaison Assistant',
         description: 'Chases suppliers for updates, requests quotes, and compares pricing tables — the engine room kept running without your involvement.',
         category: 'Operations',
         iconKey: 'globe',
@@ -172,7 +172,7 @@ const CATALOG = [
     },
     {
         roleKey: 'inventory_tracker',
-        name: 'The Inventory Tracker',
+        name: 'Stock Control Assistant',
         description: 'Monitors stock levels across platforms and drafts reorder requests when supplies dip below a threshold — stockouts become a thing of the past.',
         category: 'Operations',
         iconKey: 'chart',
@@ -182,7 +182,7 @@ const CATALOG = [
     },
     {
         roleKey: 'sop_writer',
-        name: 'The SOP Writer',
+        name: 'SOP Drafting Assistant',
         description: 'Takes messy voice notes or screen recordings and turns them into formatted, step-by-step training manuals — your processes documented while you work.',
         category: 'Operations',
         iconKey: 'document',
@@ -194,7 +194,7 @@ const CATALOG = [
     // ── 4. Customer Success & Support ────────────────────────────────────────
     {
         roleKey: 'tier1_support_agent',
-        name: 'The Tier 1 Support Agent',
+        name: 'First-Line Support Assistant',
         description: 'Instantly resolves common FAQs — refunds, password resets, shipping times — and escalates complex issues to your team with full context.',
         category: 'Customer Success & Support',
         iconKey: 'smile',
@@ -204,7 +204,7 @@ const CATALOG = [
     },
     {
         roleKey: 'client_onboarding_guide',
-        name: 'The Client Onboarding Guide',
+        name: 'Client Onboarding Assistant',
         description: 'Sends welcome packets, chases missing onboarding forms, and schedules kick-off calls — every client starts their journey feeling looked after.',
         category: 'Customer Success & Support',
         iconKey: 'lightning',
@@ -214,7 +214,7 @@ const CATALOG = [
     },
     {
         roleKey: 'review_reputation_manager',
-        name: 'The Review & Reputation Manager',
+        name: 'Reputation Management Assistant',
         description: 'Monitors Trustpilot, Google, and more — drafts polite responses to negative reviews and thanks positive reviewers — your reputation protected 24/7.',
         category: 'Customer Success & Support',
         iconKey: 'megaphone',
@@ -226,7 +226,7 @@ const CATALOG = [
     // ── 5. Project Management ────────────────────────────────────────────────
     {
         roleKey: 'standup_summarizer',
-        name: 'The Daily Stand-up Summarizer',
+        name: 'Stand-up Support Assistant',
         description: 'Chases team members for their daily updates and compiles them into one clean Slack or Teams message — no more status meetings.',
         category: 'Project Management',
         iconKey: 'lightning',
@@ -236,7 +236,7 @@ const CATALOG = [
     },
     {
         roleKey: 'meeting_note_taker',
-        name: 'The Meeting Note Taker',
+        name: 'Minute Taker',
         description: 'Attends virtual meetings, transcribes the conversation, and instantly extracts action items — assigned to the right people before the call ends.',
         category: 'Project Management',
         iconKey: 'document',
@@ -246,7 +246,7 @@ const CATALOG = [
     },
     {
         roleKey: 'status_report_generator',
-        name: 'The Status Report Generator',
+        name: 'Project Reporting Assistant',
         description: 'Pulls data from Jira, Asana, or Monday.com to create weekly executive summaries on project health — leadership always in the loop.',
         category: 'Project Management',
         iconKey: 'chart',
@@ -258,7 +258,7 @@ const CATALOG = [
     // ── 6. Finance & Bookkeeping ─────────────────────────────────────────────
     {
         roleKey: 'accounts_receivable_clerk',
-        name: 'The Accounts Receivable Clerk',
+        name: 'Accounts Receivable Clerk',
         description: 'Politely but persistently chases unpaid invoices and drafts payment reminders — cash flow protected without awkward conversations.',
         category: 'Finance & Bookkeeping',
         iconKey: 'chart',
@@ -268,7 +268,7 @@ const CATALOG = [
     },
     {
         roleKey: 'expense_categorizer',
-        name: 'The Expense Categorizer',
+        name: 'Expenses Assistant',
         description: 'Reads scanned receipts, extracts the vendor and amount, and matches them to the correct tax category — bookkeeping done before your accountant asks.',
         category: 'Finance & Bookkeeping',
         iconKey: 'document',
@@ -278,7 +278,7 @@ const CATALOG = [
     },
     {
         roleKey: 'sql_data_analyst',
-        name: 'The SQL/Data Analyst',
+        name: 'Data Analysis Assistant',
         description: 'Connects securely to Stripe or your database so you can ask plain-English questions like "What was our net revenue retention last month?" and get instant answers and charts.',
         category: 'Finance & Bookkeeping',
         iconKey: 'chart',

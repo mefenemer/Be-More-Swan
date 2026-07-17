@@ -3486,8 +3486,8 @@ function formatCurrency(amount, currency) {
   //  Epic: Async Setup & Progress Tracking — In-Progress "Onboarding" cards
   // ═══════════════════════════════════════════════════════════════════
   const ONBOARDING_ROLE_META = {
-    social_media: { label: 'Social Media Manager', icon: '📣', wizard: 'onboarding-social-media.html' },
-    paid_ads:     { label: 'Performance Marketer', icon: '📈', wizard: 'onboarding-performance.html' },
+    social_media: { label: 'Social Media Assistant', icon: '📣', wizard: 'onboarding-social-media.html' },
+    paid_ads:     { label: 'Performance Marketing Assistant', icon: '📈', wizard: 'onboarding-performance.html' },
     data_entry:   { label: 'Inventory & Data',     icon: '🗂️', wizard: 'onboarding-inventory.html' },
     custom:       { label: 'Custom Assistant',     icon: '🤖', wizard: 'onboarding-custom.html' },
   };
@@ -4248,7 +4248,7 @@ async function refreshPendingBadge() {
 
 // ── Review Queue ─────────────────────────────────────────────────────────────
 // Simple lifecycle: top columns (Review → Approved → Scheduled → Posted → Archived),
-// each showing collapsible content groups. For the Social Media Manager the only group
+// each showing collapsible content groups. For the Social Media Assistant the only group
 // is "Posts"; other assistant types can define their own groups later.
 
 // Column = a lifecycle stage. postStatus filters scheduled_posts.
@@ -5520,7 +5520,7 @@ function gpChooseMode(mode) {
 }
 
 // Populate the assistant picker when no assistant is pre-selected. Auto-selects the org's
-// Social Media Manager; only reveals the dropdown when there's more than one to choose from.
+// Social Media Assistant; only reveals the dropdown when there's more than one to choose from.
 async function gpPopulateAssistants() {
     const wrap = document.getElementById('gen-post-assistant-wrap');
     const sel  = document.getElementById('gen-post-assistant');
@@ -5534,7 +5534,7 @@ async function gpPopulateAssistants() {
         const active = (data.assistants || []).filter(a =>
             a.status !== 'pending' && a.status !== 'failed' && a.status !== 'blocked' &&
             a.lifecycleStatus !== 'archived');
-        // Prefer Social Media Managers, but fall back to all active assistants so orgs whose
+        // Prefer Social Media Assistants, but fall back to all active assistants so orgs whose
         // assistants predate the roleKey field aren't locked out of generating a post.
         const social = active.filter(a => a.roleKey === 'social_media_manager');
         const eligible = social.length > 0 ? social : active;
@@ -6230,7 +6230,7 @@ async function gpAskSwanImprove() {
 
 // Resolve an assistant's display name / role / roleKey for opening the chat modal. Cached per id so
 // repeat clicks don't refetch. Falls back to a neutral placeholder if the lookup fails — it used to
-// default to the Social Media Manager, which mislabelled every other role whenever the fetch failed.
+// default to the Social Media Assistant, which mislabelled every other role whenever the fetch failed.
 let _gpAssistantMetaCache = {};
 async function gpResolveAssistantMeta(id) {
     if (_gpAssistantMetaCache[id]) return _gpAssistantMetaCache[id];

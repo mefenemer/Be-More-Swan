@@ -626,9 +626,9 @@ Scoring bands: 70-100 = "hot" (strong profile fit + buying intent), 40-69 = "war
 
 When the conversation contains enough detail to assess a lead, include the scoring card.
 
-HANDOFF PROTOCOL — when you lack the firmographic data to score a named lead confidently against the profile (e.g. company size/headcount, industry, or revenue is unknown), do NOT output the lead_scoring_card yet. Instead propose a handoff to "The CRM Enricher": explain in your reply what is missing and that the enricher can fill the gaps, and emit the handoff_proposal uiElement below. Put everything the enricher needs in payloadToPass — the lead/company name, every detail already known from the conversation, and the fields you are missing. The user must approve the handoff before it runs.
+HANDOFF PROTOCOL — when you lack the firmographic data to score a named lead confidently against the profile (e.g. company size/headcount, industry, or revenue is unknown), do NOT output the lead_scoring_card yet. Instead propose a handoff to "CRM Data Assistant": explain in your reply what is missing and that the enricher can fill the gaps, and emit the handoff_proposal uiElement below. Put everything the enricher needs in payloadToPass — the lead/company name, every detail already known from the conversation, and the fields you are missing. The user must approve the handoff before it runs.
 
-A later user turn may be marked "[Approved handoff result]" and contain enriched data from The CRM Enricher — when it does, treat that data as trusted CRM enrichment, complete your original scoring task, and emit the lead_scoring_card. If the user declines the handoff, score with what you have and say which criteria you had to treat as neutral. Only propose a handoff when a specific lead has been named; if no lead is on the table yet, set uiElement to null and ask.
+A later user turn may be marked "[Approved handoff result]" and contain enriched data from CRM Data Assistant — when it does, treat that data as trusted CRM enrichment, complete your original scoring task, and emit the lead_scoring_card. If the user declines the handoff, score with what you have and say which criteria you had to treat as neutral. Only propose a handoff when a specific lead has been named; if no lead is on the table yet, set uiElement to null and ask.
 
 A user turn may also open with "[Imported records]" followed by rows from the user's Leads tab (CSV upload) — treat each row as an inbound lead to score. When several leads arrive at once, score them one per reply, starting with the most promising, and say how many remain.
 
@@ -655,7 +655,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EXACTL
   "reply": "your conversational message to the user",
   "uiElement": {                      // shape 2 — missing data, propose enrichment
     "type": "handoff_proposal",
-    "targetAssistantName": "The CRM Enricher",
+    "targetAssistantName": "CRM Data Assistant",
     "targetRoleKey": "crm_enricher",
     "reason": "<one sentence naming the missing data, e.g. 'Company size and revenue are unknown, so the lead cannot be scored against the profile yet.'>",
     "payloadToPass": {
@@ -909,7 +909,7 @@ Return STRICT JSON (no markdown, no prose outside the JSON):
         parseResponse: parseStructuredReply,
     },
 
-    // Social Media Manager — the default/legacy assistant role. Drafts real, ready-to-post
+    // Social Media Assistant — the default/legacy assistant role. Drafts real, ready-to-post
     // captions in chat; the handler below (persistSocialPostDraft) saves each as a
     // pending_approval scheduled_posts row, so the reply only needs to confirm the draft
     // exists and that a schedule was suggested — the actual "review it" link is appended

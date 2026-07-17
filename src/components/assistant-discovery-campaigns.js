@@ -65,7 +65,7 @@
     return `
       <div class="border border-gray-200 rounded-xl p-4">
         <p class="font-bold text-gray-900">Describe who you want to find</p>
-        <p class="text-xs text-gray-500 mt-0.5 mb-3">A plain-English hypothesis. The Lead Generator turns it into web searches, then scores what it finds.</p>
+        <p class="text-xs text-gray-500 mt-0.5 mb-3">A plain-English hypothesis. The Lead Generation Assistant turns it into web searches, then scores what it finds.</p>
         <textarea data-dc-idea rows="3" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm"
           placeholder="e.g. Boutique hotels in Southern Europe that don't have a modern online booking app"></textarea>
 
