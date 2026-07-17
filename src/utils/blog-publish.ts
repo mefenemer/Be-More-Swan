@@ -8,9 +8,11 @@
 
 import { createHash, createHmac, randomUUID } from 'crypto';
 import { and, eq, ne } from 'drizzle-orm';
+import { marked } from 'marked';
 import { blogPosts, contentAssets, contentProvenance } from '../../db/schema';
 import { renderMarkdown, excerpt } from './markdown-render';
 import { isC2paSigningEnabled, signStoredImageAsset, type ManifestSummary } from './c2pa-sign';
+import { stripMediaForSyndication as stripMedia } from '../lib/marked-bms-directives.js';
 
 const jwtSecret = process.env.JWT_SECRET || 'fallback';
 const C2PA_SCHEMA_VERSION = '1.0';
@@ -28,6 +30,27 @@ export function slugifyTitle(input: string): string {
 }
 
 type BlogPostRow = typeof blogPosts.$inferSelect;
+
+/**
+ * Project a blog body for an EXTERNAL destination (Dev.to / Hashnode): text only, no media.
+ * See docs/blog-media-composition-plan.md §3.5 (decided).
+ *
+ * Why no media at all:
+ *   · Our own URLs are presigned and expiring, so anything we hand an external platform 404s later.
+ *     publish-blog-destinations already refuses to syndicate the hero for exactly this reason
+ *     (`coverImageUrl: null`) — this extends that existing decision to body media.
+ *   · Pexels is hotlink-only under its ToS (src/utils/pexels.ts), so re-hosting stock media on
+ *     Dev.to's CDN would breach the licence.
+ *
+ * This also closes a live bug: bodyMarkdown was previously syndicated RAW, so an inline image
+ * shipped to Dev.to as the literal, unresolvable text `![alt](asset://42)` (plan §2.4).
+ *
+ * Columns are UNWRAPPED rather than dropped — a column holds the author's prose as well as their
+ * media, and dropping the container would silently delete their words.
+ */
+export function stripMediaForSyndication(bodyMarkdown: string): string {
+    return stripMedia(marked, bodyMarkdown);
+}
 
 // Publishes `post` and returns the updated row. Assumes post.bodyMarkdown is non-empty (callers check).
 export async function publishBlogPost(db: any, post: BlogPostRow, organisationId: number): Promise<BlogPostRow> {

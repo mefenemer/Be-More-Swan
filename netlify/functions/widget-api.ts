@@ -30,10 +30,11 @@ function escAttr(v: string): string {
     return v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-// Inline media is snapshotted as src-less <img data-bms-asset="N"> (markdown-render). Resolve each
-// referenced asset to a fresh, org-scoped URL and inject it as the img src. A deleted/foreign asset
-// is left without a src (graceful degrade). Mirrors the feature-image read-time resolution, and is
-// safe to cache because widget-api's TTL (s-maxage=300) is under the presigned-URL lifetime (600s).
+// Inline media is snapshotted as a src-less <img|video|audio data-bms-asset="N"> (markdown-render).
+// Resolve each referenced asset to a fresh, org-scoped URL and inject it as the src. A
+// deleted/foreign asset is left without a src (graceful degrade). Mirrors the feature-image
+// read-time resolution, and is safe to cache because widget-api's TTL (s-maxage=300) is under the
+// presigned-URL lifetime (600s).
 async function resolveInlineMedia(db: ReturnType<typeof getDb>, orgId: number, html: string): Promise<string> {
     if (!html || !html.includes('data-bms-asset')) return html;
     const ids = [...new Set([...html.matchAll(/data-bms-asset="(\d+)"/g)].map((x) => Number(x[1])))]
@@ -51,10 +52,13 @@ async function resolveInlineMedia(db: ReturnType<typeof getDb>, orgId: number, h
     const urlById = new Map<number, string | null>();
     for (const a of assets) urlById.set(a.id, await resolveAssetDisplayUrl(a));
 
-    return html.replace(/<img([^>]*?)data-bms-asset="(\d+)"([^>]*)>/g, (full, pre, id, post) => {
-        const url = urlById.get(Number(id));
-        return url ? `<img src="${escAttr(url)}"${pre}data-bms-asset="${id}"${post}>` : full;
-    });
+    // img | video | audio — the tag is echoed back verbatim from the (already sanitised) snapshot,
+    // so this can only ever re-emit a tag the allowlist already passed.
+    return html.replace(/<(img|video|audio)([^>]*?)data-bms-asset="(\d+)"([^>]*)>/g,
+        (full, tag, pre, id, post) => {
+            const url = urlById.get(Number(id));
+            return url ? `<${tag} src="${escAttr(url)}"${pre}data-bms-asset="${id}"${post}>` : full;
+        });
 }
 
 function json(statusCode: number, obj: unknown, cache = false) {
