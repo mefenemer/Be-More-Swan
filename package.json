@@ -64,7 +64,6 @@
     "@aws-sdk/client-s3": "^3.1069.0",
     "@aws-sdk/s3-request-presigner": "^3.1068.0",
     "@netlify/aws-lambda-compat": "^1.0.2",
-    "@netlify/database": "^1.0.0",
     "@netlify/functions": "^5.3.0",
     "@tailwindcss/cli": "^4.3.0",
     "busboy": "^1.6.0",
