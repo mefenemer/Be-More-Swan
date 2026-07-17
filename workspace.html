@@ -5655,11 +5655,11 @@ async function gpSubmit() {
         _gpCurrentJobId = d.jobId;
         document.getElementById('gen-post-actions')?.classList.add('hidden');
         gpSetStatus('');
-        // Close the sheet rather than block it on a 20–40s wait — the toast keeps the user
+        // Close the sheet rather than block it on a 30–60s wait — the toast keeps the user
         // informed and the sheet reopens (with the draft ready to review) once the job completes.
         document.getElementById('gen-post-backdrop')?.classList.add('hidden');
         document.getElementById('gen-post-sheet')?.classList.add('hidden');
-        window.showToast?.('Generating your post… This usually takes 20–40 seconds.', { icon: '✨' });
+        window.showToast?.('Generating your post… This usually takes 30–60 seconds.', { icon: '✨' });
         _gpPollInterval = setInterval(gpPollJob, 4000);
     } catch {
         gpSetStatus('Network error — please try again.', 'error');
