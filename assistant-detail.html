@@ -137,6 +137,39 @@
         </div>
       </div>
     </div>
+    <!-- Issue #206: Time/Money Saved moved out of the Impact & ROI card to sit under the assistant's
+         name and job title. The Week/Month toggle came with them — it only ever drove these two
+         figures (post counts are all-time), so leaving it behind would have stranded it from the
+         numbers it changes. Unlike the card these came from, the hero is always rendered, so this
+         strip carries its own `hidden` gate: _fetchAndRenderAssistantMetrics (assistants.js) shows
+         it on the same signal that reveals the metrics card, and _applyDashboardRegistry hides it
+         for roles with no post-based ROI. -->
+    <div id="detail-roi-strip" class="hidden mt-4 pt-4 border-t border-gray-100 z-10 relative">
+      <div class="flex items-center justify-between gap-3 mb-2">
+        <div class="flex items-baseline gap-2 min-w-0">
+          <p class="text-[11px] font-bold text-gray-400 uppercase tracking-wide shrink-0">Impact &amp; ROI</p>
+          <!-- Full sentence lives in the title attribute; the visible caption is the short form. -->
+          <p class="hidden sm:block text-[11px] text-gray-400 truncate" id="metrics-period-note">Time &amp; money saved this week</p>
+        </div>
+        <!-- Same This Week / This Month periods as the dashboard hero, so the two views always agree -->
+        <div class="flex items-center gap-0.5 p-0.5 rounded-lg bg-gray-100 shrink-0" role="tablist" aria-label="Time period">
+          <button type="button" data-period="week" class="metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition" role="tab">Week</button>
+          <button type="button" data-period="month" class="metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition" role="tab">Month</button>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div class="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2">
+          <p class="text-[11px] font-bold text-emerald-600 uppercase tracking-wide">Time Saved</p>
+          <p class="text-2xl font-black text-emerald-700 leading-tight" id="metrics-hours-saved">—</p>
+          <p class="text-[11px] text-emerald-500 leading-tight" id="metrics-hours-note">Based on ~30 min per post</p>
+        </div>
+        <div class="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2" id="metrics-roi-col">
+          <p class="text-[11px] font-bold text-emerald-600 uppercase tracking-wide">Money Saved</p>
+          <p class="text-2xl font-black text-emerald-700 leading-tight" id="metrics-gbp-saved">—</p>
+          <p class="text-[11px] text-emerald-500 leading-tight" id="metrics-roi-note"></p>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Kick Off Meeting — readiness checklist + activation gate, shown when the assistant
@@ -171,48 +204,18 @@
     </div>
   </div>
 
-  <!-- Impact & ROI — elevated to top of the page (most important executive metric). Kept to a
-       single stat strip: the two ROI figures lead, the three post totals follow, and the
-       per-platform breakdown is folded away until asked for. -->
+  <!-- Content by platform — what's left of the old "Impact & ROI" card now that the post totals
+       have gone to the Autopilot card (#205) and the Time/Money pair to the hero header (#206).
+       The list used to be folded away behind a <details> to keep this card short; it's the card's
+       only content now, so it renders open. _fetchAndRenderAssistantMetrics shows the card only
+       when this assistant has posted to 2+ platforms — with one platform there's nothing to
+       compare and the card would otherwise be an empty box. -->
   <div id="assistant-metrics-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 sm:p-5 mb-6 hidden">
     <div class="flex items-center justify-between gap-3 mb-3">
-      <div class="flex items-baseline gap-2 min-w-0">
-        <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide shrink-0">Impact &amp; ROI</h3>
-        <!-- Full sentence lives in the title attribute; the visible caption is the short form. -->
-        <p class="hidden sm:block text-[11px] text-gray-400 truncate" id="metrics-period-note">All-time posts · time &amp; money saved this week</p>
-      </div>
-      <!-- Same This Week / This Month periods as the dashboard hero, so the two views always agree -->
-      <div class="flex items-center gap-0.5 p-0.5 rounded-lg bg-gray-100 shrink-0" role="tablist" aria-label="Time period">
-        <button type="button" data-period="week" class="metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition" role="tab">Week</button>
-        <button type="button" data-period="month" class="metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition" role="tab">Month</button>
-      </div>
+      <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide shrink-0" id="metrics-breakdown-label">Content by platform</h3>
+      <p class="text-[11px] text-gray-400 shrink-0">All-time posts</p>
     </div>
-
-    <!-- The ROI pair (tinted). Issue #205: the three post totals (Created/Scheduled/Published)
-         that used to sit here moved into the Autopilot card below, next to the engine that
-         drafts them — see #autopilot-status-card. -->
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-      <div class="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2">
-        <p class="text-[11px] font-bold text-emerald-600 uppercase tracking-wide">Time Saved</p>
-        <p class="text-2xl font-black text-emerald-700 leading-tight" id="metrics-hours-saved">—</p>
-        <p class="text-[11px] text-emerald-500 leading-tight" id="metrics-hours-note">Based on ~30 min per post</p>
-      </div>
-      <div class="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2" id="metrics-roi-col">
-        <p class="text-[11px] font-bold text-emerald-600 uppercase tracking-wide">Money Saved</p>
-        <p class="text-2xl font-black text-emerald-700 leading-tight" id="metrics-gbp-saved">—</p>
-        <p class="text-[11px] text-emerald-500 leading-tight" id="metrics-roi-note"></p>
-      </div>
-    </div>
-
-    <!-- Per-platform breakdown — the tallest part of this card and the least often needed,
-         so it collapses. _fetchAndRenderAssistantMetrics hides it when there's nothing to show. -->
-    <details id="metrics-breakdown" class="group mt-3 hidden">
-      <summary class="list-none flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-gray-700 cursor-pointer select-none w-fit">
-        <svg class="w-3 h-3 shrink-0 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M9 5l7 7-7 7"/></svg>
-        <span id="metrics-breakdown-label">Breakdown by platform</span>
-      </summary>
-      <div id="metrics-by-platform" class="mt-1"></div>
-    </details>
+    <div id="metrics-by-platform"></div>
   </div>
 
   <!-- ── Status row: Autopilot + Connections, side by side. Each card hides on its own signal, and

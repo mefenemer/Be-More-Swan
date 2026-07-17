@@ -2012,11 +2012,14 @@ function _applyDashboardRegistry(data) {
     // Overview — the post-based Impact & ROI card is meaningless for non-social roles (they publish
     // nothing); their role KPI cards carry the Overview instead. A dataset flag makes the hide stick
     // even though _fetchAndRenderAssistantMetrics runs asynchronously and would otherwise un-hide it.
+    // Issue #206: the Time/Money strip moved into the always-visible hero header, so it needs the
+    // same role gate — otherwise a non-social role shows a permanent "—" ROI strip under its name.
     const impactOn = mods.hasImpactRoi !== false;
-    const metricsCard = document.getElementById('assistant-metrics-card');
-    if (metricsCard) {
-        if (impactOn) { delete metricsCard.dataset.roleHidden; }
-        else { metricsCard.dataset.roleHidden = '1'; metricsCard.classList.add('hidden'); }
+    for (const id of ['assistant-metrics-card', 'detail-roi-strip']) {
+        const node = document.getElementById(id);
+        if (!node) continue;
+        if (impactOn) { delete node.dataset.roleHidden; }
+        else { node.dataset.roleHidden = '1'; node.classList.add('hidden'); }
     }
     // Profile ▸ Creative Brief — the marketing cards (objective/CTA, audience/voice/pillars,
     // reference style) and the Sales Context playbook. Business Information & the AI-disclosure
@@ -3274,14 +3277,18 @@ async function _prefetchDetailRqBadge(assistantId) {
 // matching comment in dashboard-content.html.
 async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
     const card = document.getElementById('assistant-metrics-card');
+    // Issue #206: the Time/Money pair and their period toggle now live in the hero header, in a
+    // strip of their own. The hero is always on screen, so the strip has to be shown and hidden
+    // explicitly here rather than riding on the card's own hidden class the way it used to.
+    const roiStrip = document.getElementById('detail-roi-strip');
     if (!card) return;
-    // Non-social roles have no post-based ROI — the registry marks the card role-hidden; respect it.
+    // Non-social roles have no post-based ROI — the registry marks both role-hidden; respect it.
     if (card.dataset.roleHidden === '1') return;
 
     // Period toggle — mirrors the dashboard hero's This Week / This Month tabs so
     // the hours/£ figures here are always comparable with whichever view the
     // dashboard is showing.
-    card.querySelectorAll('.metrics-period-btn').forEach(btn => {
+    (roiStrip || card).querySelectorAll('.metrics-period-btn').forEach(btn => {
         const active = btn.dataset.period === period;
         btn.className = `metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition ${active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`;
         btn.setAttribute('aria-selected', String(active));
@@ -3296,18 +3303,18 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
         // Gate on any real ROI signal, not just post creation — hoursSaved already accounts for
         // completed task runs (see get-assistant-metrics.ts), so a task-driven assistant that
         // hasn't created any scheduledPosts yet still surfaces the card once it's done work.
-        if (!d.totalCreated && !d.hoursSaved) return; // no recorded activity yet — keep card hidden
+        if (!d.totalCreated && !d.hoursSaved) return; // no recorded activity yet — keep everything hidden
         if (card.dataset.roleHidden === '1') return;  // role-hidden set while we were awaiting — respect it
 
-        card.classList.remove('hidden');
-
         const el = id => document.getElementById(id);
+        if (roiStrip) roiStrip.classList.remove('hidden');
+
         const periodLabel = period === 'month' ? 'this month' : 'this week';
         // Short caption on screen; the sentence that explains how it lines up with the dashboard
-        // is one hover away, rather than costing a line of the card.
+        // is one hover away, rather than costing a line of the header.
         const note = el('metrics-period-note');
-        note.textContent = `All-time posts · time & money saved ${periodLabel}`;
-        note.title = `All-time posts created by this assistant; time & money saved ${periodLabel} (matches the dashboard's ${period === 'month' ? 'This Month' : 'This Week'} view)`;
+        note.textContent = `Time & money saved ${periodLabel}`;
+        note.title = `Time & money saved ${periodLabel} (matches the dashboard's ${period === 'month' ? 'This Month' : 'This Week'} view)`;
         el('metrics-total-created').textContent = d.totalCreated.toLocaleString();
         el('metrics-total-scheduled').textContent = d.totalScheduled.toLocaleString();
         el('metrics-total-published').textContent = d.totalPublished.toLocaleString();
@@ -3322,16 +3329,17 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
             el('metrics-roi-note').innerHTML = `<a href="#" onclick="loadView && loadView('account'); return false" class="text-emerald-600 hover:underline">Set your hourly rate</a> to see this`;
         }
 
-        // Per-platform breakdown — collapsed by default, and absent entirely when this
-        // assistant has only ever posted to one platform (the strip above already says it all).
+        // Per-platform breakdown — absent entirely when this assistant has only ever posted to one
+        // platform (the Autopilot card's totals already say it all). Since #206 left this list as
+        // the card's only content, that condition now hides the whole card rather than just the
+        // list — otherwise a single-platform assistant gets an empty titled box.
         const platformEl = el('metrics-by-platform');
-        const breakdown = el('metrics-breakdown');
-        if (platformEl && breakdown) {
+        if (platformEl) {
             const entries = Object.entries(d.byPlatform || {})
                 .filter(([, v]) => v.created > 0)
                 .sort(([, a], [, b]) => b.created - a.created);
-            breakdown.classList.toggle('hidden', entries.length < 2);
-            el('metrics-breakdown-label').textContent = `Breakdown by platform (${entries.length})`;
+            card.classList.toggle('hidden', entries.length < 2);
+            el('metrics-breakdown-label').textContent = `Content by platform (${entries.length})`;
             platformEl.innerHTML = entries.map(([p, v]) => {
                 const icon = (window._PLATFORM_ICONS || {})[p] || '';
                 const label = (window._PLATFORM_LABEL || {})[p] || p.charAt(0).toUpperCase() + p.slice(1);
