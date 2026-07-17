@@ -16,6 +16,10 @@
     page is kept as a thin delegator so any existing direct link (incl. ?postId deep-links) still
     works: it loads the shared module and opens the modal full-screen over a blank page.
   -->
+  <!-- The editor parses with an isolated marked instance carrying the :::media / ::::columns
+       directives; without this the instance can't be built and EVERY block silently falls back to
+       escaped plain text (not just media). Must stay in step with workspace.html's copy. -->
+  <script src="./src/lib/marked-bms-directives.js"></script>
   <script src="./src/components/markdown-editor.js"></script>
   <!-- The Blog Studio's media pickers include Canva; without this the button is a silent no-op
        on this page (workspace.html loads it alongside its own Create Post sheet). -->

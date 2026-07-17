@@ -75,14 +75,31 @@
   // `resolveUrl` is passed HERE and nowhere on the server: the author needs a real src to see their
   // video, while the published payload must stay src-less so widget-api can resolve a fresh
   // presigned URL per read. The URL is preview state — it never reaches body_markdown.
+  //
+  // Returning null degrades the WHOLE editor to escaped plain text, not just media — so a host page
+  // that forgets a <script> presents as "the features never shipped" rather than as a broken page,
+  // which sends you hunting in the wrong half of the stack. Still degrade rather than throw, but
+  // name the missing global so the next reader gets the answer from the console, not a bisect.
   function makeMarked(resolveUrl) {
-    if (!window.marked || !window.BmsDirectives) return null;
+    const missing = [];
+    if (!window.marked) missing.push('marked');
+    if (!window.BmsDirectives) missing.push('BmsDirectives (src/lib/marked-bms-directives.js)');
+    if (missing.length) {
+      console.warn('[MarkdownEditor] rendering as plain text — this page is missing: '
+        + missing.join(', ') + '. Add the script tag(s); see workspace.html.');
+      return null;
+    }
     const Ctor = window.marked.Marked;
-    if (!Ctor) return null;
+    if (!Ctor) {
+      console.warn('[MarkdownEditor] rendering as plain text — window.marked has no Marked ctor.');
+      return null;
+    }
     try {
       return window.BmsDirectives.install(new Ctor(), { resolveUrl: resolveUrl });
-    } catch (_) {
-      return null;   // fall back to escaped plain text rather than break the editor
+    } catch (err) {
+      // Fall back to escaped plain text rather than break the editor.
+      console.error('[MarkdownEditor] directive install failed; rendering as plain text:', err);
+      return null;
     }
   }
 
@@ -483,7 +500,7 @@
       // Show the diff with Accept / Reject before committing.
       if (blockEl) {
         blockEl.classList.remove('bmsme-busy');
-        blockEl.innerHTML = renderBlock(applyAssetUrls(block.raw));
+        blockEl.innerHTML = renderBlock(applyAssetUrls(block.raw), mdInst);
         const diff = document.createElement('div');
         diff.className = 'bmsme-diff';
         diff.innerHTML = diffHtml(rawSelected, rewrittenText) +
