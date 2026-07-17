@@ -429,6 +429,10 @@ window.showComplianceModals = function showComplianceModals(force) {
           <span>Upload</span>
         </button>
         <input type="file" id="gp-ai-upload-input" class="hidden" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm" onchange="gpAiUploadSelected(event)">
+        <button type="button" onclick="gpAiBrowseCanva()" class="px-2.5 py-1 text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer flex items-center gap-1">
+          <span>🎨</span>
+          <span>Canva</span>
+        </button>
         <button type="button" onclick="gpAiFind()" class="px-2.5 py-1 text-xs font-semibold border border-sky-300 text-sky-700 hover:bg-sky-50 rounded-lg transition cursor-pointer flex items-center gap-1">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
           <span id="gp-ai-find-label">Find a photo</span>
@@ -6390,6 +6394,25 @@ async function gpAiUploadSelected(e) {
     } finally {
         gpAiMediaBusy(false);
     }
+}
+
+// ── Source: Canva (import a design) ──────────────────────────────────────────
+// Canva imports land in content_assets like any other source, so once the picker reports back,
+// attaching is identical to picking from "Use my own" (gpAiSelectOwn). assetType 'image' keeps
+// video designs out when we're attaching an image; a multi-page design yields several assets, so
+// only the first is attached and the rest are left in the library.
+function gpAiBrowseCanva() {
+    if (!_gpCurrentPostId || !window.CanvaBrowser) return;
+    document.getElementById('gp-ai-own')?.classList.add('hidden');
+    document.getElementById('gp-ai-pexels')?.classList.add('hidden');
+    window.CanvaBrowser.open({
+        assetType: _gpAiMediaType === 'video' ? 'any' : 'image',
+        multiple: false,
+        onImported: (assetIds) => {
+            if (!assetIds || !assetIds.length) return;
+            gpAiSelectOwn(assetIds[0]);
+        },
+    });
 }
 
 // ── Source: Find with AI (Pexels stock, image or video) ─────────────────────
