@@ -4164,6 +4164,9 @@ function formatCurrency(amount, currency) {
      feature/inline image pickers. Imports land in content_assets, so both hosts just refresh
      the library grid they already render. -->
 <script src="/src/components/canva-browser.js"></script>
+<!-- Shared Web Speech API recogniser (window.SwanSpeech) — used by the Create Post
+     mic buttons and the command bar. Must load before both. -->
+<script src="/src/components/speech-recognition.js"></script>
 <!-- Role-aware post-hire dashboard config — assistant-detail.html KPI cards + module
      visibility, keyed by roleKey (consumed by _applyDashboardRegistry in assistants.js). -->
 <script src="/src/components/assistant-dashboard-registry.js"></script>
@@ -5846,27 +5849,29 @@ const GP_VOICE_FIELDS = {
 };
 function gpStartVoice(targetId = 'gen-post-context') {
     const cfg = GP_VOICE_FIELDS[targetId] || { mic: 'gen-post-mic-btn' };
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { alert('Voice input is not supported in this browser. Try Chrome or Safari.'); return; }
-    const rec = new SR();
-    rec.lang = 'en-GB';
-    rec.interimResults = false;
-    rec.maxAlternatives = 1;
+    if (!window.SwanSpeech.isSupported()) { alert('Voice input is not supported in this browser. Try Chrome or Safari.'); return; }
     const micBtn = document.getElementById(cfg.mic);
+    const clearMic = () => { if (micBtn) micBtn.classList.remove('text-red-500'); };
     if (micBtn) micBtn.classList.add('text-red-500');
-    rec.onresult = (e) => {
-        const transcript = e.results[0][0].transcript;
-        const field = document.getElementById(targetId);
-        if (field) {
+    const handle = window.SwanSpeech.start({
+        lang: 'en-GB',
+        interimResults: false,
+        maxAlternatives: 1,
+        // Appends to whatever is already in the field, so it wants each newly
+        // finalised chunk rather than the running transcript.
+        onTranscript: ({ chunk }) => {
+            if (!chunk) return;
+            const field = document.getElementById(targetId);
+            if (!field) return;
             const max = Number(field.getAttribute('maxlength')) || 5000;
-            field.value = ((field.value ? field.value + ' ' : '') + transcript).slice(0, max);
+            field.value = ((field.value ? field.value + ' ' : '') + chunk).slice(0, max);
             const counter = cfg.count && document.getElementById(cfg.count);
             if (counter) counter.textContent = field.value.length;
-        }
-    };
-    rec.onend = () => { if (micBtn) micBtn.classList.remove('text-red-500'); };
-    rec.onerror = () => { if (micBtn) micBtn.classList.remove('text-red-500'); };
-    rec.start();
+        },
+        onEnd: clearMic,
+        onError: clearMic,
+    });
+    if (!handle) clearMic();
 }
 
 // ── Shared chip styling for the write-your-own platform buttons ──────────────────
@@ -7141,39 +7146,33 @@ async function gpSubmitReject() {
     }
 
     // ── AC2: voice dictation (Web Speech API) with waveform ──
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     let recog = null, listening = false;
-    if (!SR) { micBtn.style.display = 'none'; }
+    if (!window.SwanSpeech.isSupported()) { micBtn.style.display = 'none'; }
 
     function startDictation() {
-      if (!SR || listening) return;
-      recog = new SR();
-      recog.lang = (navigator.language || 'en-GB');
-      recog.interimResults = true;
-      recog.continuous = false;
+      if (!window.SwanSpeech.isSupported() || listening) return;
       listening = true;
       micBtn.classList.add('listening');
       wave.classList.remove('hidden');
-      let finalText = '';
-      recog.onresult = e => {
-        let interim = '';
-        for (let i = e.resultIndex; i < e.results.length; i++) {
-          const t = e.results[i][0].transcript;
-          if (e.results[i].isFinal) finalText += t; else interim += t;
-        }
-        input.value = (finalText + interim).trim();
-      };
-      recog.onerror = () => stopDictation();
-      recog.onend = () => {
-        const had = listening;
-        stopDictation();
-        const v = input.value.trim();
-        if (had && v) runCommand(v); // auto-run once dictation completes
-      };
-      try { recog.start(); } catch { stopDictation(); }
+      recog = window.SwanSpeech.start({
+        lang: (navigator.language || 'en-GB'),
+        interimResults: true,
+        continuous: false,
+        onTranscript: ({ transcript }) => { input.value = transcript.trim(); },
+        // Clearing `listening` here is what suppresses the auto-run below on an
+        // error or a manual stop — onEnd still fires afterwards either way.
+        onError: () => stopDictation(),
+        onEnd: () => {
+          const had = listening;
+          stopDictation();
+          const v = input.value.trim();
+          if (had && v) runCommand(v); // auto-run once dictation completes
+        },
+      });
+      if (!recog) stopDictation();
     }
     function stopDictation() {
-      if (recog) { try { recog.stop(); } catch {} recog = null; }
+      if (recog) { recog.stop(); recog = null; }
       listening = false;
       micBtn.classList.remove('listening');
       wave.classList.add('hidden');
