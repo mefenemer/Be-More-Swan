@@ -30,9 +30,7 @@
     }, opts)).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); });
   };
 
-  // `scaffold` holds the untouched "Start blank" seed, so the publish/schedule guard below can tell
-  // placeholder text apart from something the author actually wrote.
-  var state = { injected: false, postId: null, editor: null, assistants: {}, assistantId: null, mediaTarget: 'feature', scaffold: null };
+  var state = { injected: false, postId: null, editor: null, assistants: {}, assistantId: null, mediaTarget: 'feature' };
 
   function el(id) { return document.getElementById(id); }
   function setStatus(id, msg) { var e = el(id); if (e) e.textContent = msg; }
@@ -392,7 +390,9 @@
       var voice = tone ? ' in a ' + tone + ' tone' : '';
       return '# ' + (topic || 'New post') + '\n\n_Drafting' + voice + '…_\n\n' + (notes || '');
     }
-    return '# ' + (topic || 'New post') + '\n\nStart writing here.';
+    // Blank starts genuinely empty: the editor shows its own placeholder and takes the caret, so
+    // there's nothing to mistake for content (seeded filler used to get published verbatim).
+    return '';
   }
 
   // Reveal the editor workspace for a post (new or existing): mount the editor + side panels.
@@ -407,6 +407,7 @@
       blogPostId: postId,
       initialMarkdown: md,
       title: title,
+      placeholder: 'Write your post here… (Markdown supported — or ask your assistant to draft it)',
       onChange: function (nextMd) {
         refreshReadout(nextMd);
         setStatus('bs-save-status', 'Saving…');
@@ -433,10 +434,8 @@
     setBanner('bs-brief-status', '');
     api('blog-posts', { method: 'POST', body: JSON.stringify({ title: title, assistantId: voice.assistantId }) }).then(function (res) {
       if (!res.ok) { setBanner('bs-brief-status', 'Could not create post: ' + (res.body.error || 'please try again.'), 'error'); return; }
-      var seeded = seedMarkdown(path, voice.tone);
-      // Only "Start blank" seeds placeholder prose; "Improve draft" seeds the author's own notes.
-      state.scaffold = path === 'blank' ? seeded : null;
-      openWorkspace(res.body.post.id, title, seeded);
+      var editor = openWorkspace(res.body.post.id, title, seedMarkdown(path, voice.tone));
+      if (path !== 'generate' && editor && editor.focus) editor.focus();   // drop straight into typing
       if (path === 'generate') {
         setStatus('bs-save-status', 'Drafting…');
         api('generate-blog', { method: 'POST', body: JSON.stringify({
@@ -448,7 +447,6 @@
         }) }).then(function (gen) {
           if (gen.ok && gen.body.bodyMarkdown) {
             state.editor.setMarkdown(gen.body.bodyMarkdown);
-            state.scaffold = null;                   // generated prose is real content
             refreshReadout(gen.body.bodyMarkdown);   // setMarkdown doesn't fire onChange
             setStatus('bs-save-status', 'Draft ready');
           } else {
@@ -465,7 +463,6 @@
       if (!res.ok || !res.body.post) { setStatus('bs-save-status', ''); return; }
       var post = res.body.post;
       if (post.assistantId != null) state.assistantId = post.assistantId;
-      state.scaffold = null;   // a stored post is real content, never the starter template
       openWorkspace(post.id, post.title || 'Untitled draft', post.bodyMarkdown || '');
       setStatus('bs-save-status', 'Saved');
       if (post.status) setBanner('bs-action-status', 'Status: ' + post.status);
@@ -663,21 +660,15 @@
   }
 
   // Push what's on screen to the server before any action that validates the *stored* body.
-  // The editor only autosaves after an edit, and neither mount() nor setMarkdown() persists, so a
-  // body the author can plainly see (the blank scaffold, or notes carried in by "Improve draft")
-  // may not exist server-side yet. publish-blog and schedule-blog both reject on the stored
+  // Typing autosaves on a debounce and neither mount() nor setMarkdown() persists at all, so a body
+  // the author can plainly see (notes carried in by "Improve draft", or a sentence typed a moment
+  // ago) may not have landed yet. publish-blog and schedule-blog both reject on the stored
   // bodyMarkdown, which surfaced as "Cannot publish an empty post." over visible text.
-  // True while the body is still the untouched "Start blank" starter text. Flushing that to the
-  // server would satisfy publish-blog's non-empty check and put "Start writing here." on the
-  // author's live site, so the actions refuse it with something more useful than the server's
-  // "Cannot publish an empty post."
-  function bodyIsScaffold() {
-    return state.scaffold != null && state.editor
-      && state.editor.getMarkdown().trim() === state.scaffold.trim();
-  }
-  function blockedAsScaffold() {
-    if (!bodyIsScaffold()) return false;
-    setBanner('bs-action-status', 'This draft is still the starter template — add some content before publishing.', 'error');
+  // publish-blog / schedule-blog both refuse an empty body. Catch it here so the author gets a
+  // useful nudge instead of the server's "Cannot publish an empty post." after a round trip.
+  function blockedAsEmpty() {
+    if (state.editor && state.editor.getMarkdown().trim()) return false;
+    setBanner('bs-action-status', 'This draft is empty — write something before publishing.', 'error');
     return true;
   }
 
@@ -820,7 +811,7 @@
     el('bs-swan-improve').addEventListener('click', askSwanImprove);
 
     el('bs-publish').addEventListener('click', function () {
-      if (!state.postId || blockedAsScaffold()) return;
+      if (!state.postId || blockedAsEmpty()) return;
       setBanner('bs-action-status', 'Publishing…');
       flushDraft().then(function () {
         return api('publish-blog', { method: 'POST', body: JSON.stringify({ id: state.postId }) });
@@ -879,7 +870,7 @@
 
     // Approve & schedule — the assistant picks the next free cadence slot (no manual date).
     el('bs-approve').addEventListener('click', function () {
-      if (!state.postId || blockedAsScaffold()) return;
+      if (!state.postId || blockedAsEmpty()) return;
       setBanner('bs-action-status', 'Scheduling…');
       flushDraft().then(function () {
         return api('schedule-blog', { method: 'POST', body: JSON.stringify({ id: state.postId, action: 'approve' }) });
@@ -892,7 +883,7 @@
     });
 
     el('bs-schedule').addEventListener('click', function () {
-      if (!state.postId || blockedAsScaffold()) return;
+      if (!state.postId || blockedAsEmpty()) return;
       var iso = localToISO(el('bs-schedule-at').value);
       if (!iso) { setBanner('bs-action-status', 'Pick a date & time.', 'error'); return; }
       setBanner('bs-action-status', 'Scheduling…');
@@ -1049,7 +1040,6 @@
   function resetToBrief() {
     if (state.editor && state.editor.destroy) { state.editor.destroy(); state.editor = null; }
     state.postId = null;
-    state.scaffold = null;
     ['bs-topic', 'bs-keywords', 'bs-notes', 'bs-tone'].forEach(function (id) { var e = el(id); if (e) e.value = ''; });
     var st = el('bs-save-tone'); if (st) st.checked = false;
     ['bs-save-status', 'bs-media-status', 'bs-synd-status'].forEach(function (id) { setStatus(id, ''); });

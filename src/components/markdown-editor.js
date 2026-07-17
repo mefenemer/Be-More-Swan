@@ -6,7 +6,14 @@
  * The draft is split into ordered BLOCKS (paragraph/heading/list/quote/code) separated by blank
  * lines. Each block keeps its raw Markdown as the source of truth and is rendered with
  * marked + DOMPurify (the workspace.html pattern; a minimal escape-first fallback is used when
- * those globals are absent). Highlighting text inside a rendered block opens a contextual toolbar
+ * those globals are absent).
+ *
+ * AUTHORING: clicking a block opens a textarea over its raw Markdown — typing writes straight to
+ * `raw`, so the author's own words, AI rewrites and inserted images all share one source of truth.
+ * The block re-renders on blur (or Esc to revert / Cmd-Enter to commit); a blank line splits the
+ * text into separate blocks, and clicking the space below the draft appends a new one.
+ *
+ * Highlighting text inside a rendered block opens a contextual toolbar
  * (Expand / Condense / Change Tone / Rewrite…). The chosen action calls
  * /.netlify/functions/rewrite-section for a replacement fragment, which is shown as a word-level
  * diff (Accept / Reject). Accepting splices the fragment into that block's raw Markdown and
@@ -18,9 +25,10 @@
  *     container,          // HTMLElement
  *     blogPostId,         // number — for rewrite + autosave
  *     initialMarkdown,    // string
- *     onChange,           // optional (markdown) => void
+ *     onChange,           // optional (markdown) => void — fires as the author types
+ *     placeholder,        // optional string shown in an empty block
  *   });
- *   ed.getMarkdown();  ed.setMarkdown(md);  ed.destroy();
+ *   ed.getMarkdown();  ed.setMarkdown(md);  ed.focus();  ed.destroy();
  *
  * See docs/content-engine-epic-plan.md §10.
  */
@@ -105,9 +113,15 @@
   function injectStyles() {
     if (document.getElementById(STYLE_ID)) return;
     const css = `
-      .bmsme-root { position: relative; }
+      .bmsme-root { position: relative; min-height: 120px; cursor: text; }
       .bmsme-block { padding: 2px 4px; border-radius: 4px; }
       .bmsme-block:hover { background: rgba(0,0,0,0.02); }
+      /* Click-to-edit: the block swaps its rendered HTML for a textarea over its raw Markdown. */
+      .bmsme-editing { background: rgba(236,72,153,.04); box-shadow: inset 0 0 0 1px #fbcfe8; }
+      .bmsme-input { display:block; width:100%; border:0; outline:0; padding:0; margin:0;
+        font: inherit; color: inherit; background: transparent; resize: none; overflow: hidden;
+        line-height: 1.6; }
+      .bmsme-placeholder { color:#9ca3af; margin:0; }
       .bmsme-toolbar { position: absolute; z-index: 40; display: flex; gap: 4px;
         background: #111827; color: #fff; padding: 4px; border-radius: 8px;
         box-shadow: 0 6px 24px rgba(0,0,0,.25); font-size: 13px; }
@@ -136,6 +150,7 @@
 
   function mount(opts) {
     const { container, blogPostId, initialMarkdown = '', onChange } = opts || {};
+    const placeholder = (opts && opts.placeholder) || 'Write your post… (Markdown supported)';
     if (!container) throw new Error('MarkdownEditor.mount: container is required');
     injectStyles();
 
@@ -162,25 +177,55 @@
 
     let activeMenu = null;
     let currentSel = null; // { blockId, text }
+    let editing = null;    // { blockId, textarea, prevRaw } while a block is open for typing
 
     function getMarkdown() { return blocks.map((b) => b.raw).join('\n\n'); }
 
+    // An empty block still needs something clickable, or an empty draft would be a dead surface
+    // with no way in. The placeholder is chrome, never content — it is not part of the Markdown.
+    function blockHtml(b) {
+      return b.raw.trim()
+        ? renderBlock(applyAssetUrls(b.raw))
+        : '<p class="bmsme-placeholder">' + escapeHtml(placeholder) + '</p>';
+    }
+
     function renderAll() {
+      // A re-render mid-edit (setAssetUrls, an image insert) must not orphan the open textarea:
+      // leaving `editing` pointing at a detached node wedges enterEdit's same-block guard shut and
+      // the draft silently stops accepting clicks. Carry the edit across the render instead.
+      const open = editing ? {
+        id: editing.blockId, value: editing.textarea.value,
+        start: editing.textarea.selectionStart, end: editing.textarea.selectionEnd,
+      } : null;
+      editing = null;
+
       // Remove existing block nodes (keep toolbar).
       Array.from(root.querySelectorAll('.bmsme-block')).forEach((n) => n.remove());
       for (const b of blocks) {
         const el = document.createElement('div');
         el.className = 'bmsme-block';
         el.setAttribute('data-block-id', b.id);
-        el.innerHTML = renderBlock(applyAssetUrls(b.raw));
+        el.innerHTML = blockHtml(b);
         root.appendChild(el);
+      }
+
+      if (open && blocks.some((b) => b.id === open.id)) {
+        const el = root.querySelector('.bmsme-block[data-block-id="' + open.id + '"]');
+        if (el) {
+          enterEdit(el, open.id);
+          if (editing) {
+            editing.textarea.value = open.value;
+            editing.textarea.setSelectionRange(open.start, open.end);
+            autosize(editing.textarea);
+          }
+        }
       }
     }
 
     function renderOneBlock(blockId) {
       const b = blocks.find((x) => x.id === blockId);
       const el = root.querySelector('.bmsme-block[data-block-id="' + blockId + '"]');
-      if (b && el) el.innerHTML = renderBlock(applyAssetUrls(b.raw));
+      if (b && el) { el.classList.remove('bmsme-editing'); el.innerHTML = blockHtml(b); }
     }
 
     function scheduleSave() {
@@ -203,6 +248,97 @@
     function hideChrome() {
       toolbar.style.display = 'none';
       if (activeMenu) { activeMenu.remove(); activeMenu = null; }
+    }
+
+    // ── Authoring: click a block to type into its raw Markdown ───────────────────────────────────
+    // The block's `raw` stays the source of truth, so typing, AI rewrites and image inserts all
+    // write to the same place. Typing updates `raw` live (so onChange/autosave fire as you go) and
+    // the block re-renders on blur.
+    function autosize(ta) { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; }
+
+    function commitEdit() {
+      if (!editing) return;
+      const { blockId, textarea } = editing;
+      editing = null;                       // clear first: blur handlers must not re-enter
+      const b = blocks.find((x) => x.id === blockId);
+      if (!b) { renderAll(); return; }
+      b.raw = textarea.value.trim();
+
+      // A blank line means the author started a new paragraph — re-split so each becomes its own
+      // block (blocks are the unit the AI rewrite works on).
+      const parts = splitBlocks(b.raw).filter((p) => p.trim());
+      const at = blocks.findIndex((x) => x.id === blockId);
+      if (parts.length > 1) {
+        blocks.splice(at, 1, ...parts.map((raw) => ({ id: uid(), raw })));
+      } else if (!parts.length && blocks.length > 1) {
+        blocks.splice(at, 1);               // emptied — drop it, unless it's the only block left
+      }
+      renderAll();
+      scheduleSave();
+    }
+
+    function enterEdit(blockEl, blockId) {
+      if (editing && editing.blockId === blockId) return;
+      commitEdit();
+      const b = blocks.find((x) => x.id === blockId);
+      if (!b) return;
+      // Re-resolve the node: commitEdit above may have re-rendered every block.
+      const el = root.querySelector('.bmsme-block[data-block-id="' + blockId + '"]') || blockEl;
+      if (!el) return;
+      hideChrome();
+
+      const ta = document.createElement('textarea');
+      ta.className = 'bmsme-input';
+      ta.value = b.raw;
+      ta.setAttribute('aria-label', 'Edit section');
+      el.innerHTML = '';
+      el.classList.add('bmsme-editing');
+      el.appendChild(ta);
+      editing = { blockId, textarea: ta, prevRaw: b.raw };
+
+      ta.addEventListener('input', () => {
+        autosize(ta);
+        b.raw = ta.value;   // keep getMarkdown() live so onChange (word count) tracks typing
+        scheduleSave();
+      });
+      ta.addEventListener('blur', commitEdit);
+      ta.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); b.raw = editing ? editing.prevRaw : b.raw; ta.value = b.raw; ta.blur(); }
+        else if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); ta.blur(); }
+      });
+      ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+      autosize(ta);
+    }
+
+    function appendBlockAndEdit() {
+      commitEdit();
+      const last = blocks[blocks.length - 1];
+      // Reuse a trailing empty block rather than stacking up more of them.
+      if (last && !last.raw.trim()) {
+        const el = root.querySelector('.bmsme-block[data-block-id="' + last.id + '"]');
+        if (el) return enterEdit(el, last.id);
+      }
+      const block = { id: uid(), raw: '' };
+      blocks.push(block);
+      renderAll();
+      const el = root.querySelector('.bmsme-block[data-block-id="' + block.id + '"]');
+      if (el) enterEdit(el, block.id);
+    }
+
+    function onRootClick(e) {
+      // A drag-select fires a click too — let the AI-rewrite toolbar have it instead of swallowing
+      // the selection by dropping into edit mode.
+      const sel = window.getSelection();
+      if (sel && !sel.isCollapsed && String(sel).trim()) return;
+      if (e.target.closest && e.target.closest('.bmsme-diff, .bmsme-toolbar, .bmsme-menu')) return;
+      const blockEl = e.target.closest && e.target.closest('.bmsme-block');
+      if (blockEl) {
+        if (blockEl.querySelector('.bmsme-diff')) return;   // a rewrite is awaiting Accept/Reject
+        enterEdit(blockEl, blockEl.getAttribute('data-block-id'));
+        return;
+      }
+      if (e.target === root) appendBlockAndEdit();           // clicking the empty space below
     }
 
     function onSelect() {
@@ -325,22 +461,39 @@
     const onDocMouseDown = (e) => { if (!root.contains(e.target)) hideChrome(); };
     document.addEventListener('mouseup', onMouseUp);
     document.addEventListener('mousedown', onDocMouseDown);
+    root.addEventListener('click', onRootClick);
 
     renderAll();
 
     return {
       getMarkdown,
-      setMarkdown(md) { blocks = splitBlocks(md).map((raw) => ({ id: uid(), raw })); renderAll(); },
+      setMarkdown(md) {
+        editing = null;   // whatever was open refers to blocks that no longer exist
+        blocks = splitBlocks(md).map((raw) => ({ id: uid(), raw }));
+        renderAll();
+      },
+      // Put the caret in the draft so an empty post has an obvious way in.
+      focus() {
+        const last = blocks[blocks.length - 1];
+        const el = last && root.querySelector('.bmsme-block[data-block-id="' + last.id + '"]');
+        if (el) enterEdit(el, last.id); else appendBlockAndEdit();
+      },
       // Register/refresh display URLs for inline asset:// refs (e.g. after loading an existing post).
       setAssetUrls(map) {
         if (!map) return;
-        Object.keys(map).forEach((id) => { assetUrls[id] = map[id]; });
-        renderAll();
+        // loadFeature() calls this on every open, usually with nothing in it — don't re-render
+        // (and disturb the caret) for a no-op.
+        let changed = false;
+        Object.keys(map).forEach((id) => {
+          if (assetUrls[id] !== map[id]) { assetUrls[id] = map[id]; changed = true; }
+        });
+        if (changed) renderAll();
       },
       // Append an inline image as its own block. The stable asset:// ref is the source of truth;
       // `url` is only for immediate preview. Inserts after the last-selected block when known.
       insertImage(img) {
         if (!img || img.assetId == null) return;
+        commitEdit();   // fold any in-progress typing in before splicing the image block
         if (img.url != null) assetUrls[img.assetId] = img.url;
         const alt = String(img.alt || '').replace(/[[\]]/g, '');
         const block = { id: uid(), raw: '![' + alt + '](asset://' + img.assetId + ')' };
@@ -352,10 +505,20 @@
         scheduleSave();
       },
       destroy() {
+        // Fold in any open edit and flush it synchronously — closing the modal mid-sentence must
+        // not silently drop the last thing typed (the autosave debounce may still be pending).
+        commitEdit();
+        const pending = saveTimer != null;
         destroyed = true;
         if (saveTimer) clearTimeout(saveTimer);
+        if (pending && blogPostId) {
+          const body = JSON.stringify({ id: blogPostId, bodyMarkdown: getMarkdown() });
+          if (navigator.sendBeacon) navigator.sendBeacon(SAVE_URL, new Blob([body], { type: 'application/json' }));
+          else fetch(SAVE_URL, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body, keepalive: true }).catch(() => {});
+        }
         document.removeEventListener('mouseup', onMouseUp);
         document.removeEventListener('mousedown', onDocMouseDown);
+        root.removeEventListener('click', onRootClick);
         container.innerHTML = '';
       },
     };
