@@ -4212,6 +4212,10 @@ function formatCurrency(amount, currency) {
 <!-- Per-assistant Calendar tab on assistant-detail.html — reuses calendar.js rendering
      scoped to the current assistant (scheduled posts + records with scheduled_for + task runs). -->
 <script src="/src/components/assistant-calendar.js"></script>
+<!-- My Content tab (social_media_manager, blog_writer) — reuses the org-wide content
+     library (my-content.html + my-content.js, already loaded above) as a tab on the two
+     assistants that consume it. -->
+<script src="/src/components/assistant-my-content.js"></script>
 <script src="/billing.js"></script>
 <script src="/swan-cursor.js"></script>
 <script src="/tour.js"></script>

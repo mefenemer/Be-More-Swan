@@ -448,6 +448,13 @@
       <!-- Calendar — this assistant's scheduled work / timeline (assistant-calendar.js scopes
            the global calendar to this assistant). Always shown. -->
       <button type="button" id="maintab-btn-calendar" data-maintab="calendar" class="main-tab-btn">Calendar</button>
+      <!-- My Content — content-roles only (myContentTab: social_media_manager, blog_writer);
+           the org-wide content library (uploads/links/AI-generated media) this assistant draws
+           on for posts. Placed right after Calendar (issue #213). Hidden by default, shown by
+           _applyDashboardRegistry when a myContentTab exists. -->
+      <button type="button" id="maintab-btn-mycontent" data-maintab="mycontent" class="main-tab-btn hidden">
+        <span id="mycontent-tab-label">My Content</span>
+      </button>
       <!-- ── Secondary tabs — role-gated, after the core three ── -->
       <button type="button" data-maintab="goals"         class="main-tab-btn">Goals</button>
       <button type="button" data-maintab="workflow"      class="main-tab-btn">Workflow</button>
@@ -599,6 +606,14 @@
   <div id="maintab-calendar" class="main-tab-content hidden">
     <div id="assistant-calendar-host"></div>
   </div><!-- /maintab-calendar -->
+
+  <!-- ── MAIN TAB: My Content ─────────────────────────────────────────────
+       The org-wide content library (uploads/links/AI-generated media, not
+       assistant-scoped). Populated by assistant-my-content.js, which reuses the
+       standalone my-content.html fragment + my-content.js controller. -->
+  <div id="maintab-mycontent" class="main-tab-content hidden">
+    <div id="mycontent-host"></div>
+  </div><!-- /maintab-mycontent -->
 
   <!-- ── MAIN TAB: Knowledge Base ───────────────────────────────────────
        Support articles grounding the tier1_support_agent's Resolved answers

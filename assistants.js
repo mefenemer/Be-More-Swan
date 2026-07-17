@@ -522,6 +522,8 @@ window._activateMainTab = function(name) {
     if (name === 'datahub') window.AssistantDataHub?.refresh();
     // Render the per-assistant Calendar on first open (component scopes calendar.js to this assistant).
     if (name === 'calendar') window.AssistantCalendar?.show();
+    // Render the My Content library on first open (component reuses my-content.html/.js).
+    if (name === 'mycontent') window.AssistantMyContent?.show();
 };
 
 // ── Assistant-detail scoped Review Queue ─────────────────────────────────────
@@ -2103,6 +2105,12 @@ function _applyDashboardRegistry(data) {
         setText('inspo-tab-label', inspo.label);
         window.AssistantInspo?.init({ inspo, assistantId: data.id });
     }
+
+    // My Content tab — only the content roles (myContentTab: social_media_manager, blog_writer):
+    // the org-wide content library they draw media from (issue #213).
+    const myContent = cfg.myContentTab;
+    toggle('maintab-btn-mycontent', !!myContent);
+    if (myContent) setText('mycontent-tab-label', myContent.label);
 }
 
 // Steps from the role's schema-driven onboarding definition
