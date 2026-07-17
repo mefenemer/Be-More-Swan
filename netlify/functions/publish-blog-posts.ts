@@ -11,6 +11,7 @@ import { and, eq, lte, lt } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { blogPosts } from '../../db/schema';
 import { publishBlogPost } from '../../src/utils/blog-publish';
+import { resolveBaseUrl } from '../../src/utils/base-url';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BATCH = 50;
@@ -19,6 +20,9 @@ const STALE_PUBLISHING_MINS = 15;
 export default withLambda(async () => {
     const db = getDb();
     const now = new Date();
+    // No request headers on a cron invocation — resolveBaseUrl falls back to BASE_URL / DEPLOY_PRIME_URL
+    // env for the self-canonical /b/:key/:slug fallback (null → canonical recomputed on read).
+    const baseUrl = resolveBaseUrl();
     let claimed = 0, published = 0, failed = 0;
 
     // Self-heal: reclaim posts stranded in 'publishing' by an earlier crashed/timed-out tick.
@@ -51,7 +55,7 @@ export default withLambda(async () => {
                 failed++;
                 continue;
             }
-            await publishBlogPost(db, post, post.organisationId);
+            await publishBlogPost(db, post, post.organisationId, baseUrl);
             published++;
         } catch (err) {
             console.error(`[publish-blog-posts] post ${id} failed:`, err);

@@ -2976,6 +2976,7 @@ export const blogPosts = pgTable("blog_posts", {
   metaDescription: text("meta_description"),
   tags: jsonb("tags").notNull().default([]),
   canonicalUrl: text("canonical_url"),
+  robots: text("robots").notNull().default("index,follow"), // <meta name="robots"> for the hosted page (US 1.3)
 
   // Hero / feature graphic
   featureAssetId: integer("feature_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
@@ -3015,6 +3016,7 @@ export const blogPosts = pgTable("blog_posts", {
   uniqueIndex("blog_posts_org_slug_unique").on(t.organisationId, t.slug).where(sql`${t.slug} IS NOT NULL`),
   check("blog_posts_status_check", sql`${t.status} IN ('draft','pending_approval','in_review','approved','scheduled','publishing','published','paused','failed','rejected','archived')`),
   check("blog_posts_ab_state_check", sql`${t.abState} IN ('off','testing','decided')`),
+  check("blog_posts_robots_check", sql`${t.robots} IN ('index,follow','index,nofollow','noindex,follow','noindex,nofollow')`),
 ]);
 
 // Ordered media junction — mirrors scheduledPostAssets.
@@ -3035,6 +3037,12 @@ export const widgetConfigs = pgTable("widget_configs", {
   name: text("name").notNull().default("Default"),
   theme: jsonb("theme").notNull().default({}),              // { accent, fontFamily, layout, customCss, badge }
   allowedOrigins: text("allowed_origins").array(),          // optional origin allowlist; null = any (public read)
+  // Where the customer actually publishes — reconstructs the public per-post URL on THEIR domain so
+  // canonical can credit them: (siteBaseUrl,'/blog/{slug}') → https://acme.com/blog/my-post. BOTH
+  // required before we canonicalise to the customer; site_post_path alone collapses the blog (see
+  // blog-seo-metadata.sql). CHECK enforces a rooted path containing the {slug} placeholder.
+  siteBaseUrl: text("site_base_url"),                       // e.g. 'https://acme.com'
+  sitePostPath: text("site_post_path"),                     // e.g. '/blog/{slug}'
   badgeEnabled: boolean("badge_enabled").notNull().default(true), // AI Transparency Badge (US 6.1 AC2)
   status: text("status").notNull().default("active"),       // active | disabled
   createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
@@ -3043,6 +3051,7 @@ export const widgetConfigs = pgTable("widget_configs", {
 }, (t) => [
   index("widget_configs_org_idx").on(t.organisationId),
   check("widget_configs_status_check", sql`${t.status} IN ('active','disabled')`),
+  check("widget_configs_site_post_path_check", sql`${t.sitePostPath} IS NULL OR (${t.sitePostPath} LIKE '/%' AND ${t.sitePostPath} LIKE '%{slug}%')`),
 ]);
 
 // A/B engagement aggregates per (blog_post, variant) — upserted by widget-ab-beacon (US 5.2).

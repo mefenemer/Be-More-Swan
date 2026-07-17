@@ -209,7 +209,14 @@
     + '          <option value="Georgia, serif">Serif</option>'
     + '          <option value="\'Inter\', sans-serif">Inter</option></select></div>'
     + '        <div class="bs-field"><label><input id="bs-badge" type="checkbox" checked> Show AI transparency badge</label></div>'
-    + '        <button id="bs-save-theme" class="bs-btn bs-btn-ghost">Save theme</button>'
+    // Where you republish the widget on your own site. Both fields let a post\'s canonical URL credit
+    // YOUR domain instead of our permalink — leave blank to use the Be More Swan permalink.
+    + '        <div class="bs-field"><label>Your site URL <span class="bs-status" style="font-weight:400;">(optional)</span></label>'
+    + '          <input id="bs-site-base" type="url" placeholder="https://acme.com"></div>'
+    + '        <div class="bs-field"><label>Post URL pattern</label>'
+    + '          <input id="bs-site-path" placeholder="/blog/{slug}">'
+    + '          <span class="bs-status" style="font-size:11px;">Must start with / and contain {slug}. Needed for canonical URLs to point at your site.</span></div>'
+    + '        <button id="bs-save-theme" class="bs-btn bs-btn-ghost">Save settings</button>'
     + '        <div style="margin-top:12px;"><label class="bs-status">Embed snippet</label>'
     + '          <div id="bs-snippet" class="bs-snippet">Create a widget to get your embed code.</div></div>'
     + '      </div>'
@@ -275,6 +282,25 @@
     + '      <div class="bs-row" style="margin-top:16px;">'
     + '        <button id="bs-generate-hooks" class="bs-btn bs-btn-ghost">Generate A/B hooks</button>'
     + '        <button id="bs-generate-seo" class="bs-btn bs-btn-ghost">Generate SEO</button>'
+    + '      </div>'
+    // Crawler-facing metadata (US 1.3). Generate SEO fills these in; the author can override before
+    // publishing. Saved via save-blog-draft; emitted server-side by the /b/:key/:slug permalink.
+    + '      <div class="bs-panel" style="margin-top:16px;">'
+    + '        <h3>SEO &amp; social preview</h3>'
+    + '        <div class="bs-field"><label>Search title <span id="bs-meta-title-count" class="bs-status" style="font-weight:400;"></span></label>'
+    + '          <input id="bs-meta-title" maxlength="120" placeholder="Shown as the clickable headline in Google"></div>'
+    + '        <div class="bs-field"><label>Search description <span id="bs-meta-desc-count" class="bs-status" style="font-weight:400;"></span></label>'
+    + '          <textarea id="bs-meta-desc" maxlength="320" rows="3" placeholder="The summary beneath the title in search results"></textarea></div>'
+    + '        <div class="bs-field"><label>Search visibility</label>'
+    + '          <select id="bs-robots">'
+    + '            <option value="index,follow">Indexed — show in search results (default)</option>'
+    + '            <option value="noindex,follow">Hidden from search — live but not indexed</option>'
+    + '            <option value="index,nofollow">Indexed, don\'t follow links</option>'
+    + '            <option value="noindex,nofollow">Fully hidden from search engines</option>'
+    + '          </select></div>'
+    + '        <div class="bs-field"><label>Canonical URL</label>'
+    + '          <div id="bs-canonical" class="bs-status" style="word-break:break-all;">Set when the post is published.</div></div>'
+    + '        <span id="bs-seo-status" class="bs-status"></span>'
     + '      </div>'
     // Scheduling mirrors the Create Post sheet: one guided question, not three loose button rows.
     + '      <div class="bs-panel" style="margin-top:16px;">'
@@ -400,7 +426,7 @@
   }
 
   // Reveal the editor workspace for a post (new or existing): mount the editor + side panels.
-  function openWorkspace(postId, title, md) {
+  function openWorkspace(postId, title, md, post) {
     state.postId = postId;
     el('bs-brief').classList.add('bs-hidden');
     el('bs-workspace').classList.remove('bs-hidden');
@@ -426,6 +452,7 @@
     loadFeature();
     loadSyndication();
     loadSearchConsole();
+    populateSeo(post);
     return state.editor;
   }
 
@@ -467,7 +494,7 @@
       if (!res.ok || !res.body.post) { setStatus('bs-save-status', ''); return; }
       var post = res.body.post;
       if (post.assistantId != null) state.assistantId = post.assistantId;
-      openWorkspace(post.id, post.title || 'Untitled draft', post.bodyMarkdown || '');
+      openWorkspace(post.id, post.title || 'Untitled draft', post.bodyMarkdown || '', post);
       setStatus('bs-save-status', 'Saved');
       if (post.status) setBanner('bs-action-status', 'Status: ' + post.status);
       // A post already on the calendar can be pulled back off it.
@@ -498,6 +525,25 @@
     if (theme.accent) el('bs-accent').value = theme.accent;
     if (theme.fontFamily) el('bs-font').value = theme.fontFamily;
     el('bs-badge').checked = cfg.badgeEnabled !== false;
+    el('bs-site-base').value = cfg.siteBaseUrl || '';
+    el('bs-site-path').value = cfg.sitePostPath || '';
+  }
+
+  // ── SEO metadata panel ─────────────────────────────────────────────────────────────────────────
+  // Google truncates around 60 chars (title) / 155 (description); show a live count that turns amber
+  // past those so the author can see when they overrun without a hard block.
+  function refreshSeoCounts() {
+    var t = el('bs-meta-title').value.length, d = el('bs-meta-desc').value.length;
+    var tc = el('bs-meta-title-count'), dc = el('bs-meta-desc-count');
+    tc.textContent = t + '/60'; tc.style.color = t > 60 ? '#b45309' : '';
+    dc.textContent = d + '/155'; dc.style.color = d > 155 ? '#b45309' : '';
+  }
+  function populateSeo(post) {
+    el('bs-meta-title').value = (post && post.metaTitle) || '';
+    el('bs-meta-desc').value = (post && post.metaDescription) || '';
+    el('bs-robots').value = (post && post.robots) || 'index,follow';
+    el('bs-canonical').textContent = (post && post.canonicalUrl) || 'Set when the post is published.';
+    refreshSeoCounts();
   }
 
   // ── Feature / inline media (reuses content-assets + generate-ai-image + pexels-search) ─────────
@@ -980,6 +1026,10 @@
         if (!res.ok) { setBanner('bs-action-status', (res.body && res.body.error) || 'Could not generate SEO.', 'error'); return; }
         var slugPart = res.body.urlSlug ? ('/' + res.body.urlSlug + ' · ') : '';
         setBanner('bs-action-status', 'SEO ready — ' + slugPart + res.body.tags.length + ' tags');
+        // Surface the freshly generated meta in the editable panel so the author can tweak it.
+        if (res.body.metaTitle) el('bs-meta-title').value = res.body.metaTitle;
+        if (res.body.metaDescription) el('bs-meta-desc').value = res.body.metaDescription;
+        refreshSeoCounts();
       });
     });
 
@@ -987,11 +1037,35 @@
       var theme = { accent: el('bs-accent').value, fontFamily: el('bs-font').value };
       api('save-widget-config', { method: 'POST', body: JSON.stringify({
         action: 'update', theme: theme, badgeEnabled: el('bs-badge').checked,
+        siteBaseUrl: el('bs-site-base').value.trim(), sitePostPath: el('bs-site-path').value.trim(),
       }) }).then(function (res) {
-        if (res.ok) setBanner('bs-action-status', 'Theme saved.');
-        else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not save the theme.', 'error');
+        if (res.ok) { setBanner('bs-action-status', 'Settings saved.'); applyWidget(res.body.config); }
+        else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not save settings.', 'error');
       });
     });
+
+    // ── SEO metadata overrides (US 1.3) — debounced autosave, mirrors the body autosave contract ──
+    function saveSeo() {
+      if (!state.postId) return;
+      setStatus('bs-seo-status', 'Saving…');
+      api('save-blog-draft', { method: 'POST', body: JSON.stringify({
+        id: state.postId,
+        metaTitle: el('bs-meta-title').value,
+        metaDescription: el('bs-meta-desc').value,
+        robots: el('bs-robots').value,
+      }) }).then(function (res) {
+        setStatus('bs-seo-status', res.ok ? 'Saved' : ((res.body && res.body.error) || 'Not saved'));
+      });
+    }
+    var seoTimer;
+    function seoChanged() {
+      refreshSeoCounts();
+      clearTimeout(seoTimer);
+      seoTimer = setTimeout(saveSeo, 900);
+    }
+    el('bs-meta-title').addEventListener('input', seoChanged);
+    el('bs-meta-desc').addEventListener('input', seoChanged);
+    el('bs-robots').addEventListener('change', saveSeo);
 
     mediaEls = {
       preview: el('bs-feature-preview'), library: el('bs-feature-library'), pexels: el('bs-feature-pexels'),

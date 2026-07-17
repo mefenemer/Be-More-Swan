@@ -9,10 +9,11 @@
 import { createHash, createHmac, randomUUID } from 'crypto';
 import { and, eq, ne } from 'drizzle-orm';
 import { marked } from 'marked';
-import { blogPosts, contentAssets, contentProvenance } from '../../db/schema';
+import { blogPosts, contentAssets, contentProvenance, widgetConfigs } from '../../db/schema';
 import { renderMarkdown, excerpt } from './markdown-render';
 import { isC2paSigningEnabled, signStoredImageAsset, type ManifestSummary } from './c2pa-sign';
 import { stripMediaForSyndication as stripMedia } from '../lib/marked-bms-directives.js';
+import { resolveCanonical } from './blog-seo';
 
 const jwtSecret = process.env.JWT_SECRET || 'fallback';
 const C2PA_SCHEMA_VERSION = '1.0';
@@ -53,7 +54,11 @@ export function stripMediaForSyndication(bodyMarkdown: string): string {
 }
 
 // Publishes `post` and returns the updated row. Assumes post.bodyMarkdown is non-empty (callers check).
-export async function publishBlogPost(db: any, post: BlogPostRow, organisationId: number): Promise<BlogPostRow> {
+//
+// `baseUrl` is this app's own origin (resolveBaseUrl), used only for the self-canonical fallback when
+// the org hasn't told us their public site URL. Optional: passing null just means a post with no
+// customer site + no baseUrl gets a null canonical (recomputed on next publish / read).
+export async function publishBlogPost(db: any, post: BlogPostRow, organisationId: number, baseUrl?: string | null): Promise<BlogPostRow> {
     const id = post.id;
 
     // Resolve a unique-per-org slug (partial unique index enforces it; disambiguate on collision).
@@ -64,6 +69,28 @@ export async function publishBlogPost(db: any, post: BlogPostRow, organisationId
         .where(and(eq(blogPosts.organisationId, organisationId), eq(blogPosts.slug, slug), ne(blogPosts.id, id)))
         .limit(1);
     if (clash) slug = `${slug}-${id}`;
+
+    // Stamp the canonical URL. Until now canonical_url was READ (by devto/ghost/hashnode syndication
+    // and ingest-gsc-metrics) but WRITTEN by nothing — so it was always NULL, silently disabling both
+    // duplicate-content protection and content-decay detection (US 5.1). Resolve it here: the org's
+    // own site when they've configured site_base_url + site_post_path, else our /b/:key/:slug permalink.
+    const [wcfg] = await db
+        .select({
+            publicKey: widgetConfigs.publicKey,
+            siteBaseUrl: widgetConfigs.siteBaseUrl,
+            sitePostPath: widgetConfigs.sitePostPath,
+        })
+        .from(widgetConfigs)
+        .where(and(eq(widgetConfigs.organisationId, organisationId), eq(widgetConfigs.status, 'active')))
+        .orderBy(widgetConfigs.id)
+        .limit(1);
+    const canonicalUrl = resolveCanonical({
+        slug,
+        siteBaseUrl: wcfg?.siteBaseUrl,
+        sitePostPath: wcfg?.sitePostPath,
+        publicKey: wcfg?.publicKey,
+        baseUrl,
+    });
 
     // Snapshot the hero/feature graphic as a STABLE reference (assetId, not a URL): presigned R2
     // URLs expire, so widget-api resolves a fresh URL from this assetId at read time (US 2.1).
@@ -140,6 +167,7 @@ export async function publishBlogPost(db: any, post: BlogPostRow, organisationId
         .set({
             status: 'published',
             slug,
+            canonicalUrl,
             publishedPayload,
             provenanceContentId: contentId,
             publishedAt: post.publishedAt || now,

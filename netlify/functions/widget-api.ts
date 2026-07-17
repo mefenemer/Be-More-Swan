@@ -12,10 +12,10 @@
 //   GET /api/widget/:key/posts/:slug     → { post: {...payload, aiAssisted, hookVariants, abState} }
 
 import { HandlerEvent } from '@netlify/functions';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { widgetConfigs, blogPosts, contentAssets } from '../../db/schema';
-import { resolveAssetDisplayUrl } from '../../src/utils/social-publish';
+import { widgetConfigs, blogPosts } from '../../db/schema';
+import { resolveInlineMedia, resolveFeatureImageUrl } from '../../src/utils/blog-media-resolve';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const CORS = {
@@ -24,42 +24,6 @@ const CORS = {
     'Access-Control-Allow-Headers': 'Content-Type',
 };
 const CACHE = 'public, max-age=120, s-maxage=300';
-
-// Escape a resolved URL for safe insertion into an HTML double-quoted attribute value.
-function escAttr(v: string): string {
-    return v.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-// Inline media is snapshotted as a src-less <img|video|audio data-bms-asset="N"> (markdown-render).
-// Resolve each referenced asset to a fresh, org-scoped URL and inject it as the src. A
-// deleted/foreign asset is left without a src (graceful degrade). Mirrors the feature-image
-// read-time resolution, and is safe to cache because widget-api's TTL (s-maxage=300) is under the
-// presigned-URL lifetime (600s).
-async function resolveInlineMedia(db: ReturnType<typeof getDb>, orgId: number, html: string): Promise<string> {
-    if (!html || !html.includes('data-bms-asset')) return html;
-    const ids = [...new Set([...html.matchAll(/data-bms-asset="(\d+)"/g)].map((x) => Number(x[1])))]
-        .filter(Number.isFinite);
-    if (!ids.length) return html;
-
-    const assets = await db
-        .select({
-            id: contentAssets.id, assetType: contentAssets.assetType, storageUrl: contentAssets.storageUrl,
-            storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl,
-        })
-        .from(contentAssets)
-        .where(and(inArray(contentAssets.id, ids), eq(contentAssets.organisationId, orgId)));
-
-    const urlById = new Map<number, string | null>();
-    for (const a of assets) urlById.set(a.id, await resolveAssetDisplayUrl(a));
-
-    // img | video | audio — the tag is echoed back verbatim from the (already sanitised) snapshot,
-    // so this can only ever re-emit a tag the allowlist already passed.
-    return html.replace(/<(img|video|audio)([^>]*?)data-bms-asset="(\d+)"([^>]*)>/g,
-        (full, tag, pre, id, post) => {
-            const url = urlById.get(Number(id));
-            return url ? `<${tag} src="${escAttr(url)}"${pre}data-bms-asset="${id}"${post}>` : full;
-        });
-}
 
 function json(statusCode: number, obj: unknown, cache = false) {
     return {
@@ -153,15 +117,7 @@ export default withLambda(async (event: HandlerEvent) => {
         const payload = (post.publishedPayload as Record<string, any> | null) || null;
         const featureAssetId = payload?.featureImage?.assetId;
         if (payload && Number.isFinite(featureAssetId)) {
-            const [a] = await db
-                .select({
-                    assetType: contentAssets.assetType, storageUrl: contentAssets.storageUrl,
-                    storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl,
-                })
-                .from(contentAssets)
-                .where(and(eq(contentAssets.id, featureAssetId), eq(contentAssets.organisationId, orgId)))
-                .limit(1);
-            payload.featureImage = { ...payload.featureImage, url: a ? await resolveAssetDisplayUrl(a) : null };
+            payload.featureImage = { ...payload.featureImage, url: await resolveFeatureImageUrl(db, orgId, featureAssetId) };
         }
 
         // Resolve fresh URLs for any inline media referenced in the snapshotted body HTML.
