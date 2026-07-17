@@ -25,6 +25,7 @@ export const wordpresscomAdapter: BlogDestinationAdapter<WordpresscomCreds> = {
     label: 'WordPress.com',
     authKind: 'oauth',
     oauthProvider: 'wordpresscom',
+    supportsDraft: true,
     credFields: [], // OAuth — connected via the /api/oauth flow, no paste form.
 
     // parseCreds/validate are only used by the paste-connect endpoint; OAuth connects elsewhere.
@@ -35,14 +36,15 @@ export const wordpresscomAdapter: BlogDestinationAdapter<WordpresscomCreds> = {
         return { ok: false, error: 'WordPress.com connects via OAuth.' };
     },
 
-    async publish(post, creds, externalId) {
+    async publish(post, creds, opts = {}) {
+        const { externalId, asDraft } = opts;
         const url = externalId
             ? `${API}/sites/${encodeURIComponent(creds.siteId)}/posts/${externalId}`
             : `${API}/sites/${encodeURIComponent(creds.siteId)}/posts/new`;
         const res = await fetch(url, {
             method: 'POST',
             headers: { Authorization: `Bearer ${creds.accessToken}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify(buildWordpresscomPost(post, { publish: true })),
+            body: JSON.stringify(buildWordpresscomPost(post, { publish: !asDraft })),
         });
         if (!res.ok) {
             const detail = await res.text().catch(() => '');

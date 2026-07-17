@@ -3,7 +3,11 @@
 // Idempotent — re-running updates the existing external post (via the stored externalId) instead of
 // duplicating. Per-target outcome is written back into blog_posts.destinations jsonb.
 //
-// POST { postId, targets: ['devto','hashnode'] }  → { results: { [target]: {...} } }
+// POST { postId, targets: ['devto','hashnode'], draftTargets: ['ghost'] }
+//   → { results: { [target]: {...} } }
+//
+// `draftTargets` is a subset of `targets` to push unpublished, leaving the author to publish from the
+// CMS itself (US 3.2 AC4). Adapters that can't draft (Hashnode) reject the combination outright.
 
 import { HandlerEvent } from '@netlify/functions';
 import { and, eq } from 'drizzle-orm';
@@ -34,7 +38,7 @@ export default withLambda(async (event: HandlerEvent) => {
     if ('error' in ctx) return ctx.error;
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed.' });
 
-    let body: { postId?: number; targets?: unknown };
+    let body: { postId?: number; targets?: unknown; draftTargets?: unknown };
     try {
         body = JSON.parse(event.body || '{}');
     } catch {
@@ -46,6 +50,15 @@ export default withLambda(async (event: HandlerEvent) => {
 
     const targets = Array.isArray(body.targets) ? body.targets.filter(isBlogDestinationId) : [];
     if (!targets.length) return json(400, { error: 'No valid targets supplied.' });
+
+    const draftTargets = new Set(Array.isArray(body.draftTargets) ? body.draftTargets.filter(isBlogDestinationId) : []);
+    // Fail the whole request rather than per-target: asking for a draft and getting a live post on
+    // someone's blog is exactly the surprise AC4 exists to prevent.
+    const undraftable = [...draftTargets].filter((id) => !getBlogAdapter(id).supportsDraft);
+    if (undraftable.length) {
+        const labels = undraftable.map((id) => getBlogAdapter(id).label).join(', ');
+        return json(422, { error: `${labels} cannot receive drafts — publish live, or deselect it.` });
+    }
 
     const [post] = await db
         .select()
@@ -100,7 +113,10 @@ export default withLambda(async (event: HandlerEvent) => {
                     ? String((prior as { externalId?: unknown }).externalId ?? '') || undefined
                     : undefined;
 
-            const out = await adapter.publish(projected, creds as never, priorExternalId);
+            const out = await adapter.publish(projected, creds as never, {
+                externalId: priorExternalId,
+                asDraft: draftTargets.has(target),
+            });
             results[target] = { status: out.status, externalId: out.externalId, url: out.url, at: new Date().toISOString() };
         } catch (err) {
             results[target] = { status: 'error', error: err instanceof Error ? err.message : 'Publish failed.' };

@@ -10,6 +10,7 @@ import { buildHashnodeInput, buildHashnodeTags } from '../src/utils/blog-destina
 import { buildWordpressPost, normaliseSiteUrl } from '../src/utils/blog-destinations/wordpress';
 import { buildGhostPost, ghostAdminBase, signGhostToken } from '../src/utils/blog-destinations/ghost';
 import { buildWordpresscomPost } from '../src/utils/blog-destinations/wordpresscom';
+import { BLOG_DESTINATION_IDS, getBlogAdapter } from '../src/utils/blog-destinations';
 import type { BlogDestinationPost } from '../src/utils/blog-destinations/types';
 
 let passed = 0;
@@ -116,6 +117,11 @@ check('ghost wraps HTML in posts[] with published status + tag objects', () => {
     assert.equal(p.custom_excerpt, 'A short intro.');
 });
 
+check('ghost draft flag flows through to status', () => {
+    const p = buildGhostPost(post, { publish: false }).posts[0] as Record<string, unknown>;
+    assert.equal(p.status, 'draft');
+});
+
 check('ghost custom_excerpt capped at 300 chars', () => {
     const long = 'x'.repeat(400);
     const p = buildGhostPost({ ...post, metaDescription: long }, { publish: true }).posts[0] as Record<string, unknown>;
@@ -149,4 +155,27 @@ check('wordpress.com omits tags when none; draft flag', () => {
     assert.equal(body.status, 'draft');
 });
 
-console.log(`\n${passed} checks passed.`);
+// ── Draft support (US 3.2 AC4) ──────────────────────────────────────────────
+check('every adapter declares whether it can draft; only Hashnode cannot', () => {
+    const undraftable = BLOG_DESTINATION_IDS.filter((id) => {
+        const a = getBlogAdapter(id);
+        assert.equal(typeof a.supportsDraft, 'boolean', `${id} must declare supportsDraft`);
+        return !a.supportsDraft;
+    });
+    assert.deepEqual(undraftable, ['hashnode']);
+});
+
+// `check` is sync-only — an async fn handed to it would never be awaited and would pass silently.
+async function checkAsync(name: string, fn: () => Promise<void>) { await fn(); console.log(`  ✓ ${name}`); passed++; }
+
+void (async () => {
+    await checkAsync('hashnode refuses a draft push rather than publishing live', async () => {
+        // Must reject before any network call — the creds below are never used.
+        await assert.rejects(
+            () => getBlogAdapter('hashnode').publish(post, { token: 't', publicationId: 'p' } as never, { asDraft: true }),
+            /cannot receive drafts/,
+        );
+    });
+
+    console.log(`\n${passed} checks passed.`);
+})();
