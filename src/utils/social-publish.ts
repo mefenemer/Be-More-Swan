@@ -28,10 +28,16 @@ export async function presignR2Get(key: string, expiresSec = 600): Promise<strin
     return getSignedUrl(r2Client(), new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key }), { expiresIn: expiresSec });
 }
 
-// Resolve a displayable URL for a visual asset: S3 uploads already carry a public
+// Resolve a displayable URL for a stored asset: S3 uploads already carry a public
 // storageUrl; AI-generated images live in the private R2 bucket with only a storageKey,
 // so presign a short-lived GET URL; mock/dev assets (Pexels/picsum hotlinks) fall back
 // to externalUrl. Used anywhere an asset needs to be shown in the UI (not just publishing).
+//
+// `audio` belongs on the presign path, not off it. content-upload-url returns only
+// { uploadUrl, storageKey } — never a storageUrl — so every library upload reaches here with
+// storageUrl null and depends on the presign below. A type left out of this list resolves to
+// externalUrl, which an uploaded file doesn't have: the caller gets null and the media silently
+// never plays. `link` stays out because externalUrl IS its content.
 export async function resolveAssetDisplayUrl(asset: {
     assetType?: string | null;
     storageUrl?: string | null;
@@ -39,8 +45,8 @@ export async function resolveAssetDisplayUrl(asset: {
     externalUrl?: string | null;
 }): Promise<string | null> {
     if (asset.storageUrl) return asset.storageUrl;
-    const isVisual = asset.assetType === 'image' || asset.assetType === 'video';
-    if (!isVisual) return asset.externalUrl || null;
+    const isStored = asset.assetType === 'image' || asset.assetType === 'video' || asset.assetType === 'audio';
+    if (!isStored) return asset.externalUrl || null;
     if (asset.storageKey) {
         try { return await presignR2Get(asset.storageKey); } catch { /* fall through to externalUrl */ }
     }

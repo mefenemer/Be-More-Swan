@@ -133,6 +133,11 @@
     + '.bs-media-picker img,.bs-media-picker video{width:100%;height:72px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid transparent;background:#000;}'
     + '.bs-media-picker img:hover,.bs-media-picker video:hover{border-color:#ec4899;}'
     + '.bs-media-empty{grid-column:1 / -1;font-size:12px;color:#6b7280;text-align:center;padding:12px;}'
+    // Audio has no thumbnail — a labelled tile stands in, sized to match the image/video ones.
+    + '.bs-media-audio{height:72px;border-radius:6px;cursor:pointer;border:2px solid #e5e7eb;'
+      + 'display:flex;align-items:center;justify-content:center;text-align:center;padding:4px;'
+      + 'font-size:11px;color:#374151;background:#f9fafb;overflow:hidden;word-break:break-word;}'
+    + '.bs-media-audio:hover{border-color:#ec4899;}'
     + '.bs-synd-row{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;}'
     + '.bs-synd-form{flex-basis:100%;margin-top:8px;}'
     + '.bs-linkbtn{background:none;border:0;color:#6b7280;font-size:12px;cursor:pointer;text-decoration:underline;padding:0;}'
@@ -239,10 +244,12 @@
     + '          <button id="bs-inline-pexels" class="bs-btn bs-btn-ghost">Stock</button>'
     + '          <button id="bs-inline-canva" class="bs-btn bs-btn-ghost">Canva</button>'
     + '          <button id="bs-inline-ai" class="bs-btn bs-btn-ghost">AI</button>'
-    // Video is body-only: the hero input above stays images-only. MIME list mirrors
+    // Video and audio are body-only: the hero input above stays images-only. Audio is upload-only
+    // by decision (plan §7.4) — there is no stock provider and no AI generation, which is why the
+    // Stock and AI buttons beside this one stay image/video. MIME list mirrors
     // content-upload-url.ts's ALLOWED_MIME_TYPES — widening it here without widening that would
     // just move the rejection to a worse place.
-    + '          <input type="file" id="bs-inline-upload-input" class="bs-hidden" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm">'
+    + '          <input type="file" id="bs-inline-upload-input" class="bs-hidden" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm,audio/mpeg,audio/mp4,audio/wav,audio/webm,audio/ogg">'
     + '        </div>'
     + '        <div id="bs-ai-form" class="bs-field bs-hidden" style="margin-top:12px;">'
     + '          <input id="bs-ai-prompt" placeholder="Describe the image…">'
@@ -638,11 +645,11 @@
     if (!state.postId) return Promise.resolve(null);
 
     if (payload.kind === 'files') {
-      // content-upload-url already allows video MIME; anything else has no assetType we can file it
-      // under, so reject it here rather than upload something the body can't render.
-      var files = payload.files.filter(function (f) { return /^(image|video)\//.test(f.type || ''); });
+      // Mirrors content-upload-url's ALLOWED_MIME_TYPES families; anything else has no assetType we
+      // can file it under, so reject it here rather than upload something the body can't render.
+      var files = payload.files.filter(function (f) { return /^(image|video|audio)\//.test(f.type || ''); });
       if (!files.length) {
-        setStatus('bs-media-status', 'Only images and videos can be dropped into a post.');
+        setStatus('bs-media-status', 'Only images, videos and audio can be dropped into a post.');
         return Promise.resolve(null);
       }
       setStatus('bs-media-status', 'Uploading…');
@@ -684,7 +691,10 @@
   // content_assets.assetType is the thing that decides how the body renders the media, so derive it
   // from the file rather than assuming 'image' — an mp4 filed as an image renders as a broken <img>.
   function assetTypeOf(mimeType) {
-    return /^video\//.test(String(mimeType || '')) ? 'video' : 'image';
+    var m = String(mimeType || '');
+    if (/^video\//.test(m)) return 'video';
+    if (/^audio\//.test(m)) return 'audio';
+    return 'image';
   }
 
   // Upload a new file straight into the content library, then attach it (issue #184 — the Blog
@@ -740,11 +750,12 @@
       var inline = state.mediaTarget === 'inline';
       var items = all.filter(function (a) {
         if (!(a.storageUrl || a.externalUrl)) return false;
-        return a.assetType === 'image' || (inline && a.assetType === 'video');
+        return a.assetType === 'image'
+          || (inline && (a.assetType === 'video' || a.assetType === 'audio'));
       });
       if (!items.length) {
         mediaEls.picker.innerHTML = '<div class="bs-media-empty">'
-          + (inline ? 'No images or videos in your library yet.' : 'No images in your library yet.')
+          + (inline ? 'No images, videos or audio in your library yet.' : 'No images in your library yet.')
           + '</div>';
         return;
       }
@@ -753,10 +764,18 @@
         // A <video> with preload=metadata shows its first frame, which is a usable thumbnail —
         // content_assets has no separate poster to fall back on.
         var isVideo = a.assetType === 'video';
-        var tile = document.createElement(isVideo ? 'video' : 'img');
-        tile.src = a.storageUrl || a.externalUrl;
-        if (isVideo) { tile.preload = 'metadata'; tile.muted = true; }
-        else { tile.alt = a.name || ''; }
+        var isAudio = a.assetType === 'audio';
+        // Audio has no frame to show, so it gets a labelled tile rather than a broken thumbnail.
+        // A real <audio> element here would be a player the author has to avoid clicking to pick.
+        var tile = document.createElement(isAudio ? 'div' : (isVideo ? 'video' : 'img'));
+        if (isAudio) {
+          tile.className = 'bs-media-audio';
+          tile.textContent = '♪ ' + (a.name || 'Audio');
+        } else {
+          tile.src = a.storageUrl || a.externalUrl;
+          if (isVideo) { tile.preload = 'metadata'; tile.muted = true; }
+          else { tile.alt = a.name || ''; }
+        }
         tile.title = a.name || '';
         tile.addEventListener('click', function () { routeMedia({ assetId: a.id }); });
         makeTileDraggable(tile, { source: 'library', assetId: a.id, type: a.assetType || 'image' });

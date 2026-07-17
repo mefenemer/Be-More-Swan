@@ -1610,7 +1610,9 @@ export const contentAssets = pgTable("content_assets", {
 
   // Asset identity
   name: text("name").notNull(),
-  assetType: text("asset_type").notNull(), // 'image' | 'video' | 'link'
+  // 'audio' is blog-body only and upload-only (plan §4 Phase 2). Text column by design — adding a
+  // type is a validation change in content-assets.ts, never a migration.
+  assetType: text("asset_type").notNull(), // 'image' | 'video' | 'audio' | 'link'
   mimeType: text("mime_type"),
   fileSize: integer("file_size"),
 
