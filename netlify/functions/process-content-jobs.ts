@@ -13,6 +13,7 @@ import {
 } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
+import { buildInspoBlock } from '../../src/utils/inspo-profile';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmark';
 import { creditLine } from '../../src/utils/pexels';
 import { resolveMediaForPost } from '../../src/utils/media-resolver';
@@ -230,6 +231,22 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 if (v != null) systemPrompt += `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}\n`;
             }
         }
+
+        // Inspo (AC5) — the styles/tones the user parked in the Inspo tab. Injected here, NOT
+        // as a blueprint section: sections are dumped wholesale above, so inspo living there
+        // would grow the prompt with the user's library. buildInspoBlock is bounded (a capped
+        // distilled profile + top-K retrieval) and returns null when there's nothing to add,
+        // so a user with no inspo pays nothing. Placed after the blueprint so the assistant's
+        // own strict rules are established first, and before the safety benchmark so that
+        // always has the last word. Topic = the context prompt driving this specific draft.
+        // Never throws — inspo degrades to nothing rather than failing the draft.
+        const inspoBlock = await buildInspoBlock(db, {
+            assistantId: job.assistant_id,
+            organisationId: job.organisation_id,
+            topic: job.context_prompt,
+        });
+        if (inspoBlock) systemPrompt += `\n\n${inspoBlock}`;
+
         systemPrompt += `\n\n${AURA_SAFE_CONTENT_BENCHMARK}`;
 
         const gwResponse = await gatewayGenerate({ system: systemPrompt, messages });

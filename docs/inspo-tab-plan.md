@@ -164,13 +164,35 @@ model treats it as data, not instructions — matching the existing RAG conventi
    concurrently editing that same file — sequence after it lands to avoid a collision.
    Also still needed: R2 upload wiring from the composer (reuse `storage-request-upload` →
    `storage-confirm-upload`, then POST the returned assetId as `workspaceAssetId`).
-4. **Channel A + B + both seams** (AC5) — `inspo-profile.ts`, inject into
-   `process-content-jobs.ts` and `generate-blog.ts`.
-5. **Invalidation correctness** (AC6) — verify a deleted item cannot influence the next
-   draft. The invalidation half is already written (`invalidateStyleProfile()` in
-   inspo-items.ts fires on every mutation); this step is the compiler side + the test.
+4. ✅ **Channel A + B + both seams** (AC5) — `src/utils/inspo-profile.ts` +
+   `tests/inspo-profile.test.ts`. Injected into **both** seams: `process-content-jobs.ts`
+   (after the blueprint sections, before the safety benchmark) and `generate-blog.ts`
+   (appended to its own inline system prompt).
+5. ✅ **Invalidation correctness** (AC6) — `invalidateStyleProfile()` drops the cached row on
+   every mutation, and `getInspoStyleProfile()` additionally refuses to serve a profile whose
+   `itemFingerprint` doesn't match the live active set (recompiles, or returns null and lets
+   channel B run alone — never falls back to the stale text). Pinned by tests.
 
 Steps 1–2 are independently shippable and prove the tab; step 4 is where the value lands.
+
+**Remaining to make the whole feature user-reachable: the phase-3 UI only** (add-URL +
+upload affordances in `assistant-inspo.js`, plus R2 upload wiring). Everything behind it —
+extraction, distillation, retrieval, both prompt seams — is built and tested.
+
+### A bound the plan originally missed
+
+Channel A's *output* being capped does not by itself keep costs flat: **compiling** the
+profile means feeding the library to a model, and that input is O(items). At the 200-item
+ceiling with 50k-char bodies that call would be ~10M chars — it would blow the context window
+long before a user hit any documented limit, and the failure would look like "the feature
+broke for our biggest customer".
+
+So the compiler's input is bounded too: newest `MAX_COMPILE_ITEMS` (40), each contributing a
+full note (the strongest signal) plus a short body excerpt, under a hard
+`MAX_COMPILE_INPUT_CHARS` (60k ≈ 15k tokens) budget. Items past the cap still reach the model
+via channel B — they just don't shape the always-on profile. Newest-first is deliberate:
+recent inspo best represents current taste. `tests/inspo-profile.test.ts` pins this with a
+500-item worst case.
 
 ### What shipped in phases 1–2
 

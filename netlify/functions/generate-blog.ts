@@ -16,6 +16,7 @@ import { aiAssistants, blogPosts, organisations } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
+import { buildInspoBlock } from '../../src/utils/inspo-profile';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -84,6 +85,20 @@ export default withLambda(async (event: HandlerEvent) => {
         notes ? `Author notes / source material:\n${notes}` : '',
     ].filter(Boolean).join('\n');
 
+    // Inspo (AC5) — the styles/tones the user parked in the Inspo tab. This is the SECOND
+    // injection seam: blog never touches the blueprint, so the social path's injection in
+    // process-content-jobs.ts does nothing for these drafts and this has to be done
+    // separately. Bounded (capped distilled profile + top-K retrieval) and null when the
+    // assistant has no inspo, so a user without any pays nothing. Never throws.
+    const inspoBlock = post.assistantId
+        ? await buildInspoBlock(db, {
+            assistantId: post.assistantId,
+            organisationId: ctx.organisationId,
+            // Rank retrieval against what this post is actually about.
+            topic: [post.title, topic, keywords].filter(Boolean).join(' — '),
+        })
+        : null;
+
     try {
         const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
         const response = await anthropic.messages.create({
@@ -94,7 +109,8 @@ export default withLambda(async (event: HandlerEvent) => {
                 (assistantPrompt ? `Voice guidance: ${assistantPrompt}\n` : '') +
                 'Produce a complete, publish-ready blog post in Markdown: a single H1 title, a short ' +
                 'hook intro, 3–6 H2 sections with substantive paragraphs, and a brief conclusion. Weave ' +
-                'the target keywords in naturally — never keyword-stuff. Return ONLY the Markdown, no preamble.',
+                'the target keywords in naturally — never keyword-stuff. Return ONLY the Markdown, no preamble.' +
+                (inspoBlock ? `\n\n${inspoBlock}` : ''),
             messages: [{ role: 'user', content: brief }],
         });
 
