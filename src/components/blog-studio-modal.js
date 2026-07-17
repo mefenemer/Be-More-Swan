@@ -30,7 +30,9 @@
     }, opts)).then(function (r) { return r.json().then(function (j) { return { ok: r.ok, body: j }; }); });
   };
 
-  var state = { injected: false, postId: null, editor: null, assistants: {}, assistantId: null, mediaTarget: 'feature' };
+  // `scaffold` holds the untouched "Start blank" seed, so the publish/schedule guard below can tell
+  // placeholder text apart from something the author actually wrote.
+  var state = { injected: false, postId: null, editor: null, assistants: {}, assistantId: null, mediaTarget: 'feature', scaffold: null };
 
   function el(id) { return document.getElementById(id); }
   function setStatus(id, msg) { var e = el(id); if (e) e.textContent = msg; }
@@ -431,7 +433,10 @@
     setBanner('bs-brief-status', '');
     api('blog-posts', { method: 'POST', body: JSON.stringify({ title: title, assistantId: voice.assistantId }) }).then(function (res) {
       if (!res.ok) { setBanner('bs-brief-status', 'Could not create post: ' + (res.body.error || 'please try again.'), 'error'); return; }
-      openWorkspace(res.body.post.id, title, seedMarkdown(path, voice.tone));
+      var seeded = seedMarkdown(path, voice.tone);
+      // Only "Start blank" seeds placeholder prose; "Improve draft" seeds the author's own notes.
+      state.scaffold = path === 'blank' ? seeded : null;
+      openWorkspace(res.body.post.id, title, seeded);
       if (path === 'generate') {
         setStatus('bs-save-status', 'Drafting…');
         api('generate-blog', { method: 'POST', body: JSON.stringify({
@@ -443,6 +448,7 @@
         }) }).then(function (gen) {
           if (gen.ok && gen.body.bodyMarkdown) {
             state.editor.setMarkdown(gen.body.bodyMarkdown);
+            state.scaffold = null;                   // generated prose is real content
             refreshReadout(gen.body.bodyMarkdown);   // setMarkdown doesn't fire onChange
             setStatus('bs-save-status', 'Draft ready');
           } else {
@@ -459,6 +465,7 @@
       if (!res.ok || !res.body.post) { setStatus('bs-save-status', ''); return; }
       var post = res.body.post;
       if (post.assistantId != null) state.assistantId = post.assistantId;
+      state.scaffold = null;   // a stored post is real content, never the starter template
       openWorkspace(post.id, post.title || 'Untitled draft', post.bodyMarkdown || '');
       setStatus('bs-save-status', 'Saved');
       if (post.status) setBanner('bs-action-status', 'Status: ' + post.status);
@@ -655,6 +662,34 @@
     return isNaN(d.getTime()) ? null : d.toISOString();
   }
 
+  // Push what's on screen to the server before any action that validates the *stored* body.
+  // The editor only autosaves after an edit, and neither mount() nor setMarkdown() persists, so a
+  // body the author can plainly see (the blank scaffold, or notes carried in by "Improve draft")
+  // may not exist server-side yet. publish-blog and schedule-blog both reject on the stored
+  // bodyMarkdown, which surfaced as "Cannot publish an empty post." over visible text.
+  // True while the body is still the untouched "Start blank" starter text. Flushing that to the
+  // server would satisfy publish-blog's non-empty check and put "Start writing here." on the
+  // author's live site, so the actions refuse it with something more useful than the server's
+  // "Cannot publish an empty post."
+  function bodyIsScaffold() {
+    return state.scaffold != null && state.editor
+      && state.editor.getMarkdown().trim() === state.scaffold.trim();
+  }
+  function blockedAsScaffold() {
+    if (!bodyIsScaffold()) return false;
+    setBanner('bs-action-status', 'This draft is still the starter template — add some content before publishing.', 'error');
+    return true;
+  }
+
+  function flushDraft() {
+    if (!state.postId || !state.editor) return Promise.resolve();
+    return api('save-blog-draft', { method: 'POST', body: JSON.stringify({
+      id: state.postId,
+      title: el('bs-title').value,
+      bodyMarkdown: state.editor.getMarkdown(),
+    }) }).catch(function () { /* the action below reports its own failure */ });
+  }
+
   // ── Syndication: external blog connectors (US 3.2 — Dev.to, Hashnode) ──────────────────────────
   function loadSyndication() {
     var listEl = el('bs-synd-list');
@@ -785,9 +820,11 @@
     el('bs-swan-improve').addEventListener('click', askSwanImprove);
 
     el('bs-publish').addEventListener('click', function () {
-      if (!state.postId) return;
+      if (!state.postId || blockedAsScaffold()) return;
       setBanner('bs-action-status', 'Publishing…');
-      api('publish-blog', { method: 'POST', body: JSON.stringify({ id: state.postId }) }).then(function (res) {
+      flushDraft().then(function () {
+        return api('publish-blog', { method: 'POST', body: JSON.stringify({ id: state.postId }) });
+      }).then(function (res) {
         if (res.ok) setBanner('bs-action-status', 'Published ✓ (' + res.body.post.slug + ')');
         else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not publish — please try again.', 'error');
       });
@@ -842,9 +879,11 @@
 
     // Approve & schedule — the assistant picks the next free cadence slot (no manual date).
     el('bs-approve').addEventListener('click', function () {
-      if (!state.postId) return;
+      if (!state.postId || blockedAsScaffold()) return;
       setBanner('bs-action-status', 'Scheduling…');
-      api('schedule-blog', { method: 'POST', body: JSON.stringify({ id: state.postId, action: 'approve' }) }).then(function (res) {
+      flushDraft().then(function () {
+        return api('schedule-blog', { method: 'POST', body: JSON.stringify({ id: state.postId, action: 'approve' }) });
+      }).then(function (res) {
         if (res.ok && res.body.post) {
           setBanner('bs-action-status', 'Approved — scheduled for ' + new Date(res.body.post.publishDate).toLocaleString());
           el('bs-unschedule').classList.remove('bs-hidden');
@@ -853,11 +892,13 @@
     });
 
     el('bs-schedule').addEventListener('click', function () {
-      if (!state.postId) return;
+      if (!state.postId || blockedAsScaffold()) return;
       var iso = localToISO(el('bs-schedule-at').value);
       if (!iso) { setBanner('bs-action-status', 'Pick a date & time.', 'error'); return; }
       setBanner('bs-action-status', 'Scheduling…');
-      api('schedule-blog', { method: 'POST', body: JSON.stringify({ id: state.postId, publishDate: iso }) }).then(function (res) {
+      flushDraft().then(function () {
+        return api('schedule-blog', { method: 'POST', body: JSON.stringify({ id: state.postId, publishDate: iso }) });
+      }).then(function (res) {
         if (res.ok) {
           setBanner('bs-action-status', 'Scheduled for ' + new Date(res.body.post.publishDate).toLocaleString());
           el('bs-schedule-picker').classList.add('bs-hidden');
@@ -1008,6 +1049,7 @@
   function resetToBrief() {
     if (state.editor && state.editor.destroy) { state.editor.destroy(); state.editor = null; }
     state.postId = null;
+    state.scaffold = null;
     ['bs-topic', 'bs-keywords', 'bs-notes', 'bs-tone'].forEach(function (id) { var e = el(id); if (e) e.value = ''; });
     var st = el('bs-save-tone'); if (st) st.checked = false;
     ['bs-save-status', 'bs-media-status', 'bs-synd-status'].forEach(function (id) { setStatus(id, ''); });
