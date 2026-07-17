@@ -5,7 +5,8 @@
 import type { Handler } from '@netlify/functions';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, notifications } from '../../db/schema';
+import { users } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { sendEmail } from '../../src/utils/email';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -26,13 +27,10 @@ const handler = async () => {
 
     for (const admin of superAdmins) {
         // In-app notification
-        await db.insert(notifications).values({
-            userId:  admin.id,
-            type:    'system',
-            title:   'Quarterly Bias Review Due',
-            message: 'A quarterly review of all masterAssistant system prompts for bias is due. Please complete the review checklist in the Admin Dashboard → Bias Audit.',
+        await createNotification(db, 'quarterly_bias_reminder', {
+            userId: admin.id,
             metadata: { dueDate: new Date().toISOString() },
-        }).catch(() => {});
+        });
 
         // Email reminder
         if (admin.email) {

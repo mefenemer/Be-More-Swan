@@ -45,6 +45,7 @@ async function ghostFetch(base: string, token: string, path: string, init?: Requ
 export const ghostAdapter: BlogDestinationAdapter<GhostCreds> = {
     id: 'ghost',
     label: 'Ghost',
+    supportsDraft: true,
     credFields: [
         { key: 'apiUrl', label: 'Site URL', secret: false, help: 'e.g. https://blog.example.com' },
         { key: 'adminApiKey', label: 'Admin API Key', secret: true, help: 'Ghost → Settings → Integrations → Custom.' },
@@ -72,10 +73,12 @@ export const ghostAdapter: BlogDestinationAdapter<GhostCreds> = {
         }
     },
 
-    async publish(post, creds, externalId) {
+    async publish(post, creds, opts = {}) {
+        const { externalId, asDraft } = opts;
         const base = ghostAdminBase(creds.apiUrl);
         const token = signGhostToken(creds.adminApiKey);
-        const payload = buildGhostPost(post, { publish: true });
+        const payload = buildGhostPost(post, { publish: !asDraft });
+        const status = asDraft ? 'draft' : 'published';
 
         if (externalId) {
             // Ghost requires the current updated_at on edit (collision detection).
@@ -89,7 +92,7 @@ export const ghostAdapter: BlogDestinationAdapter<GhostCreds> = {
             if (!res.ok) throw new Error(`Ghost update failed (${res.status})`);
             const data = (await res.json()) as { posts?: { id?: string; url?: string }[] };
             const p = data.posts?.[0];
-            return { externalId: String(p?.id ?? externalId), url: p?.url ?? '', status: 'published' };
+            return { externalId: String(p?.id ?? externalId), url: p?.url ?? '', status };
         }
 
         const res = await ghostFetch(base, token, '/posts/?source=html', { method: 'POST', body: JSON.stringify(payload) });
@@ -99,6 +102,6 @@ export const ghostAdapter: BlogDestinationAdapter<GhostCreds> = {
         }
         const data = (await res.json()) as { posts?: { id?: string; url?: string }[] };
         const p = data.posts?.[0];
-        return { externalId: String(p?.id ?? ''), url: p?.url ?? '', status: 'published' };
+        return { externalId: String(p?.id ?? ''), url: p?.url ?? '', status };
     },
 };

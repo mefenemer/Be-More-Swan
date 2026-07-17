@@ -21,9 +21,9 @@ import {
     plans,
     masterPlans,
     organisations,
-    notifications,
 } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
+import { createNotification } from '../../src/utils/notify';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret  = process.env.JWT_SECRET;
@@ -167,13 +167,11 @@ export default withLambda(async (event) => {
         }).onConflictDoNothing();
 
         // SC2a: In-app notification
-        await db.insert(notifications).values({
-            userId:  existingUser.id,
-            type:    'org_invite_accepted',
-            title:   `You've been added to ${orgName}`,
-            message: `${inviterName} has added you to ${orgName} as a ${role}.`,
+        await createNotification(db, 'org_invite_accepted', {
+            userId: existingUser.id,
+            context: { org: { name: orgName, inviter_name: inviterName, role } },
             metadata: { orgId, orgName, role },
-        }).catch(() => {});
+        });
 
         // Also send a courtesy email
         sendEmail({

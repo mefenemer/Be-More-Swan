@@ -7,6 +7,7 @@ import { Handler } from '@netlify/functions';
 import { eq, and, lt, lte, gte, isNull, sql, ne } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, plans, aiAssistants, taskRuns, leads, leadAnalysisRuns } from '../../db/schema';
+import { lookupContact } from '../../src/utils/contact-type';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async () => {
@@ -14,57 +15,15 @@ export default withLambda(async () => {
     const now = new Date();
     let leadsCreated = 0;
     let leadsUpdated = 0;
+    // Free trial removed (product decision): the former "trial expiry" lead pattern is gone —
+    // there are no trial plans to expire.
     const patternCounts: Record<string, number> = {
-        trial_expiry: 0,
         never_onboarded: 0,
         cancellation_approaching: 0,
         upgrade_candidates: 0,
     };
 
     try {
-        // ── (a) TRIAL EXPIRY: trial plans expiring within 7 days, no active paid plan ──
-        const trialCutoff = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
-        const trialRows = await db
-            .select({
-                userId: plans.userId,
-                organisationId: plans.organisationId,
-                email: users.email,
-                planName: plans.planName,
-                expiresAt: plans.expiresAt,
-            })
-            .from(plans)
-            .innerJoin(users, eq(plans.userId, users.id))
-            .where(
-                and(
-                    eq(plans.planType, 'trial'),
-                    eq(plans.status, 'active'),
-                    lte(plans.expiresAt, trialCutoff),
-                    gte(plans.expiresAt, now),
-                )
-            );
-
-        for (const row of trialRows) {
-            if (!row.userId || !row.email) continue;
-            const res = await db.insert(leads)
-                .values({
-                    email: row.email,
-                    opportunityReason: `Trial expiring — ${row.planName}`,
-                    action: 'trial_expiry_identified',
-                    leadType: 'trial_expiry',
-                    source: 'data_analysis_job',
-                    userId: row.userId,
-                    organisationId: row.organisationId,
-                    priority: 'high',
-                })
-                .onConflictDoUpdate({
-                    target: [leads.email, leads.opportunityReason],
-                    set: { updatedAt: new Date() },
-                })
-                .returning({ id: leads.id });
-            if (res[0]) leadsCreated++;
-            patternCounts.trial_expiry++;
-        }
-
         // ── (b) NEVER ONBOARDED: registered >48h ago, zero assistants, zero task runs ──
         const fortyEightHoursAgo = new Date(now.getTime() - 48 * 60 * 60 * 1000);
         const neverOnboardedRows = await db
@@ -103,6 +62,10 @@ export default withLambda(async () => {
         `);
 
         for (const row of neverOnboardedSql) {
+            // These are all registered users — classify (registered/client) rather than defaulting
+            // to 'lead' so the Contacts pill is accurate. Set on insert only; never override an
+            // existing record's tier on conflict.
+            const { contactType } = await lookupContact(db, row.email);
             const res = await db.insert(leads)
                 .values({
                     email: row.email,
@@ -112,6 +75,7 @@ export default withLambda(async () => {
                     source: 'data_analysis_job',
                     userId: row.id,
                     priority: 'medium',
+                    contactType,
                 })
                 .onConflictDoUpdate({
                     target: [leads.email, leads.opportunityReason],
@@ -144,6 +108,7 @@ export default withLambda(async () => {
 
         for (const row of cancellingRows) {
             if (!row.userId || !row.email) continue;
+            const { contactType } = await lookupContact(db, row.email);
             const res = await db.insert(leads)
                 .values({
                     email: row.email,
@@ -154,6 +119,7 @@ export default withLambda(async () => {
                     userId: row.userId,
                     organisationId: row.organisationId,
                     priority: 'high',
+                    contactType,
                 })
                 .onConflictDoUpdate({
                     target: [leads.email, leads.opportunityReason],
@@ -171,7 +137,6 @@ export default withLambda(async () => {
             FROM plans p
             INNER JOIN users u ON p.user_id = u.id
             WHERE p.status = 'active'
-              AND p.plan_type != 'trial'
               AND (
                 SELECT COUNT(DISTINCT DATE(tr.created_at))
                 FROM task_runs tr
@@ -193,6 +158,7 @@ export default withLambda(async () => {
         `);
 
         for (const row of upgradeCandidates) {
+            const { contactType } = await lookupContact(db, row.email);
             const res = await db.insert(leads)
                 .values({
                     email: row.email,
@@ -203,6 +169,7 @@ export default withLambda(async () => {
                     userId: row.user_id,
                     organisationId: row.org_id,
                     priority: 'medium',
+                    contactType,
                 })
                 .onConflictDoUpdate({
                     target: [leads.email, leads.opportunityReason],
@@ -211,6 +178,46 @@ export default withLambda(async () => {
                 .returning({ id: leads.id });
             if (res[0]) leadsCreated++;
             patternCounts.upgrade_candidates++;
+        }
+
+        // ── RE-CLASSIFY EXISTING CONTACTS (upgrade-only) ───────────────────────
+        // lookupContact only stamps contact_type on insert, and every write path
+        // conflict-updates just updated_at — so a contact captured as 'lead' stays 'lead'
+        // even after that email registers or starts paying. Nightly, recompute the correct
+        // auto-tier and move each row UP the ladder (lead < registered < client) only.
+        // Never downgrade; never touch the manual 'other' tier. Mirrors promoteContactType().
+        const reclassified = await db.execute<{ id: number }>(sql`
+            WITH computed AS (
+                SELECT
+                    l.id,
+                    l.contact_type AS stored,
+                    CASE
+                        WHEN u.id IS NULL THEN 'lead'
+                        WHEN EXISTS (
+                            SELECT 1 FROM plans p
+                            WHERE p.user_id = u.id AND p.status IN ('active','past_due')
+                        ) THEN 'client'
+                        ELSE 'registered'
+                    END AS correct
+                FROM leads l
+                LEFT JOIN users u ON lower(u.email) = lower(l.email)
+                WHERE l.contact_type IN ('lead','registered','client')
+            ),
+            ranked AS (
+                SELECT id, correct,
+                    CASE stored  WHEN 'lead' THEN 0 WHEN 'registered' THEN 1 WHEN 'client' THEN 2 END AS stored_rank,
+                    CASE correct WHEN 'lead' THEN 0 WHEN 'registered' THEN 1 WHEN 'client' THEN 2 END AS correct_rank
+                FROM computed
+            )
+            UPDATE leads l
+            SET contact_type = r.correct, updated_at = NOW()
+            FROM ranked r
+            WHERE l.id = r.id AND r.correct_rank > r.stored_rank
+            RETURNING l.id
+        `);
+        if (reclassified.length) {
+            leadsUpdated += reclassified.length;
+            console.log(`[identify-leads] reclassified ${reclassified.length} contact(s) to a higher tier`);
         }
 
         // ── Write run summary ──────────────────────────────────────────────────

@@ -4,7 +4,7 @@
 //
 // POST /.netlify/functions/admin-billing-override
 //   Body: { targetUserId, action, ...actionParams }
-//   Cookie: aura_session (must be billing_admin, platform_admin, or super_admin)
+//   Cookie: aura_session (role must clear 'override_subscription' — billing_admin and above)
 //
 // Supported actions:
 //   comp_month        — Issue a balance credit equal to the plan's MRR (pence)
@@ -19,18 +19,20 @@ import { eq, and } from 'drizzle-orm';
 import Stripe from 'stripe';
 import { getDb } from '../../db/client';
 import {
-    users, plans, masterPlans, billingOverrides, notifications, userOrganisations,
+    users, plans, masterPlans, billingOverrides, userOrganisations,
 } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { sendEmail } from '../../src/utils/email';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { requirePermission } from '../../src/utils/rbac';
 
 const jwtSecret = process.env.JWT_SECRET;
 const stripe    = process.env.STRIPE_SECRET_KEY
     ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' })
     : null;
 
-const ALLOWED_ROLES = ['billing_admin', 'platform_admin', 'super_admin'];
+// Gate: rbac.ts is the single source of truth for admin authorisation.
 const VALID_ACTIONS = ['comp_month', 'upgrade_tier', 'downgrade_tier', 'extend_trial', 'pause_subscription'] as const;
 type OverrideAction = typeof VALID_ACTIONS[number];
 
@@ -66,9 +68,8 @@ export default withLambda(async (event) => {
     const [adminUser] = await db.select({ role: users.role, firstName: users.firstName, lastName: users.lastName })
         .from(users).where(eq(users.id, adminId)).limit(1);
 
-    if (!adminUser || !ALLOWED_ROLES.includes(adminUser.role || '')) {
-        return { statusCode: 403, body: JSON.stringify({ error: `Requires one of: ${ALLOWED_ROLES.join(', ')}.` }) };
-    }
+    const denied = requirePermission(adminUser?.role, 'override_subscription');
+    if (denied) return denied;
 
     // ── 2. Parse request body ─────────────────────────────────────────────────
     let body: Record<string, any>;
@@ -231,13 +232,11 @@ export default withLambda(async (event) => {
                     ? `Your subscription has been paused and will automatically resume on ${resumeDateDisplay}.`
                     : 'Your subscription has been paused. Contact support to resume.';
 
-                await db.insert(notifications).values({
-                    userId:  uid,
-                    type:    'billing',
-                    title:   'Your subscription has been paused',
-                    message: pauseMessage,
+                await createNotification(db, 'subscription_paused_admin', {
+                    userId: uid,
+                    context: { pause: { message: pauseMessage } },
                     metadata: { pausedBy: adminId, resumeDate: resumeDateIso || null },
-                }).catch(() => {});
+                });
 
                 // AC requirement: also send email notification
                 sendEmail({

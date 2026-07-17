@@ -111,6 +111,8 @@ export interface BlogDestinationStatus {
     oauth: boolean;
     /** For OAuth destinations: where the "Connect" button should redirect. */
     connectUrl?: string;
+    /** True when the destination can be pushed as an unpublished draft (false for Hashnode). */
+    supportsDraft: boolean;
 }
 
 /** Connection state for every adapter, for the integrations/settings UI. */
@@ -134,6 +136,7 @@ export async function listBlogDestinations(db: Db, organisationId: number): Prom
             credFields: adapter.credFields,
             oauth: isOAuth,
             connectUrl: isOAuth ? `/api/oauth/${adapter.oauthProvider}/connect` : undefined,
+            supportsDraft: adapter.supportsDraft,
         };
     });
 }

@@ -7,7 +7,8 @@
 
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { featureRequests, featureRequestVotes, notifications } from '../../db/schema';
+import { featureRequests, featureRequestVotes } from '../../db/schema';
+import { createNotifications } from './notify';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -129,24 +130,11 @@ export async function broadcastFeatureStatusChange(
         if (!ids.size) return 0;
 
         const released = newStatus === 'released';
-        const type = released ? 'feature_released' : 'feature_status_change';
         const statusLabel = FR_STATUS_LABEL[newStatus] || newStatus;
-        const title = released
-            ? `🎉 A feature you backed has shipped: ${feature.title}`
-            : `Feature update: ${feature.title}`;
-        const message = released
-            ? `"${feature.title}" is now Released. Thanks for helping shape Be More Swan.`
-            : `"${feature.title}" moved to ${statusLabel}.`;
-
-        const rows = [...ids].map((userId) => ({
-            userId,
-            type,
-            title,
-            message,
+        return await createNotifications(db, released ? 'feature_released' : 'feature_status_change', [...ids], {
+            context: { feature: { title: feature.title, status_label: statusLabel } },
             metadata: { featureId: feature.id, status: newStatus },
-        }));
-        await db.insert(notifications).values(rows);
-        return rows.length;
+        });
     } catch (err) {
         console.error('[feature-requests] broadcastFeatureStatusChange failed:', err);
         return 0;

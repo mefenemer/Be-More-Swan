@@ -12,8 +12,10 @@ import jwt from 'jsonwebtoken';
 import { Resend } from 'resend';
 import { eq, and, asc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, supportTickets, ticketReplies, notifications, auditLogs } from '../../db/schema';
+import { users, supportTickets, ticketReplies, auditLogs } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { hasPermission } from '../../src/utils/rbac';
 
 const jwtSecret = process.env.JWT_SECRET;
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
@@ -31,7 +33,7 @@ async function requireAdmin(event: any): Promise<number | null> {
     catch { return null; }
     const db = getDb();
     const [row] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
-    if (!row || !['admin', 'super_admin'].includes(row.role)) return null;
+    if (!hasPermission(row?.role, 'view_tickets')) return null;
     return userId;
 }
 
@@ -210,11 +212,9 @@ export default withLambda(async (event) => {
 
                 // In-app notification to the customer
                 try {
-                    await db.insert(notifications).values({
+                    await createNotification(db, 'ticket_reply', {
                         userId: ticket.userId,
-                        type: 'ticket_reply',
-                        title: `New reply on Ticket #${ticketId}`,
-                        message: `Support has responded to your request: "${ticket.subject}".`,
+                        context: { ticket: { id: ticketId, subject: ticket.subject } },
                     });
                 } catch { /* non-blocking */ }
             }

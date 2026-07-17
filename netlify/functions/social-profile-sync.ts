@@ -6,7 +6,8 @@
 import { Handler } from '@netlify/functions';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { systemConnections, organisations, aiAssistants, notifications, userOrganisations } from '../../db/schema';
+import { systemConnections, organisations, aiAssistants, userOrganisations } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { getSecret } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
@@ -177,13 +178,11 @@ export default withLambda(async (event) => {
         const msg = syncedPlatforms.length
             ? `Business profile synced to ${syncedPlatforms.join(', ')}.${failedPlatforms.length ? ` Sync failed for: ${failedPlatforms.join(', ')}.` : ''}`
             : `Profile sync completed — no platforms updated.`;
-        await db.insert(notifications).values({
+        await createNotification(db, 'profile_sync_complete', {
             userId: callerUserId,
-            type: 'profile_sync_complete',
-            title: 'Social profile sync complete',
-            message: msg,
+            context: { sync: { summary: msg } },
             metadata: { results },
-        }).catch(() => {});
+        });
     } else {
         // Internal call — find org owner to notify
         const [owner] = await db.select({ userId: userOrganisations.userId })
@@ -191,13 +190,11 @@ export default withLambda(async (event) => {
             .where(and(eq(userOrganisations.organisationId, organisationId), eq(userOrganisations.role, 'owner')))
             .limit(1);
         if (owner) {
-            await db.insert(notifications).values({
+            await createNotification(db, 'profile_sync_complete', {
                 userId: owner.userId,
-                type: 'profile_sync_complete',
-                title: 'Social profile sync complete',
-                message: syncedPlatforms.length ? `Business profile synced to ${syncedPlatforms.join(', ')}.` : 'Profile sync completed.',
+                context: { sync: { summary: syncedPlatforms.length ? `Business profile synced to ${syncedPlatforms.join(', ')}.` : 'Profile sync completed.' } },
                 metadata: { results },
-            }).catch(() => {});
+            });
         }
     }
 

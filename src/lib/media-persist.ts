@@ -1,7 +1,12 @@
 // src/lib/media-persist.ts
-// Generate ONE image with Flux 2 and persist it durably as a content_asset (provider 'fal').
-// Used by the autonomous suggestions cron (US5), where there is no human "pick a variation" step.
-// Credit accounting is the CALLER's responsibility (hold/settle around this call).
+// Durable media persistence for the Content Library.
+//
+// Two exports:
+//   persistRemoteMediaToR2 — download a remote URL into R2 and hand back the key (the shared
+//     primitive; used wherever a provider hands us a URL that expires).
+//   generateAndPersistImage — generate ONE image with Flux 2 and persist it as a content_asset
+//     (provider 'fal'). Used by the autonomous suggestions cron (US5), where there is no human
+//     "pick a variation" step. Credit accounting is the CALLER's responsibility.
 
 import crypto from 'crypto';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
@@ -17,11 +22,50 @@ const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
 const R2_BUCKET = process.env.R2_BUCKET_NAME;
 const r2Configured = !!(R2_ENDPOINT && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && R2_BUCKET);
 
-function extFromMime(mime: string): string {
+export function extFromMime(mime: string): string {
     if (mime.includes('png')) return 'png';
     if (mime.includes('webp')) return 'webp';
     if (mime.includes('jpeg') || mime.includes('jpg')) return 'jpg';
+    if (mime.includes('mp4')) return 'mp4';
+    if (mime.includes('quicktime')) return 'mov';
+    if (mime.includes('webm')) return 'webm';
+    if (mime.includes('gif')) return 'gif';
     return 'png';
+}
+
+export function r2IsConfigured(): boolean {
+    return r2Configured;
+}
+
+/**
+ * Download a remote URL and store the bytes in R2 under the org's content/ prefix.
+ * Returns the storage key and byte size.
+ *
+ * Use this for any provider whose URLs expire — Fal result URLs and Canva export downloads
+ * (24h) both rot, so the bytes must be ours. It is deliberately NOT used for Pexels, whose
+ * terms require hotlinking their CDN (see src/utils/pexels.ts).
+ *
+ * Callers must check r2IsConfigured() first: with no R2 there is nowhere to put the bytes and
+ * the only honest fallback (keeping the expiring URL as externalUrl) is the caller's decision.
+ */
+export async function persistRemoteMediaToR2(params: {
+    orgId: number;
+    url: string;
+    contentType: string;
+    /** Key segment under content/org-N/ — e.g. 'generated', 'canva'. */
+    folder?: string;
+    label?: string;
+}): Promise<{ storageKey: string; fileSize: number }> {
+    const res = await fetch(params.url);
+    if (!res.ok) throw new Error(`Could not download ${params.label || 'media'} (${res.status}).`);
+    const bytes = Buffer.from(await res.arrayBuffer());
+    const storageKey = `content/org-${params.orgId}/${params.folder || 'generated'}/${crypto.randomUUID()}.${extFromMime(params.contentType)}`;
+    const s3 = new S3Client({
+        region: 'auto', endpoint: R2_ENDPOINT,
+        credentials: { accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY! },
+    });
+    await s3.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: storageKey, Body: bytes, ContentType: params.contentType }));
+    return { storageKey, fileSize: bytes.byteLength };
 }
 
 /**
@@ -45,16 +89,11 @@ export async function generateAndPersistImage(db: Db, params: {
     let fileSize: number | null = null;
 
     if (r2Configured) {
-        const res = await fetch(image.url);
-        if (!res.ok) throw new Error(`Could not download generated image (${res.status}).`);
-        const bytes = Buffer.from(await res.arrayBuffer());
-        fileSize = bytes.byteLength;
-        storageKey = `content/org-${params.orgId}/generated/${crypto.randomUUID()}.${extFromMime(mimeType)}`;
-        const s3 = new S3Client({
-            region: 'auto', endpoint: R2_ENDPOINT,
-            credentials: { accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY! },
+        const stored = await persistRemoteMediaToR2({
+            orgId: params.orgId, url: image.url, contentType: mimeType, label: 'generated image',
         });
-        await s3.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: storageKey, Body: bytes, ContentType: mimeType }));
+        storageKey = stored.storageKey;
+        fileSize = stored.fileSize;
     } else {
         externalUrl = image.url;
     }

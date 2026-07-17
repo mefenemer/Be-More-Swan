@@ -85,8 +85,6 @@ window.NotifKit = (function () {
         tier_mismatch:                 { label: 'Go to billing',       run: routeToBilling },
         subscription_paused:           { label: 'Go to billing',       run: routeToBilling },
         assistants_paused_downgrade:   { label: 'Go to billing',       run: routeToBilling },
-        trial_expiring_soon:           { label: 'Upgrade plan',        run: routeToBilling },
-        trial_expired:                 { label: 'Upgrade plan',        run: routeToBilling },
         task_limit_warning:            { label: 'Upgrade plan',        run: routeToBilling },
         task_limit_reached:            { label: 'Upgrade plan',        run: routeToBilling },
         run_cost_warning:              { label: 'Review usage',        run: routeToBilling },
@@ -148,7 +146,7 @@ window.NotifKit = (function () {
     // Urgent action types get a red accent (vs the default emerald) so the most
     // pressing items read as pressing.
     const URGENT_TYPES = new Set([
-        'billing_payment_failed', 'trial_expired', 'run_budget_suspended',
+        'billing_payment_failed', 'run_budget_suspended',
         'post_publish_failed', 'post_missed', 'post_generation_failed',
         'security', 'agent_anomaly', 'social_oauth_revoked', 'instagram_token_refresh_failed',
         'task_limit_reached', 'subscription_paused', 'assistants_paused_downgrade',
@@ -160,7 +158,7 @@ window.NotifKit = (function () {
         'billing_payment_failed', 'missing_stripe_sub', 'stripe_cancelled_but_db_active', 'tier_mismatch',
         'subscription_paused', 'assistants_paused_downgrade', 'social_oauth_revoked',
         'instagram_token_refresh_failed', 'integration_alert', 'post_publish_failed', 'post_missed',
-        'post_generation_failed', 'trial_expiring_soon', 'trial_expired', 'task_limit_reached',
+        'post_generation_failed', 'task_limit_reached',
         'task_limit_warning', 'run_budget_suspended', 'run_cost_warning', 'security', 'agent_anomaly',
         'risk_assessment_submitted',
     ]);
@@ -173,7 +171,7 @@ window.NotifKit = (function () {
     const COMPLETION_RESOLVED_FALLBACK = new Set([
         'onboarding_prompt', 'onboarding_incomplete',
         'billing_payment_failed', 'missing_stripe_sub', 'stripe_cancelled_but_db_active', 'subscription_paused',
-        'trial_expiring_soon', 'trial_expired', 'tier_mismatch', 'assistants_paused_downgrade',
+        'tier_mismatch', 'assistants_paused_downgrade',
         'task_limit_reached', 'task_limit_warning',
         'social_oauth_revoked', 'instagram_token_refresh_failed', 'integration_alert',
         // Issue #191 follow-up: mirrors src/utils/notification-actions.ts's COMPLETION_RESOLVED_TYPES —
@@ -241,6 +239,32 @@ window.NotifKit = (function () {
     const ASSISTANT_PALETTE = ['#6366f1', '#10b981', '#f59e0b', '#ec4899', '#06b6d4', '#8b5cf6', '#ef4444', '#14b8a6', '#f97316', '#3b82f6'];
     const actorColor = (id) => (id == null ? '#9ca3af' : ASSISTANT_PALETTE[Math.abs(Number(id)) % ASSISTANT_PALETTE.length]);
     const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    // Allow-list sanitiser for stored notification title/message before they hit innerHTML.
+    // Notification copy is authored server-side as: admin template markup + HTML-ESCAPED user
+    // values (see src/utils/notify.ts). We must NOT re-escape here (that would double-escape a
+    // value like "Acme &amp; Co"); instead we parse into an inert <template>, drop any element
+    // that isn't on the small formatting allow-list (replacing it with its text — this also
+    // neutralises <script>/<img onerror>), strip ALL attributes from the survivors (kills
+    // on*=/href/src vectors), and re-serialise. Legacy rows written before notify.ts existed
+    // carried RAW user values; the same parse+strip makes those safe too.
+    const SANITIZE_ALLOWED = new Set(['B', 'STRONG', 'EM', 'I', 'U', 'BR', 'SPAN']);
+    const sanitizeText = (s) => {
+        const tpl = document.createElement('template');
+        tpl.innerHTML = String(s ?? '');
+        const walk = (node) => {
+            for (const child of Array.from(node.childNodes)) {
+                if (child.nodeType !== 1) continue; // keep text/entities as-is
+                if (!SANITIZE_ALLOWED.has(child.tagName)) {
+                    child.replaceWith(document.createTextNode(child.textContent || ''));
+                } else {
+                    for (const attr of Array.from(child.attributes)) child.removeAttribute(attr.name);
+                    walk(child);
+                }
+            }
+        };
+        walk(tpl.content);
+        return tpl.innerHTML;
+    };
     const actorInitial = (name) => (escHtml(name).trim().charAt(0) || '?').toUpperCase();
     // Assistant → coloured initial avatar; system → the category-semantic icon (unchanged).
     const avatarHTML = (notif, st) => {
@@ -263,7 +287,7 @@ window.NotifKit = (function () {
     return {
         getNotificationAction, styleOf, catOf, prioOf, isResolved, resolvesClick,
         isDismissible, dismissBtnHTML, kindOf, fmtDate, typeLabel,
-        avatarHTML, actorEyebrowHTML, actorColor, actorInitial, escHtml,
+        avatarHTML, actorEyebrowHTML, actorColor, actorInitial, escHtml, sanitizeText,
     };
 })();
 
@@ -287,7 +311,7 @@ window.initNotifications = async function() {
     // Shared classification + rendering helpers (single source of truth — see window.NotifKit).
     const {
         getNotificationAction, styleOf, catOf, prioOf, isResolved, resolvesClick,
-        dismissBtnHTML, kindOf, fmtDate, typeLabel, avatarHTML, actorEyebrowHTML,
+        dismissBtnHTML, kindOf, fmtDate, typeLabel, avatarHTML, actorEyebrowHTML, sanitizeText,
     } = window.NotifKit;
     let activeTab = 'action';
     let groupByType = false;
@@ -342,11 +366,11 @@ window.initNotifications = async function() {
             <div class="flex-1 min-w-0">
                 ${actorEyebrowHTML(notif)}
                 <div class="flex items-center gap-2">
-                    <p class="text-sm ${seen ? 'font-semibold text-gray-700' : 'font-bold text-gray-900'}">${notif.title}</p>
+                    <p class="text-sm ${seen ? 'font-semibold text-gray-700' : 'font-bold text-gray-900'}">${sanitizeText(notif.title)}</p>
                     ${critical && !resolved ? '<span class="text-xs font-bold text-red-700 bg-red-50 border border-red-200 px-2 py-0.5 rounded-full">Urgent</span>' : ''}
                     ${resolved ? '<span class="text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">Done</span>' : ''}
                 </div>
-                ${notif.message ? `<p class="text-sm text-gray-500 mt-0.5 line-clamp-2">${notif.message}</p>` : ''}
+                ${notif.message ? `<p class="text-sm text-gray-500 mt-0.5 line-clamp-2">${sanitizeText(notif.message)}</p>` : ''}
                 <p class="text-xs text-gray-400 mt-1">${fmtDate(notif.createdAt)}</p>
             </div>
             ${resolved ? '' : `<button type="button" class="action-cta px-4 py-2 ${st.cta} text-white text-sm font-bold rounded-lg transition shrink-0 whitespace-nowrap">${action.label}</button>`}
@@ -384,8 +408,8 @@ window.initNotifications = async function() {
             ${avatarHTML(notif, st)}
             <div class="flex-1 min-w-0">
                 ${actorEyebrowHTML(notif)}
-                <p class="text-sm ${textClass}">${notif.title}</p>
-                ${notif.message ? `<p class="text-sm text-gray-500 mt-1 line-clamp-4">${notif.message}</p>` : ''}
+                <p class="text-sm ${textClass}">${sanitizeText(notif.title)}</p>
+                ${notif.message ? `<p class="text-sm text-gray-500 mt-1 line-clamp-4">${sanitizeText(notif.message)}</p>` : ''}
                 <p class="text-xs text-gray-400 mt-2">${fmtDate(notif.createdAt)}</p>
                 ${action ? `<button type="button" class="update-cta mt-2 inline-flex items-center gap-1 text-sm font-bold text-emerald-700 hover:text-emerald-800">${action.label}<span aria-hidden="true">&rarr;</span></button>` : ''}
             </div>
@@ -664,8 +688,8 @@ window.NotificationPopover = (function () {
             ${K.avatarHTML(n, st)}
             <div class="flex-1 min-w-0">
                 ${K.actorEyebrowHTML(n)}
-                <p class="text-sm font-bold text-gray-900 truncate">${K.escHtml(n.title)}</p>
-                ${n.message ? `<p class="text-xs text-gray-500 mt-0.5 line-clamp-2">${K.escHtml(n.message)}</p>` : ''}
+                <p class="text-sm font-bold text-gray-900 truncate">${K.sanitizeText(n.title)}</p>
+                ${n.message ? `<p class="text-xs text-gray-500 mt-0.5 line-clamp-2">${K.sanitizeText(n.message)}</p>` : ''}
                 <div class="mt-2 flex items-center gap-2">
                     ${action ? `<button type="button" class="pop-cta px-3 py-1.5 ${st.cta} text-white text-xs font-bold rounded-lg transition whitespace-nowrap">${K.escHtml(action.label)}</button>` : ''}
                     <span class="text-[11px] text-gray-400">${K.fmtDate(n.createdAt)}</span>

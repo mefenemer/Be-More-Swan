@@ -1,0 +1,64 @@
+# Drives the staging content-generation queue.
+#
+# Why this exists: Netlify runs scheduled functions ONLY on the production deploy —
+# never on branch/preview deploys. Staging (https://staging--bemoreswan.netlify.app)
+# is a branch deploy of the `staging` branch, so its `process-content-jobs` cron never
+# fires there. `generate-post` (an HTTP function) still queues jobs on staging, but
+# nothing drains them, so on-demand/scheduled drafts sit in the queue forever.
+#
+# This workflow pokes the staging worker over HTTP so the queue drains on staging the
+# same way the native cron drains it on production.
+#
+# NOTES / LIMITATIONS:
+#  * GitHub Actions `schedule` only runs from the DEFAULT branch (main) and has a ~5-min
+#    minimum granularity (and can be delayed under load). That's fine for a test env.
+#  * Scheduled workflows only start firing once this file is on `main`.
+#  * Production is unaffected — this only talks to the staging URL.
+#
+# REQUIRED SETUP (both must use the SAME value):
+#  1. GitHub  → repo Settings → Secrets and variables → Actions → new secret CRON_TRIGGER_SECRET
+#  2. Netlify → site → Environment variables → CRON_TRIGGER_SECRET
+#       (scope it to the staging/branch-deploy context; production doesn't need it since its
+#        native cron already runs process-content-jobs).
+# The wrapper endpoint (run-content-jobs) FAILS CLOSED — it returns 503 until the secret is set,
+# so it can never be an open, cost-incurring endpoint.
+
+name: Staging content-job drainer
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # every 5 minutes (GitHub Actions minimum)
+  workflow_dispatch: {}       # allow manual "Run workflow" from the Actions tab
+
+# If a previous run is still going, don't pile up.
+concurrency:
+  group: staging-content-cron
+  cancel-in-progress: false
+
+jobs:
+  drain:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST to staging run-content-jobs
+        env:
+          ENDPOINT: "https://staging--bemoreswan.netlify.app/.netlify/functions/run-content-jobs"
+          CRON_SECRET: ${{ secrets.CRON_TRIGGER_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::Repo secret CRON_TRIGGER_SECRET is not set — the endpoint will reject the call (401/503)."
+            exit 1
+          fi
+          echo "POST $ENDPOINT"
+          HTTP_CODE=$(curl -sS -o /tmp/body.txt -w "%{http_code}" \
+            --max-time 120 --retry 2 --retry-delay 5 \
+            -X POST -H "Authorization: Bearer ${CRON_SECRET}" "$ENDPOINT")
+          echo "HTTP $HTTP_CODE"
+          echo "----- response body -----"
+          cat /tmp/body.txt || true
+          echo
+          echo "-------------------------"
+          case "$HTTP_CODE" in
+            2*) echo "OK" ;;
+            *)  echo "::error::Worker returned HTTP $HTTP_CODE"; exit 1 ;;
+          esac

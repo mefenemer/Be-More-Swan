@@ -12,22 +12,20 @@
 // API call → 'published' | retry/backoff | 'failed'. Also reclaims rows orphaned in
 // 'publishing' by a prior timed-out tick (self-healing).
 //
-// NOTE: the Graph API calls follow the documented contracts but have NOT been validated
-// against a live Facebook Page — verify with a real connected Page.
+// The Graph API driver + Page-credential resolution live in src/utils/social-publish.ts, shared
+// with the self-test harness (social-publish-selftest.ts) so a green self-test proves this path.
 
 import { Handler } from '@netlify/functions';
-import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts, systemConnections, publishCronLog, notifications } from '../../db/schema';
-import { getSecret } from '../../src/utils/vault';
-import { resolvePostImage, type PostImage } from '../../src/utils/social-publish';
+import { scheduledPosts, publishCronLog } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
+import { resolvePostImage, publishFacebook, resolveFacebookPageCredentials, type DriverResult } from '../../src/utils/social-publish';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BATCH = 100;
 const BACKOFF_MINS = [2, 8, 30];
 const MAX_ATTEMPTS = 3;
-const GRAPH_VERSION = 'v19.0';
 // A row left in 'publishing' longer than this was orphaned by a timed-out tick — reclaim it.
 const STALE_PUBLISHING_MINS = 10;
 
@@ -37,7 +35,6 @@ type PostRow = {
     hashtags: string | null; connection_id: number | null; attempt_count: number;
     publish_date: string; content_asset_ids: unknown; assistant_id: number | null;
 };
-type DriverResult = { ok: true; id: string } | { ok: false; status: number | null; error: string };
 
 const isRetryable = (s: number | null) => s === 429 || (s != null && s >= 500);
 const esc = (s: string) => s.replace(/'/g, "''");
@@ -81,7 +78,10 @@ export default withLambda(async () => {
 
     await Promise.allSettled(posts.map(async post => {
         try {
-            const { pageId, pageToken } = await resolvePageCredentials(db, post);
+            const { pageId, pageToken } = await resolveFacebookPageCredentials(db, {
+                organisationId: post.organisation_id,
+                connectionId: post.connection_id,
+            });
 
             const text = [post.caption, post.hashtags].filter(Boolean).join('\n\n').trim();
             if (!text) throw new Error('Post has no text to publish.');
@@ -102,11 +102,9 @@ export default withLambda(async () => {
             );
             await recordPostedAssets(db, { orgId: post.organisation_id, userId: post.user_id, scheduledPostId: post.id })
                 .catch(e => console.warn(`[publish-facebook] recordPostedAssets failed for post ${post.id}:`, e?.message || e));
-            await db.insert(notifications).values({
+            await createNotification(db, 'post_published', {
                 userId: post.user_id,
-                type: 'post_published',
-                title: 'Post published to Facebook',
-                message: 'Your post has been published to Facebook.',
+                context: { platform: { label: 'Facebook' } },
                 metadata: { postId: post.id, platform: 'facebook', platformPostId: result.id, assistantId: post.assistant_id },
             });
             succeeded++;
@@ -122,87 +120,6 @@ export default withLambda(async () => {
     return { statusCode: 200, body: JSON.stringify({ processed, succeeded, failed, durationMs }) };
 });
 
-// Resolve the Page id + a Page access token for this post. Prefers a dedicated 'facebook'
-// connection (future standalone FB OAuth) and otherwise falls back to the org's Meta
-// (Instagram) connection, whose metadata carries the linked Page id and a user token with
-// pages_manage_posts. Page tokens derived from a long-lived user token are themselves
-// long-lived, so we derive on demand rather than persisting a separate secret.
-async function resolvePageCredentials(db: ReturnType<typeof getDb>, post: PostRow): Promise<{ pageId: string; pageToken: string }> {
-    // 1) Dedicated facebook connection, if one exists (by id on the post, else org-active).
-    const fbWhere = post.connection_id
-        ? eq(systemConnections.id, post.connection_id)
-        : and(
-            eq(systemConnections.organisationId, post.organisation_id),
-            eq(systemConnections.serviceName, 'facebook'),
-            eq(systemConnections.isActive, true),
-          );
-    const [fbConn] = await db.select({
-        vaultRefKey: systemConnections.vaultRefKey,
-        externalUserId: systemConnections.externalUserId,
-        metadata: systemConnections.metadata,
-    }).from(systemConnections).where(fbWhere).limit(1);
-
-    if (fbConn?.vaultRefKey) {
-        const secret = await getSecret(db, fbConn.vaultRefKey);
-        const token = secret?.token as string | undefined;
-        const pageId = fbConn.externalUserId || ((fbConn.metadata as any)?.fbPageId ?? null);
-        if (token && pageId) {
-            // A dedicated FB connection may already hold a Page token; if it's a user token,
-            // deriving the page token is still correct (Graph returns the page token).
-            const pageToken = await derivePageToken(token, pageId) ?? token;
-            return { pageId, pageToken };
-        }
-    }
-
-    // 2) Fall back to the org's Meta/Instagram connection (the only place a linked Page lives).
-    const [meta] = await db.select({
-        vaultRefKey: systemConnections.vaultRefKey,
-        metadata: systemConnections.metadata,
-    }).from(systemConnections).where(and(
-        eq(systemConnections.organisationId, post.organisation_id),
-        eq(systemConnections.serviceName, 'instagram'),
-        eq(systemConnections.isActive, true),
-    )).limit(1);
-
-    const pageId = (meta?.metadata as any)?.fbPageId as string | undefined;
-    if (!meta?.vaultRefKey || !pageId) {
-        throw new Error('No connected Facebook Page for this post. Connect a Facebook Page (via the Meta integration) to publish.');
-    }
-    const secret = await getSecret(db, meta.vaultRefKey);
-    const userToken = secret?.token as string | undefined;
-    if (!userToken) throw new Error('No Meta token in vault for connection.');
-
-    const pageToken = await derivePageToken(userToken, pageId);
-    if (!pageToken) throw new Error('Could not obtain a Page access token from the Meta connection.');
-    return { pageId, pageToken };
-}
-
-// GET /{pageId}?fields=access_token → the Page access token (requires pages_manage_posts).
-async function derivePageToken(userToken: string, pageId: string): Promise<string | null> {
-    const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${pageId}?fields=access_token&access_token=${encodeURIComponent(userToken)}`);
-    const data: any = await res.json().catch(() => ({}));
-    return res.ok ? (data?.access_token ?? null) : null;
-}
-
-// Image → /{pageId}/photos (caption becomes the post text); text/link → /{pageId}/feed.
-async function publishFacebook(pageId: string, pageToken: string, text: string, image: PostImage | null): Promise<DriverResult> {
-    const endpoint = image
-        ? `https://graph.facebook.com/${GRAPH_VERSION}/${pageId}/photos`
-        : `https://graph.facebook.com/${GRAPH_VERSION}/${pageId}/feed`;
-    const body: Record<string, string> = image
-        ? { url: image.url, caption: text, access_token: pageToken }
-        : { message: text, access_token: pageToken };
-
-    const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-    });
-    const data: any = await res.json().catch(() => ({}));
-    const id = data?.post_id || data?.id;
-    if (res.ok && id) return { ok: true, id: String(id) };
-    return { ok: false, status: res.status, error: data?.error?.message || `Facebook API error (${res.status})` };
-}
 
 // ── Failure handling (rate-limit defer / retry backoff / permanent fail) ──────
 async function handleFailure(db: ReturnType<typeof getDb>, post: PostRow, reason: FailureReason, now: Date) {
@@ -212,11 +129,9 @@ async function handleFailure(db: ReturnType<typeof getDb>, post: PostRow, reason
         await db.execute(
             `UPDATE scheduled_posts SET status = 'failed', failure_reason = '${esc(JSON.stringify(reason))}', attempt_count = ${attempt}, updated_at = now() WHERE id = ${post.id}`
         );
-        await db.insert(notifications).values({
+        await createNotification(db, 'post_publish_failed', {
             userId: post.user_id,
-            type: 'post_publish_failed',
-            title: 'Post failed to publish',
-            message: `Publishing to Facebook failed: ${reason.errorMessage}`,
+            context: { platform: { label: 'Facebook' }, failure: { reason: reason.errorMessage } },
             metadata: { postId: post.id, platform: 'facebook', reason, assistantId: post.assistant_id },
         });
     } else {

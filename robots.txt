@@ -1,0 +1,19 @@
+# robots.txt — served at https://bemoreswan.com/robots.txt (Netlify serves it from the repo root).
+#
+# Crawling is open by default. Server-rendered blog permalinks live under /b/:key/:slug and are meant
+# to be crawled and shared — they are the indexable form of posts the embeddable widget renders
+# client-side (the widget's hash-routed Shadow DOM is invisible to crawlers).
+#
+# Sitemaps are PER BLOG, not global: each workspace's published posts are listed at
+#   https://bemoreswan.com/b/<widget-public-key>/sitemap.xml
+# Submit that URL in Google Search Console for your blog. There is deliberately no single
+# cross-tenant sitemap here (it would enumerate every customer's posts at one public URL).
+#
+# NOTE: authenticated app pages (dashboard, admin, workspace, billing, …) are not blocked here
+# because their names collide on prefixes with public marketing pages (e.g. assistant-catalogue.html
+# is public, assistant-chat.html is not). Keeping those out of search belongs on a per-page noindex
+# tag, not a fragile Disallow prefix list.
+
+User-agent: *
+Allow: /
+Disallow: /api/

@@ -1616,6 +1616,10 @@
       // literal) when unset, so the backend's `businessName?.trim()` guard correctly skips
       // overwriting the organisation's real name (set at registration) with a placeholder.
       businessName: sessionStorage.getItem('aura_business_name') || '',
+      // roleKey IDENTIFIES the role — assistantName is display copy only and must not be used for
+      // that (master_assistants.name is admin-editable, so a rename would break a name match).
+      // This wizard is the Social Media Manager path, hence the literal default.
+      roleKey: sessionStorage.getItem('aura_role_key') || 'social_media_manager',
       assistantName: sessionStorage.getItem('aura_assistant_name') || 'Social Media Manager',
       customAssistantName: document.getElementById('val_assistant_name')?.value || 'Digital Assistant',
       tier: currentTierKey,

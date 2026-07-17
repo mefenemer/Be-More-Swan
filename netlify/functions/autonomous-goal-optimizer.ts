@@ -13,7 +13,8 @@
 import { Handler } from '@netlify/functions';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, goals, auditLogs, notifications } from '../../db/schema';
+import { aiAssistants, goals, auditLogs } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { tierAllows, AUTONOMOUS_TUNABLE_FIELDS, funnelDiagnosticFor } from '../../src/config/goal-metrics';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
@@ -109,13 +110,10 @@ export default withLambda(async () => {
             previousState: { [field]: previousValue },
             newState: { [field]: newValue },
         }).catch(() => {});
-        await db.insert(notifications).values({
+        await createNotification(db, 'goal_autonomous_adjustment', {
             userId: a.userId,
-            type: 'goal_autonomous_adjustment',
-            title: 'Autonomous adjustment made',
-            message: `Assistant ${a.name} automatically adjusted its ${label} to improve engagement. View Changes.`,
-            isRead: false,
-        }).catch(() => {});
+            context: { assistant: { name: a.name }, goal: { label } },
+        });
         adjusted++;
     }
 

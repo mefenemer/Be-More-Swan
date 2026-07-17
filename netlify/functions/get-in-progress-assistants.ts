@@ -7,9 +7,9 @@
 // GET only. Auth: aura_session cookie + active-org membership.
 
 import { Handler } from '@netlify/functions';
-import { and, desc, eq, inArray, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, or, sql } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, onboardingDrafts } from '../../db/schema';
+import { aiAssistants, masterAssistants, onboardingDrafts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { provisioningBlockInfo } from '../../src/utils/assistant-lifecycle';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -40,10 +40,13 @@ export default withLambda(async (event) => {
         const validating = await withTenant(orgId, (tx) => tx.select({
             id: aiAssistants.id,
             name: aiAssistants.name,
-            role: aiAssistants.aiAssistantJobRole,
+            // Live role label from master_assistants; ai_assistant_job_role is a hire-time snapshot
+            // that goes stale on an admin rename, so it's only the legacy fallback. Matches get-assistants.ts.
+            role: sql<string | null>`coalesce(${masterAssistants.name}, ${aiAssistants.aiAssistantJobRole})`,
             provisioningStatus: aiAssistants.provisioningStatus,
             provisioningBlockedReason: aiAssistants.provisioningBlockedReason,
         }).from(aiAssistants)
+            .leftJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
             .where(and(
                 eq(aiAssistants.organisationId, orgId),
                 inArray(aiAssistants.provisioningStatus, ['pending', 'failed', 'blocked']),

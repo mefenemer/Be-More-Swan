@@ -248,13 +248,11 @@
         </div>`;
     }
 
-    // Roles with marketing copy in src/config/assistant-role-content.js open the
-    // shared detail modal (src/components/assistant-detail-modal.js) on click.
-    const hasDetail = !!(window.AssistantRoleContent && window.AssistantRoleContent[a.roleKey]);
-    const detailAttrs = hasDetail ? ` data-rolekey="${_esc(a.roleKey)}" role="button" tabindex="0" aria-haspopup="dialog" style="cursor:pointer"` : '';
-    const detailHint = hasDetail
-      ? `<span class="text-sm font-semibold text-emerald-700">View Details</span>`
-      : `<span class="text-xs font-bold text-gray-500 uppercase tracking-wider">Included in Plan</span>`;
+    // Every role opens the shared detail modal (src/components/assistant-detail-modal.js) on click.
+    // This used to be gated on the role having an entry in the hardcoded copy file, which covered
+    // only 7 of ~20 roles; copy is now a DB field on every row and the modal degrades if it's blank.
+    const detailAttrs = ` data-rolekey="${_esc(a.roleKey)}" role="button" tabindex="0" aria-haspopup="dialog" style="cursor:pointer"`;
+    const detailHint = `<span class="text-sm font-semibold text-emerald-700">View Details</span>`;
 
     return `
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col hover:shadow-md transition-shadow"${detailAttrs}>
@@ -304,6 +302,8 @@
       if (!catRes.ok) throw new Error();
       const { assistants } = await catRes.json();
       _catAll = assistants || [];
+      // The detail modal reads copy from this same payload — prime it rather than re-fetching.
+      if (window.AssistantContent) window.AssistantContent.prime(_catAll);
 
       // US-AUD-2.3.1: Merge milestone progress into coming-soon cards
       if (milestoneRes.ok) {
@@ -397,10 +397,10 @@
     // (Previously this called loadView('onboarding'), but there is no 'onboarding'
     // workspace route, so the click silently did nothing.)
     const ROLE_ONBOARDING_PAGE = {
-      social_media: 'onboarding-social-media.html',
-      paid_ads:     'onboarding-performance.html',
-      data_entry:   'onboarding-inventory.html',
-      custom:       'onboarding-custom.html',
+      social_media_manager: 'onboarding-social-media.html',
+      paid_ads:             'onboarding-performance.html',
+      data_entry:           'onboarding-inventory.html',
+      custom:               'onboarding-custom.html',
     };
     sessionStorage.setItem('intended_role_key', roleKey);
     window.location.href = ROLE_ONBOARDING_PAGE[roleKey] || 'onboarding.html';

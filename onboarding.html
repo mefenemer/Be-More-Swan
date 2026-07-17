@@ -159,7 +159,7 @@
                             <input type="radio" name="assistant_role" id="role-smm" value="social_media_manager" required style="margin-top: 4px;">
                             <div style="font-size: 24px;">📱</div>
                             <div>
-                                <div style="font-weight: 600; color: #1e293b;">Social Media Manager</div>
+                                <div style="font-weight: 600; color: #1e293b;">Social Media Assistant</div>
                                 <div style="font-size: 14px; color: #64748b; margin-top: 4px;">Organic content creation and automated publishing scheduling.</div>
                             </div>
                         </label>
@@ -184,7 +184,7 @@
                                 <div class="flex items-center mb-2 justify-between">
                                     <div class="flex items-center">
                                         <div class="radio-indicator h-4 w-4 rounded-full border border-gray-300 mr-3 flex-shrink-0"></div>
-                                        <span class="font-bold text-gray-900">🎯 Performance Marketer</span>
+                                        <span class="font-bold text-gray-900">🎯 Performance Marketing Assistant</span>
                                     </div>
                                     <span id="lock_paid_ads" class="hidden text-xs font-bold text-gray-400 uppercase tracking-wide bg-gray-100 px-2 py-1 rounded">Locked</span>
                                 </div>
@@ -198,7 +198,7 @@
                                 <div class="flex items-center mb-2 justify-between">
                                     <div class="flex items-center">
                                         <div class="radio-indicator h-4 w-4 rounded-full border border-gray-300 mr-3 flex-shrink-0"></div>
-                                        <span class="font-bold text-gray-900">📦 Inventory & Order Manager</span>
+                                        <span class="font-bold text-gray-900">📦 Inventory & Order Assistant</span>
                                     </div>
                                     <span id="lock_data_entry" class="hidden text-xs font-bold text-gray-400 uppercase tracking-wide bg-gray-100 px-2 py-1 rounded">Locked</span>
                                 </div>
@@ -240,7 +240,7 @@
                                 <div class="flex items-center justify-between mb-2">
                                     <div class="flex items-center">
                                         <div class="radio-indicator h-4 w-4 rounded-full border border-gray-300 mr-3 flex-shrink-0"></div>
-                                        <span class="font-bold text-gray-900">⚙️ Operations Manager (Custom)</span>
+                                        <span class="font-bold text-gray-900">⚙️ Operations Assistant (Custom)</span>
                                     </div>
                                     <span id="lock_custom" class="hidden text-xs font-bold text-gray-400 uppercase tracking-wide bg-gray-100 px-2 py-1 rounded">Locked</span>
                                 </div>
@@ -339,19 +339,36 @@
         const role = document.querySelector('input[name="category"]:checked').value;
         const bizName = document.getElementById('business_name').value;
 
-        // NEW: Map the internal route value to the human-readable Assistant Name
+        // Map the category radio value to the canonical roleKey (db/seed-catalog.ts namespace).
+        // This is what identifies the role to the backend — a display name must never be used for
+        // that, because master_assistants.name is admin-editable and a rename would break the match.
+        // Keys are the actual radio values above; 'community_mgmt' is the retired SMM key that
+        // db/rolekey-namespace-unification.sql folded into social_media_manager.
+        // Unmapped ('inbox', 'reporting') fall through to '' — both radios are disabled anyway.
+        const routeToRoleKey = {
+            'community_mgmt': 'social_media_manager',
+            'paid_ads': 'paid_ads',
+            'data_entry': 'data_entry',
+            'custom': 'custom'
+        };
+
+        // Display name only — shown in the wizard copy, never used to look a role up.
+        // NOTE: keyed on 'social_media', which is not one of the radio values, so the SMM branch has
+        // always fallen through to the generic default. Left as-is: the SMM radio is disabled and
+        // routeMap below has the same mismatch, so this page's SMM path is dead either way.
         const assistantNameMap = {
-            'social_media': 'Social Media Manager',
-            'paid_ads': 'Performance Marketer',
-            'data_entry': 'Inventory & Order Manager',
-            'custom': 'Operations Manager'
+            'social_media': 'Social Media Assistant',
+            'paid_ads': 'Performance Marketing Assistant',
+            'data_entry': 'Inventory & Order Assistant',
+            'custom': 'Operations Assistant'
         };
         const assistantDisplayName = assistantNameMap[role] || 'Be More Swan Digital Assistant';
 
         // Save all data to session storage so child pages (and the backend) can use it
         sessionStorage.setItem('aura_client_name', nameInput.value);
         sessionStorage.setItem('aura_business_name', bizName);
-        sessionStorage.setItem('aura_assistant_name', assistantDisplayName); // NEW!
+        sessionStorage.setItem('aura_assistant_name', assistantDisplayName); // display only
+        sessionStorage.setItem('aura_role_key', routeToRoleKey[role] || ''); // identity — sent to onboarding.ts
 
         if(currentTierKey) sessionStorage.setItem('aura_tier', currentTierKey);
 

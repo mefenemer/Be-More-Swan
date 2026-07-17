@@ -15,7 +15,8 @@
 //
 // A draft publishes unattended only when ALL of these hold:
 //   1. The deployer put this platform in 'auto_publish' (default: 'review').
-//   2. Its media was NOT AI-generated — the scorer reads the caption, never the image.
+//   2. Its media was NOT AI-generated — the scorer reads the caption, never the image — UNLESS the
+//      deployer has explicitly opted in via onboardingContext.allowAiMediaAutoPublish (default off).
 //   3. The confidence scorer genuinely rated the caption green with zero factual claims.
 //   4. (runtime) A live connection exists to publish through.
 //   5. (runtime) The assistant is under its rolling-7-day unattended-publish ceiling.
@@ -34,6 +35,7 @@ import {
     type ConfidenceResult,
 } from './post-confidence';
 import { resolvePostingSchedule, computeScheduleSlots } from '../config/posting-cadence';
+import { normalizePlatform } from '../config/platform-formats';
 
 /**
  * The platforms an autonomous drafter actually exists for. THE single source of truth:
@@ -41,8 +43,22 @@ import { resolvePostingSchedule, computeScheduleSlots } from '../config/posting-
  * list to the settings UI so the toggles can't drift out of sync with what the backend does.
  * Adding a platform here without a drafter would render a toggle that silently does nothing.
  */
-export const AUTONOMOUS_DRAFT_PLATFORMS = ['instagram'] as const;
+export const AUTONOMOUS_DRAFT_PLATFORMS = ['instagram', 'facebook', 'linkedin', 'x'] as const;
 export type AutonomousDraftPlatform = typeof AUTONOMOUS_DRAFT_PLATFORMS[number];
+
+/**
+ * The platforms an assistant should autonomously DRAFT for: its configured primary_platforms
+ * (normalised) intersected with the platforms a drafter actually exists for. Order follows
+ * AUTONOMOUS_DRAFT_PLATFORMS for determinism. Empty when the assistant has no recognised platforms
+ * configured — callers fall back to their legacy single-platform behaviour in that case.
+ */
+export function resolveAutonomousDraftPlatforms(onboardingContext: unknown): AutonomousDraftPlatform[] {
+    const ctx = (onboardingContext && typeof onboardingContext === 'object')
+        ? (onboardingContext as Record<string, unknown>) : {};
+    const raw = Array.isArray(ctx.primary_platforms) ? ctx.primary_platforms : [];
+    const wanted = new Set(raw.map(normalizePlatform).filter((p): p is AutonomousDraftPlatform => p !== null));
+    return AUTONOMOUS_DRAFT_PLATFORMS.filter(p => wanted.has(p));
+}
 
 /** 'review' = always queue for human approval. 'auto_publish' = allow a clean green post to schedule itself. */
 export type PublishMode = 'review' | 'auto_publish';
@@ -129,6 +145,17 @@ export function getPlatformMode(onboardingContext: unknown, platform: string): P
 }
 
 /**
+ * Whether the deployer has opted this assistant into auto-publishing posts whose image was
+ * AI-generated. Off by default (condition #2 below): an AI image built from an AI-written prompt
+ * would otherwise reach a real account with nobody having seen it. Stored as a top-level boolean on
+ * onboardingContext.allowAiMediaAutoPublish, toggled in the Operational Setup → Autopilot card.
+ */
+export function readAllowAiMediaAutoPublish(onboardingContext: unknown): boolean {
+    if (!onboardingContext || typeof onboardingContext !== 'object') return false;
+    return (onboardingContext as Record<string, unknown>).allowAiMediaAutoPublish === true;
+}
+
+/**
  * The gate itself. Call once per autonomous draft, before the scheduledPosts insert.
  *
  * Both short-circuits skip the LLM call: review mode is the default for every assistant, and
@@ -149,8 +176,9 @@ export async function gateAutonomousDraft(args: {
     // The confidence scorer reads the CAPTION only. On an image-first platform that leaves the
     // riskiest half of the post ungated: an AI image generated from an AI-written prompt would
     // reach a real account with no human ever having seen it. Stock photos and library assets
-    // were chosen or uploaded by a person, so they carry that review already.
-    if (args.mediaSource === 'ai') {
+    // were chosen or uploaded by a person, so they carry that review already. The deployer can
+    // opt out of this hold via allowAiMediaAutoPublish (default off) — see readAllowAiMediaAutoPublish.
+    if (args.mediaSource === 'ai' && !readAllowAiMediaAutoPublish(args.onboardingContext)) {
         return { status: 'pending_approval', reason: 'unreviewed_ai_media', confidence: null };
     }
 

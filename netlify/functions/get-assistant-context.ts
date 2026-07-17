@@ -1,5 +1,5 @@
 import { Handler } from '@netlify/functions';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
 import { aiAssistants, dpaAcceptances, masterAssistants } from '../../db/schema';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
@@ -28,8 +28,12 @@ export default withLambda(async (event) => {
     return withTenant(orgId, async (tx) => {
         const [row] = await tx.select({
             id: aiAssistants.id,
+            // The user's chosen name for THEIR assistant — stable, never follows a rename.
             name: aiAssistants.name,
-            role: aiAssistants.aiAssistantJobRole,
+            // The ROLE label. master_assistants.name is the live, admin-editable source;
+            // ai_assistant_job_role is only a hire-time snapshot that goes stale on rename, so it's
+            // just the fallback for legacy rows with no masterAssistantId.
+            role: sql<string | null>`coalesce(${masterAssistants.name}, ${aiAssistants.aiAssistantJobRole})`,
             status: aiAssistants.provisioningStatus,
             isActive: aiAssistants.isActive,
             // Canonical lifecycle state (assistant-lifecycle-epic) — distinct from the master

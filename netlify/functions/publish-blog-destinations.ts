@@ -3,7 +3,11 @@
 // Idempotent — re-running updates the existing external post (via the stored externalId) instead of
 // duplicating. Per-target outcome is written back into blog_posts.destinations jsonb.
 //
-// POST { postId, targets: ['devto','hashnode'] }  → { results: { [target]: {...} } }
+// POST { postId, targets: ['devto','hashnode'], draftTargets: ['ghost'] }
+//   → { results: { [target]: {...} } }
+//
+// `draftTargets` is a subset of `targets` to push unpublished, leaving the author to publish from the
+// CMS itself (US 3.2 AC4). Adapters that can't draft (Hashnode) reject the combination outright.
 
 import { HandlerEvent } from '@netlify/functions';
 import { and, eq } from 'drizzle-orm';
@@ -14,6 +18,8 @@ import { logAuditEvent } from '../../src/utils/audit';
 import { getBlogAdapter, isBlogDestinationId } from '../../src/utils/blog-destinations';
 import type { BlogDestinationId, BlogDestinationPost } from '../../src/utils/blog-destinations';
 import { resolveDestinationCreds } from '../../src/utils/blog-destinations/store';
+import { stripMediaForSyndication } from '../../src/utils/blog-publish';
+import { renderMarkdown } from '../../src/utils/markdown-render';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({ statusCode, body: JSON.stringify(body) });
@@ -32,7 +38,7 @@ export default withLambda(async (event: HandlerEvent) => {
     if ('error' in ctx) return ctx.error;
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed.' });
 
-    let body: { postId?: number; targets?: unknown };
+    let body: { postId?: number; targets?: unknown; draftTargets?: unknown };
     try {
         body = JSON.parse(event.body || '{}');
     } catch {
@@ -45,6 +51,15 @@ export default withLambda(async (event: HandlerEvent) => {
     const targets = Array.isArray(body.targets) ? body.targets.filter(isBlogDestinationId) : [];
     if (!targets.length) return json(400, { error: 'No valid targets supplied.' });
 
+    const draftTargets = new Set(Array.isArray(body.draftTargets) ? body.draftTargets.filter(isBlogDestinationId) : []);
+    // Fail the whole request rather than per-target: asking for a draft and getting a live post on
+    // someone's blog is exactly the surprise AC4 exists to prevent.
+    const undraftable = [...draftTargets].filter((id) => !getBlogAdapter(id).supportsDraft);
+    if (undraftable.length) {
+        const labels = undraftable.map((id) => getBlogAdapter(id).label).join(', ');
+        return json(422, { error: `${labels} cannot receive drafts — publish live, or deselect it.` });
+    }
+
     const [post] = await db
         .select()
         .from(blogPosts)
@@ -54,15 +69,25 @@ export default withLambda(async (event: HandlerEvent) => {
     if (post.status !== 'published') return json(409, { error: 'Publish the post to your site before syndicating it.' });
     if (!post.bodyMarkdown?.trim()) return json(422, { error: 'This post has no body to publish.' });
 
-    const payloadHtml =
-        post.publishedPayload && typeof post.publishedPayload === 'object' && 'html' in post.publishedPayload
-            ? String((post.publishedPayload as { html?: unknown }).html ?? '') || null
-            : null;
+    // Syndicated copies are TEXT ONLY (docs/blog-media-composition-plan.md §3.5, decided): no hero,
+    // no inline images, no video/audio, columns unwrapped to stacked prose. Our media URLs are
+    // presigned/expiring and Pexels is hotlink-only under its ToS, so we hand external platforms no
+    // media rather than links that 404 or breach a licence — the same reasoning that already keeps
+    // `coverImageUrl` null below.
+    //
+    // Both fields are derived from ONE stripped source. bodyHtml can't just be nulled: the
+    // WordPress / WordPress.com / Ghost adapters send `bodyHtml || bodyMarkdown` into an HTML
+    // field, so dropping it would post raw Markdown to those three. And the published_payload
+    // snapshot is unusable here by construction — its media is deliberately src-less.
+    const syndicatedMarkdown = stripMediaForSyndication(post.bodyMarkdown);
+    if (!syndicatedMarkdown.trim()) {
+        return json(422, { error: 'This post is media-only. Add some text before syndicating it — external platforms receive text only.' });
+    }
 
     const projected: BlogDestinationPost = {
         title: post.title,
-        bodyMarkdown: post.bodyMarkdown,
-        bodyHtml: payloadHtml,
+        bodyMarkdown: syndicatedMarkdown,
+        bodyHtml: renderMarkdown(syndicatedMarkdown) || null,
         canonicalUrl: post.canonicalUrl ?? null,
         tags: Array.isArray(post.tags) ? (post.tags as unknown[]).map(String) : [],
         // Private-R2 heroes are presigned/expiring, so we never hand an external platform a URL that
@@ -88,7 +113,10 @@ export default withLambda(async (event: HandlerEvent) => {
                     ? String((prior as { externalId?: unknown }).externalId ?? '') || undefined
                     : undefined;
 
-            const out = await adapter.publish(projected, creds as never, priorExternalId);
+            const out = await adapter.publish(projected, creds as never, {
+                externalId: priorExternalId,
+                asDraft: draftTargets.has(target),
+            });
             results[target] = { status: out.status, externalId: out.externalId, url: out.url, at: new Date().toISOString() };
         } catch (err) {
             results[target] = { status: 'error', error: err instanceof Error ? err.message : 'Publish failed.' };

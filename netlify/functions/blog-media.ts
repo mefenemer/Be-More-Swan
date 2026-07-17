@@ -133,8 +133,10 @@ export default withLambda(async (event: HandlerEvent) => {
     if (role === 'feature' && asset.assetType !== 'image') {
         return { statusCode: 422, body: JSON.stringify({ error: 'The feature graphic must be an image.' }) };
     }
-    if (asset.assetType !== 'image' && asset.assetType !== 'video') {
-        return { statusCode: 422, body: JSON.stringify({ error: 'Only images and videos can be attached.' }) };
+    // The body takes image, video and audio; the feature slot is image-only and already rejected
+    // above. Audio in the hero stays explicitly out of scope (plan §6).
+    if (asset.assetType !== 'image' && asset.assetType !== 'video' && asset.assetType !== 'audio') {
+        return { statusCode: 422, body: JSON.stringify({ error: 'Only images, videos and audio can be attached.' }) };
     }
 
     let nextFeature = post.featureAssetId;

@@ -33,15 +33,27 @@ const VALID_DURATIONS = VIDEO_DURATIONS;
 // downstream display, defaulting to a vertical/Reel frame when the client doesn't supply one.
 const DEFAULT_ASPECT: AspectRatio = '9:16';
 
-// Kick the background poller (fire-and-forget). Mirrors triggerExtraction in storage-confirm-upload.
-function triggerWorker(headers: Record<string, string | undefined>, jobId: number): void {
+// Kick the background poller. MUST be awaited: on Lambda the runtime freezes as soon as the handler
+// returns, so an un-awaited fetch gets frozen mid-flight and never reaches the worker — leaving the
+// job stuck 'queued'. Posting to a -background function returns 202 before the work runs, so the
+// await only costs the trigger round-trip; the AbortController caps a stalled trigger.
+async function triggerWorker(headers: Record<string, string | undefined>, jobId: number): Promise<void> {
     const baseUrl = resolveBaseUrl(headers);
     if (!baseUrl) { console.error('[generate-ai-video] no base URL — worker not triggered for job', jobId); return; }
-    fetch(`${baseUrl}/.netlify/functions/process-media-job-background`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId }),
-    }).catch(err => console.error('[generate-ai-video] failed to trigger worker:', err));
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5_000);
+    try {
+        await fetch(`${baseUrl}/.netlify/functions/process-media-job-background`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jobId }),
+            signal: controller.signal,
+        });
+    } catch (err) {
+        console.error('[generate-ai-video] failed to trigger worker:', err);
+    } finally {
+        clearTimeout(timer);
+    }
 }
 
 export default withLambda(async (event) => {
@@ -125,7 +137,7 @@ export default withLambda(async (event) => {
             organisationId: orgId, userId, mediaType: 'video', prompt, aspectRatio, durationSeconds,
             model: VIDEO_MODEL, creditCost: VIDEO_CREDIT_COST, status: 'processing',
         }).returning({ id: mediaGenerationJobs.id });
-        triggerWorker(event.headers as any, job.id);
+        await triggerWorker(event.headers as any, job.id);
         return { statusCode: 202, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId: job.id, mock: true }) };
     }
 
@@ -136,7 +148,7 @@ export default withLambda(async (event) => {
             model: VIDEO_MODEL, creditCost: VIDEO_CREDIT_COST, status: 'processing',
             falRequestId: requestId, falStatusUrl: statusUrl, falResponseUrl: responseUrl,
         }).returning({ id: mediaGenerationJobs.id });
-        triggerWorker(event.headers as any, job.id);
+        await triggerWorker(event.headers as any, job.id);
         return { statusCode: 202, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobId: job.id }) };
     } catch (err) {
         await settleHold(db, { orgId, amount: VIDEO_CREDIT_COST, success: false, mediaType: 'video', userId });

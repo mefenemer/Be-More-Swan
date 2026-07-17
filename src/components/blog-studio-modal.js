@@ -35,6 +35,49 @@
   function el(id) { return document.getElementById(id); }
   function setStatus(id, msg) { var e = el(id); if (e) e.textContent = msg; }
 
+  // Coloured success/error banner — the Create Post sheet's gpSetPanelStatus, ported. Replaces the
+  // grey one-liners and alert()s so a failure actually reads as one.
+  function setBanner(id, msg, type) {
+    var e = el(id);
+    if (!e) return;
+    if (!msg) { e.className = 'bs-banner bs-hidden'; e.textContent = ''; return; }
+    e.className = 'bs-banner ' + (type === 'error' ? 'bs-banner-error' : 'bs-banner-ok');
+    e.textContent = msg;
+  }
+
+  // Voice dictation into a text field (mirrors gpStartVoice in workspace.html — the Blog Studio is
+  // loaded standalone too, so it can't borrow that page-scoped copy).
+  function startVoice(targetId, micId) {
+    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    var mic = el(micId);
+    if (!SR) { setBanner('bs-brief-status', 'Voice input is not supported in this browser. Try Chrome or Safari.', 'error'); return; }
+    var rec = new SR();
+    rec.lang = 'en-GB';
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    if (mic) mic.classList.add('bs-recording');
+    rec.onresult = function (e) {
+      var field = el(targetId);
+      if (!field) return;
+      var transcript = e.results[0][0].transcript;
+      field.value = (field.value ? field.value + ' ' : '') + transcript;
+    };
+    rec.onend = function () { if (mic) mic.classList.remove('bs-recording'); };
+    rec.onerror = function () { if (mic) mic.classList.remove('bs-recording'); };
+    rec.start();
+  }
+
+  // Live length readout for the body — the long-form equivalent of Create Post's per-platform
+  // counter chips. Thin posts are the blog failure mode, so the chip warns under 300 words.
+  function refreshReadout(md) {
+    var out = el('bs-readout');
+    if (!out) return;
+    var words = (md || '').replace(/[#*_`>\-\[\]()!]/g, ' ').split(/\s+/).filter(Boolean).length;
+    var mins = Math.max(1, Math.round(words / 200));
+    out.textContent = words + (words === 1 ? ' word · ' : ' words · ') + (words < 200 ? 'under a minute read' : '~' + mins + ' min read');
+    out.className = 'bs-chip' + (words > 0 && words < 300 ? ' bs-chip-warn' : '');
+  }
+
   // ── Gate helpers ─────────────────────────────────────────────────────────────────────────────
   // "Active" mirrors the social gate in workspace.html (get-assistants filter): not pending/failed/
   // blocked, and not archived.
@@ -71,6 +114,9 @@
     + '.bs-field{margin-bottom:12px;}'
     + '.bs-field label{display:block;font-size:12px;color:#6b7280;margin-bottom:4px;}'
     + '.bs-field input,.bs-field select,.bs-field textarea{width:100%;padding:8px;border:1px solid #d1d5db;border-radius:8px;font:inherit;}'
+    // ...but a checkbox is not a text field: the rule above stretched it across the row and pushed
+    // its label away. Keep it intrinsic and sit it next to the text it labels.
+    + '.bs-field input[type="checkbox"]{width:auto;padding:0;margin:0 6px 0 0;vertical-align:middle;accent-color:#ec4899;}'
     + '.bs-btn{padding:8px 14px;border-radius:8px;border:0;cursor:pointer;font-size:14px;}'
     + '.bs-btn-primary{background:#ec4899;color:#fff;}'
     + '.bs-btn-ghost{background:#f3f4f6;color:#111827;}'
@@ -84,13 +130,45 @@
     + '.bs-feature-empty{font-size:12px;color:#6b7280;border:1px dashed #d1d5db;border-radius:8px;padding:20px;text-align:center;}'
     + '.bs-feature-preview img{width:100%;border-radius:8px;display:block;}'
     + '.bs-media-picker{margin-top:12px;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;max-height:260px;overflow:auto;}'
-    + '.bs-media-picker img{width:100%;height:72px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid transparent;}'
-    + '.bs-media-picker img:hover{border-color:#ec4899;}'
+    + '.bs-media-picker img,.bs-media-picker video{width:100%;height:72px;object-fit:cover;border-radius:6px;cursor:pointer;border:2px solid transparent;background:#000;}'
+    + '.bs-media-picker img:hover,.bs-media-picker video:hover{border-color:#ec4899;}'
     + '.bs-media-empty{grid-column:1 / -1;font-size:12px;color:#6b7280;text-align:center;padding:12px;}'
+    // Audio has no thumbnail — a labelled tile stands in, sized to match the image/video ones.
+    + '.bs-media-audio{height:72px;border-radius:6px;cursor:pointer;border:2px solid #e5e7eb;'
+      + 'display:flex;align-items:center;justify-content:center;text-align:center;padding:4px;'
+      + 'font-size:11px;color:#374151;background:#f9fafb;overflow:hidden;word-break:break-word;}'
+    + '.bs-media-audio:hover{border-color:#ec4899;}'
     + '.bs-synd-row{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;}'
     + '.bs-synd-form{flex-basis:100%;margin-top:8px;}'
     + '.bs-linkbtn{background:none;border:0;color:#6b7280;font-size:12px;cursor:pointer;text-decoration:underline;padding:0;}'
-    + '.bs-linkbtn:hover{color:#ec4899;}';
+    + '.bs-linkbtn:hover{color:#ec4899;}'
+    // Feedback + composer affordances brought over from the Create Post sheet.
+    + '.bs-banner{font-size:13px;border-radius:10px;padding:10px 12px;border:1px solid;margin-top:12px;}'
+    + '.bs-banner-ok{background:#fdf2f8;color:#9d174d;border-color:#fbcfe8;}'
+    + '.bs-banner-error{background:#fef2f2;color:#991b1b;border-color:#fecaca;}'
+    + '.bs-textarea-wrap{position:relative;}'
+    + '.bs-mic{position:absolute;bottom:8px;right:8px;background:none;border:0;padding:0;cursor:pointer;'
+    + 'color:#9ca3af;line-height:0;}'
+    + '.bs-mic:hover{color:#ec4899;}'
+    + '.bs-mic.bs-recording{color:#ef4444;}'
+    + '.bs-textarea-wrap textarea{padding-right:34px;}'
+    + '.bs-chip{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;font-size:12px;border-radius:8px;'
+    + 'border:1px solid #e5e7eb;color:#4b5563;background:#f9fafb;}'
+    + '.bs-chip-warn{border-color:#fcd34d;color:#b45309;background:#fffbeb;}'
+    + '.bs-swan{display:inline-flex;align-items:center;gap:6px;background:none;border:0;padding:0;cursor:pointer;'
+    + 'font-size:12px;font-weight:600;color:#be185d;}'
+    + '.bs-swan:hover{color:#9d174d;}'
+    + '.bs-swan img{width:16px;height:16px;object-fit:contain;}'
+    + '.bs-btn-danger{background:#fff;color:#b91c1c;border:1px solid #fecaca;}'
+    + '.bs-btn-danger:hover{background:#fef2f2;}'
+    + '.bs-btn-outline{background:#fff;color:#be185d;border:1px solid #f9a8d4;}'
+    + '.bs-btn-outline:hover{background:#fdf2f8;}'
+    + '.bs-btn:disabled{opacity:.5;cursor:not-allowed;}'
+    + '.bs-ready-q{font-size:14px;font-weight:600;color:#1f2937;margin:0 0 8px;}'
+    + '.bs-stack{display:flex;flex-direction:column;gap:8px;}';
+
+  var MIC_SVG = '<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
+    + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4M12 3a4 4 0 014 4v4a4 4 0 01-8 0V7a4 4 0 014-4z"/></svg>';
 
   // Author is always the user (no "Written by"); the brief is Topic + Keywords + Voice + Notes.
   var MARKUP = ''
@@ -114,12 +192,17 @@
     + '      <label id="bs-save-tone-wrap" class="bs-status bs-hidden" style="margin-top:6px;">'
     + '        <input id="bs-save-tone" type="checkbox"> Save this as <span id="bs-save-tone-name"></span>&rsquo;s voice</label>'
     + '    </div>'
-    + '    <div class="bs-field"><label>Rough notes / transcript (optional)</label><textarea id="bs-notes" rows="3"></textarea></div>'
+    + '    <div class="bs-field"><label>Rough notes / transcript (optional)</label>'
+    + '      <div class="bs-textarea-wrap"><textarea id="bs-notes" rows="3" placeholder="Dictate or paste your notes…"></textarea>'
+    + '        <button type="button" id="bs-notes-mic" class="bs-mic" title="Dictate notes" aria-label="Dictate notes">' + MIC_SVG + '</button>'
+    + '      </div>'
+    + '    </div>'
     + '    <div class="bs-row">'
     + '      <button class="bs-btn bs-btn-ghost" data-path="blank">Start blank</button>'
     + '      <button class="bs-btn bs-btn-ghost" data-path="improve">Improve draft</button>'
     + '      <button class="bs-btn bs-btn-primary" data-path="generate">AI generate</button>'
     + '    </div>'
+    + '    <div id="bs-brief-status" class="bs-banner bs-hidden"></div>'
     + '  </div>'
     + '  <div id="bs-workspace" class="bs-grid bs-hidden">'
     + '    <div>'
@@ -131,7 +214,14 @@
     + '          <option value="Georgia, serif">Serif</option>'
     + '          <option value="\'Inter\', sans-serif">Inter</option></select></div>'
     + '        <div class="bs-field"><label><input id="bs-badge" type="checkbox" checked> Show AI transparency badge</label></div>'
-    + '        <button id="bs-save-theme" class="bs-btn bs-btn-ghost">Save theme</button>'
+    // Where you republish the widget on your own site. Both fields let a post\'s canonical URL credit
+    // YOUR domain instead of our permalink — leave blank to use the Be More Swan permalink.
+    + '        <div class="bs-field"><label>Your site URL <span class="bs-status" style="font-weight:400;">(optional)</span></label>'
+    + '          <input id="bs-site-base" type="url" placeholder="https://acme.com"></div>'
+    + '        <div class="bs-field"><label>Post URL pattern</label>'
+    + '          <input id="bs-site-path" placeholder="/blog/{slug}">'
+    + '          <span class="bs-status" style="font-size:11px;">Must start with / and contain {slug}. Needed for canonical URLs to point at your site.</span></div>'
+    + '        <button id="bs-save-theme" class="bs-btn bs-btn-ghost">Save settings</button>'
     + '        <div style="margin-top:12px;"><label class="bs-status">Embed snippet</label>'
     + '          <div id="bs-snippet" class="bs-snippet">Create a widget to get your embed code.</div></div>'
     + '      </div>'
@@ -142,17 +232,24 @@
     + '          <button id="bs-feature-library" class="bs-btn bs-btn-ghost">Choose from Library</button>'
     + '          <button id="bs-feature-upload" class="bs-btn bs-btn-ghost">Upload</button>'
     + '          <button id="bs-feature-pexels" class="bs-btn bs-btn-ghost">Stock photo</button>'
+    + '          <button id="bs-feature-canva" class="bs-btn bs-btn-ghost">Canva</button>'
     + '          <button id="bs-feature-ai" class="bs-btn bs-btn-ghost">AI generate</button>'
     + '          <button id="bs-feature-remove" class="bs-btn bs-btn-ghost bs-hidden">Remove</button>'
     + '          <input type="file" id="bs-feature-upload-input" class="bs-hidden" accept="image/png,image/jpeg,image/gif,image/webp">'
     + '        </div>'
-    + '        <div style="margin-top:14px;font-size:12px;color:#6b7280;">Inline body image</div>'
+    + '        <div style="margin-top:14px;font-size:12px;color:#6b7280;">Inline body media</div>'
     + '        <div class="bs-row" style="margin-top:6px;">'
     + '          <button id="bs-inline-library" class="bs-btn bs-btn-ghost">Library</button>'
     + '          <button id="bs-inline-upload" class="bs-btn bs-btn-ghost">Upload</button>'
     + '          <button id="bs-inline-pexels" class="bs-btn bs-btn-ghost">Stock</button>'
+    + '          <button id="bs-inline-canva" class="bs-btn bs-btn-ghost">Canva</button>'
     + '          <button id="bs-inline-ai" class="bs-btn bs-btn-ghost">AI</button>'
-    + '          <input type="file" id="bs-inline-upload-input" class="bs-hidden" accept="image/png,image/jpeg,image/gif,image/webp">'
+    // Video and audio are body-only: the hero input above stays images-only. Audio is upload-only
+    // by decision (plan §7.4) — there is no stock provider and no AI generation, which is why the
+    // Stock and AI buttons beside this one stay image/video. MIME list mirrors
+    // content-upload-url.ts's ALLOWED_MIME_TYPES — widening it here without widening that would
+    // just move the rejection to a worse place.
+    + '          <input type="file" id="bs-inline-upload-input" class="bs-hidden" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm,audio/mpeg,audio/mp4,audio/wav,audio/webm,audio/ogg">'
     + '        </div>'
     + '        <div id="bs-ai-form" class="bs-field bs-hidden" style="margin-top:12px;">'
     + '          <input id="bs-ai-prompt" placeholder="Describe the image…">'
@@ -162,6 +259,12 @@
     + '          <button id="bs-pexels-go" class="bs-btn bs-btn-ghost" style="margin-top:8px;">Search</button></div>'
     + '        <div id="bs-media-picker" class="bs-media-picker bs-hidden"></div>'
     + '        <span id="bs-media-status" class="bs-status"></span>'
+    // Column layouts. Media can then be dragged into either side; the row stacks on a phone.
+    + '        <div style="margin-top:14px;font-size:12px;color:#6b7280;">Layout</div>'
+    + '        <div class="bs-row" style="margin-top:6px;">'
+    + '          <button id="bs-cols-2" class="bs-btn bs-btn-ghost">2 columns</button>'
+    + '          <button id="bs-cols-3" class="bs-btn bs-btn-ghost">3 columns</button>'
+    + '        </div>'
     + '      </div>'
     + '      <div class="bs-panel" style="margin-top:16px;">'
     + '        <h3>Syndicate</h3>'
@@ -181,23 +284,59 @@
     + '      </div>'
     + '    </div>'
     + '    <div>'
+    + '      <div class="bs-row" style="justify-content:space-between;margin-bottom:4px;">'
+    + '        <span id="bs-readout" class="bs-chip">0 words · under a minute read</span>'
+    + '        <button type="button" id="bs-swan-improve" class="bs-swan bs-hidden"'
+    + '          title="Ask your assistant to suggest improvements to this draft">'
+    + '          <img src="/images/BeMoreSwan_SwanAI.png" alt=""><span>Ask Swan to improve</span></button>'
+    + '      </div>'
     + '      <input id="bs-title" class="bs-title-input" placeholder="Post title">'
     + '      <div id="bs-editor" class="bs-editor"></div>'
     + '      <div class="bs-row" style="margin-top:16px;">'
     + '        <button id="bs-generate-hooks" class="bs-btn bs-btn-ghost">Generate A/B hooks</button>'
     + '        <button id="bs-generate-seo" class="bs-btn bs-btn-ghost">Generate SEO</button>'
-    + '        <button id="bs-publish" class="bs-btn bs-btn-primary">Publish</button>'
-    + '        <span id="bs-publish-status" class="bs-status"></span>'
     + '      </div>'
-    + '      <div class="bs-row" style="margin-top:16px;">'
-    + '        <button id="bs-approve" class="bs-btn bs-btn-primary">Approve &amp; Schedule</button>'
-    + '        <span id="bs-schedule-status" class="bs-status"></span>'
+    // Crawler-facing metadata (US 1.3). Generate SEO fills these in; the author can override before
+    // publishing. Saved via save-blog-draft; emitted server-side by the /b/:key/:slug permalink.
+    + '      <div class="bs-panel" style="margin-top:16px;">'
+    + '        <h3>SEO &amp; social preview</h3>'
+    + '        <div class="bs-field"><label>Search title <span id="bs-meta-title-count" class="bs-status" style="font-weight:400;"></span></label>'
+    + '          <input id="bs-meta-title" maxlength="120" placeholder="Shown as the clickable headline in Google"></div>'
+    + '        <div class="bs-field"><label>Search description <span id="bs-meta-desc-count" class="bs-status" style="font-weight:400;"></span></label>'
+    + '          <textarea id="bs-meta-desc" maxlength="320" rows="3" placeholder="The summary beneath the title in search results"></textarea></div>'
+    + '        <div class="bs-field"><label>Search visibility</label>'
+    + '          <select id="bs-robots">'
+    + '            <option value="index,follow">Indexed — show in search results (default)</option>'
+    + '            <option value="noindex,follow">Hidden from search — live but not indexed</option>'
+    + '            <option value="index,nofollow">Indexed, don\'t follow links</option>'
+    + '            <option value="noindex,nofollow">Fully hidden from search engines</option>'
+    + '          </select></div>'
+    + '        <div class="bs-field"><label>Canonical URL</label>'
+    + '          <div id="bs-canonical" class="bs-status" style="word-break:break-all;">Set when the post is published.</div></div>'
+    + '        <span id="bs-seo-status" class="bs-status"></span>'
     + '      </div>'
-    + '      <div class="bs-row" style="margin-top:8px;">'
-    + '        <span class="bs-status">Or set a specific time:</span>'
-    + '        <input id="bs-schedule-at" type="datetime-local" style="width:auto;">'
-    + '        <button id="bs-schedule" class="bs-btn bs-btn-ghost">Schedule</button>'
-    + '        <button id="bs-unschedule" class="bs-btn bs-btn-ghost bs-hidden">Unschedule</button>'
+    // Scheduling mirrors the Create Post sheet: one guided question, not three loose button rows.
+    + '      <div class="bs-panel" style="margin-top:16px;">'
+    + '        <p class="bs-ready-q">Your post is ready. How should it go out?</p>'
+    + '        <div class="bs-stack">'
+    + '          <button id="bs-approve" class="bs-btn bs-btn-outline">Let <span id="bs-approve-name">your assistant</span> schedule it</button>'
+    + '          <button id="bs-pick-time" class="bs-btn bs-btn-ghost">Pick a time myself</button>'
+    + '          <button id="bs-publish" class="bs-btn bs-btn-primary">Publish now</button>'
+    + '        </div>'
+    + '        <div id="bs-schedule-picker" class="bs-hidden" style="margin-top:12px;">'
+    + '          <div class="bs-field"><label>Scheduled date &amp; time</label>'
+    + '            <input id="bs-schedule-at" type="datetime-local"></div>'
+    + '          <div class="bs-row">'
+    + '            <button id="bs-schedule" class="bs-btn bs-btn-primary">Confirm schedule</button>'
+    + '            <button id="bs-schedule-back" class="bs-btn bs-btn-ghost">Back</button>'
+    + '          </div>'
+    + '        </div>'
+    + '        <div class="bs-row" style="margin-top:12px;">'
+    + '          <button id="bs-unschedule" class="bs-btn bs-btn-ghost bs-hidden">Unschedule</button>'
+    + '          <button id="bs-unpublish" class="bs-btn bs-btn-ghost bs-hidden">Unpublish</button>'
+    + '          <button id="bs-discard" class="bs-btn bs-btn-danger">Discard draft</button>'
+    + '        </div>'
+    + '        <div id="bs-action-status" class="bs-banner bs-hidden"></div>'
     + '      </div>'
     + '    </div>'
     + '  </div>'
@@ -233,6 +372,51 @@
     };
   }
 
+  // ── "Ask Swan to improve": hand the draft to the assistant in chat ────────────────────────────
+  // Same affordance as the Create Post sheet's gpAskSwanImprove. The chat modal lives in
+  // workspace.html, so on the standalone blog-studio.html page the button stays hidden.
+  function swanAvailable() {
+    return typeof window.openAssistantChatModal === 'function' && state.assistantId != null;
+  }
+  function syncSwanButton() {
+    var btn = el('bs-swan-improve');
+    if (btn) btn.classList.toggle('bs-hidden', !swanAvailable());
+  }
+  // blog-tone returns only { id, name, tone }; the chat modal also wants role/roleKey for its header
+  // and prompt, so resolve those from get-assistants (cached per id).
+  var metaCache = {};
+  function resolveAssistantMeta(id) {
+    if (metaCache[id]) return Promise.resolve(metaCache[id]);
+    var fallback = { name: 'Your assistant', role: 'Digital Assistant', roleKey: null };
+    return fetch('/.netlify/functions/get-assistants', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : { assistants: [] }; })
+      .then(function (d) {
+        var a = (d.assistants || []).filter(function (x) { return Number(x.id) === Number(id); })[0];
+        var meta = a ? { name: a.name || fallback.name, role: a.role || fallback.role, roleKey: a.roleKey || null } : fallback;
+        metaCache[id] = meta;
+        return meta;
+      })
+      .catch(function () { return fallback; });
+  }
+  function askSwanImprove() {
+    if (!swanAvailable()) return;
+    var title = el('bs-title').value.trim();
+    var md = state.editor ? state.editor.getMarkdown().trim() : '';
+    resolveAssistantMeta(state.assistantId).then(function (meta) {
+      var session = window.openAssistantChatModal(state.assistantId, meta.name, meta.role, meta.roleKey);
+      if (!md && !title) return;   // nothing to critique yet — just open the chat
+      // The body normally opens with the title as its own H1, so only prepend the title when it
+      // isn't already the first heading — otherwise the draft reads as if it were titled twice.
+      var firstHeading = (md.match(/^#\s+(.*)$/m) || [])[1];
+      var needsTitle = title && (!firstHeading || firstHeading.trim() !== title);
+      var parts = ['Here’s a draft blog post I’m working on. Please suggest improvements and give me a stronger version I can use.', ''];
+      if (needsTitle) parts.push('# ' + title, '');
+      parts.push(md || '(no body yet)');
+      var seed = parts.join('\n');
+      setTimeout(function () { try { if (session) session.sendMessage(seed); } catch (_) {} }, 60);
+    });
+  }
+
   function loadAssistants() {
     return api('blog-tone', { method: 'GET' }).then(function (res) {
       if (res.ok && Array.isArray(res.body.assistants)) {
@@ -249,11 +433,13 @@
       var voice = tone ? ' in a ' + tone + ' tone' : '';
       return '# ' + (topic || 'New post') + '\n\n_Drafting' + voice + '…_\n\n' + (notes || '');
     }
-    return '# ' + (topic || 'New post') + '\n\nStart writing here.';
+    // Blank starts genuinely empty: the editor shows its own placeholder and takes the caret, so
+    // there's nothing to mistake for content (seeded filler used to get published verbatim).
+    return '';
   }
 
   // Reveal the editor workspace for a post (new or existing): mount the editor + side panels.
-  function openWorkspace(postId, title, md) {
+  function openWorkspace(postId, title, md, post) {
     state.postId = postId;
     el('bs-brief').classList.add('bs-hidden');
     el('bs-workspace').classList.remove('bs-hidden');
@@ -264,12 +450,23 @@
       blogPostId: postId,
       initialMarkdown: md,
       title: title,
-      onChange: function () { setStatus('bs-save-status', 'Saving…'); setTimeout(function () { setStatus('bs-save-status', 'Saved'); }, 1400); },
+      placeholder: 'Write your post here… (Markdown supported — or ask your assistant to draft it)',
+      onChange: function (nextMd) {
+        refreshReadout(nextMd);
+        setStatus('bs-save-status', 'Saving…');
+        setTimeout(function () { setStatus('bs-save-status', 'Saved'); }, 1400);
+      },
+      onDropMedia: onEditorDropMedia,
     });
+    refreshReadout(md);
+    syncSwanButton();
+    var a = selectedAssistant();
+    el('bs-approve-name').textContent = a && a.name ? a.name : 'your assistant';
     loadWidget();
     loadFeature();
     loadSyndication();
     loadSearchConsole();
+    populateSeo(post);
     return state.editor;
   }
 
@@ -279,9 +476,11 @@
     if (voice.saveToProfile) {
       api('blog-tone', { method: 'POST', body: JSON.stringify({ assistantId: voice.assistantId, tone: voice.tone }) });
     }
+    setBanner('bs-brief-status', '');
     api('blog-posts', { method: 'POST', body: JSON.stringify({ title: title, assistantId: voice.assistantId }) }).then(function (res) {
-      if (!res.ok) { alert('Could not create post: ' + (res.body.error || '')); return; }
-      openWorkspace(res.body.post.id, title, seedMarkdown(path, voice.tone));
+      if (!res.ok) { setBanner('bs-brief-status', 'Could not create post: ' + (res.body.error || 'please try again.'), 'error'); return; }
+      var editor = openWorkspace(res.body.post.id, title, seedMarkdown(path, voice.tone));
+      if (path !== 'generate' && editor && editor.focus) editor.focus();   // drop straight into typing
       if (path === 'generate') {
         setStatus('bs-save-status', 'Drafting…');
         api('generate-blog', { method: 'POST', body: JSON.stringify({
@@ -293,6 +492,7 @@
         }) }).then(function (gen) {
           if (gen.ok && gen.body.bodyMarkdown) {
             state.editor.setMarkdown(gen.body.bodyMarkdown);
+            refreshReadout(gen.body.bodyMarkdown);   // setMarkdown doesn't fire onChange
             setStatus('bs-save-status', 'Draft ready');
           } else {
             setStatus('bs-save-status', (gen.body && gen.body.error) || 'Draft failed');
@@ -308,9 +508,13 @@
       if (!res.ok || !res.body.post) { setStatus('bs-save-status', ''); return; }
       var post = res.body.post;
       if (post.assistantId != null) state.assistantId = post.assistantId;
-      openWorkspace(post.id, post.title || 'Untitled draft', post.bodyMarkdown || '');
+      openWorkspace(post.id, post.title || 'Untitled draft', post.bodyMarkdown || '', post);
       setStatus('bs-save-status', 'Saved');
-      if (post.status) setStatus('bs-publish-status', 'Status: ' + post.status);
+      if (post.status) setBanner('bs-action-status', 'Status: ' + post.status);
+      // A post already on the calendar can be pulled back off it.
+      if (post.status === 'scheduled') el('bs-unschedule').classList.remove('bs-hidden');
+      // A live post can be taken back off the site.
+      if (post.status === 'published') el('bs-unpublish').classList.remove('bs-hidden');
     }).catch(function () { setStatus('bs-save-status', ''); });
   }
 
@@ -335,6 +539,25 @@
     if (theme.accent) el('bs-accent').value = theme.accent;
     if (theme.fontFamily) el('bs-font').value = theme.fontFamily;
     el('bs-badge').checked = cfg.badgeEnabled !== false;
+    el('bs-site-base').value = cfg.siteBaseUrl || '';
+    el('bs-site-path').value = cfg.sitePostPath || '';
+  }
+
+  // ── SEO metadata panel ─────────────────────────────────────────────────────────────────────────
+  // Google truncates around 60 chars (title) / 155 (description); show a live count that turns amber
+  // past those so the author can see when they overrun without a hard block.
+  function refreshSeoCounts() {
+    var t = el('bs-meta-title').value.length, d = el('bs-meta-desc').value.length;
+    var tc = el('bs-meta-title-count'), dc = el('bs-meta-desc-count');
+    tc.textContent = t + '/60'; tc.style.color = t > 60 ? '#b45309' : '';
+    dc.textContent = d + '/155'; dc.style.color = d > 155 ? '#b45309' : '';
+  }
+  function populateSeo(post) {
+    el('bs-meta-title').value = (post && post.metaTitle) || '';
+    el('bs-meta-desc').value = (post && post.metaDescription) || '';
+    el('bs-robots').value = (post && post.robots) || 'index,follow';
+    el('bs-canonical').textContent = (post && post.canonicalUrl) || 'Set when the post is published.';
+    refreshSeoCounts();
   }
 
   // ── Feature / inline media (reuses content-assets + generate-ai-image + pexels-search) ─────────
@@ -382,27 +605,98 @@
         else setStatus('bs-media-status', (res.body && res.body.error) || 'Failed');
       });
   }
-  // Attach an image as inline body media, then insert an asset:// block. `body` is { assetId } or
+  // Attach media as inline body media, then insert a block for it. `body` is { assetId } or
   // { pexelsCandidate }. Inline attach appends, so the new asset is the last inline[] item.
-  function attachInline(body) {
-    if (!state.postId || !state.editor) return;
-    setStatus('bs-media-status', 'Adding…');
-    api('blog-media', { method: 'POST', body: JSON.stringify(Object.assign({ blogPostId: state.postId, action: 'attach', role: 'inline' }, body)) })
+  //
+  // The server's inline[] carries the asset's real assetType, so we hand that to insertMedia rather
+  // than assuming an image: a video needs a `:::media{type=video}` directive, and inserting it as
+  // `![](asset://N)` is exactly the bug that made attached videos render as nothing.
+  // Attach to the inline role and RESOLVE to an insertMedia descriptor — without inserting it.
+  // Split out of attachInline because a drop needs the assetId in hand before anything is written
+  // to the Markdown (plan §4.3.3), and it places the media at the dropped gap, not at the caret.
+  // Resolves null on failure; every caller treats that as "write nothing".
+  function attachInlineAsset(body) {
+    if (!state.postId) return Promise.resolve(null);
+    return api('blog-media', { method: 'POST', body: JSON.stringify(Object.assign({ blogPostId: state.postId, action: 'attach', role: 'inline' }, body)) })
       .then(function (res) {
-        if (!res.ok) { setStatus('bs-media-status', (res.body && res.body.error) || 'Failed'); return; }
+        if (!res.ok) { setStatus('bs-media-status', (res.body && res.body.error) || 'Failed'); return null; }
         var inline = (res.body && res.body.inline) || [];
         var item = body.assetId != null
           ? (inline.filter(function (m) { return m.assetId === body.assetId; })[0] || inline[inline.length - 1])
           : inline[inline.length - 1];
-        if (item) state.editor.insertImage({ assetId: item.assetId, url: item.url, alt: item.name || '' });
-        hidePicker(); setStatus('bs-media-status', '');
+        if (!item) return null;
+        return { assetId: item.assetId, url: item.url, alt: item.name || '', type: item.assetType || 'image' };
       });
   }
-  function routeImage(body) {
+
+  function attachInline(body) {
+    if (!state.postId || !state.editor) return;
+    setStatus('bs-media-status', 'Adding…');
+    attachInlineAsset(body).then(function (media) {
+      if (!media) return;
+      state.editor.insertMedia(media);
+      hidePicker(); setStatus('bs-media-status', '');
+    });
+  }
+
+  // The editor's drop hook: turn whatever was dropped into an ATTACHED asset and hand back the
+  // descriptor(s). The editor owns placement — this owns only "how does this become an assetId".
+  function onEditorDropMedia(payload) {
+    if (!state.postId) return Promise.resolve(null);
+
+    if (payload.kind === 'files') {
+      // Mirrors content-upload-url's ALLOWED_MIME_TYPES families; anything else has no assetType we
+      // can file it under, so reject it here rather than upload something the body can't render.
+      var files = payload.files.filter(function (f) { return /^(image|video|audio)\//.test(f.type || ''); });
+      if (!files.length) {
+        setStatus('bs-media-status', 'Only images, videos and audio can be dropped into a post.');
+        return Promise.resolve(null);
+      }
+      setStatus('bs-media-status', 'Uploading…');
+      return Promise.all(files.map(function (f) {
+        return uploadContentAsset(f)
+          .then(function (asset) { return attachInlineAsset({ assetId: asset.id }); })
+          .catch(function (err) { setStatus('bs-media-status', err.message || 'Upload failed.'); return null; });
+      })).then(function (list) {
+        var ok = list.filter(Boolean);
+        setStatus('bs-media-status', ok.length ? '' : 'Nothing could be added.');
+        return ok;
+      });
+    }
+
+    var d = payload.data || {};
+    setStatus('bs-media-status', 'Adding…');
+    return attachInlineAsset(d.pexelsCandidate ? { pexelsCandidate: d.pexelsCandidate } : { assetId: d.assetId })
+      .then(function (media) { setStatus('bs-media-status', media ? '' : 'Failed'); return media; });
+  }
+
+  // Make a picker tile draggable into the body. The payload carries only what identifies the item;
+  // onEditorDropMedia attaches it and the editor places it. Uses the editor's own exported MIME so
+  // the two can't drift — a mismatched string would present as "dragging just does nothing".
+  function makeTileDraggable(tile, payload) {
+    // Only the body takes a drop: the hero is a single slot with its own picker, so there is
+    // nowhere to aim a drag at.
+    if (state.mediaTarget !== 'inline') return;
+    tile.draggable = true;
+    tile.addEventListener('dragstart', function (e) {
+      e.dataTransfer.setData(window.MarkdownEditor.MEDIA_MIME, JSON.stringify(payload));
+      e.dataTransfer.effectAllowed = 'copy';
+    });
+  }
+  function routeMedia(body) {
     if (state.mediaTarget === 'inline') return attachInline(body);
     if (body.pexelsCandidate) return attachFeatureCandidate(body.pexelsCandidate);
     return attachFeature(body.assetId);
   }
+  // content_assets.assetType is the thing that decides how the body renders the media, so derive it
+  // from the file rather than assuming 'image' — an mp4 filed as an image renders as a broken <img>.
+  function assetTypeOf(mimeType) {
+    var m = String(mimeType || '');
+    if (/^video\//.test(m)) return 'video';
+    if (/^audio\//.test(m)) return 'audio';
+    return 'image';
+  }
+
   // Upload a new file straight into the content library, then attach it (issue #184 — the Blog
   // Writer's media picker needs its own upload entry point now that My Content isn't a nav item).
   function uploadContentAsset(file) {
@@ -417,7 +711,8 @@
           .then(function (r) { if (!r.ok) throw new Error('Upload failed.'); });
         return putPromise.then(function () {
           return api('content-assets', { method: 'POST', body: JSON.stringify({
-            name: file.name, assetType: 'image', mimeType: file.type, fileSize: file.size, storageKey: storageKey, storageUrl: storageUrl,
+            name: file.name, assetType: assetTypeOf(file.type), mimeType: file.type,
+            fileSize: file.size, storageKey: storageKey, storageUrl: storageUrl,
           }) });
         });
       })
@@ -435,7 +730,7 @@
     setStatus('bs-media-status', 'Uploading…');
     uploadContentAsset(file).then(function (asset) {
       setStatus('bs-media-status', '');
-      routeImage({ assetId: asset.id });
+      routeMedia({ assetId: asset.id });
     }).catch(function (err) {
       setStatus('bs-media-status', err.message || 'Upload failed. Please try again.');
     });
@@ -450,16 +745,62 @@
       if (!res.ok) { mediaEls.picker.innerHTML = '<div class="bs-media-empty">Could not load library.</div>'; return; }
       var groups = res.body.assets || {};
       var all = [].concat(groups.pending || [], groups.scheduled || [], groups.posted || []);
-      var images = all.filter(function (a) { return a.assetType === 'image' && (a.storageUrl || a.externalUrl); });
-      if (!images.length) { mediaEls.picker.innerHTML = '<div class="bs-media-empty">No images in your library yet.</div>'; return; }
-      mediaEls.picker.innerHTML = '';
-      images.forEach(function (a) {
-        var img = document.createElement('img');
-        img.src = a.storageUrl || a.externalUrl;
-        img.alt = a.name || '';
-        img.addEventListener('click', function () { routeImage({ assetId: a.id }); });
-        mediaEls.picker.appendChild(img);
+      // The hero must be an image (blog-media rejects anything else for the feature role), but the
+      // body can carry video too — so the inline picker offers both.
+      var inline = state.mediaTarget === 'inline';
+      var items = all.filter(function (a) {
+        if (!(a.storageUrl || a.externalUrl)) return false;
+        return a.assetType === 'image'
+          || (inline && (a.assetType === 'video' || a.assetType === 'audio'));
       });
+      if (!items.length) {
+        mediaEls.picker.innerHTML = '<div class="bs-media-empty">'
+          + (inline ? 'No images, videos or audio in your library yet.' : 'No images in your library yet.')
+          + '</div>';
+        return;
+      }
+      mediaEls.picker.innerHTML = '';
+      items.forEach(function (a) {
+        // A <video> with preload=metadata shows its first frame, which is a usable thumbnail —
+        // content_assets has no separate poster to fall back on.
+        var isVideo = a.assetType === 'video';
+        var isAudio = a.assetType === 'audio';
+        // Audio has no frame to show, so it gets a labelled tile rather than a broken thumbnail.
+        // A real <audio> element here would be a player the author has to avoid clicking to pick.
+        var tile = document.createElement(isAudio ? 'div' : (isVideo ? 'video' : 'img'));
+        if (isAudio) {
+          tile.className = 'bs-media-audio';
+          tile.textContent = '♪ ' + (a.name || 'Audio');
+        } else {
+          tile.src = a.storageUrl || a.externalUrl;
+          if (isVideo) { tile.preload = 'metadata'; tile.muted = true; }
+          else { tile.alt = a.name || ''; }
+        }
+        tile.title = a.name || '';
+        tile.addEventListener('click', function () { routeMedia({ assetId: a.id }); });
+        makeTileDraggable(tile, { source: 'library', assetId: a.id, type: a.assetType || 'image' });
+        mediaEls.picker.appendChild(tile);
+      });
+    });
+  }
+  // Canva imports land in content_assets like any other source, so once the picker reports back
+  // there is nothing Canva-specific left to do — routeMedia attaches the asset exactly as the
+  // Library and Upload paths do. assetType 'image' keeps video designs out: a feature or inline
+  // image can't be an mp4.
+  function openCanva() {
+    if (!state.postId || !window.CanvaBrowser) return;
+    mediaEls.picker.classList.add('bs-hidden');
+    mediaEls.aiForm.classList.add('bs-hidden');
+    mediaEls.pexelsForm.classList.add('bs-hidden');
+    window.CanvaBrowser.open({
+      assetType: 'image',
+      multiple: false,
+      onImported: function (assetIds) {
+        if (!assetIds || !assetIds.length) return;
+        // A multi-page design yields several assets; attach the first and leave the rest in the
+        // library rather than stuffing every page into the post.
+        routeMedia({ assetId: assetIds[0] });
+      },
     });
   }
   function openAiForm() {
@@ -480,6 +821,28 @@
     if (!v) return null;
     var d = new Date(v);
     return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+
+  // Push what's on screen to the server before any action that validates the *stored* body.
+  // Typing autosaves on a debounce and neither mount() nor setMarkdown() persists at all, so a body
+  // the author can plainly see (notes carried in by "Improve draft", or a sentence typed a moment
+  // ago) may not have landed yet. publish-blog and schedule-blog both reject on the stored
+  // bodyMarkdown, which surfaced as "Cannot publish an empty post." over visible text.
+  // publish-blog / schedule-blog both refuse an empty body. Catch it here so the author gets a
+  // useful nudge instead of the server's "Cannot publish an empty post." after a round trip.
+  function blockedAsEmpty() {
+    if (state.editor && state.editor.getMarkdown().trim()) return false;
+    setBanner('bs-action-status', 'This draft is empty — write something before publishing.', 'error');
+    return true;
+  }
+
+  function flushDraft() {
+    if (!state.postId || !state.editor) return Promise.resolve();
+    return api('save-blog-draft', { method: 'POST', body: JSON.stringify({
+      id: state.postId,
+      title: el('bs-title').value,
+      bodyMarkdown: state.editor.getMarkdown(),
+    }) }).catch(function () { /* the action below reports its own failure */ });
   }
 
   // ── Syndication: external blog connectors (US 3.2 — Dev.to, Hashnode) ──────────────────────────
@@ -515,6 +878,21 @@
         disc.type = 'button'; disc.className = 'bs-linkbtn'; disc.textContent = 'Disconnect';
         disc.addEventListener('click', function () { disconnectDest(d.id); });
         row.appendChild(disc);
+        // "Push as draft" defaults on: the post is already live on our side, so the safe default is
+        // never to surprise-publish onto someone else's blog. Hashnode's API can't draft — no toggle.
+        // Appended last on a full-width line: the sidebar is too narrow for a third inline element,
+        // and wrapping it mid-row orphans the Disconnect link.
+        if (d.supportsDraft) {
+          var draftLbl = document.createElement('label');
+          draftLbl.style.display = 'flex'; draftLbl.style.alignItems = 'center'; draftLbl.style.gap = '6px';
+          draftLbl.style.flexBasis = '100%'; draftLbl.style.marginLeft = '20px'; draftLbl.style.opacity = '0.8';
+          draftLbl.title = 'Send as an unpublished draft, so you publish it from ' + d.label + ' yourself.';
+          var draftCb = document.createElement('input');
+          draftCb.type = 'checkbox'; draftCb.className = 'bs-synd-draft'; draftCb.value = d.id; draftCb.checked = true;
+          draftLbl.appendChild(draftCb);
+          draftLbl.appendChild(document.createTextNode('as draft'));
+          row.appendChild(draftLbl);
+        }
       } else {
         var connectBtn = document.createElement('button');
         connectBtn.type = 'button'; connectBtn.className = 'bs-btn bs-btn-ghost'; connectBtn.textContent = 'Connect ' + d.label;
@@ -595,17 +973,53 @@
     el('bms-blog-backdrop').addEventListener('mousedown', function (e) {
       if (e.target === el('bms-blog-backdrop')) closeBlogStudio();  // click the dimmed area to dismiss
     });
+    document.addEventListener('keydown', function (e) {
+      // Esc dismisses, unless the chat modal opened on top of us — it owns the key then.
+      if (e.key !== 'Escape' || !el('bms-blog-backdrop').classList.contains('bs-open')) return;
+      var chat = document.getElementById('chat-modal');
+      if (chat && !chat.classList.contains('hidden')) return;
+      closeBlogStudio();
+    });
 
     el('bs-title').addEventListener('blur', function () {
       if (!state.postId) return;
       api('save-blog-draft', { method: 'POST', body: JSON.stringify({ id: state.postId, title: this.value }) });
     });
 
+    el('bs-notes-mic').addEventListener('click', function () { startVoice('bs-notes', 'bs-notes-mic'); });
+    el('bs-swan-improve').addEventListener('click', askSwanImprove);
+
     el('bs-publish').addEventListener('click', function () {
+      if (!state.postId || blockedAsEmpty()) return;
+      setBanner('bs-action-status', 'Publishing…');
+      flushDraft().then(function () {
+        return api('publish-blog', { method: 'POST', body: JSON.stringify({ id: state.postId }) });
+      }).then(function (res) {
+        if (res.ok) {
+          setBanner('bs-action-status', 'Published ✓ (' + res.body.post.slug + ')');
+          el('bs-unschedule').classList.add('bs-hidden');
+          el('bs-unpublish').classList.remove('bs-hidden');
+        } else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not publish — please try again.', 'error');
+      });
+    });
+
+    // Reveal / hide the manual date-time picker ("Pick a time myself").
+    el('bs-pick-time').addEventListener('click', function () {
+      el('bs-schedule-picker').classList.remove('bs-hidden');
+      el('bs-schedule-at').focus();
+    });
+    el('bs-schedule-back').addEventListener('click', function () {
+      el('bs-schedule-picker').classList.add('bs-hidden');
+    });
+
+    // Discard — drafts only; blog-posts DELETE refuses a published post.
+    el('bs-discard').addEventListener('click', function () {
       if (!state.postId) return;
-      setStatus('bs-publish-status', 'Publishing…');
-      api('publish-blog', { method: 'POST', body: JSON.stringify({ id: state.postId }) }).then(function (res) {
-        setStatus('bs-publish-status', res.ok ? 'Published ✓ (' + res.body.post.slug + ')' : (res.body.error || 'Failed'));
+      if (!window.confirm('Discard this draft? This cannot be undone.')) return;
+      setBanner('bs-action-status', 'Discarding…');
+      api('blog-posts?id=' + encodeURIComponent(state.postId), { method: 'DELETE' }).then(function (res) {
+        if (res.ok) closeBlogStudio();
+        else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not discard this draft.', 'error');
       });
     });
 
@@ -622,13 +1036,20 @@
       if (!state.postId) return;
       var targets = Array.prototype.map.call(document.querySelectorAll('.bs-synd-check:checked'), function (c) { return c.value; });
       if (!targets.length) { setStatus('bs-synd-status', 'Select at least one destination.'); return; }
+      // Only count draft ticks for destinations actually being pushed.
+      var draftTargets = Array.prototype.map.call(document.querySelectorAll('.bs-synd-draft:checked'), function (c) { return c.value; })
+        .filter(function (id) { return targets.indexOf(id) !== -1; });
       setStatus('bs-synd-status', 'Publishing…');
-      api('publish-blog-destinations', { method: 'POST', body: JSON.stringify({ postId: state.postId, targets: targets }) }).then(function (res) {
+      api('publish-blog-destinations', {
+        method: 'POST',
+        body: JSON.stringify({ postId: state.postId, targets: targets, draftTargets: draftTargets }),
+      }).then(function (res) {
         if (!res.ok) { setStatus('bs-synd-status', (res.body && res.body.error) || 'Failed'); return; }
         var results = res.body.results || {};
         var parts = Object.keys(results).map(function (k) {
           var r = results[k];
-          if (r.status === 'published' || r.status === 'draft') return k + ' ✓';
+          if (r.status === 'draft') return k + ' ✓ (draft)';
+          if (r.status === 'published') return k + ' ✓';
           if (r.status === 'not_connected') return k + ' (not connected)';
           return k + ' ✗';
         });
@@ -638,52 +1059,82 @@
 
     // Approve & schedule — the assistant picks the next free cadence slot (no manual date).
     el('bs-approve').addEventListener('click', function () {
-      if (!state.postId) return;
-      setStatus('bs-schedule-status', 'Scheduling…');
-      api('schedule-blog', { method: 'POST', body: JSON.stringify({ id: state.postId, action: 'approve' }) }).then(function (res) {
+      if (!state.postId || blockedAsEmpty()) return;
+      setBanner('bs-action-status', 'Scheduling…');
+      flushDraft().then(function () {
+        return api('schedule-blog', { method: 'POST', body: JSON.stringify({ id: state.postId, action: 'approve' }) });
+      }).then(function (res) {
         if (res.ok && res.body.post) {
-          setStatus('bs-schedule-status', 'Approved — scheduled for ' + new Date(res.body.post.publishDate).toLocaleString());
+          setBanner('bs-action-status', 'Approved — scheduled for ' + new Date(res.body.post.publishDate).toLocaleString());
           el('bs-unschedule').classList.remove('bs-hidden');
-        } else setStatus('bs-schedule-status', (res.body && res.body.error) || 'Failed');
+        } else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not schedule this post.', 'error');
       });
     });
 
     el('bs-schedule').addEventListener('click', function () {
-      if (!state.postId) return;
+      if (!state.postId || blockedAsEmpty()) return;
       var iso = localToISO(el('bs-schedule-at').value);
-      if (!iso) { setStatus('bs-schedule-status', 'Pick a date & time.'); return; }
-      setStatus('bs-schedule-status', 'Scheduling…');
-      api('schedule-blog', { method: 'POST', body: JSON.stringify({ id: state.postId, publishDate: iso }) }).then(function (res) {
+      if (!iso) { setBanner('bs-action-status', 'Pick a date & time.', 'error'); return; }
+      setBanner('bs-action-status', 'Scheduling…');
+      flushDraft().then(function () {
+        return api('schedule-blog', { method: 'POST', body: JSON.stringify({ id: state.postId, publishDate: iso }) });
+      }).then(function (res) {
         if (res.ok) {
-          setStatus('bs-schedule-status', 'Scheduled for ' + new Date(res.body.post.publishDate).toLocaleString());
+          setBanner('bs-action-status', 'Scheduled for ' + new Date(res.body.post.publishDate).toLocaleString());
+          el('bs-schedule-picker').classList.add('bs-hidden');
           el('bs-unschedule').classList.remove('bs-hidden');
-        } else setStatus('bs-schedule-status', (res.body && res.body.error) || 'Failed');
+        } else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not schedule this post.', 'error');
       });
     });
     el('bs-unschedule').addEventListener('click', function () {
       if (!state.postId) return;
       api('schedule-blog', { method: 'POST', body: JSON.stringify({ id: state.postId, action: 'unschedule' }) }).then(function (res) {
         if (res.ok) {
-          setStatus('bs-schedule-status', 'Schedule cleared — back to draft.');
+          setBanner('bs-action-status', 'Schedule cleared — back to draft.');
           el('bs-unschedule').classList.add('bs-hidden');
-        } else setStatus('bs-schedule-status', (res.body && res.body.error) || 'Failed');
+        } else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not clear the schedule.', 'error');
+      });
+    });
+
+    // Unpublish — takes the post off the org's own site only. Syndicated copies stay live (no
+    // adapter can retract them), so name the ones that do in the confirm AND in the result banner.
+    el('bs-unpublish').addEventListener('click', function () {
+      if (!state.postId) return;
+      if (!confirm('Take this post off your site? It goes back to a draft — the URL and its content '
+        + 'are kept, so you can publish it again later. Copies on other platforms stay live.')) return;
+      setBanner('bs-action-status', 'Unpublishing…');
+      api('unpublish-blog', { method: 'POST', body: JSON.stringify({ id: state.postId }) }).then(function (res) {
+        if (!res.ok) {
+          setBanner('bs-action-status', (res.body && res.body.error) || 'Could not unpublish this post.', 'error');
+          return;
+        }
+        var live = (res.body.stillLive || []).map(function (d) { return d.target; });
+        setBanner('bs-action-status', live.length
+          ? 'Off your site — back to draft. Still live on ' + live.join(', ') + ' — remove there separately.'
+          : 'Off your site — back to draft.');
+        el('bs-unpublish').classList.add('bs-hidden');
       });
     });
 
     el('bs-generate-hooks').addEventListener('click', function () {
       if (!state.postId) return;
-      setStatus('bs-publish-status', 'Generating hooks…');
+      setBanner('bs-action-status', 'Generating hooks…');
       api('generate-hooks', { method: 'POST', body: JSON.stringify({ blogPostId: state.postId }) }).then(function (res) {
-        setStatus('bs-publish-status', res.ok ? (res.body.hookVariants.length + ' hook variants ready') : (res.body.error || 'Failed'));
+        if (res.ok) setBanner('bs-action-status', res.body.hookVariants.length + ' hook variants ready');
+        else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not generate hooks.', 'error');
       });
     });
     el('bs-generate-seo').addEventListener('click', function () {
       if (!state.postId) return;
-      setStatus('bs-publish-status', 'Generating SEO…');
+      setBanner('bs-action-status', 'Generating SEO…');
       api('generate-seo', { method: 'POST', body: JSON.stringify({ blogPostId: state.postId }) }).then(function (res) {
-        if (!res.ok) { setStatus('bs-publish-status', res.body.error || 'Failed'); return; }
+        if (!res.ok) { setBanner('bs-action-status', (res.body && res.body.error) || 'Could not generate SEO.', 'error'); return; }
         var slugPart = res.body.urlSlug ? ('/' + res.body.urlSlug + ' · ') : '';
-        setStatus('bs-publish-status', 'SEO ready — ' + slugPart + res.body.tags.length + ' tags');
+        setBanner('bs-action-status', 'SEO ready — ' + slugPart + res.body.tags.length + ' tags');
+        // Surface the freshly generated meta in the editable panel so the author can tweak it.
+        if (res.body.metaTitle) el('bs-meta-title').value = res.body.metaTitle;
+        if (res.body.metaDescription) el('bs-meta-desc').value = res.body.metaDescription;
+        refreshSeoCounts();
       });
     });
 
@@ -691,8 +1142,35 @@
       var theme = { accent: el('bs-accent').value, fontFamily: el('bs-font').value };
       api('save-widget-config', { method: 'POST', body: JSON.stringify({
         action: 'update', theme: theme, badgeEnabled: el('bs-badge').checked,
-      }) }).then(function (res) { alert(res.ok ? 'Theme saved.' : (res.body.error || 'Failed')); });
+        siteBaseUrl: el('bs-site-base').value.trim(), sitePostPath: el('bs-site-path').value.trim(),
+      }) }).then(function (res) {
+        if (res.ok) { setBanner('bs-action-status', 'Settings saved.'); applyWidget(res.body.config); }
+        else setBanner('bs-action-status', (res.body && res.body.error) || 'Could not save settings.', 'error');
+      });
     });
+
+    // ── SEO metadata overrides (US 1.3) — debounced autosave, mirrors the body autosave contract ──
+    function saveSeo() {
+      if (!state.postId) return;
+      setStatus('bs-seo-status', 'Saving…');
+      api('save-blog-draft', { method: 'POST', body: JSON.stringify({
+        id: state.postId,
+        metaTitle: el('bs-meta-title').value,
+        metaDescription: el('bs-meta-desc').value,
+        robots: el('bs-robots').value,
+      }) }).then(function (res) {
+        setStatus('bs-seo-status', res.ok ? 'Saved' : ((res.body && res.body.error) || 'Not saved'));
+      });
+    }
+    var seoTimer;
+    function seoChanged() {
+      refreshSeoCounts();
+      clearTimeout(seoTimer);
+      seoTimer = setTimeout(saveSeo, 900);
+    }
+    el('bs-meta-title').addEventListener('input', seoChanged);
+    el('bs-meta-desc').addEventListener('input', seoChanged);
+    el('bs-robots').addEventListener('change', saveSeo);
 
     mediaEls = {
       preview: el('bs-feature-preview'), library: el('bs-feature-library'), pexels: el('bs-feature-pexels'),
@@ -700,9 +1178,11 @@
       upload: el('bs-feature-upload'), uploadInput: el('bs-feature-upload-input'),
       aiForm: el('bs-ai-form'), aiPrompt: el('bs-ai-prompt'), aiGo: el('bs-ai-go'),
       pexelsForm: el('bs-pexels-form'), pexelsQuery: el('bs-pexels-query'), pexelsGo: el('bs-pexels-go'),
-      picker: el('bs-media-picker'),
+      picker: el('bs-media-picker'), canva: el('bs-feature-canva'),
       inlineLibrary: el('bs-inline-library'), inlinePexels: el('bs-inline-pexels'), inlineAi: el('bs-inline-ai'),
       inlineUpload: el('bs-inline-upload'), inlineUploadInput: el('bs-inline-upload-input'),
+      inlineCanva: el('bs-inline-canva'),
+      cols2: el('bs-cols-2'), cols3: el('bs-cols-3'),
     };
 
     mediaEls.remove.addEventListener('click', function () {
@@ -710,12 +1190,23 @@
       api('blog-media', { method: 'POST', body: JSON.stringify({ blogPostId: state.postId, action: 'detach', role: 'feature' }) })
         .then(function (res) { if (res.ok) renderFeature(res.body.feature); });
     });
+    // A column layout is body structure, not media, so it doesn't route through mediaTarget or the
+    // picker — it goes straight into the draft, after whichever block the author last touched.
+    function insertColumns(n) {
+      if (!state.editor) return;
+      state.editor.insertColumns(n);
+      setStatus('bs-media-status', 'Column layout added — drag media into a column, or click to edit the text.');
+    }
+    mediaEls.cols2.addEventListener('click', function () { insertColumns(2); });
+    mediaEls.cols3.addEventListener('click', function () { insertColumns(3); });
     mediaEls.library.addEventListener('click', function () { state.mediaTarget = 'feature'; openLibrary(); });
     mediaEls.inlineLibrary.addEventListener('click', function () { state.mediaTarget = 'inline'; openLibrary(); });
     mediaEls.ai.addEventListener('click', function () { state.mediaTarget = 'feature'; openAiForm(); });
     mediaEls.inlineAi.addEventListener('click', function () { state.mediaTarget = 'inline'; openAiForm(); });
     mediaEls.pexels.addEventListener('click', function () { state.mediaTarget = 'feature'; openPexelsForm(); });
     mediaEls.inlinePexels.addEventListener('click', function () { state.mediaTarget = 'inline'; openPexelsForm(); });
+    mediaEls.canva.addEventListener('click', function () { state.mediaTarget = 'feature'; openCanva(); });
+    mediaEls.inlineCanva.addEventListener('click', function () { state.mediaTarget = 'inline'; openCanva(); });
     mediaEls.upload.addEventListener('click', function () { state.mediaTarget = 'feature'; mediaEls.uploadInput.click(); });
     mediaEls.inlineUpload.addEventListener('click', function () { state.mediaTarget = 'inline'; mediaEls.inlineUploadInput.click(); });
     mediaEls.uploadInput.addEventListener('change', handleUploadInput);
@@ -740,7 +1231,7 @@
               setStatus('bs-media-status', 'Saving…');
               api('generate-ai-image', { method: 'POST', body: JSON.stringify({ action: 'select', jobId: jobId, index: im.index }) })
                 .then(function (sel) {
-                  if (sel.ok && sel.body.assetId) routeImage({ assetId: sel.body.assetId });
+                  if (sel.ok && sel.body.assetId) routeMedia({ assetId: sel.body.assetId });
                   else setStatus('bs-media-status', (sel.body && sel.body.error) || 'Could not save image');
                 });
             });
@@ -767,7 +1258,8 @@
             img.src = c.url;
             img.alt = c.title || '';
             img.title = c.photographer ? ('Photo by ' + c.photographer + ' on Pexels') : '';
-            img.addEventListener('click', function () { routeImage({ pexelsCandidate: c }); });
+            img.addEventListener('click', function () { routeMedia({ pexelsCandidate: c }); });
+            makeTileDraggable(img, { source: 'pexels', pexelsCandidate: c, type: 'image' });
             mediaEls.picker.appendChild(img);
           });
         });
@@ -798,10 +1290,14 @@
     state.postId = null;
     ['bs-topic', 'bs-keywords', 'bs-notes', 'bs-tone'].forEach(function (id) { var e = el(id); if (e) e.value = ''; });
     var st = el('bs-save-tone'); if (st) st.checked = false;
-    ['bs-save-status', 'bs-publish-status', 'bs-schedule-status', 'bs-media-status', 'bs-synd-status'].forEach(function (id) { setStatus(id, ''); });
+    ['bs-save-status', 'bs-media-status', 'bs-synd-status'].forEach(function (id) { setStatus(id, ''); });
+    ['bs-action-status', 'bs-brief-status'].forEach(function (id) { setBanner(id, ''); });
     el('bs-workspace').classList.add('bs-hidden');
     el('bs-brief').classList.remove('bs-hidden');
     el('bs-unschedule').classList.add('bs-hidden');
+    el('bs-unpublish').classList.add('bs-hidden');
+    el('bs-schedule-picker').classList.add('bs-hidden');
+    el('bs-schedule-at').value = '';
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────────────────────────

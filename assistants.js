@@ -522,6 +522,8 @@ window._activateMainTab = function(name) {
     if (name === 'datahub') window.AssistantDataHub?.refresh();
     // Render the per-assistant Calendar on first open (component scopes calendar.js to this assistant).
     if (name === 'calendar') window.AssistantCalendar?.show();
+    // Render the My Content library on first open (component reuses my-content.html/.js).
+    if (name === 'mycontent') window.AssistantMyContent?.show();
 };
 
 // ── Assistant-detail scoped Review Queue ─────────────────────────────────────
@@ -529,17 +531,15 @@ window._activateMainTab = function(name) {
 // fetches to window._currentAssistantId so only this assistant's content shows.
 
 const _DETAIL_RQ_COLUMNS = {
-    review:    { postStatus: 'pending_approval', ideaFilter: i => i.status === 'pending' },
-    approved:  { postStatus: 'approved',         ideaFilter: () => false },
-    scheduled: { postStatus: 'scheduled',        ideaFilter: () => false },
-    posted:    { postStatus: 'published',        ideaFilter: () => false },
-    // Once an idea has been woven into a post (in_review/delivered), its own review happens on
-    // that post's card in the Posts group — it no longer needs a separate slot in Review.
-    archived:  { postStatus: 'rejected',         ideaFilter: i => i.status === 'discarded' || i.status === 'in_review' || i.status === 'delivered' },
+    review:    { postStatus: 'pending_approval' },
+    approved:  { postStatus: 'approved' },
+    scheduled: { postStatus: 'scheduled' },
+    posted:    { postStatus: 'published' },
+    archived:  { postStatus: 'rejected' },
 };
 
 let _detailRqCurrentStatus = 'review';
-const _detailRqGroupOpen = { ideas: true, posts: true };
+const _detailRqGroupOpen = { posts: true };
 
 window.detailRqOpenStatus = function(statusKey, btn) {
     if (!_DETAIL_RQ_COLUMNS[statusKey]) return;
@@ -553,7 +553,7 @@ window.detailRqOpenStatus = function(statusKey, btn) {
     return _detailRqRenderGroups(statusKey);
 };
 
-// Re-render whichever column is currently open, e.g. after a new idea/post is added elsewhere
+// Re-render whichever column is currently open, e.g. after a new post is added elsewhere
 // (the Create Post sheet) so the list reflects it without the user manually switching tabs.
 window.detailRqRefresh = function() {
     if (document.getElementById('detail-rq-groups')) _detailRqRenderGroups(_detailRqCurrentStatus);
@@ -561,7 +561,7 @@ window.detailRqRefresh = function() {
 
 async function _detailRqRenderGroups(statusKey) {
     // Records-backed Review Queue (data-hub roles): assistant_records gated by approval_status,
-    // rather than the social posts/ideas lifecycle below.
+    // rather than the social posts lifecycle below.
     if ((window._detailReviewQueue || {}).kind === 'records') return _detailRqRenderRecords(statusKey);
     // Blog Writer: long-form drafts live in blog_posts (not scheduled_posts). The queue lists them
     // and routes into Blog Studio (where blog review/editing lives) + schedules via schedule-blog.
@@ -575,14 +575,10 @@ async function _detailRqRenderGroups(statusKey) {
     const aid = window._currentAssistantId;
     if (!aid) { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">No assistant selected.</p>'; return; }
 
-    let posts = [], ideas = [];
+    let posts = [];
     try {
-        const [pRes, iRes] = await Promise.all([
-            fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}&assistantId=${aid}`),
-            fetch(`/.netlify/functions/get-post-ideas?assistantId=${aid}`),
-        ]);
+        const pRes = await fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}&assistantId=${aid}`);
         if (pRes.ok) posts = (await pRes.json()).drafts || [];
-        if (iRes.ok) ideas = ((await iRes.json()).ideas || []).filter(col.ideaFilter);
     } catch {
         container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">Failed to load.</p>';
         return;
@@ -599,13 +595,12 @@ async function _detailRqRenderGroups(statusKey) {
         window._updateOpSignals?.({ pendingReview: posts.length });
     }
 
-    // Reuse the global render helpers from workspace.html (rqRenderSocialCard, rqRenderIdeaCard, etc.)
-    const renderByGroup = { ideas: typeof rqRenderIdeaCard === 'function' ? rqRenderIdeaCard : () => '', posts: typeof rqRenderSocialCard === 'function' ? rqRenderSocialCard : () => '' };
+    // Reuse the global render helper from workspace.html (rqRenderSocialCard).
+    const renderByGroup = { posts: typeof rqRenderSocialCard === 'function' ? rqRenderSocialCard : () => '' };
     const RQ_GROUPS = [
-        { key: 'ideas', label: 'Ideas', empty: 'No ideas here.', emptyReview: 'No ideas here yet.' },
         { key: 'posts', label: 'Posts', empty: 'No posts here.', emptyReview: 'No posts awaiting review.' },
     ];
-    const itemsByGroup = { ideas, posts };
+    const itemsByGroup = { posts };
     container.innerHTML = RQ_GROUPS.map(g => _detailRqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey)).join('');
 }
 
@@ -878,6 +873,10 @@ function _rqBlogActions(p, statusKey) {
     } else if (statusKey === 'scheduled') {
         actions.push(btn('open', 'Open in Blog Studio', primary));
         actions.push(btn('unschedule', 'Unschedule', secondary));
+    } else if (statusKey === 'posted') {
+        // Live on the site — it can be taken back off (native copy only; see unpublish-blog.ts).
+        actions.push(btn('open', 'Open in Blog Studio', primary));
+        actions.push(btn('unpublish', 'Unpublish', secondary));
     } else {
         actions.push(btn('open', 'Open in Blog Studio', secondary));
     }
@@ -961,6 +960,33 @@ window._detailRqBlogAct = async function (btn, action) {
             const res = await fetch(`/.netlify/functions/blog-posts?id=${id}`, { method: 'DELETE' });
             if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Delete failed.');
             window.showToast?.('Blog draft deleted.');
+            _detailRqRenderGroups(_detailRqCurrentStatus);
+            const calHost = document.getElementById('assistant-calendar-host');
+            if (calHost) calHost.dataset.ready = '';
+        } catch (e) {
+            buttons.forEach((b) => { b.disabled = false; });
+            showErr(e.message || 'Something went wrong.');
+        }
+        return;
+    }
+
+    // Unpublish — takes the post off the org's own site and back to draft. Syndicated copies can't
+    // be retracted (no adapter unpublish), so say so up front and name the ones that stay live.
+    if (action === 'unpublish') {
+        if (!confirm('Take this post off your site? It goes back to a draft — the URL and its content are kept, '
+            + 'so you can publish it again later. Copies on other platforms stay live.')) return;
+        const buttons = card.querySelectorAll('button');
+        buttons.forEach((b) => { b.disabled = true; });
+        try {
+            const res = await fetch('/.netlify/functions/unpublish-blog', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(body.error || 'Unpublish failed.');
+            const live = (body.stillLive || []).map((d) => d.target);
+            window.showToast?.(live.length
+                ? `Off your site — back to draft. Still live on ${live.join(', ')} — remove there separately.`
+                : 'Off your site — back to draft.');
             _detailRqRenderGroups(_detailRqCurrentStatus);
             const calHost = document.getElementById('assistant-calendar-host');
             if (calHost) calHost.dataset.ready = '';
@@ -1988,11 +2014,14 @@ function _applyDashboardRegistry(data) {
     // Overview — the post-based Impact & ROI card is meaningless for non-social roles (they publish
     // nothing); their role KPI cards carry the Overview instead. A dataset flag makes the hide stick
     // even though _fetchAndRenderAssistantMetrics runs asynchronously and would otherwise un-hide it.
+    // Issue #206: the Time/Money strip moved into the always-visible hero header, so it needs the
+    // same role gate — otherwise a non-social role shows a permanent "—" ROI strip under its name.
     const impactOn = mods.hasImpactRoi !== false;
-    const metricsCard = document.getElementById('assistant-metrics-card');
-    if (metricsCard) {
-        if (impactOn) { delete metricsCard.dataset.roleHidden; }
-        else { metricsCard.dataset.roleHidden = '1'; metricsCard.classList.add('hidden'); }
+    for (const id of ['assistant-metrics-card', 'detail-roi-strip']) {
+        const node = document.getElementById(id);
+        if (!node) continue;
+        if (impactOn) { delete node.dataset.roleHidden; }
+        else { node.dataset.roleHidden = '1'; node.classList.add('hidden'); }
     }
     // Profile ▸ Creative Brief — the marketing cards (objective/CTA, audience/voice/pillars,
     // reference style) and the Sales Context playbook. Business Information & the AI-disclosure
@@ -2067,6 +2096,21 @@ function _applyDashboardRegistry(data) {
         setText('kb-tab-label', kb.label);
         window.AssistantKnowledgeBase?.init({ kb, assistantId: data.id });
     }
+
+    // Inspo tab — only the content roles (inspoTab: social_media_manager, blog_writer):
+    // the styles/tones/ideas the assistant studies and applies to every draft.
+    const inspo = cfg.inspoTab;
+    toggle('maintab-btn-inspo', !!inspo);
+    if (inspo) {
+        setText('inspo-tab-label', inspo.label);
+        window.AssistantInspo?.init({ inspo, assistantId: data.id });
+    }
+
+    // My Content tab — only the content roles (myContentTab: social_media_manager, blog_writer):
+    // the org-wide content library they draw media from (issue #213).
+    const myContent = cfg.myContentTab;
+    toggle('maintab-btn-mycontent', !!myContent);
+    if (myContent) setText('mycontent-tab-label', myContent.label);
 }
 
 // Steps from the role's schema-driven onboarding definition
@@ -2228,6 +2272,9 @@ function _detailHydrate(data) {
     _detailSetVal('edit_reference_url', ctx.reference_style_url || '');
     _hydratePlatformStrategy(data);
     _hydrateAutoPublish(data);
+    // AI-media auto-publish opt-in (Autopilot card). Off unless explicitly stored true.
+    const allowAiMediaEl = document.getElementById('edit_allow_ai_media');
+    if (allowAiMediaEl) allowAiMediaEl.checked = ctx.allowAiMediaAutoPublish === true;
     // workflowText is Be More Swan IP — not displayed to the user
 
     // Radios — trigger / source.
@@ -2561,6 +2608,8 @@ function _detailCollect(currentData) {
         reference_style_url: document.getElementById('edit_reference_url')?.value || '',
         platform_strategy: _collectPlatformStrategy(currentData.context?.platform_strategy),
         publishPolicy: _collectPublishPolicy(currentData.context?.publishPolicy),
+        // AI-media auto-publish opt-in (Autopilot card). Read from the toggle; default off.
+        allowAiMediaAutoPublish: document.getElementById('edit_allow_ai_media')?.checked === true,
         primary_platforms: platforms,
     };
 
@@ -3236,14 +3285,18 @@ async function _prefetchDetailRqBadge(assistantId) {
 // matching comment in dashboard-content.html.
 async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
     const card = document.getElementById('assistant-metrics-card');
+    // Issue #206: the Time/Money pair and their period toggle now live in the hero header, in a
+    // strip of their own. The hero is always on screen, so the strip has to be shown and hidden
+    // explicitly here rather than riding on the card's own hidden class the way it used to.
+    const roiStrip = document.getElementById('detail-roi-strip');
     if (!card) return;
-    // Non-social roles have no post-based ROI — the registry marks the card role-hidden; respect it.
+    // Non-social roles have no post-based ROI — the registry marks both role-hidden; respect it.
     if (card.dataset.roleHidden === '1') return;
 
     // Period toggle — mirrors the dashboard hero's This Week / This Month tabs so
     // the hours/£ figures here are always comparable with whichever view the
     // dashboard is showing.
-    card.querySelectorAll('.metrics-period-btn').forEach(btn => {
+    (roiStrip || card).querySelectorAll('.metrics-period-btn').forEach(btn => {
         const active = btn.dataset.period === period;
         btn.className = `metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition ${active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`;
         btn.setAttribute('aria-selected', String(active));
@@ -3258,18 +3311,18 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
         // Gate on any real ROI signal, not just post creation — hoursSaved already accounts for
         // completed task runs (see get-assistant-metrics.ts), so a task-driven assistant that
         // hasn't created any scheduledPosts yet still surfaces the card once it's done work.
-        if (!d.totalCreated && !d.hoursSaved) return; // no recorded activity yet — keep card hidden
+        if (!d.totalCreated && !d.hoursSaved) return; // no recorded activity yet — keep everything hidden
         if (card.dataset.roleHidden === '1') return;  // role-hidden set while we were awaiting — respect it
 
-        card.classList.remove('hidden');
-
         const el = id => document.getElementById(id);
+        if (roiStrip) roiStrip.classList.remove('hidden');
+
         const periodLabel = period === 'month' ? 'this month' : 'this week';
         // Short caption on screen; the sentence that explains how it lines up with the dashboard
-        // is one hover away, rather than costing a line of the card.
+        // is one hover away, rather than costing a line of the header.
         const note = el('metrics-period-note');
-        note.textContent = `All-time posts · time & money saved ${periodLabel}`;
-        note.title = `All-time posts created by this assistant; time & money saved ${periodLabel} (matches the dashboard's ${period === 'month' ? 'This Month' : 'This Week'} view)`;
+        note.textContent = `Time & money saved ${periodLabel}`;
+        note.title = `Time & money saved ${periodLabel} (matches the dashboard's ${period === 'month' ? 'This Month' : 'This Week'} view)`;
         el('metrics-total-created').textContent = d.totalCreated.toLocaleString();
         el('metrics-total-scheduled').textContent = d.totalScheduled.toLocaleString();
         el('metrics-total-published').textContent = d.totalPublished.toLocaleString();
@@ -3284,16 +3337,17 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
             el('metrics-roi-note').innerHTML = `<a href="#" onclick="loadView && loadView('account'); return false" class="text-emerald-600 hover:underline">Set your hourly rate</a> to see this`;
         }
 
-        // Per-platform breakdown — collapsed by default, and absent entirely when this
-        // assistant has only ever posted to one platform (the strip above already says it all).
+        // Per-platform breakdown — absent entirely when this assistant has only ever posted to one
+        // platform (the Autopilot card's totals already say it all). Since #206 left this list as
+        // the card's only content, that condition now hides the whole card rather than just the
+        // list — otherwise a single-platform assistant gets an empty titled box.
         const platformEl = el('metrics-by-platform');
-        const breakdown = el('metrics-breakdown');
-        if (platformEl && breakdown) {
+        if (platformEl) {
             const entries = Object.entries(d.byPlatform || {})
                 .filter(([, v]) => v.created > 0)
                 .sort(([, a], [, b]) => b.created - a.created);
-            breakdown.classList.toggle('hidden', entries.length < 2);
-            el('metrics-breakdown-label').textContent = `Breakdown by platform (${entries.length})`;
+            card.classList.toggle('hidden', entries.length < 2);
+            el('metrics-breakdown-label').textContent = `Content by platform (${entries.length})`;
             platformEl.innerHTML = entries.map(([p, v]) => {
                 const icon = (window._PLATFORM_ICONS || {})[p] || '';
                 const label = (window._PLATFORM_LABEL || {})[p] || p.charAt(0).toUpperCase() + p.slice(1);

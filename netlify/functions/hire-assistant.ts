@@ -19,19 +19,20 @@
 // erroring — re-saving onboardingContext is idempotent and audit-logged server-side.
 
 import { Handler } from '@netlify/functions';
-import { and, asc, count, eq, inArray, sql } from 'drizzle-orm';
+import { and, asc, count, eq, inArray, isNull, or, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     aiAssistants,
     dpaAcceptances,
     masterAssistants,
     masterPlans,
-    notifications,
     organisations,
     plans,
     taskRuns,
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { createNotification } from '../../src/utils/notify';
+import { effectiveLimit, type FeatureOverrides } from '../../src/utils/plan-features';
 import { checkRateLimit } from '../../src/utils/rate-limit';
 import { CURRENT_DPA_VERSION } from './accept-dpa';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -102,14 +103,28 @@ export default withLambda(async (event) => {
 
         // ── 3. Capacity gate (server-side twin of check-capacity's client gate) ───
         // Assistants in provisioning/ready_for_work/working occupy a plan seat.
+        // Scope by org OR user: an org member shares the owner's plan (which is keyed to
+        // the owner's userId + the org id), so a userId-only lookup would wrongly find no
+        // plan for members of a paid workspace.
         const [planRow] = await db
-            .select({ assistantLimit: masterPlans.assistantLimit })
+            .select({ assistantLimit: masterPlans.assistantLimit, featureOverrides: plans.featureOverrides })
             .from(plans)
             .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
-            .where(and(eq(plans.userId, userId), inArray(plans.status, ['active', 'past_due'])))
+            .where(and(
+                or(eq(plans.userId, userId), eq(plans.organisationId, orgId)),
+                inArray(plans.status, ['active', 'past_due']),
+            ))
             .orderBy(asc(plans.status), asc(plans.startedAt))
             .limit(1);
-        let assistantLimit: number | null = planRow?.assistantLimit ?? null;
+        // No active/past_due plan → HARD BLOCK. The free trial was removed (product decision):
+        // a user with no paid plan can hire no assistants. Previously a missing plan resolved
+        // to assistantLimit=null and skipped the gate entirely, granting unlimited free hires.
+        if (!planRow) {
+            return json(402, { error: 'Choose a plan to hire your first assistant.', code: 'NO_PLAN' });
+        }
+        // Plan Features: prefer a "new subscribers only" frozen snapshot over the live master limit.
+        let assistantLimit: number | null = effectiveLimit(
+            planRow.featureOverrides as FeatureOverrides | null, 'assistantLimit', planRow.assistantLimit ?? null);
         if (assistantLimit !== null) {
             const [org] = await db
                 .select({ bonusAssistants: organisations.bonusAssistants })
@@ -132,10 +147,23 @@ export default withLambda(async (event) => {
 
         // ── 4. One instance per role name per org ─────────────────────────────────
         // Names are unique per organisation; the instance takes the catalogue name.
+        // Match on the master link, not the name. Keying this on LOWER(name) = LOWER(master.name)
+        // meant an admin renaming the role broke the check: the hired row still carried the OLD
+        // name, so nothing matched and the org could hire the same role twice (the
+        // ai_assistants_org_name_unique constraint also keys on name, so it wouldn't catch it
+        // either). masterAssistantId is stable across renames; the name fallback keeps legacy rows
+        // that predate the FK working.
         const [existing] = await db
             .select({ id: aiAssistants.id, provisioningStatus: aiAssistants.provisioningStatus, lifecycleStatus: aiAssistants.lifecycleStatus })
             .from(aiAssistants)
-            .where(and(eq(aiAssistants.organisationId, orgId), sql`LOWER(${aiAssistants.name}) = LOWER(${master.name})`))
+            .where(and(
+                eq(aiAssistants.organisationId, orgId),
+                or(
+                    eq(aiAssistants.masterAssistantId, master.id),
+                    sql`(${aiAssistants.configuration} ->> 'type') = ${master.roleKey}`,
+                    and(isNull(aiAssistants.masterAssistantId), sql`LOWER(${aiAssistants.name}) = LOWER(${master.name})`),
+                ),
+            ))
             .limit(1);
         if (existing) {
             // Abandoned pre-payment rows are safe to replace (same rule as onboarding.ts).
@@ -166,18 +194,12 @@ export default withLambda(async (event) => {
             provisioningStatus: 'complete', // lifecycle trigger derives 'working' — chattable immediately
         }).returning({ id: aiAssistants.id });
 
-        // Best-effort welcome notification (non-blocking, same tone as onboarding.ts).
-        try {
-            await db.insert(notifications).values({
-                userId,
-                type: 'system',
-                title: `${master.name} has joined your team`,
-                message: `${master.name} is hired and ready — finish its setup to put it to work.`,
-                metadata: { assistantId: created.id, roleKey: master.roleKey },
-            });
-        } catch (notifErr) {
-            console.warn('[hire-assistant] Notification insert failed (non-blocking):', notifErr);
-        }
+        // Best-effort welcome notification (non-blocking; createNotification swallows errors).
+        await createNotification(db, 'assistant_hired', {
+            userId,
+            context: { assistant: { name: master.name } },
+            metadata: { assistantId: created.id, roleKey: master.roleKey },
+        });
 
         return json(200, { assistantId: created.id, name: master.name, roleKey: master.roleKey });
     } catch (err: any) {

@@ -16,23 +16,17 @@ import { eq, and, inArray, sql } from 'drizzle-orm';
 import Stripe from 'stripe';
 import { getDb } from '../../db/client';
 import {
-    plans, organisations, masterPlans, users, notifications,
+    plans, organisations, masterPlans, users,
     billingReconciliationLog, usageCounters, taskRuns,
 } from '../../db/schema';
+import { createNotifications } from '../../src/utils/notify';
 import { getPeriodStart } from '../../src/utils/atomic-cap-check';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
-// Same Stripe price → tier mapping as verify.ts
-const PRICE_TO_TIER: Record<string, string> = {
-    // Test
-    'price_1TgGNFE7lvVYjk1BAsnhUzBp': 'buster',
-    'price_1TgGP8E7lvVYjk1BRBeEZVd6': 'saver',
-    'price_1TgGPfE7lvVYjk1B1CQrS6pE': 'employee',
-    // Live
-    'price_1Tg6f1CuS8qyNSsFxeUsfi4a': 'buster',
-    'price_1Tg6fQCuS8qyNSsF5DKmEqMu': 'saver',
-    'price_1Tg6fiCuS8qyNSsF787zwCwh': 'employee',
-};
+// A Stripe subscription's tier is resolved from its price PRODUCT (master_plans.stripe_product_id),
+// built at request time below — not a hardcoded price-id map. The product is stable across price
+// changes, so this covers legacy prices, the current live prices, and any new lookup_key-minted
+// prices alike (all sit on the same per-plan product).
 
 export interface ReconciliationMismatch {
     type: 'missing_stripe_sub' | 'tier_mismatch' | 'stripe_cancelled_but_db_active';
@@ -97,6 +91,21 @@ async function runReconciliation(): Promise<void> {
             : [];
         const masterPlanTierMap = new Map(masterPlanRows.map(mp => [mp.id, mp.tierKey]));
 
+        // Stripe price PRODUCT → tier, from master_plans.stripe_product_id (the single, stable link).
+        const productPlanRows = await db
+            .select({ tierKey: masterPlans.tierKey, stripeProductId: masterPlans.stripeProductId })
+            .from(masterPlans);
+        const productToTier = new Map(
+            productPlanRows
+                .filter(p => p.stripeProductId)
+                .map(p => [p.stripeProductId as string, p.tierKey]),
+        );
+        const tierFromSub = (sub: { items: { data: Array<{ price?: { product?: string | { id: string } } }> } }): string | null => {
+            const prod = sub.items.data[0]?.price?.product;
+            const productId = typeof prod === 'string' ? prod : prod?.id ?? null;
+            return productId ? (productToTier.get(productId) || null) : null;
+        };
+
         // Map subscriptionId → DB plan for fast lookup
         const subIdToDbPlan = new Map<string, typeof dbActivePlans[0]>();
         for (const p of dbActivePlans) {
@@ -126,7 +135,7 @@ async function runReconciliation(): Promise<void> {
         for await (const stripeSub of stripe.subscriptions.list({ status: 'active', limit: 100 })) {
             stripeSubIds.add(stripeSub.id);
             const priceId = stripeSub.items.data[0]?.price?.id ?? null;
-            const stripeTierKey = priceId ? (PRICE_TO_TIER[priceId] || null) : null;
+            const stripeTierKey = tierFromSub(stripeSub);
 
             const dbPlan = subIdToDbPlan.get(stripeSub.id);
             if (!dbPlan) {
@@ -169,7 +178,7 @@ async function runReconciliation(): Promise<void> {
                 dbTierKey,
                 stripeSubscriptionId: stripeSub.id,
                 stripePriceId:        priceId,
-                stripeTierKey:        priceId ? (PRICE_TO_TIER[priceId] || null) : null,
+                stripeTierKey:        tierFromSub(stripeSub),
                 stripeStatus:         stripeSub.status,
                 lastWebhookDate:      new Date(stripeSub.canceled_at! * 1000).toISOString(),
             });
@@ -244,17 +253,11 @@ async function runReconciliation(): Promise<void> {
                 .from(users)
                 .where(eq(users.role, 'super_admin'));
 
-            const notifValues = superAdmins.map(admin => ({
-                userId: admin.id,
-                type:    'billing_alert' as const,
-                title:   `⚠️ Billing Reconciliation: ${mismatches.length} mismatch${mismatches.length === 1 ? '' : 'es'} found`,
-                message: `The nightly Stripe↔DB reconciliation detected ${mismatches.length} plan mismatch${mismatches.length === 1 ? '' : 'es'}. Open the Reconciliation Queue in the Admin Portal to review and sync.`,
+            const mismatchPhrase = `${mismatches.length} mismatch${mismatches.length === 1 ? '' : 'es'}`;
+            await createNotifications(db, 'billing_reconciliation_mismatch', superAdmins.map(a => a.id), {
+                context: { reconciliation: { mismatch_phrase: mismatchPhrase } },
                 metadata: { mismatchCount: mismatches.length, runAt: new Date().toISOString() },
-            }));
-
-            if (notifValues.length > 0) {
-                await db.insert(notifications).values(notifValues);
-            }
+            });
 
             console.warn(`[reconcile-billing] ⚠️ ${mismatches.length} mismatch(es) found and flagged.`);
         } else {
@@ -283,15 +286,10 @@ async function runReconciliation(): Promise<void> {
                 .from(users)
                 .where(eq(users.role, 'super_admin'));
 
-            if (superAdmins.length > 0) {
-                await db2.insert(notifications).values(superAdmins.map(a => ({
-                    userId:  a.id,
-                    type:    'billing_alert' as const,
-                    title:   '🚨 Billing Reconciliation Job Failed',
-                    message: `The nightly reconciliation job failed with error: ${errorMessage}. Investigate within 4 hours.`,
-                    metadata: { error: errorMessage, runAt: new Date().toISOString() },
-                })));
-            }
+            await createNotifications(db2, 'billing_reconciliation_failed', superAdmins.map(a => a.id), {
+                context: { job: { error: errorMessage } },
+                metadata: { error: errorMessage, runAt: new Date().toISOString() },
+            });
         } catch (innerErr) {
             console.error('[reconcile-billing] Also failed to write failure log:', innerErr);
         }

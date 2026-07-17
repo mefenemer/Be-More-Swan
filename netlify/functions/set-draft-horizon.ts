@@ -13,7 +13,8 @@ import { Handler } from '@netlify/functions';
 import { and, eq, gt } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, notifications, scheduledPosts } from '../../db/schema';
+import { aiAssistants, scheduledPosts } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { getSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
 import { enqueueScheduleGapFill } from '../../src/utils/schedule-gap-fill';
@@ -118,13 +119,14 @@ export default withLambda(async (event) => {
             const newWindowEnd = new Date();
             newWindowEnd.setDate(newWindowEnd.getDate() + days);
             const toDate = newWindowEnd.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-            await db.insert(notifications).values({
+            await createNotification(db, 'draft_horizon_expanded', {
                 userId,
-                type: 'draft_horizon_expanded',
-                title: 'Draft horizon extended',
-                message: `${assistant.name} is generating ${gapFillEnqueued} new draft${gapFillEnqueued === 1 ? '' : 's'} to cover through ${toDate}. They'll appear in your Review shortly.`,
+                context: { assistant: { name: assistant.name }, horizon: {
+                    draft_count: `${gapFillEnqueued} new draft${gapFillEnqueued === 1 ? '' : 's'}`,
+                    to_date: toDate,
+                } },
                 metadata: { assistantId },
-            }).catch(() => {});
+            });
         }
     }
 
@@ -148,13 +150,14 @@ export default withLambda(async (event) => {
             .returning({ id: scheduledPosts.id });
 
         if (archived.length > 0) {
-            await db.insert(notifications).values({
+            await createNotification(db, 'draft_horizon_shrunk', {
                 userId,
-                type: 'draft_horizon_shrunk',
-                title: 'Draft horizon shortened',
-                message: `${archived.length} unreviewed draft${archived.length === 1 ? '' : 's'} beyond your new ${days}-day window have been moved to Archived Drafts.`,
+                context: { horizon: {
+                    archived_count: `${archived.length} unreviewed draft${archived.length === 1 ? '' : 's'}`,
+                    days,
+                } },
                 metadata: { assistantId },
-            }).catch(() => {});
+            });
         }
     }
 

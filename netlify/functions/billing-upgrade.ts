@@ -10,30 +10,18 @@ import Stripe from 'stripe';
 import jwt from 'jsonwebtoken';
 import { eq, and, gt } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, plans, masterPlans, notifications, processedWebhookEvents, userOrganisations } from '../../db/schema';
+import { users, plans, masterPlans, processedWebhookEvents, userOrganisations } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { sendEmail } from '../../src/utils/email';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
 import { resolveActionNotifications, PLAN_UPGRADED_TYPES } from '../../src/utils/notification-actions';
+import { resolveMonthlyPriceId } from '../../src/utils/stripe-price';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret      = process.env.JWT_SECRET!;
 const stripeSecret   = process.env.STRIPE_SECRET_KEY!;
 const stripe         = new Stripe(stripeSecret, { apiVersion: '2026-05-27.dahlia' });
-const isTestMode     = stripeSecret?.startsWith('sk_test_');
 const BASE_URL       = process.env.BASE_URL || '';
-
-// Stripe monthly price IDs per tier key
-const STRIPE_PRICE_IDS: Record<string, string> = isTestMode
-    ? {
-        buster:   'price_1TgGNFE7lvVYjk1BAsnhUzBp',
-        saver:    'price_1TgGP8E7lvVYjk1BRBeEZVd6',
-        employee: 'price_1TgGPfE7lvVYjk1B1CQrS6pE',
-    }
-    : {
-        buster:   'price_1Tg6f1CuS8qyNSsFxeUsfi4a',
-        saver:    'price_1Tg6fQCuS8qyNSsF5DKmEqMu',
-        employee: 'price_1Tg6fiCuS8qyNSsF787zwCwh',
-    };
 
 function parseSession(event: any): number | null {
     const match = (event.headers.cookie || '').match(/aura_session=([^;]+)/);
@@ -141,10 +129,9 @@ export default withLambda(async (event) => {
         return { statusCode: 400, body: JSON.stringify({ error: 'Target tier must be higher than current tier. For downgrades use billing-downgrade.' }) };
     }
 
-    const targetPriceId = STRIPE_PRICE_IDS[targetTierKey];
-    if (!targetPriceId) {
-        return { statusCode: 400, body: JSON.stringify({ error: `No Stripe price configured for tier: ${targetTierKey}` }) };
-    }
+    // Resolve the target tier's monthly price from master_plans (single source — tracks the Plans
+    // tab). Find-or-create is stable, so the preview and the execute path use the same Price.
+    const targetPriceId = await resolveMonthlyPriceId(stripe, targetMp);
 
     // ─────────────────────────────────────────────────────────────────────────
     // GET ?preview=1: SC2 — proration preview
@@ -246,16 +233,17 @@ export default withLambda(async (event) => {
                 masterPlanId: targetMp.id,
                 planName: targetMp.name,
                 status: 'active',
+                // Plan Features: moving to a new tier is a fresh binding — drop any frozen
+                // "new subscribers only" snapshot so the subscriber reads the new tier's live values.
+                featureOverrides: null,
                 updatedAt: new Date(),
             })
             .where(eq(plans.id, currentPlan.id));
 
         // SC4a: in-app notification
-        await db.insert(notifications).values({
+        await createNotification(db, 'plan_upgraded', {
             userId,
-            type: 'plan_upgraded',
-            title: `Plan upgraded to ${targetMp.name}`,
-            message: `Your plan has been upgraded to ${targetMp.name}. Your new limits are active immediately.`,
+            context: { plan: { name: targetMp.name } },
             isRead: false,
         });
 

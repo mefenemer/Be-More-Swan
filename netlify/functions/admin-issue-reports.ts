@@ -16,7 +16,7 @@ import postgres from 'postgres';
 import { and, eq, ne, desc, asc, sql, or, isNull, isNotNull, inArray, notInArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { issueReports, issueReportMessages, users } from '../../db/schema';
-import { isAdminRole, hasPermission } from '../../src/utils/rbac';
+import { hasPermission } from '../../src/utils/rbac';
 import { ISSUE_STATUS_LABEL, isIssueStatus, notifyIssueUser, maybeAdvanceToReadyToTest, type IssueStatus } from '../../src/utils/issue-reports';
 import { createRoadmapItemFromIssue, isRoadmapPriority, type RoadmapPriority } from '../../src/utils/feature-roadmap';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -37,7 +37,7 @@ async function requireAdmin(event: any): Promise<{ id: number; role: string } | 
     try { userId = (jwt.verify(match[1], jwtSecret) as { userId: number }).userId; } catch { return null; }
     const db = getDb();
     const [row] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
-    if (!row || !isAdminRole(row.role)) return null;
+    if (!hasPermission(row?.role, 'view_issue_reports')) return null;
     return { id: userId, role: row.role };
 }
 
@@ -225,8 +225,8 @@ export default withLambda(async (event) => {
     // Super-admin only. The local watcher claims the queued merge and runs `gh pr merge`;
     // a successful merge (plus any applied migration) is what advances the issue.
     if (event.httpMethod === 'POST' && action === 'request-merge' && id) {
-        if (admin.role !== 'super_admin') {
-            return json(403, { error: 'Merging to staging requires super-admin privilege.' });
+        if (!hasPermission(admin.role, 'deploy_code')) {
+            return json(403, { error: 'Merging to staging requires the deploy_code privilege.' });
         }
         const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
         if (!issue) return json(404, { error: 'Issue not found.' });
@@ -258,6 +258,44 @@ export default withLambda(async (event) => {
         return json(200, { ok: true, devMergeStatus: 'queued' });
     }
 
+    // ── POST ?action=request-prod-promote: promote a staging-verified fix to prod ──
+    // Super-admin only, and separate from closing the ticket. The fix must already be
+    // merged to staging. Queues a promotion the local watcher claims and performs by
+    // pushing staging → main (prod deploys from main); see admin-issue-handoff's
+    // claim-promote / promote-result.
+    if (event.httpMethod === 'POST' && action === 'request-prod-promote' && id) {
+        if (!hasPermission(admin.role, 'deploy_code')) {
+            return json(403, { error: 'Promoting to production requires the deploy_code privilege.' });
+        }
+        const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
+        if (!issue) return json(404, { error: 'Issue not found.' });
+        if (issue.devMergeStatus !== 'merged') {
+            return json(400, { error: 'Merge this fix to staging before promoting to production.' });
+        }
+        if (issue.devProdStatus === 'queued' || issue.devProdStatus === 'promoting') {
+            return json(409, { error: 'A promotion to production is already in progress for this issue.' });
+        }
+        if (issue.devProdStatus === 'promoted') {
+            return json(409, { error: 'This fix has already been promoted to production.' });
+        }
+
+        await db.update(issueReports).set({
+            devProdStatus: 'queued',
+            devProdResult: null,
+            updatedAt: new Date(),
+        }).where(eq(issueReports.id, id));
+
+        await db.insert(issueReportMessages).values({
+            issueId: id,
+            authorType: 'admin',
+            authorId: admin.id,
+            body: "🚀 We've queued this fix to promote from staging to production — it should be live shortly.",
+            status: null,
+        });
+
+        return json(200, { ok: true, devProdStatus: 'queued' });
+    }
+
     // ── POST ?action=request-conflict-fix: investigate + auto-resolve a failed merge ─
     // Super-admin only. Only valid once a merge attempt has actually failed. The local
     // watcher (see scripts/dev-issue-fixer.mjs) claims it, merges the base branch into
@@ -265,8 +303,8 @@ export default withLambda(async (event) => {
     // PR merge — same as a normal merge, success moves the issue on to "Fixed & Ready
     // to Test".
     if (event.httpMethod === 'POST' && action === 'request-conflict-fix' && id) {
-        if (admin.role !== 'super_admin') {
-            return json(403, { error: 'Investigating a merge conflict requires super-admin privilege.' });
+        if (!hasPermission(admin.role, 'deploy_code')) {
+            return json(403, { error: 'Investigating a merge conflict requires the deploy_code privilege.' });
         }
         const [issue] = await db.select().from(issueReports).where(eq(issueReports.id, id)).limit(1);
         if (!issue) return json(404, { error: 'Issue not found.' });
@@ -298,8 +336,8 @@ export default withLambda(async (event) => {
     // any fix still gated on a pending DB migration — those must be run individually
     // from the ticket first.
     if (event.httpMethod === 'POST' && action === 'request-merge-all') {
-        if (admin.role !== 'super_admin') {
-            return json(403, { error: 'Merging to staging requires super-admin privilege.' });
+        if (!hasPermission(admin.role, 'deploy_code')) {
+            return json(403, { error: 'Merging to staging requires the deploy_code privilege.' });
         }
         const updated = await db.update(issueReports).set({
             devMergeStatus: 'queued',
@@ -368,6 +406,8 @@ export default withLambda(async (event) => {
                 devPrUrl: issueReports.devPrUrl,
                 devSqlStatus: issueReports.devSqlStatus,
                 devMergeStatus: issueReports.devMergeStatus,
+                devProdStatus: issueReports.devProdStatus,
+                devProdAt: issueReports.devProdAt,
                 devRunnerId: issueReports.devRunnerId,
                 devRunnerHeartbeat: issueReports.devRunnerHeartbeat,
                 reporterEmail: users.email,
@@ -400,6 +440,8 @@ export default withLambda(async (event) => {
                 devPrUrl: r.devPrUrl,
                 devSqlStatus: r.devSqlStatus,
                 devMergeStatus: r.devMergeStatus,
+                devProdStatus: r.devProdStatus,
+                devProdAt: r.devProdAt,
                 devRunnerId: r.devRunnerId,
                 devRunnerHeartbeat: r.devRunnerHeartbeat,
                 reporterName: [r.reporterFirst, r.reporterLast].filter(Boolean).join(' ') || r.reporterEmail || `User #${r.userId}`,
@@ -450,6 +492,21 @@ export default withLambda(async (event) => {
                 .where(eq(issueReports.id, id));
         }
 
+        // Putting a ticket On Hold cancels a still-QUEUED AI handoff, otherwise the local
+        // runner claims it (its claim query keys off dev_handoff_status, not the visible
+        // status) and its result overwrites the status straight back out of On Hold. The
+        // compare-and-swap on dev_handoff_status='queued' only cancels a handoff nobody has
+        // started: if a runner claimed it (→ 'in_progress') in the meantime the WHERE misses,
+        // so we never yank a fix out from under an active runner.
+        let handoffCancelled = false;
+        if (newStatus === 'on_hold') {
+            const cancelled = await db.update(issueReports)
+                .set({ devHandoffStatus: null, devHandoffAt: null, devResult: null, updatedAt: new Date() })
+                .where(and(eq(issueReports.id, id), eq(issueReports.devHandoffStatus, 'queued')))
+                .returning({ id: issueReports.id });
+            handoffCancelled = cancelled.length > 0;
+        }
+
         // Promoting to the roadmap creates (or refreshes) a Feature Roadmap item carrying the
         // chosen priority. Idempotent — re-promoting the same issue won't duplicate it.
         if (newStatus === 'roadmap') {
@@ -467,11 +524,13 @@ export default withLambda(async (event) => {
 
         // Record the supporting message / status change in the thread.
         if (message || newStatus) {
+            const autoBody = `We've updated this to "${ISSUE_STATUS_LABEL[finalStatus]}".` +
+                (handoffCancelled ? ' The queued AI auto-fix has been cancelled.' : '');
             await db.insert(issueReportMessages).values({
                 issueId: id,
                 authorType: 'admin',
                 authorId: admin.id,
-                body: message || `We've updated this to "${ISSUE_STATUS_LABEL[finalStatus]}".`,
+                body: message || autoBody,
                 status: newStatus,
             });
         }
@@ -480,7 +539,7 @@ export default withLambda(async (event) => {
         await notifyIssueUser(db, { userId: issue.userId, issueId: id, status: finalStatus, adminMessage: message, headers: event.headers })
             .catch((e) => console.error('[admin-issue-reports] user notify failed:', e?.message || e));
 
-        return json(200, { ok: true, status: finalStatus });
+        return json(200, { ok: true, status: finalStatus, handoffCancelled });
     }
 
     return json(405, { error: 'Method Not Allowed.' });

@@ -2,7 +2,8 @@ import { Handler } from '@netlify/functions';
 import Stripe from 'stripe';
 import { eq, and, inArray, desc, sql } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
-import { payments, plans, aiAssistants, onboardingDrafts, notifications, users, masterPlans, planPrices, invoices, processedWebhookEvents, userReferrals, platformConfig, stripeDisputes, userOrganisations, userProfiles } from '../../db/schema';
+import { payments, plans, aiAssistants, onboardingDrafts, notifications, users, masterPlans, invoices, processedWebhookEvents, userReferrals, platformConfig, stripeDisputes, userOrganisations, userProfiles } from '../../db/schema';
+import { createNotification, createNotifications } from '../../src/utils/notify';
 import { sendEmail, buildAnnualRenewalEmail, buildDunningEmail } from '../../src/utils/email';
 import { resolveActionNotifications, PAYMENT_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { recordCardFingerprint } from '../../src/utils/billing-fingerprint';
@@ -69,6 +70,13 @@ export default withLambda(async (event) => {
         return { statusCode: 200, body: JSON.stringify({ received: true, duplicate: true }) };
     }
 
+    // The insert above is a CLAIM, not a completion marker: it only prevents two concurrent
+    // deliveries of the same event from both processing. If handling throws below (e.g. a
+    // transient DB error mid-way through creating the plan), we must RELEASE the claim before
+    // returning non-2xx — otherwise Stripe's retry hits the idempotency guard, is treated as a
+    // duplicate, and the plan is never created. Releasing lets the retry reprocess cleanly.
+    try {
+
     // ── checkout.session.completed — plan-gate subscription checkout ──
     // create-plan-checkout-intent.ts uses Stripe Checkout in `subscription` mode. Stripe does NOT
     // route these through our custom payment_intent.succeeded metadata flow, and invoice.paid with
@@ -76,7 +84,7 @@ export default withLambda(async (event) => {
     // otherwise check-capacity never sees an active plan and the plan-gate modal keeps reappearing.
     if (stripeEvent.type === 'checkout.session.completed') {
         const session = stripeEvent.data.object as Stripe.Checkout.Session;
-        const { userId, organisationId, masterPlanId, planName: metaPlanName, referralCode } = session.metadata || {};
+        const { userId, organisationId, masterPlanId, planName: metaPlanName, referralCode, billingCycle } = session.metadata || {};
 
         // Only our plan-gate subscription sessions carry userId + organisationId in metadata;
         // organisationId is required to create the plan record (plans.organisationId is NOT NULL).
@@ -114,10 +122,8 @@ export default withLambda(async (event) => {
             throw planErr;
         }
 
-        // Trial-to-paid: expire any active trial plan so check-capacity returns the paid plan
-        await db.update(plans)
-            .set(withUpdatedAt({ status: 'expired' as const }))
-            .where(and(eq(plans.userId, userIdInt), eq(plans.planType, 'trial'), eq(plans.status, 'active')));
+        // (Free trial removed: a first-time subscriber has no prior plan, so the fresh
+        // active plan inserted above is the only one — no trial row to expire.)
 
         // Record the first payment + invoice (subscription_create invoice.paid is skipped below,
         // so this is the only place the initial charge is persisted for the plan-gate flow).
@@ -136,7 +142,11 @@ export default withLambda(async (event) => {
 
         const sessBillingStart = new Date();
         const sessBillingEnd   = new Date(sessBillingStart);
-        sessBillingEnd.setMonth(sessBillingEnd.getMonth() + 1);
+        if (billingCycle === 'annual') {
+            sessBillingEnd.setFullYear(sessBillingEnd.getFullYear() + 1);
+        } else {
+            sessBillingEnd.setMonth(sessBillingEnd.getMonth() + 1);
+        }
         const sessInv = await _createInvoice({
             userId:                userIdInt,
             organisationId:        orgIdInt,
@@ -149,14 +159,11 @@ export default withLambda(async (event) => {
             stripePaymentIntentId: typeof session.payment_intent === 'string' ? session.payment_intent : null,
         });
         if (sessInv) {
-            await db.insert(notifications).values({
+            await createNotification(db, 'invoice_ready', {
                 userId: userIdInt,
-                type: 'invoice_ready',
-                title: `Your invoice for ${planName} is ready`,
-                message: `Invoice ${sessInv.invoiceNumber} has been generated for your ${planName} subscription. View it in your Invoice History.`,
-                isRead: false,
+                context: { plan: { name: planName }, invoice: { number: sessInv.invoiceNumber } },
                 metadata: { invoiceId: sessInv.id, invoiceNumber: sessInv.invoiceNumber, action: 'view_invoices' },
-            }).catch(() => {});
+            });
         }
 
         // US-ONB-2.2.1: reset welcome flag + persistent welcome notification (AC15/AC16)
@@ -164,14 +171,10 @@ export default withLambda(async (event) => {
             .set({ firstLoginWelcomeSeen: false, updatedAt: new Date() })
             .where(eq(userProfiles.userId, userIdInt))
             .catch(() => {});
-        await db.insert(notifications).values({
+        await createNotification(db, 'welcome_paid', {
             userId: userIdInt,
-            type: 'welcome',
-            title: 'Welcome to Be More Swan!',
-            message: 'Your workspace is ready. Open the Setup Wizard to build your AI assistant and go live.',
-            isRead: false,
             metadata: { action: 'open_wizard', ctaLabel: 'Open Setup Wizard' },
-        }).catch(() => {});
+        });
 
         // Referral Program Expansion: earn a referral TOKEN (not an instant £10 credit).
         // The token matures after the 14-day refund window and is then spendable in the
@@ -188,12 +191,8 @@ export default withLambda(async (event) => {
                     .set({ status: 'qualified', qualifiedAt: new Date() })
                     .where(eq(userReferrals.id, pendingReferral.id));
 
-                await db.insert(notifications).values({
+                await createNotification(db, 'referral_reward', {
                     userId: pendingReferral.referrerId,
-                    type: 'referral_reward',
-                    title: '🎉 Referral Token Earned',
-                    message: 'A friend you referred just made their first payment — you\'ve earned a referral token! It unlocks after their 14-day refund window. Save up 5 for a free assistant, or redeem 1 for £10 credit.',
-                    isRead: false,
                     metadata: { referralId: pendingReferral.id },
                 });
             }
@@ -286,11 +285,8 @@ export default withLambda(async (event) => {
             throw planErr;
         }
 
-        // US-GAP-8.1.1 SC7: Trial-to-paid conversion — expire any active trial plan for this user
-        // so check-capacity returns the new paid plan rather than the trial
-        await db.update(plans)
-            .set(withUpdatedAt({ status: 'expired' as const }))
-            .where(and(eq(plans.userId, userIdInt), eq(plans.planType, 'trial'), eq(plans.status, 'active')));
+        // (Free trial removed: no active trial plan can exist to convert — the new paid plan
+        // inserted above is this org's only active plan.)
 
         // Create payment record — include card details
         await db.insert(payments).values({
@@ -331,38 +327,25 @@ export default withLambda(async (event) => {
         // ── Notifications ─────────────────────────────────────────
         // 1. Invoice ready notification
         if (inv) {
-            await db.insert(notifications).values({
+            await createNotification(db, 'invoice_ready', {
                 userId: userIdInt,
-                type: 'invoice_ready',
-                title: `Your invoice for ${planName} is ready`,
-                message: `Invoice ${inv.invoiceNumber} has been generated for your ${planName} subscription. View it in your Invoice History.`,
-                isRead: false,
+                context: { plan: { name: planName }, invoice: { number: inv.invoiceNumber } },
                 metadata: { invoiceId: inv.id, invoiceNumber: inv.invoiceNumber, action: 'view_invoices' },
             });
         }
 
         // 2. Onboarding nudge
-        await db.insert(notifications).values({
-            userId: userIdInt,
-            type: 'billing',
-            title: 'Payment Successful — Set Up Your Assistant',
-            message: 'Your subscription is active. Click "Resume Setup" on your dashboard to build your Digital Assistant now.',
-            isRead: false,
-        });
+        await createNotification(db, 'payment_successful_setup', { userId: userIdInt });
 
         // 3. US-ONB-2.2.1: Reset firstLoginWelcomeSeen + insert persistent welcome notification (AC15/AC16)
         await db.update(userProfiles)
             .set({ firstLoginWelcomeSeen: false, updatedAt: new Date() })
             .where(eq(userProfiles.userId, userIdInt))
             .catch(() => {});
-        await db.insert(notifications).values({
+        await createNotification(db, 'welcome_paid', {
             userId: userIdInt,
-            type: 'welcome',
-            title: 'Welcome to Be More Swan!',
-            message: 'Your workspace is ready. Open the Setup Wizard to build your AI assistant and go live.',
-            isRead: false,
             metadata: { action: 'open_wizard', ctaLabel: 'Open Setup Wizard' },
-        }).catch(() => {});
+        });
 
         // ── Referral Program Expansion: earn a referral TOKEN ────────
         // The referred friend's first payment qualifies the referral. We no longer apply
@@ -380,12 +363,8 @@ export default withLambda(async (event) => {
                     .set({ status: 'qualified', qualifiedAt: new Date() })
                     .where(eq(userReferrals.id, pendingReferral.id));
 
-                await db.insert(notifications).values({
+                await createNotification(db, 'referral_reward', {
                     userId: pendingReferral.referrerId,
-                    type: 'referral_reward',
-                    title: '🎉 Referral Token Earned',
-                    message: 'A friend you referred just made their first payment — you\'ve earned a referral token! It unlocks after their 14-day refund window. Save up 5 for a free assistant, or redeem 1 for £10 credit.',
-                    isRead: false,
                     metadata: { referralId: pendingReferral.id },
                 });
             }
@@ -425,12 +404,9 @@ export default withLambda(async (event) => {
             const alreadySent = existing.some(n => (n as any).metadata?.invoiceId === invoice.id);
 
             if (!alreadySent) {
-                await db.insert(notifications).values({
+                await createNotification(db, 'billing_renewal_due', {
                     userId,
-                    type: 'billing_renewal_due',
-                    title: 'Subscription Renewal Due Soon',
-                    message: `Your subscription will renew on ${renewalDay}${amount ? ` for ${amount}` : ''}. Make sure your payment details are up to date.`,
-                    isRead: false,
+                    context: { billing: { renewal_day: renewalDay, amount_suffix: amount ? ` for ${amount}` : '' } },
                     metadata: {
                         invoiceId: invoice.id,
                         customerId: invoice.customer,
@@ -565,12 +541,9 @@ export default withLambda(async (event) => {
 
             // ── Invoice ready notification ────────────────────────
             if (renewInv) {
-                await db.insert(notifications).values({
+                await createNotification(db, 'invoice_ready_renewal', {
                     userId,
-                    type: 'invoice_ready',
-                    title: `Your invoice for ${renewPlanRecord?.planName ?? 'your subscription'} is ready`,
-                    message: `Invoice ${renewInv.invoiceNumber} has been generated. View it in your Invoice History.`,
-                    isRead: false,
+                    context: { plan: { name: renewPlanRecord?.planName ?? 'your subscription' }, invoice: { number: renewInv.invoiceNumber } },
                     metadata: { invoiceId: renewInv.id, invoiceNumber: renewInv.invoiceNumber, action: 'view_invoices' },
                 });
             }
@@ -604,12 +577,12 @@ export default withLambda(async (event) => {
 
             // In-app notification: Subscription renewed
             if (billingReason === 'subscription_cycle') {
-                await db.insert(notifications).values({
+                await createNotification(db, 'billing_renewed', {
                     userId,
-                    type: 'billing_renewed',
-                    title: 'Subscription Renewed',
-                    message: `Your subscription has been renewed successfully${amount ? ` — ${amount} charged` : ''}${periodEnd ? `. Active until ${periodEnd}.` : '.'}`,
-                    isRead: false,
+                    context: { billing: {
+                        charged_suffix: amount ? ` — ${amount} charged` : '',
+                        until_suffix: periodEnd ? `. Active until ${periodEnd}.` : '.',
+                    } },
                     metadata: {
                         invoiceId: invoice.id,
                         amountPaid: invoice.amount_paid,
@@ -618,14 +591,9 @@ export default withLambda(async (event) => {
                 });
             } else {
                 // Manual payment / other invoice paid (covers grace-period recovery payments)
-                await db.insert(notifications).values({
+                await createNotification(db, maybePastDuePlan ? 'billing_payment_received_restored' : 'billing_payment_received', {
                     userId,
-                    type: 'billing_payment_received',
-                    title: maybePastDuePlan ? 'Payment Received — Assistants Restored' : 'Payment Received',
-                    message: maybePastDuePlan
-                        ? `A payment of ${amount || 'your invoice'} has been received. Your account is back to active and your assistants have been re-enabled.`
-                        : `A payment of ${amount || 'your invoice'} has been received and your account is up to date.`,
-                    isRead: false,
+                    context: { billing: { amount: amount || 'your invoice' } },
                     metadata: {
                         invoiceId: invoice.id,
                         amountPaid: invoice.amount_paid,
@@ -684,12 +652,9 @@ export default withLambda(async (event) => {
                     ? `Your assistants will continue running for 7 days while we retry. `
                     : nextTry ? `We will try again on ${nextTry}. ` : '';
 
-            await db.insert(notifications).values({
+            await createNotification(db, attemptCount >= 3 ? 'billing_payment_failed_paused' : 'billing_payment_failed', {
                 userId,
-                type: 'billing_payment_failed',
-                title: `Payment Failed${attemptCount >= 3 ? ' — Assistants Paused' : ''}`,
-                message: `We were unable to charge ${amount || 'your account'} for your subscription. ${urgency}Update your payment details in the Billing section.`,
-                isRead: false,
+                context: { billing: { amount: amount || 'your account', urgency } },
                 metadata: {
                     invoiceId: invoice.id,
                     amountDue: invoice.amount_due,
@@ -777,14 +742,11 @@ export default withLambda(async (event) => {
 
             // Notify the affected user (if found)
             if (affectedUserId) {
-                await db.insert(notifications).values({
+                await createNotification(db, 'payment_dispute_opened', {
                     userId: affectedUserId,
-                    type:   'system',
-                    title:  '⚠️ Payment Dispute Opened',
-                    message: `A dispute of ${amountGbp} has been opened on your account. Our team will be in touch. Evidence deadline: ${deadline}.`,
-                    isRead: false,
+                    context: { billing: { amount: amountGbp }, dispute: { deadline } },
                     metadata: { disputeId: dispute.id, reason: dispute.reason, chargeId },
-                }).catch(() => {});
+                });
             }
 
             // Persist dispute record to DB for admin portal disputes tab
@@ -818,17 +780,16 @@ export default withLambda(async (event) => {
                 .from(users)
                 .where(eq(users.role, 'super_admin'));
 
-            // BUG-P1-1: Non-critical (in-app pings) — log errors but don't return 5xx
-            for (const admin of superAdmins) {
-                await db.insert(notifications).values({
-                    userId:  admin.id,
-                    type:    'system',
-                    title:   `🚨 Dispute Opened — ${amountGbp}`,
-                    message: `Dispute ID: ${dispute.id}. Reason: ${dispute.reason || 'unknown'}. Affected user ID: ${affectedUserId ?? 'unknown'}. Evidence deadline: ${deadline}.`,
-                    isRead: false,
-                    metadata: { disputeId: dispute.id, reason: dispute.reason, amountGbp, chargeId, affectedUserId, deadline },
-                }).catch(err => console.error('[stripe-webhook] Super-admin dispute notification failed:', { adminId: admin.id, disputeId: dispute.id, err: (err as any)?.message }));
-            }
+            // BUG-P1-1: Non-critical (in-app pings) — createNotifications logs & swallows internally.
+            await createNotifications(db, 'admin_dispute_opened', superAdmins.map(a => a.id), {
+                context: { billing: { amount: amountGbp }, dispute: {
+                    id: dispute.id,
+                    reason: dispute.reason || 'unknown',
+                    user_id: affectedUserId ?? 'unknown',
+                    deadline,
+                } },
+                metadata: { disputeId: dispute.id, reason: dispute.reason, amountGbp, chargeId, affectedUserId, deadline },
+            });
         } catch (dispErr) {
             console.warn('[stripe-webhook] dispute.created handling error (non-blocking):', dispErr);
         }
@@ -850,6 +811,37 @@ export default withLambda(async (event) => {
                     .where(eq(masterPlans.id, newMasterPlanId))
                     .limit(1);
 
+                // ── Scheduled downgrade took effect ─────────────────────────────
+                // billing-downgrade switches the price at period end via a Stripe subscription
+                // schedule and marks the plan 'downgrading'. When the new phase activates, its
+                // metadata (masterPlanId/tier) lands on the subscription and fires THIS event.
+                // Flip the plan record to the target tier + 'active', then release the now-spent
+                // schedule so a later item-level upgrade isn't blocked by a lingering schedule.
+                if (newMasterPlan) {
+                    const [downgradingPlan] = await db
+                        .select({ id: plans.id })
+                        .from(plans)
+                        .where(and(eq(plans.stripeSubscriptionId, sub.id), eq(plans.status, 'downgrading')))
+                        .limit(1);
+
+                    if (downgradingPlan) {
+                        await db.update(plans)
+                            // Plan Features: new tier = fresh binding — clear any frozen "new subscribers only" snapshot.
+                            .set({ masterPlanId: newMasterPlanId, planName: newMasterPlan.name, status: 'active', featureOverrides: null, updatedAt: new Date() })
+                            .where(eq(plans.id, downgradingPlan.id));
+
+                        if (typeof sub.schedule === 'string') {
+                            await stripe.subscriptionSchedules.release(sub.schedule)
+                                .catch(err => console.warn('[stripe-webhook] schedule release after downgrade failed (non-blocking):', (err as any)?.message));
+                        }
+
+                        await createNotification(db, 'downgrade_complete', {
+                            userId,
+                            context: { plan: { name: newMasterPlan.name } },
+                        });
+                    }
+                }
+
                 if (newMasterPlan?.assistantLimit !== null && newMasterPlan?.assistantLimit !== undefined) {
                     // Count currently active assistants
                     const activeAssistants = await db
@@ -869,12 +861,12 @@ export default withLambda(async (event) => {
                             .set({ isActive: false, provisioningStatus: 'paused_limit', updatedAt: new Date() })
                             .where(and(eq(aiAssistants.userId, userId), inArray(aiAssistants.id, pauseIds)));
 
-                        await db.insert(notifications).values({
+                        await createNotification(db, 'assistants_paused_downgrade', {
                             userId,
-                            type: 'assistants_paused_downgrade',
-                            title: 'Assistants Paused — Plan Limit Reached',
-                            message: `Your plan change reduced your assistant limit to ${newMasterPlan.assistantLimit}. The following assistant${excess > 1 ? 's have' : ' has'} been paused: ${pausedNames}. You can delete or swap assistants from your workspace.`,
-                            isRead: false,
+                            context: { plan: { assistant_limit: newMasterPlan.assistantLimit }, paused: {
+                                assistant_phrase: excess > 1 ? 'assistants have' : 'assistant has',
+                                names: pausedNames,
+                            } },
                             metadata: { pausedIds: pauseIds, newLimit: newMasterPlan.assistantLimit },
                         });
                     }
@@ -887,6 +879,20 @@ export default withLambda(async (event) => {
     if (stripeEvent.type === 'customer.subscription.deleted') {
         const sub    = stripeEvent.data.object as Stripe.Subscription;
         const userId = await _resolveUserIdFromSub(sub);
+
+        // Scheduled downgrades now use a subscription schedule (not cancel_at_period_end), so a
+        // deletion carrying pendingDowngrade metadata is a LEGACY downgrade that was scheduled the
+        // old way — cancelling it drops the customer instead of downgrading them. Surface it loudly
+        // so ops can re-subscribe them onto the intended tier; a deleted subscription can't be revived.
+        if (sub.metadata?.pendingDowngradeMasterPlanId) {
+            console.error('[stripe-webhook] LEGACY pending-downgrade subscription was cancelled at period end — customer needs re-subscribing to target tier:', {
+                subscriptionId: sub.id,
+                userId,
+                pendingDowngradeMasterPlanId: sub.metadata.pendingDowngradeMasterPlanId,
+                pendingDowngradeTierKey: sub.metadata.pendingDowngradeTierKey,
+            });
+        }
+
         if (userId) {
             // Mark plans as cancelled — capture cancelledAt for win-back email scheduling (US-GAP-4.2.1)
             const cancelledNow = new Date();
@@ -899,18 +905,25 @@ export default withLambda(async (event) => {
                 .set(withUpdatedAt({ isActive: false, provisioningStatus: 'paused_payment' as const }))
                 .where(and(eq(aiAssistants.userId, userId), eq(aiAssistants.isActive, true)));
 
-            await db.insert(notifications).values({
+            await createNotification(db, 'billing_cancelled', {
                 userId,
-                type: 'billing_cancelled',
-                title: 'Subscription Cancelled — Assistants Paused',
-                message: 'Your subscription has been cancelled and your Digital Assistants have been paused. You can re-subscribe at any time from the Billing area to restore full access.',
-                isRead: false,
                 metadata: { subscriptionId: sub.id },
             });
         }
     }
 
     return { statusCode: 200, body: JSON.stringify({ received: true }) };
+
+    } catch (handlerErr) {
+        // Release the idempotency claim so Stripe's retry can reprocess this event, then
+        // rethrow so withLambda returns 5xx and Stripe actually retries. Without this, a
+        // half-finished event would be permanently swallowed as a "duplicate" on retry.
+        await db.delete(processedWebhookEvents)
+            .where(eq(processedWebhookEvents.stripeEventId, stripeEvent.id))
+            .catch(delErr => console.error('[stripe-webhook] Failed to release idempotency claim:', (delErr as any)?.message));
+        console.error('[stripe-webhook] Handler error — released claim for retry:', { eventId: stripeEvent.id, type: stripeEvent.type, err: (handlerErr as any)?.message });
+        throw handlerErr;
+    }
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

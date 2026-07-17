@@ -24,10 +24,11 @@
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import Stripe from 'stripe';
-import { eq, and, gte, gt, count, sum, asc, desc, inArray } from 'drizzle-orm';
+import { eq, and, gte, gt, count, sum, asc, or, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { plans, masterPlans, planPrices, aiAssistants, taskRuns, usageCounters, userOrganisations, users, systemConnections, organisations } from '../../db/schema';
 import { getPeriodStart } from '../../src/utils/atomic-cap-check';
+import { effectiveLimit, effectiveFeatures, type FeatureOverrides } from '../../src/utils/plan-features';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const stripe = process.env.STRIPE_SECRET_KEY
@@ -53,6 +54,20 @@ export default withLambda(async (event) => {
     try {
         const db = getDb();
 
+        // Resolve the org up front — plan lookup is org-scoped so a member of a paid
+        // workspace (who has no personal plan row, only the shared org plan) still resolves
+        // to the org's plan rather than falling through to the no-plan paywall state.
+        const [userOrg] = await db
+            .select({ organisationId: userOrganisations.organisationId })
+            .from(userOrganisations)
+            .where(eq(userOrganisations.userId, userId))
+            .limit(1);
+        const orgId = userOrg?.organisationId ?? null;
+        // A plan belongs to the user either directly (solo owner) or via their org (members).
+        const planScope = orgId
+            ? or(eq(plans.userId, userId), eq(plans.organisationId, orgId))
+            : eq(plans.userId, userId);
+
         // ── 1. Resolve the user's current active plan & its limits ──
         const activePlan = await db
             .select({
@@ -71,10 +86,11 @@ export default withLambda(async (event) => {
                 appConnectionLimit: masterPlans.appConnectionLimit,
                 seatLimit: masterPlans.seatLimit,
                 features: masterPlans.features,
+                featureOverrides: plans.featureOverrides,
             })
             .from(plans)
             .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
-            .where(and(eq(plans.userId, userId), eq(plans.status, 'active')))
+            .where(and(planScope, eq(plans.status, 'active')))
             .orderBy(plans.startedAt)
             .limit(1);
 
@@ -98,42 +114,32 @@ export default withLambda(async (event) => {
                     appConnectionLimit: masterPlans.appConnectionLimit,
                     seatLimit: masterPlans.seatLimit,
                     features: masterPlans.features,
+                    featureOverrides: plans.featureOverrides,
                 })
                 .from(plans)
                 .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
-                .where(and(eq(plans.userId, userId), eq(plans.status, 'past_due')))
+                .where(and(planScope, eq(plans.status, 'past_due')))
                 .orderBy(plans.startedAt)
                 .limit(1)
             : [];
 
-        // SC6c: check for expired trial plans when no active or past_due plan exists
-        const expiredTrialPlan = (activePlan.length === 0 && pastDuePlan.length === 0)
-            ? await db
-                .select({ planType: plans.planType, expiresAt: plans.expiresAt })
-                .from(plans)
-                .where(and(eq(plans.userId, userId), eq(plans.planType, 'trial'), eq(plans.status, 'expired')))
-                .orderBy(desc(plans.expiresAt))
-                .limit(1)
-            : [];
-
         const plan = activePlan[0] ?? pastDuePlan[0] ?? null;
+        // Free trial removed (product decision): a user with no active/past_due plan is
+        // hard-gated. The frontend reads `noPlan` to show the non-dismissible plan picker,
+        // and hire-assistant / chat-orchestrator enforce the same rule server-side.
+        const noPlan = plan === null;
+        // Plan Features: a "new subscribers only" change freezes existing subscribers at their old
+        // values in plans.featureOverrides — prefer that snapshot over the live master_plans column.
+        const overrides = (plan as any)?.featureOverrides as FeatureOverrides | null;
         // Referral Program Expansion: bonus_assistants (earned via referral tokens) stacks on
         // top of the tier limit below, once orgId is resolved (AC2.2/AC4.2).
-        let assistantLimit: number | null = plan?.assistantLimit ?? null;
-        const monthlyTaskLimit: number | null = plan?.monthlyTaskLimit ?? null;
-        const monthlyTokenLimit: number | null = plan?.monthlyTokenLimit ?? null;
-        const appConnectionLimit: number | null = plan?.appConnectionLimit ?? null;
-        const seatLimit: number | null = plan?.seatLimit ?? null;
+        let assistantLimit: number | null = effectiveLimit(overrides, 'assistantLimit', plan?.assistantLimit ?? null);
+        const monthlyTaskLimit: number | null = effectiveLimit(overrides, 'monthlyTaskLimit', plan?.monthlyTaskLimit ?? null);
+        const monthlyTokenLimit: number | null = effectiveLimit(overrides, 'monthlyTokenLimit', plan?.monthlyTokenLimit ?? null);
+        const appConnectionLimit: number | null = effectiveLimit(overrides, 'appConnectionLimit', plan?.appConnectionLimit ?? null);
+        const seatLimit: number | null = effectiveLimit(overrides, 'seatLimit', plan?.seatLimit ?? null);
 
-        // ── 2. Resolve orgId and count seats ─────────────────────────────
-        const [userOrg] = await db
-            .select({ organisationId: userOrganisations.organisationId })
-            .from(userOrganisations)
-            .where(eq(userOrganisations.userId, userId))
-            .limit(1);
-
-        const orgId = userOrg?.organisationId ?? null;
-
+        // ── 2. Count seats (orgId resolved above) ────────────────────────
         // Add referral bonus assistants to the tier limit (null tier = unlimited, bonus moot).
         let bonusAssistants = 0;
         let betaAccess = false;
@@ -326,7 +332,7 @@ export default withLambda(async (event) => {
                 assistantLimit,
                 bonusAssistants,
                 betaAccess,
-                features: (plan as any)?.features ?? {}, // AC3.2.4: active plan's feature unlocks
+                features: effectiveFeatures(overrides, (plan as any)?.features), // AC3.2.4: active plan's feature unlocks (snapshot-aware)
                 taskCount,
                 taskLimit: monthlyTaskLimit,
                 tokenUsage,
@@ -345,15 +351,9 @@ export default withLambda(async (event) => {
                 planType: plan?.planType ?? null,
                 gracePeriodEndsAt,
                 graceExpired,    // true if grace period has passed and access should be blocked
-                // US-GAP-8.1.1 SC3/SC6c: trial countdown badge and expired gate data
-                trialExpired: expiredTrialPlan.length > 0,
-                isTrial: plan?.planType === 'trial',
-                trialExpiresAt: plan?.planType === 'trial' && plan?.expiresAt
-                    ? (plan.expiresAt instanceof Date ? plan.expiresAt : new Date(plan.expiresAt as string)).toISOString()
-                    : null,
-                trialDaysRemaining: plan?.planType === 'trial' && plan?.expiresAt
-                    ? Math.max(0, Math.ceil((new Date(plan.expiresAt instanceof Date ? plan.expiresAt : plan.expiresAt as string).getTime() - Date.now()) / (24 * 60 * 60 * 1000)))
-                    : null,
+                // Free trial removed: no active/past_due plan → hard-gate. The workspace reads
+                // this to show the non-dismissible plan picker for a brand-new (no-assistant) user.
+                noPlan,
                 currency: userCurrency,      // US-I18N-2.1 SC5: user's billing currency
                 pastDueAmountGbp,            // amount owed on open Stripe invoice (SC2)
                 pastDueAmount: pastDueAmountGbp, // alias — use formatCurrency(pastDueAmount, currency) in UI

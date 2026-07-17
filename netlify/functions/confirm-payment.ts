@@ -3,7 +3,8 @@ import jwt from 'jsonwebtoken';
 import Stripe from 'stripe';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, plans, payments, masterPlans, notifications } from '../../db/schema';
+import { users, plans, payments, masterPlans } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { resolveActionNotifications, PAYMENT_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -113,13 +114,7 @@ export default withLambda(async (event) => {
         });
 
         // 8. Notify user
-        await db.insert(notifications).values({
-            userId,
-            type: 'billing',
-            title: 'Payment Successful — Set Up Your Assistant',
-            message: 'Your subscription is active. Click "Resume Setup" on your dashboard to build your Digital Assistant now.',
-            isRead: false,
-        });
+        await createNotification(db, 'payment_successful_setup', { userId, isRead: false });
 
         // Clear any lingering "fix your billing" action items now the subscription is active.
         await resolveActionNotifications(db, userId, PAYMENT_RESTORED_TYPES);

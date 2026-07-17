@@ -27,19 +27,20 @@ import { getDb, withUpdatedAt } from '../../db/client';
 import {
     users, userProfiles, plans, aiAssistants,
     supportTickets, masterAssistants, waitlist,
-    leads, auditLogs, notifications, aiModelConfig,
+    leads, auditLogs, aiModelConfig,
     gdprErasureLog, adminAuditLog, aiUsageLog, aiModelPricing,
     organisations, billingReconciliationLog, masterPlans, platformConfig, featureFlags,
     billingOverrides, payments, assistantVersions,
     agentAnomalies, agentAnomalyThresholds, taskRuns,
     legalHolds, jwtBlocklist, stripeDisputes, storageUsage, helpArticles,
-    rewardAudits, userOrganisations, assistantFeatures,
+    rewardAudits, userOrganisations,
+    leadReplies, contactTasks, issueReports,
 } from '../../db/schema';
-import { ASSISTANT_FEATURES, isAssistantFeatureKey } from '../../src/config/assistant-features';
+import { createNotification } from '../../src/utils/notify';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { resolveEnvironment, runWithEnvironment } from '../../src/utils/env-context';
 import { sendMagicLinkEmail } from '../../src/utils/email';
-import { isAdminRole, hasPermission, requirePermission } from '../../src/utils/rbac';
+import { isAdminRole, hasPermission, requirePermission, permissionsForRole } from '../../src/utils/rbac';
 import { checkImpersonationBlock } from '../../src/utils/impersonation-guard';
 import { SPECIAL_CATEGORY_CLAUSE } from './get-dpa-content';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -108,14 +109,27 @@ export default withLambda(async (event) => {
     const [_adminRoleRow] = await authDb.select({ role: users.role }).from(users).where(eq(users.id, adminId)).limit(1);
     const adminRole = _adminRoleRow?.role ?? null;
 
-    // Epic: Superadmin Environment Management — US2/US3.
-    // Resolve Live vs Sandbox for this request. Only super_admins may operate in
-    // sandbox; a missing/malformed X-Environment header, a non-super-admin, or an
-    // unprovisioned sandbox all fall back to live (AC 3.3). Every data query below
-    // runs on the env-routed connection (db/client.ts).
-    const env = resolveEnvironment(event.headers, { allowSandbox: adminRole === 'super_admin' });
+    // ── GET: my-permissions — the caller's own resolved permission set ────────
+    // The admin portal is a static page and cannot import rbac.ts, so it asks for
+    // its permissions rather than keeping a second copy of the matrix in JS. This
+    // is what stops the nav and the API drifting apart. Env-independent: roles are
+    // always resolved against live.
+    if (event.httpMethod === 'GET' && resource === 'my-permissions') {
+        return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ role: adminRole, permissions: permissionsForRole(adminRole) }),
+        };
+    }
 
-    return runWithEnvironment(env, async () => {
+    // Epic: Superadmin Environment Management — US2/US3.
+    // Resolve Live vs Sandbox for this request. Only roles clearing 'sandbox_access'
+    // may operate in sandbox; a missing/malformed X-Environment header, an
+    // insufficient role, or an unprovisioned sandbox all fall back to live (AC 3.3).
+    // Every data query below runs on the env-routed connection (db/client.ts).
+    const env = resolveEnvironment(event.headers, { allowSandbox: hasPermission(adminRole, 'sandbox_access') });
+
+    const result = await runWithEnvironment<any>(env, async () => {
     const db = getDb();
 
     try {
@@ -419,84 +433,6 @@ export default withLambda(async (event) => {
             };
         }
 
-        // ── Assistant feature capabilities (per assistant TYPE) ───────────────
-        // The matrix behind the admin "Assistant Features" page. Feature keys are the SoT in
-        // src/config/assistant-features.ts; enabled state is stored per (type, key).
-        if (resource === 'assistant-features') {
-            const permErr = requirePermission(adminRole, 'feature_flags');
-            if (permErr) return permErr;
-
-            if (event.httpMethod === 'GET') {
-                const assistants = await db
-                    .select({
-                        id: masterAssistants.id,
-                        name: masterAssistants.name,
-                        roleKey: masterAssistants.roleKey,
-                        lifecycleState: masterAssistants.lifecycleState,
-                    })
-                    .from(masterAssistants)
-                    .orderBy(masterAssistants.name);
-
-                const rows = await db
-                    .select({
-                        masterAssistantId: assistantFeatures.masterAssistantId,
-                        featureKey: assistantFeatures.featureKey,
-                        enabled: assistantFeatures.enabled,
-                    })
-                    .from(assistantFeatures);
-
-                const byAssistant = new Map<number, Record<string, boolean>>();
-                for (const r of rows) {
-                    const m = byAssistant.get(r.masterAssistantId) || {};
-                    m[r.featureKey] = r.enabled;
-                    byAssistant.set(r.masterAssistantId, m);
-                }
-
-                // Absent row = disabled — backfill every known feature key so the UI renders a
-                // full grid without guessing.
-                const result = assistants.map(a => ({
-                    ...a,
-                    features: Object.fromEntries(
-                        ASSISTANT_FEATURES.map(f => [f.key, byAssistant.get(a.id)?.[f.key] ?? false]),
-                    ),
-                }));
-
-                return {
-                    statusCode: 200,
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ features: ASSISTANT_FEATURES, assistants: result }),
-                };
-            }
-
-            if (event.httpMethod === 'PATCH') {
-                const id = parseInt(qs.id || '');
-                if (!id) return { statusCode: 400, body: JSON.stringify({ error: 'id required.' }) };
-
-                const body = JSON.parse(event.body || '{}');
-                const { featureKey, enabled } = body;
-                if (!isAssistantFeatureKey(featureKey)) {
-                    return { statusCode: 400, body: JSON.stringify({ error: 'Unknown featureKey.' }) };
-                }
-                if (typeof enabled !== 'boolean') {
-                    return { statusCode: 400, body: JSON.stringify({ error: 'enabled (boolean) required.' }) };
-                }
-
-                await db.insert(assistantFeatures)
-                    .values({ masterAssistantId: id, featureKey, enabled, updatedBy: adminId })
-                    .onConflictDoUpdate({
-                        target: [assistantFeatures.masterAssistantId, assistantFeatures.featureKey],
-                        set: { enabled, updatedBy: adminId, updatedAt: new Date() },
-                    });
-                await audit(db, adminId, 'UPDATE', 'assistant_features', `${id}:${featureKey}`, { enabled });
-
-                return {
-                    statusCode: 200,
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ success: true }),
-                };
-            }
-        }
-
         // ── POST: send passwordless login link to user (US6 Sc2) ─────────────
         if (event.httpMethod === 'POST' && resource === 'send-login-link') {
             const uid = parseInt(qs.id || '');
@@ -752,9 +688,8 @@ export default withLambda(async (event) => {
         // Same Stripe card fingerprint active on ≥2 workspaces ⇒ possible account-splitting.
         // Superadmin-only (this exposes cross-workspace billing linkage).
         if (event.httpMethod === 'GET' && resource === 'security-abuse') {
-            if (adminRole !== 'super_admin') {
-                return { statusCode: 403, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Superadmin access required.' }) };
-            }
+            const permErr = requirePermission(adminRole, 'view_security_abuse');
+            if (permErr) return permErr;
             const rows = await db
                 .select({
                     id: organisations.id,
@@ -1077,9 +1012,8 @@ export default withLambda(async (event) => {
             }
 
             if (event.httpMethod === 'POST') {
-                if (adminRole !== 'super_admin') {
-                    return { statusCode: 403, body: JSON.stringify({ error: 'Only super admins can change the session timeout.' }) };
-                }
+                const permErr = requirePermission(adminRole, 'manage_session_timeout');
+                if (permErr) return permErr;
                 const body = JSON.parse(event.body || '{}');
                 const timeout = Number(body.inactivityTimeoutMinutes);
                 const countdown = Number(body.countdownMinutes);
@@ -1523,13 +1457,11 @@ export default withLambda(async (event) => {
                 const otherSuperAdmins = await db.select({ id: users.id }).from(users)
                     .where(and(eq(users.role, 'super_admin'), sql`${users.id} != ${adminId}`));
                 for (const sa of otherSuperAdmins) {
-                    await db.insert(notifications).values({
+                    await createNotification(db, 'super_admin_promotion_approval', {
                         userId: sa.id,
-                        type: 'system',
-                        title: '🔐 Super Admin Promotion Requires Your Approval',
-                        message: `A request to promote ${targetUser.email} to super_admin has been initiated. Your approval is required within 24 hours. Request ID: ${requestId}`,
+                        context: { promotion: { target_email: targetUser.email, request_id: requestId } },
                         metadata: { requestId, targetEmail: targetUser.email, initiatorId: adminId, expiresAt },
-                    }).catch(() => {});
+                    });
                 }
 
                 await insertAdminAuditLog({
@@ -1781,11 +1713,13 @@ export default withLambda(async (event) => {
                 company: leads.company,
                 useCase: leads.useCase,
                 createdAt: leads.createdAt,
+                updatedAt: leads.updatedAt,
                 lastContactedAt: leads.lastContactedAt,
             })
             .from(leads)
             .where(conditions.length ? and(...conditions) : undefined)
-            .orderBy(desc(leads.createdAt))
+            // Sort by last activity so leads with a fresh inbound email/reply resurface to the top.
+            .orderBy(desc(leads.updatedAt))
             .limit(200);
 
             return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ leads: rows }) };
@@ -1811,6 +1745,299 @@ export default withLambda(async (event) => {
             const { leadId, salesNotes } = body;
             if (!leadId) return { statusCode: 400, body: JSON.stringify({ error: 'leadId required.' }) };
             await db.update(leads).set({ salesNotes: salesNotes ?? null, updatedAt: new Date() }).where(eq(leads.id, leadId));
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
+        }
+
+        // ── CRM contact-request management: lead detail + threaded replies ────
+        // GET ?resource=lead-detail&id=N → lead row + full correspondence thread
+        if (event.httpMethod === 'GET' && resource === 'lead-detail') {
+            const denied = requirePermission(adminRole, 'view_billing_history');
+            if (denied) return denied;
+            const leadId = parseInt(qs.id || '');
+            if (!leadId) return { statusCode: 400, body: JSON.stringify({ error: 'id required.' }) };
+
+            const [lead] = await db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
+            if (!lead) return { statusCode: 404, body: JSON.stringify({ error: 'Lead not found.' }) };
+
+            const thread = await db.select({
+                id: leadReplies.id,
+                direction: leadReplies.direction,
+                body: leadReplies.body,
+                createdAt: leadReplies.createdAt,
+                authorName: sql<string>`trim(coalesce(${users.firstName}, '') || ' ' || coalesce(${users.lastName}, ''))`,
+            })
+            .from(leadReplies)
+            .leftJoin(users, eq(users.id, leadReplies.authorId))
+            .where(eq(leadReplies.leadId, leadId))
+            .orderBy(leadReplies.createdAt);
+
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lead, thread }) };
+        }
+
+        // POST ?resource=lead-reply { leadId, body, direction } → store a reply.
+        // direction 'outbound' emails the prospect via Resend and marks the lead contacted;
+        // 'internal' is a private note that never leaves the CRM.
+        if (event.httpMethod === 'POST' && resource === 'lead-reply') {
+            const denied = requirePermission(adminRole, 'view_billing_history');
+            if (denied) return denied;
+            const payload = JSON.parse(event.body || '{}');
+            const leadId = parseInt(payload.leadId);
+            const messageBody = (payload.body || '').trim();
+            const direction = payload.direction === 'internal' ? 'internal' : 'outbound';
+            if (!leadId || !messageBody) return { statusCode: 400, body: JSON.stringify({ error: 'leadId and body are required.' }) };
+
+            const [lead] = await db.select().from(leads).where(eq(leads.id, leadId)).limit(1);
+            if (!lead) return { statusCode: 404, body: JSON.stringify({ error: 'Lead not found.' }) };
+
+            // Email the prospect for outbound replies (internal notes stay private).
+            if (direction === 'outbound') {
+                if (!resend) return { statusCode: 503, body: JSON.stringify({ error: 'Email is not configured (RESEND_API_KEY unset).' }) };
+                const subject = lead.opportunityReason ? `Re: ${lead.opportunityReason}` : 'Re: your enquiry';
+                await resend.emails.send({
+                    from: FROM_EMAIL,
+                    to: lead.email,
+                    replyTo: 'support@bemoreswan.com',
+                    subject,
+                    html: `
+<div style="font-family:-apple-system,sans-serif;max-width:600px;margin:24px auto;color:#374151;font-size:15px;line-height:1.7">
+  <div style="white-space:pre-wrap">${messageBody.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
+  <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">
+  <p style="font-size:13px;color:#9ca3af">Be More Swan · <a href="https://bemoreswan.com" style="color:#10b981">bemoreswan.com</a></p>
+</div>`,
+                });
+            }
+
+            await db.insert(leadReplies).values({
+                leadId,
+                direction,
+                authorId: adminId,
+                body: messageBody,
+            });
+
+            // Outbound contact advances the pipeline status + timestamp.
+            if (direction === 'outbound') {
+                await db.update(leads)
+                    .set({ status: 'contacted', lastContactedAt: new Date(), updatedAt: new Date() })
+                    .where(eq(leads.id, leadId));
+            }
+
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
+        }
+
+        // ── CRM Contacts view ────────────────────────────────────────────────
+        // GET ?resource=contacts[&search=&type=] → contact list (enquiry leads, one per email)
+        if (event.httpMethod === 'GET' && resource === 'contacts') {
+            const denied = requirePermission(adminRole, 'view_billing_history');
+            if (denied) return denied;
+            const search = qs.search || '';
+            const type   = qs.type || '';
+            const opp    = qs.opp || '';   // optional leadType (opportunity/signal) filter
+            // Contacts is the single CRM: every lead row is a person (enquiries, waitlist, and the
+            // system-detected sales signals that used to live in the now-removed Sales Pipeline).
+            const conds: any[] = [];
+            if (type) conds.push(eq(leads.contactType, type));
+            if (opp)  conds.push(eq(leads.leadType, opp));
+            if (search) conds.push(or(
+                ilike(leads.email, `%${search}%`), ilike(leads.name, `%${search}%`), ilike(leads.company, `%${search}%`),
+            ));
+            const rows = await db.select({
+                id: leads.id, name: leads.name, email: leads.email, company: leads.company,
+                phone: leads.phone, contactType: leads.contactType, status: leads.status,
+                leadType: leads.leadType, priority: leads.priority,
+                tags: leads.tags, useCase: leads.useCase, opportunityReason: leads.opportunityReason,
+                createdAt: leads.createdAt, updatedAt: leads.updatedAt,
+            }).from(leads).where(conds.length ? and(...conds) : undefined).orderBy(desc(leads.updatedAt)).limit(500);
+            // One contact per person: a person can have several lead rows (a contact form + a
+            // waitlist signup, etc.). Ordered by last activity, so we keep the most recent per email.
+            const seen = new Set<string>();
+            const contacts = rows.filter(r => {
+                const k = (r.email || '').toLowerCase();
+                if (seen.has(k)) return false;
+                seen.add(k); return true;
+            });
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contacts }) };
+        }
+
+        // GET ?resource=contact-detail&id=N → contact + message thread + tasks
+        if (event.httpMethod === 'GET' && resource === 'contact-detail') {
+            const denied = requirePermission(adminRole, 'view_billing_history');
+            if (denied) return denied;
+            const id = parseInt(qs.id || '');
+            if (!id) return { statusCode: 400, body: JSON.stringify({ error: 'id required.' }) };
+            const [lead] = await db.select().from(leads).where(eq(leads.id, id)).limit(1);
+            if (!lead) return { statusCode: 404, body: JSON.stringify({ error: 'Contact not found.' }) };
+            const thread = await db.select({
+                id: leadReplies.id, direction: leadReplies.direction, body: leadReplies.body,
+                createdAt: leadReplies.createdAt,
+                authorName: sql<string>`trim(coalesce(${users.firstName}, '') || ' ' || coalesce(${users.lastName}, ''))`,
+            }).from(leadReplies).leftJoin(users, eq(users.id, leadReplies.authorId))
+              .where(eq(leadReplies.leadId, id)).orderBy(leadReplies.createdAt);
+            const tasks = await db.select().from(contactTasks)
+              .where(eq(contactTasks.leadId, id)).orderBy(contactTasks.done, desc(contactTasks.createdAt));
+
+            // ── Client at-a-glance panel ───────────────────────────────────────
+            // When this contact's email maps to a user account, surface the live
+            // account snapshot the Super Admin needs without leaving Contacts:
+            // plan, plan end date, payment status, active-assistant count, and a
+            // derived upgrade-opportunity verdict + reasons. Null for pure prospects.
+            let client: any = null;
+            let tickets: any[] = [];
+            let issues: any[] = [];
+            if (lead.email) {
+                const [snap] = await db.execute<{
+                    user_id: number; first_name: string | null; last_name: string | null;
+                    org_name: string | null;
+                    plan_name: string | null; plan_status: string | null;
+                    started_at: Date | null; expires_at: Date | null; grace_period_ends_at: Date | null;
+                    cancelled_at: Date | null; master_plan_name: string | null;
+                    assistant_limit: number | null; monthly_task_limit: number | null;
+                    active_assistants: number; tasks_this_month: number;
+                }>(sql`
+                    SELECT
+                        u.id AS user_id, u.first_name, u.last_name,
+                        org.name AS org_name,
+                        p.plan_name, p.status AS plan_status,
+                        p.started_at, p.expires_at, p.grace_period_ends_at, p.cancelled_at,
+                        mp.name AS master_plan_name,
+                        mp.assistant_limit, mp.monthly_task_limit,
+                        (SELECT COUNT(*)::int FROM ai_assistants aa
+                           WHERE aa.user_id = u.id AND aa.is_active = true) AS active_assistants,
+                        (SELECT COUNT(*)::int FROM task_runs tr
+                           JOIN ai_assistants aa2 ON tr.assistant_id = aa2.id
+                           WHERE aa2.user_id = u.id
+                             AND tr.created_at >= date_trunc('month', NOW())) AS tasks_this_month
+                    FROM users u
+                    LEFT JOIN LATERAL (
+                        SELECT * FROM plans pp WHERE pp.user_id = u.id
+                        ORDER BY (pp.status IN ('active','past_due')) DESC, pp.created_at DESC
+                        LIMIT 1
+                    ) p ON true
+                    LEFT JOIN master_plans mp ON mp.id = p.master_plan_id
+                    LEFT JOIN organisations org ON org.id = p.organisation_id
+                    WHERE lower(u.email) = lower(${lead.email})
+                    LIMIT 1
+                `);
+
+                if (snap) {
+                    const status = snap.plan_status || null;
+                    // Plan end date + label depend on lifecycle stage.
+                    let endDate: Date | null = null;
+                    let endLabel = '—';
+                    if (status === 'active')                 { endDate = snap.expires_at;          endLabel = endDate ? 'Renews' : 'No renewal date'; }
+                    else if (status === 'past_due')          { endDate = snap.grace_period_ends_at; endLabel = 'Grace period ends'; }
+                    else if (status === 'cancelling' || status === 'downgrading')
+                                                              { endDate = snap.cancelled_at || snap.expires_at; endLabel = 'Ends'; }
+                    else if (status === 'cancelled' || status === 'expired')
+                                                              { endDate = snap.cancelled_at || snap.expires_at; endLabel = 'Ended'; }
+
+                    // Derived upgrade-opportunity verdict.
+                    const reasons: string[] = [];
+                    const taskLimit = snap.monthly_task_limit;
+                    const asstLimit = snap.assistant_limit;
+                    const tasks = snap.tasks_this_month || 0;
+                    const assts = snap.active_assistants || 0;
+                    const paid = status === 'active' || status === 'past_due';
+                    if (paid && taskLimit && tasks >= taskLimit * 0.8) {
+                        const pct = Math.round((tasks / taskLimit) * 100);
+                        reasons.push(`High task usage — ${tasks} of ${taskLimit} monthly tasks used (${pct}%)`);
+                    }
+                    if (paid && asstLimit && assts >= asstLimit) {
+                        reasons.push(`At assistant capacity — ${assts} of ${asstLimit} assistants active`);
+                    }
+                    if (!paid && assts > 0) {
+                        reasons.push(`Active but on no paid plan — ${assts} assistant${assts === 1 ? '' : 's'} running: conversion opportunity`);
+                    }
+
+                    const accountName = [snap.first_name, snap.last_name].filter(Boolean).join(' ').trim() || null;
+
+                    client = {
+                        userId: snap.user_id,
+                        // Account identity — the source of truth for a client's name/company.
+                        accountName,
+                        accountCompany: snap.org_name || null,
+                        plan: snap.master_plan_name || snap.plan_name || (paid ? 'Paid plan' : 'No paid plan'),
+                        planStatus: status,             // 'active' | 'past_due' | 'cancelling' | 'cancelled' | 'expired' | null
+                        paymentStatus: !status ? 'No plan'
+                            : status === 'active' ? 'Paid'
+                            : status === 'past_due' ? 'Payment failed'
+                            : status === 'cancelling' ? 'Cancelling'
+                            : status === 'downgrading' ? 'Downgrading'
+                            : status === 'cancelled' ? 'Cancelled'
+                            : status === 'expired' ? 'Expired' : status,
+                        planEndDate: endDate,
+                        planEndLabel: endLabel,
+                        activeAssistants: assts,
+                        assistantLimit: asstLimit,
+                        tasksThisMonth: tasks,
+                        monthlyTaskLimit: taskLimit,
+                        upgradeOpportunity: reasons.length > 0,
+                        upgradeReasons: reasons,
+                    };
+
+                    // Support Request History — every ticket this account has raised,
+                    // newest first, for the in-panel list + reuse of the ticket modal.
+                    tickets = await db.select({
+                        id: supportTickets.id, subject: supportTickets.subject,
+                        category: supportTickets.category, status: supportTickets.status,
+                        priority: supportTickets.priority, createdAt: supportTickets.createdAt,
+                        slaBreachedAt: supportTickets.slaBreachedAt,
+                    }).from(supportTickets)
+                      .where(eq(supportTickets.userId, snap.user_id))
+                      .orderBy(desc(supportTickets.createdAt)).limit(50);
+
+                    // Issues Reported — in-app bug reports this account has filed, newest first.
+                    // Reuses the Issue Reports modal (openIssuePanel) for view/manage.
+                    issues = await db.select({
+                        id: issueReports.id, description: issueReports.description,
+                        sourceLocation: issueReports.sourceLocation, status: issueReports.status,
+                        createdAt: issueReports.createdAt,
+                        hasImage: sql<boolean>`(${issueReports.imageData} IS NOT NULL)`,
+                    }).from(issueReports)
+                      .where(eq(issueReports.userId, snap.user_id))
+                      .orderBy(desc(issueReports.createdAt)).limit(50);
+                }
+            }
+
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ lead, thread, tasks, client, tickets, issues }) };
+        }
+
+        // POST ?resource=contact-update → edit name/company/phone/type/tags
+        if (event.httpMethod === 'POST' && resource === 'contact-update') {
+            const denied = requirePermission(adminRole, 'view_billing_history');
+            if (denied) return denied;
+            const b = JSON.parse(event.body || '{}');
+            if (!b.leadId) return { statusCode: 400, body: JSON.stringify({ error: 'leadId required.' }) };
+            const updates: Record<string, any> = { updatedAt: new Date() };
+            if (b.name !== undefined)    updates.name = b.name || null;
+            if (b.company !== undefined) updates.company = b.company || null;
+            if (b.phone !== undefined)   updates.phone = b.phone || null;
+            if (b.contactType && ['lead', 'registered', 'client', 'other'].includes(b.contactType)) updates.contactType = b.contactType;
+            if (Array.isArray(b.tags))   updates.tags = b.tags.map((t: any) => String(t)).slice(0, 20);
+            await db.update(leads).set(updates).where(eq(leads.id, b.leadId));
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
+        }
+
+        // POST ?resource=contact-task → add a task
+        if (event.httpMethod === 'POST' && resource === 'contact-task') {
+            const denied = requirePermission(adminRole, 'view_billing_history');
+            if (denied) return denied;
+            const b = JSON.parse(event.body || '{}');
+            if (!b.leadId || !(b.title || '').trim()) return { statusCode: 400, body: JSON.stringify({ error: 'leadId and title required.' }) };
+            await db.insert(contactTasks).values({
+                leadId: b.leadId, title: b.title.trim(), dueDate: (b.dueDate || '').trim() || null, createdBy: adminId,
+            });
+            return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
+        }
+
+        // POST ?resource=contact-task-toggle → complete/reopen a task
+        if (event.httpMethod === 'POST' && resource === 'contact-task-toggle') {
+            const denied = requirePermission(adminRole, 'view_billing_history');
+            if (denied) return denied;
+            const b = JSON.parse(event.body || '{}');
+            if (!b.taskId) return { statusCode: 400, body: JSON.stringify({ error: 'taskId required.' }) };
+            await db.update(contactTasks)
+                .set({ done: !!b.done, completedAt: b.done ? new Date() : null })
+                .where(eq(contactTasks.id, b.taskId));
             return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true }) };
         }
 
@@ -2439,4 +2666,12 @@ export default withLambda(async (event) => {
         return { statusCode: 500, body: JSON.stringify({ error: 'Internal Server Error' }) };
     }
     });
+
+    // AC 2.2: tell the frontend which environment actually served this request. A
+    // super_admin can request 'sandbox' via X-Environment yet still be silently routed
+    // to 'live' (unprovisioned SANDBOX_DATABASE_URL, AC 3.3) — without this header the
+    // Live/Sandbox toggle looks like it does nothing, because the data really doesn't
+    // change. The frontend uses it to warn the admin instead of lying about the active env.
+    result.headers = { ...(result.headers || {}), 'X-Resolved-Env': env };
+    return result;
 });

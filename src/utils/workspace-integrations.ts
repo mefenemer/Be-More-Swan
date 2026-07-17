@@ -12,17 +12,25 @@
 // expired (or about-to-expire) access token using the provider's refresh grant, persists
 // the rotated tokens (Xero rotates the refresh token on every use), and marks the row
 // 'expired' when the refresh grant itself is rejected so the UI can prompt a reconnect.
+//
+// Refresh is SERIALISED per (org, provider) — see refreshUnderLock(). Several providers
+// issue rotating single-use refresh tokens, so two concurrent refreshes would both POST
+// the same token, the provider would honour the first and reject the second, and the
+// loser would mark a perfectly healthy connection 'expired' for the whole org. The lock
+// makes the loser wait and then re-read the winner's freshly stored token instead.
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
 import { workspaceIntegrations } from '../../db/schema';
 import { storeSecret, getSecret, deleteSecret } from './vault';
+import { singleFlight } from './single-flight';
 
 type Db = ReturnType<typeof getDb>;
+type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
-export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail' | 'threads' | 'tiktok' | 'youtube' | 'wordpresscom' | 'searchconsole' | 'jira' | 'asana';
+export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail' | 'threads' | 'tiktok' | 'youtube' | 'wordpresscom' | 'searchconsole' | 'jira' | 'asana' | 'canva';
 
-export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail', 'threads', 'tiktok', 'youtube', 'wordpresscom', 'searchconsole', 'jira', 'asana'];
+export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail', 'threads', 'tiktok', 'youtube', 'wordpresscom', 'searchconsole', 'jira', 'asana', 'canva'];
 
 export function isIntegrationProvider(value: unknown): value is IntegrationProvider {
     return typeof value === 'string' && (INTEGRATION_PROVIDERS as string[]).includes(value);
@@ -352,6 +360,22 @@ async function refreshProviderToken(provider: IntegrationProvider, refreshToken:
         return { accessToken: data.access_token, refreshToken: data.refresh_token ?? null, expiresInSec: data.expires_in ?? 3600 };
     }
 
+    if (provider === 'canva') {
+        const credentials = Buffer.from(`${process.env.CANVA_CLIENT_ID ?? ''}:${process.env.CANVA_CLIENT_SECRET ?? ''}`).toString('base64');
+        const res = await fetch('https://api.canva.com/rest/v1/oauth/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Basic ${credentials}` },
+            body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: refreshToken }),
+        });
+        const data: { access_token?: string; refresh_token?: string; expires_in?: number } = await res.json().catch(() => ({}));
+        if (!res.ok || !data.access_token) throw new IntegrationError('refresh_failed', 'Canva token refresh was rejected.', 401);
+        // Canva refresh tokens are SINGLE-USE and always rotate — the one we just sent is now
+        // dead, so a missing refresh_token in the response would strand the connection. Treat
+        // that as a failure rather than falling back to the stored (now-spent) token.
+        if (!data.refresh_token) throw new IntegrationError('refresh_failed', 'Canva did not return a rotated refresh token — please reconnect it.', 401);
+        return { accessToken: data.access_token, refreshToken: data.refresh_token, expiresInSec: data.expires_in ?? null };
+    }
+
     // Slack: only used when token rotation is enabled on the app (otherwise bot tokens
     // never expire and this path is never reached — expiresAt stays null).
     const res = await fetch('https://slack.com/api/oauth.v2.access', {
@@ -375,6 +399,88 @@ export interface FreshToken {
     integrationId: number;
 }
 
+// How long a caller waits for the lock held by whoever is mid-refresh. Comfortably
+// longer than a refresh round-trip, short enough that a wedged provider surfaces as a
+// clean error instead of piling up serverless invocations until they time out.
+const REFRESH_LOCK_TIMEOUT = '15s';
+
+/**
+ * The outcome of a locked refresh attempt.
+ *
+ * The failure path CANNOT write status='expired' from inside the transaction: the
+ * caller throws on failure, and anything written in the transaction is rolled back —
+ * so the row would silently stay 'active'. The transaction therefore returns the
+ * verdict and getFreshAccessToken applies it after the transaction has committed.
+ */
+type RefreshOutcome =
+    | { ok: true; token: FreshToken }
+    | { ok: false; markExpired: boolean; error: IntegrationError };
+
+/**
+ * Refresh (org, provider) with the workspace_integrations row locked FOR UPDATE.
+ *
+ * The lock is what makes rotating single-use refresh tokens safe: a concurrent caller
+ * blocks here rather than racing to spend the same refresh token, and once it acquires
+ * the lock it re-reads the row and vault INSIDE the lock. If the winner already
+ * refreshed, expiresAt is no longer in the skew window and we return their token
+ * without touching the provider at all.
+ */
+async function refreshUnderLock(tx: Tx, organisationId: number, provider: IntegrationProvider): Promise<RefreshOutcome> {
+    await tx.execute(sql`SET LOCAL lock_timeout = ${sql.raw(`'${REFRESH_LOCK_TIMEOUT}'`)}`);
+
+    const [row] = await tx
+        .select()
+        .from(workspaceIntegrations)
+        .where(and(
+            eq(workspaceIntegrations.organisationId, organisationId),
+            eq(workspaceIntegrations.provider, provider),
+        ))
+        .limit(1)
+        .for('update');
+
+    if (!row || row.status === 'revoked') {
+        return { ok: false, markExpired: false, error: new IntegrationError('not_connected', `${providerLabel(provider)} is not connected for this workspace. Connect it on the Integrations page first.`, 409) };
+    }
+
+    const secret = (await getSecret(tx, row.vaultRefKey).catch(() => null)) as TokenPayload | null;
+    if (!secret?.accessToken) {
+        return { ok: false, markExpired: false, error: new IntegrationError('not_connected', `${providerLabel(provider)} credentials are missing — please reconnect it on the Integrations page.`, 409) };
+    }
+
+    // Re-check under the lock. We may have queued behind a concurrent refresh that has
+    // already stored a good token — spending our (now dead) refresh token would burn it.
+    const stillExpired = row.expiresAt && row.expiresAt.getTime() - REFRESH_SKEW_MS < Date.now();
+    if (!stillExpired) {
+        return { ok: true, token: { accessToken: secret.accessToken, tenantId: row.tenantId, integrationId: row.id } };
+    }
+
+    if (!secret.refreshToken) {
+        return { ok: false, markExpired: true, error: new IntegrationError('expired', `${providerLabel(provider)} access has expired and no refresh token is available — please reconnect it.`, 409) };
+    }
+
+    try {
+        const refreshed = await refreshProviderToken(provider, secret.refreshToken, row.tenantId);
+        await storeSecret(tx, row.vaultRefKey, {
+            accessToken: refreshed.accessToken,
+            refreshToken: refreshed.refreshToken ?? secret.refreshToken,
+        });
+        await tx.update(workspaceIntegrations).set({
+            status: 'active',
+            expiresAt: refreshed.expiresInSec ? new Date(Date.now() + refreshed.expiresInSec * 1000) : null,
+            updatedAt: new Date(),
+        }).where(eq(workspaceIntegrations.id, row.id));
+        return { ok: true, token: { accessToken: refreshed.accessToken, tenantId: row.tenantId, integrationId: row.id } };
+    } catch (err) {
+        // Genuine rejection (revoked app, rotated client secret, user disconnected upstream):
+        // we held the lock, so no concurrent caller can have spent this refresh token —
+        // the grant really is dead and reconnecting is the only fix.
+        const error = err instanceof IntegrationError
+            ? err
+            : new IntegrationError('refresh_failed', `${providerLabel(provider)} token refresh failed — please reconnect it on the Integrations page.`, 401);
+        return { ok: false, markExpired: true, error };
+    }
+}
+
 /**
  * Resolve a valid access token for (org, provider), refreshing it first when expired
  * or about to expire. Throws IntegrationError('not_connected' | 'refresh_failed').
@@ -390,34 +496,30 @@ export async function getFreshAccessToken(db: Db, organisationId: number, provid
         throw new IntegrationError('not_connected', `${providerLabel(provider)} credentials are missing — please reconnect it on the Integrations page.`, 409);
     }
 
+    // Fast path: a healthy token needs no lock, so the common case never touches the
+    // transaction and stays exactly as cheap as it was before.
     const expired = row.expiresAt && row.expiresAt.getTime() - REFRESH_SKEW_MS < Date.now();
     if (!expired) {
         return { accessToken: secret.accessToken, tenantId: row.tenantId, integrationId: row.id };
     }
 
-    if (!secret.refreshToken) {
-        await db.update(workspaceIntegrations).set({ status: 'expired', updatedAt: new Date() }).where(eq(workspaceIntegrations.id, row.id));
-        throw new IntegrationError('expired', `${providerLabel(provider)} access has expired and no refresh token is available — please reconnect it.`, 409);
-    }
+    // Slow path. singleFlight collapses same-process concurrency (the batch-import case,
+    // where the pool is max:1 and a transaction would otherwise hold the only connection
+    // while every sibling job queues); the FOR UPDATE row lock inside covers callers in
+    // other serverless instances, which share nothing but the database. Joiners share one
+    // outcome, so the 'expired' write below happens once per refresh, not once per caller.
+    const outcome = await singleFlight(`integration-refresh:${organisationId}:${provider}`, async () => {
+        const result = await db.transaction((tx) => refreshUnderLock(tx as Tx, organisationId, provider));
+        // Applied only after the transaction commits: this write must survive the throw,
+        // and anything written inside the transaction would roll back with it.
+        if (!result.ok && result.markExpired) {
+            await db.update(workspaceIntegrations).set({ status: 'expired', updatedAt: new Date() }).where(eq(workspaceIntegrations.id, row.id));
+        }
+        return result;
+    });
 
-    try {
-        const refreshed = await refreshProviderToken(provider, secret.refreshToken, row.tenantId);
-        await storeSecret(db, row.vaultRefKey, {
-            accessToken: refreshed.accessToken,
-            refreshToken: refreshed.refreshToken ?? secret.refreshToken,
-        });
-        await db.update(workspaceIntegrations).set({
-            status: 'active',
-            expiresAt: refreshed.expiresInSec ? new Date(Date.now() + refreshed.expiresInSec * 1000) : null,
-            updatedAt: new Date(),
-        }).where(eq(workspaceIntegrations.id, row.id));
-        return { accessToken: refreshed.accessToken, tenantId: row.tenantId, integrationId: row.id };
-    } catch (err) {
-        // Refresh grant rejected (revoked app, rotated secret, …) — surface as reconnect-needed.
-        await db.update(workspaceIntegrations).set({ status: 'expired', updatedAt: new Date() }).where(eq(workspaceIntegrations.id, row.id));
-        if (err instanceof IntegrationError) throw err;
-        throw new IntegrationError('refresh_failed', `${providerLabel(provider)} token refresh failed — please reconnect it on the Integrations page.`, 401);
-    }
+    if (outcome.ok) return outcome.token;
+    throw outcome.error;
 }
 
 const PROVIDER_LABELS: Record<IntegrationProvider, string> = {
@@ -437,6 +539,7 @@ const PROVIDER_LABELS: Record<IntegrationProvider, string> = {
     searchconsole: 'Google Search Console',
     jira: 'Jira',
     asana: 'Asana',
+    canva: 'Canva',
 };
 
 export function providerLabel(provider: IntegrationProvider): string {

@@ -10,7 +10,8 @@
 import { Handler } from '@netlify/functions';
 import { eq, and, inArray } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, systemConnections, notifications } from '../../db/schema';
+import { aiAssistants, systemConnections } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { requireTenant } from '../../src/utils/tenant';
 import { transitionAssistantStatus, provisioningBlockInfo } from '../../src/utils/assistant-lifecycle';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -111,20 +112,14 @@ export default withLambda(async (event) => {
     // Issue #115: the Kick Off Meeting summary (primary directive + active connections) was only
     // ever shown on this page and lost the moment the user navigated away. Send it as a
     // notification with the same detail instead of leaving it stranded in the Notebook.
-    try {
-        const directive = a.role || 'Digital Assistant';
-        const connLabels = connections.map(c => CONN_LABELS[c] || (c.charAt(0).toUpperCase() + c.slice(1)));
-        const connSentence = connLabels.length ? `Connected accounts: ${connLabels.join(', ')}.` : 'No connected accounts yet.';
-        await db.insert(notifications).values({
-            userId,
-            type: 'assistant_kickoff_complete',
-            title: `${a.name} is now working`,
-            message: `${a.name} (${directive}) has been kicked off and is now actively working. ${connSentence}`,
-            metadata: { assistantId, directive, connections },
-        });
-    } catch (notifErr) {
-        console.warn('[kickoff-assistant] Notification insert failed (non-blocking):', notifErr);
-    }
+    const directive = a.role || 'Digital Assistant';
+    const connLabels = connections.map(c => CONN_LABELS[c] || (c.charAt(0).toUpperCase() + c.slice(1)));
+    const connSentence = connLabels.length ? `Connected accounts: ${connLabels.join(', ')}.` : 'No connected accounts yet.';
+    await createNotification(db, 'assistant_kickoff_complete', {
+        userId,
+        context: { assistant: { name: a.name, directive, connection_sentence: connSentence } },
+        metadata: { assistantId, directive, connections },
+    });
 
     return json(200, { ok: true, from: result.from, lifecycleStatus: 'working' });
 });

@@ -1005,12 +1005,23 @@ function _typeLabel(type) {
     return { image: 'Image', video: 'Video', link: 'Link' }[type] || type;
 }
 
-// Which of {your upload, AI-sourced, AI-generated} an asset is, for the badges in
+// Which of {your upload, Canva, AI-sourced, AI-generated} an asset is, for the badges in
 // _assetRow. Driven by contentAssets.provider (US3 AC3.2 / Epic 1 AI Media Generation):
-// 'fal' = generated, 'pexels' (or any other stock provider) = sourced, null = user upload.
+// 'fal' = generated, 'canva' = the user's own design, 'pexels' (or any other stock provider)
+// = sourced, null = user upload.
 // Only shown for visual assets — link assets are always user-provided, so no badge adds value.
 function _sourceInfo(asset) {
     if (asset.assetType !== 'image' && asset.assetType !== 'video') return null;
+    // Canva must be checked before the generic `asset.provider` branch below, which would
+    // otherwise label a design the user picked themselves as "Sourced by Assistant".
+    if (asset.provider === 'canva') {
+        return {
+            label: 'From Canva',
+            badgeClass: 'bg-teal-100 text-teal-700 border-teal-200',
+            chipClass: 'bg-teal-500',
+            icon: `<svg class="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14M4 6h16v12H4V6z"/></svg>`,
+        };
+    }
     if (asset.provider === 'fal') {
         return {
             label: 'AI Generated',

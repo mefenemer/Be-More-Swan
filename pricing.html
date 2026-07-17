@@ -99,12 +99,16 @@
 
         <div class="pricing-grid grid grid-cols-1 sm:grid-cols-2 gap-6 items-stretch">
 
-            <!-- ── Tier 1: The Busywork Buster ──────────────────── -->
-            <div class="flex flex-col bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200 overflow-hidden">
+            <!-- ── Tier 1: The Workflow Saver ─────────────────────── -->
+            <!-- Plan-card copy (tier line / name / description / Most-Popular pill) is DB-driven:
+                 renderPlanCards() below overwrites these from get-plans → master_plans. The static
+                 text here is only a pre-fetch fallback. -->
+            <div class="flex flex-col bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200 overflow-hidden relative">
+                <div class="absolute top-4 right-4" id="card-pill-t1"></div>
                 <div class="p-6 pb-5 border-b border-gray-100">
-                    <p class="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Tier 1 · Best for Solo Operators</p>
-                    <h2 class="text-lg font-extrabold text-gray-900 mb-3">The Workflow Saver</h2>
-                    <p class="text-sm text-gray-500 leading-relaxed mb-4 italic">Reclaim hours every day. Hand your most draining task to a helper that never takes a day off.</p>
+                    <p id="card-tier-t1" class="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Tier 1 · Best for Solo Operators</p>
+                    <h2 id="card-name-t1" class="text-lg font-extrabold text-gray-900 mb-3">The Workflow Saver</h2>
+                    <p id="card-desc-t1" class="text-sm text-gray-500 leading-relaxed mb-4 italic">Reclaim hours every day. Hand your most draining task to a helper that never takes a day off.</p>
                     <div class="flex items-end gap-1 mb-1">
                         <span id="card-price-t1" class="text-4xl font-extrabold text-gray-900 leading-none">£29</span>
                         <span class="text-gray-400 text-base font-medium mb-1">/month</span>
@@ -112,18 +116,20 @@
                     <p id="card-note-t1" class="text-xs text-gray-400 mt-1">Billed monthly · cancel any time</p>
                 </div>
                 <div class="p-6 flex-grow flex flex-col">
-                    <!-- Capacity stat boxes — pink -->
+                    <!-- Capacity stat boxes — pink. DB-driven: renderPlanCards() fills these from
+                         get-plans → master_plans (assistantLimit / monthlyTaskLimit / appConnectionLimit).
+                         The static numbers are only a pre-fetch fallback. -->
                     <div class="grid grid-cols-3 gap-2 mb-6">
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">1</div>
-                            <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistant</div>
+                            <div id="stat-asst-t1" class="text-xl font-extrabold pk-stat-num">1</div>
+                            <div id="stat-asst-lbl-t1" class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistant</div>
                         </div>
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">500</div>
+                            <div id="stat-task-t1" class="text-xl font-extrabold pk-stat-num">500</div>
                             <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Tasks/mo</div>
                         </div>
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">2</div>
+                            <div id="stat-app-t1" class="text-xl font-extrabold pk-stat-num">2</div>
                             <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Apps</div>
                         </div>
                     </div>
@@ -148,15 +154,15 @@
                 </div>
             </div>
 
-            <!-- ── Tier 2: The Workflow Saver ─────────────────────── -->
+            <!-- ── Tier 2: The Busywork Buster ────────────────────── -->
             <div class="flex flex-col bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200 overflow-hidden relative">
-                <div class="absolute top-4 right-4">
+                <div class="absolute top-4 right-4" id="card-pill-t2">
                     <span class="pk-pill text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full">Most Popular</span>
                 </div>
                 <div class="p-6 pb-5 border-b border-gray-100">
-                    <p class="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Tier 2 · Best for Scaling Founders</p>
-                    <h2 class="text-lg font-extrabold text-gray-900 mb-3">The Busywork Buster</h2>
-                    <p class="text-sm text-gray-500 leading-relaxed mb-4 italic">Scale your business with autonomous goal tracking, advanced analytics, and your own mini digital department.</p>
+                    <p id="card-tier-t2" class="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Tier 2 · Best for Scaling Founders</p>
+                    <h2 id="card-name-t2" class="text-lg font-extrabold text-gray-900 mb-3">The Busywork Buster</h2>
+                    <p id="card-desc-t2" class="text-sm text-gray-500 leading-relaxed mb-4 italic">Scale your business with autonomous goal tracking, advanced analytics, and your own mini digital department.</p>
                     <div class="flex items-end gap-1 mb-1">
                         <span id="card-price-t2" class="text-4xl font-extrabold text-gray-900 leading-none">£99</span>
                         <span class="text-gray-400 text-base font-medium mb-1">/month</span>
@@ -166,15 +172,15 @@
                 <div class="p-6 flex-grow flex flex-col">
                     <div class="grid grid-cols-3 gap-2 mb-6">
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">3</div>
-                            <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistants</div>
+                            <div id="stat-asst-t2" class="text-xl font-extrabold pk-stat-num">3</div>
+                            <div id="stat-asst-lbl-t2" class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistants</div>
                         </div>
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">2.5k</div>
+                            <div id="stat-task-t2" class="text-xl font-extrabold pk-stat-num">2.5k</div>
                             <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Tasks/mo</div>
                         </div>
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">5</div>
+                            <div id="stat-app-t2" class="text-xl font-extrabold pk-stat-num">5</div>
                             <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Apps</div>
                         </div>
                     </div>
@@ -199,12 +205,13 @@
                 </div>
             </div>
 
-            <!-- ── Tier 3: The Business Automator ────────────────── -->
-            <div class="flex flex-col bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200 overflow-hidden">
+            <!-- ── Tier 3: The Digital Employee ───────────────────── -->
+            <div class="flex flex-col bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200 overflow-hidden relative">
+                <div class="absolute top-4 right-4" id="card-pill-t3"></div>
                 <div class="p-6 pb-5 border-b border-gray-100">
-                    <p class="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Tier 3 · Best for Teams</p>
-                    <h2 class="text-lg font-extrabold text-gray-900 mb-3">The Digital Employee</h2>
-                    <p class="text-sm text-gray-500 leading-relaxed mb-4 italic">A complete digital workforce built for growing businesses and collaborative teams.</p>
+                    <p id="card-tier-t3" class="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Tier 3 · Best for Teams</p>
+                    <h2 id="card-name-t3" class="text-lg font-extrabold text-gray-900 mb-3">The Digital Employee</h2>
+                    <p id="card-desc-t3" class="text-sm text-gray-500 leading-relaxed mb-4 italic">A complete digital workforce built for growing businesses and collaborative teams.</p>
                     <div class="flex items-end gap-1 mb-1">
                         <span id="card-price-t3" class="text-4xl font-extrabold text-gray-900 leading-none">£349</span>
                         <span class="text-gray-400 text-base font-medium mb-1">/month</span>
@@ -214,15 +221,15 @@
                 <div class="p-6 flex-grow flex flex-col">
                     <div class="grid grid-cols-3 gap-2 mb-6">
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">10</div>
-                            <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistants</div>
+                            <div id="stat-asst-t3" class="text-xl font-extrabold pk-stat-num">10</div>
+                            <div id="stat-asst-lbl-t3" class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistants</div>
                         </div>
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">10k</div>
+                            <div id="stat-task-t3" class="text-xl font-extrabold pk-stat-num">10k</div>
                             <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Tasks/mo</div>
                         </div>
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">15</div>
+                            <div id="stat-app-t3" class="text-xl font-extrabold pk-stat-num">15</div>
                             <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Apps</div>
                         </div>
                     </div>
@@ -247,10 +254,11 @@
 
             <!-- ── Tier 4: Custom Enterprise ─────────────────────── -->
             <div id="enterprise" class="flex flex-col bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200 overflow-hidden relative">
+                <div class="absolute top-4 right-4" id="card-pill-t4"></div>
                 <div class="p-6 pb-5 border-b border-gray-100">
-                    <p class="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Tier 4 · Enterprise</p>
-                    <h2 class="text-lg font-extrabold text-gray-900 mb-3">Custom Enterprise</h2>
-                    <p class="text-sm text-gray-500 leading-relaxed mb-4 italic">Bespoke digital architecture for complex corporate environments.</p>
+                    <p id="card-tier-t4" class="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Tier 4 · Enterprise</p>
+                    <h2 id="card-name-t4" class="text-lg font-extrabold text-gray-900 mb-3">Custom Enterprise</h2>
+                    <p id="card-desc-t4" class="text-sm text-gray-500 leading-relaxed mb-4 italic">Bespoke digital architecture for complex corporate environments.</p>
                     <div class="flex items-end gap-1 mb-1">
                         <span class="text-4xl font-extrabold text-gray-900 leading-none">£1,199</span>
                         <span class="text-gray-400 text-base font-medium mb-1">+/mo</span>
@@ -260,15 +268,15 @@
                 <div class="p-6 flex-grow flex flex-col">
                     <div class="grid grid-cols-3 gap-2 mb-6">
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">∞</div>
-                            <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistants</div>
+                            <div id="stat-asst-t4" class="text-xl font-extrabold pk-stat-num">∞</div>
+                            <div id="stat-asst-lbl-t4" class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistants</div>
                         </div>
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num">∞</div>
+                            <div id="stat-task-t4" class="text-xl font-extrabold pk-stat-num">∞</div>
                             <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Tasks/mo</div>
                         </div>
                         <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div class="text-xl font-extrabold pk-stat-num" style="font-size:1rem;">Bespoke</div>
+                            <div id="stat-app-t4" class="text-xl font-extrabold pk-stat-num" style="font-size:1rem;">Bespoke</div>
                             <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Apps</div>
                         </div>
                     </div>
@@ -336,32 +344,37 @@
                             <th class="text-left px-6 py-5 font-semibold text-gray-600 w-2/5 bg-gray-50" style="vertical-align:top"></th>
                             <th class="text-center px-4 py-5 bg-gray-50 w-[15%]" style="vertical-align:top">
                                 <div class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-0.5">Tier 1</div>
-                                <div class="font-extrabold text-gray-900 text-sm leading-snug">The Workflow<br>Saver</div>
+                                <div id="tbl-name-t1" class="font-extrabold text-gray-900 text-sm leading-snug">The Workflow<br>Saver</div>
                                 <div id="tbl-price-t1" class="font-extrabold text-gray-900 text-base mt-1.5">£29</div>
                                 <div class="text-[10px] text-gray-400 mt-0.5">/ month</div>
+                                <div class="mt-2" id="tbl-pill-t1"></div>
                             </th>
                             <th class="text-center px-4 py-5 w-[15%] pk-col-th" style="vertical-align:top">
                                 <div class="text-[10px] font-bold uppercase tracking-wider pk-text mb-0.5">Tier 2</div>
-                                <div class="font-extrabold text-gray-900 text-sm leading-snug">The Busywork<br>Buster</div>
+                                <div id="tbl-name-t2" class="font-extrabold text-gray-900 text-sm leading-snug">The Busywork<br>Buster</div>
                                 <div id="tbl-price-t2" class="font-extrabold text-gray-900 text-base mt-1.5">£99</div>
                                 <div class="text-[10px] text-gray-400 mt-0.5">/ month</div>
-                                <div class="mt-2"><span class="pk-pill inline-block text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full">Popular</span></div>
+                                <div class="mt-2" id="tbl-pill-t2"><span class="pk-pill inline-block text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full">Popular</span></div>
                             </th>
                             <th class="text-center px-4 py-5 bg-gray-50 w-[15%]" style="vertical-align:top">
                                 <div class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-0.5">Tier 3</div>
-                                <div class="font-extrabold text-gray-900 text-sm leading-snug">The Digital<br>Employee</div>
+                                <div id="tbl-name-t3" class="font-extrabold text-gray-900 text-sm leading-snug">The Digital<br>Employee</div>
                                 <div id="tbl-price-t3" class="font-extrabold text-gray-900 text-base mt-1.5">£349</div>
                                 <div class="text-[10px] text-gray-400 mt-0.5">/ month</div>
+                                <div class="mt-2" id="tbl-pill-t3"></div>
                             </th>
                             <th class="text-center px-4 py-5 bg-gray-50 w-[15%]" style="vertical-align:top">
                                 <div class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-0.5">Tier 4</div>
-                                <div class="font-extrabold text-gray-900 text-sm leading-snug">Custom<br>Enterprise</div>
+                                <div id="tbl-name-t4" class="font-extrabold text-gray-900 text-sm leading-snug">Custom<br>Enterprise</div>
                                 <div class="font-extrabold text-gray-900 text-base mt-1.5">£1,199+</div>
                                 <div class="text-[10px] text-gray-400 mt-0.5">/ month</div>
                             </th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <!-- Plan Features: the rows below are a no-JS / pre-seed FALLBACK. When the DB-driven
+                         feature catalog loads (get-plans → featureCatalog), renderComparisonTable() below
+                         overwrites this tbody so the table is fully database-driven. -->
+                    <tbody id="cmp-tbody">
 
                         <!-- CAPACITY -->
                         <tr class="bg-gray-50/70 border-t border-gray-200">
@@ -791,6 +804,180 @@
         });
     }
 
+    // Single source of truth: pull the live GBP prices from the DB (get-plans → master_plans)
+    // so a price change in the Admin Portal shows here without editing this file. GBP only is
+    // managed centrally today; the hardcoded values below stay as pre-fetch fallbacks and for
+    // the other display currencies. Annual = round(monthly × 0.8), matching checkout.
+    // Card slot → master_plans.tierKey. Fixed by product identity (NOT price order, which the
+    // Admin can change): t1 = The Workflow Saver, t2 = The Busywork Buster, t3 = The Digital Employee.
+    const GBP_TIER_ORDER = ['saver', 'buster', 'employee'];
+    async function syncLivePricesGBP() {
+        try {
+            const r = await fetch('/.netlify/functions/get-plans');
+            if (!r.ok) return;
+            const { plans, enterprisePlan, featureCatalog } = await r.json();
+            if (!Array.isArray(plans)) return;
+            // Plan cards: render the DB-driven tier line / name / description / Most-Popular pill
+            // (overwrites the static fallback markup). Enterprise is a contact-sales plan returned
+            // separately; include it so its card is DB-driven too.
+            renderPlanCards(plans.concat(enterprisePlan ? [enterprisePlan] : []));
+            // Plan Features: render the DB-driven comparison table (overwrites the static fallback tbody).
+            renderComparisonTable(plans, featureCatalog);
+            const byTier = {};
+            plans.forEach(p => { if (p.tierKey) byTier[p.tierKey] = Number(p.monthlyPriceGbp); });
+            const gbp = CURRENCY_CONFIG.GBP;
+            GBP_TIER_ORDER.forEach((tk, i) => {
+                const m = byTier[tk];
+                if (!(m > 0)) return; // keep hardcoded fallback if this tier is missing
+                const annual = Math.round(m * 0.8); // monthly-equivalent shown on annual cards
+                gbp.monthly[i] = m;
+                gbp.annual[i] = annual;
+                gbp.annualTotal[i] = annual * 12;
+                const tKey = 't' + (i + 1);
+                BILLING_CONFIG.monthly[tKey] = { price: '£' + m.toLocaleString('en-GB'), note: 'Billed monthly · cancel any time' };
+                BILLING_CONFIG.annual[tKey]  = { price: '£' + annual.toLocaleString('en-GB'), note: `Billed £${(annual * 12).toLocaleString('en-GB')} annually · cancel any time` };
+            });
+        } catch { /* non-critical — fall back to the hardcoded prices */ }
+    }
+
+    // ── Plan Features: DB-driven comparison table ────────────────────────────
+    // Builds the whole comparison tbody from the catalog returned by get-plans, so an admin edit
+    // in the Portal (Master Data → Plan Features) shows here with no code change. Columns are the
+    // 3 purchasable tiers (saver/buster/employee) + the contact-sales "Custom Enterprise" column
+    // (feature.enterpriseValue). If the catalog is missing (pre-seed), the static fallback stays.
+    const CMP_CHECK = '<svg class="w-5 h-5 text-emerald-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>';
+    const CMP_DASH  = '<span class="text-gray-300">—</span>';
+
+    function cmpEsc(s) {
+        return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    }
+    function cmpTruthy(v) {
+        if (v === true) return true;
+        const s = String(v).trim().toLowerCase();
+        return s === 'true' || s === '✓' || s === 'yes' || s === '1';
+    }
+    function cmpReadValue(plan, def) {
+        if (!plan) return null;
+        if (def.storageTarget === 'column' && def.columnName) return plan[def.columnName] ?? null;
+        return (plan.features || {})[def.key] ?? null;
+    }
+    // Render one cell's INNER html by value type. `emphasise` = the popular (buster) column styling.
+    function cmpCellInner(def, value, emphasise) {
+        if (def.valueType === 'boolean') return cmpTruthy(value) ? CMP_CHECK : CMP_DASH;
+        let text;
+        if (value === null || value === undefined || value === '') text = def.unlimitedLabel || '—';
+        else if (def.valueType === 'number') text = Number(value).toLocaleString('en-GB');
+        else text = value;
+        const cls = emphasise ? 'font-semibold pk-text-dark' : (def.valueType === 'number' ? 'font-bold text-gray-900' : 'text-gray-600');
+        return `<span class="${cls}">${cmpEsc(text)}</span>`;
+    }
+    function cmpEnterpriseInner(def) {
+        if (def.valueType === 'boolean') return cmpTruthy(def.enterpriseValue) ? CMP_CHECK : CMP_DASH;
+        return `<span class="text-gray-600">${cmpEsc(def.enterpriseValue || '—')}</span>`;
+    }
+
+    function renderComparisonTable(plans, featureCatalog) {
+        const tbody = document.getElementById('cmp-tbody');
+        if (!tbody || !Array.isArray(featureCatalog) || !featureCatalog.length) return; // keep static fallback
+        const byTier = {};
+        plans.forEach(p => { if (p.tierKey) byTier[p.tierKey] = p; });
+        // Fixed column order mirrors the pricing cards; enterprise is a static 4th column.
+        const cols = GBP_TIER_ORDER.map(tk => byTier[tk]);
+        const defs = featureCatalog.slice().sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
+
+        let html = '';
+        let lastCategory = null;
+        for (const def of defs) {
+            if (def.category !== lastCategory) {
+                html += `<tr class="bg-gray-50/70 border-t border-gray-200"><td colspan="5" class="px-6 py-2.5 text-xs font-bold uppercase tracking-wider text-gray-400">${cmpEsc(def.category)}</td></tr>`;
+                lastCategory = def.category;
+            }
+            html += '<tr class="border-t border-gray-100 hover:bg-gray-50/40">';
+            html += `<td class="px-6 py-3.5 text-gray-700"><span class="font-medium">${cmpEsc(def.label)}</span>` +
+                    (def.description ? `<br><span class="text-xs text-gray-400 font-normal">${cmpEsc(def.description)}</span>` : '') + '</td>';
+            cols.forEach((plan, i) => {
+                const emphasise = i === 1; // t2 (buster) = the "Popular" tinted column
+                const tint = emphasise ? ' pk-col-tint' : '';
+                html += `<td class="px-4 py-3.5 text-center align-middle${tint}">${cmpCellInner(def, cmpReadValue(plan, def), emphasise)}</td>`;
+            });
+            html += `<td class="px-4 py-3.5 text-center align-middle">${cmpEnterpriseInner(def)}</td>`;
+            html += '</tr>';
+        }
+
+        // CTA row — reproduces the static footer (choosePlan / openEnterpriseModal).
+        html += '<tr class="border-t-2 border-gray-200 bg-gray-50">' +
+            '<td class="px-6 py-5"></td>' +
+            '<td class="px-4 py-5 text-center"><a href="#" onclick="event.preventDefault(); choosePlan(\'starter\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Choose</a></td>' +
+            '<td class="px-4 py-5 text-center pk-col-tint"><a href="#" onclick="event.preventDefault(); choosePlan(\'pro_team\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Choose</a></td>' +
+            '<td class="px-4 py-5 text-center"><a href="#" onclick="event.preventDefault(); choosePlan(\'business\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Choose</a></td>' +
+            '<td class="px-4 py-5 text-center"><button onclick="openEnterpriseModal()" class="inline-block px-5 py-2 text-sm font-bold rounded-lg text-white bg-pink-600 hover:bg-pink-700 transition">Choose</button></td>' +
+            '</tr>';
+
+        tbody.innerHTML = html;
+    }
+
+    // ── Plan cards: DB-driven tier line / name / description / Most-Popular pill ──────────────
+    // Card slot ↔ master_plans.tierKey. Fixed by product identity (NOT price order): t1 = saver,
+    // t2 = buster, t3 = employee, t4 = enterprise (contact-sales). An admin edit in the Portal
+    // (Master Data → Plans) shows here with no code change; missing DB values keep the static copy.
+    const CARD_SLOT_BY_TIER = { saver: 't1', buster: 't2', employee: 't3', enterprise: 't4' };
+    const CARD_PILL_HTML = '<span class="pk-pill text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full">Most Popular</span>';
+    const TBL_PILL_HTML  = '<span class="pk-pill inline-block text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full">Popular</span>';
+
+    function setCardText(id, val) {
+        const el = document.getElementById(id);
+        // Only overwrite when the DB supplies a non-empty value — otherwise keep the static fallback.
+        if (el && val != null && String(val).trim() !== '') el.textContent = String(val);
+    }
+
+    // ── Capacity stat boxes (pink) ───────────────────────────────────────────
+    // Compact task counts the way the original static copy read them: 500 → "500",
+    // 2500 → "2.5k", 10000 → "10k".
+    function fmtStatCount(n, compact) {
+        if (!compact || n < 1000) return String(n);
+        return (Math.round((n / 1000) * 10) / 10) + 'k';
+    }
+    // A null/blank limit means UNLIMITED (that's how enforcement reads it), so — unlike
+    // setCardText — null is a real value here and must overwrite the static fallback.
+    function setStatBox(id, value, unlimitedText, compact) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const n = Number(value);
+        const isNum = value !== null && value !== undefined && value !== '' && Number.isFinite(n);
+        const text = isNum ? fmtStatCount(n, compact) : unlimitedText;
+        el.textContent = text;
+        // "Bespoke" only fits at the smaller size; a real number gets the full-size type back.
+        el.style.fontSize = (!isNum && text.length > 3) ? '1rem' : '';
+    }
+
+    function renderPlanCards(cards) {
+        if (!Array.isArray(cards)) return;
+        for (const plan of cards) {
+            const slot = CARD_SLOT_BY_TIER[plan && plan.tierKey];
+            if (!slot) continue;
+            setCardText('card-tier-' + slot, plan.tierDescription);
+            setCardText('card-name-' + slot, plan.name);
+            setCardText('card-desc-' + slot, plan.description);
+            setCardText('tbl-name-'  + slot, plan.name);
+            // Capacity stat boxes — straight from the master_plans capacity columns, so an admin
+            // edit in Master Data → Plan Features moves the pink boxes with no code change.
+            // Contact-sales (Enterprise) has no numeric limits: apps read "Bespoke", the rest "∞".
+            const unlimitedApps = plan.isContactSales ? 'Bespoke' : '∞';
+            setStatBox('stat-asst-' + slot, plan.assistantLimit, '∞', false);
+            setStatBox('stat-task-' + slot, plan.monthlyTaskLimit, '∞', true);
+            setStatBox('stat-app-'  + slot, plan.appConnectionLimit, unlimitedApps, false);
+            // "1 Assistant" vs "3 Assistants".
+            const asstLbl = document.getElementById('stat-asst-lbl-' + slot);
+            if (asstLbl) asstLbl.textContent = Number(plan.assistantLimit) === 1 ? 'Assistant' : 'Assistants';
+            // Most-Popular pill (card + comparison-table header). The DB guarantees at most one plan
+            // is flagged, so clearing then setting per plan yields a single pill overall.
+            const cardPill = document.getElementById('card-pill-' + slot);
+            if (cardPill) cardPill.innerHTML = plan.isMostPopular ? CARD_PILL_HTML : '';
+            const tblPill = document.getElementById('tbl-pill-' + slot);
+            if (tblPill) tblPill.innerHTML = plan.isMostPopular ? TBL_PILL_HTML : '';
+        }
+    }
+
     const BILLING_CONFIG = {
         monthly: {
             t1: { price: '£29',  note: 'Billed monthly · cancel any time' },
@@ -832,13 +1019,6 @@
         updatePriceDisplay();
     };
 
-    // Monthly price IDs (test env) — used when billing_cycle = 'monthly'
-    const PRICE_IDS = {
-        starter:  'price_1TgGNFE7lvVYjk1BAsnhUzBp',
-        pro_team: 'price_1TgGP8E7lvVYjk1BRBeEZVd6',
-        business: 'price_1TgGPfE7lvVYjk1B1CQrS6pE',
-    };
-
     function getCookie(name) {
         const v = `; ${document.cookie}`;
         const p = v.split(`; ${name}=`);
@@ -855,16 +1035,20 @@
         } catch { return false; }
     }
 
+    // Card CTA identifiers → canonical master_plans tier keys. The cards use legacy labels
+    // (starter/pro_team/business); the system + Stripe speak saver/buster/employee. Anchored on
+    // the advertised price: starter £29 = saver, pro_team £99 = buster, business £349 = employee.
+    const CARD_TIER = { starter: 'saver', pro_team: 'buster', business: 'employee' };
     window.choosePlan = function (tier) {
         if (tier === 'enterprise') { openEnterpriseModal(); return; }
+        const planTier = CARD_TIER[tier] || tier; // normalise to the canonical system tier
         const cycle = _billingCycle || 'monthly';
         sessionStorage.setItem('billing_cycle', cycle);
         sessionStorage.setItem('aura_currency', _currency); // US-I18N-2.1 SC3: pass currency to checkout
         if (isLoggedIn()) {
-            window.location.href = 'checkout.html?tier=' + tier + '&cycle=' + cycle + '&currency=' + _currency;
+            window.location.href = 'checkout.html?tier=' + planTier + '&cycle=' + cycle + '&currency=' + _currency;
         } else {
-            sessionStorage.setItem('pending_price_id', PRICE_IDS[tier] || PRICE_IDS.pro_team);
-            sessionStorage.setItem('pending_tier', tier);
+            sessionStorage.setItem('pending_tier', planTier);
             window.location.href = 'register.html';
         }
     };
@@ -933,6 +1117,10 @@
         loadComponent('footer-placeholder', './components/footer.html');
         setupMobileMenu();
         if (window.i18n) window.i18n.apply();
+
+        // Pull live GBP prices from the DB before first render so the Admin Portal is the single
+        // source of truth for pricing shown here.
+        await syncLivePricesGBP();
 
         // US-I18N-2.1 SC2: Detect currency from geo-IP if not already stored
         if (!localStorage.getItem('aura_currency')) {

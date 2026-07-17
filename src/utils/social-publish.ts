@@ -1,13 +1,16 @@
-// social-publish.ts — helpers for the LinkedIn/X publisher (publish-social-posts.ts):
-// resolve a post's image to fetchable bytes, and refresh an expired X token.
+// social-publish.ts — the shared social-publishing layer used by BOTH the cron publishers
+// (publish-social-posts.ts for LinkedIn/X, publish-facebook.ts) and the self-test harness
+// (social-publish-selftest.ts): image resolution, X token refresh, and the per-platform publish
+// drivers themselves. Keeping the drivers here (not inline in the crons) is what lets the harness
+// prove the real publish path rather than a copy of it.
 //
-// NOTE: the platform media-upload flows that consume resolvePostImage have NOT been
-// validated against the live LinkedIn/X APIs — verify with real connected accounts.
+// The API contracts were audited 2026-07-15 (see the driver section below); the self-test harness
+// is the way to confirm them against a live connected account.
 
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { inArray } from 'drizzle-orm';
-import { contentAssets } from '../../db/schema';
+import { and, eq, inArray } from 'drizzle-orm';
+import { contentAssets, systemConnections } from '../../db/schema';
 import { getSecret, storeSecret } from './vault';
 
 function r2Client(): S3Client {
@@ -25,10 +28,16 @@ export async function presignR2Get(key: string, expiresSec = 600): Promise<strin
     return getSignedUrl(r2Client(), new GetObjectCommand({ Bucket: process.env.R2_BUCKET_NAME, Key: key }), { expiresIn: expiresSec });
 }
 
-// Resolve a displayable URL for a visual asset: S3 uploads already carry a public
+// Resolve a displayable URL for a stored asset: S3 uploads already carry a public
 // storageUrl; AI-generated images live in the private R2 bucket with only a storageKey,
 // so presign a short-lived GET URL; mock/dev assets (Pexels/picsum hotlinks) fall back
 // to externalUrl. Used anywhere an asset needs to be shown in the UI (not just publishing).
+//
+// `audio` belongs on the presign path, not off it. content-upload-url returns only
+// { uploadUrl, storageKey } — never a storageUrl — so every library upload reaches here with
+// storageUrl null and depends on the presign below. A type left out of this list resolves to
+// externalUrl, which an uploaded file doesn't have: the caller gets null and the media silently
+// never plays. `link` stays out because externalUrl IS its content.
 export async function resolveAssetDisplayUrl(asset: {
     assetType?: string | null;
     storageUrl?: string | null;
@@ -36,8 +45,8 @@ export async function resolveAssetDisplayUrl(asset: {
     externalUrl?: string | null;
 }): Promise<string | null> {
     if (asset.storageUrl) return asset.storageUrl;
-    const isVisual = asset.assetType === 'image' || asset.assetType === 'video';
-    if (!isVisual) return asset.externalUrl || null;
+    const isStored = asset.assetType === 'image' || asset.assetType === 'video' || asset.assetType === 'audio';
+    if (!isStored) return asset.externalUrl || null;
     if (asset.storageKey) {
         try { return await presignR2Get(asset.storageKey); } catch { /* fall through to externalUrl */ }
     }
@@ -98,4 +107,227 @@ export async function fetchImageBytes(url: string): Promise<ArrayBuffer> {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Failed to fetch media (${res.status})`);
     return res.arrayBuffer();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// Platform publish drivers. Extracted here so BOTH the cron publishers (publish-social-posts.ts,
+// publish-facebook.ts) and the self-test harness (social-publish-selftest.ts) run the exact same
+// code — a green self-test then proves the real publish path, not a parallel copy of it.
+//
+// AUDIT (2026-07-15): API contracts reviewed against current platform docs. Endpoints/versions were
+// modernized where the change is unambiguous (Graph version, X host). Anything that couldn't be
+// confirmed without a live connected account is flagged and is exactly what the harness exercises.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+export type DriverResult = { ok: true; id: string } | { ok: false; status: number | null; error: string };
+
+export const X_MAX = 280;
+export const FB_GRAPH_VERSION = 'v21.0';   // was v19.0 — bumped to a current stable Graph version.
+const isDriverRetryable = (s: number | null) => s === 429 || (s != null && s >= 500);
+export { isDriverRetryable };
+
+// ── X (Twitter) ────────────────────────────────────────────────────────────────────────────────
+// Tweet creation: POST /2/tweets (unchanged contract). Media upload: the v1.1 upload.twitter.com
+// endpoint is superseded by /2/media/upload on api.x.com; we use the v2 endpoint and fall back to a
+// text-only tweet if media upload fails (best-effort media has always been the behaviour). Host
+// canonicalised to api.x.com (api.twitter.com still resolves, but x.com is the documented host).
+export async function publishX(text: string, token: string, image: PostImage | null): Promise<DriverResult> {
+    let mediaId: string | null = null;
+    if (image) { try { mediaId = await uploadXMedia(image, token); } catch { /* text-only on media failure */ } }
+
+    const body: Record<string, unknown> = { text: text.slice(0, X_MAX) };
+    if (mediaId) body.media = { media_ids: [mediaId] };
+
+    const res = await fetch('https://api.x.com/2/tweets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+    });
+    const data: any = await res.json().catch(() => ({}));
+    if (res.ok && data?.data?.id) return { ok: true, id: String(data.data.id) };
+    return { ok: false, status: res.status, error: data?.detail || data?.title || `X API error (${res.status})` };
+}
+
+// Upload media to X via the v2 endpoint (multipart form-data). Returns the media id or null (→ text-only).
+async function uploadXMedia(image: PostImage, token: string): Promise<string | null> {
+    const bytes = await fetchImageBytes(image.url);
+    const form = new FormData();
+    form.append('media', new Blob([bytes], { type: image.mimeType || 'image/jpeg' }));
+    form.append('media_category', 'tweet_image');
+    const res = await fetch('https://api.x.com/2/media/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },   // let fetch set the multipart boundary
+        body: form,
+    });
+    const data: any = await res.json().catch(() => ({}));
+    // v2 returns { data: { id } }; tolerate the legacy media_id_string shape too.
+    return res.ok ? (data?.data?.id ?? data?.media_id_string ?? null) : null;
+}
+
+// Read the authenticated X user (read-only preflight for the harness).
+export async function fetchXIdentity(token: string): Promise<DriverResult> {
+    const res = await fetch('https://api.x.com/2/users/me', { headers: { Authorization: `Bearer ${token}` } });
+    const data: any = await res.json().catch(() => ({}));
+    if (res.ok && data?.data?.id) return { ok: true, id: `@${data.data.username || data.data.id}` };
+    return { ok: false, status: res.status, error: data?.detail || data?.title || `X API error (${res.status})` };
+}
+
+// ── LinkedIn ─────────────────────────────────────────────────────────────────────────────────────
+// AUDIT: /v2/ugcPosts + /v2/assets registerUpload is the legacy Share API; it still works for apps
+// with the w_member_social scope (which this app uses). The modern equivalent is the versioned
+// /rest/posts + /rest/images API, which requires the "Community Management" product and a
+// LinkedIn-Version header — a scope/product change, not a drop-in swap. Left on ugcPosts and flagged
+// for the harness; migration tracked separately.
+export async function publishLinkedIn(text: string, token: string, authorId: string | null, image: PostImage | null): Promise<DriverResult> {
+    if (!authorId) return { ok: false, status: null, error: 'No LinkedIn author URN on connection.' };
+    const author = authorId.startsWith('urn:') ? authorId : `urn:li:person:${authorId}`;
+
+    let assetUrn: string | null = null;
+    if (image) { try { assetUrn = await uploadLinkedInImage(image, token, author); } catch { /* text-only on media failure */ } }
+
+    const shareContent: Record<string, unknown> = {
+        shareCommentary: { text },
+        shareMediaCategory: assetUrn ? 'IMAGE' : 'NONE',
+    };
+    if (assetUrn) shareContent.media = [{ status: 'READY', media: assetUrn }];
+
+    const res = await fetch('https://api.linkedin.com/v2/ugcPosts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Restli-Protocol-Version': '2.0.0' },
+        body: JSON.stringify({
+            author,
+            lifecycleState: 'PUBLISHED',
+            specificContent: { 'com.linkedin.ugc.ShareContent': shareContent },
+            visibility: { 'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC' },
+        }),
+    });
+    if (res.status === 201 || res.ok) {
+        const id = res.headers.get('x-restli-id') || (await res.json().catch(() => ({})) as any)?.id || 'posted';
+        return { ok: true, id: String(id) };
+    }
+    const data: any = await res.json().catch(() => ({}));
+    return { ok: false, status: res.status, error: data?.message || `LinkedIn API error (${res.status})` };
+}
+
+// registerUpload → PUT bytes → return the asset URN (or null → text-only).
+async function uploadLinkedInImage(image: PostImage, token: string, owner: string): Promise<string | null> {
+    const reg = await fetch('https://api.linkedin.com/v2/assets?action=registerUpload', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Restli-Protocol-Version': '2.0.0' },
+        body: JSON.stringify({
+            registerUploadRequest: {
+                recipes: ['urn:li:digitalmediaRecipe:feedshare-image'],
+                owner,
+                serviceRelationships: [{ relationshipType: 'OWNER', identifier: 'urn:li:userGeneratedContent' }],
+            },
+        }),
+    });
+    const regData: any = await reg.json().catch(() => ({}));
+    const asset: string | undefined = regData?.value?.asset;
+    const uploadUrl: string | undefined =
+        regData?.value?.uploadMechanism?.['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']?.uploadUrl;
+    if (!asset || !uploadUrl) return null;
+
+    const put = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': image.mimeType },
+        body: await fetchImageBytes(image.url),
+    });
+    return put.ok ? asset : null;
+}
+
+// Resolve the member's author URN via OpenID userinfo (preferred; needs the 'openid'/'profile'
+// scope) then the legacy /v2/me. Returns a urn:li:person:… string, or an error for the harness.
+export async function resolveLinkedInAuthor(token: string): Promise<{ ok: true; urn: string } | { ok: false; status: number | null; error: string }> {
+    const info = await fetch('https://api.linkedin.com/v2/userinfo', { headers: { Authorization: `Bearer ${token}` } });
+    if (info.ok) {
+        const d: any = await info.json().catch(() => ({}));
+        if (d?.sub) return { ok: true, urn: `urn:li:person:${d.sub}` };
+    }
+    const me = await fetch('https://api.linkedin.com/v2/me', { headers: { Authorization: `Bearer ${token}`, 'X-Restli-Protocol-Version': '2.0.0' } });
+    const md: any = await me.json().catch(() => ({}));
+    if (me.ok && md?.id) return { ok: true, urn: `urn:li:person:${md.id}` };
+    return { ok: false, status: me.status, error: md?.message || `LinkedIn identity error (${me.status})` };
+}
+
+// ── Facebook (Graph API) ──────────────────────────────────────────────────────────────────────────
+// Image → /{pageId}/photos (caption becomes the post text); text/link → /{pageId}/feed.
+export async function publishFacebook(pageId: string, pageToken: string, text: string, image: PostImage | null): Promise<DriverResult> {
+    const endpoint = image
+        ? `https://graph.facebook.com/${FB_GRAPH_VERSION}/${pageId}/photos`
+        : `https://graph.facebook.com/${FB_GRAPH_VERSION}/${pageId}/feed`;
+    const body: Record<string, string> = image
+        ? { url: image.url, caption: text, access_token: pageToken }
+        : { message: text, access_token: pageToken };
+
+    const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    const data: any = await res.json().catch(() => ({}));
+    const id = data?.post_id || data?.id;
+    if (res.ok && id) return { ok: true, id: String(id) };
+    return { ok: false, status: res.status, error: data?.error?.message || `Facebook API error (${res.status})` };
+}
+
+// GET /{pageId}?fields=access_token → the Page access token (requires pages_manage_posts).
+export async function derivePageToken(userToken: string, pageId: string): Promise<string | null> {
+    const res = await fetch(`https://graph.facebook.com/${FB_GRAPH_VERSION}/${pageId}?fields=access_token&access_token=${encodeURIComponent(userToken)}`);
+    const data: any = await res.json().catch(() => ({}));
+    return res.ok ? (data?.access_token ?? null) : null;
+}
+
+// Resolve a Page id + Page access token for an org. Prefers a dedicated 'facebook' connection and
+// otherwise falls back to the org's Meta (Instagram) connection, whose metadata carries the linked
+// Page id and a user token with pages_manage_posts. Shared by the FB publisher and the harness.
+export async function resolveFacebookPageCredentials(
+    db: any,
+    args: { organisationId: number; connectionId?: number | null },
+): Promise<{ pageId: string; pageToken: string }> {
+    // 1) Dedicated facebook connection, if one exists (by id, else org-active).
+    const fbWhere = args.connectionId
+        ? eq(systemConnections.id, args.connectionId)
+        : and(
+            eq(systemConnections.organisationId, args.organisationId),
+            eq(systemConnections.serviceName, 'facebook'),
+            eq(systemConnections.isActive, true),
+          );
+    const [fbConn] = await db.select({
+        vaultRefKey: systemConnections.vaultRefKey,
+        externalUserId: systemConnections.externalUserId,
+        metadata: systemConnections.metadata,
+    }).from(systemConnections).where(fbWhere).limit(1);
+
+    if (fbConn?.vaultRefKey) {
+        const secret = await getSecret(db, fbConn.vaultRefKey);
+        const token = secret?.token as string | undefined;
+        const pageId = fbConn.externalUserId || ((fbConn.metadata as any)?.fbPageId ?? null);
+        if (token && pageId) {
+            const pageToken = await derivePageToken(token, pageId) ?? token;
+            return { pageId, pageToken };
+        }
+    }
+
+    // 2) Fall back to the org's Meta/Instagram connection (the only place a linked Page lives).
+    const [meta] = await db.select({
+        vaultRefKey: systemConnections.vaultRefKey,
+        metadata: systemConnections.metadata,
+    }).from(systemConnections).where(and(
+        eq(systemConnections.organisationId, args.organisationId),
+        eq(systemConnections.serviceName, 'instagram'),
+        eq(systemConnections.isActive, true),
+    )).limit(1);
+
+    const pageId = (meta?.metadata as any)?.fbPageId as string | undefined;
+    if (!meta?.vaultRefKey || !pageId) {
+        throw new Error('No connected Facebook Page for this post. Connect a Facebook Page (via the Meta integration) to publish.');
+    }
+    const secret = await getSecret(db, meta.vaultRefKey);
+    const userToken = secret?.token as string | undefined;
+    if (!userToken) throw new Error('No Meta token in vault for connection.');
+
+    const pageToken = await derivePageToken(userToken, pageId);
+    if (!pageToken) throw new Error('Could not obtain a Page access token from the Meta connection.');
+    return { pageId, pageToken };
 }

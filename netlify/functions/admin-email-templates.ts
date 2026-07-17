@@ -16,10 +16,10 @@ import jwt from 'jsonwebtoken';
 import { eq } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
 import { users, emailTemplates } from '../../db/schema';
-import { isAdminRole } from '../../src/utils/rbac';
+import { requirePermission } from '../../src/utils/rbac';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { renderTemplate, sendEmail } from '../../src/utils/email';
-import { EMAIL_VARIABLES, sampleContext, sanitiseBodyHtml } from '../../src/utils/email-template';
+import { EMAIL_VARIABLES, sampleContext, sanitiseBodyHtml, validateMergeVars } from '../../src/utils/email-template';
 import { TEMPLATE_DEFAULTS, getTemplateDefault } from '../../src/utils/email-templates-catalog';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -50,7 +50,10 @@ export default withLambda(async (event) => {
     const [admin] = await db
         .select({ role: users.role, email: users.email })
         .from(users).where(eq(users.id, adminId)).limit(1);
-    if (!admin || !isAdminRole(admin.role)) return json(403, { error: 'Admin role required.' });
+    if (!admin) return json(401, { error: 'Account not found.' });
+    // AC1: Super Admin only — template copy is a platform-wide control.
+    const denied = requirePermission(admin.role, 'manage_comms_templates');
+    if (denied) return json(denied.statusCode, JSON.parse(denied.body));
 
     const qs = event.queryStringParameters || {};
     const resource = qs.resource || '';
@@ -103,6 +106,9 @@ export default withLambda(async (event) => {
                     // Admin-editable fields: DB override falls back to the catalog default.
                     subject: ov?.subject ?? def.subject,
                     bodyHtml: ov?.bodyHtml ?? def.bodyHtml,
+                    // AC3: null bodyText = auto-derived from HTML at send time; '' signals that
+                    // to the editor so the "auto" placeholder shows instead of a stale override.
+                    bodyText: ov?.bodyText ?? '',
                     preheader: ov?.preheader ?? def.preheader ?? '',
                     isActive: ov ? ov.isActive : true,
                     edited: !!ov,
@@ -115,7 +121,7 @@ export default withLambda(async (event) => {
         // ── POST save ─────────────────────────────────────────────────────────────
         if (event.httpMethod === 'POST' && resource === 'save') {
             const body = JSON.parse(event.body || '{}');
-            const { triggerKey, subject, bodyHtml, preheader } = body;
+            const { triggerKey, subject, bodyHtml, bodyText, preheader } = body;
             let isActive = body.isActive;
 
             const def = getTemplateDefault(triggerKey);
@@ -123,6 +129,24 @@ export default withLambda(async (event) => {
             if (!subject?.trim() || !bodyHtml?.trim()) {
                 return json(400, { error: 'Subject and body are both required.' });
             }
+
+            // AC5: reject merge tags that reference unknown variables or are malformed, across
+            // every editable field, so broken {{...}} never reaches a subscriber's inbox.
+            const allowed = EMAIL_VARIABLES.map((v) => v.key);
+            const unknown = new Set<string>();
+            const malformed = new Set<string>();
+            for (const field of [subject, bodyHtml, bodyText, preheader]) {
+                const r = validateMergeVars(field ?? '', allowed);
+                r.unknown.forEach((u) => unknown.add(u));
+                r.malformed.forEach((m) => malformed.add(m));
+            }
+            if (unknown.size || malformed.size) {
+                return json(422, {
+                    error: 'Template contains variables that will not render.',
+                    unknown: [...unknown], malformed: [...malformed],
+                });
+            }
+
             // AC3.2.2: critical (locked) templates can never be deactivated.
             if (def.locked) isActive = true;
             if (typeof isActive !== 'boolean') isActive = true;
@@ -135,6 +159,8 @@ export default withLambda(async (event) => {
                 category: def.category,
                 subject: subject.trim(),
                 bodyHtml: sanitiseBodyHtml(bodyHtml),
+                // AC3: blank text part = auto-derive from HTML at send time (store NULL).
+                bodyText: bodyText?.trim() ? bodyText : null,
                 preheader: preheader?.trim() || null,
                 isActive,
                 locked: !!def.locked,
@@ -149,6 +175,7 @@ export default withLambda(async (event) => {
                     set: withUpdatedAt({
                         subject: values.subject,
                         bodyHtml: values.bodyHtml,
+                        bodyText: values.bodyText,
                         preheader: values.preheader,
                         isActive: values.isActive,
                         updatedByAdminId: adminId,
@@ -162,8 +189,8 @@ export default withLambda(async (event) => {
                 action: 'email_template_edit',
                 targetType: 'email_template',
                 targetId: triggerKey,
-                previousState: prev ? { subject: prev.subject, bodyHtml: prev.bodyHtml, preheader: prev.preheader, isActive: prev.isActive } : undefined,
-                newState: { subject: values.subject, bodyHtml: values.bodyHtml, preheader: values.preheader, isActive: values.isActive },
+                previousState: prev ? { subject: prev.subject, bodyHtml: prev.bodyHtml, bodyText: prev.bodyText, preheader: prev.preheader, isActive: prev.isActive } : undefined,
+                newState: { subject: values.subject, bodyHtml: values.bodyHtml, bodyText: values.bodyText, preheader: values.preheader, isActive: values.isActive },
                 ipAddress: getAdminIp(event.headers as Record<string, string | undefined>),
                 userAgent: event.headers['user-agent'],
             });
@@ -171,10 +198,41 @@ export default withLambda(async (event) => {
             return json(200, { ok: true });
         }
 
+        // ── POST restore (AC7) ────────────────────────────────────────────────────
+        // Delete the override row; the code catalog default takes over on the next render.
+        if (event.httpMethod === 'POST' && resource === 'restore') {
+            const body = JSON.parse(event.body || '{}');
+            const { triggerKey } = body;
+            const def = getTemplateDefault(triggerKey);
+            if (!def) return json(400, { error: 'Unknown trigger.' });
+
+            const [prev] = await db.select().from(emailTemplates).where(eq(emailTemplates.triggerKey, triggerKey)).limit(1);
+            if (prev) {
+                await db.delete(emailTemplates).where(eq(emailTemplates.triggerKey, triggerKey));
+                await insertAdminAuditLog({
+                    adminId,
+                    action: 'email_template_restore',
+                    targetType: 'email_template',
+                    targetId: triggerKey,
+                    previousState: { subject: prev.subject, bodyHtml: prev.bodyHtml, bodyText: prev.bodyText, preheader: prev.preheader, isActive: prev.isActive },
+                    newState: { subject: def.subject, bodyHtml: def.bodyHtml, preheader: def.preheader ?? null, isActive: true },
+                    ipAddress: getAdminIp(event.headers as Record<string, string | undefined>),
+                    userAgent: event.headers['user-agent'],
+                });
+            }
+            return json(200, {
+                ok: true,
+                template: {
+                    subject: def.subject, bodyHtml: def.bodyHtml, bodyText: '',
+                    preheader: def.preheader ?? '', isActive: true, edited: false,
+                },
+            });
+        }
+
         // ── POST preview / test ─────────────────────────────────────────────────
         if (event.httpMethod === 'POST' && (resource === 'preview' || resource === 'test')) {
             const body = JSON.parse(event.body || '{}');
-            const { triggerKey, subject, bodyHtml, preheader } = body;
+            const { triggerKey, subject, bodyHtml, bodyText, preheader } = body;
             const def = getTemplateDefault(triggerKey);
             if (!def) return json(400, { error: 'Unknown trigger.' });
 
@@ -183,6 +241,7 @@ export default withLambda(async (event) => {
             const rendered = await renderTemplate(triggerKey, sampleContext(), {
                 overrideSubject: subject,
                 overrideBody: bodyHtml,
+                overrideText: bodyText?.trim() ? bodyText : undefined,
                 transactional: !!def.transactional,
             });
             if (!rendered) return json(500, { error: 'Failed to render template.' });
@@ -190,7 +249,7 @@ export default withLambda(async (event) => {
             void preheader;
 
             if (resource === 'preview') {
-                return json(200, { subject: rendered.subject, html: rendered.html });
+                return json(200, { subject: rendered.subject, html: rendered.html, text: rendered.text });
             }
 
             // test → deliver to the logged-in admin's own inbox.

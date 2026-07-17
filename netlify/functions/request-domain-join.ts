@@ -11,7 +11,7 @@
 
 import { Handler } from '@netlify/functions';
 import { getDb } from '../../db/client';
-import { notifications } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { businessDomainOf } from '../../src/utils/email-domain';
 import { findPaidDomainWorkspace } from '../../src/utils/domain-workspace';
 import { sendEmail } from '../../src/utils/email';
@@ -51,14 +51,12 @@ export default withLambda(async (event) => {
 
     const requesterLabel = firstName ? `${firstName} (${email})` : email;
 
-    await db.insert(notifications).values({
+    await createNotification(db, 'domain_join_request', {
         userId: target.ownerUserId,
-        type: 'domain_join_request',
         category: 'suggested_action',
-        title: 'Workspace join request',
-        message: `${requesterLabel} signed up with a ${businessDomain} email and would like to join your workspace. Invite them to keep your team on one account?`,
+        context: { requester: { label: requesterLabel, domain: businessDomain } },
         metadata: { requestingEmail: email, requestingFirstName: firstName, domain: businessDomain },
-    }).catch((e) => { console.warn('[request-domain-join] notification insert failed (non-blocking):', e); });
+    });
 
     await sendEmail({
         to: target.ownerEmail,

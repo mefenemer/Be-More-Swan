@@ -3,7 +3,13 @@
 //
 // GET  → the org's widget config (or { config: null } if none yet)
 // POST { action:'create' }                                   → create with a fresh public_key
-// POST { action:'update', theme?, badgeEnabled?, name?, allowedOrigins? } → update (admin/owner only)
+// POST { action:'update', theme?, badgeEnabled?, name?, allowedOrigins?, siteBaseUrl?, sitePostPath? }
+//                                                            → update (admin/owner only)
+//
+// siteBaseUrl + sitePostPath tell us where the customer PUBLISHES so canonical URLs can credit their
+// own domain (US 1.3). BOTH are required to canonicalise there; sitePostPath must be a rooted path
+// containing the {slug} placeholder — a pattern without it would canonicalise every post to one URL
+// and collapse the whole blog (see blog-seo-metadata.sql / blog-seo.ts resolveCanonical).
 //
 // public_key is the unguessable identifier baked into the embed <script data-bms-key>. Theming
 // writes are gated to owner/admin. See docs §8.
@@ -71,6 +77,21 @@ export default withLambda(async (event: HandlerEvent) => {
         if (typeof body.name === 'string') updates.name = body.name.slice(0, 120);
         if (typeof body.badgeEnabled === 'boolean') updates.badgeEnabled = body.badgeEnabled;
         if (Array.isArray(body.allowedOrigins)) updates.allowedOrigins = body.allowedOrigins.slice(0, 50);
+
+        // Public-site canonical settings. '' clears the field (back to self-canonical /b/:key/:slug).
+        if (typeof body.siteBaseUrl === 'string') {
+            const v = body.siteBaseUrl.trim();
+            if (v === '') { updates.siteBaseUrl = null; }
+            else if (/^https?:\/\/[^\s/]+/i.test(v)) { updates.siteBaseUrl = v.replace(/\/+$/, '').slice(0, 300); }
+            else { return { statusCode: 400, body: JSON.stringify({ error: 'siteBaseUrl must be a full http(s) URL, e.g. https://acme.com' }) }; }
+        }
+        if (typeof body.sitePostPath === 'string') {
+            const v = body.sitePostPath.trim();
+            if (v === '') { updates.sitePostPath = null; }
+            // Must mirror the DB CHECK: rooted path containing the {slug} placeholder.
+            else if (v.startsWith('/') && v.includes('{slug}')) { updates.sitePostPath = v.slice(0, 300); }
+            else { return { statusCode: 400, body: JSON.stringify({ error: 'sitePostPath must be a rooted path containing {slug}, e.g. /blog/{slug}' }) }; }
+        }
 
         const [config] = await db
             .update(widgetConfigs)

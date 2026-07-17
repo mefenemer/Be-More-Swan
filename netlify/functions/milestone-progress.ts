@@ -4,6 +4,7 @@ import { HandlerEvent } from '@netlify/functions';
 import { eq, and, count } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
+import { createNotification } from '../../src/utils/notify';
 import { masterAssistants, taskRuns, waitlist, notifications } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -87,11 +88,9 @@ export default withLambda(async (event: HandlerEvent) => {
                             // Check metadata for assistantId to be precise
                             // Use a lightweight check: insert only if none exists with this assistantId in metadata
                             // (The simple check above catches all milestone_unlock notifications — acceptable for typical small unlocked-assistant counts)
-                            await db.insert(notifications).values({
+                            await createNotification(db, 'milestone_unlock', {
                                 userId,
-                                type: 'milestone_unlock',
-                                title: `You've unlocked early access to ${a.name}!`,
-                                message: `You've earned early access to ${a.name} — you're in! Head to the assistant catalogue to hire this role.`,
+                                context: { assistant: { name: a.name } },
                                 metadata: { assistantId: a.id, roleKey: a.roleKey },
                             });
                             // Mark waitlist entry as notified if present

@@ -40,6 +40,9 @@ export type AdminAction =
     | 'sandbox_purge'
     | 'sandbox_seed'
     | 'email_template_edit'
+    | 'email_template_restore'
+    | 'notification_template_edit'
+    | 'notification_template_restore'
     | 'session_timeout_config_update';
 
 export interface AdminAuditParams {

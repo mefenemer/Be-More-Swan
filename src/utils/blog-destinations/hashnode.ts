@@ -59,6 +59,9 @@ async function gql<T>(creds: HashnodeCreds, query: string, variables: Record<str
 export const hashnodeAdapter: BlogDestinationAdapter<HashnodeCreds> = {
     id: 'hashnode',
     label: 'Hashnode',
+    // `publishPost` has no draft path — drafts are a separate `createDraft` mutation with its own
+    // shape, so a draft push here is refused rather than silently published live.
+    supportsDraft: false,
     credFields: [
         { key: 'token', label: 'Personal Access Token', secret: true, help: 'hashnode.com → Settings → Developer.' },
         { key: 'publicationId', label: 'Publication ID', secret: false, help: 'Your blog dashboard URL contains it.' },
@@ -81,7 +84,9 @@ export const hashnodeAdapter: BlogDestinationAdapter<HashnodeCreds> = {
         }
     },
 
-    async publish(post, creds, externalId) {
+    async publish(post, creds, opts = {}) {
+        const { externalId, asDraft } = opts;
+        if (asDraft) throw new Error('Hashnode cannot receive drafts — its API only publishes live.');
         const input = buildHashnodeInput(post, creds.publicationId, externalId);
         const data = externalId
             ? await gql<{ updatePost: { post: { id: string; url: string } } }>(creds, UPDATE_MUTATION, { input })

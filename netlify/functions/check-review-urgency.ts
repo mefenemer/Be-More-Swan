@@ -8,7 +8,8 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, gt, isNull, lt, lte, sql } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
-import { aiAssistants, notifications, scheduledPosts, users } from '../../db/schema';
+import { aiAssistants, scheduledPosts, users } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { sendEmail } from '../../src/utils/email';
 import { isEmailAllowedForUser } from '../../src/utils/notification-email-gate';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -55,13 +56,11 @@ export default withLambda(async (event) => {
             .where(eq(scheduledPosts.id, post.id));
 
         // In-app notification (assistantId in metadata → per-assistant preference gating)
-        await db.insert(notifications).values({
+        await createNotification(db, 'review_red_urgency', {
             userId,
-            type: 'review_red_urgency',
-            title: 'Action needed — post due soon',
-            message: `${post.platform} post scheduled for ${publishLabel} needs your approval in the next ${hoursLeft} hours or it will be missed.`,
+            context: { platform: { label: post.platform }, post: { publish_label: publishLabel, hours_left: hoursLeft } },
             metadata: { assistantId: post.assistantId, postId: post.id },
-        }).catch(() => {});
+        });
 
         // Email (only for 'immediate' pref — red_urgency_only also qualifies), respecting
         // the user's Approvals email preference (incl. any per-assistant override).
@@ -117,13 +116,11 @@ export default withLambda(async (event) => {
                 sql`${scheduledPosts.status} IN ('draft','in_review')`,
             ));
 
-        await db.insert(notifications).values({
+        await createNotification(db, 'post_missed', {
             userId,
-            type: 'post_missed',
-            title: 'Post not published — approval window passed',
-            message: `${post.platform} post scheduled for ${publishLabel} was not approved in time and has not been published. You can reschedule it from your Missed Posts tab.`,
+            context: { platform: { label: post.platform }, post: { publish_label: publishLabel } },
             metadata: { assistantId: post.assistantId, postId: post.id },
-        }).catch(() => {});
+        });
 
         const [user] = await db
             .select({ email: users.email, firstName: users.firstName })

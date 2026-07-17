@@ -9,7 +9,8 @@ import Stripe from 'stripe';
 import jwt from 'jsonwebtoken';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, plans, cancellationReasons, notifications } from '../../db/schema';
+import { users, plans, cancellationReasons } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret    = process.env.JWT_SECRET!;
@@ -73,11 +74,9 @@ export default withLambda(async (event) => {
             });
 
             // SC4c: in-app success notification
-            await db.insert(notifications).values({
+            await createNotification(db, 'subscription_paused_survey', {
                 userId,
-                type: 'subscription_paused',
-                title: 'Account paused — access continues until ' + periodEnd,
-                message: `Your subscription will not renew. You'll have full access until ${periodEnd} — come back any time and your setup will be exactly as you left it.`,
+                context: { billing: { period_end: periodEnd } },
                 isRead: false,
             });
 

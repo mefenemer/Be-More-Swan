@@ -22,24 +22,24 @@ function check(name: string, fn: () => void): void {
 
 const SOCIALS = ['Facebook', 'Instagram', 'LinkedIn', 'X'];
 
-check('Social Media Manager may use every social connector', () => {
-    const a = { roleKey: 'social_media_manager', role: 'The Social Media Manager' };
+check('Social Media Assistant may use every social connector', () => {
+    const a = { roleKey: 'social_media_manager', role: 'Social Media Assistant' };
     for (const s of SOCIALS) assert.equal(isServiceAllowedForAssistant(s, a), true, s);
 });
 
 check('CRM Enricher cannot reach social connectors (sandbox)', () => {
-    const a = { roleKey: 'crm_enricher', role: 'The CRM Enricher' };
+    const a = { roleKey: 'crm_enricher', role: 'CRM Data Assistant' };
     assert.equal(isServiceAllowedForAssistant('Facebook', a), false);
     assert.equal(isServiceAllowedForAssistant('LinkedIn', a), false);
 });
 
 check('Tier 1 Support Agent cannot reach social connectors', () => {
-    const a = { roleKey: 'tier1_support_agent', role: 'The Tier 1 Support Agent' };
+    const a = { roleKey: 'tier1_support_agent', role: 'First-Line Support Assistant' };
     assert.equal(isServiceAllowedForAssistant('Facebook', a), false);
 });
 
 check('Scoped role + uncategorised connector is fail-closed', () => {
-    const a = { roleKey: 'social_media_manager', role: 'The Social Media Manager' };
+    const a = { roleKey: 'social_media_manager', role: 'Social Media Assistant' };
     // BambooHR has no category mapping yet → must be denied for a scoped role.
     assert.equal(isServiceAllowedForAssistant('BambooHR', a), false);
 });
@@ -51,22 +51,23 @@ check('Unknown / custom role is unrestricted', () => {
 });
 
 check('Keyword fallback works from display name when roleKey is missing', () => {
-    const a = { roleKey: null, role: 'The Social Media Manager' };
+    const a = { roleKey: null, role: 'Social Media Assistant' };
     assert.equal(isServiceAllowedForAssistant('Instagram', a), true);
 });
 
 check('allowedServiceNames filters the catalog for the assistant', () => {
-    const a = { roleKey: 'social_media_manager', role: 'The Social Media Manager' };
+    const a = { roleKey: 'social_media_manager', role: 'Social Media Assistant' };
     const result = allowedServiceNames(a, [...SOCIALS, 'BambooHR', 'Salesforce']);
     assert.deepEqual(result.sort(), [...SOCIALS].sort());
 });
 
 check('relevantConnectorsForAssistant returns social connectors with no DB rows', () => {
     // Regression: social connectors only become DB rows after OAuth, so the UI must
-    // still surface them for a fresh Social Media Manager (was showing "none relevant").
-    const a = { roleKey: 'social_media_manager', role: 'The Social Media Manager' };
+    // still surface them for a fresh Social Media Assistant (was showing "none relevant").
+    const a = { roleKey: 'social_media_manager', role: 'Social Media Assistant' };
     const result = relevantConnectorsForAssistant(a);
-    assert.deepEqual(result.sort(), ['facebook', 'instagram', 'linkedin', 'threads', 'tiktok', 'twitter', 'x', 'youtube']);
+    // 'design' (Canva) is now in the social role's scope, so canva surfaces alongside the socials.
+    assert.deepEqual(result.sort(), ['canva', 'facebook', 'instagram', 'linkedin', 'threads', 'tiktok', 'twitter', 'x', 'youtube']);
 });
 
 check('Un-migrated legacy roleKey degrades gracefully via the display-name fallback', () => {
@@ -74,42 +75,47 @@ check('Un-migrated legacy roleKey degrades gracefully via the display-name fallb
     // (db/rolekey-namespace-unification.sql) and is no longer in ROLE_CONNECTIONS.
     // A row that somehow escaped the migration must still resolve its social scope
     // from the display name — never widen to unrestricted, never throw.
-    const a = { roleKey: 'social_media', role: 'The Social Media Manager' };
+    const a = { roleKey: 'social_media', role: 'Social Media Assistant' };
     assert.equal(isServiceAllowedForAssistant('Instagram', a), true);
     assert.equal(isServiceAllowedForAssistant('BambooHR', a), false); // still scoped, not fail-open
-    assert.deepEqual(relevantConnectorsForAssistant(a).sort(), ['facebook', 'instagram', 'linkedin', 'threads', 'tiktok', 'twitter', 'x', 'youtube']);
+    // Display-name fallback grants social + design, so canva surfaces alongside the socials.
+    assert.deepEqual(relevantConnectorsForAssistant(a).sort(), ['canva', 'facebook', 'instagram', 'linkedin', 'threads', 'tiktok', 'twitter', 'x', 'youtube']);
 });
 
 check('relevantConnectorsForAssistant excludes social for a CRM role', () => {
-    const a = { roleKey: 'crm_enricher', role: 'The CRM Enricher' };
+    const a = { roleKey: 'crm_enricher', role: 'CRM Data Assistant' };
     // No CRM connectors exist in the catalog yet → empty, but crucially no socials.
     assert.equal(relevantConnectorsForAssistant(a).includes('facebook'), false);
 });
 
 check('relevantConnectorsForAssistant returns full catalog for unrestricted role', () => {
     const a = { roleKey: 'custom', role: 'My Bespoke Helper' };
-    assert.deepEqual(relevantConnectorsForAssistant(a).sort(), ['facebook', 'instagram', 'linkedin', 'threads', 'tiktok', 'twitter', 'x', 'youtube']);
+    // Full catalog for an unrestricted role now includes canva (the 'design' connector).
+    assert.deepEqual(relevantConnectorsForAssistant(a).sort(), ['canva', 'facebook', 'instagram', 'linkedin', 'threads', 'tiktok', 'twitter', 'x', 'youtube']);
 });
 
 // ── supportedToolsForAssistant (Connections UI + onboarding summary) ──
 
-check('supportedToolsForAssistant marks Social Media as available for a social role', () => {
-    const a = { roleKey: 'social_media_manager', role: 'The Social Media Manager' };
+check('supportedToolsForAssistant marks Social Media + Design as available for a social role', () => {
+    const a = { roleKey: 'social_media_manager', role: 'Social Media Assistant' };
     const tools = supportedToolsForAssistant(a);
-    assert.deepEqual(tools.map(t => t.key), ['social']);
-    assert.equal(tools[0].available, true);
-    assert.equal(typeof tools[0].label, 'string');
+    // Both categories have a live connector (socials + Canva), so both are available and
+    // sort by label: Design before Social Media.
+    assert.deepEqual(tools.map(t => t.key), ['design', 'social']);
+    const social = tools.find(t => t.key === 'social')!;
+    assert.equal(social.available, true);
+    assert.equal(typeof social.label, 'string');
 });
 
 check('supportedToolsForAssistant surfaces coming-soon tools for a non-social role', () => {
-    const a = { roleKey: 'inbox_manager', role: 'The Inbox Manager' };
+    const a = { roleKey: 'inbox_manager', role: 'Inbox Assistant' };
     const tools = supportedToolsForAssistant(a);
     assert.deepEqual(tools.map(t => t.key), ['email']);
     assert.equal(tools[0].available, false); // no live email connector yet
 });
 
 check('supportedToolsForAssistant lists available tools before coming-soon ones', () => {
-    const a = { roleKey: 'review_reputation_manager', role: 'The Review & Reputation Manager' };
+    const a = { roleKey: 'review_reputation_manager', role: 'Reputation Management Assistant' };
     const tools = supportedToolsForAssistant(a);
     // reviews (coming soon) + social (available) → social sorts first.
     assert.deepEqual(tools.map(t => t.key), ['social', 'reviews']);

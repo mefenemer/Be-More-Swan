@@ -16,8 +16,9 @@ import { and, eq, sql, inArray, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     goals, goalTelemetry, aiAssistants, systemConnections,
-    scheduledPosts, leads, plans, masterPlans, notifications, assistantRecords, blogPosts,
+    scheduledPosts, leads, plans, masterPlans, assistantRecords, blogPosts,
 } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { getSecret } from '../../src/utils/vault';
 import { connectionDisplayName, getGoalMetric, pollCadenceHours, RUN_RATE_THRESHOLDS } from '../../src/config/goal-metrics';
 import { computeGoalProgress } from '../../src/utils/goal-progress';
@@ -315,13 +316,10 @@ export async function pollGoalTelemetry(): Promise<{ goals: number; polled: numb
             const metric = getGoalMetric(goal.metricKey);
             const integration = connectionDisplayName(metric?.connectionService) ?? 'your data source';
             if (goal.createdByUserId) {
-                await db.insert(notifications).values({
+                await createNotification(db, 'goal_data_disconnected', {
                     userId: goal.createdByUserId,
-                    type: 'goal_data_disconnected',
-                    title: 'Goal tracking paused',
-                    message: `We lost connection to ${integration}. Please re-authenticate so your assistant can continue tracking its goals.`,
-                    isRead: false,
-                }).catch(() => {});
+                    context: { integration: { name: integration } },
+                });
             }
         }
     }));

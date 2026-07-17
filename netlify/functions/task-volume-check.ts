@@ -11,6 +11,8 @@ import { Handler } from '@netlify/functions';
 import { eq, and, gte, count, isNotNull } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
 import { users, plans, masterPlans, taskRuns, notifications, aiAssistants } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
+import { effectiveLimit, type FeatureOverrides } from '../../src/utils/plan-features';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -30,6 +32,7 @@ export default withLambda(async (event) => {
                 tierKey: masterPlans.tierKey,
                 tierName: masterPlans.name,
                 monthlyTaskLimit: masterPlans.monthlyTaskLimit,
+                featureOverrides: plans.featureOverrides,
             })
             .from(plans)
             .innerJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
@@ -46,7 +49,9 @@ export default withLambda(async (event) => {
         let paused100  = 0;
 
         for (const plan of activePlans) {
-            const limit = plan.monthlyTaskLimit!;
+            // Plan Features: prefer a "new subscribers only" frozen snapshot over the live master limit.
+            const limit = effectiveLimit(plan.featureOverrides as FeatureOverrides | null, 'monthlyTaskLimit', plan.monthlyTaskLimit);
+            if (limit == null) continue;      // frozen as unlimited → no volume warnings
             if (plan.userId == null) continue; // plans.userId is nullable; skip org-only plans
             const userId = plan.userId;
 
@@ -92,14 +97,9 @@ export default withLambda(async (event) => {
                         ))
                         .catch(err => console.warn('[task-volume-check] Pause assistants failed:', err.message));
 
-                    await db.insert(notifications).values({
+                    await createNotification(db, 'task_limit_reached', {
                         userId,
-                        type: 'task_limit_reached',
-                        title: 'Monthly Task Limit Reached — Automated Tasks Paused',
-                        message: `You've used all ${limit.toLocaleString()} tasks included in your ${plan.tierName} plan for ${monthLabel}. `
-                            + `Automated tasks have been paused. Manual "on-command" tasks still work. `
-                            + `Upgrade your plan to resume automation immediately, or tasks will restart at the beginning of next month.`,
-                        isRead: false,
+                        context: { usage: { limit: limit.toLocaleString(), month: monthLabel }, plan: { tier_name: plan.tierName } },
                         metadata: { month: monthLabel, taskCount, limit, tierKey: plan.tierKey },
                     });
 
@@ -125,14 +125,12 @@ export default withLambda(async (event) => {
 
                 if (!alreadyWarned) {
                     const remaining = limit - taskCount;
-                    await db.insert(notifications).values({
+                    await createNotification(db, 'task_limit_warning', {
                         userId,
-                        type: 'task_limit_warning',
-                        title: `You've used ${pct}% of your monthly task allowance`,
-                        message: `Your ${plan.tierName} plan includes ${limit.toLocaleString()} tasks per month. `
-                            + `You have used ${taskCount.toLocaleString()} (${pct}%) with ${remaining.toLocaleString()} remaining. `
-                            + `Automated tasks will pause if you reach 100%. Consider upgrading for a higher limit.`,
-                        isRead: false,
+                        context: { usage: {
+                            pct, limit: limit.toLocaleString(),
+                            count: taskCount.toLocaleString(), remaining: remaining.toLocaleString(),
+                        }, plan: { tier_name: plan.tierName } },
                         metadata: { month: monthLabel, taskCount, limit, pct, tierKey: plan.tierKey },
                     });
 

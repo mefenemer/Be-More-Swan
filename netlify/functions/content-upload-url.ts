@@ -22,6 +22,10 @@ const R2_BUCKET   = process.env.R2_BUCKET_NAME;
 const ALLOWED_MIME_TYPES = new Set([
     'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
     'video/mp4', 'video/quicktime', 'video/webm', 'video/mpeg',
+    // Blog body audio (plan §4 Phase 2) — upload-only: there is no stock provider for audio and no
+    // AI generation. audio/mpeg covers .mp3; mp4 covers .m4a. Kept in step with the Studio's
+    // inline upload `accept` list — widening one without the other just moves the rejection.
+    'audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/webm', 'audio/ogg',
 ]);
 
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500 MB

@@ -1,6 +1,7 @@
 import { Handler } from '@netlify/functions';
 import { getDb } from '../../db/client';
 import { leads } from '../../db/schema';
+import { lookupContact } from '../../src/utils/contact-type';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const URGENCY_TO_PRIORITY: Record<string, string> = {
@@ -33,8 +34,11 @@ export default withLambda(async (event) => {
         const useCase   = (body.useCase   || '').trim() || null;
         const leadType  = (body.leadType  || '').trim() || null;
         const source    = (body.source    || '').trim() || null;
-        const userId    = body.userId ? Number(body.userId) : null;
         const urgency   = (body.urgency   || '').trim();
+
+        // A registered user is an existing customer → 'client'; anyone else → 'lead'.
+        const { userId: detectedUserId, contactType } = await lookupContact(db, email);
+        const userId    = body.userId ? Number(body.userId) : detectedUserId;
 
         const priority  = URGENCY_TO_PRIORITY[urgency] ?? (body.priority || null);
 
@@ -60,6 +64,7 @@ export default withLambda(async (event) => {
                 teamSize,
                 useCase,
                 priority,
+                contactType,
             })
             .onConflictDoUpdate({
                 target: [leads.email, leads.opportunityReason],

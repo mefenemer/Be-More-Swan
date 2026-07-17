@@ -110,6 +110,6 @@ export async function decideAutoPublish(db: Db, args: {
 /** Human-readable trail for generationReason, so a queue can be debugged without reading code. */
 export function describeDecision(decision: AutoPublishDecision): string {
     return decision.status === 'scheduled'
-        ? 'Auto-published: Autopilot is in publish mode for this platform, the caption scored green with no factual claims, and the image was not AI-generated.'
+        ? 'Auto-published: Autopilot is in publish mode for this platform and the caption scored green with no factual claims.'
         : `Sent for review (${decision.reason.replace(/_/g, ' ')}).`;
 }

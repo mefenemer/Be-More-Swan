@@ -10,7 +10,8 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, desc, count } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { connectionCollisionAttempts, userOrganisations, users, notifications, plans, masterPlans } from '../../db/schema';
+import { connectionCollisionAttempts, userOrganisations, users, plans, masterPlans } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { requireTenant } from '../../src/utils/tenant';
 import { sendEmail } from '../../src/utils/email';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -80,12 +81,10 @@ export default withLambda(async (event) => {
             ? `Someone (${requester.email}) is trying to connect your ${label} account to Be More Swan. Invite them to your team?`
             : `Someone (${requester.email}) is trying to connect your ${label} account to Be More Swan. Your plan doesn't have a free seat to invite them — upgrade to add team members.`;
 
-        await db.insert(notifications).values({
+        await createNotification(db, canInvite ? 'workspace_access_request' : 'workspace_access_request_upgrade', {
             userId: owner.userId,
-            type: 'workspace_access_request',
             category: 'suggested_action',
-            title: canInvite ? 'Connection access request' : 'Connection access request — upgrade needed',
-            message,
+            context: { request: { message } },
             metadata: { requestingEmail: requester.email, serviceName: platform, seatLimitReached: !canInvite },
         });
 

@@ -8,7 +8,7 @@
 // existing workspace's owner). It is deliberately distinct from the silent domain AUTO-JOIN path
 // (allow_domain_join && domain_verified) in register.ts, which takes precedence and never prompts.
 
-import { and, eq, ne, inArray } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { organisations, plans, userOrganisations, users } from '../../db/schema';
 import { businessDomainOf } from './email-domain';
@@ -23,9 +23,10 @@ export type DomainWorkspace = {
     domainVerified: boolean;
 };
 
-// A workspace is "paid" once it holds a non-trial plan that is currently billing (active or in the
-// past-due grace window). Trial / cancelled / expired plans never count, so a lapsed account on the
-// domain won't trigger the consolidation prompt.
+// A workspace is "paid" once it holds a plan that is currently billing (active or in the
+// past-due grace window). Cancelled / expired plans never count, so a lapsed account on the
+// domain won't trigger the consolidation prompt. (The free trial was removed, so there are no
+// non-billing "trial" plans to exclude any more.)
 const PAID_PLAN_STATUSES = ['active', 'past_due'] as const;
 
 /**
@@ -58,7 +59,6 @@ export async function findPaidDomainWorkspace(
         .innerJoin(users, eq(users.id, userOrganisations.userId))
         .where(and(
             eq(organisations.businessDomain, businessDomain),
-            ne(plans.planType, 'trial'),
             inArray(plans.status, [...PAID_PLAN_STATUSES]),
         ))
         .limit(1);

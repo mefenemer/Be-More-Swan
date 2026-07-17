@@ -5,7 +5,7 @@
 -- Design (see memory: assistant-lifecycle-epic):
 --   • The legacy (provisioning_status, is_active) pair stays as-is. A BEFORE trigger keeps
 --     lifecycle_status DERIVED from that pair, so every existing write site (onboarding,
---     stripe-webhook, trial-expiry, manage-assistant, provision-assistant-async, …) stays
+--     stripe-webhook, manage-assistant, provision-assistant-async, …) stays
 --     consistent without being individually edited.
 --   • The forward-only state `ready_for_work` has no (provisioning_status, is_active) equivalent.
 --     It is written EXPLICITLY by the transitionAssistantStatus() helper; the trigger detects an

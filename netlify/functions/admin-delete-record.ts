@@ -4,7 +4,7 @@
 // SuperAdmin only.
 //
 // DELETE /.netlify/functions/admin-delete-record
-//   Auth: aura_session cookie with adminRole = 'super_admin'
+//   Auth: aura_session cookie whose adminRole clears 'delete_records' (super_admin)
 //   Body: {
 //     table: string,
 //     id?: number,          // single record
@@ -22,6 +22,7 @@ import { TABLE_DELETE_CONFIG, BLOCKING_DEPENDENCY_TABLES } from '../../src/utils
 import { insertAdminAuditLog } from '../../src/utils/admin-audit';
 import { checkImpersonationBlock } from '../../src/utils/impersonation';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { requirePermission } from '../../src/utils/rbac';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 const BULK_CONFIRM_THRESHOLD = 100;
@@ -54,9 +55,9 @@ export default withLambda(async (event) => {
     if (impersonationBlock) return impersonationBlock;
 
     const auth = getAdminId(event);
-    if (!auth || auth.role !== 'super_admin') {
-        return { statusCode: 403, body: JSON.stringify({ error: 'SuperAdmin access required.' }) };
-    }
+    if (!auth) return { statusCode: 401, body: JSON.stringify({ error: 'Unauthorized.' }) };
+    const denied = requirePermission(auth.role, 'delete_records');
+    if (denied) return denied;
 
     let body: any = {};
     try { body = JSON.parse(event.body || '{}'); } catch {

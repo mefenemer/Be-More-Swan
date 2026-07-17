@@ -6,7 +6,8 @@ import { Handler } from '@netlify/functions';
 import { eq, and, desc } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import { getDb } from '../../db/client';
-import { aiBlueprints, aiAssistants, contentGenerationJobs, notifications } from '../../db/schema';
+import { aiBlueprints, aiAssistants, contentGenerationJobs } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { requireTenant } from '../../src/utils/tenant';
 import { assembleBlueprint } from '../../src/utils/blueprint';
@@ -145,11 +146,8 @@ export default withLambda(async (event) => {
         platform: platform || null,
     });
 
-    await db.insert(notifications).values({
+    await createNotification(db, triggerType === 'on_demand' ? 'post_generation_queued_on_demand' : 'post_generation_queued', {
         userId,
-        type: 'post_generation_queued',
-        title: triggerType === 'on_demand' ? 'Generating your post on demand…' : 'Generating your post…',
-        message: 'Your post is being generated. This usually takes 30–60 seconds.',
         metadata: { jobId, assistantId },
     });
 

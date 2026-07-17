@@ -237,15 +237,6 @@ export const TEMPLATE_DEFAULTS: EmailTemplateDefault[] = [
             button('Manage billing', 'billing.portal_url') + signoff,
     },
     {
-        triggerKey: 'trial_ending',
-        name: 'Trial Ending',
-        category: 'Billing',
-        subject: 'Your Be More Swan trial is ending soon',
-        bodyHtml: greet +
-            p('Your trial is ending soon. Choose a plan to keep {{assistant.name | "your assistant"}} working without interruption.') +
-            button('Choose a plan', 'billing.portal_url') + signoff,
-    },
-    {
         triggerKey: 'billing_override',
         name: 'Billing Adjustment',
         category: 'Billing',

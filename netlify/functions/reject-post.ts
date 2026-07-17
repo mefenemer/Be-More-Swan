@@ -14,7 +14,8 @@ import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts, contentRules, users, notifications, aiAssistants, workspaceAssets } from '../../db/schema';
+import { scheduledPosts, contentRules, users, aiAssistants, workspaceAssets } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -137,11 +138,9 @@ export default withLambda(async (event) => {
                         .from(aiAssistants).where(eq(aiAssistants.id, post.assistantId)).limit(1);
                     if (asst?.name) assistantName = asst.name;
                 }
-                await db.insert(notifications).values({
+                await createNotification(db, 'post_revised', {
                     userId,
-                    type: 'post_revised',
-                    title: `${assistantName}: Your revised post is ready to review`,
-                    message: `Your voice feedback has been applied. The revised draft is ready for your review.`,
+                    context: { assistant: { name: assistantName } },
                     metadata: { revisedPostId: revised.id, originalPostId: postId, assistantId: post.assistantId },
                 });
             } catch { /* non-blocking */ }

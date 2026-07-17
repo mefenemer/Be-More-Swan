@@ -10,7 +10,8 @@
 import type { Handler } from '@netlify/functions';
 import { eq, and, or, lte, isNotNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, systemConnections, notifications, processedWebhookEvents } from '../../db/schema';
+import { users, systemConnections, processedWebhookEvents } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { sendEmail } from '../../src/utils/email';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -73,22 +74,15 @@ async function runIntegrationHealthCheck() {
 
         const displayName = conn.serviceName.charAt(0).toUpperCase() + conn.serviceName.slice(1);
 
-        // SC2: In-app alert for both expiring and expired
-        const notifTitle = isExpired
-            ? `${displayName} disconnected — action required`
-            : `${displayName} connection expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`;
-        const notifMsg = isExpired
-            ? `Your ${displayName} integration has been disconnected. Re-authorise it to keep your assistants running.`
-            : `Your ${displayName} connection will expire in ${daysLeft} day${daysLeft === 1 ? '' : 's'}. Re-authorise to avoid interruption.`;
-
-        await db.insert(notifications).values({
+        // SC2: In-app alert for both expiring and expired.
+        await createNotification(db, isExpired ? 'integration_alert_expired' : 'integration_alert_expiring', {
             userId: conn.userId,
-            type: 'integration_alert',
-            title: notifTitle,
-            message: notifMsg,
-            isRead: false,
+            context: {
+                platform: { label: displayName },
+                expiry: { days_left: `${daysLeft} day${daysLeft === 1 ? '' : 's'}` },
+            },
             metadata: { connectionId: conn.id, serviceName: conn.serviceName, alertType, assistantId: conn.assistantId },
-        }).catch(() => {});
+        });
 
         // SC3: Email only for already-expired connections
         if (isExpired) {

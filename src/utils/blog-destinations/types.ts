@@ -30,6 +30,17 @@ export interface BlogPublishResult {
     status: 'published' | 'draft';
 }
 
+export interface BlogPublishOptions {
+    /** A prior push's platform-native id. Present = update in place; absent = create. */
+    externalId?: string;
+    /**
+     * Push as an unpublished draft, leaving the author to publish from the CMS itself (US 3.2 AC4).
+     * Only honoured by adapters declaring `supportsDraft`; the dispatcher refuses the combination
+     * otherwise rather than quietly publishing live to someone's blog.
+     */
+    asDraft?: boolean;
+}
+
 export interface ValidationResult {
     ok: boolean;
     /** Human label to show in the UI + store as workspace_integrations.externalAccountName. */
@@ -87,12 +98,17 @@ export interface BlogDestinationAdapter<C extends BlogDestinationCreds = BlogDes
     oauthProvider?: string;
     /** Fields the connect form collects (paste only); the secret ones are encrypted into the vault. */
     credFields: CredField[];
+    /**
+     * Whether this platform's publish call can create an unpublished draft. False for Hashnode, whose
+     * `publishPost` mutation has no draft path at all (drafts are a separate `createDraft` mutation).
+     */
+    supportsDraft: boolean;
     /** Narrow an untyped `{ [k]: string }` form body into this adapter's cred shape, or return an error. */
     parseCreds(input: Record<string, unknown>): { ok: true; creds: C } | { ok: false; error: string };
     /** Validate creds with a live call; returns an account label to display/store on success. */
     validate(creds: C): Promise<ValidationResult>;
-    /** Publish, or update in place when `externalId` is supplied (idempotent re-publish). */
-    publish(post: BlogDestinationPost, creds: C, externalId?: string): Promise<BlogPublishResult>;
+    /** Publish, or update in place when `opts.externalId` is supplied (idempotent re-publish). */
+    publish(post: BlogDestinationPost, creds: C, opts?: BlogPublishOptions): Promise<BlogPublishResult>;
 }
 
 /** Shared tag slugifier — lowercased, alphanumeric, hyphen-collapsed. */

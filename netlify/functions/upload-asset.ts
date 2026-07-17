@@ -92,11 +92,24 @@ export default withLambda(async (event: HandlerEvent) => {
         console.log(`[RAG TRIGGERED] Kicked off extraction job for Asset ID: ${newAsset.id}`);
         const uploadBaseUrl = resolveBaseUrl(event.headers);
         if (uploadBaseUrl) {
-            fetch(`${uploadBaseUrl}/.netlify/functions/process-asset-background`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ assetId: newAsset.id })
-            }).catch(err => console.error("Failed to trigger background worker:", err));
+            // MUST be awaited: on Lambda the runtime freezes as soon as the handler returns, so an
+            // un-awaited fetch gets frozen mid-flight and never reaches the worker. The background
+            // function returns 202 before the work runs, so the await only costs the trigger
+            // round-trip; the AbortController caps a stalled trigger.
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 5_000);
+            try {
+                await fetch(`${uploadBaseUrl}/.netlify/functions/process-asset-background`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ assetId: newAsset.id }),
+                    signal: controller.signal,
+                });
+            } catch (err) {
+                console.error("Failed to trigger background worker:", err);
+            } finally {
+                clearTimeout(timer);
+            }
         } else {
             console.error('[upload-asset] Could not resolve base URL — background RAG worker not triggered for asset', newAsset.id);
         }

@@ -7,7 +7,8 @@ import { Handler } from '@netlify/functions';
 import { eq, and } from 'drizzle-orm';
 import { createHmac, randomBytes } from 'crypto';
 import { getDb } from '../../db/client';
-import { systemConnections, notifications, users, auditLogs, userOrganisations } from '../../db/schema';
+import { systemConnections, users, auditLogs, userOrganisations } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { storeSecret } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
@@ -210,13 +211,9 @@ export default withLambda(async (event) => {
         // Find userId from org (use first active user for notification)
         const [orgUser] = await db.select({ id: users.id }).from(users).innerJoin(userOrganisations, eq(users.id, userOrganisations.userId)).where(eq(userOrganisations.organisationId, organisationId)).limit(1);
         if (orgUser) {
-            await db.insert(notifications).values({
+            await createNotification(db, isReconnect ? 'instagram_reconnected' : 'instagram_connected', {
                 userId: orgUser.id,
-                type: 'instagram_connected',
-                title: isReconnect ? 'Instagram reconnected' : 'Instagram connected',
-                message: isReconnect
-                    ? `Instagram account connected successfully. Token refreshed.`
-                    : `Instagram account connected successfully. You can now schedule and publish posts.${!fbPageId ? ' Note: No Facebook Page linked — some features may be limited.' : ''}`,
+                context: { instagram: { page_warning: !fbPageId ? ' Note: No Facebook Page linked — some features may be limited.' : '' } },
                 metadata: { igUserId, accountType, fbPageId, assistantId },
             });
             // Connection is live again — clear any open "reconnect Instagram" action items.

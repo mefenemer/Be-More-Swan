@@ -44,6 +44,7 @@ function headers(creds: DevtoCreds): Record<string, string> {
 export const devtoAdapter: BlogDestinationAdapter<DevtoCreds> = {
     id: 'devto',
     label: 'Dev.to',
+    supportsDraft: true,
     credFields: [{ key: 'apiKey', label: 'API key', secret: true, help: 'dev.to → Settings → Extensions → API keys.' }],
 
     parseCreds(input) {
@@ -64,8 +65,9 @@ export const devtoAdapter: BlogDestinationAdapter<DevtoCreds> = {
         }
     },
 
-    async publish(post, creds, externalId) {
-        const body = JSON.stringify(buildDevtoArticle(post, { publish: true }));
+    async publish(post, creds, opts = {}) {
+        const { externalId, asDraft } = opts;
+        const body = JSON.stringify(buildDevtoArticle(post, { publish: !asDraft }));
         const url = externalId ? `${API}/articles/${externalId}` : `${API}/articles`;
         const res = await fetch(url, { method: externalId ? 'PUT' : 'POST', headers: headers(creds), body });
         if (!res.ok) {

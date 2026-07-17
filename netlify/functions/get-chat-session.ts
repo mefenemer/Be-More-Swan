@@ -12,9 +12,9 @@
 // Aging Invoices table, …) re-hydrate exactly as first rendered.
 
 import { Handler } from '@netlify/functions';
-import { and, asc, eq, inArray } from 'drizzle-orm';
+import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, chatMessages, chatSessions } from '../../db/schema';
+import { aiAssistants, chatMessages, chatSessions, masterAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -43,10 +43,13 @@ export default withLambda(async (event) => {
             createdAt: chatSessions.createdAt,
             updatedAt: chatSessions.updatedAt,
             assistantName: aiAssistants.name,
-            assistantRole: aiAssistants.aiAssistantJobRole,
+            // Live role label from master_assistants; ai_assistant_job_role is a hire-time snapshot
+            // that goes stale on an admin rename, so it's only the legacy fallback.
+            assistantRole: sql<string | null>`coalesce(${masterAssistants.name}, ${aiAssistants.aiAssistantJobRole})`,
         })
         .from(chatSessions)
         .innerJoin(aiAssistants, eq(chatSessions.aiAssistantId, aiAssistants.id))
+        .leftJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
         .where(and(eq(chatSessions.id, chatSessionId), eq(chatSessions.organisationId, orgId)))
         .limit(1);
     if (!session) return json(404, { error: 'Chat session not found.' });

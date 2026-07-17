@@ -16,7 +16,8 @@ import jwt from 'jsonwebtoken';
 import { eq, and, ilike, or, sql } from 'drizzle-orm';
 import { Resend } from 'resend';
 import { getDb } from '../../db/client';
-import { masterAssistants, waitlist, userProfiles, notifications, organisations, userOrganisations } from '../../db/schema';
+import { masterAssistants, waitlist, userProfiles, organisations, userOrganisations } from '../../db/schema';
+import { createNotifications } from '../../src/utils/notify';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : (null as unknown as Resend); // guarded: resend v6 throws at construction when key missing -> would crash module at import
@@ -94,19 +95,10 @@ async function handlePatch(event: any): Promise<any> {
                 .where(sql`COALESCE((${userProfiles.inAppPreferences} ->> 'new_role_availability')::boolean, ${userProfiles.notifyAvailability}) = true`);
 
             if (profiles.length > 0) {
-                const notifRows = profiles.map(p => ({
-                    userId: p.userId,
-                    title: `New Role Available: ${updated.name}`,
-                    message: `${updated.name} is now available to hire. Visit the Assistant Catalog to get started.`,
-                    type: 'new_role_availability',
-                    isRead: false,
-                }));
-
-                // Insert in batches of 100 to stay under DB limits
-                for (let i = 0; i < notifRows.length; i += 100) {
-                    await db.insert(notifications).values(notifRows.slice(i, i + 100));
-                }
-                notifiedCount = notifRows.length;
+                // createNotifications batches in 100s internally.
+                notifiedCount = await createNotifications(db, 'new_role_availability', profiles.map(p => p.userId), {
+                    context: { assistant: { name: updated.name } },
+                });
             }
 
             // Also mark waitlist entries for this assistant as notified
@@ -184,16 +176,9 @@ async function handlePatch(event: any): Promise<any> {
                 .where(eq(usersTable.role as any, 'workspace_admin'));
             // Notify workspace admins in batches; message includes 30-day grace period
             if (admins.length > 0) {
-                const reclassNotifs = admins.map(a => ({
-                    userId: a.id,
-                    type: 'risk_reclassification',
-                    title: `High-Risk Reclassification: ${updated.name}`,
-                    message: `${updated.name} has been reclassified as High Risk under the EU AI Act. EU-market workspaces have a 30-day grace period before enforcement begins. A conformity assessment must be submitted to continue EU deployment.`,
-                    isRead: false,
-                }));
-                for (let i = 0; i < reclassNotifs.length; i += 100) {
-                    await db.insert(notifications).values(reclassNotifs.slice(i, i + 100));
-                }
+                await createNotifications(db, 'risk_reclassification', admins.map(a => a.id), {
+                    context: { assistant: { name: updated.name } },
+                });
             }
         } catch (reclassErr) {
             console.error('[master-assistants] Reclassification notification error (non-blocking):', reclassErr);
@@ -289,6 +274,13 @@ export default withLambda(async (event) => {
             iconKey: r.iconKey,
             iconColor: r.iconColor,
             comingSoon: r.comingSoon,
+            // Detail-page copy. This used to come from the hardcoded src/config/assistant-role-content.js,
+            // which covered only 7 of the ~20 catalog roles and had drifted from the DB's description.
+            // Serving it here makes the card and the detail page read the same row.
+            tagline: r.tagline,
+            keyFeatures: r.keyFeatures ?? [],
+            integrations: r.integrations ?? [],
+            video: r.video ?? null,
             beta: r.lifecycleState === 'beta', // UI can badge these as Beta Program early access
             waitlistCount: countMap[r.id] || 0,
             onWaitlist: callerId ? userSet.has(r.id) : false,

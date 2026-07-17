@@ -17,8 +17,9 @@ import { and, avg, eq, gte, isNull, or } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     users, taskRuns, aiAssistants, agentAnomalies,
-    agentAnomalyThresholds, agentRunSummaries, notifications,
+    agentAnomalyThresholds, agentRunSummaries,
 } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -175,14 +176,10 @@ export default withLambda(async (event) => {
     }).returning();
 
     // Notify the run owner
-    await db.insert(notifications).values({
+    await createNotification(db, newStatus === 'terminated' ? 'agent_run_terminated' : 'agent_run_suspended', {
         userId,
-        type: 'agent_anomaly',
-        title: `⚠ Agent Run ${newStatus === 'terminated' ? 'Terminated' : 'Suspended'}: ${anomalyType.replace('_', ' ')} detected`,
-        message: newStatus === 'terminated'
-            ? `Run #${taskRunId} has been permanently terminated after a repeated anomaly (${anomalyType}). Review the audit trail for details.`
-            : `Run #${taskRunId} has been paused due to a ${anomalyType} anomaly. Review the tool call sequence and manually resume when ready.`,
-    }).catch(() => {});
+        context: { anomaly: { type: anomalyType.replace('_', ' ') }, run: { id: taskRunId } },
+    });
 
     return {
         statusCode: 200,

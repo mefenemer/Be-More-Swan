@@ -3,7 +3,8 @@
 
 import { eq, or, inArray, sql } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { users, notifications, issueReports, issueReportMessages } from '../../db/schema';
+import { users, issueReports, issueReportMessages } from '../../db/schema';
+import { createNotification } from './notify';
 import { sendEmail } from './email';
 import { resolveBaseUrl } from './base-url';
 import { isEmailAllowedForUser } from './notification-email-gate';
@@ -126,15 +127,23 @@ export async function notifyIssueUser(
 
     const messageLine = adminMessage ? ` — “${adminMessage}”` : '';
 
-    // In-app notification (canonical table). type 'issue_update' defaults to the
-    // 'informational' category until/unless added to the categorization map.
-    await db.insert(notifications).values({
+    // In-app notification. The status picks a per-status template; each carries the same
+    // copy the `cta`/`title` above build (kept here because the email below reuses them).
+    const ISSUE_TEMPLATE_KEY: Record<string, string> = {
+        fixed_ready_to_test: 'issue_fixed_ready_to_test',
+        more_info_required:  'issue_more_info_required',
+        fix_in_progress:     'issue_fix_in_progress',
+        backlog:             'issue_backlog',
+        on_hold:             'issue_on_hold',
+        merge:               'issue_merge',
+        roadmap:             'issue_roadmap',
+        closed:              'issue_closed',
+    };
+    await createNotification(db, ISSUE_TEMPLATE_KEY[status] ?? 'issue_updated', {
         userId,
-        type: 'issue_update',
-        title,
-        message: `${cta}${messageLine}`,
+        context: { issue: { id: issueId, status_label: label, admin_message: messageLine } },
         metadata: { issueId, status },
-    }).catch((e) => console.error('[issue-reports] notification insert failed:', e?.message || e));
+    });
 
     // Email the user too — subject to their notification preferences.
     if (!(await isEmailAllowedForUser(userId, 'issue_update'))) return;
@@ -218,5 +227,24 @@ export async function triggerStagingDeployIfDrained(db: Db): Promise<void> {
         if (!res.ok) console.error(`[issue-reports] staging deploy hook returned ${res.status}`);
     } catch (e) {
         console.error('[issue-reports] staging deploy hook unreachable:', e instanceof Error ? e.message : e);
+    }
+}
+
+/**
+ * Fire the Netlify PRODUCTION build hook after a successful staging → main promotion.
+ * The push to `main` already auto-deploys prod, so this is a belt-and-suspenders rebuild
+ * that only runs when NETLIFY_PROD_BUILD_HOOK is set (unset → no-op). Unlike the staging
+ * hook there is no drain check: a promotion is a single deliberate action, not a batch.
+ * Best-effort: a hook failure is logged, never thrown.
+ */
+export async function triggerProdDeploy(): Promise<void> {
+    const hook = process.env.NETLIFY_PROD_BUILD_HOOK;
+    if (!hook) return;
+
+    try {
+        const res = await fetch(hook, { method: 'POST' });
+        if (!res.ok) console.error(`[issue-reports] prod deploy hook returned ${res.status}`);
+    } catch (e) {
+        console.error('[issue-reports] prod deploy hook unreachable:', e instanceof Error ? e.message : e);
     }
 }

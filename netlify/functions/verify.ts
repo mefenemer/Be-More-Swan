@@ -3,6 +3,7 @@ import { Handler, HandlerResponse } from '@netlify/functions';
 import { eq, and, gt, inArray, isNull } from 'drizzle-orm';
 import * as crypto from 'crypto';
 import { getDb } from '../../db/client';
+import { createNotification } from '../../src/utils/notify';
 import { users, plans, aiAssistants, onboardingDrafts, notifications, userProfiles } from '../../db/schema';
 import { sendEmail } from '../../src/utils/email';
 import { getEmailStrings } from '../../src/utils/email-i18n';
@@ -47,7 +48,7 @@ export default withLambda(async (event) => {
 
         const stripe = new Stripe(stripeSecret, { apiVersion: '2026-05-27.dahlia' });
         const body = JSON.parse(event.body || '{}');
-        const { token: plainToken, priceId } = body;
+        const { token: plainToken, tier: pendingTier } = body;
         // US-ONB-2.1.2 AC9: safe relative post-login redirect (must start with / to prevent open redirect)
         const postLoginRedirect: string | undefined = typeof body.redirect === 'string' && body.redirect.startsWith('/') && !body.redirect.startsWith('//') ? body.redirect : undefined;
 
@@ -93,25 +94,11 @@ export default withLambda(async (event) => {
 
         // ── US3 Sc3 + US2 Sc1: Welcome + onboard prompt on first login ───────
         if (isFirstLogin) {
-            try {
-                await db.insert(notifications).values([
-                    {
-                        userId: user.id,
-                        type: 'welcome',
-                        title: 'Welcome to Be More Swan!',
-                        message: 'Thanks for registering and welcome to Be More Swan. Your workspace is ready.',
-                    },
-                    {
-                        userId: user.id,
-                        type: 'onboarding_prompt',
-                        title: 'Finish setting up your workspace',
-                        message: "Open the Setup Wizard to build your AI assistant — it walks you through every step, from your business details to going live.",
-                        metadata: { action: 'open_wizard', ctaLabel: 'Open Setup Wizard' },
-                    },
-                ]);
-            } catch (notifErr) {
-                console.warn('[verify] Welcome notification insert failed (non-blocking):', notifErr);
-            }
+            await createNotification(db, 'welcome_verified', { userId: user.id });
+            await createNotification(db, 'onboarding_prompt', {
+                userId: user.id,
+                metadata: { action: 'open_wizard', ctaLabel: 'Open Setup Wizard' },
+            });
 
             // US-GAP-6.1.1 SC1/SC2: Welcome email — sent exactly once (SC3: gated by isFirstLogin)
             // SC4: arrives before the 24h onboarding reminder (onboarding-reminder.ts fires at 24h)
@@ -157,17 +144,9 @@ export default withLambda(async (event) => {
         const baseUrl = resolveBaseUrl(event.headers);
         if (!baseUrl) return { statusCode: 500, body: 'Server misconfigured.' };
 
-        // Map Stripe price IDs → tier keys (test + live environments)
-        const priceToTier: Record<string, string> = {
-            // Test price IDs
-            'price_1TgGNFE7lvVYjk1BAsnhUzBp': 'buster',
-            'price_1TgGP8E7lvVYjk1BRBeEZVd6': 'saver',
-            'price_1TgGPfE7lvVYjk1B1CQrS6pE': 'employee',
-            // Live price IDs
-            'price_1Tg6f1CuS8qyNSsFxeUsfi4a': 'buster',
-            'price_1Tg6fQCuS8qyNSsF5DKmEqMu': 'saver',
-            'price_1Tg6fiCuS8qyNSsF787zwCwh': 'employee',
-        };
+        // Valid subscription tier keys (master_plans.tier_key). A new registration carries the
+        // chosen tier straight through the magic link (?tier=…); a returning-user login carries none.
+        const VALID_TIERS = ['saver', 'buster', 'employee'];
 
         // Onboarding path → HTML page map (mirrors onboarding-reminder.ts)
         const ONBOARDING_PAGE: Record<string, string> = {
@@ -178,7 +157,7 @@ export default withLambda(async (event) => {
             'performance':   'onboarding-performance.html',
         };
 
-        // If no priceId — this is a returning user logging in (not a new registration).
+        // If no pending tier — this is a returning user logging in (not a new registration).
         // Priority order:
         //   0. super_admin / admin role                    → admin portal
         //   1. active plan + incomplete onboarding draft   → resume onboarding step
@@ -187,7 +166,7 @@ export default withLambda(async (event) => {
         //   4. past_due plan (grace period) + assistants   → workspace with billing warning
         //   5. cancelled / no plan + existing assistants   → workspace (can view, not use)
         //   6. no plan + no assistants                     → pricing
-        if (!priceId || !priceToTier[priceId]) {
+        if (!pendingTier || !VALID_TIERS.includes(pendingTier)) {
             // Case 0: Admin / superuser
             // US-ADM-5.2.2: Dual-role — if the admin also has an active workspace plan, send them
             // to workspace.html (the Admin Portal launcher appears in the sidebar).
@@ -229,7 +208,6 @@ export default withLambda(async (event) => {
                 .where(eq(aiAssistants.userId, user.id))
                 .limit(1);
 
-            const hasAnyPlan      = !!existingPlan;
             const hasActivePlan   = existingPlan?.status === 'active';
             const hasPastDuePlan  = existingPlan?.status === 'past_due';
             const hasAnyAssistant = !!existingAssistant;
@@ -250,12 +228,7 @@ export default withLambda(async (event) => {
                             ))
                             .limit(1);
                         if (!existingReminder) {
-                            await db.insert(notifications).values({
-                                userId: user.id,
-                                type: 'onboarding_incomplete',
-                                title: 'Complete your assistant setup',
-                                message: 'You have not yet completed the onboarding of your digital assistant. Pick up where you left off.',
-                            });
+                            await createNotification(db, 'onboarding_incomplete', { userId: user.id });
                         }
                     } catch { /* non-blocking */ }
 
@@ -291,7 +264,10 @@ export default withLambda(async (event) => {
             // send to workspace so they can see their existing setup and take action.
             // The workspace will show a payment warning banner via check-capacity.ts.
             if (hasAnyAssistant) {
-                const suffix = hasPastDuePlan ? '?alert=payment_overdue' : (hasAnyPlan ? '?alert=subscription_ended' : '?alert=no_plan');
+                // Free trial removed: a user can no longer reach "has assistants but never had a
+                // plan" through normal signup, so the former no_plan case collapses into the
+                // subscription-ended banner (server-side gates still block hiring/tasks).
+                const suffix = hasPastDuePlan ? '?alert=payment_overdue' : '?alert=subscription_ended';
                 return {
                     statusCode: 200,
                     headers: getHeaders(sessionCookie),
@@ -309,11 +285,10 @@ export default withLambda(async (event) => {
             };
         }
 
-        const tierKey = priceToTier[priceId];
         return {
             statusCode: 200,
             headers: getHeaders(sessionCookie),
-            body: JSON.stringify({ success: true, redirect: `${baseUrl}/checkout.html?tier=${tierKey}` })
+            body: JSON.stringify({ success: true, redirect: `${baseUrl}/checkout.html?tier=${pendingTier}` })
         };
     } catch (error: any) {
         // BUG-P1-5: Log full error server-side; never return internal detail to the client.

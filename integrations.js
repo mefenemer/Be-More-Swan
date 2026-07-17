@@ -123,6 +123,54 @@ const PLATFORMS = [
     },
 ];
 
+// ── Inbound source catalogue ─────────────────────────────────────
+// Sources are connectors assistants read FROM, never write to — the opposite direction to
+// PLATFORMS above. They differ in three ways that _sourceCard() encodes: no social handle is
+// required to connect (the handle gate is a publishing concern), there is no "Use for this
+// assistant" toggle (connecting is workspace-wide — an inbound library isn't per-assistant
+// state), and the CTA leads to browsing rather than publishing.
+//
+// serviceName here must match the CONNECTOR_CATEGORY key in src/utils/connection-map.ts
+// (lowercased), which is what the server returns in `allowedServices`.
+const SOURCES = [
+    {
+        id: 'canva',
+        label: 'Canva',
+        emoji: '🎨',
+        // bg-teal-100 is in the compiled style.css; bg-cyan-100 is NOT, and an uncompiled
+        // Tailwind class renders as no background at all.
+        iconBg: 'bg-teal-100',
+        iconText: 'text-teal-700',
+        oauthUrl: '/api/oauth/canva/connect',
+        tagline: 'Bring your Canva designs into your Content Library, so this assistant can use them in posts and articles.',
+        headline: 'Import designs from Canva',
+    },
+];
+
+// Sources connect straight through the OAuth router — no pre-connect checklist and no handle
+// gate, so unlike _intStartOAuth there is nothing to interstitial.
+window._intConnectSource = function (sourceId) {
+    const source = SOURCES.find(s => s.id === sourceId);
+    if (source) window.location.href = source.oauthUrl;
+};
+
+// Canva is the only source with a picker, so this is deliberately Canva-specific rather than
+// dispatching on sourceId — a second source would need its own browser anyway.
+// Imports land in My Content, not on this tab, so there is nothing here to re-render: confirm
+// what arrived and name where it went, otherwise the modal just closes and looks like a no-op.
+// CanvaBrowser is loaded by workspace.html, which hosts this tab as a fragment.
+window._intBrowseCanvaDesigns = function () {
+    if (!window.CanvaBrowser) return;
+    window.CanvaBrowser.open({
+        // Count items, not designs: the importer writes one asset per PAGE, so a 2-page
+        // presentation lands as 2 items and "2 designs" would contradict what the user picked.
+        onImported: (assetIds) => {
+            const n = assetIds.length;
+            window.showToast?.(`${n} item${n > 1 ? 's' : ''} imported to My Content.`, { icon: '✅' });
+        },
+    });
+};
+
 let _connToDelete = null;
 let _userConnections = [];
 
@@ -186,6 +234,12 @@ function _relevantPlatforms() {
     // ('Facebook'). Compare case-insensitively so the allow-list actually matches.
     const allow = new Set(_allowedServices.map(s => String(s).toLowerCase()));
     return PLATFORMS.filter(p => allow.has(String(p.id).toLowerCase()));
+}
+
+function _relevantSources() {
+    if (!_allowedServices) return SOURCES;
+    const allow = new Set(_allowedServices.map(s => String(s).toLowerCase()));
+    return SOURCES.filter(s => allow.has(String(s.id).toLowerCase()));
 }
 
 // Append the selected assistant so the OAuth flow binds the connection to it
@@ -358,6 +412,11 @@ async function _loadConnections() {
 
     grid.innerHTML = '';
     const platforms = _relevantPlatforms();
+    // Inbound sources (Canva). Their category is marked available:true by the server's
+    // connection-map, which is what keeps them out of the coming-soon list below — so this
+    // renderer is the ONLY thing standing between a tagged source connector and a silently
+    // empty grid.
+    const sources = _relevantSources();
     // Categories the role supports that have no live connector yet — rendered as
     // "coming soon" cards so every assistant shows the tools it's built to use.
     // Exclude any category already covered by an enable-able "Synced actions" recipe
@@ -366,7 +425,7 @@ async function _loadConnections() {
     const covered = window._syncedActionCategories || new Set();
     const comingSoon = _supportedTools.filter(t => t && t.available === false && !covered.has(t.key));
 
-    if (!platforms.length && !comingSoon.length) {
+    if (!platforms.length && !sources.length && !comingSoon.length) {
         // Nothing to connect and nothing "coming soon" here — but the assistant may still
         // have enable-able recipes rendered by the Synced actions list above, so only show
         // the empty state when there are no recipes either.
@@ -376,6 +435,10 @@ async function _loadConnections() {
     platforms.forEach(platform => {
         const conn = _userConnections.find(c => _serviceMatchesPlatform(c.serviceName, platform.id));
         grid.insertAdjacentHTML('beforeend', _platformCard(platform, conn));
+    });
+    sources.forEach(source => {
+        const conn = _userConnections.find(c => String(c.serviceName).toLowerCase() === source.id);
+        grid.insertAdjacentHTML('beforeend', _sourceCard(source, conn));
     });
     comingSoon.forEach(tool => grid.insertAdjacentHTML('beforeend', _comingSoonCard(tool)));
 
@@ -485,15 +548,42 @@ function _connStatusRow(platform, conn) {
         </div>`;
 }
 
+// Status row for an inbound source (SOURCES). Same shell as _connStatusRow, minus the
+// switch: connecting a source is workspace-wide, so there is no per-assistant on/off to
+// show. A connected source is simply available to the assistant.
+function _sourceStatusRow(source, conn) {
+    const health = _connHealth(conn);
+    const isActive = !!conn && conn.status === 'active';
+    const sub = !conn ? 'Connect it to import designs'
+        : health.problem ? health.label
+        : 'Designs available';
+    const subTone = !conn ? 'text-gray-400' : health.problem ? 'text-amber-700' : 'text-emerald-700';
+    const control = isActive
+        ? ''
+        : `<button type="button" onclick="window._openBriefDrawer && window._openBriefDrawer('platforms')" class="shrink-0 px-2.5 py-1 text-xs font-bold rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">${conn ? 'Reconnect' : 'Connect'}</button>`;
+    return `
+        <div class="flex items-center justify-between gap-3 py-2">
+            <div class="flex items-center gap-2.5 min-w-0">
+                <span class="w-8 h-8 rounded-lg ${source.iconBg} ${source.iconText} flex items-center justify-center text-base shrink-0">${source.emoji}</span>
+                <div class="min-w-0">
+                    <p class="text-sm font-bold text-gray-900 truncate">${_esc(source.label)}</p>
+                    <p class="text-xs font-semibold ${subTone} truncate">${_esc(sub)}</p>
+                </div>
+            </div>
+            ${control}
+        </div>`;
+}
+
 // Rendered from whatever _loadConnections last fetched, so it never issues its own request.
-// Self-hides for roles with no connector platforms (their integrations are recipes in the
+// Self-hides for roles with no connectors at all (their integrations are recipes in the
 // Connections drawer's "Synced actions" list, which carry their own enable toggles).
 window._renderConnectionsStatusCard = function () {
     const card = document.getElementById('connections-status-card');
     if (!card) return;
     const list = document.getElementById('connections-status-list');
     const platforms = _assistantScoped ? _relevantPlatforms() : [];
-    if (!list || !platforms.length) {
+    const sources = _assistantScoped ? _relevantSources() : [];
+    if (!list || (!platforms.length && !sources.length)) {
         card.classList.add('hidden');
         window._syncStatusRow && window._syncStatusRow();
         return;
@@ -503,26 +593,41 @@ window._renderConnectionsStatusCard = function () {
     const rows = platforms.map(p => ({ p, conn: _userConnections.find(c => _serviceMatchesPlatform(c.serviceName, p.id)) }));
     const connected = rows.filter(r => r.conn && r.conn.status === 'active');
     const enabled = connected.filter(r => _assistantSelectedIds.has(r.conn.id));
+    const sourceRows = sources.map(s => ({ s, conn: _userConnections.find(c => String(c.serviceName).toLowerCase() === s.id) }));
+    const activeSources = sourceRows.filter(r => r.conn && r.conn.status === 'active');
 
     const pill = document.getElementById('connections-pill');
     if (pill) {
-        const ok = connected.length > 0;
-        pill.textContent = ok ? `${enabled.length} of ${connected.length} on` : '● None connected';
+        // A connected source has no switch, so it counts as on the moment it is connected.
+        const onCount = enabled.length + activeSources.length;
+        const connectedCount = connected.length + activeSources.length;
+        pill.textContent = connectedCount ? `${onCount} of ${connectedCount} on` : '● None connected';
         pill.className = 'inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full ' +
-            (enabled.length ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500');
+            (onCount ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500');
     }
     const headline = document.getElementById('connections-headline');
     if (headline) {
-        headline.textContent = !connected.length
-            ? 'No channels connected yet'
-            : !enabled.length
-            ? 'Connected — but no channel is switched on for this assistant'
-            : `Posting to ${_listPhrase(enabled.map(r => r.p.label))}`;
+        const parts = [];
+        if (enabled.length) parts.push(`Posting to ${_listPhrase(enabled.map(r => r.p.label))}`);
+        if (activeSources.length) parts.push(`Designs from ${_listPhrase(activeSources.map(r => r.s.label))}`);
+        headline.textContent = (!connected.length && !activeSources.length)
+            ? (sources.length ? 'Nothing connected yet' : 'No channels connected yet')
+            : parts.length
+            ? parts.join(' · ')
+            : 'Connected — but no channel is switched on for this assistant';
+    }
+    // The card's footnote is about the per-channel switch, which only platform rows have.
+    const subtext = document.getElementById('connections-subtext');
+    if (subtext) {
+        subtext.textContent = platforms.length
+            ? 'Switch a channel off and this assistant stops posting there. The account stays connected for your other assistants.'
+            : 'Connections are shared across your workspace — connecting here connects for your other assistants too.';
     }
     // A toggle re-renders the list it lives in, so the switch the user just flipped is replaced
     // mid-interaction. Put focus back on its successor, or keyboard users lose their place.
     const focused = list.contains(document.activeElement) ? document.activeElement.getAttribute('aria-label') : null;
-    list.innerHTML = rows.map(r => _connStatusRow(r.p, r.conn)).join('');
+    list.innerHTML = rows.map(r => _connStatusRow(r.p, r.conn)).join('')
+        + sourceRows.map(r => _sourceStatusRow(r.s, r.conn)).join('');
     if (focused) list.querySelector(`input[aria-label="${focused}"]`)?.focus();
     window._syncStatusRow && window._syncStatusRow();
 };
@@ -567,6 +672,89 @@ function _healthBadge(health) {
     if (health.key === 'bad')  return `<span class="${pill} text-red-700 bg-red-50 border-red-200"><span class="${dot} bg-red-500"></span> ${health.label}</span>`;
     if (health.key === 'warn') return `<span class="${pill} text-amber-700 bg-amber-50 border-amber-200"><span class="${dot} bg-amber-500 animate-pulse"></span> ${health.label}</span>`;
     return `<span class="${pill} text-gray-500 bg-gray-100 border-gray-200"><span class="${dot} bg-gray-400"></span> ${health.label}</span>`;
+}
+
+// Card for an inbound source (SOURCES). Mirrors _platformCard's shell — same grid cell size,
+// rounding and pill language — but drops the two things that only make sense for an outbound
+// publishing target: the Business-Information handle gate and the "Use for this assistant"
+// toggle. The direction marker reads "in" rather than "out".
+function _sourceCard(source, conn) {
+    const isConnected = !!conn;
+    const isActive = isConnected && conn.status === 'active';
+    const health = _connHealth(conn);
+    const account = conn?.externalAccountName || conn?.externalUserId || '';
+
+    const connectIcon = `<svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.657l-3 3a4 4 0 01-5.657-5.657l1.5-1.5m6.828-6.829l3-3a4 4 0 015.657 5.657l-1.5 1.5"/></svg>`;
+    const primaryBtn = 'w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl shadow-sm hover:shadow transition cursor-pointer';
+    const connectBtn = `<button onclick="window._intConnectSource('${source.id}')" class="${primaryBtn}" type="button">${connectIcon} Connect ${_esc(source.label)}</button>`;
+
+    const ghostPill = 'inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
+    const neutralPill = `${ghostPill} text-gray-600 bg-gray-50 hover:bg-gray-100 border-gray-200`;
+    const reconnectBtn = `<button onclick="window._intConnectSource('${source.id}')" class="${neutralPill}" type="button">Reconnect</button>`;
+    const disconnectBtn = `<button onclick="window._intPromptDisconnect(${conn?.id})" class="${ghostPill} text-red-600 bg-white hover:bg-red-600 hover:text-white border-red-200 hover:border-red-600" type="button">Disconnect</button>`;
+
+    const accountChip = (isConnected && account)
+        ? `<div class="flex items-center gap-1.5 w-fit max-w-full text-xs font-semibold text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-2.5 py-1.5 mt-2">
+               <svg class="w-3.5 h-3.5 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+               <span class="truncate">Connected as ${_esc(account)}</span>
+           </div>`
+        : '';
+
+    const action = isConnected
+        ? `<div class="mt-auto pt-4 border-t border-gray-100 flex items-center gap-2 flex-wrap">
+               ${reconnectBtn}
+               <span class="ml-auto">${disconnectBtn}</span>
+           </div>`
+        : `<div class="mt-auto pt-4 border-t border-gray-100">${connectBtn}</div>`;
+
+    // Assistant-scoped: match the capability-card language of the social cards beside it.
+    // There is no Enable step — an inbound source is either connected or not, and once it is,
+    // the useful next move is to open the picker.
+    if (_assistantScoped) {
+        const capPill = !isActive
+            ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">⚠ Connect ${_esc(source.label)}</span>`
+            : `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">✓ Connected</span>`;
+        const healthPill = (isConnected && health.problem) ? _healthBadge(health) : '';
+        const primary = !isActive
+            ? connectBtn
+            : `<button type="button" onclick="window._intBrowseCanvaDesigns()" class="w-full px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition cursor-pointer">Browse designs</button>`;
+        const manage = isConnected
+            ? `<details class="mt-1">
+                   <summary class="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 select-none">Manage connection</summary>
+                   <div>${action}</div>
+               </details>`
+            : '';
+        return `
+        <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
+            <div class="flex items-start justify-between gap-2">
+                <div class="flex items-center gap-2 flex-wrap">${capPill}${healthPill}<span class="text-xs font-semibold text-gray-400">← in</span></div>
+                <span class="text-xs font-semibold text-gray-400">${_esc(source.label)}</span>
+            </div>
+            <div class="grow">
+                <p class="font-bold text-gray-900">${_esc(source.headline)}</p>
+                <p class="text-sm text-gray-500 mt-1">${_esc(source.tagline)}</p>
+                ${accountChip}
+            </div>
+            ${primary}
+            ${manage}
+        </div>`;
+    }
+
+    return `
+        <div class="relative bg-white rounded-2xl border ${isConnected ? 'border-emerald-200 shadow-md ring-1 ring-emerald-100' : 'border-gray-200 shadow-sm hover:border-gray-300 hover:shadow-md'} p-5 flex flex-col gap-3 transition">
+            <div class="flex items-start gap-3.5">
+                <div class="w-11 h-11 rounded-xl ${source.iconBg} ${source.iconText} flex items-center justify-center font-bold text-xl shadow-sm shrink-0">
+                    ${source.emoji}
+                </div>
+                <div class="flex-1 min-w-0">
+                    <h3 class="font-extrabold text-gray-900 leading-tight truncate">${_esc(source.label)}</h3>
+                    <p class="text-[13px] text-gray-500 mt-1 leading-snug line-clamp-2">${_esc(source.tagline)}</p>
+                </div>
+                <div class="shrink-0">${_healthBadge(health)}</div>
+            </div>
+            ${accountChip}
+            ${action}
+        </div>`;
 }
 
 function _platformCard(platform, conn) {

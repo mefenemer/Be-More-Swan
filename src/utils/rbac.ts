@@ -40,6 +40,8 @@ const PERMISSION_MIN_RANK: Record<string, number> = {
     lock_account:           1,  // lock / unlock accounts
     view_tickets:           1,  // support ticket queue
     view_analytics:         1,  // basic analytics
+    view_issue_reports:     1,  // issue report queue (running the SQL needs run_migration_sql)
+    manage_feature_requests:1,  // moderate the feature request board / roadmap
 
     // ── billing_admin and above ───────────────────────────────────────
     issue_refund:           2,  // Stripe refunds (not yet built but guarded)
@@ -49,6 +51,8 @@ const PERMISSION_MIN_RANK: Record<string, number> = {
     dunning_override:       2,  // mark payment arranged offline
     view_reconciliation:    2,  // billing reconciliation queue
     sar_export:             2,  // GDPR SAR export
+    manage_ai_credits:      2,  // grant / deduct AI generation credits (DB-only, no Stripe)
+    view_workspaces:        2,  // browse the workspace list + detail
 
     // ── platform_admin and above ──────────────────────────────────────
     kill_switch:            3,  // toggle emergency kill switches
@@ -56,6 +60,8 @@ const PERMISSION_MIN_RANK: Record<string, number> = {
     assistant_catalog:      3,  // deploy / rollback assistant versions, lifecycle transitions
     platform_config:        3,  // read / write platform config
     view_audit_log:         3,  // see audit log list (diffs still super_admin only)
+    run_test_generation:    3,  // trigger test generations against a blueprint (spends AI budget)
+    breach_response:        3,  // breach response workflow
 
     // ── super_admin only ──────────────────────────────────────────────
     audit_log_diff:         4,  // raw before/after state diffs in audit log
@@ -63,7 +69,30 @@ const PERMISSION_MIN_RANK: Record<string, number> = {
     manage_admin_roles:     4,  // promote / demote other admins
     impersonate:            4,  // impersonate any user
     run_migration_sql:      4,  // execute AI-proposed migration SQL against the DB (issue tickets)
+    deploy_code:            4,  // merge a fix to staging / promote staging → production
+    manage_comms_templates: 4,  // US-COMMS-2: edit email + in-app notification templates
+    delete_records:         4,  // hard-delete arbitrary records
+    view_system_status:     4,  // infrastructure registry (reveals which secrets are configured)
+    view_security_abuse:    4,  // cross-workspace billing linkage / account-splitting signals
+    manage_session_timeout: 4,  // change the platform-wide inactivity timeout
+    sandbox_access:         4,  // switch the portal to the sandbox database
 };
+
+/**
+ * Every permission a role holds, resolved through the rank hierarchy.
+ *
+ * The admin portal is a static page with no bundler, so it cannot import this
+ * module. Rather than duplicate the matrix in admin.html — which is how the
+ * nav and the API drifted apart in the first place — the portal fetches this
+ * list for the signed-in admin and gates on it.
+ */
+export function permissionsForRole(role: string | null | undefined): string[] {
+    if (!role) return [];
+    const roleRank = ROLE_RANK[role] ?? 0;
+    return Object.keys(PERMISSION_MIN_RANK)
+        .filter((p) => roleRank >= PERMISSION_MIN_RANK[p])
+        .sort();
+}
 
 /**
  * Returns true if the given role has the specified permission.

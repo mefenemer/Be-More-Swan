@@ -57,6 +57,7 @@ async function resolveTagIds(base: string, auth: string, names: string[]): Promi
 export const wordpressAdapter: BlogDestinationAdapter<WordpressCreds> = {
     id: 'wordpress',
     label: 'WordPress',
+    supportsDraft: true,
     credFields: [
         { key: 'siteUrl', label: 'Site URL', secret: false, help: 'e.g. https://blog.example.com' },
         { key: 'username', label: 'Username', secret: false },
@@ -86,10 +87,11 @@ export const wordpressAdapter: BlogDestinationAdapter<WordpressCreds> = {
         }
     },
 
-    async publish(post, creds, externalId) {
+    async publish(post, creds, opts = {}) {
+        const { externalId, asDraft } = opts;
         const auth = basicAuth(creds);
         const tagIds = await resolveTagIds(creds.siteUrl, auth, post.tags);
-        const body = JSON.stringify(buildWordpressPost(post, { publish: true, tagIds }));
+        const body = JSON.stringify(buildWordpressPost(post, { publish: !asDraft, tagIds }));
         const url = externalId
             ? `${creds.siteUrl}/wp-json/wp/v2/posts/${externalId}`
             : `${creds.siteUrl}/wp-json/wp/v2/posts`;

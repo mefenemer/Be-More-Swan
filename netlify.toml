@@ -57,6 +57,31 @@
   to = "/.netlify/functions/widget-api"
   status = 200
 
+# Autonomous Content Engine (US 1.3): per-widget XML sitemap. MUST precede the /b/* catch-all below —
+# Netlify evaluates redirects top-to-bottom, first match wins, so without this a sitemap request would
+# fall through to blog-page and 404 (no post has the slug "sitemap.xml").
+[[redirects]]
+  from = "/b/:key/sitemap.xml"
+  to = "/.netlify/functions/blog-sitemap"
+  status = 200
+
+# Autonomous Content Engine (US 1.3): server-rendered blog permalink. Rewrite (status 200) — the
+# original /b/:key/:slug path survives in event.rawUrl, which blog-page.ts parses. This is the
+# crawler-facing, indexable, shareable URL the hash-routed Shadow-DOM widget cannot provide.
+[[redirects]]
+  from = "/b/*"
+  to = "/.netlify/functions/blog-page"
+  status = 200
+
+# Stripe webhook: stable public path so the Stripe endpoint URL isn't tied to Netlify's internal
+# /.netlify/functions/ path. Rewrite (status 200) — a 3xx would break delivery because Stripe does
+# NOT follow redirects. MUST be configured on the apex host (bemoreswan.com); www 308-redirects to
+# apex and would fail. Set the Stripe endpoint to https://bemoreswan.com/api/stripe/webhook.
+[[redirects]]
+  from = "/api/stripe/webhook"
+  to = "/.netlify/functions/stripe-webhook"
+  status = 200
+
 [build]
   # Rebuild the Tailwind stylesheet from input.css on every deploy so style.css can never
   # drift from the markup (a stale committed style.css silently drops classes and breaks layouts).
@@ -127,6 +152,10 @@ node_bundler = "esbuild"
 # US-ADM-2.3.1: Stripe↔DB nightly billing reconciliation — 02:00 UTC every day
 [functions.reconcile-billing]
   schedule = "0 2 * * *"
+
+# Single-source price management: flip scheduled plan price changes live — every 15 min
+[functions.activate-scheduled-prices]
+  schedule = "*/15 * * * *"
 
 # US-SALES-1.1 Part 4: Nightly lead identification — 03:00 UTC every day
 [functions.identify-leads]

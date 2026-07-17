@@ -19,7 +19,8 @@ import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, notifications, platformConfig, taskRuns } from '../../db/schema';
+import { aiAssistants, platformConfig, taskRuns } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -213,11 +214,9 @@ export default withLambda(async (event) => {
                 .where(eq(taskRuns.id, taskRunId));
 
             // Notify the run owner immediately
-            await db.insert(notifications).values({
+            await createNotification(db, 'run_budget_suspended', {
                 userId: run.userId,
-                type: 'run_budget_suspended',
-                title: 'Agent Run Suspended — Budget Ceiling Reached',
-                message: `Run #${taskRunId} has been suspended because it reached the ${suspendReason.replace(/_/g, ' ')} ceiling. Review the run to resume or cancel.`,
+                context: { run: { id: taskRunId, suspend_reason: suspendReason.replace(/_/g, ' ') } },
                 isRead: false,
             });
 
@@ -231,11 +230,14 @@ export default withLambda(async (event) => {
         const prevCostPct = prevCostGbp / budget.maxCostGbp;
         if (costPct >= 0.8 && prevCostPct < 0.8) {
             warningType = 'cost_80pct';
-            await db.insert(notifications).values({
+            await createNotification(db, 'run_cost_warning', {
                 userId: run.userId,
-                type: 'run_cost_warning',
-                title: 'Agent Run Cost Warning — 80% of Budget Used',
-                message: `Run #${taskRunId} has used £${newCostGbp.toFixed(4)} of the £${budget.maxCostGbp.toFixed(2)} budget (${Math.round(costPct * 100)}%). The run will suspend if the ceiling is reached.`,
+                context: { run: {
+                    id: taskRunId,
+                    cost: newCostGbp.toFixed(4),
+                    budget: budget.maxCostGbp.toFixed(2),
+                    pct: Math.round(costPct * 100),
+                } },
                 isRead: false,
             });
         }

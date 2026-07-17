@@ -79,20 +79,21 @@
               <img src="/images/BeMoreSwan_SwanAI.png" alt="Generate a name with Be More Swan AI" class="ai-wand-img">
             </button>
           </div>
-          <!-- Issue #154: status pill moved below the name so it reads as the assistant's status, not part of the name.
-               Issue #162: Brand Protected badge sits to the right of the status pill, not the name. -->
+          <!-- Issue #204: role title moved directly under the name so it reads as part of the
+               identity, with the status pill/badges now the second row. -->
           <div class="flex items-center gap-3 mt-1">
+            <p id="detail-role" class="text-gray-500 font-medium text-xs">Reviewing tasks…</p>
+            <!-- AC2.1.2 — primary goal progress bar (populated by _fetchAndRenderGoals) -->
+            <div id="detail-primary-goal" class="hidden max-w-xs"></div>
+          </div>
+          <!-- Issue #162: Brand Protected badge sits to the right of the status pill, not the name. -->
+          <div class="flex items-center gap-3 mt-1.5">
             <span id="detail-status" class="inline-flex items-center gap-1.5 py-0.5 px-2 rounded-md text-xs font-bold bg-gray-100 text-gray-600 border border-gray-200">…</span>
             <!-- Brand Safety badge — shown when guardrails are configured -->
             <span id="guardrails-protected-badge" class="hidden inline-flex items-center gap-1 py-0.5 px-2 rounded-md text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
               <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
               Brand Protected
             </span>
-          </div>
-          <div class="flex items-center gap-3 mt-1.5">
-            <p id="detail-role" class="text-gray-500 font-medium text-xs">Reviewing tasks…</p>
-            <!-- AC2.1.2 — primary goal progress bar (populated by _fetchAndRenderGoals) -->
-            <div id="detail-primary-goal" class="hidden max-w-xs"></div>
           </div>
         </div>
       </div>
@@ -136,6 +137,39 @@
         </div>
       </div>
     </div>
+    <!-- Issue #206: Time/Money Saved moved out of the Impact & ROI card to sit under the assistant's
+         name and job title. The Week/Month toggle came with them — it only ever drove these two
+         figures (post counts are all-time), so leaving it behind would have stranded it from the
+         numbers it changes. Unlike the card these came from, the hero is always rendered, so this
+         strip carries its own `hidden` gate: _fetchAndRenderAssistantMetrics (assistants.js) shows
+         it on the same signal that reveals the metrics card, and _applyDashboardRegistry hides it
+         for roles with no post-based ROI. -->
+    <div id="detail-roi-strip" class="hidden mt-4 pt-4 border-t border-gray-100 z-10 relative">
+      <div class="flex items-center justify-between gap-3 mb-2">
+        <div class="flex items-baseline gap-2 min-w-0">
+          <p class="text-[11px] font-bold text-gray-400 uppercase tracking-wide shrink-0">Impact &amp; ROI</p>
+          <!-- Full sentence lives in the title attribute; the visible caption is the short form. -->
+          <p class="hidden sm:block text-[11px] text-gray-400 truncate" id="metrics-period-note">Time &amp; money saved this week</p>
+        </div>
+        <!-- Same This Week / This Month periods as the dashboard hero, so the two views always agree -->
+        <div class="flex items-center gap-0.5 p-0.5 rounded-lg bg-gray-100 shrink-0" role="tablist" aria-label="Time period">
+          <button type="button" data-period="week" class="metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition" role="tab">Week</button>
+          <button type="button" data-period="month" class="metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition" role="tab">Month</button>
+        </div>
+      </div>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        <div class="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2">
+          <p class="text-[11px] font-bold text-emerald-600 uppercase tracking-wide">Time Saved</p>
+          <p class="text-2xl font-black text-emerald-700 leading-tight" id="metrics-hours-saved">—</p>
+          <p class="text-[11px] text-emerald-500 leading-tight" id="metrics-hours-note">Based on ~30 min per post</p>
+        </div>
+        <div class="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2" id="metrics-roi-col">
+          <p class="text-[11px] font-bold text-emerald-600 uppercase tracking-wide">Money Saved</p>
+          <p class="text-2xl font-black text-emerald-700 leading-tight" id="metrics-gbp-saved">—</p>
+          <p class="text-[11px] text-emerald-500 leading-tight" id="metrics-roi-note"></p>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- Kick Off Meeting — readiness checklist + activation gate, shown when the assistant
@@ -170,59 +204,18 @@
     </div>
   </div>
 
-  <!-- Impact & ROI — elevated to top of the page (most important executive metric). Kept to a
-       single stat strip: the two ROI figures lead, the three post totals follow, and the
-       per-platform breakdown is folded away until asked for. -->
+  <!-- Content by platform — what's left of the old "Impact & ROI" card now that the post totals
+       have gone to the Autopilot card (#205) and the Time/Money pair to the hero header (#206).
+       The list used to be folded away behind a <details> to keep this card short; it's the card's
+       only content now, so it renders open. _fetchAndRenderAssistantMetrics shows the card only
+       when this assistant has posted to 2+ platforms — with one platform there's nothing to
+       compare and the card would otherwise be an empty box. -->
   <div id="assistant-metrics-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 sm:p-5 mb-6 hidden">
     <div class="flex items-center justify-between gap-3 mb-3">
-      <div class="flex items-baseline gap-2 min-w-0">
-        <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide shrink-0">Impact &amp; ROI</h3>
-        <!-- Full sentence lives in the title attribute; the visible caption is the short form. -->
-        <p class="hidden sm:block text-[11px] text-gray-400 truncate" id="metrics-period-note">All-time posts · time &amp; money saved this week</p>
-      </div>
-      <!-- Same This Week / This Month periods as the dashboard hero, so the two views always agree -->
-      <div class="flex items-center gap-0.5 p-0.5 rounded-lg bg-gray-100 shrink-0" role="tablist" aria-label="Time period">
-        <button type="button" data-period="week" class="metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition" role="tab">Week</button>
-        <button type="button" data-period="month" class="metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition" role="tab">Month</button>
-      </div>
+      <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide shrink-0" id="metrics-breakdown-label">Content by platform</h3>
+      <p class="text-[11px] text-gray-400 shrink-0">All-time posts</p>
     </div>
-
-    <!-- One strip: the ROI pair (tinted, double-width so their footnotes fit on a line), then
-         the three post totals. Mobile falls back to 2-up with Published spanning the last row. -->
-    <div class="grid grid-cols-2 sm:grid-cols-7 gap-2">
-      <div class="sm:col-span-2 rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2">
-        <p class="text-[11px] font-bold text-emerald-600 uppercase tracking-wide">Time Saved</p>
-        <p class="text-2xl font-black text-emerald-700 leading-tight" id="metrics-hours-saved">—</p>
-        <p class="text-[11px] text-emerald-500 leading-tight" id="metrics-hours-note">Based on ~30 min per post</p>
-      </div>
-      <div class="sm:col-span-2 rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2" id="metrics-roi-col">
-        <p class="text-[11px] font-bold text-emerald-600 uppercase tracking-wide">Money Saved</p>
-        <p class="text-2xl font-black text-emerald-700 leading-tight" id="metrics-gbp-saved">—</p>
-        <p class="text-[11px] text-emerald-500 leading-tight" id="metrics-roi-note"></p>
-      </div>
-      <div class="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2 flex flex-col justify-center">
-        <p class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Created</p>
-        <p class="text-2xl font-black text-gray-900 leading-tight" id="metrics-total-created">—</p>
-      </div>
-      <div class="rounded-xl bg-blue-50 border border-blue-100 px-3 py-2 flex flex-col justify-center">
-        <p class="text-[11px] font-bold text-blue-500 uppercase tracking-wide">Scheduled</p>
-        <p class="text-2xl font-black text-blue-700 leading-tight" id="metrics-total-scheduled">—</p>
-      </div>
-      <div class="col-span-2 sm:col-span-1 rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2 flex flex-col justify-center">
-        <p class="text-[11px] font-bold text-emerald-600 uppercase tracking-wide">Published</p>
-        <p class="text-2xl font-black text-emerald-700 leading-tight" id="metrics-total-published">—</p>
-      </div>
-    </div>
-
-    <!-- Per-platform breakdown — the tallest part of this card and the least often needed,
-         so it collapses. _fetchAndRenderAssistantMetrics hides it when there's nothing to show. -->
-    <details id="metrics-breakdown" class="group mt-3 hidden">
-      <summary class="list-none flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-gray-700 cursor-pointer select-none w-fit">
-        <svg class="w-3 h-3 shrink-0 transition-transform group-open:rotate-90" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M9 5l7 7-7 7"/></svg>
-        <span id="metrics-breakdown-label">Breakdown by platform</span>
-      </summary>
-      <div id="metrics-by-platform" class="mt-1"></div>
-    </details>
+    <div id="metrics-by-platform"></div>
   </div>
 
   <!-- ── Status row: Autopilot + Connections, side by side. Each card hides on its own signal, and
@@ -266,6 +259,23 @@
           <p class="text-xs font-semibold text-gray-500">Drafts kept ahead</p>
         </div>
       </div>
+      <!-- Post totals — moved here from the Impact & ROI card (issue #205) so Created/Scheduled/
+           Published sit with the engine that drafts them. Still populated by
+           _fetchAndRenderAssistantMetrics() (assistants.js) via these same element ids. -->
+      <div class="mt-4 pt-4 border-t border-gray-100 grid grid-cols-3 gap-2">
+        <div class="rounded-xl bg-gray-50 border border-gray-100 px-3 py-2 flex flex-col justify-center">
+          <p class="text-[11px] font-bold text-gray-400 uppercase tracking-wide">Created</p>
+          <p class="text-2xl font-black text-gray-900 leading-tight" id="metrics-total-created">—</p>
+        </div>
+        <div class="rounded-xl bg-blue-50 border border-blue-100 px-3 py-2 flex flex-col justify-center">
+          <p class="text-[11px] font-bold text-blue-500 uppercase tracking-wide">Scheduled</p>
+          <p class="text-2xl font-black text-blue-700 leading-tight" id="metrics-total-scheduled">—</p>
+        </div>
+        <div class="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-2 flex flex-col justify-center">
+          <p class="text-[11px] font-bold text-emerald-600 uppercase tracking-wide">Published</p>
+          <p class="text-2xl font-black text-emerald-700 leading-tight" id="metrics-total-published">—</p>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -274,7 +284,8 @@
        pool: switching one off here stops this assistant posting there, it does not disconnect the
        account. Rows + toggles are rendered by _renderConnectionsStatusCard() in integrations.js,
        which owns the connection state and the _intToggleUseForAssistant persistence; the card
-       self-hides for roles with no connector platforms. -->
+       self-hides for roles with no connectors at all. Inbound sources (Canva) list here too,
+       without a switch — connecting one is workspace-wide, not per-assistant. -->
   <div id="connections-status-card" class="hidden">
     <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 h-full">
       <div class="flex items-start justify-between gap-4 flex-wrap">
@@ -289,7 +300,7 @@
               <span id="connections-save-status" class="text-xs font-bold text-emerald-600 transition-all"></span>
             </div>
             <p id="connections-headline" class="text-sm text-gray-700 mt-1 font-semibold"></p>
-            <p class="text-xs text-gray-500 mt-0.5">Switch a channel off and this assistant stops posting there. The account stays connected for your other assistants.</p>
+            <p id="connections-subtext" class="text-xs text-gray-500 mt-0.5">Switch a channel off and this assistant stops posting there. The account stays connected for your other assistants.</p>
           </div>
         </div>
         <button type="button" onclick="window._openBriefDrawer && window._openBriefDrawer('platforms')" class="shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Manage connections</button>
@@ -437,6 +448,13 @@
       <!-- Calendar — this assistant's scheduled work / timeline (assistant-calendar.js scopes
            the global calendar to this assistant). Always shown. -->
       <button type="button" id="maintab-btn-calendar" data-maintab="calendar" class="main-tab-btn">Calendar</button>
+      <!-- My Content — content-roles only (myContentTab: social_media_manager, blog_writer);
+           the org-wide content library (uploads/links/AI-generated media) this assistant draws
+           on for posts. Placed right after Calendar (issue #213). Hidden by default, shown by
+           _applyDashboardRegistry when a myContentTab exists. -->
+      <button type="button" id="maintab-btn-mycontent" data-maintab="mycontent" class="main-tab-btn hidden">
+        <span id="mycontent-tab-label">My Content</span>
+      </button>
       <!-- ── Secondary tabs — role-gated, after the core three ── -->
       <button type="button" data-maintab="goals"         class="main-tab-btn">Goals</button>
       <button type="button" data-maintab="workflow"      class="main-tab-btn">Workflow</button>
@@ -446,6 +464,13 @@
            Placed last; hidden by default, shown by _applyDashboardRegistry when a kbTab exists. -->
       <button type="button" id="maintab-btn-kb" data-maintab="kb" class="main-tab-btn hidden">
         <span id="kb-tab-label">Knowledge Base</span>
+      </button>
+      <!-- Inspo — content-roles only (inspoTab: social_media_manager, blog_writer); the
+           styles/tones the assistant studies and applies to every draft
+           (assistant-inspo.js → inspo-items.ts). Hidden by default, shown by
+           _applyDashboardRegistry when an inspoTab exists. -->
+      <button type="button" id="maintab-btn-inspo" data-maintab="inspo" class="main-tab-btn hidden">
+        <span id="inspo-tab-label">Inspo</span>
       </button>
     </nav>
   </div>
@@ -582,6 +607,14 @@
     <div id="assistant-calendar-host"></div>
   </div><!-- /maintab-calendar -->
 
+  <!-- ── MAIN TAB: My Content ─────────────────────────────────────────────
+       The org-wide content library (uploads/links/AI-generated media, not
+       assistant-scoped). Populated by assistant-my-content.js, which reuses the
+       standalone my-content.html fragment + my-content.js controller. -->
+  <div id="maintab-mycontent" class="main-tab-content hidden">
+    <div id="mycontent-host"></div>
+  </div><!-- /maintab-mycontent -->
+
   <!-- ── MAIN TAB: Knowledge Base ───────────────────────────────────────
        Support articles grounding the tier1_support_agent's Resolved answers
        (KB phase). Populated by assistant-knowledge-base.js from the kbTab
@@ -591,6 +624,16 @@
     <div id="kb-editor-host"></div>
     <div id="kb-list-host"></div>
   </div><!-- /maintab-kb -->
+
+  <!-- ── MAIN TAB: Inspo ────────────────────────────────────────────────
+       The styles/tones/ideas the content assistants study and apply to every
+       draft. Populated by assistant-inspo.js from the inspoTab config; items
+       live in inspo_items (netlify/functions/inspo-items.ts). -->
+  <div id="maintab-inspo" class="main-tab-content hidden">
+    <div id="inspo-toolbar"></div>
+    <div id="inspo-composer-host"></div>
+    <div id="inspo-list-host"></div>
+  </div><!-- /maintab-inspo -->
 
   <!-- ── Persona / config slide-over (Epic 1) ──────────────────────────
        Opened from the header "Assistant Profile" button (#btn-assistant-profile),
@@ -915,9 +958,10 @@
 
            A draft only publishes unattended when ALL of these hold (src/utils/publish-policy.ts +
            auto-publish-runtime.ts): platform in publish mode, caption scores green with zero factual
-           claims, the image is NOT AI-generated, a live connection exists, and the assistant is under
-           its rolling-7-day ceiling. The ceiling is derived from the posting schedule and is
-           deliberately not user-editable — see #autopublish-volume. -->
+           claims, the image is NOT AI-generated (unless allowAiMediaAutoPublish is on — see the
+           toggle below), a live connection exists, and the assistant is under its rolling-7-day
+           ceiling. The ceiling is derived from the posting schedule and is deliberately not
+           user-editable — see #autopublish-volume. -->
       <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 sm:p-8">
         <div>
           <h3 class="text-lg font-bold text-gray-900">Autopilot mode</h3>
@@ -927,11 +971,28 @@
           <p class="text-xs text-amber-800"><strong>In publish mode, posts go live without you.</strong> They post to your real accounts. Scheduled posts stay visible on the calendar, so you can still change or cancel one before it publishes.</p>
         </div>
         <p id="autopublish-volume" class="mt-3 text-xs font-semibold text-gray-600"></p>
-        <p class="mt-2 text-xs text-gray-500">Even in publish mode, a draft is held for review if its caption isn't confidently factual, if its image was <strong>AI-generated</strong> (the confidence check reads the caption, not the picture), or if the assistant has already published its weekly allowance. Nothing is ever discarded — it just waits for you.</p>
+        <p class="mt-2 text-xs text-gray-500">Even in publish mode, a draft is held for review if its caption isn't confidently factual, if its image was <strong>AI-generated</strong> (the confidence check reads the caption, not the picture) and you haven't allowed AI images below, or if the assistant has already published its weekly allowance. Nothing is ever discarded — it just waits for you.</p>
         <div id="autopublish-platform-list" class="mt-5 space-y-2.5">
           <!-- Rows injected by _hydrateAutoPublish() in assistants.js -->
         </div>
         <p id="autopublish-empty" class="hidden mt-3 text-xs font-semibold text-gray-400">Connect a platform first — Autopilot mode applies per platform.</p>
+
+        <!-- AI-media auto-publish opt-in. By default a post whose image was AI-generated is ALWAYS held
+             for review even in publish mode (the confidence check reads the caption, not the picture).
+             This toggle lets those posts auto-publish too. Stored as context.allowAiMediaAutoPublish
+             (default false); read by gateAutonomousDraft() in src/utils/publish-policy.ts. Hydrated +
+             persisted in assistants.js (_hydrateAutoPublish / _detailCollect). -->
+        <label class="mt-5 flex items-start justify-between gap-4 p-3 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50">
+          <span>
+            <span class="block text-sm font-bold text-gray-900">Let AI-generated images publish without review</span>
+            <span class="block text-xs text-gray-500 mt-0.5">Off by default. When off, any post using an AI-generated image is always held for your review, even on platforms set to publish mode. Turn this on to let those posts auto-publish too — the caption still has to pass every safety check.</span>
+          </span>
+          <span class="relative inline-flex shrink-0 mt-0.5">
+            <input type="checkbox" id="edit_allow_ai_media" class="sr-only peer">
+            <span class="w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-emerald-700 transition
+              after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:w-5 after:h-5 after:bg-white after:rounded-full after:shadow after:transition-all peer-checked:after:translate-x-5"></span>
+          </span>
+        </label>
       </div>
 
       <!-- Media Sources (Media Source Selection) -->

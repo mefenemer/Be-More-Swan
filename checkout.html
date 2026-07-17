@@ -196,6 +196,7 @@
   let _currentCycle = 'monthly';
   let _stripeElements = null;
   let _stripeInstance = null;
+  let _isFreeCheckout = false; // true once a 100%-off promo makes the plan £0 (already provisioned server-side)
 
   // SC2: Validate promo code via backend
   window._applyPromo = async function () {
@@ -302,7 +303,15 @@
         }),
       });
       const json = await res.json();
-      if (!res.ok || !json.data?.clientSecret) return;
+      if (!res.ok) return;
+
+      // 100%-off promo → £0 due. The subscription is already active (provisioned
+      // server-side), so there is nothing to confirm — switch to the no-payment state.
+      if (json.data?.requiresPayment === false) {
+        _enterFreeCheckoutState();
+        return;
+      }
+      if (!json.data?.clientSecret) return;
 
       // Reinitialise Stripe Elements with new clientSecret
       _stripeElements = _stripeInstance.elements({
@@ -316,6 +325,38 @@
     } catch (err) {
       console.warn('[checkout] Failed to reinitialise PaymentIntent after promo:', err);
     }
+  }
+
+  // Switch the checkout into its "no payment due" state after a 100%-off promo.
+  // The plan is already active server-side, so we tear down the card form and LOCK
+  // the promo box — re-applying a different code now would spin up a second
+  // subscription. The submit button becomes a plain "continue to dashboard".
+  function _enterFreeCheckoutState() {
+    _isFreeCheckout = true;
+
+    const payEl = document.getElementById('payment-element');
+    if (payEl) { payEl.innerHTML = ''; payEl.style.display = 'none'; }
+
+    const annualAck = document.getElementById('annual-ack-block');
+    if (annualAck) { annualAck.classList.add('hidden'); annualAck.style.display = 'none'; }
+
+    const promoInput = document.getElementById('promo-input');
+    const promoBtn   = document.getElementById('promo-apply-btn');
+    if (promoInput) promoInput.disabled = true;
+    if (promoBtn)   promoBtn.disabled   = true;
+
+    document.getElementById('payment-error')?.classList.add('hidden');
+
+    if (payEl && !document.getElementById('free-checkout-note')) {
+      const freeNote = document.createElement('div');
+      freeNote.id = 'free-checkout-note';
+      freeNote.className = 'mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-sm text-emerald-800 font-medium';
+      freeNote.textContent = 'No payment due today — your promo code covers the full amount. Your subscription is active.';
+      payEl.parentNode?.insertBefore(freeNote, payEl);
+    }
+
+    const submitText = document.getElementById('submit-text');
+    if (submitText) submitText.textContent = 'Continue to Dashboard';
   }
 
   const _stripeAppearance = {
@@ -395,6 +436,13 @@
       return;
     }
 
+    // Defensive: a £0 plan at initial load (no promo) shouldn't happen, but if the
+    // backend reports no payment is due, the plan is already active — go to dashboard.
+    if (checkoutData.requiresPayment === false) {
+      window.location.href = `${window.location.origin}/workspace.html?payment=success`;
+      return;
+    }
+
     const { clientSecret, publishableKey, planName, amountGbp, billingCycleLabel } = checkoutData;
     if (!clientSecret || !publishableKey) { showError('Payment configuration missing. Please contact support.'); return; }
 
@@ -461,6 +509,12 @@
 
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
+
+      // £0 checkout (100%-off promo): the plan is already active — no payment to confirm.
+      if (_isFreeCheckout) {
+        window.location.href = `${window.location.origin}/workspace.html?payment=success`;
+        return;
+      }
 
       // Gate annual plans behind the acknowledgment checkbox
       if (billingCycle === 'annual' && !annualAckCheckbox.checked) {

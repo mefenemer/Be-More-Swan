@@ -102,6 +102,22 @@
       '.bms a{color:' + accent + ';}' +
       '.bms h1,.bms h2,.bms h3{line-height:1.25;}' +
       '.bms img{max-width:100%;height:auto;border-radius:8px;}' +
+      // Inline body media (:::media directives). A video/audio element with no width rule blows out
+      // of the column on a narrow customer page, so constrain both the same way as img.
+      '.bms video{max-width:100%;height:auto;border-radius:8px;display:block;}' +
+      '.bms audio{width:100%;display:block;margin:8px 0;}' +
+      '.bms figure{margin:16px 0;}' +
+      '.bms figcaption{font-size:13px;color:#6b7280;margin-top:6px;}' +
+      // Column layouts. `gap` + minmax(0,1fr) rather than 1fr: a long word or a wide media element
+      // in a 1fr track forces the grid wider than its container instead of shrinking.
+      '.bms .bms-columns{display:grid;gap:20px;margin:16px 0;' +
+        'grid-template-columns:repeat(2,minmax(0,1fr));}' +
+      '.bms .bms-columns[data-cols="3"]{grid-template-columns:repeat(3,minmax(0,1fr));}' +
+      '.bms .bms-column > :first-child{margin-top:0;}' +
+      // Columns are a desktop affordance — on a phone they must stack, or a 3-up grid renders as
+      // three unreadable slivers.
+      '@media (max-width:640px){.bms .bms-columns,.bms .bms-columns[data-cols="3"]' +
+        '{grid-template-columns:minmax(0,1fr);}}' +
       '.bms .bms-hero{width:100%;object-fit:cover;margin:8px 0 16px;}' +
       '.bms .bms-credit{font-size:12px;color:#6b7280;margin:-8px 0 16px;}' +
       '.bms .bms-card{padding:16px 0;border-bottom:1px solid #e5e7eb;cursor:pointer;}' +

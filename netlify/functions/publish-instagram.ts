@@ -8,8 +8,9 @@ import { and, eq, lte, or, isNull, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     scheduledPosts, systemConnections, rateLimitStates, publishCronLog,
-    notifications, users, auditLogs,
+    users, auditLogs,
 } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { getSecret } from '../../src/utils/vault';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -89,8 +90,6 @@ export default withLambda(async () => {
 
     await Promise.allSettled(posts.map(async post => {
         try {
-            if (!post.connection_id) throw new Error('No Instagram connection linked to this post.');
-
             // Check rate limit state for this org
             const [rl] = await db
                 .select({ rateLimitedUntil: rateLimitStates.rateLimitedUntil })
@@ -106,13 +105,20 @@ export default withLambda(async () => {
                 return;
             }
 
-            // Fetch connection + token
+            // Resolve connection — by id, else the org's active Instagram connection.
+            const connWhere = post.connection_id
+                ? eq(systemConnections.id, post.connection_id)
+                : and(
+                    eq(systemConnections.organisationId, post.organisation_id),
+                    eq(systemConnections.serviceName, 'instagram'),
+                    eq(systemConnections.isActive, true),
+                  );
             const [conn] = await db
                 .select({ vaultRefKey: systemConnections.vaultRefKey, externalUserId: systemConnections.externalUserId })
                 .from(systemConnections)
-                .where(eq(systemConnections.id, post.connection_id))
+                .where(connWhere)
                 .limit(1);
-            if (!conn?.vaultRefKey) throw new Error('No vault token for connection.');
+            if (!conn?.vaultRefKey) throw new Error('No active Instagram connection for this post.');
 
             const secretData = await getSecret(db, conn.vaultRefKey);
             const token = secretData?.token as string | undefined;
@@ -214,11 +220,8 @@ export default withLambda(async () => {
             await recordPostedAssets(db, { orgId: post.organisation_id, userId: post.user_id, scheduledPostId: post.id })
                 .catch(e => console.warn(`[publish-instagram] recordPostedAssets failed for post ${post.id}:`, e?.message || e));
 
-            await db.insert(notifications).values({
+            await createNotification(db, 'post_published_instagram', {
                 userId: post.user_id,
-                type: 'post_published',
-                title: 'Post published to Instagram',
-                message: 'Your post has been published to Instagram — tap to view.',
                 metadata: { postId: post.id, instagramPostId, assistantId: post.assistant_id },
             });
 
@@ -270,11 +273,8 @@ async function handlePublishFailure(
         const scheduledAt = new Date((post as any).publish_date ?? now);
         const delayHours = (rateLimitedUntil.getTime() - scheduledAt.getTime()) / 3_600_000;
         if (delayHours > 2) {
-            await db.insert(notifications).values({
+            await createNotification(db, 'instagram_rate_limited', {
                 userId: post.user_id,
-                type: 'instagram_rate_limited',
-                title: 'Instagram publishing delayed',
-                message: `Some posts have been delayed due to Instagram rate limits. They will publish automatically when the limit resets.`,
                 metadata: { rateLimitedUntil, assistantId: post.assistant_id },
             });
         }
@@ -286,11 +286,9 @@ async function handlePublishFailure(
         await db.execute(
             `UPDATE scheduled_posts SET status = 'failed', failure_reason = '${JSON.stringify(reason).replace(/'/g, "''")}', attempt_count = ${attempt}, updated_at = now() WHERE id = ${post.id}`
         );
-        await db.insert(notifications).values({
+        await createNotification(db, 'post_publish_failed_instagram', {
             userId: post.user_id,
-            type: 'post_publish_failed',
-            title: 'Post failed to publish',
-            message: userMessage(reason),
+            context: { failure: { reason: userMessage(reason) } },
             metadata: { postId: post.id, reason, assistantId: post.assistant_id },
         });
         await db.insert(auditLogs).values({ actionType: 'instagram_publish_failed', resourceType: 'scheduled_posts', resourceId: String(post.id), userId: post.user_id, newState: { reason, attempt } });

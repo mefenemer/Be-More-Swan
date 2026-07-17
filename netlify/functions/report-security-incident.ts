@@ -8,7 +8,8 @@ import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, securityIncidents, notifications, adminAuditLog } from '../../db/schema';
+import { users, securityIncidents, adminAuditLog } from '../../db/schema';
+import { createNotifications } from '../../src/utils/notify';
 import { sendEmail } from '../../src/utils/email';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -86,16 +87,9 @@ export default withLambda(async (event) => {
             .where(inArray(users.role as any, ['super_admin', 'platform_admin']));
 
         if (superAdmins.length > 0) {
-            await db.insert(notifications).values(
-                superAdmins.map(sa => ({
-                    userId: sa.id,
-                    type: 'security_incident_p0',
-                    title: `⚠ P0 Security Incident: ${title}`,
-                    message: `Severity: ${severity.toUpperCase()}. A security incident has been detected. ` +
-                        `Visit the Admin Portal → Breach Response to review timelines and take action.`,
-                    isRead: false,
-                }))
-            ).catch(() => {});
+            await createNotifications(db, 'security_incident_p0', superAdmins.map(sa => sa.id), {
+                context: { incident: { title, severity: severity.toUpperCase() } },
+            });
 
             // Also send email so superadmins are alerted even if not in-app
             for (const sa of superAdmins) {

@@ -145,11 +145,27 @@ export const leads = pgTable('leads', {
   salesNotes: text('sales_notes'),
   lastContactedAt: timestamp('last_contacted_at'),
   resolvedAt: timestamp('resolved_at'),
+  // CRM Contacts view fields (db/crm-contacts.sql)
+  phone: text('phone'),
+  contactType: text('contact_type').notNull().default('lead'), // 'lead' | 'registered' | 'client' | 'other'
+  tags: jsonb('tags').$type<string[]>().notNull().default([]),
   createdAt: timestamp('created_at').defaultNow().notNull(),
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 }, (t) => ({
   emailRoleUnique: unique('email_role_unique').on(t.email, t.opportunityReason)
 }));
+
+// Contact Tasks — per-contact to-do items shown in the Contacts activity timeline (db/crm-contacts.sql).
+export const contactTasks = pgTable('contact_tasks', {
+  id: serial('id').primaryKey(),
+  leadId: integer('lead_id').notNull().references(() => leads.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  done: boolean('done').notNull().default(false),
+  dueDate: text('due_date'),
+  createdBy: integer('created_by').references(() => users.id, { onDelete: 'set null' }),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+  completedAt: timestamp('completed_at'),
+});
 
 // Plans table — subscription or service plans associated with a user
 export const plans = pgTable("plans", {
@@ -171,6 +187,12 @@ export const plans = pgTable("plans", {
   stripeCustomerId: text("stripe_customer_id"),
   stripeSubscriptionId: text("stripe_subscription_id"),
   cancelledAt: timestamp("cancelled_at"),               // set when status transitions to 'cancelled' (US-GAP-4.2.1)
+  // Plan Features: frozen limits/features snapshot for the "new subscribers only" cohort. When set,
+  // enforcement prefers this over the live master_plans values, so an admin can change a plan for
+  // NEW subscribers without moving existing ones. null (default) = read live from master_plans.
+  // Shape: { assistantLimit, monthlyTaskLimit, monthlyTokenLimit, appConnectionLimit, seatLimit,
+  //          storageLimitBytes, features: { ... } }
+  featureOverrides: jsonb("feature_overrides"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
@@ -446,11 +468,33 @@ export const emailTemplates = pgTable("email_templates", {
   category: text("category").notNull().default("General"), // Onboarding | Billing | Security | …
   subject: text("subject").notNull(),                 // supports {{merge}} tags
   bodyHtml: text("body_html").notNull(),              // inner body only — wrapped at send time
+  // Plain-text alternative part. NULL = derive from bodyHtml at send time (htmlToPlainText);
+  // a non-NULL value is an admin-authored override. Requires db/notification-templates.sql.
+  bodyText: text("body_text"),
   preheader: text("preheader"),                       // inbox preview text
   // Governance (full UI is Feature 3; columns ship now so the send path can respect them).
   isActive: boolean("is_active").notNull().default(true),
   locked: boolean("locked").notNull().default(false), // critical triggers can't be deactivated
   transactional: boolean("transactional").notNull().default(false), // omit unsubscribe link
+  updatedByAdminId: integer("updated_by_admin_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// ── US-COMMS-2: Admin-editable in-app notification templates ────────────────
+// One row per piece of in-app copy, created lazily on first admin edit. Defaults & the
+// render-time fallback live in src/utils/notification-templates-catalog.ts.
+//
+// Keyed on templateKey, NOT on notifications.type: `type` is reused across call sites
+// ('system' backs 10 distinct notifications) and drives category/priority routing, so it
+// can't identify one piece of copy. The type a template stamps stays code-owned in the
+// catalog. Requires db/notification-templates.sql applied before deploy.
+export const notificationTemplates = pgTable("notification_templates", {
+  id: serial().primaryKey(),
+  templateKey: text("template_key").notNull().unique(), // e.g. 'assistant_hired' | 'org_invite_accepted'
+  title: text("title").notNull(),                       // supports {{merge}} tags
+  message: text("message"),                             // supports {{merge}} tags + inline HTML
+  isActive: boolean("is_active").notNull().default(true),
   updatedByAdminId: integer("updated_by_admin_id").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -748,6 +792,17 @@ export const masterPlans = pgTable("master_plans", {
   id: serial().primaryKey(),
   tierKey: text("tier_key").notNull().unique(),
   name: text("name").notNull(),
+  // Pricing-card marketing copy — DB-driven so the Super Admin (Master Data → Plans) controls
+  // every visible plan-card field, and pricing.html / the comparison table render from here.
+  // tierDescription = the eyebrow line ("Tier 2 · Best for Scaling Founders").
+  // description = the italic sub-heading blurb. isMostPopular = the "Most Popular" pill (at most
+  // one plan; the admin API clears the flag on every other plan when one is set true).
+  tierDescription: text("tier_description"),
+  description: text("description"),
+  isMostPopular: boolean("is_most_popular").notNull().default(false),
+  // Contact-sales tier (Enterprise): displayed on pricing.html but NOT purchasable — excluded from
+  // get-plans' plan picker (like 'trial') so it never fires a self-serve Stripe checkout.
+  isContactSales: boolean("is_contact_sales").notNull().default(false),
   monthlyPriceGbp: numeric("monthly_price_gbp", { precision: 10, scale: 2 }).notNull(),
   // Capacity limits — enforced at runtime; null = unlimited
   assistantLimit: integer("assistant_limit"),           // max active AI assistants (total per account)
@@ -777,6 +832,53 @@ export const planPrices = pgTable("plan_prices", {
 }, (t) => ({
   planCurrencyUnique: unique("plan_currency_unique").on(t.masterPlanId, t.currency),
 }));
+
+// Plan feature catalog — the DB-driven definition of every row in the pricing.html comparison table.
+// (SQL: db/plan-features.sql; seed: db/seed-plan-features.ts). This is a metadata + rendering layer:
+// the VALUES live in master_plans (capacity as typed columns, everything else in the features jsonb);
+// each row here records WHERE a feature's value is stored (storageTarget/columnName) and HOW to render it
+// (valueType, unlimitedLabel). Admins edit these via Admin → Master Data → Plan Features, and pricing.html
+// renders the comparison table dynamically from this catalog.
+export const planFeatures = pgTable("plan_features", {
+  id: serial("id").primaryKey(),
+  key: text("key").notNull().unique(),                    // e.g. 'assistant_limit', 'monthly_ai_credits', 'ai_video_generation'
+  label: text("label").notNull(),                         // pricing-table row title
+  description: text("description"),                        // pricing-table row sub-caption
+  category: text("category").notNull(),                   // section header: 'Capacity' | 'AI Media Generation' | ...
+  valueType: text("value_type").notNull().default("boolean"), // 'number' | 'boolean' | 'text'
+  storageTarget: text("storage_target").notNull().default("feature"), // 'column' | 'feature'
+  columnName: text("column_name"),                        // master_plans column (camelCase key) when storageTarget='column'
+  unlimitedLabel: text("unlimited_label"),                // how to render a null value, e.g. 'Custom' | 'Unlimited'
+  // The pricing table's 4th column ("Custom Enterprise") is contact-sales — not a purchasable
+  // master_plan (excluded from get-plans so it never appears in the plan picker). Its per-feature
+  // display value is stored here so the whole comparison table stays DB-driven + admin-editable.
+  // Rendering: boolean → truthy ('true'/'✓'/'yes') = check, else dash; number/text → the text.
+  enterpriseValue: text("enterprise_value"),
+  displayOrder: integer("display_order").notNull().default(0),
+  isEnabled: boolean("is_enabled").notNull().default(true), // false = globally disabled (hidden from pricing, treated as off)
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Plan price history — dated audit trail of every subscription price change (SQL: db/plan-price-history.sql).
+// master_plans.monthlyPriceGbp + the GBP planPrices row hold the CURRENT live price; this table records
+// how it changed over time (start/end dates) and holds scheduled future prices until the activation worker
+// (activate-scheduled-prices.ts) flips them live. One 'active' row per plan+currency at a time.
+export const planPriceHistory = pgTable("plan_price_history", {
+  id: serial("id").primaryKey(),
+  masterPlanId: integer("master_plan_id").notNull().references(() => masterPlans.id, { onDelete: "cascade" }),
+  currency: text("currency").notNull().default("GBP"),               // ISO 4217; GBP is canonical
+  monthlyPriceMajorUnit: numeric("monthly_price_major_unit", { precision: 10, scale: 2 }).notNull(),
+  stripePriceId: text("stripe_price_id"),                            // Stripe price minted for this point; null until active
+  effectiveFrom: timestamp("effective_from").notNull(),             // when this price becomes / became live
+  effectiveTo: timestamp("effective_to"),                           // null = live or still pending; set when superseded
+  status: text("status").notNull().default("active"),               // 'scheduled' | 'active' | 'superseded'
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("plan_price_history_plan_idx").on(t.masterPlanId, t.currency),
+  index("plan_price_history_due_idx").on(t.status, t.effectiveFrom),
+]);
 
 // Task runs — one row per automated task execution; used for monthly volume tracking (SC3)
 export const taskRuns = pgTable("task_runs", {
@@ -833,6 +935,14 @@ export const masterAssistants = pgTable("master_assistants", {
   category: text("category").notNull().default("Administration"),
   iconKey: text("icon_key").notNull().default("document"),
   iconColor: text("icon_color").notNull().default("blue"),
+  // Detail-page marketing copy (SQL: db/assistant-content.sql; seed: db/seed-assistant-content.ts).
+  // These replaced src/config/assistant-role-content.js, which used to re-declare name/description/
+  // icons here AND own these four — two sources of truth that had already drifted apart. Admin-edited
+  // via Master Data → Assistants; served publicly by netlify/functions/master-assistants.ts.
+  tagline: text("tagline"),                                        // one-line hook under the name
+  keyFeatures: jsonb("key_features").notNull().default([]),        // string[] — the bullet list
+  integrations: jsonb("integrations").notNull().default([]),       // string[] — the integration chips
+  video: jsonb("video"),                                           // {url, title, poster} | null; null url = placeholder slot
   comingSoon: boolean("coming_soon").notNull().default(false),
   // US-AUD-2.3.1 SC2: task completions required to unlock early access (null = no milestone gate)
   milestoneTasksRequired: integer("milestone_tasks_required").default(25),
@@ -855,9 +965,27 @@ export const masterAssistants = pgTable("master_assistants", {
   check("master_assistants_lifecycle_check", sql`${t.lifecycleState} IN ('draft', 'review', 'beta', 'live', 'deprecated', 'archived')`),
 ]);
 
+// Assistant capability catalog — which capability keys exist, how they're labelled and grouped.
+// (SQL: db/assistant-content.sql; seed: db/seed-assistant-content.ts). Metadata only: the VALUES live
+// in assistant_features (one row per master_assistant × key). Mirrors the plan_features pattern, and
+// replaces the hardcoded ASSISTANT_FEATURES list that used to live in src/config/assistant-features.ts,
+// so adding a capability no longer needs a deploy. Admins edit these via Master Data → Assistant
+// Features. No analogue of plans.feature_overrides: capability changes have no subscriber cohort.
+export const assistantFeatureDefs = pgTable("assistant_feature_defs", {
+  id: serial("id").primaryKey(),
+  key: text("key").notNull().unique(),                    // e.g. 'ai_image_generation'
+  label: text("label").notNull(),                         // matrix column header
+  description: text("description"),                       // column tooltip / admin help text
+  category: text("category").notNull(),                   // matrix section header: 'Media' | 'Engagement' | ...
+  displayOrder: integer("display_order").notNull().default(0),
+  isEnabled: boolean("is_enabled").notNull().default(true), // false = globally disabled (hidden, treated as off)
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // Per-assistant feature capabilities — admin-managed, keyed by assistant TYPE.
 // One row per (master_assistant, feature_key); absent row = disabled. Feature keys are the
-// canonical list in src/config/assistant-features.ts. Gates user-facing capabilities
+// enabled rows of assistant_feature_defs. Gates user-facing capabilities
 // (e.g. AI image/video generation) via src/utils/assistant-capabilities.ts.
 // DDL + SMM seed: db/assistant-features.sql (apply manually — no db:push).
 export const assistantFeatures = pgTable("assistant_features", {
@@ -1207,6 +1335,26 @@ export const ticketReplies = pgTable("ticket_replies", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// Lead Replies Table — threaded correspondence for a CRM lead / contact request (db/lead-replies.sql).
+// Mirrors ticketReplies but for the leads pipeline, where the "customer" may be an anonymous
+// prospect (contact form / inbound email) with no users row — so authorId is nullable and
+// direction records who sent it. Inbound emails land here via the inbound-email webhook;
+// admin replies are emailed out (Sales Pipeline reply box). Internal notes never leave the CRM.
+export const leadReplies = pgTable("lead_replies", {
+  id: serial("id").primaryKey(),
+  leadId: integer("lead_id")
+      .notNull()
+      .references(() => leads.id, { onDelete: "cascade" }),
+  // 'inbound'  = from the prospect (contact form / received email)
+  // 'outbound' = admin reply emailed to the prospect
+  // 'internal' = private admin note (never emailed)
+  direction: text("direction").notNull().default("inbound"),
+  // Admin author for outbound/internal; null for inbound (anonymous prospect).
+  authorId: integer("author_id").references(() => users.id, { onDelete: "set null" }),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // Issue Reports Table — testing-phase "Report an Issue" submissions (db/issue-reports.sql).
 // Captures the user's description, WHERE they were when they reported (sourceLocation/
 // sourceUrl) and an optional screenshot stored inline as a base64 data URL. Stored against
@@ -1263,12 +1411,20 @@ export const issueReports = pgTable("issue_reports", {
   devMergeStatus: text("dev_merge_status"),
   devMergedAt: timestamp("dev_merged_at"),
   devMergeResult: text("dev_merge_result"),  // gh output / error from the merge attempt
+
+  // Promotion of the staging-verified fix to production — requested from the ticket
+  // (super-admin "Push to prod") and performed by the local watcher, which pushes
+  // staging → main (prod deploys from main). null | 'queued' | 'promoting' | 'promoted' | 'failed'
+  devProdStatus: text("dev_prod_status"),
+  devProdAt: timestamp("dev_prod_at"),
+  devProdResult: text("dev_prod_result"),    // git/gh output or error from the promotion
 }, (t) => [
   index("issue_reports_user_idx").on(t.userId, t.createdAt),
   index("issue_reports_org_idx").on(t.organisationId),
   index("issue_reports_status_idx").on(t.status, t.createdAt),
   index("issue_reports_handoff_idx").on(t.devHandoffStatus, t.devHandoffAt),
   index("issue_reports_merge_idx").on(t.devMergeStatus, t.devHandoffAt),
+  index("issue_reports_prod_idx").on(t.devProdStatus, t.devHandoffAt),
 ]);
 
 // Issue Report Messages Table — threaded admin status updates + user replies.
@@ -1454,7 +1610,9 @@ export const contentAssets = pgTable("content_assets", {
 
   // Asset identity
   name: text("name").notNull(),
-  assetType: text("asset_type").notNull(), // 'image' | 'video' | 'link'
+  // 'audio' is blog-body only and upload-only (plan §4 Phase 2). Text column by design — adding a
+  // type is a validation change in content-assets.ts, never a migration.
+  assetType: text("asset_type").notNull(), // 'image' | 'video' | 'audio' | 'link'
   mimeType: text("mime_type"),
   fileSize: integer("file_size"),
 
@@ -1916,6 +2074,75 @@ export const kbChunks = pgTable("kb_chunks", {
   index("kb_chunks_assistant_idx").on(t.aiAssistantId, t.organisationId),
 ]);
 
+// ── Inspo Items — Inspo tab (social_media_manager, blog_writer) ─────────────
+// The inspiration material a user parks so their assistant keeps applying the
+// styles/tones they like. `userNote` (what they like about it) is the strongest
+// signal — often stronger than the material itself.
+// Migration: db/inspo-items.sql (manual apply). Plan: docs/inspo-tab-plan.md.
+//
+// Raw inspo is NEVER injected wholesale — prompt cost must not scale with library
+// size. It reaches the model only via inspoStyleProfiles (distilled, capped) and
+// top-K retrieval over inspoChunks. Both are O(1) in item count.
+export const inspoItems = pgTable("inspo_items", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  kind: text().notNull(),                                // 'url' | 'file' | 'text' | 'voice'
+  title: text().notNull(),
+  sourceUrl: text("source_url"),                         // kind='url'
+  workspaceAssetId: integer("workspace_asset_id").references(() => workspaceAssets.id, { onDelete: "set null" }),
+  userNote: text("user_note"),                           // "what I like about this" (AC2/AC3)
+  body: text(),                                          // extracted/transcribed/typed text
+  // AC6: deactivating must stop influence as immediately as deleting.
+  isActive: boolean("is_active").notNull().default(true),
+  // 'pending' → awaiting extraction; 'ready' → body usable; 'unsupported' → we
+  // deliberately don't extract it (video: userNote is the only signal); 'failed'.
+  ingestStatus: text("ingest_status").notNull().default("pending"),
+  embeddingStatus: text("embedding_status").notNull().default("pending"),
+  chunkCount: integer("chunk_count").notNull().default(0),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("inspo_items_org_idx").on(t.organisationId),
+  index("inspo_items_assistant_idx").on(t.aiAssistantId),
+  index("inspo_items_active_idx").on(t.aiAssistantId, t.organisationId, t.isActive),
+]);
+
+// Retrieval units for channel B. Exact mirror of kbChunks (content_tsv generated
+// column lives in the SQL migration only).
+// GDPR: every embedded chunk gets a vectorEmbeddings map row (sourceType 'inspo_item').
+export const inspoChunks = pgTable("inspo_chunks", {
+  id: serial().primaryKey(),
+  inspoItemId: integer("inspo_item_id").notNull().references(() => inspoItems.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  chunkIndex: integer("chunk_index").notNull(),
+  content: text().notNull(),
+  embedding: vector("embedding", { dimensions: 1024 }),  // voyage-3.5-lite output dim
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("inspo_chunks_item_idx").on(t.inspoItemId),
+  index("inspo_chunks_assistant_idx").on(t.aiAssistantId, t.organisationId),
+]);
+
+// Channel A cache — the distilled, token-capped style directive injected on every
+// generation. `sourceItemIds` exists for AC6: the profile is a cache, so generation
+// must verify a removed item isn't baked into it and fall back to retrieval-only if
+// it is. `itemFingerprint` is the cheap staleness check (mirrors the blueprint hash).
+export const inspoStyleProfiles = pgTable("inspo_style_profiles", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }).unique(),
+  profileText: text("profile_text").notNull(),
+  sourceItemIds: integer("source_item_ids").array().notNull().default([]),
+  itemFingerprint: text("item_fingerprint").notNull(),
+  tokenEstimate: integer("token_estimate").notNull().default(0),
+  compiledAt: timestamp("compiled_at").defaultNow().notNull(),
+}, (t) => [
+  index("inspo_style_profiles_org_idx").on(t.organisationId),
+]);
+
 // ── Data Export Requests — US-GAP-2.2.1 SC5 ─────────────────────────────────
 // Tracks data export requests to enforce 24-hour rate limit.
 export const dataExportRequests = pgTable("data_export_requests", {
@@ -2050,7 +2277,7 @@ export const leadAnalysisRuns = pgTable("lead_analysis_runs", {
   runAt: timestamp("run_at").defaultNow().notNull(),
   leadsCreated: integer("leads_created").notNull().default(0),
   leadsUpdated: integer("leads_updated").notNull().default(0),
-  patternCounts: jsonb("pattern_counts"),  // { trial_expiry, never_onboarded, cancellation_approaching, upgrade_candidates }
+  patternCounts: jsonb("pattern_counts"),  // { never_onboarded, cancellation_approaching, upgrade_candidates }
   status: text("status").notNull().default("success"), // 'success' | 'failed'
   errorMessage: text("error_message"),
 });
@@ -2583,6 +2810,32 @@ export const mediaGenerationJobs = pgTable("media_generation_jobs", {
   index("media_generation_jobs_status_idx").on(t.status),
 ]);
 
+// Canva connector, US3: one row per design being imported into the Content Library.
+// Canonical DDL: db/canva-import.sql (apply manually as owner — no db:push).
+// Canva's export API is asynchronous, so import is a job: export → poll → download → R2.
+// A multi-page design exports one image per page, so one job can yield several assets.
+export const canvaImportJobs = pgTable("canva_import_jobs", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+
+  designId: text("design_id").notNull(),                           // Canva design id being exported
+  designTitle: text("design_title"),                               // title at selection time (names the assets)
+  designType: text("design_type"),                                 // Canva design_type, decides mp4 vs png export
+  exportJobId: text("export_job_id"),                              // Canva export job id, set once created
+
+  // Lifecycle: queued → processing → completed | failed
+  status: text("status").notNull().default("queued"),
+  resultAssetIds: jsonb("result_asset_ids").default([]),           // content_assets.id[] persisted to R2
+  errorMessage: text("error_message"),
+
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("canva_import_jobs_org_idx").on(t.organisationId),
+  index("canva_import_jobs_status_idx").on(t.status),
+]);
+
 // ── Chat Persistence (Digital Assistant Orchestrator) ────────────────────────
 // Canonical DDL: db/chat-sessions.sql (apply manually as owner — no db:push).
 // One session = one conversation thread between a user and a per-org assistant
@@ -2725,6 +2978,7 @@ export const blogPosts = pgTable("blog_posts", {
   metaDescription: text("meta_description"),
   tags: jsonb("tags").notNull().default([]),
   canonicalUrl: text("canonical_url"),
+  robots: text("robots").notNull().default("index,follow"), // <meta name="robots"> for the hosted page (US 1.3)
 
   // Hero / feature graphic
   featureAssetId: integer("feature_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
@@ -2764,6 +3018,7 @@ export const blogPosts = pgTable("blog_posts", {
   uniqueIndex("blog_posts_org_slug_unique").on(t.organisationId, t.slug).where(sql`${t.slug} IS NOT NULL`),
   check("blog_posts_status_check", sql`${t.status} IN ('draft','pending_approval','in_review','approved','scheduled','publishing','published','paused','failed','rejected','archived')`),
   check("blog_posts_ab_state_check", sql`${t.abState} IN ('off','testing','decided')`),
+  check("blog_posts_robots_check", sql`${t.robots} IN ('index,follow','index,nofollow','noindex,follow','noindex,nofollow')`),
 ]);
 
 // Ordered media junction — mirrors scheduledPostAssets.
@@ -2784,6 +3039,12 @@ export const widgetConfigs = pgTable("widget_configs", {
   name: text("name").notNull().default("Default"),
   theme: jsonb("theme").notNull().default({}),              // { accent, fontFamily, layout, customCss, badge }
   allowedOrigins: text("allowed_origins").array(),          // optional origin allowlist; null = any (public read)
+  // Where the customer actually publishes — reconstructs the public per-post URL on THEIR domain so
+  // canonical can credit them: (siteBaseUrl,'/blog/{slug}') → https://acme.com/blog/my-post. BOTH
+  // required before we canonicalise to the customer; site_post_path alone collapses the blog (see
+  // blog-seo-metadata.sql). CHECK enforces a rooted path containing the {slug} placeholder.
+  siteBaseUrl: text("site_base_url"),                       // e.g. 'https://acme.com'
+  sitePostPath: text("site_post_path"),                     // e.g. '/blog/{slug}'
   badgeEnabled: boolean("badge_enabled").notNull().default(true), // AI Transparency Badge (US 6.1 AC2)
   status: text("status").notNull().default("active"),       // active | disabled
   createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
@@ -2792,6 +3053,7 @@ export const widgetConfigs = pgTable("widget_configs", {
 }, (t) => [
   index("widget_configs_org_idx").on(t.organisationId),
   check("widget_configs_status_check", sql`${t.status} IN ('active','disabled')`),
+  check("widget_configs_site_post_path_check", sql`${t.sitePostPath} IS NULL OR (${t.sitePostPath} LIKE '/%' AND ${t.sitePostPath} LIKE '%{slug}%')`),
 ]);
 
 // A/B engagement aggregates per (blog_post, variant) — upserted by widget-ab-beacon (US 5.2).

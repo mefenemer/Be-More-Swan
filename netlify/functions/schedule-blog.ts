@@ -8,6 +8,9 @@
 //                                     free slot of its posting cadence (no manual date) → 'scheduled'
 // POST { id, action:'unschedule' }  → status back to 'draft', publish_date cleared
 //   →  { post: { id, status, publishDate } }
+//
+// No action here applies to a published post — it is live and possibly mirrored externally, so
+// every path 409s on status 'published' (mirrors blog-posts.ts's delete guard).
 
 import { HandlerEvent } from '@netlify/functions';
 import { and, eq, gte, lte, ne, sql } from 'drizzle-orm';
@@ -91,6 +94,12 @@ export default withLambda(async (event: HandlerEvent) => {
         .limit(1);
     if (!post) return { statusCode: 404, body: JSON.stringify({ error: 'Blog post not found.' }) };
 
+    // A published post is live on the user's site (widget-api serves status='published') and may
+    // already be mirrored to external destinations, so no action here may move it off 'published'.
+    if (post.status === 'published') {
+        return { statusCode: 409, body: JSON.stringify({ error: 'This post is published. Unpublish it before rescheduling.' }) };
+    }
+
     // Clear an existing schedule → return to draft.
     if (body.action === 'unschedule') {
         const [updated] = await db.update(blogPosts)
@@ -101,9 +110,6 @@ export default withLambda(async (event: HandlerEvent) => {
     }
 
     // Guard shared by both scheduling paths.
-    if (post.status === 'published') {
-        return { statusCode: 409, body: JSON.stringify({ error: 'This post is already published.' }) };
-    }
     if (!post.bodyMarkdown || !post.bodyMarkdown.trim()) {
         return { statusCode: 400, body: JSON.stringify({ error: 'Cannot schedule an empty post.' }) };
     }

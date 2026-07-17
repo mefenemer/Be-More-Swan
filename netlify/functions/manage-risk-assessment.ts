@@ -9,7 +9,8 @@ import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { masterAssistants, notifications, riskAssessments, users, userOrganisations } from '../../db/schema';
+import { masterAssistants, riskAssessments, users, userOrganisations } from '../../db/schema';
+import { createNotification, createNotifications } from '../../src/utils/notify';
 import { suggestsHighRisk } from '../../src/config/compliance';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -137,13 +138,9 @@ export default withLambda(async (event) => {
             .where(eq(users.role as any, 'super_admin'));
 
         if (admins.length > 0) {
-            await db.insert(notifications).values(admins.map(a => ({
-                userId: a.id,
-                type: 'risk_assessment_submitted',
-                title: 'Risk Assessment Submitted',
-                message: `A risk assessment has been submitted for master assistant #${masterAssistantId} and requires review.`,
-                isRead: false,
-            })));
+            await createNotifications(db, 'risk_assessment_submitted', admins.map(a => a.id), {
+                context: { risk: { master_assistant_id: masterAssistantId } },
+            });
         }
 
         return { statusCode: 201, body: JSON.stringify(record) };
@@ -183,12 +180,9 @@ export default withLambda(async (event) => {
 
         // Notify the submitting assessor of the decision
         if (updated.assessorId) {
-            await db.insert(notifications).values({
+            await createNotification(db, approvalStatus === 'approved' ? 'risk_assessment_approved' : 'risk_assessment_rejected', {
                 userId: updated.assessorId,
-                type: 'risk_assessment_decision',
-                title: `Risk Assessment ${approvalStatus === 'approved' ? 'Approved' : 'Rejected'}`,
-                message: `Your EU AI Act conformity assessment for assistant #${updated.masterAssistantId} has been ${approvalStatus}. ${approvalStatus === 'approved' ? 'You may now activate the assistant in EU-market workspaces.' : 'Please review the findings and resubmit.'}`,
-                isRead: false,
+                context: { risk: { master_assistant_id: updated.masterAssistantId } },
             });
         }
 

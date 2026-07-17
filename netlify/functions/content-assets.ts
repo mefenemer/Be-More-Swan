@@ -247,9 +247,11 @@ export default withLambda(async (event) => {
                 return { statusCode: 400, body: JSON.stringify({ error: 'name and assetType are required.' }) };
             }
 
-            const validTypes = ['image', 'video', 'link'];
+            // 'audio' is blog-body only (plan §4 Phase 2) and upload-only. No DDL was needed:
+            // asset_type is a text column, so this is a validation change, not a migration.
+            const validTypes = ['image', 'video', 'audio', 'link'];
             if (!validTypes.includes(assetType)) {
-                return { statusCode: 400, body: JSON.stringify({ error: 'assetType must be image, video, or link.' }) };
+                return { statusCode: 400, body: JSON.stringify({ error: 'assetType must be image, video, audio, or link.' }) };
             }
 
             if (assetType === 'link' && !externalUrl) {

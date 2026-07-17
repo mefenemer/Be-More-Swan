@@ -2,7 +2,7 @@
 // US-ADM-1.2.1: Admin Impersonation with Scoped Token & Audit Trail
 //
 // POST /.netlify/functions/admin-impersonate
-//   Auth: aura_session (super_admin or platform_admin role required)
+//   Auth: aura_session (role must clear 'impersonate' — super_admin only)
 //   Body (start): { action: 'start', targetUserId: number, reason: string }
 //   Body (end):   { action: 'end' }
 //
@@ -24,6 +24,7 @@ import { users } from '../../db/schema';
 import { insertAdminAuditLog, getAdminIp } from '../../src/utils/admin-audit';
 import { resolveActiveOrg } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { requirePermission, isAdminRole } from '../../src/utils/rbac';
 
 const jwtSecret = process.env.JWT_SECRET;
 const IMPERSONATION_TTL_SECONDS = 15 * 60; // 15 minutes
@@ -78,9 +79,8 @@ export default withLambda(async (event) => {
         .where(eq(users.id, adminId))
         .limit(1);
 
-    if (!adminUser || !['super_admin', 'platform_admin'].includes(adminUser.role || '')) {
-        return { statusCode: 403, body: JSON.stringify({ error: 'Impersonation requires platform_admin or super_admin role.' }) };
-    }
+    const denied = requirePermission(adminUser?.role, 'impersonate');
+    if (denied) return denied;
 
     let body: { action?: string; targetUserId?: number; reason?: string };
     try { body = JSON.parse(event.body || '{}'); } catch { body = {}; }
@@ -149,7 +149,7 @@ export default withLambda(async (event) => {
         }
 
         // Prevent privilege escalation: never impersonate another admin
-        if (['admin', 'super_admin', 'platform_admin'].includes(targetUser.role || '')) {
+        if (isAdminRole(targetUser.role)) {
             return { statusCode: 403, body: JSON.stringify({ error: 'Cannot impersonate admin users.' }) };
         }
 

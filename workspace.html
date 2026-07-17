@@ -309,7 +309,11 @@ window.showComplianceModals = function showComplianceModals(force) {
           <button type="button" id="gpw-media-toggle" onclick="gpwToggleMediaPicker()" class="text-xs font-semibold text-emerald-700 hover:text-emerald-800 transition cursor-pointer">Add media</button>
         </div>
         <div id="gpw-media-picker" class="hidden border border-gray-200 rounded-xl p-2 max-h-48 overflow-y-auto">
-          <div class="flex justify-end mb-2">
+          <div class="flex justify-end gap-2 mb-2">
+            <button type="button" onclick="gpwBrowseCanva()" class="px-2 py-1 text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer flex items-center gap-1">
+              <span>🎨</span>
+              <span>Canva</span>
+            </button>
             <button type="button" onclick="gpwUpload()" class="px-2 py-1 text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer flex items-center gap-1">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
               <span>Upload</span>
@@ -330,9 +334,39 @@ window.showComplianceModals = function showComplianceModals(force) {
         <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
         Prefer your assistant to draft it? Generate a post
       </button>
-      <div class="flex gap-2">
-        <button id="gpw-submit-btn" onclick="gpwSubmit()" class="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Add to Review</button>
+      <!-- Step 1: create the draft(s). No review step — the next screen chooses how it's scheduled. -->
+      <div id="gpw-create-actions" class="flex gap-2">
+        <button id="gpw-submit-btn" onclick="gpwSubmit()" class="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">Next: choose scheduling</button>
         <button onclick="closeGeneratePostSheet()" class="px-5 py-2.5 border border-gray-300 text-gray-700 text-sm font-bold rounded-xl hover:bg-gray-50 transition cursor-pointer">Cancel</button>
+      </div>
+
+      <!-- Step 2: scheduling choice (shown after the draft is created). Human writes → no review;
+           they choose here whether the assistant schedules it, they pick a time, or it posts now. -->
+      <div id="gpw-schedule-actions" class="hidden">
+        <p class="text-sm font-semibold text-gray-800 mb-2">Your post is ready. How should it go out?</p>
+        <div class="flex flex-col gap-2">
+          <button onclick="gpwSchedule('approve')" class="w-full py-2.5 border border-emerald-600 text-emerald-700 hover:bg-emerald-50 text-sm font-bold rounded-xl transition cursor-pointer inline-flex items-center justify-center gap-1.5">
+            <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
+            Let <span id="gpw-assistant-name">your assistant</span> schedule it
+          </button>
+          <button onclick="gpwSchedule('reschedule')" class="w-full py-2.5 border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-bold rounded-xl transition cursor-pointer">Pick a time myself</button>
+          <button onclick="gpwSchedule('publish_now')" class="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer">Post now</button>
+        </div>
+        <!-- Date/time picker (revealed by "Pick a time myself") -->
+        <div id="gpw-schedule-picker" class="hidden mt-3">
+          <label class="block text-xs font-semibold text-gray-700 mb-1">Scheduled date &amp; time</label>
+          <input id="gpw-schedule-input" type="datetime-local" class="w-full text-sm border border-gray-300 rounded-xl px-3 py-2 mb-2 focus:outline-none focus:ring-2 focus:ring-emerald-400">
+          <div class="flex gap-2">
+            <button onclick="gpwConfirmSchedule()" class="flex-1 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer">Confirm Schedule</button>
+            <button onclick="document.getElementById('gpw-schedule-picker').classList.add('hidden')" class="py-2 px-3 text-sm font-semibold text-gray-600 border border-gray-300 rounded-xl hover:bg-gray-50 transition cursor-pointer">Back</button>
+          </div>
+        </div>
+        <!-- Connect notice — scheduling/publishing needs a live connection for each draft's platform. -->
+        <div id="gpw-connect-notice" class="hidden mt-3 flex items-start gap-2.5 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+          <svg class="w-4 h-4 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.656l-3 3a4 4 0 01-5.656-5.656l1.5-1.5m9.656.656a4 4 0 010-5.656l3-3a4 4 0 015.656 5.656l-1.5 1.5"/></svg>
+          <span class="flex-1"><span id="gpw-connect-notice-text">Connect the platform to schedule or publish this post.</span></span>
+          <button type="button" onclick="gpGoConnect()" class="shrink-0 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg transition cursor-pointer">Connect</button>
+        </div>
       </div>
     </div>
 
@@ -395,6 +429,10 @@ window.showComplianceModals = function showComplianceModals(force) {
           <span>Upload</span>
         </button>
         <input type="file" id="gp-ai-upload-input" class="hidden" accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm" onchange="gpAiUploadSelected(event)">
+        <button type="button" onclick="gpAiBrowseCanva()" class="px-2.5 py-1 text-xs font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer flex items-center gap-1">
+          <span>🎨</span>
+          <span>Canva</span>
+        </button>
         <button type="button" onclick="gpAiFind()" class="px-2.5 py-1 text-xs font-semibold border border-sky-300 text-sky-700 hover:bg-sky-50 rounded-lg transition cursor-pointer flex items-center gap-1">
           <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
           <span id="gp-ai-find-label">Find a photo</span>
@@ -430,10 +468,18 @@ window.showComplianceModals = function showComplianceModals(force) {
       <span class="flex-1"><span id="gp-connect-notice-text">Connect this platform to schedule or publish this post.</span></span>
       <button type="button" onclick="gpGoConnect()" class="shrink-0 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg transition cursor-pointer">Connect</button>
     </div>
-    <div id="gen-post-approve-actions" class="hidden flex gap-2 mt-2">
-      <button id="gp-approve-now-btn" onclick="gpApprovePost()" class="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-700">Post Now</button>
-      <button id="gp-approve-schedule-btn" onclick="gpSchedulePost()" class="flex-1 py-2.5 border border-emerald-600 text-emerald-700 hover:bg-emerald-50 text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent">Schedule for Later</button>
-      <button onclick="gpRejectPost()" class="py-2.5 px-3 border border-red-300 text-red-600 hover:bg-red-50 text-sm font-bold rounded-xl transition cursor-pointer">Reject</button>
+    <div id="gen-post-approve-actions" class="hidden mt-2 space-y-2">
+      <!-- Co-authored drafts get the same no-review scheduling choice as write-your-own: let the
+           assistant slot it, pick a time, or post now. Reject discards the draft. -->
+      <button id="gp-approve-assistant-btn" onclick="gpAssistantSchedule()" class="w-full py-2.5 border border-emerald-600 text-emerald-700 hover:bg-emerald-50 text-sm font-bold rounded-xl transition cursor-pointer inline-flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent">
+        <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
+        Let your assistant schedule it
+      </button>
+      <div class="flex gap-2">
+        <button id="gp-approve-now-btn" onclick="gpApprovePost()" class="flex-1 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-700">Post Now</button>
+        <button id="gp-approve-schedule-btn" onclick="gpSchedulePost()" class="flex-1 py-2.5 border border-emerald-600 text-emerald-700 hover:bg-emerald-50 text-sm font-bold rounded-xl transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent">Schedule for Later</button>
+        <button onclick="gpRejectPost()" class="py-2.5 px-3 border border-red-300 text-red-600 hover:bg-red-50 text-sm font-bold rounded-xl transition cursor-pointer">Reject</button>
+      </div>
     </div>
     <!-- Schedule for later picker (shown when Schedule for Later is clicked) -->
     <div id="gen-post-schedule-picker" class="hidden mt-2">
@@ -646,7 +692,8 @@ window.showComplianceModals = function showComplianceModals(force) {
 <!-- US-ONB-2.1.1: Plan selection gate — non-dismissible, shows live plan cards from DB (AC5–AC18) -->
 <div id="plan-gate-modal" class="hidden fixed inset-0 z-[10000] backdrop-blur-sm flex items-center justify-center p-4" style="z-index:10000;background-color:rgba(20,18,15,0.45);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);padding-top:max(1rem,env(safe-area-inset-top));padding-bottom:max(1rem,env(safe-area-inset-bottom))">
   <div class="relative bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-y-auto" style="max-height:calc(100vh - 2rem)">
-    <!-- Dismissible: the wizard now drives onboarding, so the plan picker is an on-demand step rather than a hard block. -->
+    <!-- Close affordance is hidden by showGate({hard:true}) for no-plan users (free trial removed):
+         the picker is only dismissible when opened on-demand from the wizard (soft mode). -->
     <button type="button" id="plan-gate-close" aria-label="Close plan picker"
       class="absolute top-3 right-3 z-10 text-gray-400 hover:text-gray-700 transition p-1 cursor-pointer">
       <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -986,27 +1033,6 @@ window.showComplianceModals = function showComplianceModals(force) {
     </div>
   </div>
 
-  <!-- US-GAP-8.1.1 SC6c: Trial Expired Gate — full-page non-dismissable, shown after cron marks plan 'expired' -->
-  <div id="trial-expired-gate" class="hidden fixed inset-0 z-[9999] backdrop-blur-sm flex items-center justify-center p-4" style="z-index:9999;background-color:rgba(20,18,15,0.45);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)">
-    <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 text-center">
-      <div class="flex items-center justify-center w-16 h-16 bg-amber-100 rounded-full mx-auto mb-4">
-        <svg class="w-8 h-8 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-            d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
-        </svg>
-      </div>
-      <h2 class="text-2xl font-bold text-gray-900 mb-2">Your Free Trial Has Ended</h2>
-      <p class="text-gray-600 mb-6">Your 14-day free trial has expired. Choose a plan to continue using your assistant — your configuration and data are safe.</p>
-      <a href="/pricing.html"
-         class="block w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-6 rounded-xl mb-3 transition-colors">
-        Choose a Plan →
-      </a>
-      <a href="mailto:hello@bemoreswan.com?subject=Trial%20Enquiry" class="text-sm text-gray-500 hover:text-gray-700 underline">
-        Questions? Contact us
-      </a>
-    </div>
-  </div>
-
   <!-- Issue #127: Inactivity "stay signed in?" countdown — period + countdown length are admin-configurable -->
   <div id="session-timeout-modal" class="hidden fixed inset-0 z-[9999] items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="session-timeout-title">
     <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 text-center">
@@ -1026,12 +1052,6 @@ window.showComplianceModals = function showComplianceModals(force) {
         Log Out Now
       </button>
     </div>
-  </div>
-
-  <!-- US-GAP-8.1.1 SC3: Trial Countdown Badge — persistent when plan is trial -->
-  <div id="trial-badge" class="hidden w-full bg-blue-600 text-white text-sm text-center py-2 px-4 flex items-center justify-center gap-3">
-    <span id="trial-badge-text">Free Trial</span>
-    <a href="/pricing.html" class="bg-white text-blue-700 font-semibold text-xs px-3 py-1 rounded-full hover:bg-blue-50 transition">Upgrade Now →</a>
   </div>
 
   <!-- US-GAP-9.2.1: Task Volume Warning Banner (SC1–SC5) -->
@@ -1169,11 +1189,6 @@ function formatCurrency(amount, currency) {
           cls: 'bg-red-50 border-red-300 text-red-900',
           icon: '🔴',
           msg: 'Your subscription has ended and your assistants are paused. <a href="/pricing.html" class="font-bold underline">Re-subscribe</a> to restore full access.',
-        },
-        no_plan: {
-          cls: 'bg-blue-50 border-blue-200 text-blue-900',
-          icon: 'ℹ️',
-          msg: 'You don\'t have an active plan. <a href="/pricing.html" class="font-bold underline">Choose a plan</a> to activate your assistants.',
         },
       };
       const alert = alertParam ? ALERTS[alertParam] : null;
@@ -1555,9 +1570,9 @@ function formatCurrency(amount, currency) {
         }
 
         // Deep-link into a specific draft (e.g. from a "draft ready" notification): open the
-        // Review column and pop that post's mock-up modal, same as the Ideas tab's jump-in.
-        if (routeKey === 'review-queue' && param && param.postId && typeof rqViewIdeaDraft === 'function') {
-          await rqViewIdeaDraft(param.postId);
+        // Review column and pop that post's mock-up modal.
+        if (routeKey === 'review-queue' && param && param.postId && typeof rqViewDraft === 'function') {
+          await rqViewDraft(param.postId);
         }
 
         if (routeKey === 'billing' && typeof window.initBilling === 'function') {
@@ -1811,33 +1826,10 @@ function formatCurrency(amount, currency) {
 
     // Pre-fetch capacity once on workspace boot (non-blocking)
     // After loading, render the task-volume banner if applicable (US-GAP-9.2.1).
-    // US-GAP-8.1.1 SC6c: Show full-page non-dismissable gate when trial has been marked 'expired' by cron
-    function renderTrialExpiredGate(cap) {
-      if (!cap || !cap.trialExpired) return;
-      const gate = document.getElementById('trial-expired-gate');
-      if (gate) { gate.classList.remove('hidden'); gate.classList.add('flex'); }
-    }
-
-    // US-GAP-8.1.1 SC3: Trial countdown badge
-    function renderTrialBadge(cap) {
-      if (!cap || !cap.isTrial) return;
-      const badge = document.getElementById('trial-badge');
-      const text  = document.getElementById('trial-badge-text');
-      if (!badge || !text) return;
-      const days = cap.trialDaysRemaining;
-      if (days === 0) {
-        text.textContent = '⚠️ Your free trial has expired — choose a plan to continue';
-      } else {
-        text.textContent = `⏳ Trial: ${days} day${days === 1 ? '' : 's'} remaining`;
-      }
-      badge.classList.remove('hidden');
-      badge.classList.add('flex');
-    }
-
+    // (Free trial removed — no trial countdown badge or trial-expired gate. A no-plan user
+    // is hard-gated by initPlanGate below via cap.noPlan.)
     window.checkCapacity().then(cap => {
       renderPaymentRequiredGate(cap);
-      renderTrialExpiredGate(cap);
-      renderTrialBadge(cap);
       renderTaskVolumeBanner(cap);
     });
 
@@ -2376,15 +2368,17 @@ function formatCurrency(amount, currency) {
         }
       }
 
-      // The setup wizard now owns onboarding; the plan picker is an on-demand, dismissible
-      // step (wizard step 1) rather than a hard block. closeGate hides it and lifts the blur.
+      // The free trial was removed, so a no-plan user is HARD-gated: showGate({ hard:true })
+      // hides the close affordance and cannot be dismissed until a paid plan is active.
+      // The wizard's on-demand "Choose your plan" step opens it soft (dismissible).
+      const closeBtn = document.getElementById('plan-gate-close');
       function closeGate() {
         gateModal.classList.add('hidden');
         applyGateBlur(false);
       }
-      document.getElementById('plan-gate-close')?.addEventListener('click', closeGate);
-      // Exposed so the wizard's "Choose your plan" step can open the picker on demand.
-      window.openPlanSelection = (referralCode) => showGate(referralCode || null);
+      closeBtn?.addEventListener('click', closeGate);
+      // Exposed so the wizard's "Choose your plan" step can open the picker on demand (soft).
+      window.openPlanSelection = (referralCode) => showGate(referralCode || null, { hard: false });
 
       async function loadPlanCards(referralCode) {
         if (!cardsEl) return;
@@ -2456,7 +2450,10 @@ function formatCurrency(amount, currency) {
         }
       }
 
-      async function showGate(referralCode) {
+      async function showGate(referralCode, opts = {}) {
+        const hard = opts.hard !== false; // default hard — soft only when explicitly requested
+        // Hard gate: remove the close affordance so it can't be dismissed without paying.
+        if (closeBtn) closeBtn.classList.toggle('hidden', hard);
         gateModal.classList.remove('hidden');
         applyGateBlur(true);
         if (referralCode && refBanner) {
@@ -2476,29 +2473,47 @@ function formatCurrency(amount, currency) {
       }
 
       // US-ONB-2.1.2 AC11: strip ?action=select-plan from URL after handling.
-      // The setup wizard now drives onboarding (step 1 = "Choose your plan"), so a brand-new
-      // user lands on the wizard rather than the hard plan gate. If a referral code is present
-      // we still surface the picker immediately so the discount banner isn't missed.
+      // verify.ts sends a brand-new (no-plan) user here with ?action=select-plan so the hard
+      // plan gate opens immediately. Any ?ref is carried into the picker for its discount banner.
       const actionParam = qs.get('action');
       const refParam    = qs.get('ref');
-      if (actionParam === 'select-plan') {
+      const selectPlanRequested = actionParam === 'select-plan';
+      if (selectPlanRequested) {
         const url = new URL(window.location.href);
         url.searchParams.delete('action');
         url.searchParams.delete('ref');
         history.replaceState(null, '', url.toString());
-        if (refParam) showGate(refParam);
       }
 
       // Returning from Stripe checkout — the webhook may not have marked the plan active yet,
       // so we must NOT show the plan-selection gate here; the polling block below handles it.
-      const planActivated = qs.get('plan_activated') === 'true';
+      // The webhook can lag past our poll window (cold start / retry), and a manual refresh
+      // drops ?plan_activated — which previously slammed a just-paid user into the hard "select
+      // a plan" gate. Persist a short-lived marker so a refresh keeps showing the "activating"
+      // state (and keeps polling) rather than demanding payment again.
+      const ACTIVATING_KEY = 'bms_plan_activating_until';
+      if (qs.get('plan_activated') === 'true') {
+        try { sessionStorage.setItem(ACTIVATING_KEY, String(Date.now() + 10 * 60 * 1000)); } catch {}
+      }
+      let activatingMarker = false;
+      try {
+        const until = parseInt(sessionStorage.getItem(ACTIVATING_KEY) || '0', 10);
+        activatingMarker = until > Date.now();
+        if (!activatingMarker && until) sessionStorage.removeItem(ACTIVATING_KEY);
+      } catch {}
+      const planActivated = qs.get('plan_activated') === 'true' || activatingMarker;
 
-      // No-plan users are no longer hard-gated: the setup wizard auto-opens and its step 1
-      // ("Choose your plan") opens this picker on demand via window.openPlanSelection.
-      // Still warm the capacity cache for the rest of the workspace.
-      await window.checkCapacity();
+      // Free trial removed: a user with no active/past-due plan is HARD-gated. We show the
+      // non-dismissible plan picker for a brand-new user (no assistants yet) or whenever
+      // verify.ts routed here with ?action=select-plan. Existing users who churned keep their
+      // assistants visible (server-side gates still block hiring/tasks) rather than being
+      // locked out of viewing their data, so we don't hard-gate when assistants exist.
+      const cap = await window.checkCapacity();
+      if (!planActivated && cap?.noPlan && (selectPlanRequested || (cap?.assistantCount ?? 0) === 0)) {
+        showGate(refParam || null, { hard: true });
+      }
 
-      // AC6: gate is non-dismissible — no cancel handler
+      // Hard gate is non-dismissible — no cancel handler (closeBtn is hidden while hard)
 
       // AC12: ?plan_activated=true — poll for confirmed subscription
       if (planActivated) {
@@ -2514,28 +2529,51 @@ function formatCurrency(amount, currency) {
         gateModal.classList.remove('hidden');
         applyGateBlur(true);
         if (pollingEl) pollingEl.classList.remove('hidden');
-        let attempts = 0;
-        const poll = setInterval(async () => {
-          attempts++;
-          const fresh = await window.checkCapacity(true);
-          if (fresh?.planStatus === 'active' || fresh?.planStatus === 'trialing') {
-            clearInterval(poll);
-            gateModal.classList.add('hidden');
-            applyGateBlur(false);
-            if (typeof window.refreshPlanPill === 'function') window.refreshPlanPill(); // cache already fresh
-            // Plan is now active — tick the wizard's "Choose your plan" step (and celebrate).
-            window.SetupWizard?.refresh?.({ autoOpen: true });
-            // Welcome modal retired — welcome + setup checklist now live in the
-            // Notifications area (see initGettingStarted / notifications.js).
-          } else if (attempts >= 5) {
-            clearInterval(poll);
-            if (pollingEl) {
-              pollingEl.textContent = 'Taking longer than expected — refresh the page.';
-              pollingEl.classList.remove('animate-pulse', 'text-emerald-700');
-              pollingEl.classList.add('text-amber-600');
-            }
+
+        const finishActivation = () => {
+          try { sessionStorage.removeItem(ACTIVATING_KEY); } catch {}
+          gateModal.classList.add('hidden');
+          applyGateBlur(false);
+          if (typeof window.refreshPlanPill === 'function') window.refreshPlanPill(); // cache already fresh
+          // Plan is now active — tick the wizard's "Choose your plan" step (and celebrate).
+          window.SetupWizard?.refresh?.({ autoOpen: true });
+          // Welcome modal retired — welcome + setup checklist now live in the
+          // Notifications area (see initGettingStarted / notifications.js).
+        };
+
+        // Poll for up to ~60s — the webhook + a function cold start can easily exceed the old
+        // 15s window. If it still hasn't landed we must NOT fall through to the hard "pay again"
+        // gate: the payment is real, and the marker (10 min) keeps us in this activating state
+        // across refreshes. Offer a manual re-check instead of demanding payment.
+        const runPoll = () => {
+          if (pollingEl) {
+            pollingEl.textContent = 'Payment received — confirming your subscription…';
+            pollingEl.classList.remove('text-amber-600');
+            pollingEl.classList.add('animate-pulse', 'text-emerald-700');
           }
-        }, 3000);
+          let attempts = 0;
+          const poll = setInterval(async () => {
+            attempts++;
+            const fresh = await window.checkCapacity(true);
+            if (fresh?.planStatus === 'active' || fresh?.planStatus === 'trialing') {
+              clearInterval(poll);
+              finishActivation();
+            } else if (attempts >= 20) {
+              clearInterval(poll);
+              if (pollingEl) {
+                pollingEl.classList.remove('animate-pulse', 'text-emerald-700');
+                pollingEl.classList.add('text-amber-600');
+                pollingEl.innerHTML = 'Your payment went through, but activation is taking longer than usual. ' +
+                  'It will finish automatically — you can ' +
+                  '<button type="button" id="plan-recheck-btn" class="underline font-medium">check again</button>' +
+                  ' or contact support if it persists.';
+                const btn = document.getElementById('plan-recheck-btn');
+                if (btn) btn.addEventListener('click', () => runPoll(), { once: true });
+              }
+            }
+          }, 3000);
+        };
+        runPoll();
       }
     })();
 
@@ -3304,10 +3342,10 @@ function formatCurrency(amount, currency) {
     // and hands them straight to the next step in the Setup Wizard slide-over.
     window._onAgreementsComplete = function _onAgreementsComplete() {
       window.showToast?.('Step 4: Compliance & Data Use completed — next up: choose your assistant.', { icon: '✅', duration: 6000 });
-      window.fireConfetti?.();
-      // Re-sync the wizard (compliance now ticks) and open it so the next step is front-and-centre.
+      // Re-sync the wizard — compliance now ticks, and refresh() itself fires the confetti
+      // and opens the drawer for the newly-completed step (see celebrate() in the
+      // SetupWizard controller), so no need to duplicate either here.
       window.SetupWizard?.refresh?.();
-      setTimeout(() => window.SetupWizard?.open?.(), 500);
     };
 
     window.renderMyAgreements();
@@ -3448,8 +3486,8 @@ function formatCurrency(amount, currency) {
   //  Epic: Async Setup & Progress Tracking — In-Progress "Onboarding" cards
   // ═══════════════════════════════════════════════════════════════════
   const ONBOARDING_ROLE_META = {
-    social_media: { label: 'Social Media Manager', icon: '📣', wizard: 'onboarding-social-media.html' },
-    paid_ads:     { label: 'Performance Marketer', icon: '📈', wizard: 'onboarding-performance.html' },
+    social_media: { label: 'Social Media Assistant', icon: '📣', wizard: 'onboarding-social-media.html' },
+    paid_ads:     { label: 'Performance Marketing Assistant', icon: '📈', wizard: 'onboarding-performance.html' },
     data_entry:   { label: 'Inventory & Data',     icon: '🗂️', wizard: 'onboarding-inventory.html' },
     custom:       { label: 'Custom Assistant',     icon: '🤖', wizard: 'onboarding-custom.html' },
   };
@@ -4122,6 +4160,10 @@ function formatCurrency(amount, currency) {
 <script src="/my-content.js"></script>
 <script src="/src/components/platform-post-preview.js"></script>
 <script src="/src/components/confidence-badge.js"></script>
+<!-- Canva design picker — shared by the Create Post sheet's media section and the Blog Studio's
+     feature/inline image pickers. Imports land in content_assets, so both hosts just refresh
+     the library grid they already render. -->
+<script src="/src/components/canva-browser.js"></script>
 <!-- Role-aware post-hire dashboard config — assistant-detail.html KPI cards + module
      visibility, keyed by roleKey (consumed by _applyDashboardRegistry in assistants.js). -->
 <script src="/src/components/assistant-dashboard-registry.js"></script>
@@ -4149,23 +4191,35 @@ function formatCurrency(amount, currency) {
 <!-- Knowledge Base tab (tier1_support_agent) — the support articles grounding the
      assistant's Resolved answers; articles live in kb_articles via kb-articles.ts. -->
 <script src="/src/components/assistant-knowledge-base.js"></script>
+<!-- Inspo tab (social_media_manager, blog_writer) — the styles/tones the assistant studies
+     and applies to every draft; items live in inspo_items via inspo-items.ts. -->
+<script src="/src/components/assistant-inspo.js"></script>
 <!-- Role-specific onboarding schemas — the catalogue's Hire Role buttons route any roleKey
      defined here to assistant-setup.html (schema-driven wizard) instead of onboarding.html. -->
 <script src="/src/config/assistant-onboarding-schemas.js"></script>
-<!-- Role marketing copy + shared detail modal — the catalogue opens the modal
-     for any roleKey defined in assistant-role-content.js. -->
-<script src="/src/config/assistant-role-content.js"></script>
+<!-- Role marketing copy (read from master_assistants via the API) + shared detail modal —
+     the catalogue primes this registry from the list it already fetches, then opens the modal
+     for any roleKey. -->
+<script src="/src/config/assistant-content.js"></script>
 <!-- Role-specific Mandate "Quick Start Suggestions" — clickable bottleneck prompts
      rendered into assistant-detail.html ▸ Profile ▸ Mandate by _renderMandateSuggestions(). -->
 <script src="/src/config/mandate-suggestions.js"></script>
 <script src="/src/components/assistant-detail-modal.js"></script>
 <!-- Content Engine: Blog Studio native modal (self-injects markup; uses marked/DOMPurify above). -->
+<!-- The :::media / ::::columns tokenizer. The SAME file is imported server-side by
+     markdown-render.ts, so the Studio's preview can't disagree with what actually publishes
+     (docs/blog-media-composition-plan.md §3.2). Must load BEFORE markdown-editor.js. -->
+<script src="/src/lib/marked-bms-directives.js"></script>
 <script src="/src/components/markdown-editor.js"></script>
 <script src="/src/components/blog-studio-modal.js"></script>
 <script src="/calendar.js?v=20260625-approve-gate"></script>
 <!-- Per-assistant Calendar tab on assistant-detail.html — reuses calendar.js rendering
      scoped to the current assistant (scheduled posts + records with scheduled_for + task runs). -->
 <script src="/src/components/assistant-calendar.js"></script>
+<!-- My Content tab (social_media_manager, blog_writer) — reuses the org-wide content
+     library (my-content.html + my-content.js, already loaded above) as a tab on the two
+     assistants that consume it. -->
+<script src="/src/components/assistant-my-content.js"></script>
 <script src="/billing.js"></script>
 <script src="/swan-cursor.js"></script>
 <script src="/tour.js"></script>
@@ -4202,24 +4256,20 @@ async function refreshPendingBadge() {
 
 // ── Review Queue ─────────────────────────────────────────────────────────────
 // Simple lifecycle: top columns (Review → Approved → Scheduled → Posted → Archived),
-// each showing collapsible content groups. For the Social Media Manager the groups are
-// "Ideas" and "Posts"; other assistant types can define their own groups later.
+// each showing collapsible content groups. For the Social Media Assistant the only group
+// is "Posts"; other assistant types can define their own groups later.
 
-// Column = a lifecycle stage. postStatus filters scheduled_posts; ideaFilter selects which
-// post-ideas belong in this stage (ideas only make sense in Review and Archived).
+// Column = a lifecycle stage. postStatus filters scheduled_posts.
 const RQ_COLUMNS = {
-    review:    { label: 'Review',    postStatus: 'pending_approval', ideaFilter: i => i.status === 'pending' },
-    approved:  { label: 'Approved',  postStatus: 'approved',         ideaFilter: () => false },
-    scheduled: { label: 'Scheduled', postStatus: 'scheduled',        ideaFilter: () => false },
-    posted:    { label: 'Posted',    postStatus: 'published',        ideaFilter: () => false },
-    // Once an idea has been woven into a post (in_review/delivered), its own review happens on
-    // that post's card in the Posts group — it no longer needs a separate slot in Review.
-    archived:  { label: 'Archived',  postStatus: 'rejected',         ideaFilter: i => i.status === 'discarded' || i.status === 'in_review' || i.status === 'delivered' },
+    review:    { label: 'Review',    postStatus: 'pending_approval' },
+    approved:  { label: 'Approved',  postStatus: 'approved' },
+    scheduled: { label: 'Scheduled', postStatus: 'scheduled' },
+    posted:    { label: 'Posted',    postStatus: 'published' },
+    archived:  { label: 'Archived',  postStatus: 'rejected' },
 };
 
 // Content groups for this assistant type. Each: how to fetch its items for a column + how to render.
 const RQ_GROUPS = [
-    { key: 'ideas', label: 'Ideas', empty: 'No ideas here.',  emptyReview: 'No ideas here yet.' },
     { key: 'posts', label: 'Posts', empty: 'No posts here.',  emptyReview: 'No posts awaiting review.' },
 ];
 
@@ -4236,7 +4286,7 @@ const RQ_BLOG_GROUP = { key: 'blog', label: 'Blog posts', empty: 'No blog posts 
 let _rqBlogWriterActive = false;
 
 let _rqCurrentStatus = 'review';
-const _rqGroupOpen = { ideas: true, posts: true, blog: true };
+const _rqGroupOpen = { posts: true, blog: true };
 
 // Back-compat shim: several callers (gen-post success, modal refresh) still call rqLoadItems()/rqSetTab().
 function rqLoadItems() { rqRenderGroups(_rqCurrentStatus); }
@@ -4254,10 +4304,10 @@ function rqOpenStatus(statusKey, btn) {
     return rqRenderGroups(statusKey);
 }
 
-// Ideas tab "Review this draft →": jump straight to the Review column AND pop the specific
+// Deep-link "Review this draft →": jump straight to the Review column AND pop the specific
 // draft's mock-up modal, instead of leaving the user to hunt for it among the Posts group
 // (the vague tab-switch was the source of the "I don't know how to review it" feedback).
-async function rqViewIdeaDraft(postId) {
+async function rqViewDraft(postId) {
     await rqOpenStatus('review');
     if (postId) openPostReview(postId);
 }
@@ -4273,15 +4323,13 @@ async function rqRenderGroups(statusKey) {
         try { _rqBlogWriterActive = !!(await window.resolveBlogWriter()); } catch { /* non-blocking */ }
     }
 
-    let posts = [], ideas = [], blogPosts = [];
+    let posts = [], blogPosts = [];
     try {
-        const [pRes, iRes, bRes] = await Promise.all([
+        const [pRes, bRes] = await Promise.all([
             fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}`),
-            fetch('/.netlify/functions/get-post-ideas'),
             _rqBlogWriterActive ? fetch('/.netlify/functions/blog-posts') : Promise.resolve(null),
         ]);
         if (pRes.ok) posts = (await pRes.json()).drafts || [];
-        if (iRes.ok) ideas = ((await iRes.json()).ideas || []).filter(col.ideaFilter);
         if (bRes && bRes.ok) {
             const allBlog = (await bRes.json()).posts || [];
             const wanted = RQ_BLOG_STATUSES[statusKey] || [];
@@ -4303,8 +4351,8 @@ async function rqRenderGroups(statusKey) {
     }
 
     const groups = _rqBlogWriterActive ? [...RQ_GROUPS, RQ_BLOG_GROUP] : RQ_GROUPS;
-    const itemsByGroup = { ideas, posts, blog: blogPosts };
-    const renderByGroup = { ideas: rqRenderIdeaCard, posts: rqRenderSocialCard, blog: rqRenderBlogCard };
+    const itemsByGroup = { posts, blog: blogPosts };
+    const renderByGroup = { posts: rqRenderSocialCard, blog: rqRenderBlogCard };
     container.innerHTML = groups.map(g => rqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey)).join('');
 }
 
@@ -4419,93 +4467,6 @@ function rqRenderSocialCard(draft) {
       ${statusChip}
       <svg class="w-4 h-4 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
     </div>`;
-}
-
-// Review Queue → Ideas tab: one card per suggested idea, showing where it is in its lifecycle so
-// the user can tell whether it's still pending, sitting in a draft for review, or delivered (live).
-function rqRenderIdeaCard(idea) {
-    const platformLabel = { instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X' };
-    const platforms = (idea.platform || '').split(',').map(p => platformLabel[p.trim()] || p.trim()).filter(Boolean);
-    const platformHint = platforms.length ? platforms.join(', ') : 'All platforms';
-    const ago = rqTimeAgo(idea.createdAt);
-
-    const STATUS = {
-        pending:   { label: 'Pending',            cls: 'bg-amber-50 border-amber-200 text-amber-700' },
-        in_review: { label: 'In a draft to review', cls: 'bg-violet-50 border-violet-200 text-violet-700' },
-        delivered: { label: 'Delivered',          cls: 'bg-emerald-50 border-emerald-200 text-emerald-700' },
-        discarded: { label: 'Not used',           cls: 'bg-gray-100 border-gray-200 text-gray-500' },
-    };
-    const s = STATUS[idea.status] || STATUS.pending;
-
-    let progress = '';
-    if (idea.status === 'pending') {
-        progress = `<p class="text-xs text-gray-500">Waiting to be woven into an upcoming draft.</p>
-          <button onclick="ideaToggleEdit(${idea.id})" class="mt-1.5 text-xs font-semibold text-emerald-700 hover:text-emerald-800 underline cursor-pointer">Edit</button>
-          <button onclick="ideaDelete(${idea.id})" class="mt-1.5 ml-3 text-xs font-semibold text-red-600 hover:text-red-700 underline cursor-pointer">Delete</button>
-          <div class="rq-idea-edit-${idea.id} hidden mt-2">
-            <textarea id="rq-idea-input-${idea.id}" rows="2" maxlength="500" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-300">${_rqEsc(idea.idea)}</textarea>
-            <div class="flex gap-2 mt-1"><button onclick="ideaSaveEdit(${idea.id})" class="px-3 py-1.5 text-xs font-bold bg-emerald-600 text-white rounded-lg cursor-pointer">Save</button><button onclick="ideaToggleEdit(${idea.id})" class="px-3 py-1.5 text-xs font-bold text-gray-500 cursor-pointer">Cancel</button></div>
-          </div>`;
-    } else if (idea.status === 'in_review') {
-        const cap = idea.postCaption ? `<p class="text-xs text-gray-600 mt-1 line-clamp-2 italic">"${_rqEsc(idea.postCaption)}"</p>` : '';
-        progress = `<p class="text-xs text-gray-500">Built into a post — now awaiting your review.${cap ? '' : ''}</p>${cap}
-          ${idea.usedPostId ? `<button onclick="openPostReview(${idea.usedPostId})" class="mt-1.5 text-xs font-semibold text-violet-700 hover:text-violet-800 underline cursor-pointer">Review this post →</button>` : ''}`;
-    } else if (idea.status === 'delivered') {
-        const when = idea.postPublishDate ? new Date(idea.postPublishDate).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : null;
-        const postState = idea.postStatus === 'published' ? 'Published' : (idea.postStatus === 'scheduled' ? 'Scheduled' : 'Approved');
-        const cap = idea.postCaption ? `<p class="text-xs text-gray-600 mt-1 line-clamp-2 italic">"${_rqEsc(idea.postCaption)}"</p>` : '';
-        progress = `<p class="text-xs text-emerald-700 font-medium">✓ Approved and turned into a post${when ? ` · ${postState} for ${_rqEsc(when)}` : ` · ${postState}`}.</p>${cap}`;
-    } else {
-        progress = `<p class="text-xs text-gray-500">This idea wasn't used.</p>`;
-    }
-
-    return `<div class="py-4">
-      <div class="flex items-start justify-between gap-3 mb-1.5">
-        <div class="flex-1 min-w-0">
-          <p class="text-sm font-medium text-gray-900">${_rqEsc(idea.idea)}</p>
-          <p class="text-xs text-gray-500 mt-0.5">${_rqEsc(idea.assistantName || 'Assistant')} · ${platformHint} · suggested ${ago}</p>
-        </div>
-        <span class="flex-shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border ${s.cls}">${s.label}</span>
-      </div>
-      ${progress}
-    </div>`;
-}
-
-function ideaToggleEdit(id) {
-    document.querySelector(`.rq-idea-edit-${id}`)?.classList.toggle('hidden');
-}
-
-async function ideaSaveEdit(id) {
-    const idea = (document.getElementById(`rq-idea-input-${id}`) || {}).value?.trim();
-    if (!idea) { alert('Please describe your post idea.'); return; }
-    try {
-        const res = await fetch('/.netlify/functions/update-post-idea', {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id, idea }),
-        });
-        const d = await res.json().catch(() => ({}));
-        if (!res.ok) { alert(d.error || 'Could not save your idea.'); return; }
-        rqLoadItems();
-    } catch { alert('Network error — please try again.'); }
-}
-
-function ideaDelete(id) {
-    window.showConfirmModal('Delete this idea? This cannot be undone.', async () => {
-        try {
-            const res = await fetch('/.netlify/functions/update-post-idea', {
-                method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id }),
-            });
-            const d = await res.json().catch(() => ({}));
-            if (!res.ok) { window.showToast?.(d.error || 'Could not delete this idea.'); return; }
-            // Refresh whichever Review Queue view is currently mounted — the global Review Queue
-            // page (Social tab) and/or the assistant-detail page's own scoped Review Queue tab.
-            rqLoadItems();
-            if (typeof window.detailRqRefresh === 'function') { try { window.detailRqRefresh(); } catch { /* ignore */ } }
-        } catch { window.showToast?.('Network error — please try again.'); }
-    }, { title: 'Delete idea?', confirmLabel: 'Yes, delete idea' });
 }
 
 async function sdApprove(postId, action) {
@@ -4952,6 +4913,7 @@ window.openAssistantChatModal = function(assistantId, assistantName, assistantRo
 
     modal.classList.remove('hidden');
     modal.classList.add('flex');
+    return _chatModalSession;   // callers seed the conversation via session.sendMessage()
 };
 
 window.closeAssistantChatModal = function() {
@@ -5431,12 +5393,20 @@ let _gpCap = null;                 // cached capacity (connected platforms + AI 
 let _gpwSelectedPlatforms = [];    // write-your-own: multi-select
 let _gpwSelectedAssets = [];       // write-your-own: chosen My Content asset ids
 let _gpwAssetsById = {};           // write-your-own: id → asset object (for the live preview)
+let _gpwCreatedPosts = [];         // write-your-own: [{id, platform}] created, awaiting a scheduling choice
 let _gpHasMedia = false;           // work-with-AI: whether the current draft has an image attached
 
 // Opens the sheet on the single "write your own" composer. From there the user can hand the draft to
 // the assistant for improvements (Ask Swan) or reveal the on-demand generator via its link. The AI
 // task-limit gate is enforced only when the generator is opened — writing your own is always free.
 async function openGeneratePostSheet() {
+    // A previous generation is still running in the background (sheet was closed while waiting) —
+    // don't clobber its poll interval, or it'll finish with nowhere to report the result.
+    if (_gpPollInterval && _gpCurrentJobId) {
+        window.showToast?.("Your assistant is still working on your last post — we'll let you know when it's ready.", { icon: '⏳' });
+        return;
+    }
+
     _gpCurrentAssistantId = window._currentAssistantId || null;
     _gpCurrentJobId = null;
     _gpCurrentPostId = null;
@@ -5497,7 +5467,7 @@ function gpBackToChooser() {
     document.getElementById('gen-post-preview')?.classList.add('hidden');
     document.getElementById('gen-post-approve-actions')?.classList.add('hidden');
     document.getElementById('gp-connect-notice')?.classList.add('hidden');
-    ['gp-approve-now-btn', 'gp-approve-schedule-btn'].forEach(id => {
+    ['gp-approve-now-btn', 'gp-approve-schedule-btn', 'gp-approve-assistant-btn'].forEach(id => {
         const b = document.getElementById(id); if (b) b.disabled = false;
     });
     document.getElementById('gen-post-schedule-picker')?.classList.add('hidden');
@@ -5524,8 +5494,14 @@ function gpBackToChooser() {
     document.getElementById('gpw-platform-meta')?.classList.add('hidden');
     document.getElementById('gpw-live-preview')?.classList.add('hidden');
     gpSetPanelStatus('gpw-status', '');
+    // Reset the two-step scheduling flow back to step 1.
+    _gpwCreatedPosts = [];
+    document.getElementById('gpw-schedule-actions')?.classList.add('hidden');
+    document.getElementById('gpw-schedule-picker')?.classList.add('hidden');
+    document.getElementById('gpw-connect-notice')?.classList.add('hidden');
+    document.getElementById('gpw-create-actions')?.classList.remove('hidden');
     const wBtn = document.getElementById('gpw-submit-btn');
-    if (wBtn) { wBtn.disabled = false; wBtn.textContent = 'Add to Review'; }
+    if (wBtn) { wBtn.disabled = false; wBtn.textContent = 'Next: choose scheduling'; }
 }
 
 // Reveal a mode's panel. 'ai' enforces the monthly AI generation limit first.
@@ -5533,9 +5509,7 @@ function gpChooseMode(mode) {
     if (mode === 'ai') {
         const cap = _gpCap;
         if (cap && cap.taskLimit != null && cap.taskCount >= cap.taskLimit) {
-            const resetDate = cap.trialExpiresAt
-                ? new Date(cap.trialExpiresAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'long' })
-                : 'the start of your next billing cycle';
+            const resetDate = 'the start of your next billing cycle';
             window.openUpgradeModal(
                 'Monthly generation limit reached',
                 `You've used all ${cap.taskLimit} generations this month.`,
@@ -5561,7 +5535,7 @@ function gpChooseMode(mode) {
 }
 
 // Populate the assistant picker when no assistant is pre-selected. Auto-selects the org's
-// Social Media Manager; only reveals the dropdown when there's more than one to choose from.
+// Social Media Assistant; only reveals the dropdown when there's more than one to choose from.
 async function gpPopulateAssistants() {
     const wrap = document.getElementById('gen-post-assistant-wrap');
     const sel  = document.getElementById('gen-post-assistant');
@@ -5575,7 +5549,7 @@ async function gpPopulateAssistants() {
         const active = (data.assistants || []).filter(a =>
             a.status !== 'pending' && a.status !== 'failed' && a.status !== 'blocked' &&
             a.lifecycleStatus !== 'archived');
-        // Prefer Social Media Managers, but fall back to all active assistants so orgs whose
+        // Prefer Social Media Assistants, but fall back to all active assistants so orgs whose
         // assistants predate the roleKey field aren't locked out of generating a post.
         const social = active.filter(a => a.roleKey === 'social_media_manager');
         const eligible = social.length > 0 ? social : active;
@@ -5680,7 +5654,12 @@ async function gpSubmit() {
         if (!res.ok) { gpSetStatus(d.error || 'Failed to queue generation.', 'error'); if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Generate'; } return; }
         _gpCurrentJobId = d.jobId;
         document.getElementById('gen-post-actions')?.classList.add('hidden');
-        gpSetStatus('Generating your post… This usually takes 20–40 seconds.');
+        gpSetStatus('');
+        // Close the sheet rather than block it on a 30–60s wait — the toast keeps the user
+        // informed and the sheet reopens (with the draft ready to review) once the job completes.
+        document.getElementById('gen-post-backdrop')?.classList.add('hidden');
+        document.getElementById('gen-post-sheet')?.classList.add('hidden');
+        window.showToast?.('Generating your post… This usually takes 30–60 seconds.', { icon: '✨' });
         _gpPollInterval = setInterval(gpPollJob, 4000);
     } catch {
         gpSetStatus('Network error — please try again.', 'error');
@@ -5696,10 +5675,20 @@ async function gpPollJob() {
         const { status, resultPostId, errorMessage } = await res.json();
         if (status === 'completed' && resultPostId) {
             clearInterval(_gpPollInterval);
+            _gpPollInterval = null;
+            _gpCurrentJobId = null;
             _gpCurrentPostId = resultPostId;
+            window.showToast?.('Your post is ready! Opening it for review…', { icon: '✅' });
+            document.getElementById('gen-post-backdrop')?.classList.remove('hidden');
+            document.getElementById('gen-post-sheet')?.classList.remove('hidden');
             await gpLoadPreview(resultPostId);
         } else if (status === 'failed') {
             clearInterval(_gpPollInterval);
+            _gpPollInterval = null;
+            _gpCurrentJobId = null;
+            window.showToast?.(errorMessage || 'Generation failed. Please try again.', { icon: '⚠️' });
+            document.getElementById('gen-post-backdrop')?.classList.remove('hidden');
+            document.getElementById('gen-post-sheet')?.classList.remove('hidden');
             gpSetStatus(errorMessage || 'Generation failed. Please try again.', 'error');
             document.getElementById('gen-post-actions')?.classList.remove('hidden');
             const submitBtn = document.getElementById('gen-post-submit-btn');
@@ -5762,7 +5751,7 @@ function gpEnsureMediaBeforeApproval() {
 // Reject stays enabled since discarding a draft needs no connection.
 async function gpApplyApprovalConnectGate(platform) {
     const connected = await rqEnsurePlatformConnection(platform);
-    ['gp-approve-now-btn', 'gp-approve-schedule-btn'].forEach(id => {
+    ['gp-approve-now-btn', 'gp-approve-schedule-btn', 'gp-approve-assistant-btn'].forEach(id => {
         const b = document.getElementById(id); if (b) b.disabled = !connected;
     });
     const notice = document.getElementById('gp-connect-notice');
@@ -5785,6 +5774,19 @@ async function gpApprovePost() {
     document.getElementById('gen-post-approve-actions')?.classList.add('hidden');
     document.getElementById('gen-post-preview')?.classList.add('hidden');
     setTimeout(closeGeneratePostSheet, 1500);
+}
+
+// "Let your assistant schedule it" (co-author panel): approve with no explicit time, so approve-post
+// lands the draft in the next free slot of the assistant's posting cadence (pickOptimalSlot).
+async function gpAssistantSchedule() {
+    if (!_gpCurrentPostId) return;
+    if (!gpEnsureMediaBeforeApproval()) return;
+    if (!(await gpApplyApprovalConnectGate(_gpDraftPlatform || _gpSelectedPlatform))) return;
+    if (!(await sdApprove(_gpCurrentPostId, 'approve'))) return;
+    gpSetStatus('Your assistant scheduled the post into its next available slot.');
+    document.getElementById('gen-post-approve-actions')?.classList.add('hidden');
+    document.getElementById('gen-post-preview')?.classList.add('hidden');
+    setTimeout(closeGeneratePostSheet, 1800);
 }
 
 async function gpSchedulePost() {
@@ -5837,7 +5839,7 @@ function gpRejectPost() {
 }
 
 // Voice dictation into one of the Create Post text fields. Each field declares its own mic button
-// and (optionally) a live character counter so all three modes can share this one recognizer.
+// and (optionally) a live character counter so both modes can share this one recognizer.
 const GP_VOICE_FIELDS = {
     'gen-post-context': { mic: 'gen-post-mic-btn', count: 'gen-post-ctx-count' },
     'gpw-caption':      { mic: 'gpw-mic-btn' },
@@ -5867,7 +5869,7 @@ function gpStartVoice(targetId = 'gen-post-context') {
     rec.start();
 }
 
-// ── Shared chip styling for the write-your-own / suggest-idea platform buttons ──────────────────
+// ── Shared chip styling for the write-your-own platform buttons ──────────────────
 function gpwSetChipState(btn, on) {
     if (!btn) return;
     if (on) {
@@ -6042,6 +6044,25 @@ function gpwUpload() {
     document.getElementById('gpw-upload-input')?.click();
 }
 
+// Import from Canva, then behave exactly as an upload does: refresh the library grid and
+// auto-select what just arrived, so the designs are already attached to the draft.
+function gpwBrowseCanva() {
+    if (!window.CanvaBrowser) return;
+    window.CanvaBrowser.open({
+        assetType: 'any',
+        multiple: true,
+        onImported: async (assetIds) => {
+            const picker = document.getElementById('gpw-media-picker');
+            if (picker) delete picker.dataset.loaded;
+            await gpwLoadMedia();
+            assetIds.forEach(id => {
+                const cell = document.querySelector(`.gpw-media-cell[data-asset-id="${id}"]`);
+                if (cell && !_gpwSelectedAssets.includes(id)) gpwToggleAsset(cell, id);
+            });
+        },
+    });
+}
+
 async function gpwUploadSelected(e) {
     const file = e.target.files?.[0];
     e.target.value = '';
@@ -6084,19 +6105,19 @@ async function gpwSubmit() {
             if (picker?.classList.contains('hidden')) gpwToggleMediaPicker();
         };
         if (_gpwSelectedPlatforms.includes('instagram')) {
-            gpSetPanelStatus('gpw-status', 'Instagram requires an image. Add one from My Content before adding to the queue.', 'error');
+            gpSetPanelStatus('gpw-status', 'Instagram requires an image. Add one from My Content before scheduling.', 'error');
             openMediaPicker();
             return;
         }
-        if (!window.confirm("You haven't added an image. Posts with images perform better — add to the queue without one?")) {
+        if (!window.confirm("You haven't added an image. Posts with images perform better — continue without one?")) {
             openMediaPicker();
             return;
         }
     }
 
     const btn = document.getElementById('gpw-submit-btn');
-    if (btn) { btn.disabled = true; btn.textContent = 'Adding…'; }
-    gpSetPanelStatus('gpw-status', 'Adding to your Review…');
+    if (btn) { btn.disabled = true; btn.textContent = 'Creating…'; }
+    gpSetPanelStatus('gpw-status', 'Creating your post…');
     try {
         const res = await fetch('/.netlify/functions/create-manual-post', {
             method: 'POST',
@@ -6112,21 +6133,96 @@ async function gpwSubmit() {
         const d = await res.json().catch(() => ({}));
         if (!res.ok) {
             gpSetPanelStatus('gpw-status', d.error || 'Could not create the post.', 'error');
-            if (btn) { btn.disabled = false; btn.textContent = 'Add to Review'; }
+            if (btn) { btn.disabled = false; btn.textContent = 'Next: choose scheduling'; }
             return;
         }
-        const n = (d.created || []).length;
-        gpSetPanelStatus('gpw-status', `Added ${n} draft${n === 1 ? '' : 's'} to your Review.`);
-        if (typeof refreshPendingBadge === 'function') refreshPendingBadge();
-        // Refresh whichever Review Queue view is currently mounted — the global Review Queue
-        // page (Social tab) and/or the assistant-detail page's own scoped Review Queue tab.
-        if (typeof rqLoadItems === 'function') { try { rqLoadItems('pending_approval', 'social'); } catch { /* ignore */ } }
-        if (typeof window.detailRqRefresh === 'function') { try { window.detailRqRefresh(); } catch { /* ignore */ } }
-        setTimeout(closeGeneratePostSheet, 1500);
+        // Draft(s) created — no review step. Move to the scheduling choice: the human writes it,
+        // then decides here whether the assistant slots it, they pick a time, or it posts now.
+        _gpwCreatedPosts = (d.created || []).map(c => ({ id: c.id, platform: c.platform }));
+        const meta = await gpResolveAssistantMeta(_gpCurrentAssistantId).catch(() => null);
+        const nameEl = document.getElementById('gpw-assistant-name');
+        if (nameEl) nameEl.textContent = meta?.name || 'your assistant';
+        gpSetPanelStatus('gpw-status', 'Your post is ready — choose how it goes out below.');
+        document.getElementById('gpw-create-actions')?.classList.add('hidden');
+        document.getElementById('gpw-schedule-actions')?.classList.remove('hidden');
     } catch {
         gpSetPanelStatus('gpw-status', 'Network error — please try again.', 'error');
-        if (btn) { btn.disabled = false; btn.textContent = 'Add to Review'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Next: choose scheduling'; }
     }
+}
+
+// Scheduling choice for write-your-own drafts (no review step). 'approve' lets the assistant slot it
+// into its next cadence opening, 'reschedule' opens a datetime picker, 'publish_now' posts immediately.
+async function gpwSchedule(action) {
+    if (action === 'reschedule') {
+        const picker = document.getElementById('gpw-schedule-input');
+        if (picker) {
+            const min = new Date(Date.now() + 5 * 60 * 1000);
+            picker.min = min.toISOString().slice(0, 16);
+            picker.value = new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16);
+        }
+        document.getElementById('gpw-schedule-picker')?.classList.remove('hidden');
+        return;
+    }
+    await _gpwApplyScheduleAction(action);
+}
+
+async function gpwConfirmSchedule() {
+    const picker = document.getElementById('gpw-schedule-input');
+    const rescheduleAt = picker?.value;
+    if (!rescheduleAt) { gpSetPanelStatus('gpw-status', 'Please choose a date and time.', 'error'); return; }
+    if (new Date(rescheduleAt) <= new Date()) { gpSetPanelStatus('gpw-status', 'Scheduled time must be in the future.', 'error'); return; }
+    await _gpwApplyScheduleAction('reschedule', rescheduleAt);
+}
+
+// Drive the chosen approve-post action across every created draft (one per selected platform). Any
+// platform without a live connection comes back 422 PLATFORM_NOT_CONNECTED — surface a connect prompt
+// listing those platforms; the drafts stay saved so the user can connect and retry.
+async function _gpwApplyScheduleAction(action, rescheduleAt) {
+    if (!_gpwCreatedPosts.length) return;
+    document.getElementById('gpw-connect-notice')?.classList.add('hidden');
+    gpSetPanelStatus('gpw-status', action === 'publish_now' ? 'Publishing…' : 'Scheduling…');
+
+    let scheduled = 0;
+    const needConnect = [];
+    let lastError = null;
+    for (const post of _gpwCreatedPosts) {
+        try {
+            const res = await fetch('/.netlify/functions/approve-post', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ postId: post.id, action, rescheduleAt }),
+            });
+            const d = await res.json().catch(() => ({}));
+            if (res.ok) { scheduled++; continue; }
+            if (d.code === 'PLATFORM_NOT_CONNECTED') { needConnect.push(d.platform || post.platform); continue; }
+            lastError = d.error || 'Could not schedule this post.';
+        } catch { lastError = 'Network error — please try again.'; }
+    }
+
+    // Drop the successfully-scheduled posts so a retry only re-hits the ones that failed.
+    _gpwCreatedPosts = _gpwCreatedPosts.filter(p => needConnect.includes(p.platform));
+
+    if (typeof refreshPendingBadge === 'function') refreshPendingBadge();
+    if (typeof rqLoadItems === 'function') { try { rqLoadItems('pending_approval', 'social'); } catch { /* ignore */ } }
+    if (typeof window.detailRqRefresh === 'function') { try { window.detailRqRefresh(); } catch { /* ignore */ } }
+    if (typeof window.calRefresh === 'function') { try { window.calRefresh(); } catch { /* ignore */ } }
+
+    if (needConnect.length) {
+        document.getElementById('gpw-schedule-picker')?.classList.add('hidden');
+        const labels = [...new Set(needConnect)].map(p => (p === 'x' ? 'X' : p.charAt(0).toUpperCase() + p.slice(1)));
+        const noticeText = document.getElementById('gpw-connect-notice-text');
+        if (noticeText) noticeText.textContent = `Connect your ${labels.join(', ')} account${labels.length > 1 ? 's' : ''} to schedule ${labels.length > 1 ? 'these posts' : 'this post'}. Your draft${labels.length > 1 ? 's are' : ' is'} saved in the meantime.`;
+        document.getElementById('gpw-connect-notice')?.classList.remove('hidden');
+        gpSetPanelStatus('gpw-status', scheduled ? `Scheduled ${scheduled} post${scheduled === 1 ? '' : 's'}; the rest need a connection.` : (lastError || 'Connect the platform to continue.'), scheduled ? '' : 'error');
+        return;
+    }
+
+    if (lastError && !scheduled) { gpSetPanelStatus('gpw-status', lastError, 'error'); return; }
+
+    const verb = action === 'publish_now' ? 'queued to publish now' : action === 'approve' ? 'scheduled by your assistant' : 'scheduled';
+    gpSetPanelStatus('gpw-status', `Your post${scheduled === 1 ? ' is' : 's are'} ${verb}.`);
+    setTimeout(closeGeneratePostSheet, 1600);
 }
 
 // ── Ask Swan to improve ─────────────────────────────────────────────────────────────────────────
@@ -6163,11 +6259,12 @@ async function gpAskSwanImprove() {
 }
 
 // Resolve an assistant's display name / role / roleKey for opening the chat modal. Cached per id so
-// repeat clicks don't refetch. Falls back to sensible SMM defaults if the lookup fails.
+// repeat clicks don't refetch. Falls back to a neutral placeholder if the lookup fails — it used to
+// default to the Social Media Assistant, which mislabelled every other role whenever the fetch failed.
 let _gpAssistantMetaCache = {};
 async function gpResolveAssistantMeta(id) {
     if (_gpAssistantMetaCache[id]) return _gpAssistantMetaCache[id];
-    let meta = { name: 'Your assistant', role: 'Social Media Manager', roleKey: 'social_media_manager' };
+    let meta = { name: 'Your assistant', role: 'Digital Assistant', roleKey: null };
     try {
         const res = await fetch('/.netlify/functions/get-assistants');
         const data = res.ok ? await res.json() : { assistants: [] };
@@ -6327,6 +6424,25 @@ async function gpAiUploadSelected(e) {
     } finally {
         gpAiMediaBusy(false);
     }
+}
+
+// ── Source: Canva (import a design) ──────────────────────────────────────────
+// Canva imports land in content_assets like any other source, so once the picker reports back,
+// attaching is identical to picking from "Use my own" (gpAiSelectOwn). assetType 'image' keeps
+// video designs out when we're attaching an image; a multi-page design yields several assets, so
+// only the first is attached and the rest are left in the library.
+function gpAiBrowseCanva() {
+    if (!_gpCurrentPostId || !window.CanvaBrowser) return;
+    document.getElementById('gp-ai-own')?.classList.add('hidden');
+    document.getElementById('gp-ai-pexels')?.classList.add('hidden');
+    window.CanvaBrowser.open({
+        assetType: _gpAiMediaType === 'video' ? 'any' : 'image',
+        multiple: false,
+        onImported: (assetIds) => {
+            if (!assetIds || !assetIds.length) return;
+            gpAiSelectOwn(assetIds[0]);
+        },
+    });
 }
 
 // ── Source: Find with AI (Pexels stock, image or video) ─────────────────────
@@ -7101,10 +7217,22 @@ async function gpSubmitReject() {
   const label  = document.getElementById('setup-wizard-progress-label');
   if (!drawer || !fab || !body) return;
 
-  let last = null;          // previous snapshot { key: done } for completion diffing
+  // Several steps (e.g. "onboard your assistant") complete on a standalone full-page
+  // wizard (onboarding-*.html) that navigates back here with a fresh JS context, so a
+  // plain in-memory `last`/`celebratedGoLive` would reset to null/false right as the
+  // completion needs detecting — silently swallowing that step's celebration (no prior
+  // snapshot to diff against). Persist both in sessionStorage, same pattern as COLLAPSE_KEY
+  // above, so the diff survives the full-page hop.
+  const LAST_KEY = 'swan_wizard_last_snapshot';
+  const GO_LIVE_KEY = 'swan_wizard_celebrated_go_live';
+  const readLast = () => { try { return JSON.parse(sessionStorage.getItem(LAST_KEY)); } catch { return null; } };
+  const writeLast = (val) => { try { val === null ? sessionStorage.removeItem(LAST_KEY) : sessionStorage.setItem(LAST_KEY, JSON.stringify(val)); } catch { /* non-fatal */ } };
+  const writeGoLive = (val) => { try { val ? sessionStorage.setItem(GO_LIVE_KEY, '1') : sessionStorage.removeItem(GO_LIVE_KEY); } catch { /* non-fatal */ } };
+
+  let last = readLast();    // previous snapshot { key: done } for completion diffing
   let lastData = null;      // last full payload (re-render on open)
   let isOpen = false;
-  let celebratedGoLive = false;
+  let celebratedGoLive = sessionStorage.getItem(GO_LIVE_KEY) === '1';
 
   const tick = '<span class="flex items-center justify-center w-7 h-7 rounded-full bg-emerald-600 text-white shrink-0"><svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg></span>';
 
@@ -7280,6 +7408,15 @@ async function gpSubmitReject() {
           window.routeToAssistantDetail(data.primaryAssistantId);
           return;
         }
+        // "Business information" (assets.html) renders a centred form whose fields can sit
+        // directly under the fixed-width drawer strip, so — unlike the other steps, which
+        // stay open as a companion per US1 AC2 — this one must collapse on click or the
+        // fields it just routed to are left unreachable behind it.
+        if (key === 'business_info') {
+          collapse();
+          if (window.loadView) window.loadView(view);
+          return;
+        }
         // US1 AC2 — route the main area, but keep the drawer open as a companion.
         if (window.loadView) window.loadView(view);
       });
@@ -7357,15 +7494,23 @@ async function gpSubmitReject() {
   }
 
   // Compare against the previous snapshot and celebrate any step that just flipped done.
+  // Returns true when a step newly completed, so refresh() can also surface the drawer —
+  // this is the single place EVERY step-completion path funnels through (onNavigate,
+  // autoOpen refreshes, bespoke per-step handlers), so it must fire the full toast +
+  // confetti + open treatment itself rather than leaving that to individual call sites,
+  // which is why the celebration used to appear only for the handful of steps whose
+  // caller happened to also confetti/open manually.
   function celebrate(data) {
     const prev = last || {};
     let newlyDone = false;
     (data.steps || []).forEach(s => { if (s.done && prev[s.key] === false) newlyDone = true; });
     if (newlyDone && !data.allDone) {
       window.showToast?.('Great job — you\'re one step closer! 🎉', { icon: '✅' });
+      window.fireConfetti?.();
     }
     if (data.allDone && !celebratedGoLive && last !== null) {
       celebratedGoLive = true;
+      writeGoLive(true);
       window.showToast?.('Your assistant is live! 🎉', { icon: '🎉' });
       window.fireConfetti?.();
       // The new-assistant journey is finished — drop back to normal (org-global) behaviour.
@@ -7373,6 +7518,8 @@ async function gpSubmitReject() {
     }
     last = {};
     (data.steps || []).forEach(s => { last[s.key] = s.done; });
+    writeLast(last);
+    return newlyDone;
   }
 
   async function fetchState() {
@@ -7394,7 +7541,7 @@ async function gpSubmitReject() {
     const data = await fetchState();
     if (!data) return;
     const firstLoad = last === null;
-    celebrate(data);          // sets `last`; also fires celebrations on subsequent loads
+    const newlyDone = celebrate(data);  // sets `last`; also fires celebrations on subsequent loads
     lastData = data;
     render(data);
 
@@ -7405,6 +7552,18 @@ async function gpSubmitReject() {
     // they can still re-open from My Account (US8 AC2).
     if ((data.allDone && celebratedGoLive && !isOpen) || (data.dismissed && !isOpen && firstLoad)) {
       setOpen(false); showFab(false); return;
+    }
+
+    // A step just completed — bring the drawer to the front so the next step is
+    // immediately visible, regardless of which call site (onNavigate, a bespoke
+    // per-step handler, etc.) triggered this refresh. Previously only refresh(...
+    // {autoOpen:true}) calls opened the drawer, so most step completions (which route
+    // through onNavigate(), which never passes autoOpen) celebrated with a toast but
+    // left the drawer closed.
+    if (newlyDone && !data.allDone && !isOpen) {
+      setOpen(true);
+      showFab(false);
+      return;
     }
 
     if (opts.autoOpen && !data.allDone && !data.dismissed && !collapsedPref && !isOpen) {
@@ -7476,6 +7635,7 @@ async function gpSubmitReject() {
     sessionStorage.setItem(SINCE_D_KEY, String(base?.maxDraftId ?? 0));
     // Reset celebration/diff baselines so the fresh journey is tracked from scratch.
     last = null; celebratedGoLive = false;
+    writeLast(null); writeGoLive(false);
     await refresh();   // now scoped to the new assistant (steps 6-8 reset)
     open();
     if (window.loadView) window.loadView('catalog');

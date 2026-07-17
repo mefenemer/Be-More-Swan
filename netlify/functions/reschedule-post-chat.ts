@@ -15,7 +15,8 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, ne, gte, lte, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, auditLogs, notifications, scheduledPosts } from '../../db/schema';
+import { aiAssistants, auditLogs, scheduledPosts } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { requireTenant } from '../../src/utils/tenant';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -190,13 +191,11 @@ export default withLambda(async (event) => {
         ? `Got it — your assistant has moved this post to ${friendlyDate}.${conflictWarning ? ' ' + conflictWarning : ''}`
         : `Post rescheduled to ${friendlyDate}.${conflictWarning ? ' ' + conflictWarning : ''}`;
 
-    await db.insert(notifications).values({
+    await createNotification(db, 'post_rescheduled', {
         userId,
-        type: 'post_rescheduled',
-        title: 'Post rescheduled',
-        message: confirmation,
+        context: { post: { confirmation } },
         metadata: { postId, scheduledFor: newPublishDate.toISOString() },
-    }).catch(() => {});
+    });
 
     return {
         statusCode: 200,

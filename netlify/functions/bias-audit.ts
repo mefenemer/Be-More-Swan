@@ -16,8 +16,9 @@ import jwt from 'jsonwebtoken';
 import { eq, desc, and } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
 import {
-    users, biasAuditReviews, biasIncidents, biasSamplingReports, aiAssistants, notifications,
+    users, biasAuditReviews, biasIncidents, biasSamplingReports, aiAssistants,
 } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -171,13 +172,11 @@ export default withLambda(async (event) => {
             await db.update(aiAssistants).set(withUpdatedAt({ isActive: true })).where(eq(aiAssistants.id, incident.assistantId));
         }
 
-        await db.insert(notifications).values({
+        await createNotification(db, 'bias_reactivated', {
             userId,
-            type:    'system',
-            title:   `Assistant reactivated after bias review`,
-            message: `You acknowledged the corrective actions for bias incident #${incidentId}. The assistant has been reactivated.`,
+            context: { bias: { incident_id: incidentId } },
             metadata: { incidentId },
-        }).catch(() => {});
+        });
 
         return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ success: true, reactivated: !!incident.assistantId }) };
     }

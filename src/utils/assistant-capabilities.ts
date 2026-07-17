@@ -12,10 +12,9 @@
 // withTenant (RLS); `assistant_features`/`master_assistants` are owner-path config → read on
 // the owner connection. We resolve the join in JS to avoid mixing connections in one query.
 
-import { and, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, eq, ne, sql } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, assistantFeatures, masterAssistants } from '../../db/schema';
-import { ASSISTANT_FEATURE_KEYS } from '../config/assistant-features';
+import { aiAssistants, assistantFeatures, assistantFeatureDefs, masterAssistants } from '../../db/schema';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -41,7 +40,10 @@ export async function getOrgEnabledFeatures(db: Db, orgId: number): Promise<Set<
     const activeIds = new Set(active.map(a => a.masterAssistantId).filter((v): v is number => v != null));
     const activeRoles = new Set(active.map(a => a.roleKey).filter((v): v is string => !!v));
 
-    // Enabled feature rows across the catalogue (owner-path; small table).
+    // Enabled feature rows across the catalogue (owner-path; small table). The join against
+    // assistant_feature_defs restricts to keys that still exist AND are globally enabled — a def
+    // switched off in Admin → Master Data → Assistant Features is treated as off everywhere,
+    // without having to clear each stored value.
     const rows = await db
         .select({
             masterAssistantId: assistantFeatures.masterAssistantId,
@@ -50,9 +52,10 @@ export async function getOrgEnabledFeatures(db: Db, orgId: number): Promise<Set<
         })
         .from(assistantFeatures)
         .innerJoin(masterAssistants, eq(masterAssistants.id, assistantFeatures.masterAssistantId))
+        .innerJoin(assistantFeatureDefs, eq(assistantFeatureDefs.key, assistantFeatures.featureKey))
         .where(and(
             eq(assistantFeatures.enabled, true),
-            inArray(assistantFeatures.featureKey, ASSISTANT_FEATURE_KEYS),
+            eq(assistantFeatureDefs.isEnabled, true),
         ));
 
     const enabled = new Set<string>();

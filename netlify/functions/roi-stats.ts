@@ -9,6 +9,7 @@ import { eq, ne, and, gte, count, desc, sql, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, userProfiles, taskRuns, scheduledPosts, leads, plans, masterPlans, notifications } from '../../db/schema';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
+import { createNotification } from '../../src/utils/notify';
 import { requireSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
 import { parseRoiPeriod, roiPeriodStart } from '../../src/utils/roi-period';
@@ -193,11 +194,9 @@ export default withLambda(async (event: HandlerEvent) => {
                         .orderBy(desc(notifications.createdAt))
                         .limit(1);
                     if (existing && (existing.metadata as Record<string, unknown> | null)?.periodKey === periodKey) return;
-                    await db.insert(notifications).values({
+                    await createNotification(db, 'roi_milestone', {
                         userId,
-                        type: 'roi_milestone',
-                        title: 'Your assistants are paying for themselves!',
-                        message: `£${gbpSaved.toFixed(2)} saved this month — ${multiplier}× your subscription cost — your assistants are paying for themselves.`,
+                        context: { roi: { saved: gbpSaved.toFixed(2), multiplier } },
                         metadata: { periodKey, gbpSaved, multiplier },
                     });
                 } catch { /* non-blocking */ }

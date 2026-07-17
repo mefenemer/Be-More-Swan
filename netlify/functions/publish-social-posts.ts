@@ -5,16 +5,17 @@
 // Meta media-container flow. Posts the attached image when present (best-effort; falls
 // back to text-only if media upload fails). Refreshes expired X tokens on 401 and retries.
 //
-// NOTE: the per-platform API calls (incl. media upload) follow the documented contracts
-// but have NOT been validated against the live LinkedIn/X APIs — verify with real
-// connected accounts. Facebook is excluded: it has no distinct connection yet.
+// The per-platform publish drivers live in src/utils/social-publish.ts so the self-test harness
+// (social-publish-selftest.ts) runs the exact same code. Facebook is excluded here: it has its own
+// publisher (publish-facebook.ts) sharing the same driver module.
 
 import { Handler } from '@netlify/functions';
 import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts, systemConnections, rateLimitStates, publishCronLog, notifications } from '../../db/schema';
+import { scheduledPosts, systemConnections, rateLimitStates, publishCronLog } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { getSecret } from '../../src/utils/vault';
-import { resolvePostImage, refreshXToken, fetchImageBytes, type PostImage } from '../../src/utils/social-publish';
+import { resolvePostImage, refreshXToken, publishX, publishLinkedIn, type DriverResult } from '../../src/utils/social-publish';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -23,7 +24,6 @@ const BATCH = 100;
 const BACKOFF_MINS = [2, 8, 30];
 const MAX_ATTEMPTS = 3;
 const LABEL: Record<string, string> = { linkedin: 'LinkedIn', x: 'X (Twitter)' };
-const X_MAX = 280;
 // A row left in 'publishing' longer than this was orphaned by a timed-out tick — reclaim it.
 const STALE_PUBLISHING_MINS = 10;
 
@@ -34,7 +34,6 @@ type PostRow = {
     publish_date: string; platform: string; content_asset_ids: unknown;
     assistant_id: number | null;
 };
-type DriverResult = { ok: true; id: string } | { ok: false; status: number | null; error: string };
 
 const isRetryable = (s: number | null) => s === 429 || (s != null && s >= 500);
 const esc = (s: string) => s.replace(/'/g, "''");
@@ -127,11 +126,9 @@ export default withLambda(async () => {
             // covers autonomous posts that bypass manual approval). Never blocks publish success.
             await recordPostedAssets(db, { orgId: post.organisation_id, userId: post.user_id, scheduledPostId: post.id })
                 .catch(e => console.warn(`[publish-social-posts] recordPostedAssets failed for post ${post.id}:`, e?.message || e));
-            await db.insert(notifications).values({
+            await createNotification(db, 'post_published', {
                 userId: post.user_id,
-                type: 'post_published',
-                title: `Post published to ${LABEL[post.platform]}`,
-                message: `Your post has been published to ${LABEL[post.platform]}.`,
+                context: { platform: { label: LABEL[post.platform] } },
                 metadata: { postId: post.id, platform: post.platform, platformPostId: result.id, assistantId: post.assistant_id },
             });
             // Orchestration (Phase 5): this assistant just published — hand off to any linked
@@ -159,95 +156,6 @@ export default withLambda(async () => {
     return { statusCode: 200, body: JSON.stringify({ processed, succeeded, failed, durationMs }) };
 });
 
-// ── X (Twitter) ──────────────────────────────────────────────────────────────
-async function publishX(text: string, token: string, image: PostImage | null): Promise<DriverResult> {
-    let mediaId: string | null = null;
-    if (image) { try { mediaId = await uploadXMedia(image, token); } catch { /* text-only on media failure */ } }
-
-    const body: Record<string, unknown> = { text: text.slice(0, X_MAX) };
-    if (mediaId) body.media = { media_ids: [mediaId] };
-
-    const res = await fetch('https://api.twitter.com/2/tweets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(body),
-    });
-    const data: any = await res.json().catch(() => ({}));
-    if (res.ok && data?.data?.id) return { ok: true, id: String(data.data.id) };
-    return { ok: false, status: res.status, error: data?.detail || data?.title || `X API error (${res.status})` };
-}
-
-// Simple upload via media_data (base64). Returns media_id_string or null (→ text-only).
-async function uploadXMedia(image: PostImage, token: string): Promise<string | null> {
-    const bytes = await fetchImageBytes(image.url);
-    const res = await fetch('https://upload.twitter.com/1.1/media/upload.json', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Bearer ${token}` },
-        body: new URLSearchParams({ media_data: Buffer.from(bytes).toString('base64') }),
-    });
-    const data: any = await res.json().catch(() => ({}));
-    return res.ok ? (data?.media_id_string ?? null) : null;
-}
-
-// ── LinkedIn ─────────────────────────────────────────────────────────────────
-async function publishLinkedIn(text: string, token: string, authorId: string | null, image: PostImage | null): Promise<DriverResult> {
-    if (!authorId) return { ok: false, status: null, error: 'No LinkedIn author URN on connection.' };
-    const author = authorId.startsWith('urn:') ? authorId : `urn:li:person:${authorId}`;
-
-    let assetUrn: string | null = null;
-    if (image) { try { assetUrn = await uploadLinkedInImage(image, token, author); } catch { /* text-only on media failure */ } }
-
-    const shareContent: Record<string, unknown> = {
-        shareCommentary: { text },
-        shareMediaCategory: assetUrn ? 'IMAGE' : 'NONE',
-    };
-    if (assetUrn) shareContent.media = [{ status: 'READY', media: assetUrn }];
-
-    const res = await fetch('https://api.linkedin.com/v2/ugcPosts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Restli-Protocol-Version': '2.0.0' },
-        body: JSON.stringify({
-            author,
-            lifecycleState: 'PUBLISHED',
-            specificContent: { 'com.linkedin.ugc.ShareContent': shareContent },
-            visibility: { 'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC' },
-        }),
-    });
-    if (res.status === 201 || res.ok) {
-        const id = res.headers.get('x-restli-id') || (await res.json().catch(() => ({})) as any)?.id || 'posted';
-        return { ok: true, id: String(id) };
-    }
-    const data: any = await res.json().catch(() => ({}));
-    return { ok: false, status: res.status, error: data?.message || `LinkedIn API error (${res.status})` };
-}
-
-// registerUpload → PUT bytes → return the asset URN (or null → text-only).
-async function uploadLinkedInImage(image: PostImage, token: string, owner: string): Promise<string | null> {
-    const reg = await fetch('https://api.linkedin.com/v2/assets?action=registerUpload', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Restli-Protocol-Version': '2.0.0' },
-        body: JSON.stringify({
-            registerUploadRequest: {
-                recipes: ['urn:li:digitalmediaRecipe:feedshare-image'],
-                owner,
-                serviceRelationships: [{ relationshipType: 'OWNER', identifier: 'urn:li:userGeneratedContent' }],
-            },
-        }),
-    });
-    const regData: any = await reg.json().catch(() => ({}));
-    const asset: string | undefined = regData?.value?.asset;
-    const uploadUrl: string | undefined =
-        regData?.value?.uploadMechanism?.['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']?.uploadUrl;
-    if (!asset || !uploadUrl) return null;
-
-    const put = await fetch(uploadUrl, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': image.mimeType },
-        body: await fetchImageBytes(image.url),
-    });
-    return put.ok ? asset : null;
-}
-
 // ── Failure handling (rate-limit defer / retry backoff / permanent fail) ──────
 async function handleFailure(db: ReturnType<typeof getDb>, post: PostRow, reason: FailureReason, now: Date) {
     const attempt = post.attempt_count + 1;
@@ -269,11 +177,9 @@ async function handleFailure(db: ReturnType<typeof getDb>, post: PostRow, reason
         await db.execute(
             `UPDATE scheduled_posts SET status = 'failed', failure_reason = '${esc(JSON.stringify(reason))}', attempt_count = ${attempt}, updated_at = now() WHERE id = ${post.id}`
         );
-        await db.insert(notifications).values({
+        await createNotification(db, 'post_publish_failed', {
             userId: post.user_id,
-            type: 'post_publish_failed',
-            title: 'Post failed to publish',
-            message: `Publishing to ${LABEL[post.platform]} failed: ${reason.errorMessage}`,
+            context: { platform: { label: LABEL[post.platform] }, failure: { reason: reason.errorMessage } },
             metadata: { postId: post.id, platform: post.platform, reason, assistantId: post.assistant_id },
         });
     } else {

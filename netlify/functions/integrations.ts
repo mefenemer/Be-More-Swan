@@ -2,8 +2,10 @@ import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { eq, and, or, isNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { systemConnections, scheduledPosts, notifications, users, userOrganisations, auditLogs } from '../../db/schema';
+import { systemConnections, scheduledPosts, users, userOrganisations, auditLogs, workspaceIntegrations } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { storeSecret, deleteSecret, buildRefKey } from '../../src/utils/vault';
+import { deleteIntegration, isIntegrationProvider } from '../../src/utils/workspace-integrations';
 import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
@@ -70,6 +72,51 @@ export default withLambda(async (event) => {
                 }
             });
 
+            // Canva (and any future inbound source) authenticates through the org-scoped
+            // workspace_integrations store (src/utils/workspace-integrations.ts), not
+            // system_connections — so its real status must be merged in separately. Without
+            // this, system_connections never has a canva row, the card above always renders
+            // "Not connected", and the user can re-trigger the OAuth flow even when the org's
+            // Canva account is already linked (silently swapping which account is connected).
+            if (currentOrgId) {
+                const [canvaIntegration] = await db.select({
+                    id: workspaceIntegrations.id,
+                    status: workspaceIntegrations.status,
+                    externalAccountName: workspaceIntegrations.externalAccountName,
+                    scopes: workspaceIntegrations.scopes,
+                    expiresAt: workspaceIntegrations.expiresAt,
+                    createdAt: workspaceIntegrations.createdAt,
+                    updatedAt: workspaceIntegrations.updatedAt,
+                }).from(workspaceIntegrations).where(and(
+                    eq(workspaceIntegrations.organisationId, currentOrgId),
+                    eq(workspaceIntegrations.provider, 'canva'),
+                )).limit(1);
+                if (canvaIntegration) {
+                    // Shape matches safeColumns + connected exactly (same fields `merged`'s other
+                    // entries carry) — externalAccountName rides in externalUserId, which
+                    // _sourceCard's account chip already falls back to when the dedicated field
+                    // is absent.
+                    merged.push({
+                        // Negative id marks this as a workspace_integrations row rather than a
+                        // system_connections one — the two tables have independent id sequences,
+                        // so a positive id here could collide with an unrelated row. The DELETE
+                        // handler below reverses this to route disconnects to the right table.
+                        id: -canvaIntegration.id,
+                        serviceName: 'canva',
+                        connectionType: 'oauth',
+                        externalUserId: canvaIntegration.externalAccountName,
+                        scopes: canvaIntegration.scopes,
+                        status: canvaIntegration.status,
+                        isActive: canvaIntegration.status === 'active',
+                        metadata: null,
+                        createdAt: canvaIntegration.createdAt,
+                        updatedAt: canvaIntegration.updatedAt,
+                        tokenExpiresAt: canvaIntegration.expiresAt,
+                        connected: true,
+                    });
+                }
+            }
+
             // Server-side connection sandboxing: when scoped to an assistant, return
             // only the connectors relevant to its role (defence in depth — the UI also
             // filters, but the server is authoritative). Invalid assistant → 400.
@@ -134,6 +181,10 @@ export default withLambda(async (event) => {
                 slack:         ['channels:read', 'chat:write', 'files:write'],
             };
 
+            // Canonical form. service_name is persisted lowercase everywhere (the OAuth callbacks
+            // write literals like 'instagram'), and every consumer — publish-instagram,
+            // publish-social-posts, findTenantCollision — matches on a lowercase literal. A raw
+            // "Instagram" from this generic path would be invisible to all of them.
             const serviceKey = serviceName.toLowerCase();
             if (scopes && Array.isArray(scopes)) {
                 const allowed = ALLOWED_SCOPES[serviceKey];
@@ -159,16 +210,16 @@ export default withLambda(async (event) => {
                 .from(systemConnections)
                 .where(and(
                     eq(systemConnections.userId, currentUserId),
-                    eq(systemConnections.serviceName, serviceName),
+                    eq(systemConnections.serviceName, serviceKey),
                     ...(currentOrgId ? [eq(systemConnections.organisationId, currentOrgId)] : []),
                 ))
                 .limit(1);
 
             // US1 AC1.3: block if this account/handle is already live in another workspace.
             if (handle && currentOrgId) {
-                const collision = await findTenantCollision(db, { serviceName, externalUserId: handle, organisationId: currentOrgId });
+                const collision = await findTenantCollision(db, { serviceName: serviceKey, externalUserId: handle, organisationId: currentOrgId });
                 if (collision) {
-                    await recordCollisionAttempt(db, { requestingOrgId: currentOrgId, existingOrgId: collision.organisationId, serviceName, externalUserId: handle });
+                    await recordCollisionAttempt(db, { requestingOrgId: currentOrgId, existingOrgId: collision.organisationId, serviceName: serviceKey, externalUserId: handle });
                     return { statusCode: 409, body: JSON.stringify({
                         error: `This ${serviceName} account is already connected to another Be More Swan workspace. To use it, you must join the existing workspace or disconnect it from the other account.`,
                         code: 'TENANT_COLLISION',
@@ -177,7 +228,7 @@ export default withLambda(async (event) => {
             }
 
             const scopeString = Array.isArray(scopes) && scopes.length ? scopes.join(' ') : null;
-            const refKey = buildRefKey(currentUserId, serviceName, 'apikey');
+            const refKey = buildRefKey(currentUserId, serviceKey, 'apikey');
             await storeSecret(db, refKey, { token: apiKey });
 
             if (existing.length > 0) {
@@ -201,7 +252,7 @@ export default withLambda(async (event) => {
                 await db.insert(systemConnections).values({
                     userId: currentUserId,
                     organisationId: currentOrgId,
-                    serviceName,
+                    serviceName: serviceKey,
                     connectionType,
                     vaultRefKey: refKey,
                     externalUserId: handle || null,
@@ -220,6 +271,20 @@ export default withLambda(async (event) => {
             const connectionId = event.queryStringParameters?.id;
             if (!connectionId) return { statusCode: 400, body: JSON.stringify({ error: 'Connection ID required.' }) };
             const connIdInt = parseInt(connectionId);
+
+            // Negative id → a workspace_integrations row (e.g. Canva), synthesised by GET
+            // above. It lives in a different table with its own id sequence, so it needs its
+            // own disconnect path rather than falling through to the system_connections delete.
+            if (connIdInt < 0) {
+                if (!currentOrgId) return { statusCode: 400, body: JSON.stringify({ error: 'No organisation found for this account.' }) };
+                const [row] = await db.select({ provider: workspaceIntegrations.provider })
+                    .from(workspaceIntegrations)
+                    .where(and(eq(workspaceIntegrations.id, -connIdInt), eq(workspaceIntegrations.organisationId, currentOrgId)))
+                    .limit(1);
+                if (!row || !isIntegrationProvider(row.provider)) return { statusCode: 404, body: JSON.stringify({ error: 'Connection not found.' }) };
+                await deleteIntegration(db, currentOrgId, row.provider);
+                return { statusCode: 200, body: JSON.stringify({ success: true }) };
+            }
 
             // Fetch vaultRefKey + serviceName before deleting
             const [conn] = await db
@@ -296,13 +361,9 @@ export default withLambda(async (event) => {
             // Notification for all social platforms
             const platformLabel: Record<string, string> = { instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X (Twitter)' };
             const label = platformLabel[svcForPost] ?? conn?.serviceName ?? 'Platform';
-            await db.insert(notifications).values({
+            await createNotification(db, cancelledCount > 0 ? 'social_disconnected_posts_cancelled' : 'social_disconnected', {
                 userId: currentUserId,
-                type: 'social_oauth_revoked',
-                title: `${label} disconnected`,
-                message: cancelledCount > 0
-                    ? `${label} disconnected. ${cancelledCount} scheduled post${cancelledCount !== 1 ? 's have' : ' has'} been cancelled. Reconnect to resume publishing.`
-                    : `${label} disconnected successfully.`,
+                context: { platform: { label }, cancelled: { post_count: `${cancelledCount} scheduled post${cancelledCount !== 1 ? 's have' : ' has'}` } },
                 metadata: { connectionId: connIdInt, platform: svcForPost, cancelledCount, assistantId: conn?.assistantId ?? null },
             });
 

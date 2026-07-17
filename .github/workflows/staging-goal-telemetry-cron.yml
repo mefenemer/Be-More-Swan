@@ -1,0 +1,57 @@
+# Drives the staging SMART Goals telemetry poll.
+#
+# Why this exists: Netlify runs scheduled functions ONLY on the production deploy —
+# never on branch/preview deploys. Staging (https://staging--bemoreswan.netlify.app)
+# is a branch deploy of the `staging` branch, so its `poll-goal-telemetry` cron never
+# fires there. Without it, goal status never advances past 'pending', so the
+# Assistants card's "On Track / Off Track" summary stays at 0/0 forever on staging
+# even when there has been activity (see issue #62).
+#
+# This workflow pokes the staging worker over HTTP so goal status advances on staging
+# the same way the native cron does it on production. Same pattern as
+# staging-content-cron.yml / run-content-jobs.ts.
+#
+# REQUIRED SETUP: reuses the SAME CRON_TRIGGER_SECRET as staging-content-cron.yml
+# (GitHub repo secret + Netlify env var, both already required for that workflow).
+# The wrapper endpoint (run-goal-telemetry) FAILS CLOSED — it returns 503 until the
+# secret is set, so it can never be an open, cost-incurring endpoint.
+
+name: Staging goal-telemetry poll
+
+on:
+  schedule:
+    - cron: "0 * * * *"   # hourly, matching poll-goal-telemetry's production cadence
+  workflow_dispatch: {}     # allow manual "Run workflow" from the Actions tab
+
+# If a previous run is still going, don't pile up.
+concurrency:
+  group: staging-goal-telemetry-cron
+  cancel-in-progress: false
+
+jobs:
+  poll:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST to staging run-goal-telemetry
+        env:
+          ENDPOINT: "https://staging--bemoreswan.netlify.app/.netlify/functions/run-goal-telemetry"
+          CRON_SECRET: ${{ secrets.CRON_TRIGGER_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::Repo secret CRON_TRIGGER_SECRET is not set — the endpoint will reject the call (401/503)."
+            exit 1
+          fi
+          echo "POST $ENDPOINT"
+          HTTP_CODE=$(curl -sS -o /tmp/body.txt -w "%{http_code}" \
+            --max-time 120 --retry 2 --retry-delay 5 \
+            -X POST -H "Authorization: Bearer ${CRON_SECRET}" "$ENDPOINT")
+          echo "HTTP $HTTP_CODE"
+          echo "----- response body -----"
+          cat /tmp/body.txt || true
+          echo
+          echo "-------------------------"
+          case "$HTTP_CODE" in
+            2*) echo "OK" ;;
+            *)  echo "::error::Worker returned HTTP $HTTP_CODE"; exit 1 ;;
+          esac

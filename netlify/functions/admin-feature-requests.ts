@@ -23,7 +23,7 @@ import jwt from 'jsonwebtoken';
 import { eq, asc, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { featureRequests, featureRequestVotes, masterAssistants, users } from '../../db/schema';
-import { isAdminRole } from '../../src/utils/rbac';
+import { hasPermission } from '../../src/utils/rbac';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import {
@@ -60,7 +60,7 @@ async function requireAdmin(event: any): Promise<{ id: number; role: string } | 
     try { userId = (jwt.verify(match[1], jwtSecret) as { userId: number }).userId; } catch { return null; }
     const db = getDb();
     const [row] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId)).limit(1);
-    if (!row || !isAdminRole(row.role)) return null;
+    if (!hasPermission(row?.role, 'manage_feature_requests')) return null;
     return { id: userId, role: row.role };
 }
 

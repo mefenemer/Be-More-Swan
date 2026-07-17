@@ -13,6 +13,7 @@ import { Handler } from '@netlify/functions';
 import { and, eq, gte, isNotNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { blogPosts, notifications, workspaceIntegrations } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { getFreshAccessToken, IntegrationError } from '../../src/utils/workspace-integrations';
 import { evaluateDecay, gscDateRange, matchProperty } from '../../src/utils/gsc-decay';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -113,11 +114,9 @@ export default withLambda(async () => {
                 const already = recent.some((r) => r.metadata && (r.metadata as { blogPostId?: number }).blogPostId === post.id);
                 if (already) continue;
 
-                await db.insert(notifications).values({
+                await createNotification(db, 'blog_content_decay', {
                     userId: post.userId,
-                    type: 'blog_content_decay',
-                    title: `Traffic dropping: “${post.title}”`,
-                    message: `Search impressions for “${post.title}” have fallen to ${current} from a peak of ${peak}. Consider refreshing the post to recover its ranking.`,
+                    context: { post: { title: post.title, current_impressions: current, peak_impressions: peak } },
                     metadata: { blogPostId: post.id, canonicalUrl: url, current, baseline: peak, property },
                 });
                 flagged++;

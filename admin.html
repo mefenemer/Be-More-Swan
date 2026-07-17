@@ -72,6 +72,12 @@
         <span class="text-xl">🛡️</span>
         <span class="text-[10px] font-bold mt-0.5 hidden lg:block truncate text-gray-400 group-hover:text-white transition-colors">Security</span>
       </button>
+      <button data-cat="communications" onclick="adminCatNav('communications')"
+        class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
+        aria-label="Communications" title="Communications">
+        <span class="text-xl">✉️</span>
+        <span class="text-[10px] font-bold mt-0.5 hidden lg:block truncate text-gray-400 group-hover:text-white transition-colors">Comms</span>
+      </button>
       <button data-cat="compliance" onclick="adminCatNav('compliance')"
         class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
         aria-label="Compliance" title="Compliance">
@@ -83,6 +89,12 @@
         aria-label="Testing" title="Testing">
         <span class="text-xl">🐞</span>
         <span class="text-[10px] font-bold mt-0.5 hidden lg:block truncate text-gray-400 group-hover:text-white transition-colors">Testing</span>
+      </button>
+      <button data-cat="workspaces" onclick="adminCatNav('workspaces')"
+        class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
+        aria-label="Workspaces" title="Workspaces">
+        <span class="text-xl">🏢</span>
+        <span class="text-[10px] font-bold mt-0.5 hidden lg:block truncate text-gray-400 group-hover:text-white transition-colors">Spaces</span>
       </button>
     </nav>
     <div class="pb-4 flex flex-col items-center gap-1">
@@ -248,14 +260,6 @@
       <section id="view-catalog" class="admin-view hidden">
         <p class="text-sm text-gray-500 mb-5">Toggle &#34;Coming Soon&#34; / &#34;Live&#34; status. Switching to Live triggers the waitlist notification loop.</p>
         <div id="catalog-grid" class="bg-white rounded-2xl border border-gray-200 overflow-hidden">
-          <div class="px-5 py-8 text-center text-gray-400">Loading…</div>
-        </div>
-      </section>
-
-      <!-- ── Assistant Features ─────────────────────────────────────── -->
-      <section id="view-assistant-features" class="admin-view hidden">
-        <p class="text-sm text-gray-500 mb-5">Choose which features each assistant type exposes to customers. Toggling a box takes effect immediately — customers see the feature only if one of their active assistants is a type with it enabled (some features also require a specific plan tier).</p>
-        <div id="assistant-features-grid" class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
           <div class="px-5 py-8 text-center text-gray-400">Loading…</div>
         </div>
       </section>
@@ -654,8 +658,9 @@
         <!-- Tab bar -->
         <div class="flex gap-1 overflow-x-auto mb-5 border-b border-gray-200 pb-0" id="md-tab-bar">
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="plans" onclick="mdSwitchTab('plans')">Plans</button>
-          <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="plan-prices" onclick="mdSwitchTab('plan-prices')">Plan Prices</button>
+          <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="plan-features" onclick="mdSwitchTab('plan-features')">Plan Features</button>
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="assistants" onclick="mdSwitchTab('assistants')">Assistants</button>
+          <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="assistant-features" onclick="mdSwitchTab('assistant-features')">Assistant Features</button>
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="assistant-versions" onclick="mdSwitchTab('assistant-versions')">Versions</button>
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="feature-flags-md" onclick="mdSwitchTab('feature-flags-md')">Flag Definitions</button>
           <button class="md-tab px-4 py-2 text-sm font-semibold rounded-t-lg border-b-2 whitespace-nowrap" data-tab="languages" onclick="mdSwitchTab('languages')">Languages</button>
@@ -679,19 +684,20 @@
           </div>
         </div>
 
-        <!-- Plan Prices tab -->
-        <div id="md-pane-plan-prices" class="md-pane hidden">
+        <!-- Plan Features tab — DB-driven pricing feature matrix (feature rows × plan columns) -->
+        <div id="md-pane-plan-features" class="md-pane hidden">
           <div class="flex items-center justify-between mb-3">
-            <h2 class="text-sm font-bold text-gray-700">Plan Prices</h2>
-            <button onclick="mdOpenAdd('plan-prices')" class="px-3 py-1.5 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition">+ Add Price</button>
+            <div>
+              <h2 class="text-sm font-bold text-gray-700">Plan Features</h2>
+              <p class="text-xs text-gray-400 mt-0.5">Edit each feature's value per plan, or disable a feature entirely. Drives the pricing page and in-app feature limits.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="pfOpenAddFeature()" class="px-3 py-1.5 bg-gray-100 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-200 transition">+ Add Feature</button>
+              <button id="pf-save-btn" onclick="pfOpenApplyChooser()" disabled class="px-3 py-1.5 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition disabled:opacity-40 disabled:cursor-not-allowed">Save changes</button>
+            </div>
           </div>
-          <div class="bg-white rounded-2xl border border-gray-200 overflow-x-auto">
-            <table class="w-full text-sm admin-responsive-table">
-              <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase tracking-wide">
-                <tr><th class="px-4 py-3 text-left">Plan</th><th class="px-4 py-3 text-left">Currency</th><th class="px-4 py-3 text-right">Monthly</th><th class="px-4 py-3 text-right">Annual</th><th class="px-4 py-3 text-left">Actions</th></tr>
-              </thead>
-              <tbody id="md-plan-prices-tbody"><tr><td colspan="5" class="px-5 py-8 text-center text-gray-400">Loading…</td></tr></tbody>
-            </table>
+          <div id="md-plan-features-body" class="bg-white rounded-2xl border border-gray-200 overflow-x-auto p-1">
+            <div class="px-5 py-8 text-center text-gray-400">Loading…</div>
           </div>
         </div>
 
@@ -708,6 +714,25 @@
               </thead>
               <tbody id="md-assistants-tbody"><tr><td colspan="5" class="px-5 py-8 text-center text-gray-400">Loading…</td></tr></tbody>
             </table>
+          </div>
+        </div>
+
+        <!-- Assistant Features tab — capability matrix (feature rows × assistant columns).
+             Distinct from the "Key Features" marketing bullets on the Assistants tab: these are
+             capability gates (AI image/video generation), enforced by assistant-capabilities.ts. -->
+        <div id="md-pane-assistant-features" class="md-pane hidden">
+          <div class="flex items-center justify-between mb-3">
+            <div>
+              <h2 class="text-sm font-bold text-gray-700">Assistant Features</h2>
+              <p class="text-xs text-gray-400 mt-0.5">Switch each capability on or off per assistant type, or disable one entirely. Gates what a hired assistant can actually do.</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="afOpenAddFeature()" class="px-3 py-1.5 bg-gray-100 text-gray-700 text-xs font-bold rounded-lg hover:bg-gray-200 transition">+ Add Feature</button>
+              <button id="af-save-btn" onclick="afSave()" disabled class="px-3 py-1.5 bg-gray-900 text-white text-xs font-bold rounded-lg hover:bg-black transition disabled:opacity-40 disabled:cursor-not-allowed">Save changes</button>
+            </div>
+          </div>
+          <div id="md-assistant-features-body" class="bg-white rounded-2xl border border-gray-200 overflow-x-auto p-1">
+            <div class="px-5 py-8 text-center text-gray-400">Loading…</div>
           </div>
         </div>
 
@@ -826,6 +851,42 @@
             <button onclick="mdCloseForm()" class="px-4 py-2 border border-gray-200 text-gray-600 text-sm font-semibold rounded-lg hover:bg-gray-50 transition">Cancel</button>
           </div>
         </div>
+
+        <!-- Manage Price panel — single-source price management (immediate or scheduled) + history -->
+        <div id="md-price-panel" class="hidden mt-5 bg-white rounded-2xl border border-indigo-200 p-6">
+          <div class="flex items-start justify-between mb-4">
+            <div>
+              <h3 class="text-sm font-bold text-gray-800">Manage Price — <span id="mp-plan-name"></span></h3>
+              <p class="text-xs text-gray-500 mt-1">Current live price: <span id="mp-current" class="font-mono font-bold text-gray-700">—</span> <span id="mp-current-since" class="text-gray-400"></span></p>
+            </div>
+            <button onclick="managePriceClose()" class="text-gray-400 hover:text-gray-600 text-lg leading-none">&times;</button>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-xs font-bold text-gray-500 mb-1">New monthly price (GBP) <span class="text-red-500">*</span></label>
+              <input id="mp-new-price" type="number" min="0" step="0.01" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none">
+            </div>
+            <div>
+              <label class="block text-xs font-bold text-gray-500 mb-1">Effective date <span class="text-gray-400 font-normal">(blank = apply now)</span></label>
+              <input id="mp-effective-from" type="datetime-local" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none">
+            </div>
+          </div>
+          <p class="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">⚠️ Applies to <strong>new</strong> subscribers only. Existing subscribers keep their current price until they change plan (handled separately). Saving mints a new Stripe price and archives the old one.</p>
+          <div class="flex gap-3 mt-4">
+            <button id="mp-save-btn" onclick="managePriceSave()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-bold rounded-lg transition">Save price</button>
+            <button onclick="managePriceClose()" class="px-4 py-2 border border-gray-200 text-gray-600 text-sm font-semibold rounded-lg hover:bg-gray-50 transition">Cancel</button>
+            <span id="mp-status" class="self-center text-xs"></span>
+          </div>
+          <h4 class="text-xs font-bold text-gray-500 uppercase tracking-wide mt-6 mb-2">Price history</h4>
+          <div class="border border-gray-100 rounded-xl overflow-x-auto">
+            <table class="w-full text-xs">
+              <thead class="bg-gray-50 text-gray-500 font-bold uppercase tracking-wide">
+                <tr><th class="px-3 py-2 text-right">Price</th><th class="px-3 py-2 text-left">From</th><th class="px-3 py-2 text-left">To</th><th class="px-3 py-2 text-center">Status</th><th class="px-3 py-2 text-left">Stripe price</th></tr>
+              </thead>
+              <tbody id="mp-history-tbody"><tr><td colspan="5" class="px-3 py-4 text-center text-gray-400">Loading…</td></tr></tbody>
+            </table>
+          </div>
+        </div>
       </section>
 
       <!-- ── US-ADM-3.2.1: Emergency Controls / Kill Switches ────────── -->
@@ -871,49 +932,56 @@
         </div>
       </section>
 
-      <!-- ── US-SALES-1.1 Part 5: Sales Pipeline ──────────────────────── -->
-      <section id="view-sales-pipeline" class="admin-view hidden">
-        <div class="flex items-center justify-between mb-5">
-          <div>
-            <h2 class="text-lg font-bold text-gray-900">Sales Pipeline</h2>
-            <p class="text-sm text-gray-500 mt-0.5">All captured leads — role requests, enterprise enquiries, cancellation risk, upgrade candidates, and more.</p>
-          </div>
-          <button onclick="loadSalesPipeline()" class="text-sm px-4 py-2 bg-emerald-600 text-white rounded-lg font-semibold hover:bg-emerald-700">Refresh</button>
-        </div>
+      <!-- ── CRM Contacts (contact-centric 3-pane) ─────────────────────── -->
+      <section id="view-contacts" class="admin-view hidden">
+        <div class="flex flex-col lg:flex-row gap-4 lg:h-[calc(100vh-150px)] lg:min-h-[540px]">
 
-        <!-- Filters -->
-        <div class="flex flex-wrap gap-2 mb-4">
-          <select id="sp-filter-type" onchange="loadSalesPipeline()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-            <option value="">All types</option>
-            <option value="enterprise_enquiry">Enterprise enquiry</option>
-            <option value="role_request">Role request</option>
-            <option value="cancellation_intent">Cancellation intent</option>
-            <option value="upgrade_intent">Upgrade intent</option>
-            <option value="trial_expiry">Trial expiry</option>
-            <option value="never_onboarded">Never onboarded</option>
-            <option value="waitlist_interest">Waitlist interest</option>
-            <option value="contact_form">Contact form</option>
-            <option value="payment_recovery">Payment recovery</option>
-          </select>
-          <select id="sp-filter-priority" onchange="loadSalesPipeline()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-            <option value="">All priorities</option>
-            <option value="high">High</option>
-            <option value="medium">Medium</option>
-            <option value="low">Low</option>
-          </select>
-          <select id="sp-filter-status" onchange="loadSalesPipeline()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
-            <option value="">All statuses</option>
-            <option value="notification_pending">New</option>
-            <option value="contacted">Contacted</option>
-            <option value="qualified">Qualified</option>
-            <option value="converted">Converted</option>
-            <option value="closed_lost">Closed lost</option>
-          </select>
-          <input id="sp-filter-search" type="text" placeholder="Search email or name…" oninput="loadSalesPipeline()" class="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none w-52">
-        </div>
+          <!-- LEFT: people list -->
+          <aside class="lg:w-72 shrink-0 bg-white border border-gray-200 rounded-2xl flex flex-col overflow-hidden">
+            <div class="p-3 border-b border-gray-100">
+              <div class="flex items-center justify-between mb-2">
+                <h2 class="text-sm font-bold text-gray-900">Contacts</h2>
+                <button onclick="loadContacts()" title="Refresh" class="text-gray-400 hover:text-emerald-600 text-sm">↻</button>
+              </div>
+              <input id="contacts-search" placeholder="Search name, email, company…" oninput="_contactsSearchDebounced()"
+                class="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+              <select id="contacts-type-filter" onchange="_contactsSetType(this.value)" class="w-full mt-2 text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+                <option value="">All types</option>
+                <option value="lead">Leads</option>
+                <option value="registered">Registered</option>
+                <option value="client">Clients</option>
+                <option value="other">Other</option>
+              </select>
+              <select id="contacts-opp-filter" onchange="_contactsSetOpp(this.value)" class="w-full mt-2 text-xs border border-gray-200 rounded-lg px-2 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+                <option value="">All opportunities</option>
+                <option value="waitlist_interest">Future Assistant Opportunity</option>
+                <option value="role_request">Assistant Request</option>
+                <option value="enterprise_enquiry">Enterprise Enquiry</option>
+                <option value="upgrade_intent">Upgrade Opportunity</option>
+                <option value="cancellation_intent">Churn Risk</option>
+                <option value="never_onboarded">Not Onboarded</option>
+                <option value="payment_recovery">Payment Recovery</option>
+                <option value="contact_form">Enquiry</option>
+                <option value="inbound_email">Inbound Email</option>
+              </select>
+            </div>
+            <div id="contacts-list" class="flex-1 overflow-y-auto min-h-[240px]">
+              <p class="p-4 text-sm text-gray-400 animate-pulse">Loading…</p>
+            </div>
+          </aside>
 
-        <div id="sales-pipeline-body">
-          <p class="text-gray-400 text-sm">Loading…</p>
+          <!-- CENTER: contact detail -->
+          <main class="flex-1 bg-white border border-gray-200 rounded-2xl overflow-y-auto min-h-[320px]">
+            <div id="contact-detail" class="h-full flex items-center justify-center text-gray-400 text-sm">
+              Select a contact to see their activity.
+            </div>
+          </main>
+
+          <!-- RIGHT: contact info -->
+          <aside class="lg:w-72 shrink-0 bg-white border border-gray-200 rounded-2xl overflow-y-auto">
+            <div id="contact-info" class="p-5 text-sm text-gray-400">No contact selected.</div>
+          </aside>
+
         </div>
       </section>
 
@@ -1436,6 +1504,7 @@
               </div>
             </div>
             <div class="flex items-center gap-2">
+              <button onclick="restoreEmailTemplate()" id="et-restore-btn" class="hidden px-3 py-2 text-sm font-semibold border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition">Restore to default</button>
               <button onclick="sendEmailTest()" id="et-test-btn" class="px-3 py-2 text-sm font-semibold border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition">Send test to me</button>
               <button onclick="saveEmailTemplate()" id="et-save-btn" class="px-4 py-2 text-sm font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition">Save</button>
             </div>
@@ -1470,14 +1539,27 @@
 
               <div>
                 <div class="flex items-center justify-between mb-1">
-                  <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide">Body</label>
+                  <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs font-bold">
+                    <button type="button" id="et-tab-rich" onclick="setEmailBodyTab('rich')" class="px-3 py-1 bg-emerald-600 text-white">Rich text</button>
+                    <button type="button" id="et-tab-plain" onclick="setEmailBodyTab('plain')" class="px-3 py-1 bg-white text-gray-600">Plain text</button>
+                  </div>
                   <select id="et-var-picker" onchange="insertEmailVariable(this.value); this.value='';"
                           class="text-xs border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white">
                     <option value="">Insert variable…</option>
                   </select>
                 </div>
-                <div id="et-quill" style="min-height:240px;background:#fff;"></div>
-                <p class="text-xs text-gray-400 mt-1">Use fallbacks for optional fields, e.g. <code>{{user.first_name | "there"}}</code>.</p>
+                <!-- Rich text (HTML body) -->
+                <div id="et-body-rich">
+                  <div id="et-quill" style="min-height:240px;background:#fff;"></div>
+                  <p class="text-xs text-gray-400 mt-1">Use fallbacks for optional fields, e.g. <code>{{user.first_name | "there"}}</code>.</p>
+                </div>
+                <!-- Plain text (alternative part) -->
+                <div id="et-body-plain" class="hidden">
+                  <textarea id="et-body-text" rows="11" oninput="scheduleEtPreview()"
+                            class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-400"
+                            placeholder="Leave blank to auto-generate the plain-text part from the HTML body."></textarea>
+                  <p class="text-xs text-gray-400 mt-1">Sent to text-only mail clients. Blank = auto-derived from the HTML above at send time.</p>
+                </div>
               </div>
             </div>
 
@@ -1494,6 +1576,105 @@
               <div class="bg-gray-100 rounded-xl p-4 flex justify-center">
                 <iframe id="et-pv-frame" title="Email preview" style="width:600px;max-width:100%;height:560px;border:0;background:#fff;border-radius:8px;transition:width .2s;"></iframe>
               </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── US-COMMS-2: Notification Templates (in-app) ───────────────────── -->
+      <section id="view-notification-templates" class="admin-view hidden overflow-y-auto" style="max-height:calc(100vh - 130px)">
+        <!-- List -->
+        <div id="nt-list-pane">
+          <div class="mb-6">
+            <h2 class="text-lg font-extrabold text-gray-900">Notification Templates</h2>
+            <p class="text-sm text-gray-500 mt-0.5">Edit the copy for in-app notifications shown in users' Action Center and inbox. Dynamic fields like <code>{{assistant.name}}</code> are filled in when the notification fires.</p>
+          </div>
+          <div id="nt-list" class="text-gray-500 text-sm">Loading…</div>
+        </div>
+
+        <!-- Editor -->
+        <div id="nt-editor-pane" class="hidden">
+          <div class="flex items-center justify-between flex-wrap gap-3 mb-5">
+            <div class="flex items-center gap-3">
+              <button onclick="closeNotifEditor()" class="text-gray-400 hover:text-gray-700 text-sm font-semibold">← Back</button>
+              <div>
+                <h2 id="nt-editor-title" class="text-lg font-extrabold text-gray-900">Edit Notification</h2>
+                <p class="text-xs text-gray-400 mt-0.5"><span id="nt-editor-category"></span> · <span class="text-gray-400">In-App</span> · <code id="nt-editor-key" class="text-gray-500"></code></p>
+              </div>
+            </div>
+            <div class="flex items-center gap-2">
+              <button onclick="restoreNotifTemplate()" id="nt-restore-btn" class="hidden px-3 py-2 text-sm font-semibold border border-amber-300 text-amber-700 rounded-lg hover:bg-amber-50 transition">Restore to default</button>
+              <button onclick="saveNotifTemplate()" id="nt-save-btn" class="px-4 py-2 text-sm font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition">Save</button>
+            </div>
+          </div>
+
+          <div id="nt-status" class="hidden mb-4 text-sm rounded-lg px-3 py-2"></div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Left: editor controls -->
+            <div class="space-y-4">
+              <div id="nt-active-row" class="flex items-center justify-between bg-white border border-gray-200 rounded-xl px-4 py-3">
+                <div>
+                  <p class="text-sm font-bold text-gray-800">Active</p>
+                  <p class="text-xs text-gray-400">When off, this notification will not be created.</p>
+                </div>
+                <label class="inline-flex items-center cursor-pointer">
+                  <input type="checkbox" id="nt-active" class="sr-only peer">
+                  <div class="relative w-11 h-6 bg-gray-200 peer-checked:bg-emerald-600 rounded-full peer transition after:content-[''] after:absolute after:top-0.5 after:left-0.5 after:bg-white after:rounded-full after:h-5 after:w-5 after:transition peer-checked:after:translate-x-5"></div>
+                </label>
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Title</label>
+                <input id="nt-title" type="text" oninput="scheduleNotifPreview()"
+                       class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400">
+              </div>
+
+              <div>
+                <div class="flex items-center justify-between mb-1">
+                  <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs font-bold">
+                    <button type="button" id="nt-tab-source" onclick="setNotifBodyTab('source')" class="px-3 py-1 bg-emerald-600 text-white">Plain text</button>
+                    <button type="button" id="nt-tab-preview" onclick="setNotifBodyTab('preview')" class="px-3 py-1 bg-white text-gray-600">Rich preview</button>
+                  </div>
+                  <select id="nt-var-picker" onchange="insertNotifVariable(this.value); this.value='';"
+                          class="text-xs border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-400 bg-white">
+                    <option value="">Insert variable…</option>
+                  </select>
+                </div>
+                <!-- Plain text source -->
+                <div id="nt-body-source">
+                  <textarea id="nt-message" rows="6" oninput="scheduleNotifPreview()"
+                            class="w-full border border-gray-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400"></textarea>
+                  <p class="text-xs text-gray-400 mt-1">Plain text, with optional light formatting (<code>&lt;strong&gt;</code>, <code>&lt;em&gt;</code>). Use fallbacks, e.g. <code>{{assistant.name | "your assistant"}}</code>.</p>
+                </div>
+                <!-- Rich preview (rendered message) -->
+                <div id="nt-body-preview" class="hidden">
+                  <div id="nt-message-rendered" class="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm text-gray-600 bg-gray-50 min-h-[8rem]"></div>
+                  <p class="text-xs text-gray-400 mt-1">How the message renders, with dummy data in place of variables.</p>
+                </div>
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Available variables</label>
+                <div id="nt-var-list" class="flex flex-wrap gap-1.5 text-xs"></div>
+              </div>
+            </div>
+
+            <!-- Right: live preview card -->
+            <div>
+              <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">Live Preview</label>
+              <div class="bg-gray-100 rounded-xl p-4">
+                <div class="bg-white rounded-xl border border-gray-200 p-4 flex gap-3">
+                  <div class="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-lg">🔔</div>
+                  <div class="min-w-0 flex-1">
+                    <p class="text-xs font-bold text-gray-400 mb-0.5">Be More Swan</p>
+                    <p id="nt-pv-title" class="text-sm font-bold text-gray-900"></p>
+                    <p id="nt-pv-message" class="text-sm text-gray-500 mt-0.5"></p>
+                    <p class="text-xs text-gray-400 mt-1">just now</p>
+                  </div>
+                </div>
+              </div>
+              <p class="text-xs text-gray-400 mt-2">Preview uses sample data; the live notification uses real values when it fires.</p>
             </div>
           </div>
         </div>
@@ -1731,6 +1912,19 @@
 <style>
   /* Legacy flat nav buttons (kept for any JS still referencing them) */
   .admin-nav-btn { display: none; }
+
+  /* Contact detail — collapsible sections (native <details>, chevron rotates on open) */
+  .contact-section > summary { list-style: none; }
+  .contact-section > summary::-webkit-details-marker { display: none; }
+  .contact-section > summary { outline: none; }
+  .contact-section[open] > summary .contact-section-chev { transform: rotate(180deg); }
+  /* Collapse the body when closed (this stack's <details> doesn't hide it natively). */
+  .contact-section:not([open]) > .ct-sec-body { display: none; }
+  /* Contact detail — message bubbles (client left, Super Admin right) */
+  .ct-msg-row { display: flex; }
+  .ct-msg-row.ct-out { justify-content: flex-end; }
+  .ct-msg-row.ct-in { justify-content: flex-start; }
+  .ct-bubble { max-width: 80%; }
 
   /* Two-tier nav — US-ADM-1.4.1 */
   .admin-cat-btn { color: #9ca3af; border-left: 3px solid transparent; }
@@ -1976,71 +2170,83 @@ function debounce(fn, ms) {
 // ── Navigation — US-ADM-1.4.1 Two-tier nav ───────────────────────────────────
 const VIEW_LABELS = {
   dashboard: 'Dashboard', users: 'All Users', tickets: 'Support Tickets',
-  catalog: 'Assistant Catalog', 'assistant-features': 'Assistant Features', analytics: 'Analytics', 'model-config': 'AI Model Config',
+  catalog: 'Assistant Catalog', analytics: 'Analytics', 'model-config': 'AI Model Config',
   logs: 'System Logs', 'audit-log': 'Audit Log', 'security-abuse': 'Security & Abuse', cogs: 'COGS Dashboard',
   reconciliation: 'Stripe Reconciliation', dunning: 'Dunning Queue',
   'manage-admins': 'Admin Accounts', 'kill-switches': 'Emergency Controls',
   gamification: 'Gamification Settings', 'session-timeout': 'Session Timeout', 'reward-audits': 'Reward Audits',
-  'feature-flags': 'Feature Flags', 'sales-pipeline': 'Sales Pipeline',
+  'feature-flags': 'Feature Flags', contacts: 'Contacts',
   'breach-response': 'Breach Response', 'master-data': 'Master Data',
   workspaces: 'Workspaces', 'workspace-detail': 'Workspace Detail',
   'blueprint-inspector': 'Blueprint Inspector', sandbox: 'Sandbox Environment',
-  'email-templates': 'Manage Emails', systems: 'Systems & Connections',
+  'email-templates': 'Manage Emails', 'notification-templates': 'Notification Templates',
+  systems: 'Systems & Connections',
   'issue-reports': 'Issue Reports', 'feature-roadmap': 'Feature Requests',
 };
 
-// Category → child items mapping
+// Category → child items mapping.
+//
+// Each child declares the permission that its API already enforces server-side —
+// NOT a list of role names. Role lists here used to be maintained by hand and had
+// drifted out of step with src/utils/rbac.ts, which is the real gate: a page could
+// be visible to a role the API then refused, or (worse) hidden from a role that was
+// perfectly entitled to it. Permissions come from ?resource=my-permissions, which
+// resolves them from rbac.ts, so there is exactly one matrix.
+//
+// A category is shown when at least one of its children is — no separate cat gate.
 const ADMIN_CATS = {
-  dashboard: { label: 'Dashboard', roles: null, children: [
-    { view: 'dashboard', icon: '📊', label: 'Dashboard' },
+  dashboard: { label: 'Dashboard', children: [
+    { view: 'dashboard', icon: '📊', label: 'Dashboard', perm: null }, // always visible to any admin
   ]},
-  users: { label: 'Users', roles: ['admin','super_admin','support_agent'], children: [
-    { view: 'users',    icon: '👥', label: 'All Users' },
-    { view: 'tickets',  icon: '🎫', label: 'Support Tickets' },
-    { view: 'sales-pipeline', icon: '💼', label: 'Sales Pipeline' },
+  users: { label: 'Users', children: [
+    { view: 'users',    icon: '👥', label: 'All Users',       perm: 'view_users' },
+    { view: 'contacts', icon: '👤', label: 'Contacts',        perm: 'view_users' },
+    { view: 'tickets',  icon: '🎫', label: 'Support Tickets', perm: 'view_tickets' },
   ]},
-  billing: { label: 'Billing', roles: ['admin','super_admin','billing_admin'], children: [
-    { view: 'reconciliation', icon: '🔄', label: 'Stripe Reconciliation' },
-    { view: 'dunning',        icon: '⏰', label: 'Dunning Queue' },
-    { view: 'disputes',       icon: '⚠️', label: 'Disputes' },
-    { view: 'cogs',           icon: '💰', label: 'COGS Dashboard' },
+  billing: { label: 'Billing', children: [
+    { view: 'reconciliation', icon: '🔄', label: 'Stripe Reconciliation', perm: 'view_reconciliation' },
+    { view: 'dunning',        icon: '⏰', label: 'Dunning Queue',         perm: 'dunning_override' },
+    { view: 'disputes',       icon: '⚠️', label: 'Disputes',              perm: 'view_reconciliation' },
+    { view: 'cogs',           icon: '💰', label: 'COGS Dashboard',        perm: 'view_cogs' },
   ]},
-  assistants: { label: 'Assistants', roles: ['admin','super_admin','platform_admin'], children: [
-    { view: 'catalog',              icon: '🤖', label: 'Assistant Catalog' },
-    { view: 'assistant-features',   icon: '🎚️', label: 'Assistant Features' },
-    { view: 'model-config',         icon: '⚙️', label: 'AI Model Config' },
-    { view: 'blueprint-inspector',  icon: '🔬', label: 'Blueprint Inspector' },
+  assistants: { label: 'Assistants', children: [
+    { view: 'catalog',              icon: '🤖', label: 'Assistant Catalog',  perm: 'assistant_catalog' },
+    // Assistant Features moved to Master Data → Assistant Features, where its catalog is now
+    // DB-driven and sits alongside the assistant copy fields it relates to.
+    { view: 'model-config',         icon: '⚙️', label: 'AI Model Config',    perm: 'platform_config' },
+    { view: 'blueprint-inspector',  icon: '🔬', label: 'Blueprint Inspector', perm: 'assistant_catalog' },
   ]},
-  platform: { label: 'Platform', roles: ['admin','super_admin','platform_admin'], children: [
-    { view: 'analytics',            icon: '📈', label: 'Analytics' },
-    { view: 'master-data',          icon: '🗂️', label: 'Master Data' },
-    { view: 'feature-flags',        icon: '🚩', label: 'Feature Flags' },
-    { view: 'kill-switches',        icon: '🚨', label: 'Emergency Controls' },
-    { view: 'gamification',         icon: '🎮', label: 'Gamification Settings' },
-    { view: 'session-timeout',      icon: '⏱️', label: 'Session Timeout', superAdminOnly: true },
-    { view: 'reward-audits',        icon: '🏆', label: 'Reward Audits' },
-    { view: 'publish-pipeline',     icon: '📡', label: 'Publishing Pipeline' },
-    { view: 'sandbox',              icon: '🧪', label: 'Sandbox Environment', superAdminOnly: true },
-    { view: 'systems',              icon: '🛠️', label: 'Systems & Connections', superAdminOnly: true },
+  platform: { label: 'Platform', children: [
+    { view: 'analytics',            icon: '📈', label: 'Analytics',             perm: 'view_analytics' },
+    { view: 'master-data',          icon: '🗂️', label: 'Master Data',           perm: 'platform_config' },
+    { view: 'feature-flags',        icon: '🚩', label: 'Feature Flags',         perm: 'feature_flags' },
+    { view: 'kill-switches',        icon: '🚨', label: 'Emergency Controls',    perm: 'kill_switch' },
+    { view: 'gamification',         icon: '🎮', label: 'Gamification Settings', perm: 'platform_config' },
+    { view: 'session-timeout',      icon: '⏱️', label: 'Session Timeout',       perm: 'manage_session_timeout' },
+    { view: 'reward-audits',        icon: '🏆', label: 'Reward Audits',         perm: 'platform_config' },
+    { view: 'publish-pipeline',     icon: '📡', label: 'Publishing Pipeline',   perm: 'platform_config' },
+    { view: 'sandbox',              icon: '🧪', label: 'Sandbox Environment',   perm: 'sandbox_access' },
+    { view: 'systems',              icon: '🛠️', label: 'Systems & Connections', perm: 'view_system_status' },
   ]},
-  security: { label: 'Security', roles: ['admin','super_admin'], children: [
-    { view: 'manage-admins',  icon: '🛡️', label: 'Admin Accounts' },
-    { view: 'audit-log',      icon: '🔐', label: 'Audit Log' },
-    { view: 'security-abuse', icon: '🚩', label: 'Security & Abuse' },
+  security: { label: 'Security', children: [
+    { view: 'manage-admins',  icon: '🛡️', label: 'Admin Accounts',    perm: 'manage_admin_roles' },
+    { view: 'audit-log',      icon: '🔐', label: 'Audit Log',         perm: 'view_audit_log' },
+    { view: 'security-abuse', icon: '🚩', label: 'Security & Abuse',  perm: 'view_security_abuse' },
   ]},
-  communications: { label: 'Communications', roles: ['admin','super_admin','platform_admin'], children: [
-    { view: 'email-templates', icon: '✉️', label: 'Manage Emails' },
+  communications: { label: 'Communications', children: [
+    { view: 'email-templates',        icon: '✉️', label: 'Manage Emails',          perm: 'manage_comms_templates' },
+    { view: 'notification-templates', icon: '🔔', label: 'Notification Templates', perm: 'manage_comms_templates' },
   ]},
-  compliance: { label: 'Compliance', roles: ['admin','super_admin'], children: [
-    { view: 'breach-response', icon: '🚨', label: 'Breach Response' },
-    { view: 'logs',            icon: '📋', label: 'System Logs' },
+  compliance: { label: 'Compliance', children: [
+    { view: 'breach-response', icon: '🚨', label: 'Breach Response', perm: 'breach_response' },
+    { view: 'logs',            icon: '📋', label: 'System Logs',     perm: 'view_audit_log' },
   ]},
-  testing: { label: 'Testing', roles: ['admin','super_admin','support_agent'], children: [
-    { view: 'issue-reports',   icon: '🐞', label: 'Issue Reports' },
-    { view: 'feature-roadmap', icon: '💡', label: 'Feature Requests' },
+  testing: { label: 'Testing', children: [
+    { view: 'issue-reports',   icon: '🐞', label: 'Issue Reports',    perm: 'view_issue_reports' },
+    { view: 'feature-roadmap', icon: '💡', label: 'Feature Requests', perm: 'manage_feature_requests' },
   ]},
-  workspaces: { label: 'Workspaces', roles: ['admin','super_admin'], children: [
-    { view: 'workspaces', icon: '🏢', label: 'All Workspaces' },
+  workspaces: { label: 'Workspaces', children: [
+    { view: 'workspaces', icon: '🏢', label: 'All Workspaces', perm: 'view_workspaces' },
   ]},
 };
 
@@ -2058,17 +2264,50 @@ function _getAdminRole() {
 
 const _adminRole = _getAdminRole();
 
+// The caller's permissions, resolved server-side from rbac.ts by _loadAdminPermissions()
+// below. Declared up here because getAdminEnv() — reached from the global fetch shim —
+// calls _can(), and a `let` read before its declaration is evaluated would throw.
+// Null until the fetch lands, and _can() denies until then, so the nav is
+// hidden-by-default rather than briefly showing entries the admin may not hold.
+let _adminPermissions = null;
+
+function _can(perm) {
+  if (perm === null) return !!_adminRole; // open to any admin role
+  return !!_adminPermissions && _adminPermissions.includes(perm);
+}
+
 // ── Epic: Superadmin Environment Management — US1/US2: Live/Sandbox environment ──
 const ENV_STORAGE_KEY = 'aura_admin_env';
 
 function getAdminEnv() {
-  // Only super_admins may ever be in sandbox; anyone else is always live.
-  if (_adminRole !== 'super_admin') return 'live';
+  // Only roles clearing sandbox_access may ever be in sandbox; anyone else is always live.
+  if (!_can('sandbox_access')) return 'live';
   return localStorage.getItem(ENV_STORAGE_KEY) === 'sandbox' ? 'sandbox' : 'live';
 }
 
 // AC 2.1: append X-Environment to every Admin Portal API request. A single global
 // fetch shim covers calls made via api() AND the many direct fetch() call sites.
+let _sandboxDowngradeWarned = false;
+// The server can silently resolve 'sandbox' down to 'live' (AC 3.3 — e.g. no sandbox
+// database provisioned on this deployment). When that happens the toggle otherwise
+// looks broken: it visually flips to Sandbox but every page keeps showing Live data.
+// admin-api.ts echoes back the environment it actually used via X-Resolved-Env so we
+// can detect the mismatch and tell the admin instead of silently doing nothing.
+function _checkResolvedEnv(res, requestedEnv) {
+  if (requestedEnv !== 'sandbox') return;
+  let resolved;
+  try { resolved = res.headers.get('X-Resolved-Env'); } catch { return; }
+  if (!resolved || resolved === 'sandbox') return;
+  if (getAdminEnv() === 'sandbox') {
+    localStorage.setItem(ENV_STORAGE_KEY, 'live');
+    _applyEnvTheme('live');
+  }
+  if (!_sandboxDowngradeWarned) {
+    _sandboxDowngradeWarned = true;
+    alert('Sandbox mode is not available on this deployment (no sandbox database is configured), so pages kept showing Live data. Switched the toggle back to Live.');
+  }
+}
+
 (function () {
   const _origFetch = window.fetch.bind(window);
   window.fetch = function (input, init) {
@@ -2077,8 +2316,13 @@ function getAdminEnv() {
       if (url.includes('/.netlify/functions/')) {
         init = init ? { ...init } : {};
         const h = new Headers(init.headers || (typeof input !== 'string' && input ? input.headers : undefined) || {});
-        h.set('X-Environment', getAdminEnv());
+        const requestedEnv = getAdminEnv();
+        h.set('X-Environment', requestedEnv);
         init.headers = h;
+        return _origFetch(input, init).then((res) => {
+          _checkResolvedEnv(res, requestedEnv);
+          return res;
+        });
       }
     } catch { /* never block a request over header injection */ }
     return _origFetch(input, init);
@@ -2098,8 +2342,9 @@ function _applyEnvTheme(env) {
 }
 
 function setAdminEnv(env) {
-  if (_adminRole !== 'super_admin') return; // hard guard — only super_admins switch
+  if (!_can('sandbox_access')) return; // hard guard — only sandbox_access holders switch
   env = env === 'sandbox' ? 'sandbox' : 'live';
+  if (env === 'sandbox') _sandboxDowngradeWarned = false; // re-warn on each fresh attempt
   const prev = getAdminEnv();
   localStorage.setItem(ENV_STORAGE_KEY, env);
   _applyEnvTheme(env);
@@ -2111,7 +2356,7 @@ function setAdminEnv(env) {
 
 function initEnvToggle() {
   const toggle = document.getElementById('env-toggle');
-  if (_adminRole === 'super_admin') {
+  if (_can('sandbox_access')) {
     toggle?.classList.remove('hidden');
   } else {
     // Non-super-admins are pinned to live; clear any stale preference.
@@ -2120,17 +2365,38 @@ function initEnvToggle() {
   _applyEnvTheme(getAdminEnv()); // AC 1.3: restore persisted environment on load
 }
 
-function _catAllowed(catKey) {
-  const cat = ADMIN_CATS[catKey];
-  if (!cat) return false;
-  if (cat.roles === null) return true; // dashboard always visible
-  if (!_adminRole) return false;
-  return cat.roles.includes(_adminRole);
+async function _loadAdminPermissions() {
+  try {
+    const res = await fetch('/.netlify/functions/admin-api?resource=my-permissions');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    _adminPermissions = Array.isArray(data.permissions) ? data.permissions : [];
+  } catch (err) {
+    // Deny by default. An admin seeing an empty nav is recoverable with a reload;
+    // showing pages the API will then refuse is a confusing dead end.
+    console.error('[admin] could not load permissions:', err);
+    _adminPermissions = [];
+  }
 }
 
-// Filter primary nav buttons based on role
-document.addEventListener('DOMContentLoaded', () => {
-  document.querySelectorAll('.admin-cat-btn').forEach(btn => {
+function _visibleChildren(catKey) {
+  const cat = ADMIN_CATS[catKey];
+  return cat ? cat.children.filter(c => _can(c.perm)) : [];
+}
+
+// A category is worth showing exactly when it has something inside it.
+function _catAllowed(catKey) {
+  return _visibleChildren(catKey).length > 0;
+}
+
+// Filter nav buttons on the caller's permissions, across all three surfaces: the
+// desktop sidebar, the mobile bottom tab bar and the mobile More drawer. The
+// [data-cat] qualifier is load-bearing — the More button is an .admin-bottom-tab-btn
+// that opens the drawer rather than a category, so it has no data-cat and must
+// survive the filter.
+document.addEventListener('DOMContentLoaded', async () => {
+  await _loadAdminPermissions();
+  document.querySelectorAll('.admin-cat-btn[data-cat], .admin-bottom-tab-btn[data-cat], .admin-more-item[data-cat]').forEach(btn => {
     if (!_catAllowed(btn.dataset.cat)) btn.style.display = 'none';
   });
   initEnvToggle();
@@ -2166,8 +2432,7 @@ function adminCatNav(cat) {
   if (!catDef) return;
 
   titleEl.textContent = catDef.label;
-  itemsEl.innerHTML = catDef.children
-    .filter(c => !c.superAdminOnly || _adminRole === 'super_admin')
+  itemsEl.innerHTML = _visibleChildren(cat)
     .map(c =>
     `<button class="admin-child-btn${_activeView === c.view ? ' active' : ''}"
       data-view="${c.view}"
@@ -2225,7 +2490,6 @@ function adminNav(view) {
   if (view === 'users')        loadUsers();
   if (view === 'tickets')      loadTickets();
   if (view === 'catalog')      loadCatalog();
-  if (view === 'assistant-features') loadAssistantFeatures();
   if (view === 'analytics')    { loadAnalytics(); loadChurnSignals(); }
   if (view === 'model-config') loadModelConfig();
   if (view === 'logs')         loadLogs();
@@ -2236,7 +2500,7 @@ function adminNav(view) {
   if (view === 'dunning')         loadDunningQueue();
   if (view === 'disputes')        loadDisputes();
   if (view === 'manage-admins')   loadManageAdmins();
-  if (view === 'sales-pipeline')  loadSalesPipeline();
+  if (view === 'contacts')        loadContacts();
   if (view === 'kill-switches')   loadKillSwitches();
   if (view === 'gamification')    loadGamificationSettings();
   if (view === 'session-timeout') loadSessionTimeoutSettings();
@@ -2250,6 +2514,7 @@ function adminNav(view) {
   if (view === 'sandbox')             loadSandboxPanel();
   if (view === 'systems')             loadSystemStatus();
   if (view === 'email-templates')     loadEmailTemplates();
+  if (view === 'notification-templates') loadNotificationTemplates();
   if (view === 'issue-reports')       loadIssueReports();
   if (view === 'feature-roadmap')     loadFeatureRoadmap();
 }
@@ -2261,6 +2526,7 @@ let _etCurrent = null;       // { triggerKey, name, category, locked, transactio
 let _etVariables = [];
 let _etPreviewMode = 'desktop';
 let _etPreviewTimer = null;
+let _etBodyTab = 'rich';     // 'rich' (Quill/HTML) | 'plain' (text override)
 
 async function loadEmailTemplates() {
   closeEmailEditor();
@@ -2315,6 +2581,10 @@ async function openEmailEditor(key) {
     document.getElementById('et-editor-key').textContent = template.triggerKey;
     document.getElementById('et-subject').value = template.subject || '';
     document.getElementById('et-preheader').value = template.preheader || '';
+    document.getElementById('et-body-text').value = template.bodyText || '';
+    // Restore-to-default only makes sense once an admin override exists (AC7).
+    document.getElementById('et-restore-btn').classList.toggle('hidden', !template.edited);
+    setEmailBodyTab('rich');
     hideEtStatus();
 
     // Active toggle — locked/critical templates can't be deactivated (AC3.2.2).
@@ -2372,11 +2642,30 @@ function initEtQuill(html) {
 }
 
 function insertEmailVariable(key) {
-  if (!key || !_etQuill) return;
-  const range = _etQuill.getSelection(true);
-  _etQuill.insertText(range ? range.index : _etQuill.getLength(), `{{${key}}}`, 'user');
-  _etQuill.focus();
+  if (!key) return;
+  const tag = `{{${key}}}`;
+  if (_etBodyTab === 'plain') {
+    const ta = document.getElementById('et-body-text');
+    const at = ta.selectionStart ?? ta.value.length;
+    ta.value = ta.value.slice(0, at) + tag + ta.value.slice(ta.selectionEnd ?? at);
+    ta.focus();
+    ta.selectionStart = ta.selectionEnd = at + tag.length;
+  } else if (_etQuill) {
+    const range = _etQuill.getSelection(true);
+    _etQuill.insertText(range ? range.index : _etQuill.getLength(), tag, 'user');
+    _etQuill.focus();
+  }
   scheduleEtPreview();
+}
+
+// Rich text (HTML body) ⇄ Plain text (alternative part) — two views, both editable (AC3).
+function setEmailBodyTab(mode) {
+  _etBodyTab = mode;
+  document.getElementById('et-body-rich').classList.toggle('hidden', mode !== 'rich');
+  document.getElementById('et-body-plain').classList.toggle('hidden', mode !== 'plain');
+  const r = document.getElementById('et-tab-rich'), p = document.getElementById('et-tab-plain');
+  r.className = 'px-3 py-1 ' + (mode === 'rich' ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600');
+  p.className = 'px-3 py-1 ' + (mode === 'plain' ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600');
 }
 
 function setEmailPreviewMode(mode) {
@@ -2398,6 +2687,7 @@ async function refreshEmailPreview() {
     triggerKey: _etCurrent.triggerKey,
     subject: document.getElementById('et-subject').value,
     bodyHtml: _etQuill ? _etQuill.root.innerHTML : '',
+    bodyText: document.getElementById('et-body-text').value,
     preheader: document.getElementById('et-preheader').value,
   };
   try {
@@ -2422,17 +2712,58 @@ async function saveEmailTemplate() {
         triggerKey: _etCurrent.triggerKey,
         subject: document.getElementById('et-subject').value,
         bodyHtml: _etQuill ? _etQuill.root.innerHTML : '',
+        bodyText: document.getElementById('et-body-text').value,
         preheader: document.getElementById('et-preheader').value,
         isActive: document.getElementById('et-active').checked,
       }),
     });
     const data = await res.json();
+    if (res.status === 422) { showEtStatus('error', mergeVarError(data)); return; }
     if (!res.ok) throw new Error(data.error || 'save failed');
+    _etCurrent.edited = true;
+    document.getElementById('et-restore-btn').classList.remove('hidden');
     showEtStatus('success', 'Saved. This copy is now live.');
   } catch (e) {
     showEtStatus('error', e.message || 'Failed to save.');
   } finally {
     btn.disabled = false; btn.textContent = 'Save';
+  }
+}
+
+// Turn a 422 validation payload into a readable message (AC5).
+function mergeVarError(data) {
+  const parts = [];
+  if (data.unknown && data.unknown.length) parts.push(`unknown variable(s): ${data.unknown.map(v => `{{${v}}}`).join(', ')}`);
+  if (data.malformed && data.malformed.length) parts.push(`malformed tag(s): ${data.malformed.join(', ')}`);
+  return (data.error || 'Template has variables that will not render.') + (parts.length ? ` — ${parts.join('; ')}` : '');
+}
+
+async function restoreEmailTemplate() {
+  if (!_etCurrent) return;
+  if (!confirm('Restore this email to the original system default? Your edits will be discarded.')) return;
+  const btn = document.getElementById('et-restore-btn');
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${ET_API}?resource=restore`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ triggerKey: _etCurrent.triggerKey }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'restore failed');
+    const t = data.template;
+    document.getElementById('et-subject').value = t.subject || '';
+    document.getElementById('et-preheader').value = t.preheader || '';
+    document.getElementById('et-body-text').value = t.bodyText || '';
+    document.getElementById('et-active').checked = t.isActive;
+    if (_etQuill) _etQuill.clipboard.dangerouslyPasteHTML(t.bodyHtml || '');
+    _etCurrent.edited = false;
+    btn.classList.add('hidden');
+    refreshEmailPreview();
+    showEtStatus('success', 'Restored to the system default.');
+  } catch (e) {
+    showEtStatus('error', e.message || 'Failed to restore.');
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -2478,6 +2809,207 @@ function showEtStatus(kind, msg) {
 }
 function hideEtStatus() { document.getElementById('et-status').classList.add('hidden'); }
 function escapeHtmlJs(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+// ── US-COMMS-2: Notification Templates (in-app editor) ───────────────────────
+const NT_API = '/.netlify/functions/admin-notification-templates';
+let _ntCurrent = null;        // { templateKey, name, category, edited }
+let _ntVariables = [];
+let _ntBodyTab = 'source';    // 'source' (textarea) | 'preview' (rendered)
+let _ntActiveField = 'message'; // last-focused editable — where Insert Variable lands
+let _ntPreviewTimer = null;
+
+async function loadNotificationTemplates() {
+  closeNotifEditor();
+  const el = document.getElementById('nt-list');
+  el.innerHTML = 'Loading…';
+  try {
+    const res = await fetch(`${NT_API}?resource=list`);
+    if (!res.ok) throw new Error('list failed');
+    const { templates } = await res.json();
+
+    const groups = {};
+    templates.forEach(t => { (groups[t.category] ||= []).push(t); });
+
+    el.innerHTML = Object.keys(groups).sort().map(cat => `
+      <div class="mb-6">
+        <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wide mb-2">${escapeHtmlJs(cat)}</h3>
+        <div class="bg-white border border-gray-200 rounded-xl divide-y divide-gray-100">
+          ${groups[cat].map(t => `
+            <button onclick="openNotifEditor('${t.templateKey}')" class="w-full text-left px-4 py-3 hover:bg-gray-50 transition flex items-center justify-between gap-3">
+              <div class="min-w-0">
+                <p class="text-sm font-semibold text-gray-800 truncate">${escapeHtmlJs(t.name)}</p>
+                <p class="text-xs text-gray-400 truncate">${escapeHtmlJs(t.title)}</p>
+              </div>
+              <div class="flex items-center gap-2 shrink-0">
+                <span class="text-[10px] font-bold text-sky-700 bg-sky-50 px-2 py-0.5 rounded-full">${escapeHtmlJs(t.channel)}</span>
+                ${t.edited ? '<span class="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">Edited</span>' : ''}
+                ${!t.isActive ? '<span class="text-[10px] font-bold text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full">Off</span>' : ''}
+                <span class="text-gray-300">›</span>
+              </div>
+            </button>`).join('')}
+        </div>
+      </div>`).join('');
+  } catch {
+    el.innerHTML = '<p class="text-rose-600 text-sm">Failed to load notification templates.</p>';
+  }
+}
+
+async function openNotifEditor(key) {
+  try {
+    const res = await fetch(`${NT_API}?resource=get&key=${encodeURIComponent(key)}`);
+    if (!res.ok) throw new Error('get failed');
+    const { template, variables } = await res.json();
+    _ntCurrent = template;
+    _ntVariables = variables || [];
+
+    document.getElementById('nt-list-pane').classList.add('hidden');
+    document.getElementById('nt-editor-pane').classList.remove('hidden');
+    document.getElementById('nt-editor-title').textContent = template.name;
+    document.getElementById('nt-editor-category').textContent = template.category;
+    document.getElementById('nt-editor-key').textContent = template.templateKey;
+    document.getElementById('nt-title').value = template.title || '';
+    document.getElementById('nt-message').value = template.message || '';
+    document.getElementById('nt-active').checked = template.isActive;
+    document.getElementById('nt-restore-btn').classList.toggle('hidden', !template.edited);
+
+    // Variable picker + reference chips (AC4).
+    const picker = document.getElementById('nt-var-picker');
+    picker.innerHTML = '<option value="">Insert variable…</option>' +
+      _ntVariables.map(v => `<option value="${v.key}">${escapeHtmlJs(v.label)}</option>`).join('');
+    const chips = document.getElementById('nt-var-list');
+    chips.innerHTML = _ntVariables.length
+      ? _ntVariables.map(v => `<button type="button" onclick="insertNotifVariable('${v.key}')" title="${escapeHtmlJs(v.label)}" class="font-mono px-2 py-0.5 rounded-md bg-gray-100 text-gray-600 hover:bg-emerald-50 hover:text-emerald-700 border border-gray-200">{{${escapeHtmlJs(v.key)}}}</button>`).join('')
+      : '<span class="text-gray-400">This notification has no dynamic variables.</span>';
+
+    // Track which field Insert Variable should target.
+    _ntActiveField = 'message';
+    document.getElementById('nt-title').onfocus = () => { _ntActiveField = 'title'; };
+    document.getElementById('nt-message').onfocus = () => { _ntActiveField = 'message'; };
+
+    setNotifBodyTab('source');
+    hideNtStatus();
+    refreshNotifPreview();
+  } catch {
+    showNtStatus('error', 'Failed to open this template.');
+  }
+}
+
+function setNotifBodyTab(mode) {
+  _ntBodyTab = mode;
+  document.getElementById('nt-body-source').classList.toggle('hidden', mode !== 'source');
+  document.getElementById('nt-body-preview').classList.toggle('hidden', mode !== 'preview');
+  const s = document.getElementById('nt-tab-source'), p = document.getElementById('nt-tab-preview');
+  s.className = 'px-3 py-1 ' + (mode === 'source' ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600');
+  p.className = 'px-3 py-1 ' + (mode === 'preview' ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600');
+  if (mode === 'preview') refreshNotifPreview();
+}
+
+function insertNotifVariable(key) {
+  if (!key) return;
+  const tag = `{{${key}}}`;
+  const ta = document.getElementById(_ntActiveField === 'title' ? 'nt-title' : 'nt-message');
+  const at = ta.selectionStart ?? ta.value.length;
+  ta.value = ta.value.slice(0, at) + tag + ta.value.slice(ta.selectionEnd ?? at);
+  ta.focus();
+  ta.selectionStart = ta.selectionEnd = at + tag.length;
+  scheduleNotifPreview();
+}
+
+function scheduleNotifPreview() {
+  clearTimeout(_ntPreviewTimer);
+  _ntPreviewTimer = setTimeout(refreshNotifPreview, 300);
+}
+
+async function refreshNotifPreview() {
+  if (!_ntCurrent) return;
+  const payload = {
+    templateKey: _ntCurrent.templateKey,
+    title: document.getElementById('nt-title').value,
+    message: document.getElementById('nt-message').value,
+  };
+  try {
+    const res = await fetch(`${NT_API}?resource=preview`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    if (!res.ok) return;
+    const { title, message } = await res.json();
+    // Server renders with dummy data and escapes interpolated values; safe to set as HTML.
+    document.getElementById('nt-pv-title').innerHTML = title || '';
+    document.getElementById('nt-pv-message').innerHTML = message || '';
+    document.getElementById('nt-message-rendered').innerHTML = message || '<span class="text-gray-400">No message.</span>';
+  } catch { /* preview is best-effort */ }
+}
+
+async function saveNotifTemplate() {
+  if (!_ntCurrent) return;
+  const btn = document.getElementById('nt-save-btn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  try {
+    const res = await fetch(`${NT_API}?resource=save`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        templateKey: _ntCurrent.templateKey,
+        title: document.getElementById('nt-title').value,
+        message: document.getElementById('nt-message').value,
+        isActive: document.getElementById('nt-active').checked,
+      }),
+    });
+    const data = await res.json();
+    if (res.status === 422) { showNtStatus('error', mergeVarError(data)); return; }
+    if (!res.ok) throw new Error(data.error || 'save failed');
+    _ntCurrent.edited = true;
+    document.getElementById('nt-restore-btn').classList.remove('hidden');
+    showNtStatus('success', 'Saved. This copy is now live for all future notifications.');
+  } catch (e) {
+    showNtStatus('error', e.message || 'Failed to save.');
+  } finally {
+    btn.disabled = false; btn.textContent = 'Save';
+  }
+}
+
+async function restoreNotifTemplate() {
+  if (!_ntCurrent) return;
+  if (!confirm('Restore this notification to the original system default? Your edits will be discarded.')) return;
+  const btn = document.getElementById('nt-restore-btn');
+  btn.disabled = true;
+  try {
+    const res = await fetch(`${NT_API}?resource=restore`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ templateKey: _ntCurrent.templateKey }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'restore failed');
+    const t = data.template;
+    document.getElementById('nt-title').value = t.title || '';
+    document.getElementById('nt-message').value = t.message || '';
+    document.getElementById('nt-active').checked = t.isActive;
+    _ntCurrent.edited = false;
+    btn.classList.add('hidden');
+    refreshNotifPreview();
+    showNtStatus('success', 'Restored to the system default.');
+  } catch (e) {
+    showNtStatus('error', e.message || 'Failed to restore.');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function closeNotifEditor() {
+  _ntCurrent = null;
+  const ed = document.getElementById('nt-editor-pane');
+  const list = document.getElementById('nt-list-pane');
+  if (ed) ed.classList.add('hidden');
+  if (list) list.classList.remove('hidden');
+}
+
+function showNtStatus(kind, msg) {
+  const el = document.getElementById('nt-status');
+  el.textContent = msg;
+  el.className = 'mb-4 text-sm rounded-lg px-3 py-2 ' +
+    (kind === 'success' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700');
+  el.classList.remove('hidden');
+}
+function hideNtStatus() { document.getElementById('nt-status').classList.add('hidden'); }
 
 // ── US-ADM-4.3.1/4.3.2: Blueprint Inspector ─────────────────────────────────
 
@@ -3425,8 +3957,20 @@ function _irHandoffBadge(i) {
   if (i.devMergeStatus === 'conflict_queued' || i.devMergeStatus === 'conflict_resolving') {
     return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">🔧 Resolving conflict…</span>`;
   }
+  // Once merged to staging, the prod-promotion state (if any) is the more-actionable signal.
   if (i.devMergeStatus === 'merged') {
-    return `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">🔀 Merged</span>`;
+    const staging = `<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">🔀 Merged to staging</span>`;
+    const ps = i.devProdStatus;
+    if (ps === 'queued' || ps === 'promoting') {
+      return `${staging}<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">🚀 ${ps === 'queued' ? 'Prod queued…' : 'Promoting…'}</span>`;
+    }
+    if (ps === 'promoted') {
+      return `${staging}<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">🚀 Merged to prod</span>`;
+    }
+    if (ps === 'failed') {
+      return `${staging}<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-800">🚀 Prod failed</span>`;
+    }
+    return staging;
   }
   const b = IR_HANDOFF_BADGE[i.devHandoffStatus];
   if (!b) return '';
@@ -3442,7 +3986,7 @@ function _irFmt(d) { return d ? new Date(d).toLocaleString() : ''; }
 // issue (a fix or a merge), devRunnerId/devRunnerHeartbeat tell us who and since when.
 const IR_RUNNER_STALL_MS = 15 * 60 * 1000; // a fix normally finishes in minutes
 function _irRunnerActive(i) {
-  return !!i.devRunnerId && (i.devHandoffStatus === 'in_progress' || i.devMergeStatus === 'merging' || i.devMergeStatus === 'conflict_resolving');
+  return !!i.devRunnerId && (i.devHandoffStatus === 'in_progress' || i.devMergeStatus === 'merging' || i.devMergeStatus === 'conflict_resolving' || i.devProdStatus === 'promoting');
 }
 function _irRunnerElapsed(i) {
   if (!i.devRunnerHeartbeat) return '';
@@ -3548,10 +4092,13 @@ async function openIssuePanel(id) {
       <!-- Merge the fix PR to staging -->
       ${_irMergeCard(i)}
 
+      <!-- Promote the staging-verified fix to production -->
+      ${_irProdCard(i)}
+
       <!-- Status control -->
       <div class="border border-gray-200 rounded-xl p-4 space-y-3">
         <div class="flex items-center gap-3 flex-wrap">
-          <span class="text-xs font-bold uppercase text-gray-400">Current</span>${_irBadge(i.status)}${i.devMergeStatus === 'merged' ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">🔀 Merged to staging</span>' : ''}
+          <span class="text-xs font-bold uppercase text-gray-400">Current</span>${_irBadge(i.status)}${i.devMergeStatus === 'merged' ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-700">🔀 Merged to staging</span>' : ''}${i.devProdStatus === 'promoted' ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700">🚀 Merged to prod</span>' : ''}
         </div>
         <label class="block text-xs font-bold uppercase text-gray-400">Update status</label>
         <select id="ir-new-status" onchange="irOnStatusChange()" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2">
@@ -3780,7 +4327,7 @@ function _irSqlCard(i) {
   const resultBlock = i.devSqlResult
     ? `<div class="rounded-lg p-3 text-xs whitespace-pre-wrap font-mono max-h-56 overflow-auto ${st === 'applied' ? 'bg-emerald-50 text-emerald-800 border border-emerald-200' : 'bg-red-50 text-red-800 border border-red-200'}"><div class="font-sans font-bold mb-1">Staging database response${ranAt}:</div>${_esc(i.devSqlResult)}</div>`
     : '';
-  const canRun = (typeof _adminRole !== 'undefined') && _adminRole === 'super_admin';
+  const canRun = _can('run_migration_sql');
   const runBtn = canRun
     ? `<button onclick="runIssueSql(${i.id})" class="w-full px-4 py-2.5 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 transition flex items-center justify-center gap-2"><span>🗄️</span> ${st === 'applied' ? 'Re-run on staging Neon' : 'Run on staging Neon'}</button>`
     : `<p class="text-xs text-amber-700 font-semibold">Only a super-admin can run this SQL.</p>`;
@@ -3826,7 +4373,7 @@ function _irMergeCard(i) {
   const prLink = `<a href="${_esc(i.devPrUrl)}" target="_blank" rel="noopener" class="inline-flex items-center gap-1 text-sm font-bold text-indigo-700 hover:underline">View pull request →</a>`;
   const resultBlock = i.devMergeResult
     ? `<div class="rounded-lg p-3 text-xs font-mono whitespace-pre-wrap max-h-48 overflow-auto bg-white border border-gray-200 text-gray-700">${_esc(i.devMergeResult)}</div>` : '';
-  const isSuper = (typeof _adminRole !== 'undefined') && _adminRole === 'super_admin';
+  const isSuper = _can('deploy_code');
   const sqlPending = i.devSqlStatus === 'pending';
   const mergeBtn = isSuper
     ? `<button onclick="requestMerge(${i.id})" ${sqlPending ? 'disabled' : ''} class="w-full px-4 py-2.5 ${sqlPending ? 'bg-gray-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700'} text-white text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🔀</span> Merge to staging</button>`
@@ -3871,12 +4418,72 @@ function _irMergeCard(i) {
     </div>`;
 }
 
+// ── Promote the staging-verified fix to production (super-admin only) ──────────
+// Shown once the fix is merged to staging (dev_merge_status='merged'). Separate from
+// closing the ticket. Queues a promotion the local watcher performs by pushing staging →
+// main (prod deploys from main); the ticket shows "Merged to prod" once it lands.
+function _irProdCard(i) {
+  if (i.devMergeStatus !== 'merged') return '';
+  const ps = i.devProdStatus || null;
+  const resultBlock = i.devProdResult
+    ? `<div class="rounded-lg p-3 text-xs font-mono whitespace-pre-wrap max-h-48 overflow-auto bg-white border border-gray-200 text-gray-700">${_esc(i.devProdResult)}</div>` : '';
+  const isSuper = _can('deploy_code');
+  const canPromote = !ps || ps === 'failed';
+  const promoteBtn = isSuper
+    ? `<button onclick="requestProdPromote(${i.id})" class="w-full px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-bold rounded-lg transition flex items-center justify-center gap-2"><span>🚀</span> ${ps === 'failed' ? 'Retry push to prod' : 'Push to prod'}</button>`
+    : `<p class="text-xs text-amber-700 font-semibold">Only a super-admin can promote to production.</p>`;
+
+  let chip, inner;
+  if (canPromote) {
+    const failed = ps === 'failed';
+    chip = failed ? ['bg-red-100 text-red-700', 'Last promotion failed'] : ['bg-amber-100 text-amber-800', 'Ready for prod'];
+    inner = `<p class="text-xs text-gray-500">${failed
+        ? 'The promotion failed — see the runner output below. Resolve the problem and push to prod again.'
+        : 'This fix is live on <b>staging</b>. Promote it to <b>production</b> — the developer runner will push staging → main and prod will redeploy.'}</p>
+      ${failed ? resultBlock : ''}${promoteBtn}`;
+  } else if (ps === 'queued') {
+    chip = ['bg-indigo-100 text-indigo-700', 'Queued'];
+    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Promotion requested — the developer runner will push to production within ~15s…</div>`;
+  } else if (ps === 'promoting') {
+    chip = ['bg-indigo-100 text-indigo-700', 'Promoting…'];
+    const who = i.devRunnerId ? `<div class="text-xs text-indigo-600">🖥 Runner <b>${_esc(i.devRunnerId)}</b> is promoting${_irRunnerElapsed(i) ? ` · ${_irRunnerElapsed(i)}` : ''}</div>` : '';
+    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-indigo-700"><span class="animate-pulse">●</span> Pushing staging → production…</div>${who}`;
+  } else if (ps === 'promoted') {
+    chip = ['bg-emerald-100 text-emerald-700', 'Live on prod ✓'];
+    inner = `<div class="flex items-center gap-2 text-sm font-semibold text-emerald-700">🚀 Promoted to production${i.devProdAt ? ` · ${_irFmt(i.devProdAt)}` : ''}.</div>${resultBlock}`;
+  } else { return ''; }
+
+  return `<div class="border border-red-200 bg-red-50 rounded-xl p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold uppercase text-red-600">Push to Production</span>
+        <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ${chip[0]}">${chip[1]}</span>
+      </div>
+      ${inner}
+    </div>`;
+}
+
 async function requestMerge(id) {
   if (!confirm('Merge this fix to the staging branch now? The developer runner will merge the pull request and the issue will move to “Fixed & Ready to Test”.')) return;
   const btn = event?.target?.closest('button');
   if (btn) { btn.disabled = true; btn.textContent = 'Requesting…'; }
   try {
     await api(`${IR_API}?id=${id}&action=request-merge`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    await openIssuePanel(id);
+    if (!document.getElementById('view-issue-reports').classList.contains('hidden')) loadIssueReports();
+  } catch (e) {
+    if (btn) { btn.disabled = false; }
+    alert(e.message);
+  }
+}
+
+async function requestProdPromote(id) {
+  if (!confirm('Promote this fix to PRODUCTION now? The developer runner will push staging → main and prod will redeploy with everything currently on staging. This affects live users.')) return;
+  const btn = event?.target?.closest('button');
+  if (btn) { btn.disabled = true; btn.textContent = 'Requesting…'; }
+  try {
+    await api(`${IR_API}?id=${id}&action=request-prod-promote`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
     });
     await openIssuePanel(id);
@@ -3919,7 +4526,7 @@ function _irMergeEligible(i) {
 function _updateMergeAllBtns(issues) {
   const mergeBtn = document.getElementById('ir-merge-all-btn');
   if (!mergeBtn) return;
-  const isSuper = (typeof _adminRole !== 'undefined') && _adminRole === 'super_admin';
+  const isSuper = _can('deploy_code');
   const onTab = _irFilter === 'merge';
   const eligible = (issues || []).filter(_irMergeEligible);
   const inFlight = (issues || []).filter(i => i.devMergeStatus === 'queued' || i.devMergeStatus === 'merging');
@@ -4968,59 +5575,6 @@ async function toggleCatalogStatus(id, currentlyComingSoon) {
   } catch(e) { alert(e.message); }
 }
 
-// ── Assistant Features — per-type capability matrix ────────────────────────────
-async function loadAssistantFeatures() {
-  const el = document.getElementById('assistant-features-grid');
-  el.innerHTML = '<div class="px-5 py-8 text-center text-gray-400 animate-pulse">Loading…</div>';
-  try {
-    const d = await api('/.netlify/functions/admin-api?resource=assistant-features');
-    const features = d.features || [];
-    const assistants = d.assistants || [];
-
-    const head = `<th class="px-5 py-3 text-left">Assistant Type</th>` +
-      features.map(f => `<th class="px-4 py-3 text-center" title="${escapeHtmlJs(f.description)}">${escapeHtmlJs(f.label)}</th>`).join('');
-
-    const rows = assistants.map(a => {
-      const cells = features.map(f => {
-        const on = !!(a.features && a.features[f.key]);
-        return `<td class="px-4 py-3 text-center">
-          <input type="checkbox" ${on ? 'checked' : ''}
-            onchange="toggleAssistantFeature(${a.id}, '${f.key}', this.checked, this)"
-            class="w-4 h-4 accent-emerald-600 cursor-pointer">
-        </td>`;
-      }).join('');
-      return `<tr class="border-t border-gray-50 hover:bg-gray-50 transition">
-        <td class="px-5 py-3">
-          <div class="font-medium">${escapeHtmlJs(a.name)}</div>
-          <div class="text-xs text-gray-400">${escapeHtmlJs(a.roleKey || '')}</div>
-        </td>${cells}
-      </tr>`;
-    }).join('');
-
-    el.innerHTML = `<table class="w-full text-sm">
-      <thead class="bg-gray-50 text-xs font-bold text-gray-500 uppercase"><tr>${head}</tr></thead>
-      <tbody>${rows || `<tr><td class="px-5 py-8 text-center text-gray-400" colspan="${features.length + 1}">No assistant types found.</td></tr>`}</tbody>
-    </table>`;
-  } catch(e) {
-    el.innerHTML = `<div class="px-5 py-5 text-red-500 text-sm">${escapeHtmlJs(e.message)}</div>`;
-  }
-}
-
-async function toggleAssistantFeature(masterAssistantId, featureKey, enabled, input) {
-  if (input) input.disabled = true;
-  try {
-    await api(`/.netlify/functions/admin-api?resource=assistant-features&id=${masterAssistantId}`, {
-      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ featureKey, enabled }),
-    });
-  } catch(e) {
-    alert(e.message);
-    if (input) input.checked = !enabled; // revert optimistic toggle on failure
-  } finally {
-    if (input) input.disabled = false;
-  }
-}
-
 // ── System Logs ───────────────────────────────────────────────────────────────
 let _logsPage = 0;
 async function loadLogs() {
@@ -5643,116 +6197,467 @@ async function loadDisputes() {
   } catch(e) { body.innerHTML = `<p class="text-red-500">${e.message}</p>`; }
 }
 
-// ── US-SALES-1.1 Part 5: Sales Pipeline ──────────────────────────────────────
+// Priority + pipeline-status vocab — retained from the retired Sales Pipeline; now drives the
+// sales-tracking controls in the Contacts detail panel.
 const SP_PRIORITY_BADGE = {
   high:   'bg-red-100 text-red-800',
   medium: 'bg-amber-100 text-amber-800',
   low:    'bg-gray-100 text-gray-600',
 };
-const SP_TYPE_BADGE = {
-  enterprise_enquiry:  'bg-purple-100 text-purple-800',
-  role_request:        'bg-blue-100 text-blue-800',
-  cancellation_intent: 'bg-red-100 text-red-800',
-  upgrade_intent:      'bg-emerald-100 text-emerald-800',
-  trial_expiry:        'bg-orange-100 text-orange-800',
-  never_onboarded:     'bg-gray-100 text-gray-700',
-  waitlist_interest:   'bg-sky-100 text-sky-800',
-  contact_form:        'bg-indigo-100 text-indigo-800',
-  payment_recovery:    'bg-rose-100 text-rose-800',
-};
 const SP_STATUS_OPTIONS = ['notification_pending','contacted','qualified','converted','closed_lost'];
 const SP_STATUS_LABELS  = { notification_pending:'New', contacted:'Contacted', qualified:'Qualified', converted:'Converted', closed_lost:'Closed lost' };
 
-async function loadSalesPipeline() {
-  const el = document.getElementById('sales-pipeline-body');
-  el.innerHTML = '<p class="text-gray-400 text-sm animate-pulse">Loading…</p>';
+// ── CRM Contacts (contact-centric 3-pane) ─────────────────────────────────────
+let _contactsCache = [];
+let _contactsType = '';
+let _contactsOpp = '';
+let _selectedContactId = null;
+let _contactsDebounce = null;
+
+const CT_TYPE_PILL = {
+  lead:       { label: 'Lead',       cls: 'bg-amber-100 text-amber-800',     dot: 'bg-amber-500' },
+  registered: { label: 'Registered', cls: 'bg-sky-100 text-sky-800',         dot: 'bg-sky-500' },
+  client:     { label: 'Client',     cls: 'bg-emerald-100 text-emerald-800', dot: 'bg-emerald-500' },
+  other:      { label: 'Other',      cls: 'bg-gray-100 text-gray-600',       dot: 'bg-gray-400' },
+};
+// Opportunity/signal badge derived from the lead's leadType — the "why they're a contact" layer
+// that Contacts absorbed from the retired Sales Pipeline. The contactType pill (above) says who
+// they are; this says what they want. Order/labels are the single source of truth for both the
+// list badge and the toolbar's opportunity filter.
+const CT_OPP_BADGE = {
+  waitlist_interest:   { label: 'Future Assistant Opportunity', cls: 'bg-sky-100 text-sky-800' },
+  role_request:        { label: 'Assistant Request',            cls: 'bg-blue-100 text-blue-800' },
+  enterprise_enquiry:  { label: 'Enterprise Enquiry',           cls: 'bg-purple-100 text-purple-800' },
+  upgrade_intent:      { label: 'Upgrade Opportunity',          cls: 'bg-emerald-100 text-emerald-800' },
+  cancellation_intent: { label: 'Churn Risk',                   cls: 'bg-red-100 text-red-800' },
+  never_onboarded:     { label: 'Not Onboarded',                cls: 'bg-orange-100 text-orange-800' },
+  payment_recovery:    { label: 'Payment Recovery',             cls: 'bg-rose-100 text-rose-800' },
+  contact_form:        { label: 'Enquiry',                      cls: 'bg-gray-100 text-gray-600' },
+  inbound_email:       { label: 'Inbound Email',                cls: 'bg-gray-100 text-gray-600' },
+};
+function _ctOppBadge(leadType) {
+  const o = CT_OPP_BADGE[leadType];
+  if (!o) return '';
+  return `<span class="inline-flex items-center text-[10px] font-bold px-2 py-0.5 rounded-full ${o.cls}">${o.label}</span>`;
+}
+const CT_AVATAR_COLORS = ['bg-emerald-500','bg-sky-500','bg-violet-500','bg-amber-500','bg-rose-500','bg-teal-500','bg-indigo-500'];
+function _ctInitials(name, email) {
+  const s = (name || email || '?').trim();
+  const parts = s.split(/\s+/);
+  return ((parts[0]?.[0] || '') + (parts[1]?.[0] || '')).toUpperCase() || s[0].toUpperCase();
+}
+function _ctAvatarColor(key) {
+  let h = 0; for (const c of (key || '')) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return CT_AVATAR_COLORS[h % CT_AVATAR_COLORS.length];
+}
+function _ctWhen(d) { return d ? new Date(d).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : ''; }
+
+async function loadContacts() {
+  const el = document.getElementById('contacts-list');
+  el.innerHTML = '<p class="p-4 text-sm text-gray-400 animate-pulse">Loading…</p>';
   try {
-    const leadType = document.getElementById('sp-filter-type').value;
-    const priority = document.getElementById('sp-filter-priority').value;
-    const status   = document.getElementById('sp-filter-status').value;
-    const search   = document.getElementById('sp-filter-search').value.trim();
-    const params   = new URLSearchParams({ resource: 'sales-pipeline' });
-    if (leadType) params.set('leadType', leadType);
-    if (priority) params.set('priority', priority);
-    if (status)   params.set('status', status);
-    if (search)   params.set('search', search);
-
+    const search = document.getElementById('contacts-search').value.trim();
+    const params = new URLSearchParams({ resource: 'contacts' });
+    if (_contactsType) params.set('type', _contactsType);
+    if (_contactsOpp) params.set('opp', _contactsOpp);
+    if (search) params.set('search', search);
     const data = await api(`/.netlify/functions/admin-api?${params}`);
-    const leads = data.leads || [];
-    if (!leads.length) { el.innerHTML = '<p class="text-gray-400 text-sm">No leads match the current filters.</p>'; return; }
+    _contactsCache = data.contacts || [];
+    renderContactList(_contactsCache);
+  } catch (e) {
+    el.innerHTML = `<p class="p-4 text-sm text-red-500">Failed to load: ${_escH(e.message)}</p>`;
+  }
+}
+function _contactsSearchDebounced() { clearTimeout(_contactsDebounce); _contactsDebounce = setTimeout(loadContacts, 250); }
+function _contactsSetType(t) {
+  _contactsType = t;
+  loadContacts();
+}
+function _contactsSetOpp(v) { _contactsOpp = v; loadContacts(); }
 
-    const now = Date.now();
-    const rows = leads.map(l => {
-      const isUrgent = l.leadType === 'cancellation_intent' && l.createdAt && (now - new Date(l.createdAt).getTime()) < 86400000;
-      const typeBadge = SP_TYPE_BADGE[l.leadType] || 'bg-gray-100 text-gray-700';
-      const priBadge  = SP_PRIORITY_BADGE[l.priority] || 'bg-gray-100 text-gray-600';
-      const statusOpts = SP_STATUS_OPTIONS.map(s =>
-        `<option value="${s}" ${l.status === s ? 'selected' : ''}>${SP_STATUS_LABELS[s]}</option>`
-      ).join('');
-      return `
-        <tr class="border-b border-gray-100 hover:bg-gray-50">
-          <td class="px-4 py-3 text-sm">
-            <div class="font-semibold text-gray-900">${_escH(l.name || l.email)}</div>
-            ${l.name ? `<div class="text-xs text-gray-400">${_escH(l.email)}</div>` : ''}
-            ${isUrgent ? '<span class="mt-1 inline-block text-xs font-bold bg-red-600 text-white px-1.5 py-0.5 rounded">Urgent</span>' : ''}
-          </td>
-          <td class="px-4 py-3"><span class="text-xs font-semibold px-2 py-0.5 rounded-full ${typeBadge}">${(l.leadType||'—').replace(/_/g,' ')}</span></td>
-          <td class="px-4 py-3 text-xs text-gray-500">${l.source ? l.source.replace(/_/g,' ') : '—'}</td>
-          <td class="px-4 py-3"><span class="text-xs font-semibold px-2 py-0.5 rounded-full ${priBadge}">${l.priority || '—'}</span></td>
-          <td class="px-4 py-3">
-            <select onchange="updateLeadStatus(${l.id}, this.value)" class="text-xs border border-gray-200 rounded-lg px-2 py-1 focus:ring-2 focus:ring-emerald-500 focus:outline-none">${statusOpts}</select>
-          </td>
-          <td class="px-4 py-3 text-xs text-gray-500 max-w-xs">
-            <input type="text" value="${_escH(l.salesNotes||'')}" placeholder="Add notes…"
-              onblur="saveLeadNotes(${l.id}, this.value)"
-              class="w-full border border-transparent hover:border-gray-200 focus:border-gray-300 rounded px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-400 bg-transparent">
-          </td>
-          <td class="px-4 py-3 text-xs text-gray-400 whitespace-nowrap">${l.createdAt ? new Date(l.createdAt).toLocaleDateString('en-GB') : '—'}</td>
-        </tr>`;
-    }).join('');
+function renderContactList(contacts) {
+  const el = document.getElementById('contacts-list');
+  if (!contacts.length) { el.innerHTML = '<p class="p-4 text-sm text-gray-400">No contacts found.</p>'; return; }
+  el.innerHTML = contacts.map(c => {
+    const pill = CT_TYPE_PILL[c.contactType] || CT_TYPE_PILL.lead;
+    const sel = c.id === _selectedContactId;
+    return `
+      <button onclick="openContact(${c.id})" class="w-full text-left flex items-center gap-3 px-3 py-2.5 border-b border-gray-50 hover:bg-gray-50 transition ${sel ? 'bg-emerald-50' : ''}">
+        <span class="w-9 h-9 rounded-full ${_ctAvatarColor(c.email)} text-white text-xs font-bold flex items-center justify-center shrink-0">${_escH(_ctInitials(c.name, c.email))}</span>
+        <span class="min-w-0 flex-1">
+          <span class="block font-semibold text-sm text-gray-900 truncate">${_escH(c.name || c.email)}</span>
+          <span class="block text-xs text-gray-400 break-all">${_escH(c.email)}</span>
+          ${_ctOppBadge(c.leadType) ? `<span class="mt-1 block">${_ctOppBadge(c.leadType)}</span>` : ''}
+        </span>
+        <span class="shrink-0 inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full ${pill.cls}"><span class="w-1.5 h-1.5 rounded-full ${pill.dot}"></span>${pill.label}</span>
+      </button>`;
+  }).join('');
+}
 
-    el.innerHTML = `
-      <div class="overflow-x-auto rounded-xl border border-gray-200">
-        <table class="w-full text-sm">
-          <thead class="bg-gray-50 text-xs text-gray-500 uppercase tracking-wider">
-            <tr>
-              <th class="px-4 py-3 text-left">Contact</th>
-              <th class="px-4 py-3 text-left">Type</th>
-              <th class="px-4 py-3 text-left">Source</th>
-              <th class="px-4 py-3 text-left">Priority</th>
-              <th class="px-4 py-3 text-left">Status</th>
-              <th class="px-4 py-3 text-left">Notes</th>
-              <th class="px-4 py-3 text-left">Created</th>
-            </tr>
-          </thead>
-          <tbody>${rows}</tbody>
-        </table>
-      </div>
-      <p class="text-xs text-gray-400 mt-2">${leads.length} lead${leads.length === 1 ? '' : 's'} shown</p>`;
-  } catch(e) {
-    el.innerHTML = `<p class="text-red-500 text-sm">Failed to load: ${e.message}</p>`;
+async function openContact(id) {
+  _selectedContactId = id;
+  renderContactList(_contactsCache); // refresh selection highlight
+  const detailPane = document.getElementById('contact-detail');
+  // Loading/empty states are centred; the flex-centring classes must be dropped before real
+  // content is injected, or the detail block shrinks to content width and is vertically
+  // centred (top cut off). renderContactDetail resets this; restore it for the spinner here.
+  detailPane.className = 'h-full flex items-center justify-center text-gray-400 text-sm';
+  detailPane.innerHTML = '<div class="animate-pulse">Loading…</div>';
+  document.getElementById('contact-info').innerHTML = '<p class="p-1 text-gray-400">Loading…</p>';
+  try {
+    const data = await api(`/.netlify/functions/admin-api?resource=contact-detail&id=${id}`);
+    renderContactDetail(data.lead, data.thread || [], data.tasks || [], data.client || null, data.tickets || [], data.issues || []);
+    renderContactInfo(data.lead, data.client || null);
+    // Scroll the detail pane back to the top so the avatar/header is fully visible.
+    if (detailPane.parentElement) detailPane.parentElement.scrollTop = 0;
+  } catch (e) {
+    detailPane.className = '';
+    detailPane.innerHTML = `<div class="p-6 text-sm text-red-500">Failed to load: ${_escH(e.message)}</div>`;
   }
 }
 
-async function updateLeadStatus(leadId, newStatus) {
-  try {
-    const res = await fetch('/.netlify/functions/admin-api', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ resource: 'lead-status', leadId, status: newStatus }),
-    });
-    if (!res.ok) { const d = await res.json(); alert('Error: ' + d.error); }
-  } catch(e) { alert('Request failed: ' + e.message); }
+function renderContactDetail(lead, thread, tasks, client, tickets, issues) {
+  const pill = CT_TYPE_PILL[lead.contactType] || CT_TYPE_PILL.lead;
+  // Prefer the client's account name for the header so it matches the read-only Contact info.
+  const displayName = (client && client.accountName) || lead.name || '';
+  const openTasks = tasks.filter(t => !t.done), doneTasks = tasks.filter(t => t.done);
+
+  const taskRow = t => `
+    <label class="flex items-start gap-2 py-1.5 group cursor-pointer">
+      <input type="checkbox" ${t.done ? 'checked' : ''} onchange="_ctToggleTask(${t.id}, this.checked)" class="mt-0.5 accent-emerald-600 cursor-pointer">
+      <span class="text-sm ${t.done ? 'text-gray-400 line-through' : 'text-gray-700'}">${_escH(t.title)}${t.dueDate ? ` <span class="text-xs text-gray-400">· ${_escH(t.dueDate)}</span>` : ''}</span>
+    </label>`;
+
+  // Internal notes span full width (amber); client messages sit on the left, Super Admin
+  // replies on the right — chat-bubble style via the .ct-msg-row / .ct-bubble CSS.
+  const msgRow = r => {
+    if (r.direction === 'internal') {
+      return `<div class="border bg-amber-50 border-amber-200 rounded-xl px-4 py-3">
+        <div class="flex justify-between items-center gap-3 mb-1"><span class="text-xs font-bold text-amber-700">Internal note${r.authorName ? ' · ' + _escH(r.authorName) : ''}</span><span class="text-xs text-gray-400">${_ctWhen(r.createdAt)}</span></div>
+        <div class="text-sm text-gray-700 whitespace-pre-wrap">${_escH(r.body)}</div></div>`;
+    }
+    const inbound = r.direction === 'inbound';
+    const who = inbound ? _escH(lead.name || lead.email) : `You${r.authorName ? ' · ' + _escH(r.authorName) : ''}`;
+    const box = inbound ? 'bg-gray-100 border-gray-200' : 'bg-emerald-50 border-emerald-200';
+    return `<div class="ct-msg-row ${inbound ? 'ct-in' : 'ct-out'}">
+      <div class="ct-bubble border ${box} rounded-2xl px-4 py-2.5">
+        <div class="flex justify-between items-center gap-3 mb-1"><span class="text-xs font-bold text-gray-600">${who}</span><span class="text-xs text-gray-400">${_ctWhen(r.createdAt)}</span></div>
+        <div class="text-sm text-gray-700 whitespace-pre-wrap">${_escH(r.body)}</div>
+      </div></div>`;
+  };
+
+  const detailPane = document.getElementById('contact-detail');
+  // Drop the empty/loading state's `flex items-center justify-center` so the injected content
+  // fills the pane width and flows from the top instead of shrinking and centring.
+  detailPane.className = '';
+  detailPane.innerHTML = `
+    <div class="p-6">
+      <!-- identity -->
+      <div class="flex flex-col items-center text-center border-b border-gray-100 pb-6">
+        <span class="w-20 h-20 rounded-full ${_ctAvatarColor(lead.email)} text-white text-2xl font-bold flex items-center justify-center mb-3">${_escH(_ctInitials(displayName, lead.email))}</span>
+        <h2 class="text-xl font-extrabold text-gray-900">${_escH(displayName || '—')}</h2>
+        <a href="mailto:${_escH(lead.email)}" class="text-sm text-emerald-700 hover:underline">${_escH(lead.email)}</a>
+        ${_ctOppBadge(lead.leadType) ? `<div class="mt-2">${_ctOppBadge(lead.leadType)}</div>` : ''}
+        <div class="mt-2 flex items-center gap-1">
+          ${Object.keys(CT_TYPE_PILL).map(k => `<button onclick="_ctSetType('${k}')" class="text-xs font-semibold px-2.5 py-1 rounded-lg ${lead.contactType === k ? CT_TYPE_PILL[k].cls : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}">${CT_TYPE_PILL[k].label}</button>`).join('')}
+        </div>
+        <!-- quick actions -->
+        <div class="mt-5 flex items-center justify-center gap-2 flex-wrap">
+          ${_ctQuickAction('_ctFocusReply()', 'Email', 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z')}
+          ${_ctQuickAction('_ctFocusNote()', 'Note', 'M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z')}
+          ${_ctQuickAction('_ctFocusTask()', 'Task', 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7l2 2 4-4')}
+          ${_ctQuickAction('_ctAddTag()', 'Tag', 'M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-5 5a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z')}
+          ${lead.phone ? _ctQuickActionLink('tel:' + encodeURIComponent(lead.phone), 'Call', 'M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z') : ''}
+        </div>
+      </div>
+
+      ${_ctClientSection(client)}
+
+      ${_ctSupportSection(tickets, client)}
+
+      ${_ctIssuesSection(issues, client)}
+
+      ${_ctSection(
+        'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7l2 2 4-4',
+        'Tasks',
+        openTasks.length ? `<span class="text-emerald-600">(${openTasks.length} open)</span>` : '',
+        `<div>${openTasks.map(taskRow).join('') || '<p class="text-xs text-gray-400 py-1">No open tasks.</p>'}</div>
+        ${doneTasks.length ? `<details class="mt-1"><summary class="text-xs text-gray-400 cursor-pointer">${doneTasks.length} completed</summary>${doneTasks.map(taskRow).join('')}</details>` : ''}
+        <div class="flex gap-2 mt-2">
+          <input id="ct-task-input" placeholder="Add a task…" onkeydown="if(event.key==='Enter')_ctAddTask()" class="flex-1 text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">
+          <button onclick="_ctAddTask()" class="text-sm px-3 py-1.5 bg-gray-100 text-gray-700 rounded-lg font-semibold hover:bg-gray-200">Add</button>
+        </div>`
+      )}
+
+      ${_ctSection(
+        'M8 12h.01M12 12h.01M16 12h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z',
+        'Messages', '',
+        `<div class="mb-4">
+          <textarea id="ct-reply-body" rows="3" placeholder="Write a reply or an internal note…" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-emerald-500 focus:outline-none resize-y"></textarea>
+          <p id="ct-reply-error" class="hidden text-xs text-red-600 mt-1"></p>
+          <div class="flex items-center gap-2 mt-2">
+            <button id="ct-reply-send" onclick="_ctSend('outbound')" class="px-4 py-2 bg-emerald-700 text-white text-sm font-bold rounded-lg hover:bg-emerald-800 disabled:opacity-60">Send email reply</button>
+            <button onclick="_ctSend('internal')" class="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-semibold rounded-lg hover:bg-gray-200">Add internal note</button>
+          </div>
+        </div>
+        <div class="space-y-2">${[...thread].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(msgRow).join('')}</div>
+        ${lead.useCase ? `<div class="border border-gray-200 rounded-xl p-4 bg-white mt-2">
+          <p class="text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Original request${lead.opportunityReason ? ` · ${_escH(lead.opportunityReason)}` : ''}</p>
+          <p class="text-sm text-gray-600 whitespace-pre-wrap">${_escH(lead.useCase)}</p>
+          <p class="text-xs text-gray-400 mt-2">${_ctWhen(lead.createdAt)}</p></div>` : ''}`,
+        { last: true }
+      )}
+    </div>`;
 }
 
-async function saveLeadNotes(leadId, notes) {
+// Collapsible section wrapper for the contact detail pane. Uses a native <details> so the
+// open/closed state needs no JS; the header mirrors the old <h3> styling and the chevron
+// rotates on open via the `.contact-section` CSS. `count` is optional trailing header HTML.
+function _ctSection(iconPath, title, count, body, opts) {
+  opts = opts || {};
+  const border = opts.last ? '' : 'border-b border-gray-100';
+  return `
+    <details ${opts.open === false ? '' : 'open'} class="contact-section py-5 ${border}">
+      <summary class="flex items-center gap-2 cursor-pointer select-none">
+        <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${iconPath}"/></svg>
+        <span class="text-xs font-bold uppercase tracking-wide text-gray-400">${title}</span>
+        ${count || ''}
+        <svg class="contact-section-chev w-4 h-4 text-gray-300 ml-auto shrink-0 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+      </summary>
+      <div class="ct-sec-body mt-3">${body}</div>
+    </details>`;
+}
+
+// Client at-a-glance panel — only rendered when the contact maps to a user account.
+function _ctClientSection(c) {
+  if (!c) return '';
+  const fmtDate = iso => { if (!iso) return '—'; const d = new Date(iso); return isNaN(d) ? '—' : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); };
+  const payCls = {
+    'Paid': 'bg-emerald-100 text-emerald-800',
+    'Payment failed': 'bg-red-100 text-red-700',
+    'Cancelling': 'bg-amber-100 text-amber-800',
+    'Downgrading': 'bg-amber-100 text-amber-800',
+    'Cancelled': 'bg-gray-100 text-gray-500',
+    'Expired': 'bg-gray-100 text-gray-500',
+    'No plan': 'bg-gray-100 text-gray-500',
+  }[c.paymentStatus] || 'bg-gray-100 text-gray-600';
+
+  const stat = (label, value) => `
+    <div class="bg-white border border-gray-200 rounded-xl px-3 py-2.5">
+      <p class="text-[11px] font-bold uppercase tracking-wide text-gray-400">${label}</p>
+      <p class="text-sm font-semibold text-gray-800 mt-0.5">${value}</p>
+    </div>`;
+
+  const assts = c.assistantLimit != null ? `${c.activeAssistants} <span class="text-gray-400 font-normal">/ ${c.assistantLimit}</span>` : `${c.activeAssistants}`;
+  const tasksUsed = c.monthlyTaskLimit != null ? `${c.tasksThisMonth} <span class="text-gray-400 font-normal">/ ${c.monthlyTaskLimit}</span>` : `${c.tasksThisMonth}`;
+
+  const upgrade = c.upgradeOpportunity
+    ? `<div class="mt-3 border border-amber-200 bg-amber-50 rounded-xl px-3 py-2.5">
+        <p class="flex items-center gap-1.5 text-xs font-bold text-amber-800">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+          Upgrade opportunity
+        </p>
+        <ul class="mt-1.5 space-y-1 text-xs text-amber-900 list-disc list-inside">${c.upgradeReasons.map(r => `<li>${_escH(r)}</li>`).join('')}</ul>
+      </div>`
+    : `<div class="mt-3 flex items-center gap-1.5 text-xs text-gray-400">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        No upgrade signals — healthy on current plan
+      </div>`;
+
+  return _ctSection(
+    'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z',
+    'At a Glance', '',
+    `<div class="grid grid-cols-2 gap-2">
+        ${stat('Plan', _escH(c.plan))}
+        ${stat('Payment', `<span class="inline-flex text-xs font-semibold px-2 py-0.5 rounded-md ${payCls}">${_escH(c.paymentStatus)}</span>`)}
+        ${stat(_escH(c.planEndLabel || 'Plan end'), fmtDate(c.planEndDate))}
+        ${stat('Active assistants', assts)}
+        ${stat('Tasks this month', tasksUsed)}
+      </div>
+      ${upgrade}`
+  );
+}
+
+// Support Request History — the account's support tickets, newest first. Each row opens
+// the existing ticket modal (openTicketPanel) to view/manage. Hidden for contacts with no tickets.
+function _ctSupportSection(tickets, client) {
+  tickets = Array.isArray(tickets) ? tickets : [];
+  // Show the section for any contact with an account (client), even with zero tickets —
+  // a Super Admin should see "no requests yet" rather than a missing panel. Hide it only
+  // for pure prospects, who can't raise tickets (support_tickets.userId is required).
+  if (!tickets.length && !client) return '';
+  const open = tickets.filter(t => !['resolved', 'closed'].includes(t.status)).length;
+  const row = t => {
+    const sla = t.slaBreachedAt ? ' <span class="text-red-600 font-bold">· SLA breached</span>' : '';
+    return `<button onclick="openTicketPanel(${t.id})" class="w-full text-left border border-gray-200 rounded-xl px-3 py-2.5 hover:bg-gray-50 transition flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <p class="text-sm font-semibold text-gray-800 truncate">${_escH(t.subject)}</p>
+        <p class="text-xs text-gray-400 mt-0.5">#${t.id} · ${_escH((t.category || '').replace(/_/g, ' '))} · ${age(t.createdAt)}${sla}</p>
+      </div>
+      <div class="flex flex-col items-end gap-1 shrink-0">${statusBadge(t.status)}${priorityBadge(t.priority)}</div>
+    </button>`;
+  };
+  return _ctSection(
+    'M18.364 5.636l-3.536 3.536m0 5.656l3.536 3.536M9.172 9.172L5.636 5.636m3.536 9.192l-3.536 3.536M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-5 0a4 4 0 11-8 0 4 4 0 018 0z',
+    'Support requests',
+    open ? `<span class="text-emerald-600">(${open} open)</span>` : `<span class="text-gray-400">(${tickets.length})</span>`,
+    `<div class="space-y-2">${tickets.length ? tickets.map(row).join('') : '<p class="text-xs text-gray-400 py-1">No support requests raised yet.</p>'}</div>`
+  );
+}
+
+// Issues Reported — in-app bug reports this account has filed, newest first. Each row opens
+// the existing Issue Reports modal (openIssuePanel) to view/manage. Same visibility rule as
+// Support requests: shown for any account (client), hidden for pure prospects.
+function _ctIssuesSection(issues, client) {
+  issues = Array.isArray(issues) ? issues : [];
+  if (!issues.length && !client) return '';
+  const open = issues.filter(i => !['closed', 'roadmap'].includes(i.status)).length;
+  const row = i => `<button onclick="openIssuePanel(${i.id})" class="w-full text-left border border-gray-200 rounded-xl px-3 py-2.5 hover:bg-gray-50 transition flex items-start justify-between gap-3">
+      <div class="min-w-0">
+        <p class="text-sm font-semibold text-gray-800 truncate">${_escH(i.description || '(no description)')}${i.hasImage ? ' 📎' : ''}</p>
+        <p class="text-xs text-gray-400 mt-0.5">#${i.id}${i.sourceLocation ? ` · ${_escH(i.sourceLocation)}` : ''} · ${age(i.createdAt)}</p>
+      </div>
+      <div class="shrink-0">${_irBadge(i.status)}</div>
+    </button>`;
+  return _ctSection(
+    'M12 9v2m0 4h.01M5.07 19h13.86a2 2 0 001.74-2.99l-6.93-12a2 2 0 00-3.48 0l-6.93 12A2 2 0 005.07 19z',
+    'Issues reported',
+    open ? `<span class="text-emerald-600">(${open} open)</span>` : `<span class="text-gray-400">(${issues.length})</span>`,
+    `<div class="space-y-2">${issues.length ? issues.map(row).join('') : '<p class="text-xs text-gray-400 py-1">No issues reported yet.</p>'}</div>`
+  );
+}
+
+function _ctQuickAction(onclick, label, path) {
+  return `<button onclick="${onclick}" class="flex flex-col items-center gap-1 w-16 group">
+    <span class="w-10 h-10 rounded-full bg-gray-100 group-hover:bg-emerald-100 flex items-center justify-center transition">
+      <svg class="w-5 h-5 text-gray-600 group-hover:text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${path}"/></svg>
+    </span><span class="text-xs text-gray-500">${label}</span></button>`;
+}
+function _ctQuickActionLink(href, label, path) {
+  return `<a href="${href}" class="flex flex-col items-center gap-1 w-16 group">
+    <span class="w-10 h-10 rounded-full bg-gray-100 group-hover:bg-emerald-100 flex items-center justify-center transition">
+      <svg class="w-5 h-5 text-gray-600 group-hover:text-emerald-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${path}"/></svg>
+    </span><span class="text-xs text-gray-500">${label}</span></a>`;
+}
+
+function renderContactInfo(lead, client) {
+  const tags = Array.isArray(lead.tags) ? lead.tags : [];
+  // For a client, name + company are owned by their account — show them read-only so
+  // edits can't silently diverge from (and be overwritten by) the account on reload.
+  const acctName = client && client.accountName;
+  const acctCompany = client && client.accountCompany;
+  const fromAcct = '<span class="ml-1 text-[10px] font-semibold text-emerald-600 normal-case tracking-normal">· from account</span>';
+  const readonlyField = val => `<p class="w-full text-sm text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5">${_escH(val)}</p>`;
+  document.getElementById('contact-info').innerHTML = `
+    <div class="flex items-center gap-2 mb-5">
+      <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+      <h3 class="font-bold text-gray-900">Contact info</h3>
+    </div>
+    <div class="space-y-4">
+      <div><div class="flex items-center justify-between mb-1"><label class="block text-xs font-bold uppercase tracking-wide text-gray-400">Name${acctName ? fromAcct : ''}</label><span id="ci-saved" class="hidden text-xs text-emerald-600 font-semibold">Saved ✓</span></div>
+        ${acctName ? readonlyField(acctName) : `<input id="ci-name" value="${_escH(lead.name || '')}" onchange="_ctSaveInfo()" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">`}</div>
+      <div><label class="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Company${acctCompany ? fromAcct : ''}</label>
+        ${acctCompany ? readonlyField(acctCompany) : `<input id="ci-company" value="${_escH(lead.company || '')}" onchange="_ctSaveInfo()" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">`}</div>
+      <div><label class="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Phone</label>
+        <input id="ci-phone" value="${_escH(lead.phone || '')}" placeholder="—" onchange="_ctSaveInfo()" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none"></div>
+      <div><label class="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Email</label>
+        <p class="text-sm text-gray-700 break-all">${_escH(lead.email)}</p></div>
+      <div><label class="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Tags</label>
+        <div id="ci-tags" class="flex flex-wrap gap-1">${tags.length ? tags.map(t => `<span class="inline-flex items-center gap-1 text-xs bg-gray-100 text-gray-700 rounded-full px-2 py-0.5">${_escH(t)}<button onclick="_ctRemoveTag('${_escH(t).replace(/'/g, "\\'")}')" class="text-gray-400 hover:text-red-500">×</button></span>`).join('') : '<span class="text-xs text-gray-400">No tags</span>'}</div></div>
+
+      <!-- Sales tracking (absorbed from the retired Sales Pipeline) -->
+      <div class="pt-5 mt-1 border-t border-gray-100 space-y-4">
+        <div><label class="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Opportunity</label>
+          <div class="flex items-center gap-2">${_ctOppBadge(lead.leadType) || '<span class="text-xs text-gray-400">—</span>'}${lead.source ? `<span class="text-xs text-gray-400">· ${_escH(lead.source.replace(/_/g,' '))}</span>` : ''}</div></div>
+        <div><label class="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Priority</label>
+          <span class="text-xs font-semibold px-2 py-0.5 rounded-full ${SP_PRIORITY_BADGE[lead.priority] || 'bg-gray-100 text-gray-600'}">${lead.priority || '—'}</span></div>
+        <div><label class="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Pipeline status</label>
+          <select onchange="_ctSetStatus(this.value)" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none">${SP_STATUS_OPTIONS.map(s => `<option value="${s}" ${lead.status === s ? 'selected' : ''}>${SP_STATUS_LABELS[s]}</option>`).join('')}</select></div>
+        <div><label class="block text-xs font-bold uppercase tracking-wide text-gray-400 mb-1">Sales notes</label>
+          <textarea onblur="_ctSaveNotes(this.value)" rows="3" placeholder="Add notes…" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:ring-2 focus:ring-emerald-500 focus:outline-none resize-y">${_escH(lead.salesNotes || '')}</textarea></div>
+      </div>
+    </div>`;
+}
+
+// Quick-action focus helpers
+function _ctFocusReply() { const t = document.getElementById('ct-reply-body'); if (t) { t.focus(); t.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }
+function _ctFocusNote()  { _ctFocusReply(); }
+function _ctFocusTask()  { const t = document.getElementById('ct-task-input'); if (t) { t.focus(); t.scrollIntoView({ behavior: 'smooth', block: 'center' }); } }
+
+async function _ctPost(resource, payload) {
+  const res = await fetch(`/.netlify/functions/admin-api?resource=${resource}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ resource, ...payload }),
+  });
+  if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'Request failed.'); }
+  return res.json().catch(() => ({}));
+}
+
+async function _ctSend(direction) {
+  const bodyEl = document.getElementById('ct-reply-body'), errEl = document.getElementById('ct-reply-error'), btn = document.getElementById('ct-reply-send');
+  const message = (bodyEl.value || '').trim();
+  errEl.classList.add('hidden');
+  if (!message) { errEl.textContent = 'Please write a message first.'; errEl.classList.remove('hidden'); return; }
+  if (btn) btn.disabled = true;
   try {
-    await fetch('/.netlify/functions/admin-api', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ resource: 'lead-notes', leadId, salesNotes: notes }),
-    });
-  } catch { /* silent */ }
+    await _ctPost('lead-reply', { leadId: _selectedContactId, body: message, direction });
+    await openContact(_selectedContactId);
+    loadContacts();
+  } catch (e) { errEl.textContent = e.message; errEl.classList.remove('hidden'); }
+  finally { if (btn) btn.disabled = false; }
+}
+
+async function _ctAddTask() {
+  const input = document.getElementById('ct-task-input');
+  const title = (input.value || '').trim();
+  if (!title) return;
+  try { await _ctPost('contact-task', { leadId: _selectedContactId, title }); await openContact(_selectedContactId); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+async function _ctToggleTask(taskId, done) {
+  try { await _ctPost('contact-task-toggle', { taskId, done }); await openContact(_selectedContactId); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+async function _ctSetType(type) {
+  try { await _ctPost('contact-update', { leadId: _selectedContactId, contactType: type }); await openContact(_selectedContactId); loadContacts(); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+// Pipeline status + sales notes, reusing the endpoints the retired Sales Pipeline used.
+async function _ctSetStatus(status) {
+  try { await _ctPost('lead-status', { leadId: _selectedContactId, status }); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+async function _ctSaveNotes(salesNotes) {
+  try { await _ctPost('lead-notes', { leadId: _selectedContactId, salesNotes }); }
+  catch { /* silent, matches old pipeline behaviour */ }
+}
+async function _ctSaveInfo() {
+  // Name/Company inputs are absent when they're read-only account fields (client) — only
+  // send the fields the CRM actually owns for this contact.
+  const nameEl = document.getElementById('ci-name');
+  const companyEl = document.getElementById('ci-company');
+  const phoneEl = document.getElementById('ci-phone');
+  const payload = { leadId: _selectedContactId };
+  if (nameEl) payload.name = nameEl.value.trim();
+  if (companyEl) payload.company = companyEl.value.trim();
+  if (phoneEl) payload.phone = phoneEl.value.trim();
+  try {
+    await _ctPost('contact-update', payload);
+    const s = document.getElementById('ci-saved'); s.classList.remove('hidden'); setTimeout(() => s.classList.add('hidden'), 1500);
+    loadContacts();
+  } catch (e) { alert('Failed: ' + e.message); }
+}
+function _ctCurrentTags() { const c = _contactsCache.find(x => x.id === _selectedContactId); return Array.isArray(c?.tags) ? c.tags.slice() : []; }
+async function _ctAddTag() {
+  const tag = (prompt('Add a tag') || '').trim();
+  if (!tag) return;
+  const tags = _ctCurrentTags(); if (!tags.includes(tag)) tags.push(tag);
+  try { await _ctPost('contact-update', { leadId: _selectedContactId, tags }); await openContact(_selectedContactId); loadContacts(); }
+  catch (e) { alert('Failed: ' + e.message); }
+}
+async function _ctRemoveTag(tag) {
+  const tags = _ctCurrentTags().filter(t => t !== tag);
+  try { await _ctPost('contact-update', { leadId: _selectedContactId, tags }); await openContact(_selectedContactId); loadContacts(); }
+  catch (e) { alert('Failed: ' + e.message); }
 }
 
 // ── US-ADM-2.3.1: Billing Reconciliation Queue ────────────────────────────────
@@ -6704,18 +7609,9 @@ window.addEventListener('popstate', (e) => {
   adminNav(view);
 });
 
-// Boot: restore from URL param or default to dashboard
-(function bootAdmin() {
-  const params = new URLSearchParams(location.search);
-  const initialView = params.get('view') || 'dashboard';
-  const cat = Object.keys(ADMIN_CATS).find(k => ADMIN_CATS[k].children.some(c => c.view === initialView));
-  if (cat && cat !== 'dashboard') {
-    adminCatNav(cat);
-    adminNav(initialView);
-  } else {
-    adminCatNav('dashboard');
-  }
-})();
+// Boot runs at the END of this script (see bootAdmin below): adminNav() reads let-declared
+// state such as _mdActiveTab, which stays in the temporal dead zone until its declaration
+// further down has been evaluated. Booting from here threw on any deep link to ?view=master-data.
 
 // ── US-ADM-1.5.1: Bottom sheet helper ────────────────────────────────────────
 function openBottomSheet(id) {
@@ -6735,7 +7631,6 @@ const MD_API = '/.netlify/functions/master-data-api';
 
 const MD_TAB_RESOURCE = {
   'plans':              'master-plans',
-  'plan-prices':        'plan-prices',
   'assistants':         'master-assistants',
   'assistant-versions': 'assistant-versions',
   'feature-flags-md':   'feature-flags',
@@ -6745,28 +7640,43 @@ const MD_TAB_RESOURCE = {
 
 const MD_FIELDS = {
   'master-plans': [
-    { key: 'name',              label: 'Name',              type: 'text',   required: true },
-    { key: 'description',       label: 'Description',       type: 'text' },
+    { key: 'name',              label: 'Plan Name',         type: 'text',   required: true },
+    { key: 'tierDescription',   label: 'Tier Description',  type: 'text',   placeholder: 'Tier 2 · Best for Scaling Founders' },
+    { key: 'description',       label: 'Plan Description',  type: 'textarea', placeholder: 'Scale your business with autonomous goal tracking…' },
     { key: 'monthlyPriceGbp',   label: 'Monthly Price (GBP)', type: 'number', required: true },
     { key: 'interval',          label: 'Billing Cycle (month/year)', type: 'text', placeholder: 'month' },
     { key: 'tierKey',           label: 'Tier Key',          type: 'text',   required: true },
     { key: 'features',          label: 'Features (JSON)',   type: 'json',   placeholder: '{ "unlock_trending_audio": true, "bonus_assistants": 1 }' },
+    { key: 'isMostPopular',     label: 'Most Popular (shows the pill — only one plan)', type: 'checkbox' },
     { key: 'isActive',          label: 'Active',            type: 'checkbox' },
   ],
-  'plan-prices': [
-    { key: 'masterPlanId',      label: 'Master Plan ID',    type: 'number', required: true },
-    { key: 'currency',          label: 'Currency',          type: 'text',   required: true, placeholder: 'GBP' },
-    { key: 'monthlyPricePence', label: 'Monthly (pence)',   type: 'number', required: true },
-    { key: 'annualPricePence',  label: 'Annual (pence)',    type: 'number' },
-    { key: 'stripePriceIdMonthly', label: 'Stripe Monthly Price ID', type: 'text' },
-    { key: 'stripePriceIdAnnual',  label: 'Stripe Annual Price ID',  type: 'text' },
-  ],
+  // Everything the public assistant catalogue, detail modal and detail page render lives here —
+  // these fields ARE the marketing copy (there is no hardcoded fallback any more).
   'master-assistants': [
     { key: 'name',              label: 'Name',              type: 'text',   required: true },
-    { key: 'roleKey',           label: 'Role Key',          type: 'text',   required: true },
+    // The join key across ai_assistants.configuration->>'type', the cron role lists and the
+    // onboarding schemas. Set once at create; renaming it would strand every hired assistant.
+    { key: 'roleKey',           label: 'Role Key',          type: 'text',   required: true, readOnlyOnEdit: true,
+      help: 'Set once at creation — hired assistants are matched on this.' },
     { key: 'category',          label: 'Category',          type: 'text' },
-    { key: 'systemPrompt',      label: 'System Prompt',     type: 'textarea' },
+    { key: 'tagline',           label: 'Tagline',           type: 'text',   placeholder: 'Consistent, on-brand content — without the daily grind.' },
+    { key: 'description',       label: 'Description',       type: 'textarea', placeholder: 'Plans, writes, and schedules branded content…' },
+    { key: 'iconKey',           label: 'Icon Key',          type: 'text',   placeholder: 'megaphone' },
+    { key: 'iconColor',         label: 'Icon Colour',       type: 'text',   placeholder: 'pink' },
+    { key: 'keyFeatures',       label: 'Key Features',      type: 'list',   help: 'One per line. Shown as the bullet list on the detail page.' },
+    { key: 'integrations',      label: 'Integrations',      type: 'list',   help: 'One per line. Shown as the integration chips.' },
+    { key: 'video.url',         label: 'Video URL',         type: 'text',   placeholder: 'https://www.youtube.com/embed/ID  or  /videos/smm.mp4',
+      help: 'Leave blank to show the branded placeholder slot.' },
+    { key: 'video.title',       label: 'Video Caption',     type: 'text',   placeholder: 'Watch the Social Media Manager in action' },
+    { key: 'video.poster',      label: 'Video Poster',      type: 'text',   placeholder: '/images/smm-poster.jpg' },
+    { key: 'systemPrompt',      label: 'System Prompt',     type: 'textarea',
+      help: 'Leave blank to keep the current prompt. Any text here creates a new immutable version.' },
     { key: 'riskClassification', label: 'Risk',             type: 'text' },
+    { key: 'milestoneTasksRequired', label: 'Milestone Tasks Required', type: 'number' },
+    // comingSoon is deliberately NOT here. Clearing it launches a role, and that has to go through
+    // master-assistants.ts so the waitlist launch-notification fan-out fires. Editing it here would
+    // write master_assistants directly and launch the role silently. Use Assistants → Assistant
+    // Catalog, which is the surface that owns launch/lifecycle state.
     { key: 'isActive',          label: 'Active',            type: 'checkbox' },
   ],
   'feature-flags': [
@@ -6813,6 +7723,10 @@ function mdSwitchTab(tab) {
 async function mdLoadTab(tab) {
   // US-HELP-1.3.1: Help Articles tab has its own loader
   if (tab === 'help-articles') { await mdLoadHelpArticles(); return; }
+  // Plan Features tab renders a matrix (features × plans), not the standard CRUD table.
+  if (tab === 'plan-features') { await mdLoadPlanFeatures(); return; }
+  // Assistant Features likewise renders a matrix (assistants × capabilities).
+  if (tab === 'assistant-features') { await mdLoadAssistantFeatures(); return; }
 
   const resource = MD_TAB_RESOURCE[tab];
   if (!resource) return;
@@ -6906,14 +7820,360 @@ async function mdApplyHelpSeed() {
   }
 }
 
+// ── Plan Features matrix (DB-driven pricing features) ───────────────────────
+// Loads the feature catalog + per-plan values, renders an editable matrix, and saves changes
+// either retroactively (all existing accounts) or to new subscribers only (freezes existing ones).
+let _pfData = null;                 // { features:[], plans:[], values:{[planId]:{[key]:val}} }
+let _pfDirty = {};                  // { "planId::key": value } — pending edits
+
+async function mdLoadPlanFeatures() {
+  const host = document.getElementById('md-plan-features-body');
+  if (!host) return;
+  host.innerHTML = '<div class="px-5 py-8 text-center text-gray-400">Loading…</div>';
+  _pfDirty = {};
+  pfUpdateSaveBtn();
+  try {
+    _pfData = await api(MD_API + '?resource=plan-feature-values');
+    pfRenderMatrix();
+  } catch (e) {
+    host.innerHTML = '<div class="px-5 py-8 text-center text-red-400">Failed to load: ' + escAdm(e.message || e) + '</div>';
+  }
+}
+
+function pfRenderMatrix() {
+  const host = document.getElementById('md-plan-features-body');
+  if (!host || !_pfData) return;
+  const { features, plans, values } = _pfData;
+  if (!features.length) {
+    host.innerHTML = '<div class="px-5 py-8 text-center text-gray-400">No feature definitions yet. Apply db/plan-features.sql and run db/seed-plan-features.ts, or add one.</div>';
+    return;
+  }
+  const cols = plans.map(p => `<th class="px-3 py-3 text-center font-bold text-gray-600 whitespace-nowrap">${escAdm(p.name)}<div class="text-[10px] font-normal text-gray-400">${escAdm(p.tierKey)}</div></th>`).join('');
+  let rows = '';
+  let lastCat = null;
+  for (const def of features) {
+    if (def.category !== lastCat) {
+      rows += `<tr class="bg-gray-50"><td colspan="${plans.length + 2}" class="px-4 py-2 text-xs font-bold uppercase tracking-wider text-gray-400">${escAdm(def.category)}</td></tr>`;
+      lastCat = def.category;
+    }
+    const disabled = !def.isEnabled;
+    rows += `<tr class="border-t border-gray-100 ${disabled ? 'opacity-50' : ''}">`;
+    rows += `<td class="px-4 py-2.5 align-top"><div class="font-medium text-gray-800 text-sm">${escAdm(def.label)}</div>`
+          + `<div class="text-[11px] text-gray-400 font-mono">${escAdm(def.key)} · ${escAdm(def.valueType)} · ${escAdm(def.storageTarget)}${def.columnName ? '(' + escAdm(def.columnName) + ')' : ''}</div></td>`;
+    for (const p of plans) {
+      const val = (values[p.id] || {})[def.key];
+      rows += `<td class="px-3 py-2.5 text-center align-middle">${pfCellEditor(def, p.id, val, disabled)}</td>`;
+    }
+    // Per-feature Enabled toggle (row-level; PATCHes plan-feature-defs immediately).
+    rows += `<td class="px-3 py-2.5 text-center align-middle">`
+          + `<button onclick="pfToggleEnabled(${def.id}, ${def.isEnabled ? 'false' : 'true'})" `
+          + `class="px-2.5 py-1 text-[11px] font-bold rounded-full ${def.isEnabled ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}">`
+          + `${def.isEnabled ? 'Enabled' : 'Disabled'}</button></td>`;
+    rows += '</tr>';
+  }
+  host.innerHTML = `<table class="w-full text-sm"><thead class="text-xs uppercase tracking-wide border-b border-gray-200">`
+    + `<tr><th class="px-4 py-3 text-left font-bold text-gray-500">Feature</th>${cols}<th class="px-3 py-3 text-center font-bold text-gray-500">Status</th></tr>`
+    + `</thead><tbody>${rows}</tbody></table>`;
+}
+
+// Inline editor for one cell, keyed by planId::featureKey. Writes into _pfDirty on change.
+function pfCellEditor(def, planId, val, disabled) {
+  const id = `pf-${planId}-${escAdm(def.key)}`;
+  const dis = disabled ? 'disabled' : '';
+  if (def.valueType === 'boolean') {
+    const on = val === true || val === 'true';
+    return `<input type="checkbox" id="${id}" ${on ? 'checked' : ''} ${dis} onchange="pfEdit(${planId}, '${escAdm(def.key)}', this.checked)" class="w-4 h-4 cursor-pointer accent-emerald-600">`;
+  }
+  if (def.valueType === 'number') {
+    const v = (val === null || val === undefined) ? '' : val;
+    return `<input type="number" id="${id}" value="${escAdm(v)}" ${dis} placeholder="∞" onchange="pfEdit(${planId}, '${escAdm(def.key)}', this.value)" class="w-20 px-2 py-1 border border-gray-200 rounded text-center text-sm">`;
+  }
+  const v = (val === null || val === undefined) ? '' : val;
+  return `<input type="text" id="${id}" value="${escAdm(v)}" ${dis} onchange="pfEdit(${planId}, '${escAdm(def.key)}', this.value)" class="w-40 px-2 py-1 border border-gray-200 rounded text-sm">`;
+}
+
+function pfEdit(planId, key, value) {
+  _pfDirty[planId + '::' + key] = value;
+  pfUpdateSaveBtn();
+}
+
+function pfUpdateSaveBtn() {
+  const btn = document.getElementById('pf-save-btn');
+  if (!btn) return;
+  const n = Object.keys(_pfDirty).length;
+  btn.disabled = n === 0;
+  btn.textContent = n ? `Save ${n} change${n === 1 ? '' : 's'}` : 'Save changes';
+}
+
+async function pfToggleEnabled(id, newVal) {
+  try {
+    await api(MD_API + '?resource=plan-feature-defs&id=' + id, { method: 'PATCH', body: JSON.stringify({ isEnabled: newVal }) });
+    showToast('Feature ' + (newVal ? 'enabled' : 'disabled') + '.', 'success');
+    await mdLoadPlanFeatures();
+  } catch (e) {
+    showToast('Failed: ' + (e.message || e), 'error');
+  }
+}
+
+// Apply-mode chooser — the two required modes: retroactive vs new subscribers only.
+function pfOpenApplyChooser() {
+  if (!Object.keys(_pfDirty).length) return;
+  const n = Object.keys(_pfDirty).length;
+  const ov = document.createElement('div');
+  ov.id = 'pf-apply-overlay';
+  ov.className = 'fixed inset-0 bg-black/40 flex items-center justify-center z-50';
+  ov.innerHTML = `<div class="bg-white rounded-2xl shadow-xl max-w-md w-full mx-4 p-6">
+    <h3 class="text-base font-bold text-gray-800 mb-1">Apply ${n} feature change${n === 1 ? '' : 's'}</h3>
+    <p class="text-sm text-gray-500 mb-5">Choose who these changes affect.</p>
+    <div class="space-y-3">
+      <button onclick="pfSave('new')" class="w-full text-left px-4 py-3 rounded-xl border border-gray-200 hover:border-indigo-400 hover:bg-indigo-50 transition">
+        <div class="font-bold text-gray-800 text-sm">New subscribers only</div>
+        <div class="text-xs text-gray-500 mt-0.5">Existing subscribers keep their current values (frozen). Only future sign-ups get the new values.</div>
+      </button>
+      <button onclick="pfSave('retroactive')" class="w-full text-left px-4 py-3 rounded-xl border border-gray-200 hover:border-indigo-400 hover:bg-indigo-50 transition">
+        <div class="font-bold text-gray-800 text-sm">All existing accounts (retroactive)</div>
+        <div class="text-xs text-gray-500 mt-0.5">Applies immediately to every current subscriber as well as new ones.</div>
+      </button>
+    </div>
+    <div class="mt-5 text-right"><button onclick="pfCloseApplyChooser()" class="px-4 py-2 text-sm font-semibold text-gray-500 hover:text-gray-700">Cancel</button></div>
+  </div>`;
+  document.body.appendChild(ov);
+}
+function pfCloseApplyChooser() {
+  document.getElementById('pf-apply-overlay')?.remove();
+}
+
+async function pfSave(applyMode) {
+  const updates = Object.entries(_pfDirty).map(([k, value]) => {
+    const idx = k.indexOf('::');
+    return { planId: Number(k.slice(0, idx)), key: k.slice(idx + 2), value };
+  });
+  pfCloseApplyChooser();
+  try {
+    const r = await api(MD_API + '?resource=plan-feature-values', { method: 'PATCH', body: JSON.stringify({ updates, applyMode }) });
+    const who = applyMode === 'new' ? `${r.affectedSubscribers} existing subscriber(s) frozen` : 'applied to all accounts';
+    showToast(`Saved ${r.applied} change(s) — ${who}.`, 'success');
+    await mdLoadPlanFeatures();
+  } catch (e) {
+    showToast('Save failed: ' + (e.message || e), 'error');
+  }
+}
+
+// Add a new feature definition (compact modal).
+function pfOpenAddFeature() {
+  const ov = document.createElement('div');
+  ov.id = 'pf-add-overlay';
+  ov.className = 'fixed inset-0 bg-black/40 flex items-center justify-center z-50';
+  ov.innerHTML = `<div class="bg-white rounded-2xl shadow-xl max-w-lg w-full mx-4 p-6">
+    <h3 class="text-base font-bold text-gray-800 mb-4">Add feature</h3>
+    <div class="grid grid-cols-2 gap-3 text-sm">
+      <label class="col-span-2 block"><span class="text-xs font-semibold text-gray-500">Key (snake_case)</span><input id="pf-add-key" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg" placeholder="e.g. priority_support"></label>
+      <label class="col-span-2 block"><span class="text-xs font-semibold text-gray-500">Label</span><input id="pf-add-label" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg"></label>
+      <label class="col-span-2 block"><span class="text-xs font-semibold text-gray-500">Description</span><input id="pf-add-desc" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg"></label>
+      <label class="block"><span class="text-xs font-semibold text-gray-500">Category</span><input id="pf-add-cat" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg" placeholder="e.g. Support"></label>
+      <label class="block"><span class="text-xs font-semibold text-gray-500">Value type</span><select id="pf-add-type" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg"><option value="boolean">boolean</option><option value="number">number</option><option value="text">text</option></select></label>
+      <label class="block"><span class="text-xs font-semibold text-gray-500">Enterprise (t4) value</span><input id="pf-add-ent" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg" placeholder="true / Custom / …"></label>
+      <label class="block"><span class="text-xs font-semibold text-gray-500">Unlimited label</span><input id="pf-add-unl" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg" placeholder="Custom (optional)"></label>
+    </div>
+    <p class="text-[11px] text-gray-400 mt-3">Stored in the plan's <code>features</code> map. To bind a capacity column instead, set it via the Plans tab.</p>
+    <div class="mt-5 flex justify-end gap-2">
+      <button onclick="pfCloseAddFeature()" class="px-4 py-2 text-sm font-semibold text-gray-500 hover:text-gray-700">Cancel</button>
+      <button onclick="pfSubmitAddFeature()" class="px-4 py-2 text-sm font-bold text-white bg-gray-900 rounded-lg hover:bg-black">Add</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+}
+function pfCloseAddFeature() { document.getElementById('pf-add-overlay')?.remove(); }
+
+async function pfSubmitAddFeature() {
+  const key = document.getElementById('pf-add-key').value.trim();
+  const label = document.getElementById('pf-add-label').value.trim();
+  const category = document.getElementById('pf-add-cat').value.trim();
+  if (!key || !label || !category) { showToast('Key, label and category are required.', 'error'); return; }
+  const body = {
+    key, label, category,
+    description: document.getElementById('pf-add-desc').value.trim() || null,
+    valueType: document.getElementById('pf-add-type').value,
+    storageTarget: 'feature',
+    enterpriseValue: document.getElementById('pf-add-ent').value.trim() || null,
+    unlimitedLabel: document.getElementById('pf-add-unl').value.trim() || null,
+    displayOrder: (_pfData?.features?.length || 0) + 100,
+  };
+  try {
+    await api(MD_API + '?resource=plan-feature-defs', { method: 'POST', body: JSON.stringify(body) });
+    pfCloseAddFeature();
+    showToast('Feature added.', 'success');
+    await mdLoadPlanFeatures();
+  } catch (e) {
+    showToast('Failed to add: ' + (e.message || e), 'error');
+  }
+}
+
+// ── Assistant Features matrix (DB-driven capability catalog) ────────────────
+// The capability gates enforced by src/utils/assistant-capabilities.ts — NOT the "Key Features"
+// marketing bullets, which are per-assistant copy on the Assistants tab.
+//
+// Orientation is transposed vs the Plan Features matrix: there are many assistants and few
+// capabilities, so assistants are ROWS and capabilities are COLUMNS (3 columns beats 20). The
+// behaviours are the same — dirty-cell batching, an immediate per-def Enabled toggle, add-def modal.
+// No apply-mode chooser: capabilities have no subscriber cohort, so changes are always live.
+let _afData = null;                 // { features:[], assistants:[], values:{[assistantId]:{[key]:bool}} }
+let _afDirty = {};                  // { "assistantId::key": bool } — pending edits
+
+async function mdLoadAssistantFeatures() {
+  const host = document.getElementById('md-assistant-features-body');
+  if (!host) return;
+  host.innerHTML = '<div class="px-5 py-8 text-center text-gray-400">Loading…</div>';
+  _afDirty = {};
+  afUpdateSaveBtn();
+  try {
+    _afData = await api(MD_API + '?resource=assistant-feature-values');
+    afRenderMatrix();
+  } catch (e) {
+    host.innerHTML = '<div class="px-5 py-8 text-center text-red-400">Failed to load: ' + escAdm(e.message || e) + '</div>';
+  }
+}
+
+function afRenderMatrix() {
+  const host = document.getElementById('md-assistant-features-body');
+  if (!host || !_afData) return;
+  const { features, assistants, values } = _afData;
+  if (!features.length) {
+    host.innerHTML = '<div class="px-5 py-8 text-center text-gray-400">No feature definitions yet. Apply db/assistant-content.sql and run db/seed-assistant-content.ts, or add one.</div>';
+    return;
+  }
+  if (!assistants.length) {
+    host.innerHTML = '<div class="px-5 py-8 text-center text-gray-400">No active assistants.</div>';
+    return;
+  }
+
+  // Header row 1 — category bands spanning their features.
+  let bands = '<th></th>';
+  let i = 0;
+  while (i < features.length) {
+    let j = i;
+    while (j < features.length && features[j].category === features[i].category) j++;
+    bands += `<th colspan="${j - i}" class="px-3 pt-3 pb-1 text-center text-[10px] font-bold uppercase tracking-wider text-gray-400 border-b border-gray-100">${escAdm(features[i].category)}</th>`;
+    i = j;
+  }
+
+  // Header row 2 — one column per capability, each with its own global Enabled toggle.
+  const cols = features.map(def => {
+    const toggle = `<button onclick="afToggleEnabled(${def.id}, ${def.isEnabled ? 'false' : 'true'})" `
+      + `class="mt-1 px-2 py-0.5 text-[10px] font-bold rounded-full ${def.isEnabled ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'}">`
+      + `${def.isEnabled ? 'Enabled' : 'Disabled'}</button>`;
+    return `<th class="px-3 py-2 text-center align-top ${def.isEnabled ? '' : 'opacity-50'}" title="${escAdm(def.description || '')}">`
+      + `<div class="font-bold text-gray-600 text-xs whitespace-nowrap">${escAdm(def.label)}</div>`
+      + `<div class="text-[10px] font-normal text-gray-400 font-mono">${escAdm(def.key)}</div>${toggle}</th>`;
+  }).join('');
+
+  const rows = assistants.map(a => {
+    const cells = features.map(def => {
+      const on = (values[a.id] || {})[def.key] === true;
+      const dis = def.isEnabled ? '' : 'disabled';
+      return `<td class="px-3 py-2.5 text-center align-middle ${def.isEnabled ? '' : 'opacity-50'}">`
+        + `<input type="checkbox" id="af-${a.id}-${escAdm(def.key)}" ${on ? 'checked' : ''} ${dis} `
+        + `onchange="afEdit(${a.id}, '${escAdm(def.key)}', this.checked)" class="w-4 h-4 cursor-pointer accent-emerald-600"></td>`;
+    }).join('');
+    const beta = a.lifecycleState === 'beta' ? ' <span class="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded text-[10px] font-bold align-middle">beta</span>' : '';
+    return `<tr class="border-t border-gray-100">`
+      + `<td class="px-4 py-2.5 align-top"><div class="font-medium text-gray-800 text-sm">${escAdm(a.name)}${beta}</div>`
+      + `<div class="text-[11px] text-gray-400 font-mono">${escAdm(a.roleKey)}</div></td>${cells}</tr>`;
+  }).join('');
+
+  host.innerHTML = `<table class="w-full text-sm"><thead class="border-b border-gray-200">`
+    + `<tr>${bands}</tr><tr><th class="px-4 py-2 text-left text-xs font-bold text-gray-500 uppercase tracking-wide">Assistant</th>${cols}</tr>`
+    + `</thead><tbody>${rows}</tbody></table>`;
+}
+
+function afEdit(assistantId, key, value) {
+  _afDirty[assistantId + '::' + key] = value;
+  afUpdateSaveBtn();
+}
+
+function afUpdateSaveBtn() {
+  const btn = document.getElementById('af-save-btn');
+  if (!btn) return;
+  const n = Object.keys(_afDirty).length;
+  btn.disabled = n === 0;
+  btn.textContent = n ? `Save ${n} change${n === 1 ? '' : 's'}` : 'Save changes';
+}
+
+async function afToggleEnabled(id, newVal) {
+  try {
+    await api(MD_API + '?resource=assistant-feature-defs&id=' + id, { method: 'PATCH', body: JSON.stringify({ isEnabled: newVal }) });
+    showToast('Feature ' + (newVal ? 'enabled' : 'disabled') + '.', 'success');
+    await mdLoadAssistantFeatures();
+  } catch (e) {
+    showToast('Failed: ' + (e.message || e), 'error');
+  }
+}
+
+async function afSave() {
+  const updates = Object.entries(_afDirty).map(([k, value]) => {
+    const idx = k.indexOf('::');
+    return { assistantId: Number(k.slice(0, idx)), key: k.slice(idx + 2), value };
+  });
+  if (!updates.length) return;
+  try {
+    const r = await api(MD_API + '?resource=assistant-feature-values', { method: 'PATCH', body: JSON.stringify({ updates }) });
+    showToast(`Saved ${r.applied} change(s) — live immediately.`, 'success');
+    await mdLoadAssistantFeatures();
+  } catch (e) {
+    showToast('Save failed: ' + (e.message || e), 'error');
+  }
+}
+
+// Add a new capability definition (compact modal).
+function afOpenAddFeature() {
+  const ov = document.createElement('div');
+  ov.id = 'af-add-overlay';
+  ov.className = 'fixed inset-0 bg-black/40 flex items-center justify-center z-50';
+  ov.innerHTML = `<div class="bg-white rounded-2xl shadow-xl max-w-lg w-full mx-4 p-6">
+    <h3 class="text-base font-bold text-gray-800 mb-4">Add assistant capability</h3>
+    <div class="grid grid-cols-2 gap-3 text-sm">
+      <label class="col-span-2 block"><span class="text-xs font-semibold text-gray-500">Key (snake_case)</span><input id="af-add-key" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg" placeholder="e.g. ai_audio_generation"></label>
+      <label class="col-span-2 block"><span class="text-xs font-semibold text-gray-500">Label</span><input id="af-add-label" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg"></label>
+      <label class="col-span-2 block"><span class="text-xs font-semibold text-gray-500">Description</span><input id="af-add-desc" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg"></label>
+      <label class="block"><span class="text-xs font-semibold text-gray-500">Category</span><input id="af-add-cat" class="mt-1 w-full px-3 py-2 border border-gray-200 rounded-lg" placeholder="e.g. Media"></label>
+    </div>
+    <p class="text-[11px] text-gray-400 mt-3">Adding a key here surfaces the column. A capability only takes effect once the matching call site gates on <code>orgHasAssistantFeature</code>.</p>
+    <div class="mt-5 flex justify-end gap-2">
+      <button onclick="afCloseAddFeature()" class="px-4 py-2 text-sm font-semibold text-gray-500 hover:text-gray-700">Cancel</button>
+      <button onclick="afSubmitAddFeature()" class="px-4 py-2 text-sm font-bold text-white bg-gray-900 rounded-lg hover:bg-black">Add</button>
+    </div>
+  </div>`;
+  document.body.appendChild(ov);
+}
+function afCloseAddFeature() { document.getElementById('af-add-overlay')?.remove(); }
+
+async function afSubmitAddFeature() {
+  const key = document.getElementById('af-add-key').value.trim();
+  const label = document.getElementById('af-add-label').value.trim();
+  const category = document.getElementById('af-add-cat').value.trim();
+  if (!key || !label || !category) { showToast('Key, label and category are required.', 'error'); return; }
+  const body = {
+    key, label, category,
+    description: document.getElementById('af-add-desc').value.trim() || null,
+    displayOrder: (_afData?.features?.length || 0) + 100,
+  };
+  try {
+    await api(MD_API + '?resource=assistant-feature-defs', { method: 'POST', body: JSON.stringify(body) });
+    afCloseAddFeature();
+    showToast('Capability added.', 'success');
+    await mdLoadAssistantFeatures();
+  } catch (e) {
+    showToast('Failed to add: ' + (e.message || e), 'error');
+  }
+}
+
 function mdRenderRow(tab, r) {
   const editBtn = `<button onclick='mdOpenEdit("${tab}", ${JSON.stringify(r.id ?? r.key ?? r.code ?? '').replace(/'/g,"\\'")})'
     class="text-xs text-indigo-600 hover:underline font-semibold mr-2">Edit</button>`;
   const activeChip = v => v ? '<span class="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-xs font-bold">Active</span>'
                            : '<span class="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full text-xs">Inactive</span>';
   const delBtn = (dbTable, id, lbl) => `<button onclick='openCascadeDeleteSheet("${dbTable}",${JSON.stringify(id)},"${String(lbl).replace(/"/g,"&quot;")}",()=>mdLoadTab(_mdActiveTab))' class="text-xs text-red-500 hover:underline font-semibold">Delete</button>`;
-  if (tab === 'plans') return `<tr class="border-t border-gray-100"><td class="px-4 py-3 font-medium">${r.name||''}</td><td class="px-4 py-3 text-gray-500">${r.tierKey||''}</td><td class="px-4 py-3 text-right font-mono">£${(r.monthlyPriceGbp||0)}</td><td class="px-4 py-3 text-center">${activeChip(r.isActive)}</td><td class="px-4 py-3 flex gap-2">${editBtn}${delBtn('master_plans',r.id,r.name||'Plan')}</td></tr>`;
-  if (tab === 'plan-prices') return `<tr class="border-t border-gray-100"><td class="px-4 py-3">${r.masterPlanId||''}</td><td class="px-4 py-3 font-mono font-bold">${r.currency||''}</td><td class="px-4 py-3 text-right font-mono">${r.monthlyPricePence!=null?r.monthlyPricePence+'p':'-'}</td><td class="px-4 py-3 text-right font-mono">${r.annualPricePence!=null?r.annualPricePence+'p':'-'}</td><td class="px-4 py-3 flex gap-2">${editBtn}${delBtn('plan_prices',r.id,(r.currency||'')+'price')}</td></tr>`;
+  if (tab === 'plans') { const priceBtn = `<button onclick='managePriceOpen(${JSON.stringify(r.id)})' class="text-xs text-emerald-600 hover:underline font-semibold mr-2">Manage Price</button>`; return `<tr class="border-t border-gray-100"><td class="px-4 py-3 font-medium">${r.name||''}</td><td class="px-4 py-3 text-gray-500">${r.tierKey||''}</td><td class="px-4 py-3 text-right font-mono">£${(r.monthlyPriceGbp||0)}</td><td class="px-4 py-3 text-center">${activeChip(r.isActive)}</td><td class="px-4 py-3 flex gap-2">${priceBtn}${editBtn}${delBtn('master_plans',r.id,r.name||'Plan')}</td></tr>`; }
   if (tab === 'assistants') return `<tr class="border-t border-gray-100"><td class="px-4 py-3 font-medium">${r.name||''}</td><td class="px-4 py-3 text-gray-500">${r.category||''}</td><td class="px-4 py-3 text-gray-500">${r.riskClassification||''}</td><td class="px-4 py-3 text-center">${activeChip(r.isActive)}</td><td class="px-4 py-3 flex gap-2">${editBtn}${delBtn('master_assistants',r.id,r.name||'Assistant')}</td></tr>`;
   if (tab === 'assistant-versions') return `<tr class="border-t border-gray-100"><td class="px-4 py-3">${r.masterAssistantId||''}</td><td class="px-4 py-3 text-center font-mono">v${r.versionNumber||''}</td><td class="px-4 py-3 text-gray-500 max-w-xs truncate">${r.changeNote||''}</td><td class="px-4 py-3 text-gray-400 text-xs">${r.createdAt?new Date(r.createdAt).toLocaleDateString('en-GB'):''}</td></tr>`;
   if (tab === 'feature-flags-md') return `<tr class="border-t border-gray-100"><td class="px-4 py-3 font-mono text-xs">${r.key||''}</td><td class="px-4 py-3 text-gray-500 max-w-xs truncate">${r.description||''}</td><td class="px-4 py-3 text-center">${activeChip(r.isActive)}</td><td class="px-4 py-3 text-center font-mono">${r.rolloutPercentage??0}%</td><td class="px-4 py-3 flex gap-2">${editBtn}${delBtn('feature_flags',r.key,r.key||'Flag')}</td></tr>`;
@@ -6936,6 +8196,18 @@ function mdOpenEdit(tab, id) {
   mdRenderForm(tab, record);
 }
 
+// A field key may be a dotted path into a nested jsonb column (e.g. 'video.url').
+function mdGetPath(obj, path) {
+  return path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
+}
+function mdSetPath(obj, path, val) {
+  const keys = path.split('.');
+  const last = keys.pop();
+  let cur = obj;
+  for (const k of keys) { if (cur[k] == null || typeof cur[k] !== 'object') cur[k] = {}; cur = cur[k]; }
+  cur[last] = val;
+}
+
 function mdRenderForm(tab, record) {
   const resource = MD_TAB_RESOURCE[tab];
   const fields = MD_FIELDS[resource] || [];
@@ -6943,12 +8215,18 @@ function mdRenderForm(tab, record) {
   document.getElementById('md-form-title').textContent = (isEdit ? 'Edit' : 'Add') + ' — ' + (document.querySelector('.md-tab[data-tab="' + tab + '"]')?.textContent || tab);
   const isPlan = tab === 'plans' && isEdit;
   document.getElementById('md-plan-warning').classList.toggle('hidden', !isPlan);
+  const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   document.getElementById('md-form-fields').innerHTML = fields.map(f => {
-    const val = record[f.key] ?? '';
+    const val = mdGetPath(record, f.key) ?? '';
+    const req = f.required ? ' <span class="text-red-500">*</span>' : '';
+    const help = f.help ? `<p class="text-xs text-gray-400 mt-1">${f.help}</p>` : '';
+    const locked = isEdit && f.readOnlyOnEdit;
     if (f.type === 'checkbox') return `<label class="flex items-center gap-2 sm:col-span-2"><input type="checkbox" id="md-f-${f.key}" class="w-4 h-4 accent-indigo-600" ${val ? 'checked' : ''}><span class="text-sm text-gray-700">${f.label}</span></label>`;
-    if (f.type === 'textarea') return `<div class="sm:col-span-2"><label class="block text-xs font-bold text-gray-500 mb-1">${f.label}${f.required?' <span class=\'text-red-500\'>*</span>':''}</label><textarea id="md-f-${f.key}" rows="4" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none font-mono text-xs">${val}</textarea></div>`;
-    if (f.type === 'json') { const jv = val && typeof val === 'object' ? JSON.stringify(val, null, 2) : (val || ''); return `<div class="sm:col-span-2"><label class="block text-xs font-bold text-gray-500 mb-1">${f.label}</label><textarea id="md-f-${f.key}" rows="4" placeholder="${(f.placeholder||'').replace(/"/g,'&quot;')}" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none font-mono text-xs">${jv}</textarea></div>`; }
-    return `<div><label class="block text-xs font-bold text-gray-500 mb-1">${f.label}${f.required?' <span class="text-red-500">*</span>':''}</label><input id="md-f-${f.key}" type="${f.type}" value="${String(val).replace(/"/g,'&quot;')}" placeholder="${f.placeholder||''}" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none"></div>`;
+    // 'list' → a string[] jsonb column, edited one item per line.
+    if (f.type === 'list') { const lv = Array.isArray(val) ? val.join('\n') : (val || ''); return `<div class="sm:col-span-2"><label class="block text-xs font-bold text-gray-500 mb-1">${f.label}</label><textarea id="md-f-${f.key}" rows="4" placeholder="${(f.placeholder||'').replace(/"/g,'&quot;')}" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none">${esc(lv)}</textarea>${help}</div>`; }
+    if (f.type === 'textarea') return `<div class="sm:col-span-2"><label class="block text-xs font-bold text-gray-500 mb-1">${f.label}${req}</label><textarea id="md-f-${f.key}" rows="4" placeholder="${(f.placeholder||'').replace(/"/g,'&quot;')}" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none font-mono text-xs">${esc(val)}</textarea>${help}</div>`;
+    if (f.type === 'json') { const jv = val && typeof val === 'object' ? JSON.stringify(val, null, 2) : (val || ''); return `<div class="sm:col-span-2"><label class="block text-xs font-bold text-gray-500 mb-1">${f.label}</label><textarea id="md-f-${f.key}" rows="4" placeholder="${(f.placeholder||'').replace(/"/g,'&quot;')}" class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none font-mono text-xs">${esc(jv)}</textarea>${help}</div>`; }
+    return `<div><label class="block text-xs font-bold text-gray-500 mb-1">${f.label}${req}</label><input id="md-f-${f.key}" type="${f.type}" value="${String(val).replace(/"/g,'&quot;')}" placeholder="${f.placeholder||''}" ${locked ? 'disabled' : ''} class="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-400 outline-none ${locked ? 'bg-gray-100 text-gray-500 cursor-not-allowed' : ''}">${help}</div>`;
   }).join('');
   document.getElementById('md-form-panel').classList.remove('hidden');
   document.getElementById('md-form-panel').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -6957,24 +8235,29 @@ function mdRenderForm(tab, record) {
 async function mdSaveRecord() {
   const resource = _mdEditResource;
   const fields = MD_FIELDS[resource] || [];
+  const isEdit = _mdEditId != null;
   const body = {};
   for (const f of fields) {
     const el = document.getElementById('md-f-' + f.key);
     if (!el) continue;
-    if (f.type === 'checkbox') body[f.key] = el.checked;
-    else if (f.type === 'number') body[f.key] = el.value !== '' ? Number(el.value) : null;
+    // A locked field is disabled in the form and must not be sent — the API drops it anyway.
+    if (isEdit && f.readOnlyOnEdit) continue;
+    let value;
+    if (f.type === 'checkbox') value = el.checked;
+    else if (f.type === 'number') value = el.value !== '' ? Number(el.value) : null;
+    else if (f.type === 'list') value = el.value.split('\n').map(s => s.trim()).filter(Boolean);
     else if (f.type === 'json') {
-      try { body[f.key] = el.value.trim() ? JSON.parse(el.value) : {}; }
+      try { value = el.value.trim() ? JSON.parse(el.value) : {}; }
       catch { alert(f.label + ' must be valid JSON.'); el.focus(); return; }
     }
-    else body[f.key] = el.value;
-    if (f.required && (body[f.key] === '' || body[f.key] === null)) {
+    else value = el.value;
+    if (f.required && (value === '' || value === null)) {
       alert(f.label + ' is required.');
       el.focus();
       return;
     }
+    mdSetPath(body, f.key, value);
   }
-  const isEdit = _mdEditId != null;
   const url = MD_API + '?resource=' + resource + (isEdit ? '&id=' + encodeURIComponent(_mdEditId) : '');
   try {
     await api(url, { method: isEdit ? 'PATCH' : 'POST', body: JSON.stringify(body) });
@@ -6989,6 +8272,83 @@ function mdCloseForm() {
   document.getElementById('md-form-panel').classList.add('hidden');
   _mdEditId = null;
   _mdEditResource = null;
+}
+
+// ── Manage Price (single-source price management) ───────────────────────────
+let _mpPlanId = null;
+
+function managePriceOpen(planId) {
+  _mpPlanId = planId;
+  const plan = (_mdCache['plans'] || []).find(p => p.id == planId) || {};
+  document.getElementById('mp-plan-name').textContent = plan.name || ('Plan ' + planId);
+  document.getElementById('mp-current').textContent = '£' + (plan.monthlyPriceGbp || 0);
+  document.getElementById('mp-current-since').textContent = '';
+  document.getElementById('mp-new-price').value = '';
+  document.getElementById('mp-effective-from').value = '';
+  document.getElementById('mp-status').textContent = '';
+  document.getElementById('md-form-panel').classList.add('hidden');
+  const panel = document.getElementById('md-price-panel');
+  panel.classList.remove('hidden');
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  managePriceLoadHistory(planId);
+}
+
+function _mpFmt(ts) { return ts ? new Date(ts).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' }) : ''; }
+
+async function managePriceLoadHistory(planId) {
+  const tbody = document.getElementById('mp-history-tbody');
+  tbody.innerHTML = '<tr><td colspan="5" class="px-3 py-4 text-center text-gray-400">Loading…</td></tr>';
+  try {
+    const rows = await api(MD_API + '?resource=plan-price-history&planId=' + encodeURIComponent(planId));
+    const list = Array.isArray(rows) ? rows : (rows.data || []);
+    const chip = s => s === 'active'    ? '<span class="px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full font-bold">Active</span>'
+                    : s === 'scheduled' ? '<span class="px-2 py-0.5 bg-amber-100 text-amber-700 rounded-full font-bold">Scheduled</span>'
+                    :                      '<span class="px-2 py-0.5 bg-gray-100 text-gray-500 rounded-full">Superseded</span>';
+    // Reflect the live 'active' row + its start date in the header.
+    const active = list.find(r => r.status === 'active');
+    if (active) document.getElementById('mp-current-since').textContent = '· since ' + _mpFmt(active.effectiveFrom);
+    tbody.innerHTML = list.length ? list.map(r => `<tr class="border-t border-gray-50">
+      <td class="px-3 py-2 text-right font-mono">£${Number(r.monthlyPriceMajorUnit).toFixed(2)}</td>
+      <td class="px-3 py-2">${_mpFmt(r.effectiveFrom)}</td>
+      <td class="px-3 py-2 text-gray-400">${r.effectiveTo ? _mpFmt(r.effectiveTo) : '—'}</td>
+      <td class="px-3 py-2 text-center">${chip(r.status)}</td>
+      <td class="px-3 py-2 font-mono text-gray-400 truncate max-w-[10rem]">${r.stripePriceId || '—'}</td></tr>`).join('')
+      : '<tr><td colspan="5" class="px-3 py-4 text-center text-gray-400">No history yet.</td></tr>';
+  } catch (e) {
+    tbody.innerHTML = '<tr><td colspan="5" class="px-3 py-4 text-center text-red-400">Failed to load: ' + (e.message || e) + '</td></tr>';
+  }
+}
+
+async function managePriceSave() {
+  const price = Number(document.getElementById('mp-new-price').value);
+  if (!(price > 0)) { alert('Enter a positive monthly price.'); return; }
+  const effRaw = document.getElementById('mp-effective-from').value; // '' or 'YYYY-MM-DDTHH:mm' (local)
+  const body = { planId: _mpPlanId, newPriceGbp: price };
+  if (effRaw) body.effectiveFrom = new Date(effRaw).toISOString();
+  const btn = document.getElementById('mp-save-btn');
+  const status = document.getElementById('mp-status');
+  btn.disabled = true; status.textContent = 'Saving…'; status.className = 'self-center text-xs text-gray-500';
+  try {
+    const res = await api(MD_API + '?resource=plan-price-change', { method: 'POST', body: JSON.stringify(body) });
+    status.textContent = res && res.scheduled ? '✓ Scheduled' : '✓ Applied';
+    status.className = 'self-center text-xs text-emerald-600 font-semibold';
+    document.getElementById('mp-new-price').value = '';
+    document.getElementById('mp-effective-from').value = '';
+    await managePriceLoadHistory(_mpPlanId);
+    await mdLoadTab('plans'); // refresh the live price shown in the plans table
+    const plan = (_mdCache['plans'] || []).find(p => p.id == _mpPlanId);
+    if (plan) document.getElementById('mp-current').textContent = '£' + (plan.monthlyPriceGbp || 0);
+  } catch (e) {
+    status.textContent = '✗ ' + (e.message || e);
+    status.className = 'self-center text-xs text-red-500 font-semibold';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function managePriceClose() {
+  document.getElementById('md-price-panel').classList.add('hidden');
+  _mpPlanId = null;
 }
 
 // Load master data when the view is opened
@@ -7147,6 +8507,20 @@ function closeMoreDrawer() {
   document.getElementById('admin-more-drawer').classList.remove('open');
   document.getElementById('admin-more-btn').setAttribute('aria-expanded', 'false');
 }
+
+// Boot: restore from URL param or default to dashboard. Must stay last in this script — it is
+// the only top-level statement that CALLS into the code above rather than declaring it.
+(function bootAdmin() {
+  const params = new URLSearchParams(location.search);
+  const initialView = params.get('view') || 'dashboard';
+  const cat = Object.keys(ADMIN_CATS).find(k => ADMIN_CATS[k].children.some(c => c.view === initialView));
+  if (cat && cat !== 'dashboard') {
+    adminCatNav(cat);
+    adminNav(initialView);
+  } else {
+    adminCatNav('dashboard');
+  }
+})();
 </script>
 
 <!-- US-ADM-1.5.1: Bottom tab bar (mobile <768px) — 4 tabs + More -->
@@ -7185,11 +8559,17 @@ function closeMoreDrawer() {
     <button class="admin-more-item" data-cat="assistants" onclick="adminCatNav('assistants');closeMoreDrawer()">
       <span class="more-icon">🤖</span>Assistants
     </button>
-    <button class="admin-more-item" data-cat="analytics" onclick="adminCatNav('analytics');closeMoreDrawer()">
-      <span class="more-icon">📈</span>Analytics
+    <button class="admin-more-item" data-cat="communications" onclick="adminCatNav('communications');closeMoreDrawer()">
+      <span class="more-icon">✉️</span>Communications
     </button>
-    <button class="admin-more-item" data-cat="logs" onclick="adminCatNav('logs');closeMoreDrawer()">
-      <span class="more-icon">📋</span>Audit Logs
+    <button class="admin-more-item" data-cat="compliance" onclick="adminCatNav('compliance');closeMoreDrawer()">
+      <span class="more-icon">📋</span>Compliance
+    </button>
+    <button class="admin-more-item" data-cat="testing" onclick="adminCatNav('testing');closeMoreDrawer()">
+      <span class="more-icon">🐞</span>Testing
+    </button>
+    <button class="admin-more-item" data-cat="workspaces" onclick="adminCatNav('workspaces');closeMoreDrawer()">
+      <span class="more-icon">🏢</span>Workspaces
     </button>
   </div>
 </div>

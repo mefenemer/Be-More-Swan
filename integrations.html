@@ -35,6 +35,70 @@
     Connections are workspace-wide and stored encrypted. Only workspace owners and admins can disconnect a tool.
   </p>
 
+  <!-- ═══════════════ Publisher self-test (verifies the live publish path) ═══════════════ -->
+  <section id="publisher-selftest" class="mt-14">
+    <div class="mb-4">
+      <h2 class="text-2xl font-extrabold text-gray-900">Publisher self-test</h2>
+      <p class="text-gray-500 mt-1">Confirm posts can actually go out to Facebook, LinkedIn and X. <strong>Run preflight</strong> is read-only. <strong>Send test post</strong> publishes one clearly-marked post to your real account so you can prove the whole path end to end.</p>
+    </div>
+    <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 space-y-4">
+      <div class="flex flex-wrap items-center gap-2">
+        <label class="text-sm font-semibold text-gray-700">Platform</label>
+        <select id="selftest-platform" class="text-sm border border-gray-300 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-emerald-400 cursor-pointer">
+          <option value="facebook">Facebook</option>
+          <option value="linkedin">LinkedIn</option>
+          <option value="x">X (Twitter)</option>
+        </select>
+        <button id="selftest-preflight-btn" type="button" onclick="runSelfTest(false)" class="px-3.5 py-2 text-sm font-bold rounded-lg border border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Run preflight</button>
+        <button id="selftest-post-btn" type="button" onclick="runSelfTest(true)" class="px-3.5 py-2 text-sm font-bold rounded-lg border border-amber-500 text-amber-700 hover:bg-amber-50 transition cursor-pointer">Send test post…</button>
+      </div>
+      <p class="text-xs text-gray-400">Preflight checks the stored token, scopes and account identity without posting. Sending a live test post is owner/admin only and asks you to type CONFIRM first.</p>
+      <div id="selftest-result" class="hidden text-sm rounded-xl p-3 border"></div>
+    </div>
+  </section>
+  <script>
+    (function () {
+      const resultEl = () => document.getElementById('selftest-result');
+      function showResult(kind, html) {
+        const el = resultEl(); if (!el) return;
+        const tone = kind === 'ok' ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+          : kind === 'warn' ? 'bg-amber-50 text-amber-800 border-amber-200'
+          : 'bg-red-50 text-red-800 border-red-200';
+        el.className = `text-sm rounded-xl p-3 border ${tone}`;
+        el.innerHTML = html;
+        el.classList.remove('hidden');
+      }
+      window.runSelfTest = async function (confirmTestPost) {
+        const platform = document.getElementById('selftest-platform')?.value || 'facebook';
+        if (confirmTestPost) {
+          const typed = window.prompt('This publishes a real (clearly-marked) test post to your connected account. Type CONFIRM to proceed.');
+          if ((typed || '').trim().toUpperCase() !== 'CONFIRM') { showResult('warn', 'Test post cancelled.'); return; }
+        }
+        const btns = ['selftest-preflight-btn', 'selftest-post-btn'].map(id => document.getElementById(id));
+        btns.forEach(b => b && (b.disabled = true));
+        showResult('warn', confirmTestPost ? 'Sending test post…' : 'Running preflight…');
+        try {
+          const res = await fetch('/.netlify/functions/social-publish-selftest', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ platform, confirmTestPost }),
+          });
+          const d = await res.json().catch(() => ({}));
+          if (!res.ok) { showResult('fail', `<strong>${d.label || platform}:</strong> ${d.error || 'Self-test failed.'}`); return; }
+          const label = `<strong>${d.label || platform}:</strong> `;
+          if (d.preflight === 'fail' || d.preflight === 'error') { showResult('fail', `${label}${d.detail || 'Preflight failed.'}`); return; }
+          if (!confirmTestPost) { showResult('ok', `${label}Preflight passed. ${d.detail || ''}`); return; }
+          if (d.testPost === 'ok') { showResult('ok', `${label}Test post published ✅ (id ${d.postId}). ${d.deleteHint || ''}`); return; }
+          showResult('fail', `${label}Preflight passed but the test post failed: ${d.detail || 'unknown error'}${d.status ? ` (HTTP ${d.status})` : ''}.`);
+        } catch {
+          showResult('fail', 'Network error — please try again.');
+        } finally {
+          btns.forEach(b => b && (b.disabled = false));
+        }
+      };
+    })();
+  </script>
+
   <!-- ═══════════════ Integration Scenario Library ═══════════════ -->
   <section id="scenario-library" class="mt-14 hidden">
     <div class="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-6">
@@ -195,6 +259,21 @@
       tagline: 'Your Social Media Manager uploads Shorts and long-form videos with SEO-optimised titles, descriptions and tags.',
       usedBy: 'Social Media Manager',
     },
+    // ── Content sources ──
+    // Canva is an INBOUND source, not an action target: nothing is ever written back to it.
+    {
+      id: 'canva',
+      name: 'Canva',
+      emoji: '🎨',
+      // bg-teal-100 is already in the compiled style.css; bg-cyan-100 is NOT, and an
+      // uncompiled Tailwind class renders as no background at all.
+      iconBg: 'bg-teal-100',
+      tagline: 'Bring your Canva designs into your Content Library, so your Social Media Manager and Blog Writer can use them in posts and articles.',
+      usedBy: 'Social Media Manager · Blog Writer',
+      // Read-only source: assistants pull assets OUT of Canva and never write back, so the
+      // "sync actions to it" copy the action-target connectors use doesn't apply.
+      inbound: true,
+    },
   ];
 
   const grid = document.getElementById('integrations-grid');
@@ -213,12 +292,17 @@
 
   // ── OAuth redirect result banners ────────────────────────────────────────────
   const params = new URLSearchParams(window.location.search);
-  const providerName = (id) => (PROVIDERS.find((p) => p.id === id) || { name: id || 'the tool' }).name;
+  const providerOf = (id) => PROVIDERS.find((p) => p.id === id) || null;
+  const providerName = (id) => (providerOf(id) || { name: id || 'the tool' }).name;
   if (params.get('connected')) {
-    showBanner('success', providerName(params.get('connected')) + ' connected — your assistants can now sync actions to it.');
+    const p = providerOf(params.get('connected'));
+    showBanner('success', providerName(params.get('connected')) + (p && p.inbound
+      ? ' connected — you can now browse your designs and add them to your Content Library.'
+      : ' connected — your assistants can now sync actions to it.'));
   } else if (params.get('oauth_error')) {
     const reasons = {
       access_denied: 'you cancelled the authorisation',
+      provider_error: 'the provider rejected the request',
       not_configured: 'this integration is not configured on the server yet',
       csrf_fail: 'the sign-in link expired — please try again',
       token_exchange: 'the provider rejected the token exchange',
@@ -228,7 +312,9 @@
       missing_subdomain: 'no valid Zendesk subdomain was given — enter the bit before .zendesk.com and try again',
     };
     const code = params.get('oauth_error');
-    showBanner('error', 'Could not connect ' + providerName(params.get('provider')) + ' — ' + (reasons[code] || code) + '.');
+    const reason = params.get('reason'); // the provider's raw error, when we have one
+    const detail = reason && code === 'provider_error' ? ' (' + reason + ')' : '';
+    showBanner('error', 'Could not connect ' + providerName(params.get('provider')) + ' — ' + (reasons[code] || code) + detail + '.');
   }
   if (params.get('connected') || params.get('oauth_error')) {
     window.history.replaceState({}, '', window.location.pathname); // don't re-trigger on refresh
@@ -347,7 +433,13 @@
     const btn = e.target.closest('[data-disconnect]');
     if (!btn) return;
     const id = btn.getAttribute('data-disconnect');
-    if (!window.confirm('Disconnect ' + providerName(id) + '? Assistants will no longer be able to sync actions to it.')) return;
+    const dp = providerOf(id);
+    const warning = dp && dp.inbound
+      // Imported assets are copies held in our own storage, so they survive a disconnect —
+      // say so, or "Disconnect" reads like it will delete the user's library.
+      ? '? Designs you have already added to your Content Library will stay there.'
+      : '? Assistants will no longer be able to sync actions to it.';
+    if (!window.confirm('Disconnect ' + providerName(id) + warning)) return;
     btn.disabled = true;
     btn.textContent = 'Disconnecting…';
     try {

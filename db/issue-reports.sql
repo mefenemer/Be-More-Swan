@@ -145,6 +145,21 @@ ALTER TABLE issue_reports ADD COLUMN IF NOT EXISTS dev_merge_status TEXT;
 ALTER TABLE issue_reports ADD COLUMN IF NOT EXISTS dev_merged_at    TIMESTAMP;
 ALTER TABLE issue_reports ADD COLUMN IF NOT EXISTS dev_merge_result TEXT;     -- gh output / error
 
+-- ── Promote the fix from staging to production ───────────────────────────────
+-- Once a fix is merged to staging and verified, a super-admin presses "Push to prod" in
+-- the ticket. Prod deploys from `main` and all dev happens on `staging`, so promoting
+-- means the local watcher pushes staging → main (`git push origin origin/staging:main`),
+-- which auto-deploys prod (and optionally fires NETLIFY_PROD_BUILD_HOOK). This is a
+-- SEPARATE, deliberate action from closing the ticket.
+--   dev_prod_status: null      → not promoted / not applicable
+--                    queued    → super-admin pressed "Push to prod"; awaiting the watcher
+--                    promoting → the watcher has claimed it and is pushing staging → main
+--                    promoted  → live on production
+--                    failed    → the promotion failed (see dev_prod_result); retriable
+ALTER TABLE issue_reports ADD COLUMN IF NOT EXISTS dev_prod_status TEXT;
+ALTER TABLE issue_reports ADD COLUMN IF NOT EXISTS dev_prod_at     TIMESTAMP;
+ALTER TABLE issue_reports ADD COLUMN IF NOT EXISTS dev_prod_result TEXT;      -- git/gh output or error
+
 -- Lets a runner cheaply claim the oldest queued issue.
 CREATE INDEX IF NOT EXISTS issue_reports_handoff_idx
   ON issue_reports (dev_handoff_status, dev_handoff_at);
@@ -152,6 +167,10 @@ CREATE INDEX IF NOT EXISTS issue_reports_handoff_idx
 -- Lets the watcher cheaply claim the oldest queued merge.
 CREATE INDEX IF NOT EXISTS issue_reports_merge_idx
   ON issue_reports (dev_merge_status, dev_handoff_at);
+
+-- Lets the watcher cheaply claim the oldest queued prod promotion.
+CREATE INDEX IF NOT EXISTS issue_reports_prod_idx
+  ON issue_reports (dev_prod_status, dev_handoff_at);
 
 DO $$
 BEGIN
@@ -188,3 +207,11 @@ ALTER TABLE issue_reports
   CHECK (dev_merge_status IS NULL
          OR dev_merge_status IN ('ready', 'queued', 'merging', 'merged', 'failed',
                                  'conflict_queued', 'conflict_resolving'));
+
+-- Prod-promotion status. Drop-then-add (same self-healing rationale as the merge
+-- constraint above) so the allowed set can grow without a stale constraint lingering.
+ALTER TABLE issue_reports DROP CONSTRAINT IF EXISTS issue_reports_dev_prod_status_check;
+ALTER TABLE issue_reports
+  ADD CONSTRAINT issue_reports_dev_prod_status_check
+  CHECK (dev_prod_status IS NULL
+         OR dev_prod_status IN ('queued', 'promoting', 'promoted', 'failed'));

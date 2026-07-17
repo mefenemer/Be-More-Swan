@@ -10,26 +10,15 @@ import Stripe from 'stripe';
 import jwt from 'jsonwebtoken';
 import { eq, and, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, plans, masterPlans, aiAssistants, notifications, userOrganisations } from '../../db/schema';
+import { users, plans, masterPlans, aiAssistants, userOrganisations } from '../../db/schema';
+import { createNotification } from '../../src/utils/notify';
 import { checkImpersonationBlock } from '../../src/utils/impersonation-guard';
+import { resolveMonthlyPriceId } from '../../src/utils/stripe-price';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret    = process.env.JWT_SECRET!;
 const stripeSecret = process.env.STRIPE_SECRET_KEY!;
 const stripe       = new Stripe(stripeSecret, { apiVersion: '2026-05-27.dahlia' });
-const isTestMode   = stripeSecret?.startsWith('sk_test_');
-
-const STRIPE_PRICE_IDS: Record<string, string> = isTestMode
-    ? {
-        buster:   'price_1TgGNFE7lvVYjk1BAsnhUzBp',
-        saver:    'price_1TgGP8E7lvVYjk1BRBeEZVd6',
-        employee: 'price_1TgGPfE7lvVYjk1B1CQrS6pE',
-    }
-    : {
-        buster:   'price_1Tg6f1CuS8qyNSsFxeUsfi4a',
-        saver:    'price_1Tg6fQCuS8qyNSsF5DKmEqMu',
-        employee: 'price_1Tg6fiCuS8qyNSsF787zwCwh',
-    };
 
 function parseSession(event: any): number | null {
     const match = (event.headers.cookie || '').match(/aura_session=([^;]+)/);
@@ -93,10 +82,23 @@ export default withLambda(async (event) => {
         }
 
         try {
-            // Remove the schedule — restore original price
-            const sub = await stripe.subscriptions.retrieve(planToCancel.stripeSubscriptionId, { expand: ['items'] });
+            const sub = await stripe.subscriptions.retrieve(planToCancel.stripeSubscriptionId);
+
+            // New-style scheduled downgrades attach a Stripe subscription schedule (see POST).
+            // Releasing it leaves the subscription running unchanged at its current price.
+            if (typeof sub.schedule === 'string') {
+                await stripe.subscriptionSchedules.release(sub.schedule)
+                    .catch(err => console.warn('[billing-downgrade] schedule release failed (non-blocking):', err?.message));
+            }
+
+            // Clear the pending-downgrade markers, and undo any legacy cancel_at_period_end
+            // downgrade that predates the schedule-based flow.
+            const cleanedMetadata = { ...(sub.metadata || {}) };
+            delete cleanedMetadata.pendingDowngradeTierKey;
+            delete cleanedMetadata.pendingDowngradeMasterPlanId;
             await stripe.subscriptions.update(planToCancel.stripeSubscriptionId, {
                 cancel_at_period_end: false,
+                metadata: cleanedMetadata,
             });
 
             // Restore plan status to active
@@ -104,13 +106,7 @@ export default withLambda(async (event) => {
                 .set({ status: 'active', updatedAt: new Date() })
                 .where(eq(plans.id, planToCancel.id));
 
-            await db.insert(notifications).values({
-                userId,
-                type: 'downgrade_cancelled',
-                title: 'Scheduled downgrade cancelled',
-                message: 'Your plan will continue at its current tier — no change has been made.',
-                isRead: false,
-            });
+            await createNotification(db, 'downgrade_cancelled', { userId, isRead: false });
 
             return { statusCode: 200, body: JSON.stringify({ success: true, action: 'downgrade_cancelled' }) };
         } catch (err: any) {
@@ -202,39 +198,65 @@ export default withLambda(async (event) => {
         return { statusCode: 400, body: JSON.stringify({ error: 'No Stripe subscription on record. Please contact support.' }) };
     }
 
-    const targetPriceId = STRIPE_PRICE_IDS[targetTierKey];
-    if (!targetPriceId) {
-        return { statusCode: 400, body: JSON.stringify({ error: `No Stripe price configured for tier: ${targetTierKey}` }) };
-    }
+    // Resolve the target tier's stable monthly price (single source — tracks the Plans tab), then
+    // switch to it at period end using a Stripe subscription SCHEDULE. Unlike cancel_at_period_end,
+    // a schedule keeps the subscription alive and renews it at the lower price for the next period,
+    // so the customer is downgraded — not cancelled. The webhook (customer.subscription.updated)
+    // finalises the DB switch when the new phase enters.
+    const targetPriceId = await resolveMonthlyPriceId(stripe, targetMp);
 
     try {
         const sub = await stripe.subscriptions.retrieve(activePlan.stripeSubscriptionId, { expand: ['items'] });
-        const currentItemId = sub.items.data[0]?.id;
-        if (!currentItemId) throw new Error('No subscription item found');
+        const currentItem = sub.items.data[0];
+        if (!currentItem) throw new Error('No subscription item found');
+        const currentPeriodEndUnix = currentItem.current_period_end ?? 0;
 
-        // SC4: schedule downgrade at period end — set cancel_at_period_end and create new sub schedule
-        // Approach: use Stripe subscription schedules to switch price at renewal
-        await stripe.subscriptions.update(activePlan.stripeSubscriptionId, {
-            cancel_at_period_end: true,
+        // A subscription owns at most one schedule; release any stale one (e.g. from a prior,
+        // still-pending downgrade) so we can build a clean two-phase schedule below.
+        if (typeof sub.schedule === 'string') {
+            await stripe.subscriptionSchedules.release(sub.schedule).catch(() => { /* already released */ });
+        }
+
+        // SC4: build the schedule from the live subscription, then append the target-tier phase.
+        //  • Phase 0 = current price, unchanged, until period end.
+        //  • Phase 1 = target price from renewal onward. Its metadata (masterPlanId/tier) is copied
+        //    onto the subscription when the phase activates — that is what the webhook reads to
+        //    complete the tier switch in our DB.
+        const schedule = await stripe.subscriptionSchedules.create({ from_subscription: activePlan.stripeSubscriptionId });
+        const phase0 = schedule.phases[0];
+        await stripe.subscriptionSchedules.update(schedule.id, {
+            end_behavior: 'release',
+            phases: [
+                {
+                    items: phase0.items.map(i => ({
+                        price: typeof i.price === 'string' ? i.price : i.price.id,
+                        quantity: i.quantity ?? 1,
+                    })),
+                    start_date: phase0.start_date,
+                    end_date: phase0.end_date,
+                },
+                {
+                    items: [{ price: targetPriceId, quantity: 1 }],
+                    proration_behavior: 'none',
+                    metadata: { masterPlanId: String(targetMp.id), tier: targetTierKey },
+                },
+            ],
             metadata: {
-                ...sub.metadata,
                 pendingDowngradeTierKey: targetTierKey,
                 pendingDowngradeMasterPlanId: String(targetMp.id),
             },
         });
 
-        // SC4c: set DB status to 'downgrading'
+        // SC4c: set DB status to 'downgrading' (the webhook flips it back to 'active' at renewal)
         await db.update(plans)
             .set({ status: 'downgrading', updatedAt: new Date() })
             .where(eq(plans.id, activePlan.id));
 
         // Notify user
-        const periodEnd = new Date((sub.items.data[0]?.current_period_end ?? 0) * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
-        await db.insert(notifications).values({
+        const periodEnd = new Date(currentPeriodEndUnix * 1000).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+        await createNotification(db, 'downgrade_scheduled', {
             userId,
-            type: 'downgrade_scheduled',
-            title: `Downgrade to ${targetMp.name} scheduled`,
-            message: `Your plan will downgrade to ${targetMp.name} on ${periodEnd}. Your current plan remains active until then.`,
+            context: { plan: { name: targetMp.name }, billing: { period_end: periodEnd } },
             isRead: false,
         });
 
@@ -244,7 +266,7 @@ export default withLambda(async (event) => {
                 success: true,
                 action: 'downgrade_scheduled',
                 effectivePlanName: targetMp.name,
-                periodEnd: new Date((sub.items.data[0]?.current_period_end ?? 0) * 1000).toISOString(),
+                periodEnd: new Date(currentPeriodEndUnix * 1000).toISOString(),
             }),
         };
     } catch (err: any) {

@@ -15,6 +15,14 @@ import { systemConnections, connectionCollisionAttempts } from '../../db/schema'
 export type TenantCollision = { connectionId: number; organisationId: number };
 
 /**
+ * service_name is canonically lowercase in both system_connections and
+ * connection_collision_attempts. Normalise here so a caller passing "Instagram" can never silently
+ * miss a live 'instagram' row — a missed collision would let the same provider tenant be connected
+ * to two workspaces, which is exactly what this module exists to prevent.
+ */
+const canonicalService = (serviceName: string): string => serviceName.toLowerCase();
+
+/**
  * Returns the colliding connection (active, owned by a different org) for this provider tenant,
  * or null when the tenant is free to connect. A null/empty externalUserId never collides.
  */
@@ -29,7 +37,7 @@ export async function findTenantCollision(
         .select({ id: systemConnections.id, organisationId: systemConnections.organisationId })
         .from(systemConnections)
         .where(and(
-            eq(systemConnections.serviceName, params.serviceName),
+            eq(systemConnections.serviceName, canonicalService(params.serviceName)),
             eq(systemConnections.externalUserId, tenantId),
             eq(systemConnections.isActive, true),
             eq(systemConnections.status, 'active'),
@@ -55,7 +63,8 @@ export async function recordCollisionAttempt(
         await db.insert(connectionCollisionAttempts).values({
             requestingOrgId: params.requestingOrgId,
             existingOrgId: params.existingOrgId,
-            serviceName: params.serviceName,
+            // request-workspace-access.ts matches this column against a lowercased `platform`.
+            serviceName: canonicalService(params.serviceName),
             externalUserId: params.externalUserId,
             status: 'pending',
         });
