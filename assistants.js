@@ -2060,6 +2060,15 @@ function _applyDashboardRegistry(data) {
         setText('kb-tab-label', kb.label);
         window.AssistantKnowledgeBase?.init({ kb, assistantId: data.id });
     }
+
+    // Inspo tab — only the content roles (inspoTab: social_media_manager, blog_writer):
+    // the styles/tones/ideas the assistant studies and applies to every draft.
+    const inspo = cfg.inspoTab;
+    toggle('maintab-btn-inspo', !!inspo);
+    if (inspo) {
+        setText('inspo-tab-label', inspo.label);
+        window.AssistantInspo?.init({ inspo, assistantId: data.id });
+    }
 }
 
 // Steps from the role's schema-driven onboarding definition

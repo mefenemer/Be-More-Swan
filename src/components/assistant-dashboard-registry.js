@@ -36,13 +36,16 @@
  *                //   'social_drafts' (scheduled_posts) | 'blog_posts'. See assistant-data-hub.js.
  *   cfg.kbTab    // → optional Knowledge Base tab config (assistant-knowledge-base.js);
  *                //   only tier1_support_agent has one — { label, description }
+ *   cfg.inspoTab // → optional Inspo tab config (assistant-inspo.js); the content roles
+ *                //   (social_media_manager, blog_writer) only — { label, description }
  *
  * UNIFORM TEMPLATE: every role exposes the same four core tabs in the same order —
  *   Overview · Data Hub · Review Queue · Calendar — so the layout builds user muscle
  *   memory. Only labels/content differ per role (via hubTab/reviewQueue). Calendar needs
  *   no registry config (assistant-calendar.js scopes the global calendar to this assistant).
- *   Secondary tabs (Goals, Automation, Activity, KB) follow the core four
- *   and stay role-gated via `modules` (Automation) / `kbTab` (Knowledge Base).
+ *   Secondary tabs (Goals, Automation, Activity, KB, Inspo) follow the core four
+ *   and stay role-gated via `modules` (Automation) / `kbTab` (Knowledge Base) /
+ *   `inspoTab` (Inspo).
  *
  * hubTab shape:
  *   { id, label, recordType,            // recordType matches assistant_records.record_type
@@ -110,6 +113,12 @@
           { key: 'updatedAt', label: 'Updated' },
         ],
       },
+      // Inspo tab (assistant-inspo.js) — the styles/tones/ideas this assistant studies
+      // and keeps applying, so the user stops re-explaining their taste every time.
+      inspoTab: {
+        label: 'Inspo',
+        description: 'The styles, tones and ideas you want your posts to sound like. Add a link, a file, a quick note or a voice memo — and say what you like about it. Your assistant studies these and applies them to everything it drafts.',
+      },
     },
 
     // Content Engine — Blog Writer. Uses assistant-detail.html, but its primary action is
@@ -169,6 +178,12 @@
           { key: 'status', label: 'Status' },
           { key: 'updatedAt', label: 'Updated' },
         ],
+      },
+      // Inspo tab (assistant-inspo.js) — see social_media_manager above. Blog drafts get
+      // the same treatment via their own prompt path in generate-blog.ts.
+      inspoTab: {
+        label: 'Inspo',
+        description: 'The styles, tones and ideas you want your writing to sound like. Add a link, a file, a quick note or a voice memo — and say what you like about it. Your assistant studies these and applies them to every draft.',
       },
     },
 

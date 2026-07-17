@@ -2072,6 +2072,75 @@ export const kbChunks = pgTable("kb_chunks", {
   index("kb_chunks_assistant_idx").on(t.aiAssistantId, t.organisationId),
 ]);
 
+// ── Inspo Items — Inspo tab (social_media_manager, blog_writer) ─────────────
+// The inspiration material a user parks so their assistant keeps applying the
+// styles/tones they like. `userNote` (what they like about it) is the strongest
+// signal — often stronger than the material itself.
+// Migration: db/inspo-items.sql (manual apply). Plan: docs/inspo-tab-plan.md.
+//
+// Raw inspo is NEVER injected wholesale — prompt cost must not scale with library
+// size. It reaches the model only via inspoStyleProfiles (distilled, capped) and
+// top-K retrieval over inspoChunks. Both are O(1) in item count.
+export const inspoItems = pgTable("inspo_items", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  kind: text().notNull(),                                // 'url' | 'file' | 'text' | 'voice'
+  title: text().notNull(),
+  sourceUrl: text("source_url"),                         // kind='url'
+  workspaceAssetId: integer("workspace_asset_id").references(() => workspaceAssets.id, { onDelete: "set null" }),
+  userNote: text("user_note"),                           // "what I like about this" (AC2/AC3)
+  body: text(),                                          // extracted/transcribed/typed text
+  // AC6: deactivating must stop influence as immediately as deleting.
+  isActive: boolean("is_active").notNull().default(true),
+  // 'pending' → awaiting extraction; 'ready' → body usable; 'unsupported' → we
+  // deliberately don't extract it (video: userNote is the only signal); 'failed'.
+  ingestStatus: text("ingest_status").notNull().default("pending"),
+  embeddingStatus: text("embedding_status").notNull().default("pending"),
+  chunkCount: integer("chunk_count").notNull().default(0),
+  createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("inspo_items_org_idx").on(t.organisationId),
+  index("inspo_items_assistant_idx").on(t.aiAssistantId),
+  index("inspo_items_active_idx").on(t.aiAssistantId, t.organisationId, t.isActive),
+]);
+
+// Retrieval units for channel B. Exact mirror of kbChunks (content_tsv generated
+// column lives in the SQL migration only).
+// GDPR: every embedded chunk gets a vectorEmbeddings map row (sourceType 'inspo_item').
+export const inspoChunks = pgTable("inspo_chunks", {
+  id: serial().primaryKey(),
+  inspoItemId: integer("inspo_item_id").notNull().references(() => inspoItems.id, { onDelete: "cascade" }),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  chunkIndex: integer("chunk_index").notNull(),
+  content: text().notNull(),
+  embedding: vector("embedding", { dimensions: 1024 }),  // voyage-3.5-lite output dim
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("inspo_chunks_item_idx").on(t.inspoItemId),
+  index("inspo_chunks_assistant_idx").on(t.aiAssistantId, t.organisationId),
+]);
+
+// Channel A cache — the distilled, token-capped style directive injected on every
+// generation. `sourceItemIds` exists for AC6: the profile is a cache, so generation
+// must verify a removed item isn't baked into it and fall back to retrieval-only if
+// it is. `itemFingerprint` is the cheap staleness check (mirrors the blueprint hash).
+export const inspoStyleProfiles = pgTable("inspo_style_profiles", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }).unique(),
+  profileText: text("profile_text").notNull(),
+  sourceItemIds: integer("source_item_ids").array().notNull().default([]),
+  itemFingerprint: text("item_fingerprint").notNull(),
+  tokenEstimate: integer("token_estimate").notNull().default(0),
+  compiledAt: timestamp("compiled_at").defaultNow().notNull(),
+}, (t) => [
+  index("inspo_style_profiles_org_idx").on(t.organisationId),
+]);
+
 // ── Data Export Requests — US-GAP-2.2.1 SC5 ─────────────────────────────────
 // Tracks data export requests to enforce 24-hour rate limit.
 export const dataExportRequests = pgTable("data_export_requests", {

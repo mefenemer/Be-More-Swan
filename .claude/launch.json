@@ -2,6 +2,13 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-inspo",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["-m", "http.server", "4189", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/d297b73e-95b1-4e0c-a08a-cf918a309a43/scratchpad/demo"],
+      "port": 4189,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-lead-gen",
       "runtimeExecutable": "python3",
       "runtimeArgs": ["-m", "http.server", "4186", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/edb3bdd1-2b6a-4108-aaf4-0270af9ad312/scratchpad/demo"],

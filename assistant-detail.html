@@ -448,6 +448,13 @@
       <button type="button" id="maintab-btn-kb" data-maintab="kb" class="main-tab-btn hidden">
         <span id="kb-tab-label">Knowledge Base</span>
       </button>
+      <!-- Inspo — content-roles only (inspoTab: social_media_manager, blog_writer); the
+           styles/tones the assistant studies and applies to every draft
+           (assistant-inspo.js → inspo-items.ts). Hidden by default, shown by
+           _applyDashboardRegistry when an inspoTab exists. -->
+      <button type="button" id="maintab-btn-inspo" data-maintab="inspo" class="main-tab-btn hidden">
+        <span id="inspo-tab-label">Inspo</span>
+      </button>
     </nav>
   </div>
 
@@ -592,6 +599,16 @@
     <div id="kb-editor-host"></div>
     <div id="kb-list-host"></div>
   </div><!-- /maintab-kb -->
+
+  <!-- ── MAIN TAB: Inspo ────────────────────────────────────────────────
+       The styles/tones/ideas the content assistants study and apply to every
+       draft. Populated by assistant-inspo.js from the inspoTab config; items
+       live in inspo_items (netlify/functions/inspo-items.ts). -->
+  <div id="maintab-inspo" class="main-tab-content hidden">
+    <div id="inspo-toolbar"></div>
+    <div id="inspo-composer-host"></div>
+    <div id="inspo-list-host"></div>
+  </div><!-- /maintab-inspo -->
 
   <!-- ── Persona / config slide-over (Epic 1) ──────────────────────────
        Opened from the header "Assistant Profile" button (#btn-assistant-profile),

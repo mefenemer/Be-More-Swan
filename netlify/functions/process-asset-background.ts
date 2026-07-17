@@ -7,6 +7,8 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getDb } from '../../db/client';
 import { workspaceAssets } from '../../db/schema';
 import { logAuditEvent } from '../../src/utils/audit';
+import { safeFetchText } from '../../src/utils/safe-fetch';
+import { stripPromptInjection } from '../../src/utils/prompt-injection';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const R2_ENDPOINT          = process.env.R2_ENDPOINT;
@@ -23,29 +25,11 @@ function getR2Client(): S3Client {
     });
 }
 
-// ── Prompt-injection sanitiser ─────────────────────────────────────────────
-// Strips patterns commonly used to hijack LLM system prompts embedded in
-// untrusted external content (websites, PDFs, user-submitted text).
-// This is a belt-and-braces defence — the primary protection is wrapping
-// RAG content in an explicit "DOCUMENT CONTENT START/END" boundary in the
-// system prompt so the model knows to treat it as data, not instructions.
-function _stripPromptInjection(text: string): string {
-    // Remove lines that look like system prompt overrides
-    return text
-        // Classic instruction override patterns
-        .replace(/ignore\s+(all\s+)?(previous|prior|above)\s+instructions?/gi, '[content removed]')
-        .replace(/disregard\s+(all\s+)?(previous|prior|above)\s+instructions?/gi, '[content removed]')
-        .replace(/forget\s+(all\s+)?(previous|prior)\s+instructions?/gi, '[content removed]')
-        .replace(/you\s+are\s+now\s+(?:acting\s+as|a|an)\s+/gi, '[content removed] ')
-        .replace(/new\s+instructions?\s*:/gi, '[content removed]:')
-        .replace(/system\s*:\s*/gi, '[content removed]: ')
-        .replace(/\[system\]/gi, '[content removed]')
-        .replace(/<\|im_start\|>|<\|im_end\|>/g, '')  // OpenAI special tokens
-        .replace(/###\s*instruction/gi, '### [removed]')
-        .replace(/HUMAN:|ASSISTANT:|USER:|SYSTEM:/g, '[role removed]:')
-        // Trim to prevent whitespace smuggling
-        .trim();
-}
+// Prompt-injection sanitiser — now shared with the Inspo ingestion path via
+// src/utils/prompt-injection.ts (was a private copy here). Aliased so the call sites below
+// read unchanged. Still belt-and-braces: the real defence is the structural data boundary
+// in the system prompt.
+const _stripPromptInjection = stripPromptInjection;
 
 export default withLambda(async (event: HandlerEvent) => {
     try {
@@ -74,14 +58,13 @@ export default withLambda(async (event: HandlerEvent) => {
             // EXTRACTION LOGIC A: WEBSITES & URLS
             // ---------------------------------------------------------
             if (asset.assetType === 'url' && asset.externalUrl) {
-                const response = await fetch(asset.externalUrl, {
-                    headers: { 'User-Agent': 'Be More Swan RAG Bot (Mozilla/5.0)' }
-                });
-
-                if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
-
-                const html = await response.text();
-                const $ = cheerio.load(html);
+                // SSRF: externalUrl is user-supplied, so a plain fetch() here would let a user
+                // aim this Lambda at cloud metadata (169.254.169.254 → IAM credentials) or at
+                // VPC-internal services they can't reach themselves. safeFetchText validates
+                // the scheme, pins the connection to pre-validated public addresses (closing
+                // the DNS-rebind window), re-checks every redirect hop, and caps size/time.
+                const fetched = await safeFetchText(asset.externalUrl);
+                const $ = cheerio.load(fetched.body);
 
                 // Strip out code, styling, and navigation junk
                 $('script, style, noscript, iframe, img, svg, nav, footer').remove();
