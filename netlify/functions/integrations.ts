@@ -2,9 +2,10 @@ import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { eq, and, or, isNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { systemConnections, scheduledPosts, users, userOrganisations, auditLogs } from '../../db/schema';
+import { systemConnections, scheduledPosts, users, userOrganisations, auditLogs, workspaceIntegrations } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { storeSecret, deleteSecret, buildRefKey } from '../../src/utils/vault';
+import { deleteIntegration, isIntegrationProvider } from '../../src/utils/workspace-integrations';
 import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
@@ -70,6 +71,51 @@ export default withLambda(async (event) => {
                     merged.push({ ...uc, connected: true });
                 }
             });
+
+            // Canva (and any future inbound source) authenticates through the org-scoped
+            // workspace_integrations store (src/utils/workspace-integrations.ts), not
+            // system_connections — so its real status must be merged in separately. Without
+            // this, system_connections never has a canva row, the card above always renders
+            // "Not connected", and the user can re-trigger the OAuth flow even when the org's
+            // Canva account is already linked (silently swapping which account is connected).
+            if (currentOrgId) {
+                const [canvaIntegration] = await db.select({
+                    id: workspaceIntegrations.id,
+                    status: workspaceIntegrations.status,
+                    externalAccountName: workspaceIntegrations.externalAccountName,
+                    scopes: workspaceIntegrations.scopes,
+                    expiresAt: workspaceIntegrations.expiresAt,
+                    createdAt: workspaceIntegrations.createdAt,
+                    updatedAt: workspaceIntegrations.updatedAt,
+                }).from(workspaceIntegrations).where(and(
+                    eq(workspaceIntegrations.organisationId, currentOrgId),
+                    eq(workspaceIntegrations.provider, 'canva'),
+                )).limit(1);
+                if (canvaIntegration) {
+                    // Shape matches safeColumns + connected exactly (same fields `merged`'s other
+                    // entries carry) — externalAccountName rides in externalUserId, which
+                    // _sourceCard's account chip already falls back to when the dedicated field
+                    // is absent.
+                    merged.push({
+                        // Negative id marks this as a workspace_integrations row rather than a
+                        // system_connections one — the two tables have independent id sequences,
+                        // so a positive id here could collide with an unrelated row. The DELETE
+                        // handler below reverses this to route disconnects to the right table.
+                        id: -canvaIntegration.id,
+                        serviceName: 'canva',
+                        connectionType: 'oauth',
+                        externalUserId: canvaIntegration.externalAccountName,
+                        scopes: canvaIntegration.scopes,
+                        status: canvaIntegration.status,
+                        isActive: canvaIntegration.status === 'active',
+                        metadata: null,
+                        createdAt: canvaIntegration.createdAt,
+                        updatedAt: canvaIntegration.updatedAt,
+                        tokenExpiresAt: canvaIntegration.expiresAt,
+                        connected: true,
+                    });
+                }
+            }
 
             // Server-side connection sandboxing: when scoped to an assistant, return
             // only the connectors relevant to its role (defence in depth — the UI also
@@ -225,6 +271,20 @@ export default withLambda(async (event) => {
             const connectionId = event.queryStringParameters?.id;
             if (!connectionId) return { statusCode: 400, body: JSON.stringify({ error: 'Connection ID required.' }) };
             const connIdInt = parseInt(connectionId);
+
+            // Negative id → a workspace_integrations row (e.g. Canva), synthesised by GET
+            // above. It lives in a different table with its own id sequence, so it needs its
+            // own disconnect path rather than falling through to the system_connections delete.
+            if (connIdInt < 0) {
+                if (!currentOrgId) return { statusCode: 400, body: JSON.stringify({ error: 'No organisation found for this account.' }) };
+                const [row] = await db.select({ provider: workspaceIntegrations.provider })
+                    .from(workspaceIntegrations)
+                    .where(and(eq(workspaceIntegrations.id, -connIdInt), eq(workspaceIntegrations.organisationId, currentOrgId)))
+                    .limit(1);
+                if (!row || !isIntegrationProvider(row.provider)) return { statusCode: 404, body: JSON.stringify({ error: 'Connection not found.' }) };
+                await deleteIntegration(db, currentOrgId, row.provider);
+                return { statusCode: 200, body: JSON.stringify({ success: true }) };
+            }
 
             // Fetch vaultRefKey + serviceName before deleting
             const [conn] = await db
