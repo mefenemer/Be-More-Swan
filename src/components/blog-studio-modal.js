@@ -443,6 +443,7 @@
         setStatus('bs-save-status', 'Saving…');
         setTimeout(function () { setStatus('bs-save-status', 'Saved'); }, 1400);
       },
+      onDropMedia: onEditorDropMedia,
     });
     refreshReadout(md);
     syncSwanButton();
@@ -597,21 +598,77 @@
   // The server's inline[] carries the asset's real assetType, so we hand that to insertMedia rather
   // than assuming an image: a video needs a `:::media{type=video}` directive, and inserting it as
   // `![](asset://N)` is exactly the bug that made attached videos render as nothing.
-  function attachInline(body) {
-    if (!state.postId || !state.editor) return;
-    setStatus('bs-media-status', 'Adding…');
-    api('blog-media', { method: 'POST', body: JSON.stringify(Object.assign({ blogPostId: state.postId, action: 'attach', role: 'inline' }, body)) })
+  // Attach to the inline role and RESOLVE to an insertMedia descriptor — without inserting it.
+  // Split out of attachInline because a drop needs the assetId in hand before anything is written
+  // to the Markdown (plan §4.3.3), and it places the media at the dropped gap, not at the caret.
+  // Resolves null on failure; every caller treats that as "write nothing".
+  function attachInlineAsset(body) {
+    if (!state.postId) return Promise.resolve(null);
+    return api('blog-media', { method: 'POST', body: JSON.stringify(Object.assign({ blogPostId: state.postId, action: 'attach', role: 'inline' }, body)) })
       .then(function (res) {
-        if (!res.ok) { setStatus('bs-media-status', (res.body && res.body.error) || 'Failed'); return; }
+        if (!res.ok) { setStatus('bs-media-status', (res.body && res.body.error) || 'Failed'); return null; }
         var inline = (res.body && res.body.inline) || [];
         var item = body.assetId != null
           ? (inline.filter(function (m) { return m.assetId === body.assetId; })[0] || inline[inline.length - 1])
           : inline[inline.length - 1];
-        if (item) state.editor.insertMedia({
-          assetId: item.assetId, url: item.url, alt: item.name || '', type: item.assetType || 'image',
-        });
-        hidePicker(); setStatus('bs-media-status', '');
+        if (!item) return null;
+        return { assetId: item.assetId, url: item.url, alt: item.name || '', type: item.assetType || 'image' };
       });
+  }
+
+  function attachInline(body) {
+    if (!state.postId || !state.editor) return;
+    setStatus('bs-media-status', 'Adding…');
+    attachInlineAsset(body).then(function (media) {
+      if (!media) return;
+      state.editor.insertMedia(media);
+      hidePicker(); setStatus('bs-media-status', '');
+    });
+  }
+
+  // The editor's drop hook: turn whatever was dropped into an ATTACHED asset and hand back the
+  // descriptor(s). The editor owns placement — this owns only "how does this become an assetId".
+  function onEditorDropMedia(payload) {
+    if (!state.postId) return Promise.resolve(null);
+
+    if (payload.kind === 'files') {
+      // content-upload-url already allows video MIME; anything else has no assetType we can file it
+      // under, so reject it here rather than upload something the body can't render.
+      var files = payload.files.filter(function (f) { return /^(image|video)\//.test(f.type || ''); });
+      if (!files.length) {
+        setStatus('bs-media-status', 'Only images and videos can be dropped into a post.');
+        return Promise.resolve(null);
+      }
+      setStatus('bs-media-status', 'Uploading…');
+      return Promise.all(files.map(function (f) {
+        return uploadContentAsset(f)
+          .then(function (asset) { return attachInlineAsset({ assetId: asset.id }); })
+          .catch(function (err) { setStatus('bs-media-status', err.message || 'Upload failed.'); return null; });
+      })).then(function (list) {
+        var ok = list.filter(Boolean);
+        setStatus('bs-media-status', ok.length ? '' : 'Nothing could be added.');
+        return ok;
+      });
+    }
+
+    var d = payload.data || {};
+    setStatus('bs-media-status', 'Adding…');
+    return attachInlineAsset(d.pexelsCandidate ? { pexelsCandidate: d.pexelsCandidate } : { assetId: d.assetId })
+      .then(function (media) { setStatus('bs-media-status', media ? '' : 'Failed'); return media; });
+  }
+
+  // Make a picker tile draggable into the body. The payload carries only what identifies the item;
+  // onEditorDropMedia attaches it and the editor places it. Uses the editor's own exported MIME so
+  // the two can't drift — a mismatched string would present as "dragging just does nothing".
+  function makeTileDraggable(tile, payload) {
+    // Only the body takes a drop: the hero is a single slot with its own picker, so there is
+    // nowhere to aim a drag at.
+    if (state.mediaTarget !== 'inline') return;
+    tile.draggable = true;
+    tile.addEventListener('dragstart', function (e) {
+      e.dataTransfer.setData(window.MarkdownEditor.MEDIA_MIME, JSON.stringify(payload));
+      e.dataTransfer.effectAllowed = 'copy';
+    });
   }
   function routeMedia(body) {
     if (state.mediaTarget === 'inline') return attachInline(body);
@@ -696,6 +753,7 @@
         else { tile.alt = a.name || ''; }
         tile.title = a.name || '';
         tile.addEventListener('click', function () { routeMedia({ assetId: a.id }); });
+        makeTileDraggable(tile, { source: 'library', assetId: a.id, type: a.assetType || 'image' });
         mediaEls.picker.appendChild(tile);
       });
     });
@@ -795,6 +853,21 @@
         disc.type = 'button'; disc.className = 'bs-linkbtn'; disc.textContent = 'Disconnect';
         disc.addEventListener('click', function () { disconnectDest(d.id); });
         row.appendChild(disc);
+        // "Push as draft" defaults on: the post is already live on our side, so the safe default is
+        // never to surprise-publish onto someone else's blog. Hashnode's API can't draft — no toggle.
+        // Appended last on a full-width line: the sidebar is too narrow for a third inline element,
+        // and wrapping it mid-row orphans the Disconnect link.
+        if (d.supportsDraft) {
+          var draftLbl = document.createElement('label');
+          draftLbl.style.display = 'flex'; draftLbl.style.alignItems = 'center'; draftLbl.style.gap = '6px';
+          draftLbl.style.flexBasis = '100%'; draftLbl.style.marginLeft = '20px'; draftLbl.style.opacity = '0.8';
+          draftLbl.title = 'Send as an unpublished draft, so you publish it from ' + d.label + ' yourself.';
+          var draftCb = document.createElement('input');
+          draftCb.type = 'checkbox'; draftCb.className = 'bs-synd-draft'; draftCb.value = d.id; draftCb.checked = true;
+          draftLbl.appendChild(draftCb);
+          draftLbl.appendChild(document.createTextNode('as draft'));
+          row.appendChild(draftLbl);
+        }
       } else {
         var connectBtn = document.createElement('button');
         connectBtn.type = 'button'; connectBtn.className = 'bs-btn bs-btn-ghost'; connectBtn.textContent = 'Connect ' + d.label;
@@ -938,13 +1011,20 @@
       if (!state.postId) return;
       var targets = Array.prototype.map.call(document.querySelectorAll('.bs-synd-check:checked'), function (c) { return c.value; });
       if (!targets.length) { setStatus('bs-synd-status', 'Select at least one destination.'); return; }
+      // Only count draft ticks for destinations actually being pushed.
+      var draftTargets = Array.prototype.map.call(document.querySelectorAll('.bs-synd-draft:checked'), function (c) { return c.value; })
+        .filter(function (id) { return targets.indexOf(id) !== -1; });
       setStatus('bs-synd-status', 'Publishing…');
-      api('publish-blog-destinations', { method: 'POST', body: JSON.stringify({ postId: state.postId, targets: targets }) }).then(function (res) {
+      api('publish-blog-destinations', {
+        method: 'POST',
+        body: JSON.stringify({ postId: state.postId, targets: targets, draftTargets: draftTargets }),
+      }).then(function (res) {
         if (!res.ok) { setStatus('bs-synd-status', (res.body && res.body.error) || 'Failed'); return; }
         var results = res.body.results || {};
         var parts = Object.keys(results).map(function (k) {
           var r = results[k];
-          if (r.status === 'published' || r.status === 'draft') return k + ' ✓';
+          if (r.status === 'draft') return k + ' ✓ (draft)';
+          if (r.status === 'published') return k + ' ✓';
           if (r.status === 'not_connected') return k + ' (not connected)';
           return k + ' ✗';
         });
@@ -1144,6 +1224,7 @@
             img.alt = c.title || '';
             img.title = c.photographer ? ('Photo by ' + c.photographer + ' on Pexels') : '';
             img.addEventListener('click', function () { routeMedia({ pexelsCandidate: c }); });
+            makeTileDraggable(img, { source: 'pexels', pexelsCandidate: c, type: 'image' });
             mediaEls.picker.appendChild(img);
           });
         });

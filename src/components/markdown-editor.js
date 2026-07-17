@@ -103,6 +103,24 @@
     }
   }
 
+  // dataTransfer MIMEs. Module-scope and exported so a host wiring up a draggable picker uses the
+  // same string the drop handler looks for — a typo'd MIME fails silently as "drag does nothing".
+  const MEDIA_MIME = 'application/x-bms-media';   // a picker item    → JSON payload
+  const BLOCK_MIME = 'application/x-bms-block';   // an existing block → its id (reorder)
+
+  // Is this block nothing but media? Both shapes insertMedia can emit count: the `:::media`
+  // directive, and the plain `![alt](asset://N)` it still uses for a captionless image (§3.1).
+  //
+  // Only these blocks become draggable. Text blocks must NOT be: `draggable=true` makes the browser
+  // start a drag instead of a text selection, and drag-select is exactly the gesture the AI-rewrite
+  // toolbar is built on — making every block draggable would silently disable it.
+  // (Written as an alternation of two anchored patterns rather than one `(?:…)` group: the
+  // directive's own leading `:::` reads as part of the group opener otherwise.)
+  const MEDIA_BLOCK_RE = /^:::media\{|^!\[[^\]]*\]\(asset:\/\/\d+\)$/;
+  function isMediaBlock(raw) {
+    return MEDIA_BLOCK_RE.test(String(raw == null ? '' : raw).trim());
+  }
+
   // Split Markdown into blocks on blank lines, but keep fenced code blocks intact.
   function splitBlocks(md) {
     const lines = String(md == null ? '' : md).replace(/\r\n/g, '\n').split('\n');
@@ -199,6 +217,19 @@
       .bmsme-reject { background:#e5e7eb; color:#111827; }
       .bmsme-busy { opacity:.6; pointer-events:none; }
       .bmsme-skeleton { color:#6b7280; font-style:italic; padding:8px 4px; }
+      /* Drag-and-drop (plan §4 Phase 3). The insertion point is drawn as a floating line rather
+         than by rendering real drop-zone nodes between blocks: permanent nodes would sit in the
+         click/selection path and change layout even when nobody is dragging. */
+      .bmsme-dropline { position:absolute; left:0; right:0; height:2px; background:#ec4899;
+        border-radius:2px; pointer-events:none; display:none; z-index:42; }
+      .bmsme-dropline::before { content:''; position:absolute; left:-3px; top:-3px; width:8px;
+        height:8px; border-radius:50%; background:#ec4899; }
+      .bmsme-droppending { position:absolute; left:8px; z-index:43; background:#111827; color:#fff;
+        font-size:12px; padding:3px 10px; border-radius:10px; pointer-events:none; display:none; }
+      /* Only media blocks get draggable=true — see isMediaBlock. */
+      .bmsme-block[draggable="true"] { cursor:grab; }
+      .bmsme-block[draggable="true"]:active { cursor:grabbing; }
+      .bmsme-dragging { opacity:.4; }
     `;
     const el = document.createElement('style');
     el.id = STYLE_ID; el.textContent = css;
@@ -206,7 +237,11 @@
   }
 
   function mount(opts) {
-    const { container, blogPostId, initialMarkdown = '', onChange } = opts || {};
+    // `onDropMedia(payload) → media | media[] | null` turns something the author dropped into an
+    // ATTACHED asset. It is a host hook rather than editor code on purpose: attaching means
+    // blog-media / uploadContentAsset, which are Blog Studio concerns — this component stays a
+    // generic Markdown editor and never learns the blog's endpoints.
+    const { container, blogPostId, initialMarkdown = '', onChange, onDropMedia } = opts || {};
     const placeholder = (opts && opts.placeholder) || 'Write your post… (Markdown supported)';
     if (!container) throw new Error('MarkdownEditor.mount: container is required');
     injectStyles();
@@ -267,6 +302,13 @@
         el.className = 'bmsme-block';
         el.setAttribute('data-block-id', b.id);
         el.innerHTML = blockHtml(b);
+        if (isMediaBlock(b.raw)) {
+          el.setAttribute('draggable', 'true');
+          // img/video are draggable by default, and that native drag would win over the wrapper's —
+          // handing the drop a URL/file payload instead of our block id, so a reorder would read as
+          // an external insert and duplicate the media.
+          el.querySelectorAll('img, video, audio, a').forEach((n) => { n.draggable = false; });
+        }
         root.appendChild(el);
       }
 
@@ -525,11 +567,7 @@
     // need no migration and stay byte-identical (plan §3.1).
     //
     //   media: { assetId, type?: 'image'|'video'|'audio', url?, alt?, caption?, align? }
-    function insertMediaImpl(media) {
-      if (!media || media.assetId == null) return;
-      commitEdit();   // fold any in-progress typing in before splicing the media block
-      if (media.url != null) assetUrls[media.assetId] = media.url;
-
+    function mediaRaw(media) {
       const type = media.type === 'video' || media.type === 'audio' ? media.type : 'image';
       const alt = String(media.alt || '').replace(/[[\]]/g, '');
       // The attribute grammar is `key="value"` — a quote, brace or newline in author text would
@@ -537,24 +575,189 @@
       const clean = (v) => String(v || '').replace(/["}\r\n]/g, '').trim();
       const caption = clean(media.caption);
 
-      let raw;
-      if (type === 'image' && !caption) {
-        raw = '![' + alt + '](asset://' + media.assetId + ')';
-      } else {
-        raw = ':::media{asset=' + media.assetId + ' type=' + type
-          + (alt ? ' alt="' + clean(alt) + '"' : '')
-          + (caption ? ' caption="' + caption + '"' : '')
-          + (media.align ? ' align=' + clean(media.align) : '')
-          + '}';
-      }
+      if (type === 'image' && !caption) return '![' + alt + '](asset://' + media.assetId + ')';
+      return ':::media{asset=' + media.assetId + ' type=' + type
+        + (alt ? ' alt="' + clean(alt) + '"' : '')
+        + (caption ? ' caption="' + caption + '"' : '')
+        + (media.align ? ' align=' + clean(media.align) : '')
+        + '}';
+    }
 
-      const block = { id: uid(), raw };
-      const anchorId = currentSel && currentSel.blockId;
-      const at = anchorId ? blocks.findIndex((b) => b.id === anchorId) : -1;
-      if (at >= 0) blocks.splice(at + 1, 0, block); else blocks.push(block);
+    // Insert media at a GAP index: 0 puts it above the first block, blocks.length appends.
+    //
+    // The gap is anchored to the id of the block that should follow it, and re-resolved after
+    // commitEdit(), because committing an open edit rewrites the block list underneath us — it
+    // splits one block into several (each with a FRESH id) or drops an emptied one. A raw index
+    // captured beforehand would land somewhere else entirely.
+    function insertMediaAt(index, media) {
+      if (!media || media.assetId == null) return null;
+      const beforeId = (index >= 0 && index < blocks.length) ? blocks[index].id : null;
+      commitEdit();   // fold any in-progress typing in before splicing the media block
+      if (media.url != null) assetUrls[media.assetId] = media.url;
+
+      let at = beforeId != null ? blocks.findIndex((b) => b.id === beforeId) : blocks.length;
+      if (at < 0) at = blocks.length;   // the anchor was split or emptied away — land at the end
+      const block = { id: uid(), raw: mediaRaw(media) };
+      blocks.splice(at, 0, block);
       currentSel = null;
       renderAll();
       scheduleSave();
+      return block.id;
+    }
+
+    // Caret-anchored insert: media lands after the block the author last touched (the picker's
+    // behaviour, unchanged). Resolve the anchor AFTER commitEdit for the reason above.
+    function insertMediaImpl(media) {
+      if (!media || media.assetId == null) return null;
+      commitEdit();
+      const anchorId = currentSel && currentSel.blockId;
+      const at = anchorId ? blocks.findIndex((b) => b.id === anchorId) : -1;
+      return insertMediaAt(at >= 0 ? at + 1 : blocks.length, media);
+    }
+
+    // Move an existing block to a gap index (drag-reorder, plan §4.3.4).
+    function moveBlockTo(blockId, index) {
+      if (!blockId) return;
+      const beforeId = (index >= 0 && index < blocks.length) ? blocks[index].id : null;
+      if (beforeId === blockId) return;                  // dropped back on its own gap — a no-op
+      commitEdit();
+      const from = blocks.findIndex((b) => b.id === blockId);
+      if (from < 0) return;
+      const [moved] = blocks.splice(from, 1);
+      // Re-resolve the destination AFTER the removal: taking the block out shifts every index
+      // below it up by one, so the raw gap index would land one place too far down.
+      let at = beforeId != null ? blocks.findIndex((b) => b.id === beforeId) : blocks.length;
+      if (at < 0) at = blocks.length;
+      blocks.splice(at, 0, moved);
+      renderAll();
+      scheduleSave();
+    }
+
+    // ── Drag and drop ───────────────────────────────────────────────────────────────────────────
+    // Media arrives three ways — dragged from a Studio picker, dragged from elsewhere in the draft
+    // (reorder), or dropped straight off the desktop. All three resolve to one gap index, so they
+    // share one indicator and one insert path.
+    const dropline = document.createElement('div');
+    dropline.className = 'bmsme-dropline';
+    root.appendChild(dropline);
+    const pendingPill = document.createElement('div');
+    pendingPill.className = 'bmsme-droppending';
+    pendingPill.textContent = 'Adding media…';
+    root.appendChild(pendingPill);
+
+    const blockEls = () => Array.from(root.querySelectorAll('.bmsme-block'));
+
+    // Which gap is the pointer nearest? Compares against block midpoints, so the line snaps to
+    // whichever side of a block you are hovering.
+    function gapIndexAt(clientY) {
+      const els = blockEls();
+      for (let i = 0; i < els.length; i++) {
+        const r = els[i].getBoundingClientRect();
+        if (clientY < r.top + r.height / 2) return i;
+      }
+      return els.length;
+    }
+
+    function droplineY(index) {
+      const els = blockEls();
+      const rootTop = root.getBoundingClientRect().top;
+      if (!els.length) return 0;
+      if (index >= els.length) return els[els.length - 1].getBoundingClientRect().bottom - rootTop;
+      return els[index].getBoundingClientRect().top - rootTop;
+    }
+    function showDropline(index) {
+      dropline.style.top = (droplineY(index) - 1) + 'px';
+      dropline.style.display = 'block';
+    }
+    function hideDropline() { dropline.style.display = 'none'; }
+
+    // dragenter/dragleave fire once per descendant, so a plain dragleave would hide the line while
+    // the pointer is still inside the editor. Count depth instead.
+    let dragDepth = 0;
+
+    // `types` is readable during dragover; `getData` is not (the browser withholds the payload
+    // until drop), so the kind has to be decided from the MIME list alone.
+    function dragKind(dt) {
+      if (!dt) return null;
+      const types = Array.from(dt.types || []);
+      if (types.indexOf(BLOCK_MIME) >= 0) return 'block';
+      if (types.indexOf(MEDIA_MIME) >= 0) return 'media';
+      if (types.indexOf('Files') >= 0) return 'files';
+      return null;
+    }
+    // An external drop is only offered if the host gave us a way to attach it.
+    function accepts(kind) { return kind === 'block' || typeof onDropMedia === 'function'; }
+
+    function onDragStart(e) {
+      const blockEl = e.target.closest && e.target.closest('.bmsme-block');
+      if (!blockEl || blockEl.getAttribute('draggable') !== 'true') return;
+      e.dataTransfer.setData(BLOCK_MIME, blockEl.getAttribute('data-block-id'));
+      e.dataTransfer.effectAllowed = 'move';
+      blockEl.classList.add('bmsme-dragging');
+    }
+    function onDragEnd() {
+      Array.from(root.querySelectorAll('.bmsme-dragging')).forEach((n) => n.classList.remove('bmsme-dragging'));
+      hideDropline();
+      dragDepth = 0;
+    }
+    function onDragEnter(e) {
+      const kind = dragKind(e.dataTransfer);
+      if (kind && accepts(kind)) dragDepth++;
+    }
+    function onDragLeave(e) {
+      const kind = dragKind(e.dataTransfer);
+      if (!kind || !accepts(kind)) return;
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (!dragDepth) hideDropline();
+    }
+    function onDragOver(e) {
+      const kind = dragKind(e.dataTransfer);
+      if (!kind || !accepts(kind)) return;   // not ours — leave the page's own handling alone
+      e.preventDefault();                    // required, or the browser refuses to fire `drop`
+      e.dataTransfer.dropEffect = kind === 'block' ? 'move' : 'copy';
+      showDropline(gapIndexAt(e.clientY));
+    }
+
+    async function onDrop(e) {
+      const kind = dragKind(e.dataTransfer);
+      if (!kind || !accepts(kind)) return;
+      e.preventDefault();
+      onDragEnd();
+      const index = gapIndexAt(e.clientY);
+
+      if (kind === 'block') { moveBlockTo(e.dataTransfer.getData(BLOCK_MIME), index); return; }
+
+      let payload;
+      if (kind === 'media') {
+        try { payload = { kind: 'picker', data: JSON.parse(e.dataTransfer.getData(MEDIA_MIME)) }; }
+        catch (_) { return; }               // malformed payload — never guess at what was dropped
+      } else {
+        const files = Array.from(e.dataTransfer.files || []);
+        if (!files.length) return;
+        payload = { kind: 'files', files };
+      }
+
+      // Anchor the gap across the await: attaching is a network round-trip and the author can keep
+      // typing (and re-splitting blocks) while it runs.
+      const beforeId = (index >= 0 && index < blocks.length) ? blocks[index].id : null;
+      showDropline(index);
+      pendingPill.style.top = (droplineY(index) + 4) + 'px';
+      pendingPill.style.display = 'block';
+      let media = null;
+      try {
+        media = await onDropMedia(payload);
+      } catch (err) {
+        console.error('[MarkdownEditor] media drop failed:', err);
+      }
+      pendingPill.style.display = 'none';
+      hideDropline();
+      // A drop must never write a directive pointing at an unattached asset (plan §4.3.3): if the
+      // attach failed there is no assetId, so nothing goes into the Markdown at all.
+      if (!media) return;
+
+      let at = beforeId != null ? blocks.findIndex((b) => b.id === beforeId) : blocks.length;
+      if (at < 0) at = blocks.length;
+      (Array.isArray(media) ? media : [media]).forEach((m, k) => { if (m) insertMediaAt(at + k, m); });
     }
 
     // Wire events.
@@ -563,6 +766,12 @@
     document.addEventListener('mouseup', onMouseUp);
     document.addEventListener('mousedown', onDocMouseDown);
     root.addEventListener('click', onRootClick);
+    root.addEventListener('dragstart', onDragStart);
+    root.addEventListener('dragend', onDragEnd);
+    root.addEventListener('dragenter', onDragEnter);
+    root.addEventListener('dragover', onDragOver);
+    root.addEventListener('dragleave', onDragLeave);
+    root.addEventListener('drop', onDrop);
 
     renderAll();
 
@@ -591,6 +800,9 @@
         if (changed) renderAll();
       },
       insertMedia: insertMediaImpl,
+      // Positional insert. Exposed so a host can place media without a drag (the accessible path —
+      // drag-and-drop is a pointer gesture and can't be the only way to position media).
+      insertMediaAt,
       // Back-compat wrapper: insertImage predates video/audio and is still what existing callers
       // reach for. Kept thin rather than duplicated so there's one insert path to maintain.
       insertImage(img) {
@@ -612,10 +824,16 @@
         document.removeEventListener('mouseup', onMouseUp);
         document.removeEventListener('mousedown', onDocMouseDown);
         root.removeEventListener('click', onRootClick);
+        root.removeEventListener('dragstart', onDragStart);
+        root.removeEventListener('dragend', onDragEnd);
+        root.removeEventListener('dragenter', onDragEnter);
+        root.removeEventListener('dragover', onDragOver);
+        root.removeEventListener('dragleave', onDragLeave);
+        root.removeEventListener('drop', onDrop);
         container.innerHTML = '';
       },
     };
   }
 
-  window.MarkdownEditor = { mount };
+  window.MarkdownEditor = { mount, MEDIA_MIME };
 })();
