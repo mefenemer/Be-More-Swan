@@ -38,14 +38,17 @@
  *                //   only tier1_support_agent has one — { label, description }
  *   cfg.inspoTab // → optional Inspo tab config (assistant-inspo.js); the content roles
  *                //   (social_media_manager, blog_writer) only — { label, description }
+ *   cfg.myContentTab // → optional My Content tab config (assistant-my-content.js); the content
+ *                //   roles (social_media_manager, blog_writer) only — { label }. Reuses the
+ *                //   org-wide content library (my-content.html/.js), not assistant-scoped.
  *
  * UNIFORM TEMPLATE: every role exposes the same four core tabs in the same order —
  *   Overview · Data Hub · Review Queue · Calendar — so the layout builds user muscle
  *   memory. Only labels/content differ per role (via hubTab/reviewQueue). Calendar needs
  *   no registry config (assistant-calendar.js scopes the global calendar to this assistant).
- *   Secondary tabs (Goals, Automation, Activity, KB, Inspo) follow the core four
+ *   Secondary tabs (Goals, Automation, Activity, KB, Inspo, My Content) follow the core four
  *   and stay role-gated via `modules` (Automation) / `kbTab` (Knowledge Base) /
- *   `inspoTab` (Inspo).
+ *   `inspoTab` (Inspo) / `myContentTab` (My Content).
  *
  * hubTab shape:
  *   { id, label, recordType,            // recordType matches assistant_records.record_type
@@ -119,6 +122,10 @@
         label: 'Inspo',
         description: 'The styles, tones and ideas you want your posts to sound like. Add a link, a file, a quick note or a voice memo — and say what you like about it. Your assistant studies these and applies them to everything it drafts.',
       },
+      // My Content tab (assistant-my-content.js) — the org-wide media library (uploads, links,
+      // AI-generated images/video) this assistant draws on for posts, or that feeds Inspo.
+      // Placed right after Calendar (issue #213).
+      myContentTab: { label: 'My Content' },
     },
 
     // Content Engine — Blog Writer. Uses assistant-detail.html, but its primary action is
@@ -185,6 +192,8 @@
         label: 'Inspo',
         description: 'The styles, tones and ideas you want your writing to sound like. Add a link, a file, a quick note or a voice memo — and say what you like about it. Your assistant studies these and applies them to every draft.',
       },
+      // My Content tab (assistant-my-content.js) — see social_media_manager above.
+      myContentTab: { label: 'My Content' },
     },
 
     lead_qualifier: {
