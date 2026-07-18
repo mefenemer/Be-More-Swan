@@ -10,14 +10,16 @@
 //   • Horizon decrease → archives pending drafts beyond new horizon with a note
 
 import { Handler } from '@netlify/functions';
-import { and, eq, gt } from 'drizzle-orm';
+import { and, eq, gt, inArray } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, scheduledPosts } from '../../db/schema';
+import { aiAssistants, blogPosts, masterAssistants, scheduledPosts } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { getSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
 import { enqueueScheduleGapFill } from '../../src/utils/schedule-gap-fill';
+import { enqueueBlogGapFill } from '../../src/utils/blog-gap-fill';
+import { BLOG_WRITER_ROLE_KEYS } from '../../src/constants/roles';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
@@ -81,8 +83,12 @@ export default withLambda(async (event) => {
                 name: aiAssistants.name,
                 onboardingContext: aiAssistants.onboardingContext,
                 configuration: aiAssistants.configuration,
+                // Which autopilot engine owns this assistant — social and blog keep separate
+                // queues and separate draft tables, so the horizon change has to route.
+                roleKey: masterAssistants.roleKey,
             })
             .from(aiAssistants)
+            .innerJoin(masterAssistants, eq(aiAssistants.masterAssistantId, masterAssistants.id))
             .where(and(eq(aiAssistants.id, assistantId), eq(aiAssistants.organisationId, orgId)))
             .limit(1);
         return row ?? null;
@@ -92,6 +98,7 @@ export default withLambda(async (event) => {
         return { statusCode: 404, body: JSON.stringify({ error: 'Assistant not found.' }) };
     }
 
+    const isBlogWriter = BLOG_WRITER_ROLE_KEYS.includes(assistant.roleKey ?? '');
     const previousHorizon = assistant.draftHorizonDays ?? 7;
     const isExpanding = days > previousHorizon;
     const isShrinking = days < previousHorizon;
@@ -104,15 +111,17 @@ export default withLambda(async (event) => {
     // ── Horizon expanded → fill the newly-opened window immediately ───────────
     let gapFillEnqueued = 0;
     if (isExpanding) {
-        const result = await enqueueScheduleGapFill(db, {
+        const common = {
             id: assistant.id,
             userId: assistant.userId ?? userId,
             organisationId: orgId,
             name: assistant.name,
             onboardingContext: assistant.onboardingContext,
             draftHorizonDays: days,
-            configuration: assistant.configuration,
-        });
+        };
+        const result = isBlogWriter
+            ? await enqueueBlogGapFill(db, common)
+            : await enqueueScheduleGapFill(db, { ...common, configuration: assistant.configuration });
         gapFillEnqueued = result.enqueued;
 
         if (gapFillEnqueued > 0) {
@@ -135,19 +144,32 @@ export default withLambda(async (event) => {
         const newCutoff = new Date();
         newCutoff.setDate(newCutoff.getDate() + days);
 
-        const archived = await db.update(scheduledPosts)
-            .set({
-                status: 'cancelled',
-                cancelledAt: new Date(),
-                rejectionReason: 'Outside current draft horizon',
-                updatedAt: new Date(),
-            })
-            .where(and(
-                eq(scheduledPosts.assistantId, assistantId),
-                eq(scheduledPosts.status, 'draft'),
-                gt(scheduledPosts.publishDate, newCutoff),
-            ))
-            .returning({ id: scheduledPosts.id });
+        // Blog drafts live in their own table with their own status vocabulary: blog_posts has no
+        // 'cancelled' (the status check constraint would reject it) and no cancelledAt /
+        // rejectionReason columns, so the long-form equivalent is 'archived'.
+        const archived = isBlogWriter
+            ? await db.update(blogPosts)
+                .set({ status: 'archived', updatedAt: new Date() })
+                .where(and(
+                    eq(blogPosts.assistantId, assistantId),
+                    eq(blogPosts.organisationId, orgId),
+                    inArray(blogPosts.status, ['draft', 'pending_approval']),
+                    gt(blogPosts.publishDate, newCutoff),
+                ))
+                .returning({ id: blogPosts.id })
+            : await db.update(scheduledPosts)
+                .set({
+                    status: 'cancelled',
+                    cancelledAt: new Date(),
+                    rejectionReason: 'Outside current draft horizon',
+                    updatedAt: new Date(),
+                })
+                .where(and(
+                    eq(scheduledPosts.assistantId, assistantId),
+                    eq(scheduledPosts.status, 'draft'),
+                    gt(scheduledPosts.publishDate, newCutoff),
+                ))
+                .returning({ id: scheduledPosts.id });
 
         if (archived.length > 0) {
             await createNotification(db, 'draft_horizon_shrunk', {

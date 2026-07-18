@@ -59,10 +59,13 @@ export async function drainContentJobs(): Promise<number> {
     const db = getDb();
     const now = new Date();
 
-    // Reset jobs stuck in 'processing' for >3 minutes (function timed out mid-run)
+    // Reset jobs stuck in 'processing' for >3 minutes (function timed out mid-run).
+    // Scoped to social: process-blog-jobs.ts owns the recovery of its own stuck jobs, and it uses a
+    // longer window because blog drafting is a slower call than a social post.
     await db.execute(
         `UPDATE content_generation_jobs SET status = 'queued', next_retry_at = now()
-         WHERE status = 'processing' AND updated_at < now() - interval '3 minutes' AND attempt < max_attempts`
+         WHERE status = 'processing' AND content_type = 'social'
+           AND updated_at < now() - interval '3 minutes' AND attempt < max_attempts`
     );
 
     const jobs = await db.execute<{
@@ -75,6 +78,7 @@ export async function drainContentJobs(): Promise<number> {
                 context_prompt, trigger_type, platform, admin_id, target_publish_date
          FROM content_generation_jobs
          WHERE status = 'queued'
+           AND content_type = 'social'
            AND (next_retry_at IS NULL OR next_retry_at <= now())
          ORDER BY created_at
          LIMIT 20

@@ -1,0 +1,149 @@
+// src/utils/blog-generate.ts
+// Shared blog drafting core (Autonomous Content Engine US 1.1), used by BOTH the interactive
+// generate-blog handler and the Blog Autopilot worker (process-blog-jobs.ts).
+//
+// Extracted from netlify/functions/generate-blog.ts, which was session-coupled: it resolved the
+// org through requireTenant(event), so a cron — which has no request and no session — could not
+// reach the drafting logic at all. This mirrors what src/utils/blog-publish.ts already does for
+// the publish transition, and for the same reason.
+//
+// The caller is responsible for authorisation: it passes the organisationId it has already
+// established, and every query here is scoped by it.
+
+import Anthropic from '@anthropic-ai/sdk';
+import { and, eq } from 'drizzle-orm';
+import type { getDb } from '../../db/client';
+import { aiAssistants, blogPosts, organisations } from '../../db/schema';
+import { logAiUsage } from './ai-usage';
+import { buildInspoBlock } from './inspo-profile';
+
+type Db = ReturnType<typeof getDb>;
+
+export const BLOG_MODEL = 'claude-haiku-4-5-20251001';
+export const DEFAULT_TONE = 'friendly and professional';
+
+/** Trim an untrusted string to a bounded length; non-strings become ''. */
+export function str(v: unknown, max: number): string {
+    return typeof v === 'string' ? v.trim().slice(0, max) : '';
+}
+
+export interface GenerateBlogBodyOptions {
+    blogPostId: number;
+    organisationId: number;
+    /** Whose AI usage this run is billed to. The post author interactively; the assistant's owner on cron. */
+    userId: number;
+    topic?: string;
+    keywords?: string;
+    notes?: string;
+    /** Fallback voice, used only when the authoring assistant has no tone_of_voice of its own. */
+    tone?: string;
+}
+
+export interface GenerateBlogBodyResult {
+    bodyMarkdown: string;
+    tone: string;
+}
+
+export class BlogPostNotFoundError extends Error {
+    constructor(id: number) {
+        super(`Blog post ${id} not found in this organisation.`);
+        this.name = 'BlogPostNotFoundError';
+    }
+}
+
+/**
+ * Draft a full blog post in the assistant's voice and save it to blog_posts.body_markdown.
+ *
+ * Throws BlogPostNotFoundError when the post doesn't exist in `organisationId`, and a plain Error
+ * when the model returns nothing. Callers translate these into their own failure shape — an HTTP
+ * status for the handler, a job retry for the worker.
+ */
+export async function generateBlogBody(
+    db: Db,
+    opts: GenerateBlogBodyOptions,
+): Promise<GenerateBlogBodyResult> {
+    const { blogPostId, organisationId, userId } = opts;
+    const topic = str(opts.topic, 300);
+    const keywords = str(opts.keywords, 300);
+    const notes = str(opts.notes, 4000);
+
+    const [post] = await db
+        .select({ id: blogPosts.id, title: blogPosts.title, assistantId: blogPosts.assistantId })
+        .from(blogPosts)
+        .where(and(eq(blogPosts.id, blogPostId), eq(blogPosts.organisationId, organisationId)))
+        .limit(1);
+    if (!post) throw new BlogPostNotFoundError(blogPostId);
+
+    // Voice: the assistant's profile is the source of truth; the caller-supplied tone is the fallback.
+    let tone = str(opts.tone, 200);
+    let assistantPrompt = '';
+    if (post.assistantId) {
+        const [assistant] = await db
+            .select({ onboardingContext: aiAssistants.onboardingContext, systemPrompt: aiAssistants.systemPrompt })
+            .from(aiAssistants)
+            .where(and(eq(aiAssistants.id, post.assistantId), eq(aiAssistants.organisationId, organisationId)))
+            .limit(1);
+        const actx = (assistant?.onboardingContext as Record<string, unknown> | null) ?? {};
+        if (typeof actx.tone_of_voice === 'string' && actx.tone_of_voice.trim()) tone = actx.tone_of_voice.trim();
+        if (assistant?.systemPrompt) assistantPrompt = assistant.systemPrompt.slice(0, 2000);
+    }
+    if (!tone) tone = DEFAULT_TONE;
+
+    // Business grounding (cheap, materially improves relevance).
+    const [org] = await db
+        .select({ name: organisations.name, businessDescription: organisations.businessDescription, targetAudience: organisations.targetAudience })
+        .from(organisations)
+        .where(eq(organisations.id, organisationId))
+        .limit(1);
+
+    const brief = [
+        `Title: ${post.title}`,
+        topic ? `Topic: ${topic}` : '',
+        keywords ? `Target keywords: ${keywords}` : '',
+        org?.targetAudience ? `Audience: ${org.targetAudience}` : '',
+        org?.businessDescription ? `Business context: ${org.businessDescription}` : '',
+        notes ? `Author notes / source material:\n${notes}` : '',
+    ].filter(Boolean).join('\n');
+
+    // Inspo (AC5) — the styles/tones the user parked in the Inspo tab. This is the SECOND
+    // injection seam: blog never touches the blueprint, so the social path's injection in
+    // process-content-jobs.ts does nothing for these drafts and this has to be done
+    // separately. Bounded (capped distilled profile + top-K retrieval) and null when the
+    // assistant has no inspo, so a user without any pays nothing. Never throws.
+    const inspoBlock = post.assistantId
+        ? await buildInspoBlock(db, {
+            assistantId: post.assistantId,
+            organisationId,
+            // Rank retrieval against what this post is actually about.
+            topic: [post.title, topic, keywords].filter(Boolean).join(' — '),
+        })
+        : null;
+
+    const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    const response = await anthropic.messages.create({
+        model: BLOG_MODEL,
+        max_tokens: 2500,
+        system:
+            `You are a blog writer${org?.name ? ` for ${org.name}` : ''}. Write in a ${tone} tone. ` +
+            (assistantPrompt ? `Voice guidance: ${assistantPrompt}\n` : '') +
+            'Produce a complete, publish-ready blog post in Markdown: a single H1 title, a short ' +
+            'hook intro, 3–6 H2 sections with substantive paragraphs, and a brief conclusion. Weave ' +
+            'the target keywords in naturally — never keyword-stuff. Return ONLY the Markdown, no preamble.' +
+            (inspoBlock ? `\n\n${inspoBlock}` : ''),
+        messages: [{ role: 'user', content: brief }],
+    });
+
+    const bodyMarkdown = (response.content[0] as { text?: string })?.text?.trim() ?? '';
+    if (!bodyMarkdown) throw new Error('Empty draft.');
+
+    void logAiUsage({
+        userId, workspaceId: organisationId, model: BLOG_MODEL,
+        inputTokens: response.usage?.input_tokens ?? 0, outputTokens: response.usage?.output_tokens ?? 0,
+    });
+
+    await db.update(blogPosts)
+        .set({ bodyMarkdown, updatedAt: new Date() })
+        .where(and(eq(blogPosts.id, blogPostId), eq(blogPosts.organisationId, organisationId)));
+
+    return { bodyMarkdown, tone };
+}

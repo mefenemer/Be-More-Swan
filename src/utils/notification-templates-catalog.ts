@@ -491,6 +491,18 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         ],
     },
     {
+        templateKey: 'blog_draft_ready',
+        name: 'Blog draft ready for review',
+        category: 'Content',
+        type: 'blog_draft_ready',
+        title: 'New blog draft: “{{post.title}}”',
+        message: '{{assistant.name}} has written a new draft for you to review before it publishes.',
+        variables: [
+            v('post.title', 'Post title', 'How to automate your marketing'),
+            v('assistant.name', 'Assistant name', 'Marketing Mike'),
+        ],
+    },
+    {
         templateKey: 'blog_content_decay',
         name: 'Blog traffic decay',
         category: 'Content',

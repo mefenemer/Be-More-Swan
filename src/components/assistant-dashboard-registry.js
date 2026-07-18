@@ -157,7 +157,12 @@
         },
       ],
       modules: {
-        hasReviewQueue: false, hasPostingSchedule: false, hasSocialStrategy: false,
+        // hasPostingSchedule drives BOTH the schedule controls in Operational Setup and the
+        // Autopilot status card. Blog Autopilot (blog-horizon-fill → process-blog-jobs) gives the
+        // Blog Writer its own scheduled-drafting engine, reusing the same posting_frequency /
+        // posting_days / posting_times / posting_timezone context keys as the social path — so the
+        // same controls configure it, with the copy retitled for long-form.
+        hasReviewQueue: false, hasPostingSchedule: true, hasSocialStrategy: false,
         hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
         hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
         hasContentPublishing: false,

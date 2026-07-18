@@ -828,13 +828,15 @@
         </div><!-- /#operation-generic -->
         <!-- ── Posting Schedule — social-only module, toggled by AssistantDashboardRegistry ── -->
         <div id="module-posting-schedule" class="pt-2 border-t border-gray-100">
-          <h4 class="text-sm font-bold text-gray-900 mb-1">Posting Schedule</h4>
-          <p class="text-xs text-gray-500 mb-4">Set how often, on which days and at what times this assistant publishes — and how far ahead it should keep your Review stocked with drafts.</p>
+          <!-- Copy is retitled for the Blog Writer by _applyScheduleModuleCopy() (assistants.js):
+               the same controls drive both engines, but "posts" reads wrong for long-form. -->
+          <h4 id="posting-schedule-heading" class="text-sm font-bold text-gray-900 mb-1">Posting Schedule</h4>
+          <p id="posting-schedule-intro" class="text-xs text-gray-500 mb-4">Set how often, on which days and at what times this assistant publishes — and how far ahead it should keep your Review stocked with drafts.</p>
 
           <div class="space-y-5">
             <!-- Frequency -->
             <div>
-              <label for="edit_frequency" class="block text-sm font-bold text-gray-700 mb-1" data-explain="posting-schedule">Posting Frequency</label>
+              <label for="edit_frequency" id="posting-frequency-label" class="block text-sm font-bold text-gray-700 mb-1" data-explain="posting-schedule">Posting Frequency</label>
               <select id="edit_frequency" class="w-full border border-gray-300 rounded-lg p-3 text-sm bg-white focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
                 <option value="Daily">Daily</option>
                 <option value="5 times a week">5 times a week</option>
@@ -843,7 +845,7 @@
                 <option value="Weekly">Weekly</option>
                 <option value="On demand">On demand (no automatic scheduling)</option>
               </select>
-              <p class="text-xs text-gray-400 mt-1">How many posts per week this assistant drafts automatically.</p>
+              <p id="posting-frequency-hint" class="text-xs text-gray-400 mt-1">How many posts per week this assistant drafts automatically.</p>
             </div>
 
             <!-- Preferred days -->

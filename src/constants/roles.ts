@@ -14,3 +14,10 @@ export const SMM_ROLE_KEY = 'social_media_manager';
 /** Every role key that denotes a Social Media Manager. Collapsed to the single canonical
  *  key post-unification; kept as an array so drizzle `inArray(...)` call sites are stable. */
 export const SMM_ROLE_KEYS: string[] = [SMM_ROLE_KEY];
+
+/** The canonical role key for the Blog Writer. */
+export const BLOG_WRITER_ROLE_KEY = 'blog_writer';
+
+/** Every role key that denotes a Blog Writer. Array-shaped for the same `inArray(...)` reason
+ *  as SMM_ROLE_KEYS above — Blog Autopilot's cron selects on it. */
+export const BLOG_WRITER_ROLE_KEYS: string[] = [BLOG_WRITER_ROLE_KEY];

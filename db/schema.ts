@@ -2706,6 +2706,10 @@ export const contentGenerationJobs = pgTable("content_generation_jobs", {
   nextRetryAt: timestamp("next_retry_at"),
   errorMessage: text("error_message"),
   resultPostId: integer("result_post_id"),                 // scheduledPosts.id once created
+  // Blog Autopilot (db/blog-autopilot.sql): which engine owns this job. 'social' is the default so
+  // every pre-existing row and every enqueuer that doesn't set it keeps its original meaning.
+  contentType: text("content_type").notNull().default("social"), // 'social' | 'blog'
+  resultBlogPostId: integer("result_blog_post_id"),        // blogPosts.id once created (blog jobs)
   // US-SMM-3.4.1: On-demand generation fields
   contextPrompt: text("context_prompt"),                   // optional user-supplied context (≤500 chars)
   triggerType: text("trigger_type").default("scheduled"),  // 'on_demand' | 'scheduled' | 'admin_test'
@@ -2724,6 +2728,8 @@ export const contentGenerationJobs = pgTable("content_generation_jobs", {
 }, (t) => [
   index("content_jobs_status_idx").on(t.status, t.createdAt),
   index("content_jobs_org_idx").on(t.organisationId, t.status),
+  index("content_jobs_type_status_idx").on(t.contentType, t.status, t.assistantId),
+  check("content_jobs_content_type_check", sql`${t.contentType} IN ('social','blog')`),
 ]);
 
 // US-SMM-3.3.1: Per-tick cron execution log

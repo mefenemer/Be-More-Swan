@@ -192,6 +192,15 @@ node_bundler = "esbuild"
 [functions.draft-horizon-fill]
   schedule = "0 6 * * *"
 
+# Blog Autopilot: daily long-form horizon gap-fill — 05:00 UTC, an hour ahead of the social
+# gap-fill above so the two heavy top-ups don't contend for the same Neon compute window.
+# The worker drains the resulting queue every 10 minutes (long-form is slower and lower-volume
+# than social, which drains every minute).
+[functions.blog-horizon-fill]
+  schedule = "0 5 * * *"
+[functions.process-blog-jobs]
+  schedule = "*/10 * * * *"
+
 # US-SMM (AC7): Periodic conversion-post scheduler — daily 07:00 UTC; enqueues at most one
 # conversion post per eligible assistant per 7 days (see schedule-conversion-posts.ts).
 [functions.schedule-conversion-posts]

@@ -1378,6 +1378,40 @@ window._syncStatusRow = function() {
     row.classList.toggle('lg:grid-cols-2', shown.length === 2);
 };
 
+// The Posting Schedule controls drive both autopilot engines off the same context keys, so the
+// Blog Writer reuses the module wholesale — but "Posting Frequency / posts per week" reads wrong
+// for long-form. Retitle in place rather than forking the markup, and always restore the social
+// wording so switching between two assistants in one session can't leave blog copy behind.
+const _SCHEDULE_COPY = {
+    blog_writer: {
+        'posting-schedule-heading': 'Publishing Schedule',
+        'posting-schedule-intro': 'Set how often, on which days and at what times this assistant writes — and how far ahead it should keep your Blogs tab stocked with drafts.',
+        'posting-frequency-label': 'Publishing Frequency',
+        'posting-frequency-hint': 'How many posts per week this assistant writes automatically. Each one is researched and drafted for you to review.',
+    },
+    _default: {
+        'posting-schedule-heading': 'Posting Schedule',
+        'posting-schedule-intro': 'Set how often, on which days and at what times this assistant publishes — and how far ahead it should keep your Review stocked with drafts.',
+        'posting-frequency-label': 'Posting Frequency',
+        'posting-frequency-hint': 'How many posts per week this assistant drafts automatically.',
+    },
+};
+
+function _applyScheduleModuleCopy(roleKey) {
+    const copy = _SCHEDULE_COPY[roleKey] || _SCHEDULE_COPY._default;
+    for (const [id, text] of Object.entries(copy)) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = text;
+    }
+}
+
+// Blog Autopilot (blog-horizon-fill → process-blog-jobs) is the long-form twin of the social
+// engine: same schedule fields, same horizon, but it drafts blog_posts rather than scheduled_posts.
+// The card is shared; only the nouns and the data source differ.
+function _isBlogAutopilot(data) {
+    return (data || window._detailCurrentData || {}).roleKey === 'blog_writer';
+}
+
 window._renderAutopilotCard = function(data) {
     const card = document.getElementById('autopilot-status-card');
     if (!card) return;
@@ -1385,6 +1419,7 @@ window._renderAutopilotCard = function(data) {
     const ctx = data.context || {};
     const s = _autopilotSummary(ctx);
     const horizon = data.draftHorizonDays || 7;
+    const isBlog = _isBlogAutopilot(data);
 
     const pill = document.getElementById('autopilot-pill');
     const headline = document.getElementById('autopilot-headline');
@@ -1395,24 +1430,90 @@ window._renderAutopilotCard = function(data) {
 
     if (s.active) {
         if (pill) { pill.textContent = '● Active'; pill.className = 'inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700'; }
-        if (headline) headline.textContent = `Drafting ${s.phrase}, automatically`;
-        if (detail) detail.textContent = `${s.daysLabel} at ${s.timesLabel} · ${s.tzLabel} — new drafts land in your Review for approval.`;
+        if (headline) headline.textContent = isBlog
+            ? `Writing ${s.phrase}, automatically`
+            : `Drafting ${s.phrase}, automatically`;
+        if (detail) detail.textContent = isBlog
+            ? `${s.daysLabel} at ${s.timesLabel} · ${s.tzLabel} — new drafts land in your Blogs tab for approval.`
+            : `${s.daysLabel} at ${s.timesLabel} · ${s.tzLabel} — new drafts land in your Review for approval.`;
         if (adjustBtn) adjustBtn.textContent = 'Adjust schedule';
         if (horizonStat) horizonStat.classList.remove('hidden');
         if (horizonEl) horizonEl.textContent = String(horizon);
         // Fill in "Next post: …" from the assistant's nearest upcoming draft (async; hidden until found).
-        _loadAutopilotNext(window._currentAssistantId);
+        if (!isBlog) _loadAutopilotNext(window._currentAssistantId);
     } else {
         if (pill) { pill.textContent = '● Paused'; pill.className = 'inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500'; }
-        if (headline) headline.textContent = 'Autopilot is off — you’re creating posts manually';
-        if (detail) detail.textContent = 'Turn it on and your assistant will draft posts on a schedule for you to review — no need to start each one yourself.';
+        if (headline) headline.textContent = isBlog
+            ? 'Autopilot is off — you’re writing posts manually'
+            : 'Autopilot is off — you’re creating posts manually';
+        if (detail) detail.textContent = isBlog
+            ? 'Turn it on and your assistant will research and write full posts on a schedule for you to review — no need to start each one from a blank page.'
+            : 'Turn it on and your assistant will draft posts on a schedule for you to review — no need to start each one yourself.';
         if (adjustBtn) adjustBtn.textContent = 'Turn on autopilot';
         if (horizonStat) horizonStat.classList.add('hidden');
         document.getElementById('autopilot-next')?.classList.add('hidden');
     }
-    // Reflect whatever the pending-review signal last computed (kept in sync via _setReviewPendingBadge).
-    _syncAutopilotPending(window._detailOpSignals?.pendingReview || 0);
+
+    if (isBlog) {
+        // Long-form counts come from blog_posts, which get-assistant-metrics doesn't read — it is
+        // scheduledPosts-only, and _fetchAndRenderAssistantMetrics early-returns for this role
+        // anyway (the Impact card is role-hidden). One fetch fills the totals, the pending count
+        // and "Next post", so the card is never left showing the "—" placeholders.
+        _loadBlogAutopilotStats(window._currentAssistantId, s.active);
+    } else {
+        // Reflect whatever the pending-review signal last computed (kept in sync via _setReviewPendingBadge).
+        _syncAutopilotPending(window._detailOpSignals?.pendingReview || 0);
+    }
 };
+
+// Blog Autopilot's numbers, in a single pass over the assistant's posts. blog-posts returns up to
+// 200 summary rows (id/title/status/publishDate), which is plenty for counts and for finding the
+// nearest future publish date.
+async function _loadBlogAutopilotStats(assistantId, scheduleActive) {
+    if (!assistantId) return;
+    const el = id => document.getElementById(id);
+    const nextEl = el('autopilot-next');
+    try {
+        const res = await fetch(`/.netlify/functions/blog-posts?assistantId=${assistantId}`);
+        if (!res.ok) return;
+        const posts = (await res.json()).posts || [];
+        // Race guard: the user may have opened another assistant while this was in flight.
+        if (Number(window._currentAssistantId) !== Number(assistantId)) return;
+
+        // 'archived' is excluded from Created so a horizon shrink doesn't inflate the total with
+        // drafts the user never saw.
+        const counts = { created: 0, scheduled: 0, published: 0, pending: 0 };
+        const now = Date.now();
+        let next = null;
+        for (const p of posts) {
+            if (p.status === 'archived') continue;
+            counts.created++;
+            if (p.status === 'scheduled') counts.scheduled++;
+            if (p.status === 'published') counts.published++;
+            if (p.status === 'pending_approval' || p.status === 'in_review') counts.pending++;
+
+            if (p.status !== 'published') {
+                const t = p.publishDate ? new Date(p.publishDate).getTime() : NaN;
+                if (!Number.isNaN(t) && t > now && (next === null || t < next)) next = t;
+            }
+        }
+
+        el('metrics-total-created').textContent = counts.created.toLocaleString();
+        el('metrics-total-scheduled').textContent = counts.scheduled.toLocaleString();
+        el('metrics-total-published').textContent = counts.published.toLocaleString();
+        _syncAutopilotPending(counts.pending);
+
+        if (nextEl && scheduleActive && next !== null) {
+            const when = new Date(next).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+            nextEl.textContent = `Next post: ${when}`;
+            nextEl.classList.remove('hidden');
+        } else {
+            nextEl?.classList.add('hidden');
+        }
+    } catch {
+        nextEl?.classList.add('hidden');
+    }
+}
 
 // "Adjust schedule" / "Turn on autopilot" → open the Operational Setup panel and scroll to the
 // Posting Schedule controls, which already write posting_frequency/days/times/timezone + horizon.
@@ -2004,6 +2105,7 @@ function _applyDashboardRegistry(data) {
         window.AssistantDiscoveryCampaigns?.init({ assistantId: data.id, cfg: discovery });
     }
     toggle('module-posting-schedule', mods.hasPostingSchedule !== false);
+    _applyScheduleModuleCopy(data.roleKey);
     // Autopilot status card (Overview) rides the same signal as the Posting Schedule it summarises —
     // only roles with a scheduled posting cadence have an autopilot to surface. Its neighbour, the
     // Connections card, hides itself once integrations.js knows whether this role has any connectors.
