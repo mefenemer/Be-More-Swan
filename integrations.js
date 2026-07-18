@@ -197,6 +197,16 @@ window._intGetConnectedServices = () =>
 // shared org pool; this set is which connection IDs THIS assistant actually uses.
 let _assistantScoped = false;
 let _assistantSelectedIds = new Set();
+
+// Blog syndication destinations (Ghost, WordPress, Dev.to, Hashnode, WordPress.com) — the `cms`
+// category. These are NOT OAuth connectors: they live in their own subsystem (connect-blog-destination
+// + src/utils/blog-destinations) and are connected by a paste form (or OAuth for WordPress.com), so
+// they get their own loader/cards/handlers rather than riding the _userConnections path above.
+let _blogDestinations = [];
+// The `cms` category is live for this assistant (blog writer) — the server marks it available.
+function _cmsIsLive() {
+    return _supportedTools.some(t => t && t.key === 'cms' && t.available === true);
+}
 // serviceName slug → short platform key stored in context.primary_platforms
 const PLATFORM_KEY_MAP = { facebook: 'fb', instagram: 'ig', linkedin: 'li', x: 'x', twitter: 'x', tiktok: 'tt', youtube: 'yt', threads: 'th', pinterest: 'pin' };
 
@@ -406,6 +416,10 @@ async function _loadConnections() {
         console.warn('Could not load connections:', e);
     }
 
+    // Blog destinations (cms category) — a separate subsystem, loaded only when it's live for
+    // this assistant so the OAuth-only pages never call it.
+    await _loadBlogDestinations();
+
     // Overview status card first — it lives outside this grid and must render on every path,
     // including the "nothing relevant to connect" empty state below.
     window._renderConnectionsStatusCard();
@@ -425,7 +439,7 @@ async function _loadConnections() {
     const covered = window._syncedActionCategories || new Set();
     const comingSoon = _supportedTools.filter(t => t && t.available === false && !covered.has(t.key));
 
-    if (!platforms.length && !sources.length && !comingSoon.length) {
+    if (!platforms.length && !sources.length && !comingSoon.length && !_blogDestinations.length) {
         // Nothing to connect and nothing "coming soon" here — but the assistant may still
         // have enable-able recipes rendered by the Synced actions list above, so only show
         // the empty state when there are no recipes either.
@@ -440,6 +454,7 @@ async function _loadConnections() {
         const conn = _userConnections.find(c => String(c.serviceName).toLowerCase() === source.id);
         grid.insertAdjacentHTML('beforeend', _sourceCard(source, conn));
     });
+    _blogDestinations.forEach(dest => grid.insertAdjacentHTML('beforeend', _blogDestCard(dest)));
     comingSoon.forEach(tool => grid.insertAdjacentHTML('beforeend', _comingSoonCard(tool)));
 
     _queueConnectPermissionPrompts(platforms);
@@ -462,6 +477,148 @@ function _comingSoonCard(tool) {
         <button type="button" disabled class="mt-auto w-full text-sm font-bold text-gray-400 bg-gray-50 border border-gray-200 rounded-xl py-2.5 cursor-not-allowed">Not yet available</button>
       </div>`;
 }
+
+// ── Blog destinations (cms category) ─────────────────────────────
+// Load the org's blog-connector status (Ghost/WordPress/Dev.to/Hashnode/WordPress.com) only when
+// the category is live for this assistant. Populates _blogDestinations for the grid + status card.
+async function _loadBlogDestinations() {
+    _blogDestinations = [];
+    if (!_cmsIsLive()) return;
+    try {
+        const res = await fetch('/.netlify/functions/connect-blog-destination');
+        if (!res.ok) return;
+        const data = await res.json();
+        _blogDestinations = Array.isArray(data.destinations) ? data.destinations : [];
+    } catch (e) {
+        console.warn('Could not load blog destinations:', e);
+    }
+}
+
+// A connector card for one blog destination. Connect is a paste form (Ghost/WordPress/Dev.to/
+// Hashnode) or an OAuth redirect (WordPress.com). Once connected it shows the account, a
+// draft/live control (how auto-syndication publishes on this blog), and Disconnect. Blog
+// connections are org-wide (shared across assistants), like inbound sources.
+function _blogDestCard(d) {
+    const connected = !!d.connected;
+    const primaryBtn = 'w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-xl shadow-sm hover:shadow transition cursor-pointer';
+    const ghostPill = 'inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-lg border transition cursor-pointer';
+    const disconnectBtn = `<button onclick="window._blogDestDisconnect('${d.id}')" class="${ghostPill} text-red-600 bg-white hover:bg-red-600 hover:text-white border-red-200 hover:border-red-600" type="button">Disconnect</button>`;
+
+    // Connect control: OAuth destinations redirect; paste destinations reveal an inline form.
+    const connectBtn = d.oauth
+        ? `<button onclick="window.location.href='${_esc(d.connectUrl || '#')}'" class="${primaryBtn}" type="button">Connect ${_esc(d.label)}</button>`
+        : `<button onclick="window._blogDestToggleForm('${d.id}')" class="${primaryBtn}" type="button">Connect ${_esc(d.label)}</button>`;
+
+    const account = d.accountLabel
+        ? `<div class="flex items-center gap-1.5 w-fit max-w-full text-xs font-semibold text-gray-600 bg-gray-50 border border-gray-100 rounded-lg px-2.5 py-1.5 mt-2"><span class="truncate">Connected as ${_esc(d.accountLabel)}</span></div>`
+        : '';
+
+    // Draft/live control — how auto-syndication publishes here on publish. Hashnode is live-only.
+    const modeControl = d.supportsDraft
+        ? `<label class="flex items-center justify-between gap-2 mt-2 text-xs font-semibold text-gray-600">
+               <span>On publish, push as</span>
+               <select onchange="window._blogDestSetMode('${d.id}', this.value)" class="text-xs font-bold border border-gray-200 rounded-lg px-2 py-1 bg-white cursor-pointer">
+                   <option value="draft"${d.publishMode !== 'live' ? ' selected' : ''}>Draft</option>
+                   <option value="live"${d.publishMode === 'live' ? ' selected' : ''}>Live</option>
+               </select>
+           </label>`
+        : `<p class="mt-2 text-xs font-semibold text-gray-400">On publish, pushed live (no draft API)</p>`;
+
+    const capPill = connected
+        ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">✓ Connected</span>`
+        : `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-500 border-gray-200">Not connected</span>`;
+
+    const body = connected
+        ? `${account}${modeControl}
+           <details class="mt-1"><summary class="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 select-none">Manage connection</summary>
+               <div class="mt-2 pt-3 border-t border-gray-100 flex items-center gap-2 flex-wrap">${disconnectBtn}</div>
+           </details>`
+        : `<div class="mt-auto pt-4 border-t border-gray-100">${connectBtn}</div>
+           <div id="blogdest-form-${d.id}" class="hidden mt-3"></div>`;
+
+    return `
+      <div class="bg-white border border-gray-200 rounded-2xl p-5 flex flex-col gap-2">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-3 min-w-0">
+            <span class="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center text-lg shrink-0">✍️</span>
+            <p class="text-sm font-bold text-gray-900 truncate">${_esc(d.label)}</p>
+          </div>
+          ${capPill}
+        </div>
+        <p class="text-xs text-gray-500">Publish your posts to ${_esc(d.label)} automatically. Blog connections are shared across your workspace.</p>
+        ${body}
+      </div>`;
+}
+
+// Reveal / hide the inline paste form for a blog destination, built from its credFields.
+window._blogDestToggleForm = function (id) {
+    const host = document.getElementById(`blogdest-form-${id}`);
+    if (!host) return;
+    if (!host.classList.contains('hidden')) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+    const d = _blogDestinations.find(x => x.id === id);
+    if (!d) return;
+    const fields = (d.credFields || []).map(f => `
+        <label class="block mb-2">
+            <span class="text-xs font-semibold text-gray-600">${_esc(f.label)}</span>
+            <input data-key="${_esc(f.key)}" type="${f.secret ? 'password' : 'text'}" placeholder="${_esc(f.help || '')}"
+                class="mt-1 w-full text-sm border border-gray-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-emerald-300">
+        </label>`).join('');
+    host.innerHTML = `
+        ${fields}
+        <div id="blogdest-err-${id}" class="hidden text-xs font-semibold text-red-600 mb-2"></div>
+        <button onclick="window._blogDestConnect('${id}')" type="button"
+            class="w-full px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition cursor-pointer">Connect</button>`;
+    host.classList.remove('hidden');
+};
+
+// Validate + store a paste-destination's credentials, then refresh the grid.
+window._blogDestConnect = async function (id) {
+    const host = document.getElementById(`blogdest-form-${id}`);
+    const errEl = document.getElementById(`blogdest-err-${id}`);
+    if (!host) return;
+    const creds = {};
+    host.querySelectorAll('input[data-key]').forEach(inp => { creds[inp.getAttribute('data-key')] = inp.value.trim(); });
+    if (errEl) { errEl.classList.add('hidden'); errEl.textContent = ''; }
+    try {
+        const res = await fetch('/.netlify/functions/connect-blog-destination', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'connect', provider: id, creds }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            if (errEl) { errEl.textContent = data.error || 'Could not connect — check your details.'; errEl.classList.remove('hidden'); }
+            return;
+        }
+        await _loadConnections();
+    } catch {
+        if (errEl) { errEl.textContent = 'Could not reach the server. Try again.'; errEl.classList.remove('hidden'); }
+    }
+};
+
+// Disconnect a blog destination (org-wide), then refresh the grid.
+window._blogDestDisconnect = async function (id) {
+    const d = _blogDestinations.find(x => x.id === id);
+    if (!window.confirm(`Disconnect ${d ? d.label : 'this blog'}? Your posts will stop syndicating there.`)) return;
+    try {
+        await fetch('/.netlify/functions/connect-blog-destination', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'disconnect', provider: id }),
+        });
+    } catch { /* best-effort; refresh reflects true state */ }
+    await _loadConnections();
+};
+
+// Set how a destination receives auto-syndicated posts (draft vs live).
+window._blogDestSetMode = async function (id, mode) {
+    try {
+        await fetch('/.netlify/functions/connect-blog-destination', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'setmode', provider: id, publishMode: mode }),
+        });
+        const d = _blogDestinations.find(x => x.id === id);
+        if (d) d.publishMode = mode;
+    } catch { /* best-effort; selection stays as chosen */ }
+};
 
 // ── US-97: Proactively ask permission to connect platforms the user already ──
 // gave a handle for on Business Information, one at a time, "in turn". Only
@@ -583,7 +740,9 @@ window._renderConnectionsStatusCard = function () {
     const list = document.getElementById('connections-status-list');
     const platforms = _assistantScoped ? _relevantPlatforms() : [];
     const sources = _assistantScoped ? _relevantSources() : [];
-    if (!list || (!platforms.length && !sources.length)) {
+    // Blog destinations (cms) are org-wide like sources — a connected one is "on" with no switch.
+    const blogDests = _assistantScoped ? _blogDestinations : [];
+    if (!list || (!platforms.length && !sources.length && !blogDests.length)) {
         card.classList.add('hidden');
         window._syncStatusRow && window._syncStatusRow();
         return;
@@ -595,12 +754,13 @@ window._renderConnectionsStatusCard = function () {
     const enabled = connected.filter(r => _assistantSelectedIds.has(r.conn.id));
     const sourceRows = sources.map(s => ({ s, conn: _userConnections.find(c => String(c.serviceName).toLowerCase() === s.id) }));
     const activeSources = sourceRows.filter(r => r.conn && r.conn.status === 'active');
+    const connectedBlogs = blogDests.filter(d => d.connected);
 
     const pill = document.getElementById('connections-pill');
     if (pill) {
-        // A connected source has no switch, so it counts as on the moment it is connected.
-        const onCount = enabled.length + activeSources.length;
-        const connectedCount = connected.length + activeSources.length;
+        // A connected source/blog has no switch, so it counts as on the moment it is connected.
+        const onCount = enabled.length + activeSources.length + connectedBlogs.length;
+        const connectedCount = connected.length + activeSources.length + connectedBlogs.length;
         pill.textContent = connectedCount ? `${onCount} of ${connectedCount} on` : '● None connected';
         pill.className = 'inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full ' +
             (onCount ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500');
@@ -610,8 +770,10 @@ window._renderConnectionsStatusCard = function () {
         const parts = [];
         if (enabled.length) parts.push(`Posting to ${_listPhrase(enabled.map(r => r.p.label))}`);
         if (activeSources.length) parts.push(`Designs from ${_listPhrase(activeSources.map(r => r.s.label))}`);
-        headline.textContent = (!connected.length && !activeSources.length)
-            ? (sources.length ? 'Nothing connected yet' : 'No channels connected yet')
+        if (connectedBlogs.length) parts.push(`Publishing to ${_listPhrase(connectedBlogs.map(d => d.label))}`);
+        const anyConnected = connected.length || activeSources.length || connectedBlogs.length;
+        headline.textContent = !anyConnected
+            ? ((sources.length || blogDests.length) ? 'Nothing connected yet' : 'No channels connected yet')
             : parts.length
             ? parts.join(' · ')
             : 'Connected — but no channel is switched on for this assistant';
@@ -627,10 +789,34 @@ window._renderConnectionsStatusCard = function () {
     // mid-interaction. Put focus back on its successor, or keyboard users lose their place.
     const focused = list.contains(document.activeElement) ? document.activeElement.getAttribute('aria-label') : null;
     list.innerHTML = rows.map(r => _connStatusRow(r.p, r.conn)).join('')
-        + sourceRows.map(r => _sourceStatusRow(r.s, r.conn)).join('');
+        + sourceRows.map(r => _sourceStatusRow(r.s, r.conn)).join('')
+        + blogDests.map(d => _blogDestStatusRow(d)).join('');
     if (focused) list.querySelector(`input[aria-label="${focused}"]`)?.focus();
     window._syncStatusRow && window._syncStatusRow();
 };
+
+// Status row for a blog destination in the Overview card. Same shell as _sourceStatusRow, no switch
+// (org-wide): a connected blog is simply on. Connect opens the Connections tab where the card lives.
+function _blogDestStatusRow(d) {
+    const connected = !!d.connected;
+    const sub = !connected ? 'Connect it to publish here'
+        : d.publishMode === 'live' ? 'Auto-publishing live' : 'Auto-publishing as draft';
+    const subTone = connected ? 'text-emerald-700' : 'text-gray-400';
+    const control = connected
+        ? ''
+        : `<button type="button" onclick="window._openBriefDrawer && window._openBriefDrawer('platforms')" class="shrink-0 px-2.5 py-1 text-xs font-bold rounded-lg border border-emerald-200 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Connect</button>`;
+    return `
+        <div class="flex items-center justify-between gap-3 py-2">
+            <div class="flex items-center gap-2.5 min-w-0">
+                <span class="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-700 flex items-center justify-center text-base shrink-0">✍️</span>
+                <div class="min-w-0">
+                    <p class="text-sm font-bold text-gray-900 truncate">${_esc(d.label)}</p>
+                    <p class="text-xs font-semibold ${subTone} truncate">${_esc(sub)}</p>
+                </div>
+            </div>
+            ${control}
+        </div>`;
+}
 
 // "Facebook", "Facebook and X", "Facebook, X and LinkedIn"
 function _listPhrase(items) {
