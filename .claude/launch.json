@@ -2,142 +2,265 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-lead-enrich",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4190",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/1f9c158b-0bae-4c8f-92d6-e97f13df721e/scratchpad/demo"
+      ],
+      "port": 4190,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-inspo",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "4189", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/d297b73e-95b1-4e0c-a08a-cf918a309a43/scratchpad/demo"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4189",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/d297b73e-95b1-4e0c-a08a-cf918a309a43/scratchpad/demo"
+      ],
       "port": 4189,
       "autoPort": false
     },
     {
       "name": "component-harness-lead-gen",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "4186", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/edb3bdd1-2b6a-4108-aaf4-0270af9ad312/scratchpad/demo"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4186",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/edb3bdd1-2b6a-4108-aaf4-0270af9ad312/scratchpad/demo"
+      ],
       "port": 4186,
       "autoPort": false
     },
     {
       "name": "component-harness-mandate",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "4185", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/046883cb-42e8-4be9-b41f-d85fe933918b/scratchpad/demo"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4185",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/046883cb-42e8-4be9-b41f-d85fe933918b/scratchpad/demo"
+      ],
       "port": 4185,
       "autoPort": false
     },
     {
       "name": "component-harness-canva-picker",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "4187", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/e21c6fc4-294c-467e-b91a-a4398c9b5544/scratchpad/demo"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4187",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/e21c6fc4-294c-467e-b91a-a4398c9b5544/scratchpad/demo"
+      ],
       "port": 4187,
       "autoPort": false
     },
     {
       "name": "static-preview",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8890"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8890"
+      ],
       "port": 8890,
       "autoPort": false
     },
     {
       "name": "component-harness-kb",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "4184", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/8b539a26-5eb5-4a76-b740-448bd863303b/scratchpad/demo"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4184",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/8b539a26-5eb5-4a76-b740-448bd863303b/scratchpad/demo"
+      ],
       "port": 4184,
       "autoPort": false
     },
     {
       "name": "component-harness-datahub",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "4183", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/86e867d3-4a0d-44df-89ec-af482e88b86c/scratchpad/demo"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4183",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/86e867d3-4a0d-44df-89ec-af482e88b86c/scratchpad/demo"
+      ],
       "port": 4183,
       "autoPort": false
     },
     {
       "name": "component-harness-phase3-integrations",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "4182", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/73c5ea59-8530-4880-9e8d-8038d03ded3b/scratchpad/demo"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4182",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/73c5ea59-8530-4880-9e8d-8038d03ded3b/scratchpad/demo"
+      ],
       "port": 4182,
       "autoPort": false
     },
     {
       "name": "component-harness-phase2-integrations",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "4181", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/9eea7ae4-3413-4501-921d-42a7e8bc538d/scratchpad/demo"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4181",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/9eea7ae4-3413-4501-921d-42a7e8bc538d/scratchpad/demo"
+      ],
       "port": 4181,
       "autoPort": false
     },
     {
       "name": "component-harness-dashboard-registry",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "4180", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/970ec166-d37e-4cfe-88aa-d1a767cde3e3/scratchpad/demo"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4180",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/970ec166-d37e-4cfe-88aa-d1a767cde3e3/scratchpad/demo"
+      ],
       "port": 4180,
       "autoPort": false
     },
     {
       "name": "static-preview-alt",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8891"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8891"
+      ],
       "port": 8891,
       "autoPort": false
     },
     {
       "name": "static-preview-3",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8892"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8892"
+      ],
       "port": 8892,
       "autoPort": false
     },
     {
       "name": "static-preview-4",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8893"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8893"
+      ],
       "port": 8893,
       "autoPort": false
     },
     {
       "name": "static-preview-5",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8894"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8894"
+      ],
       "port": 8894,
       "autoPort": false
     },
     {
       "name": "component-harness",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "4173", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/3ee8939b-fb43-4f21-a065-8c8766e78c93/scratchpad/demo"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4173",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/3ee8939b-fb43-4f21-a065-8c8766e78c93/scratchpad/demo"
+      ],
       "port": 4173,
       "autoPort": false
     },
     {
       "name": "component-harness-batch1",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "4174", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/a9b8c9a2-3f78-497d-9faa-c9625b901d49/scratchpad/demo"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4174",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/a9b8c9a2-3f78-497d-9faa-c9625b901d49/scratchpad/demo"
+      ],
       "port": 4174,
       "autoPort": false
     },
     {
       "name": "component-harness-sync-cards",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "4177", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/bfbdcfb0-3b19-418a-835f-b02c5d804a3f/scratchpad/demo"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4177",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/bfbdcfb0-3b19-418a-835f-b02c5d804a3f/scratchpad/demo"
+      ],
       "port": 4177,
       "autoPort": false
     },
     {
       "name": "component-harness-starter-prompts",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "4178", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/f55b86c2-748c-460f-8cd2-a5015137fdb8/scratchpad/demo"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4178",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/f55b86c2-748c-460f-8cd2-a5015137fdb8/scratchpad/demo"
+      ],
       "port": 4178,
       "autoPort": false
     },
     {
       "name": "component-harness-paywall",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "4179", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/d14699bb-123e-424c-a24f-fb1490a2800c/scratchpad/demo"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4179",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/d14699bb-123e-424c-a24f-fb1490a2800c/scratchpad/demo"
+      ],
       "port": 4179,
       "autoPort": false
     },
     {
       "name": "component-harness-meeting-notes",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "4176", "--directory", "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/a9b033f1-f313-474e-8700-9c204663668d/scratchpad/demo"],
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4176",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/a9b033f1-f313-474e-8700-9c204663668d/scratchpad/demo"
+      ],
       "port": 4176,
       "autoPort": false
     }

@@ -79,6 +79,15 @@
       && typeof ui.outreachDraft.body === 'string' && ui.outreachDraft.body.trim())
       ? ui.outreachDraft : null;
 
+    // Enriched contact (process-discovery-jobs.ts `enriching` stage). Approving a
+    // discovered lead AUTO-SENDS to this address, so the reviewer must be able to see
+    // it — and see that it was scraped, not supplied. 'personal' = a named individual's
+    // inbox rather than a generic role inbox: weaker footing for cold B2B outreach, so
+    // it's called out rather than shown identically to info@/enquiries@.
+    const contactEmail = typeof ui.contactEmail === 'string' && ui.contactEmail.trim() ? ui.contactEmail.trim() : null;
+    const isPersonalInbox = contactEmail && ui.emailKind === 'personal';
+    const foundOn = typeof ui.emailFoundOn === 'string' ? ui.emailFoundOn : '';
+
     const el = document.createElement('div');
     el.className = 'bg-white border border-gray-200 rounded-xl shadow-sm p-5 max-w-md';
     el.innerHTML = `
@@ -112,6 +121,20 @@
       ${ui.suggestedNextStep ? `
         <div class="bg-emerald-50 border border-emerald-200 rounded-lg px-4 py-3 text-sm text-emerald-900">
           <span class="font-bold">Suggested next step:</span> ${esc(ui.suggestedNextStep)}
+        </div>` : ''}
+
+      ${contactEmail ? `
+        <div class="mt-4 pt-3 border-t border-gray-100">
+          <p class="text-xs font-bold text-gray-500 tracking-wider uppercase mb-1.5">Outreach will be sent to</p>
+          <p class="text-sm font-semibold text-gray-900 break-all">${esc(contactEmail)}</p>
+          <p class="text-xs text-gray-500 mt-1">
+            Found on ${foundOn ? esc(foundOn) : 'this company’s website'} — published by the company, not verified.
+          </p>
+          ${isPersonalInbox ? `
+            <div class="bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mt-2">
+              <p class="text-xs font-bold text-amber-900">Personal inbox — check before approving</p>
+              <p class="text-xs text-amber-800 mt-0.5">This looks like a named individual rather than a general contact address. Approving sends the outreach email automatically.</p>
+            </div>` : ''}
         </div>` : ''}
 
       ${draft ? `

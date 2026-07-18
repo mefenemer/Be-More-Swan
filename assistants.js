@@ -710,6 +710,25 @@ function _rqMeetingSync(r) {
     return { summary, pills: `<div class="flex flex-wrap gap-1 mt-2">${pills}</div>` };
 }
 
+// Recipient line for a lead awaiting approval. Approving a lead AUTO-SENDS outreach
+// (lead-generation.ts `send_outreach`), and discovery leads get their address scraped
+// from the company's own site (process-discovery-jobs.ts `enriching`) — so the reviewer
+// has to see who it goes to BEFORE clicking Approve, not after. 'personal' means a named
+// individual's inbox rather than a generic info@/enquiries@ one: weaker footing for cold
+// B2B outreach, so it gets an explicit warning rather than the same neutral treatment.
+function _rqRecipient(r) {
+    if (r.recordType !== 'lead') return '';
+    const d = r.data || {};
+    const to = (d.outreachDraft && d.outreachDraft.to) || d.contactEmail || (d.lead && d.lead.email) || '';
+    if (!to) return '';
+    const personal = d.emailKind === 'personal';
+    const scraped = d.emailSource === 'scrape';
+    return `<div class="mt-2">
+      <p class="text-[11px] text-gray-500">Outreach to <span class="font-bold text-gray-700 break-all">${_rqEsc(to)}</span>${scraped ? ' · found on their website' : ''}</p>
+      ${personal ? `<p class="text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 mt-1 inline-block">Personal inbox — check before approving</p>` : ''}
+    </div>`;
+}
+
 function _detailRqRecordCard(r, statusKey) {
     const snippet = _rqRecordSnippet(r);
     const schedVerb = r.recordType === 'lead' ? 'chase by' : 'scheduled';
@@ -724,6 +743,7 @@ function _detailRqRecordCard(r, statusKey) {
           ${sync.summary}
           ${sched ? `<span class="text-[11px] font-semibold text-yellow-700">${_rqEsc(sched)}</span>` : ''}
         </div>
+        ${_rqRecipient(r)}
         ${sync.pills}
       </div>
       ${_rqRecordActions(r, statusKey)}

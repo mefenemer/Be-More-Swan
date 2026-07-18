@@ -9,6 +9,7 @@
 //   stage query_gen  → generate search queries once, cache on cursor.flat, resume
 //   stage searching  → process a few queries/tick: search → dedupe → store → score
 //   stage promoting  → mirror qualified discovered_leads into assistant_records
+//   stage enriching  → scrape each hot/warm lead's own site for a contact address
 //
 // Guardrails (discovery_guardrails) are enforced BEFORE each unit of work; tripping a
 // cap ends the run cleanly and promotes whatever qualified so far.
@@ -23,6 +24,7 @@ import {
 import { generateQueries, type DiscoveryStrategy } from '../../src/lib/discovery-query-gen';
 import { scoreCandidates, type ScoreCandidate } from '../../src/lib/discovery-scoring';
 import { search, isSearchConfigured, normaliseDomain, SearchNotConfiguredError } from '../../src/lib/discovery-search';
+import { enrichLeadContact } from '../../src/lib/discovery-enrich';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { enqueueScenarioTrigger } from '../../src/utils/scenario-engine';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -38,6 +40,10 @@ const RESULTS_PER_QUERY = 10;
 // Leads promoted into assistant_records per tick — bounded so promotion can't exceed the
 // function timeout even when a run discovered dozens of leads.
 const PROMOTE_BATCH = 20;
+// Leads whose site is scraped for a contact address per tick. Each one costs up to 4
+// sequential HTTPS fetches (2.5s timeout each), so the batch runs CONCURRENTLY and stays
+// small — the tick budget is ~10s and 3 searches/tick already caused 504s.
+const ENRICH_BATCH = 5;
 
 type JobRow = {
     id: number; job_id: string; organisation_id: number; campaign_id: number;
@@ -173,6 +179,12 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
         // per tick (promoting 60+ leads in one slice was itself blowing the function timeout). ──
         if (state?.stage === 'promoting') {
             await promoteBatch(db, job, campaign.aiAssistantId, guardrails, { leadsFound, searchCallsMade, tokensUsed, costGbp });
+            return;
+        }
+
+        // ── STAGE enriching: find a contact address for each promoted hot/warm lead ──
+        if (state?.stage === 'enriching') {
+            await enrichBatch(db, job, { leadsFound, searchCallsMade, tokensUsed, costGbp });
             return;
         }
 
@@ -319,17 +331,105 @@ async function promoteBatch(db: Db, job: JobRow, assistantId: number, guardrails
         await promoteOne(db, job.organisation_id, assistantId, lead, approvalStatus);
     }
 
-    // Anything left to promote? If so, stay in the promoting stage; else the job is done.
+    // Anything left to promote? If so, stay in the promoting stage; else move on to
+    // enriching (leads are already visible in the Leads tab by now — enrichment only
+    // backfills the contact address, so it deliberately runs last).
     const [{ remaining } = { remaining: 0 }] = await db.execute<{ remaining: number }>(
         `SELECT count(*)::int AS remaining FROM discovered_leads
          WHERE campaign_id = ${job.campaign_id} AND status = 'qualified' AND assistant_record_id IS NULL`
     );
     await db.update(discoveryJobs)
         .set({
-            status: remaining > 0 ? 'queued' : 'completed', stage: 'promoting', errorMessage: null,
+            status: 'queued', stage: remaining > 0 ? 'promoting' : 'enriching', errorMessage: null,
             ...counterCols(counters), updatedAt: new Date(),
         })
         .where(eq(discoveryJobs.id, job.id));
+}
+
+// ── Enrichment: scrape each promoted lead's own site for a contact address ──────
+// Discovery surfaces companies, not people, so a promoted lead has no email and
+// `send_outreach` bails with reason 'no_recipient'. This backfills the address the
+// company already publishes. EXTRACTION ONLY — never inferred, never LLM-generated;
+// see src/lib/discovery-enrich.ts for why that rule is absolute.
+//
+// Runs after promoting so the Leads tab still fills live during the run. Leads that
+// yield nothing are stamped attempted so they're never re-scraped by a later tick.
+
+async function enrichBatch(db: Db, job: JobRow, counters: Counters): Promise<void> {
+    // Only hot/warm leads are worth a fetch — cold leads never receive outreach.
+    const batch = await db.execute<{ id: number; domain: string | null; assistant_record_id: number | null }>(
+        `SELECT id, domain, assistant_record_id FROM discovered_leads
+         WHERE campaign_id = ${job.campaign_id}
+           AND status = 'promoted'
+           AND domain IS NOT NULL
+           AND contact_email IS NULL
+           AND rating IN ('hot','warm')
+           AND signals ->> 'enrichAttemptedAt' IS NULL
+         LIMIT ${ENRICH_BATCH}`
+    );
+
+    // Concurrent: 5 leads x up to 4 sequential fetches would blow the tick budget serially.
+    await Promise.all(batch.map(async (lead) => {
+        let hit = null as Awaited<ReturnType<typeof enrichLeadContact>>;
+        try {
+            hit = await enrichLeadContact(lead.domain);
+        } catch {
+            // Best-effort: a scrape failure must never fail the run.
+        }
+        await recordEnrichment(db, lead.id, lead.assistant_record_id, hit);
+    }));
+
+    const [{ remaining } = { remaining: 0 }] = await db.execute<{ remaining: number }>(
+        `SELECT count(*)::int AS remaining FROM discovered_leads
+         WHERE campaign_id = ${job.campaign_id} AND status = 'promoted' AND domain IS NOT NULL
+           AND contact_email IS NULL AND rating IN ('hot','warm')
+           AND signals ->> 'enrichAttemptedAt' IS NULL`
+    );
+    await db.update(discoveryJobs)
+        .set({
+            status: remaining > 0 ? 'queued' : 'completed', stage: 'enriching', errorMessage: null,
+            ...counterCols(counters), updatedAt: new Date(),
+        })
+        .where(eq(discoveryJobs.id, job.id));
+}
+
+/**
+ * Persist one enrichment outcome. Always stamps `enrichAttemptedAt` (so a miss isn't
+ * retried forever) and, on a hit, mirrors the address onto the linked assistant_record
+ * so lead-generation.ts `send_outreach` resolves `data.contactEmail` with no change there.
+ */
+async function recordEnrichment(
+    db: Db, leadId: number, assistantRecordId: number | null,
+    hit: { email: string; kind: string; source: string; foundOn: string } | null,
+): Promise<void> {
+    const stamp: Record<string, unknown> = { enrichAttemptedAt: new Date().toISOString() };
+    if (hit) {
+        stamp.emailKind = hit.kind;        // 'role' | 'personal' — personal needs a closer look
+        stamp.emailSource = hit.source;    // 'scrape'
+        stamp.emailFoundOn = hit.foundOn;  // provenance for the Review Queue
+    }
+
+    await db.update(discoveredLeads)
+        .set({
+            ...(hit ? { contactEmail: hit.email } : {}),
+            // Merge into signals rather than replacing — it already holds the SERP snippet.
+            signals: sql`COALESCE(${discoveredLeads.signals}, '{}'::jsonb) || ${JSON.stringify(stamp)}::jsonb`,
+            updatedAt: new Date(),
+        })
+        .where(eq(discoveredLeads.id, leadId));
+
+    if (!hit || !assistantRecordId) return;
+
+    // Same merge on the mirrored record's scoring card, so the Review Queue and the
+    // outreach send both see the address.
+    await db.update(assistantRecords)
+        .set({
+            data: sql`COALESCE(${assistantRecords.data}, '{}'::jsonb) || ${JSON.stringify({
+                contactEmail: hit.email, emailKind: hit.kind, emailSource: hit.source, emailFoundOn: hit.foundOn,
+            })}::jsonb`,
+            updatedAt: new Date(),
+        })
+        .where(eq(assistantRecords.id, assistantRecordId));
 }
 
 /** Upsert one qualified lead into assistant_records on (org, assistant, 'lead', title). */
