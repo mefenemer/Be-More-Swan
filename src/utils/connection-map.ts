@@ -89,6 +89,12 @@ export const CATEGORY_LABELS: Record<string, { label: string; description: strin
     accounting:     { label: 'Accounting',          description: 'Sync invoices, expenses, and ledgers.' },
 };
 
+// Categories that are LIVE via a subsystem OTHER than the OAuth connector catalog, so they have no
+// entry in CONNECTOR_CATEGORY but must still count as available (suppressing the "coming soon" card
+// and letting integrations.js draw their real cards). `cms` is served by the blog-destinations
+// subsystem (connect-blog-destination + src/utils/blog-destinations), not the OAuth flow.
+export const EXTERNALLY_LIVE_CATEGORIES = new Set<string>(['cms']);
+
 export interface SupportedTool {
     key: string;         // category key (e.g. 'email')
     label: string;       // human label (e.g. 'Email')
@@ -103,7 +109,7 @@ export function supportedToolsForAssistant(a: AssistantRole | null | undefined):
     const cats = allowedCategoriesForAssistant(a);
     // Unrestricted role (unknown/custom) → surface the whole catalogue.
     const keys = cats ? Array.from(cats) : Object.keys(CATEGORY_LABELS);
-    const liveCategories = new Set(Object.values(CONNECTOR_CATEGORY));
+    const liveCategories = new Set([...Object.values(CONNECTOR_CATEGORY), ...EXTERNALLY_LIVE_CATEGORIES]);
     return keys
         .filter(k => CATEGORY_LABELS[k])
         .map(k => ({ key: k, ...CATEGORY_LABELS[k], available: liveCategories.has(k) }))

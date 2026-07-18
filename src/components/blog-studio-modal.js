@@ -45,28 +45,6 @@
     e.textContent = msg;
   }
 
-  // Voice dictation into a text field (mirrors gpStartVoice in workspace.html — the Blog Studio is
-  // loaded standalone too, so it can't borrow that page-scoped copy).
-  function startVoice(targetId, micId) {
-    var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    var mic = el(micId);
-    if (!SR) { setBanner('bs-brief-status', 'Voice input is not supported in this browser. Try Chrome or Safari.', 'error'); return; }
-    var rec = new SR();
-    rec.lang = 'en-GB';
-    rec.interimResults = false;
-    rec.maxAlternatives = 1;
-    if (mic) mic.classList.add('bs-recording');
-    rec.onresult = function (e) {
-      var field = el(targetId);
-      if (!field) return;
-      var transcript = e.results[0][0].transcript;
-      field.value = (field.value ? field.value + ' ' : '') + transcript;
-    };
-    rec.onend = function () { if (mic) mic.classList.remove('bs-recording'); };
-    rec.onerror = function () { if (mic) mic.classList.remove('bs-recording'); };
-    rec.start();
-  }
-
   // Live length readout for the body — the long-form equivalent of Create Post's per-platform
   // counter chips. Thin posts are the blog failure mode, so the chip warns under 300 words.
   function refreshReadout(md) {
@@ -138,8 +116,6 @@
       + 'display:flex;align-items:center;justify-content:center;text-align:center;padding:4px;'
       + 'font-size:11px;color:#374151;background:#f9fafb;overflow:hidden;word-break:break-word;}'
     + '.bs-media-audio:hover{border-color:#ec4899;}'
-    + '.bs-synd-row{display:flex;align-items:center;gap:8px;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;}'
-    + '.bs-synd-form{flex-basis:100%;margin-top:8px;}'
     + '.bs-linkbtn{background:none;border:0;color:#6b7280;font-size:12px;cursor:pointer;text-decoration:underline;padding:0;}'
     + '.bs-linkbtn:hover{color:#ec4899;}'
     // Feedback + composer affordances brought over from the Create Post sheet.
@@ -167,10 +143,7 @@
     + '.bs-ready-q{font-size:14px;font-weight:600;color:#1f2937;margin:0 0 8px;}'
     + '.bs-stack{display:flex;flex-direction:column;gap:8px;}';
 
-  var MIC_SVG = '<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24">'
-    + '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4M12 3a4 4 0 014 4v4a4 4 0 01-8 0V7a4 4 0 014-4z"/></svg>';
-
-  // Author is always the user (no "Written by"); the brief is Topic + Keywords + Voice + Notes.
+  // Blog Studio opens straight into the editor; AI drafting from a topic is an inline action there.
   var MARKUP = ''
     + '<div class="bms-blog-panel">'
     + '  <button type="button" class="bms-blog-close" id="bs-close" aria-label="Close">&times;</button>'
@@ -178,32 +151,8 @@
     + '    <h1 style="font-size:20px;font-weight:700;">Blog Studio</h1>'
     + '    <span id="bs-save-status" class="bs-status"></span>'
     + '  </div>'
-    + '  <div id="bs-brief" class="bs-panel" style="margin-bottom:24px;">'
-    + '    <h3>Start a new post</h3>'
-    + '    <div class="bs-grid" style="grid-template-columns:1fr 1fr;">'
-    + '      <div class="bs-field"><label>Topic</label><input id="bs-topic" placeholder="e.g. AI for small teams"></div>'
-    + '      <div class="bs-field"><label>Keywords</label><input id="bs-keywords" placeholder="comma,separated"></div>'
-    + '    </div>'
-    + '    <div class="bs-field bs-hidden" id="bs-voice-from"><label>Voice (from your assistant)</label>'
-    + '      <div id="bs-voice-display" class="bs-status"></div></div>'
-    + '    <div class="bs-field" id="bs-voice-manual"><label>Tone</label>'
-    + '      <input id="bs-tone" list="bs-tone-presets" placeholder="e.g. friendly and professional">'
-    + '      <datalist id="bs-tone-presets"><option>Professional</option><option>Casual</option><option>Confident</option><option>Friendly</option></datalist>'
-    + '      <label id="bs-save-tone-wrap" class="bs-status bs-hidden" style="margin-top:6px;">'
-    + '        <input id="bs-save-tone" type="checkbox"> Save this as <span id="bs-save-tone-name"></span>&rsquo;s voice</label>'
-    + '    </div>'
-    + '    <div class="bs-field"><label>Rough notes / transcript (optional)</label>'
-    + '      <div class="bs-textarea-wrap"><textarea id="bs-notes" rows="3" placeholder="Dictate or paste your notes…"></textarea>'
-    + '        <button type="button" id="bs-notes-mic" class="bs-mic" title="Dictate notes" aria-label="Dictate notes">' + MIC_SVG + '</button>'
-    + '      </div>'
-    + '    </div>'
-    + '    <div class="bs-row">'
-    + '      <button class="bs-btn bs-btn-ghost" data-path="blank">Start blank</button>'
-    + '      <button class="bs-btn bs-btn-ghost" data-path="improve">Improve draft</button>'
-    + '      <button class="bs-btn bs-btn-primary" data-path="generate">AI generate</button>'
-    + '    </div>'
-    + '    <div id="bs-brief-status" class="bs-banner bs-hidden"></div>'
-    + '  </div>'
+    // The old "Start a new post" brief screen is gone: opening Blog Studio drops straight into the
+    // editor on a fresh draft. AI drafting from a topic now lives inline in the editor (bs-ai-draft).
     + '  <div id="bs-workspace" class="bs-grid bs-hidden">'
     + '    <div>'
     + '      <div class="bs-panel" style="margin-bottom:16px;">'
@@ -266,13 +215,8 @@
     + '          <button id="bs-cols-3" class="bs-btn bs-btn-ghost">3 columns</button>'
     + '        </div>'
     + '      </div>'
-    + '      <div class="bs-panel" style="margin-top:16px;">'
-    + '        <h3>Syndicate</h3>'
-    + '        <div id="bs-synd-list" class="bs-status">Loading destinations…</div>'
-    + '        <button id="bs-synd-publish" class="bs-btn bs-btn-ghost bs-hidden" style="margin-top:10px;">Publish to selected</button>'
-    + '        <span id="bs-synd-status" class="bs-status" style="display:block;margin-top:6px;"></span>'
-    + '        <div class="bs-status" style="font-size:11px;margin-top:4px;">Publish to your site first, then push to connected blogs.</div>'
-    + '      </div>'
+    // Syndication connectors moved to the assistant Connections tab; posts now auto-publish to
+    // every connected blog on publish (no per-post panel here). See integrations.js / connection-map.
     + '      <div class="bs-panel" style="margin-top:16px;">'
     + '        <h3>Search performance</h3>'
     + '        <div id="bs-gsc-status" class="bs-status">Checking&hellip;</div>'
@@ -286,11 +230,27 @@
     + '    <div>'
     + '      <div class="bs-row" style="justify-content:space-between;margin-bottom:4px;">'
     + '        <span id="bs-readout" class="bs-chip">0 words · under a minute read</span>'
-    + '        <button type="button" id="bs-swan-improve" class="bs-swan bs-hidden"'
-    + '          title="Ask your assistant to suggest improvements to this draft">'
-    + '          <img src="/images/BeMoreSwan_SwanAI.png" alt=""><span>Ask Swan to improve</span></button>'
+    + '        <div class="bs-row" style="gap:12px;">'
+    + '          <button type="button" id="bs-ai-draft" class="bs-swan"'
+    + '            title="Draft this post from a topic with AI">'
+    + '            <img src="/images/BeMoreSwan_SwanAI.png" alt=""><span>AI draft</span></button>'
+    + '          <button type="button" id="bs-swan-improve" class="bs-swan bs-hidden"'
+    + '            title="Ask your assistant to suggest improvements to this draft">'
+    + '            <img src="/images/BeMoreSwan_SwanAI.png" alt=""><span>Ask Swan to improve</span></button>'
+    + '        </div>'
     + '      </div>'
     + '      <input id="bs-title" class="bs-title-input" placeholder="Post title">'
+    // Inline AI-draft prompt (hidden until "AI draft" is clicked). Replaces the old brief screen —
+    // collects a topic/keywords and drafts straight into the open editor via generate-blog.
+    + '      <div id="bs-ai-draft-form" class="bs-panel bs-hidden" style="margin-bottom:12px;">'
+    + '        <div class="bs-field"><label>Topic</label><input id="bs-ai-topic" placeholder="e.g. AI for small teams"></div>'
+    + '        <div class="bs-field"><label>Keywords (optional)</label><input id="bs-ai-keywords" placeholder="comma,separated"></div>'
+    + '        <div class="bs-row" style="margin-top:8px;">'
+    + '          <button type="button" id="bs-ai-draft-go" class="bs-btn bs-btn-primary">Draft it</button>'
+    + '          <button type="button" id="bs-ai-draft-cancel" class="bs-btn bs-btn-ghost">Cancel</button>'
+    + '        </div>'
+    + '        <div id="bs-ai-draft-status" class="bs-status" style="margin-top:6px;"></div>'
+    + '      </div>'
     + '      <div id="bs-editor" class="bs-editor"></div>'
     + '      <div class="bs-row" style="margin-top:16px;">'
     + '        <button id="bs-generate-hooks" class="bs-btn bs-btn-ghost">Generate A/B hooks</button>'
@@ -347,29 +307,10 @@
     return state.assistantId != null ? state.assistants[state.assistantId] : null;
   }
 
-  function syncVoiceControls() {
+  // Tone for AI drafting: the assistant's saved profile tone, or empty (the generator picks a default).
+  function assistantTone() {
     var a = selectedAssistant();
-    var hasProfileTone = a && a.tone;
-    el('bs-voice-from').classList.toggle('bs-hidden', !hasProfileTone);
-    el('bs-voice-manual').classList.toggle('bs-hidden', !!hasProfileTone);
-    if (hasProfileTone) {
-      el('bs-voice-display').textContent = '“' + a.tone + '” — from ' + a.name + '’s profile';
-    }
-    var offerSave = !!a && !hasProfileTone;
-    el('bs-save-tone-wrap').classList.toggle('bs-hidden', !offerSave);
-    if (offerSave) el('bs-save-tone-name').textContent = a.name;
-  }
-
-  // Voice for this post: { assistantId, tone, saveToProfile }.
-  function resolveVoice() {
-    var a = selectedAssistant();
-    if (a && a.tone) return { assistantId: a.id, tone: a.tone, saveToProfile: false };
-    var manual = el('bs-tone').value.trim();
-    return {
-      assistantId: a ? a.id : null,
-      tone: manual,
-      saveToProfile: !!(a && manual && el('bs-save-tone').checked),
-    };
+    return (a && a.tone) ? a.tone : '';
   }
 
   // ── "Ask Swan to improve": hand the draft to the assistant in chat ────────────────────────────
@@ -425,23 +366,9 @@
     }).catch(function () { /* tone is best-effort */ });
   }
 
-  function seedMarkdown(path, tone) {
-    var topic = el('bs-topic').value.trim();
-    var notes = el('bs-notes').value.trim();
-    if (path === 'improve' && notes) return notes;
-    if (path === 'generate') {
-      var voice = tone ? ' in a ' + tone + ' tone' : '';
-      return '# ' + (topic || 'New post') + '\n\n_Drafting' + voice + '…_\n\n' + (notes || '');
-    }
-    // Blank starts genuinely empty: the editor shows its own placeholder and takes the caret, so
-    // there's nothing to mistake for content (seeded filler used to get published verbatim).
-    return '';
-  }
-
   // Reveal the editor workspace for a post (new or existing): mount the editor + side panels.
   function openWorkspace(postId, title, md, post) {
     state.postId = postId;
-    el('bs-brief').classList.add('bs-hidden');
     el('bs-workspace').classList.remove('bs-hidden');
     el('bs-title').value = title;
     if (state.editor && state.editor.destroy) state.editor.destroy();  // re-open safety: no leaked listeners
@@ -464,40 +391,50 @@
     el('bs-approve-name').textContent = a && a.name ? a.name : 'your assistant';
     loadWidget();
     loadFeature();
-    loadSyndication();
     loadSearchConsole();
     populateSeo(post);
     return state.editor;
   }
 
-  function startPost(path) {
-    var title = el('bs-topic').value.trim() || 'Untitled draft';
-    var voice = resolveVoice();
-    if (voice.saveToProfile) {
-      api('blog-tone', { method: 'POST', body: JSON.stringify({ assistantId: voice.assistantId, tone: voice.tone }) });
-    }
-    setBanner('bs-brief-status', '');
-    api('blog-posts', { method: 'POST', body: JSON.stringify({ title: title, assistantId: voice.assistantId }) }).then(function (res) {
-      if (!res.ok) { setBanner('bs-brief-status', 'Could not create post: ' + (res.body.error || 'please try again.'), 'error'); return; }
-      var editor = openWorkspace(res.body.post.id, title, seedMarkdown(path, voice.tone));
-      if (path !== 'generate' && editor && editor.focus) editor.focus();   // drop straight into typing
-      if (path === 'generate') {
-        setStatus('bs-save-status', 'Drafting…');
-        api('generate-blog', { method: 'POST', body: JSON.stringify({
-          blogPostId: state.postId,
-          topic: el('bs-topic').value.trim(),
-          keywords: el('bs-keywords').value.trim(),
-          notes: el('bs-notes').value.trim(),
-          tone: voice.tone,
-        }) }).then(function (gen) {
-          if (gen.ok && gen.body.bodyMarkdown) {
-            state.editor.setMarkdown(gen.body.bodyMarkdown);
-            refreshReadout(gen.body.bodyMarkdown);   // setMarkdown doesn't fire onChange
-            setStatus('bs-save-status', 'Draft ready');
-          } else {
-            setStatus('bs-save-status', (gen.body && gen.body.error) || 'Draft failed');
-          }
-        });
+  // Open Blog Studio straight onto a fresh, empty draft (no brief screen). The editor takes the
+  // caret so the author can just start typing — or use the inline "AI draft" action.
+  function startBlankPost() {
+    // A blank post starts with a clean workspace: no stale schedule/publish affordances.
+    el('bs-unschedule').classList.add('bs-hidden');
+    el('bs-unpublish').classList.add('bs-hidden');
+    el('bs-schedule-picker').classList.add('bs-hidden');
+    el('bs-schedule-at').value = '';
+    setStatus('bs-save-status', 'Creating…');
+    api('blog-posts', { method: 'POST', body: JSON.stringify({ title: 'Untitled draft', assistantId: state.assistantId }) }).then(function (res) {
+      if (!res.ok) { setBanner('bs-action-status', 'Could not create a draft: ' + ((res.body && res.body.error) || 'please try again.'), 'error'); return; }
+      setStatus('bs-save-status', '');
+      var editor = openWorkspace(res.body.post.id, 'Untitled draft', '');
+      if (editor && editor.focus) editor.focus();   // drop straight into typing
+    });
+  }
+
+  // Inline "AI draft": collect a topic/keywords in the editor and draft straight into the open post
+  // via generate-blog — the capability the old brief screen used to host.
+  function runAiDraft() {
+    if (!state.postId) return;
+    var topic = el('bs-ai-topic').value.trim();
+    if (!topic) { setStatus('bs-ai-draft-status', 'Add a topic to draft from.'); return; }
+    setStatus('bs-ai-draft-status', 'Drafting…');
+    api('generate-blog', { method: 'POST', body: JSON.stringify({
+      blogPostId: state.postId,
+      topic: topic,
+      keywords: el('bs-ai-keywords').value.trim(),
+      notes: '',
+      tone: assistantTone(),
+    }) }).then(function (gen) {
+      if (gen.ok && gen.body.bodyMarkdown) {
+        if (!el('bs-title').value.trim() || el('bs-title').value.trim() === 'Untitled draft') el('bs-title').value = topic;
+        state.editor.setMarkdown(gen.body.bodyMarkdown);
+        refreshReadout(gen.body.bodyMarkdown);   // setMarkdown doesn't fire onChange
+        setStatus('bs-ai-draft-status', '');
+        el('bs-ai-draft-form').classList.add('bs-hidden');
+      } else {
+        setStatus('bs-ai-draft-status', (gen.body && gen.body.error) || 'Draft failed — try again.');
       }
     });
   }
@@ -845,104 +782,8 @@
     }) }).catch(function () { /* the action below reports its own failure */ });
   }
 
-  // ── Syndication: external blog connectors (US 3.2 — Dev.to, Hashnode) ──────────────────────────
-  function loadSyndication() {
-    var listEl = el('bs-synd-list');
-    if (!listEl) return;
-    listEl.textContent = 'Loading destinations…';
-    setStatus('bs-synd-status', '');
-    api('connect-blog-destination', { method: 'GET' }).then(function (res) {
-      if (!res.ok) { listEl.textContent = 'Could not load destinations.'; return; }
-      renderSyndication(res.body.destinations || []);
-    }).catch(function () { listEl.textContent = 'Could not load destinations.'; });
-  }
-
-  function renderSyndication(destinations) {
-    var listEl = el('bs-synd-list');
-    listEl.innerHTML = '';
-    if (!destinations.length) { listEl.textContent = 'No destinations available.'; el('bs-synd-publish').classList.add('bs-hidden'); return; }
-    var anyConnected = false;
-    destinations.forEach(function (d) {
-      var row = document.createElement('div');
-      row.className = 'bs-synd-row';
-      if (d.connected) {
-        anyConnected = true;
-        var lbl = document.createElement('label');
-        lbl.style.display = 'flex'; lbl.style.alignItems = 'center'; lbl.style.gap = '6px';
-        var cb = document.createElement('input');
-        cb.type = 'checkbox'; cb.className = 'bs-synd-check'; cb.value = d.id; cb.checked = true;
-        lbl.appendChild(cb);
-        lbl.appendChild(document.createTextNode(d.label + (d.accountLabel ? ' (' + d.accountLabel + ')' : '')));
-        row.appendChild(lbl);
-        var disc = document.createElement('button');
-        disc.type = 'button'; disc.className = 'bs-linkbtn'; disc.textContent = 'Disconnect';
-        disc.addEventListener('click', function () { disconnectDest(d.id); });
-        row.appendChild(disc);
-        // "Push as draft" defaults on: the post is already live on our side, so the safe default is
-        // never to surprise-publish onto someone else's blog. Hashnode's API can't draft — no toggle.
-        // Appended last on a full-width line: the sidebar is too narrow for a third inline element,
-        // and wrapping it mid-row orphans the Disconnect link.
-        if (d.supportsDraft) {
-          var draftLbl = document.createElement('label');
-          draftLbl.style.display = 'flex'; draftLbl.style.alignItems = 'center'; draftLbl.style.gap = '6px';
-          draftLbl.style.flexBasis = '100%'; draftLbl.style.marginLeft = '20px'; draftLbl.style.opacity = '0.8';
-          draftLbl.title = 'Send as an unpublished draft, so you publish it from ' + d.label + ' yourself.';
-          var draftCb = document.createElement('input');
-          draftCb.type = 'checkbox'; draftCb.className = 'bs-synd-draft'; draftCb.value = d.id; draftCb.checked = true;
-          draftLbl.appendChild(draftCb);
-          draftLbl.appendChild(document.createTextNode('as draft'));
-          row.appendChild(draftLbl);
-        }
-      } else {
-        var connectBtn = document.createElement('button');
-        connectBtn.type = 'button'; connectBtn.className = 'bs-btn bs-btn-ghost'; connectBtn.textContent = 'Connect ' + d.label;
-        if (d.oauth) {
-          // OAuth destinations (e.g. WordPress.com) connect via a full-page redirect, not a paste form.
-          connectBtn.addEventListener('click', function () { if (d.connectUrl) window.location.href = d.connectUrl; });
-        } else {
-          connectBtn.addEventListener('click', function () { toggleConnectForm(row, d); });
-        }
-        row.appendChild(connectBtn);
-      }
-      listEl.appendChild(row);
-    });
-    el('bs-synd-publish').classList.toggle('bs-hidden', !anyConnected);
-  }
-
-  function toggleConnectForm(row, d) {
-    var open = row.querySelector('.bs-synd-form');
-    if (open) { open.parentNode.removeChild(open); return; }
-    var form = document.createElement('div');
-    form.className = 'bs-synd-form';
-    var inputs = {};
-    d.credFields.forEach(function (f) {
-      var wrap = document.createElement('div'); wrap.className = 'bs-field';
-      var lab = document.createElement('label'); lab.textContent = f.label + (f.help ? ' — ' + f.help : '');
-      var inp = document.createElement('input'); inp.type = f.secret ? 'password' : 'text';
-      inputs[f.key] = inp;
-      wrap.appendChild(lab); wrap.appendChild(inp); form.appendChild(wrap);
-    });
-    var save = document.createElement('button');
-    save.type = 'button'; save.className = 'bs-btn bs-btn-primary'; save.textContent = 'Connect';
-    var msg = document.createElement('span'); msg.className = 'bs-status'; msg.style.marginLeft = '8px';
-    save.addEventListener('click', function () {
-      var creds = {};
-      Object.keys(inputs).forEach(function (k) { creds[k] = inputs[k].value.trim(); });
-      msg.textContent = 'Connecting…';
-      api('connect-blog-destination', { method: 'POST', body: JSON.stringify({ action: 'connect', provider: d.id, creds: creds }) })
-        .then(function (res) {
-          if (res.ok) loadSyndication();
-          else msg.textContent = (res.body && res.body.error) || 'Connection failed.';
-        }).catch(function () { msg.textContent = 'Connection failed.'; });
-    });
-    form.appendChild(save); form.appendChild(msg);
-    row.appendChild(form);
-  }
-
-  function disconnectDest(id) {
-    api('connect-blog-destination', { method: 'POST', body: JSON.stringify({ action: 'disconnect', provider: id }) })
-      .then(function () { loadSyndication(); });
-  }
+  // Syndication connectors + push now live in the assistant Connections tab (integrations.js): posts
+  // auto-publish to every connected blog on publish. No per-post syndication UI here any more.
 
   // ── Search Console (US 5.1 content-decay loop) — connect status ────────────────────────────────
   function loadSearchConsole() {
@@ -965,10 +806,6 @@
 
   // ── Wire all events once, after markup injection ───────────────────────────────────────────────
   function wireEvents() {
-    Array.prototype.forEach.call(document.querySelectorAll('#bs-brief [data-path]'), function (btn) {
-      btn.addEventListener('click', function () { startPost(btn.getAttribute('data-path')); });
-    });
-
     el('bs-close').addEventListener('click', closeBlogStudio);
     el('bms-blog-backdrop').addEventListener('mousedown', function (e) {
       if (e.target === el('bms-blog-backdrop')) closeBlogStudio();  // click the dimmed area to dismiss
@@ -986,8 +823,17 @@
       api('save-blog-draft', { method: 'POST', body: JSON.stringify({ id: state.postId, title: this.value }) });
     });
 
-    el('bs-notes-mic').addEventListener('click', function () { startVoice('bs-notes', 'bs-notes-mic'); });
     el('bs-swan-improve').addEventListener('click', askSwanImprove);
+
+    // Inline AI draft: reveal the topic form, draft into the editor, or cancel.
+    el('bs-ai-draft').addEventListener('click', function () {
+      var form = el('bs-ai-draft-form');
+      var showing = !form.classList.contains('bs-hidden');
+      form.classList.toggle('bs-hidden', showing);
+      if (!showing) { setStatus('bs-ai-draft-status', ''); el('bs-ai-topic').focus(); }
+    });
+    el('bs-ai-draft-go').addEventListener('click', runAiDraft);
+    el('bs-ai-draft-cancel').addEventListener('click', function () { el('bs-ai-draft-form').classList.add('bs-hidden'); });
 
     el('bs-publish').addEventListener('click', function () {
       if (!state.postId || blockedAsEmpty()) return;
@@ -1029,32 +875,6 @@
     });
     el('bs-gsc-disconnect').addEventListener('click', function () {
       api('oauth-integrations?provider=searchconsole&action=disconnect', { method: 'POST' }).then(function () { loadSearchConsole(); });
-    });
-
-    // Syndicate the published post to the selected external blogs (Dev.to, Hashnode).
-    el('bs-synd-publish').addEventListener('click', function () {
-      if (!state.postId) return;
-      var targets = Array.prototype.map.call(document.querySelectorAll('.bs-synd-check:checked'), function (c) { return c.value; });
-      if (!targets.length) { setStatus('bs-synd-status', 'Select at least one destination.'); return; }
-      // Only count draft ticks for destinations actually being pushed.
-      var draftTargets = Array.prototype.map.call(document.querySelectorAll('.bs-synd-draft:checked'), function (c) { return c.value; })
-        .filter(function (id) { return targets.indexOf(id) !== -1; });
-      setStatus('bs-synd-status', 'Publishing…');
-      api('publish-blog-destinations', {
-        method: 'POST',
-        body: JSON.stringify({ postId: state.postId, targets: targets, draftTargets: draftTargets }),
-      }).then(function (res) {
-        if (!res.ok) { setStatus('bs-synd-status', (res.body && res.body.error) || 'Failed'); return; }
-        var results = res.body.results || {};
-        var parts = Object.keys(results).map(function (k) {
-          var r = results[k];
-          if (r.status === 'draft') return k + ' ✓ (draft)';
-          if (r.status === 'published') return k + ' ✓';
-          if (r.status === 'not_connected') return k + ' (not connected)';
-          return k + ' ✗';
-        });
-        setStatus('bs-synd-status', parts.join(' · '));
-      });
     });
 
     // Approve & schedule — the assistant picks the next free cadence slot (no manual date).
@@ -1284,20 +1104,13 @@
     state.injected = true;
   }
 
-  // Reset the modal to the empty "start a new post" brief (used on each fresh open).
-  function resetToBrief() {
-    if (state.editor && state.editor.destroy) { state.editor.destroy(); state.editor = null; }
-    state.postId = null;
-    ['bs-topic', 'bs-keywords', 'bs-notes', 'bs-tone'].forEach(function (id) { var e = el(id); if (e) e.value = ''; });
-    var st = el('bs-save-tone'); if (st) st.checked = false;
-    ['bs-save-status', 'bs-media-status', 'bs-synd-status'].forEach(function (id) { setStatus(id, ''); });
-    ['bs-action-status', 'bs-brief-status'].forEach(function (id) { setBanner(id, ''); });
-    el('bs-workspace').classList.add('bs-hidden');
-    el('bs-brief').classList.remove('bs-hidden');
-    el('bs-unschedule').classList.add('bs-hidden');
-    el('bs-unpublish').classList.add('bs-hidden');
-    el('bs-schedule-picker').classList.add('bs-hidden');
-    el('bs-schedule-at').value = '';
+  // Clear transient editor state before (re)opening onto a post — the modal is injected once and
+  // reused, so status lines and the AI-draft form must not carry over between opens.
+  function clearWorkspaceState() {
+    ['bs-save-status', 'bs-media-status', 'bs-ai-draft-status'].forEach(function (id) { setStatus(id, ''); });
+    ['bs-action-status'].forEach(function (id) { setBanner(id, ''); });
+    var f = el('bs-ai-draft-form'); if (f) f.classList.add('bs-hidden');
+    ['bs-ai-topic', 'bs-ai-keywords'].forEach(function (id) { var e = el(id); if (e) e.value = ''; });
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────────────────────────
@@ -1308,12 +1121,14 @@
     el('bms-blog-backdrop').classList.add('bs-open');
     document.body.style.overflow = 'hidden';
 
+    clearWorkspaceState();
     loadAssistants().then(function () {
+      // Opening onto an existing post loads it; opening fresh drops straight into a blank draft in
+      // the editor (the old "Start a new post" brief screen is gone).
       if (opts.postId) {
         loadExistingPost(Number(opts.postId));   // sets assistantId from the post itself
       } else {
-        resetToBrief();
-        syncVoiceControls();
+        startBlankPost();
       }
     });
   }

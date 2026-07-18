@@ -177,6 +177,16 @@ export async function publishBlogPost(db: any, post: BlogPostRow, organisationId
         .where(and(eq(blogPosts.id, id), eq(blogPosts.organisationId, organisationId)))
         .returning();
 
+    // Auto-syndicate to every connected external blog (US 3.2). Best-effort and awaited: a Lambda
+    // freezes on return, so an un-awaited push would strand mid-flight — but a syndication failure
+    // must never fail the publish itself. Lazy import breaks the blog-publish ↔ syndicate cycle.
+    try {
+        const { syndicatePublishedPost } = await import('./blog-destinations/syndicate');
+        await syndicatePublishedPost(db, organisationId, updated);
+    } catch (err) {
+        console.warn(`[publishBlogPost] syndication failed for post ${id}:`, err instanceof Error ? err.message : err);
+    }
+
     return updated;
 }
 

@@ -11,6 +11,8 @@ import { buildWordpressPost, normaliseSiteUrl } from '../src/utils/blog-destinat
 import { buildGhostPost, ghostAdminBase, signGhostToken } from '../src/utils/blog-destinations/ghost';
 import { buildWordpresscomPost } from '../src/utils/blog-destinations/wordpresscom';
 import { BLOG_DESTINATION_IDS, getBlogAdapter } from '../src/utils/blog-destinations';
+import { projectPost } from '../src/utils/blog-destinations/syndicate';
+import { DEFAULT_PUBLISH_MODE } from '../src/utils/blog-destinations/store';
 import type { BlogDestinationPost } from '../src/utils/blog-destinations/types';
 
 let passed = 0;
@@ -163,6 +165,35 @@ check('every adapter declares whether it can draft; only Hashnode cannot', () =>
         return !a.supportsDraft;
     });
     assert.deepEqual(undraftable, ['hashnode']);
+});
+
+// ── Auto-syndication projection + publish mode (US 3.2) ─────────────────────
+check('publish mode defaults to draft (AC4-safe: never surprise-publish live)', () => {
+    assert.equal(DEFAULT_PUBLISH_MODE, 'draft');
+});
+
+check('projectPost maps a published row to the text-only payload', () => {
+    const projected = projectPost({
+        id: 1,
+        title: 'Hello World',
+        bodyMarkdown: '# Hi\n\nBody text.',
+        canonicalUrl: 'https://blog.example.com/hello-world',
+        tags: ['Web Dev', 'AI'],
+        metaDescription: 'A short intro.',
+        destinations: {},
+    });
+    assert.ok(projected, 'a post with text projects');
+    assert.equal(projected!.title, 'Hello World');
+    assert.equal(projected!.bodyMarkdown, '# Hi\n\nBody text.');
+    assert.ok(/<h1[ >]/.test(projected!.bodyHtml || ''), 'bodyHtml is rendered from the markdown');
+    assert.equal(projected!.canonicalUrl, 'https://blog.example.com/hello-world');
+    assert.deepEqual(projected!.tags, ['Web Dev', 'AI']);
+    assert.equal(projected!.coverImageUrl, null, 'media is never handed to external platforms');
+});
+
+check('projectPost returns null for an empty / whitespace-only body', () => {
+    assert.equal(projectPost({ id: 1, title: 'X', bodyMarkdown: '   ' }), null);
+    assert.equal(projectPost({ id: 1, title: 'X', bodyMarkdown: null }), null);
 });
 
 // `check` is sync-only — an async fn handed to it would never be awaited and would pass silently.

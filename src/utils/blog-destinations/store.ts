@@ -13,8 +13,44 @@ import type { BlogDestinationCreds, BlogDestinationId } from './types';
 
 type Db = ReturnType<typeof getDb>;
 
+/**
+ * How a connected destination receives an auto-syndicated post on publish: as an unpublished
+ * `draft` for the author to release on the platform itself, or straight to `live`. Default is
+ * `draft` — a post published on our own site should never surprise-publish onto someone else's
+ * blog (US 3.2 AC4). Hashnode has no draft API, so it is always treated as `live`.
+ */
+export type BlogPublishMode = 'draft' | 'live';
+export const DEFAULT_PUBLISH_MODE: BlogPublishMode = 'draft';
+
 const providerFor = (id: BlogDestinationId) => `blog_${id}`;
 const refKeyFor = (organisationId: number, id: BlogDestinationId) => `aura/org-${organisationId}/blog-${id}`;
+// Non-secret per-destination preferences (publish mode). Co-located in the blog-connector vault
+// namespace so it needs no schema change; workspace_integrations has no JSON column to hold it.
+const prefsRefKeyFor = (organisationId: number) => `aura/org-${organisationId}/blog-destination-prefs`;
+
+/** All per-destination publish modes for an org, defaulting missing entries to `draft`. */
+export async function getBlogPublishModes(db: Db, organisationId: number): Promise<Record<string, BlogPublishMode>> {
+    const blob = (await getSecret(db, prefsRefKeyFor(organisationId)).catch(() => null)) as
+        | { modes?: Record<string, string> }
+        | null;
+    const out: Record<string, BlogPublishMode> = {};
+    for (const id of BLOG_DESTINATION_IDS) {
+        out[id] = blob?.modes?.[id] === 'live' ? 'live' : 'draft';
+    }
+    return out;
+}
+
+/** Set one destination's publish mode, preserving the others. */
+export async function setBlogPublishMode(
+    db: Db,
+    organisationId: number,
+    id: BlogDestinationId,
+    mode: BlogPublishMode,
+): Promise<void> {
+    const modes = await getBlogPublishModes(db, organisationId);
+    modes[id] = mode;
+    await storeSecret(db, prefsRefKeyFor(organisationId), { modes });
+}
 
 /** Store validated creds in the vault and upsert the (org, provider) row. */
 export async function saveBlogDestination(
@@ -113,6 +149,8 @@ export interface BlogDestinationStatus {
     connectUrl?: string;
     /** True when the destination can be pushed as an unpublished draft (false for Hashnode). */
     supportsDraft: boolean;
+    /** How this destination receives an auto-syndicated post on publish (draft unless set to live). */
+    publishMode: BlogPublishMode;
 }
 
 /** Connection state for every adapter, for the integrations/settings UI. */
@@ -122,6 +160,7 @@ export async function listBlogDestinations(db: Db, organisationId: number): Prom
         .from(workspaceIntegrations)
         .where(eq(workspaceIntegrations.organisationId, organisationId));
     const byProvider = new Map(rows.map((r) => [r.provider, r]));
+    const modes = await getBlogPublishModes(db, organisationId);
     return BLOG_DESTINATION_IDS.map((id) => {
         const adapter = getBlogAdapter(id);
         const isOAuth = adapter.authKind === 'oauth' && !!adapter.oauthProvider;
@@ -137,6 +176,8 @@ export async function listBlogDestinations(db: Db, organisationId: number): Prom
             oauth: isOAuth,
             connectUrl: isOAuth ? `/api/oauth/${adapter.oauthProvider}/connect` : undefined,
             supportsDraft: adapter.supportsDraft,
+            // Hashnode can't draft, so it always reports live regardless of the stored preference.
+            publishMode: adapter.supportsDraft ? modes[id] : 'live',
         };
     });
 }
