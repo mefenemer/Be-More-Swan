@@ -70,6 +70,9 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     post_missed: 'suggested_action', post_generation_failed: 'suggested_action',
     // Empty-Library Draft Fallback (off) — scheduled drafts were skipped; user must upload media.
     content_library_empty: 'suggested_action',
+    // US 5.1 — a published post is losing search traffic and the user is asked to refresh it.
+    // Was uncategorised (→ 'informational'), which filed a do-something alert under Updates.
+    blog_content_decay: 'suggested_action',
     risk_assessment_submitted: 'suggested_action', billing_renewal_due: 'suggested_action',
     billing_alert: 'suggested_action', action_rejected: 'suggested_action', action_expired: 'suggested_action',
     // Issue #191 — archived assistant has a 14-day reinstate window before permanent deletion.
@@ -79,6 +82,9 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     plan_upgraded: 'state_change', downgrade_scheduled: 'state_change', downgrade_cancelled: 'state_change',
     instagram_connected: 'state_change', linkedin_connected: 'state_change', x_connected: 'state_change',
     post_published: 'state_change', post_revised: 'state_change', post_draft_ready: 'state_change',
+    // Blog Autopilot's long-form draft, mirroring post_draft_ready above. Uncategorised types fall
+    // back to 'informational', which would have put a "review this draft" alert in the wrong bucket.
+    blog_draft_ready: 'state_change',
     post_generation_queued: 'state_change', provisioning_complete: 'state_change', profile_sync_complete: 'state_change',
     draft_horizon_expanded: 'state_change', draft_horizon_shrunk: 'state_change',
     org_invite_accepted: 'state_change', org_joined: 'state_change',

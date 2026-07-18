@@ -38,6 +38,24 @@ check('Tier 1 Support Agent cannot reach social connectors', () => {
     assert.equal(isServiceAllowedForAssistant('Facebook', a), false);
 });
 
+check('Blog Writer may use Canva but not social connectors', () => {
+    const a = { roleKey: 'blog_writer', role: 'Blog Writing Assistant' };
+    // ROLE_CONNECTIONS['blog_writer'] = ['cms', 'search_console', 'knowledge', 'design'].
+    // Only 'design' has a connector in CONNECTOR_CATEGORY today (Canva); cms/search_console are
+    // served by the separate blog-destinations flow (EXTERNALLY_LIVE_CATEGORIES), so no service
+    // name maps to them here.
+    assert.equal(isServiceAllowedForAssistant('Canva', a), true);
+    // Publishing long-form is not a licence to post socially — the sandbox must hold.
+    for (const s of SOCIALS) assert.equal(isServiceAllowedForAssistant(s, a), false, s);
+});
+
+check('Blog Writer is explicitly scoped, not fail-open via the name fallback', () => {
+    // The display name contains no social keyword, so a MISSING ROLE_CONNECTIONS entry would
+    // fall through to the keyword fallback and return unrestricted. Guard that regression.
+    const a = { roleKey: 'blog_writer', role: 'Blog Writing Assistant' };
+    assert.equal(isServiceAllowedForAssistant('BambooHR', a), false);
+});
+
 check('Scoped role + uncategorised connector is fail-closed', () => {
     const a = { roleKey: 'social_media_manager', role: 'Social Media Assistant' };
     // BambooHR has no category mapping yet → must be denied for a scoped role.

@@ -197,6 +197,17 @@ check('US-04 — LinkedIn followers is a connection-gated awareness metric the p
     assert.equal(connectionDisplayName(null), undefined);
 });
 
+check('Blog Writer has a role-scoped outcome metric and does not inherit social ones', () => {
+    // No connected services: an internal-source metric must still be available on its own.
+    const forBlog = availableMetricsForRole('blog_writer', []);
+    const posts = forBlog.find(m => m.key === 'posts_published');
+    assert.ok(posts, 'blog_writer must expose posts_published');
+    assert.equal(posts!.objective, 'outcome', 'non-social roles use the Business Outcome objective');
+    assert.equal(posts!.available, true);
+    // Social-only metrics are gated by their own roles list — a blog role must not pick them up.
+    assert.ok(!forBlog.some(m => m.key === 'linkedin_followers'));
+});
+
 check('status model includes the four tracked states + pending', () => {
     for (const s of ['pending', 'on_track', 'at_risk', 'off_track', 'data_disconnected'])
         assert.ok(GOAL_STATUSES.includes(s as any), s);

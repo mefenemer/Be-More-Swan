@@ -11,13 +11,98 @@
 // established, and every query here is scoped by it.
 
 import Anthropic from '@anthropic-ai/sdk';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { aiAssistants, blogPosts, organisations } from '../../db/schema';
+import { aiAssistants, aiBlueprints, blogPosts, organisations } from '../../db/schema';
 import { logAiUsage } from './ai-usage';
 import { buildInspoBlock } from './inspo-profile';
+import { assembleBlueprint } from './blueprint';
 
 type Db = ReturnType<typeof getDb>;
+
+/** Cap on the content-rules list so a workspace with hundreds of learned directives can't
+ *  crowd out the brief. §11's own text is already capped by the compiler (8k total / 4k per doc). */
+const MAX_RULES = 40;
+
+/**
+ * Pull the two blueprint sections that must govern a long-form draft:
+ *   §4 Content Rules      — the workspace's guardrails and learned directives
+ *   §11 Business Knowledge — the owner-supplied docs the compiler marks AUTHORITATIVE
+ *
+ * Blog generation historically never read the blueprint at all, so neither of these reached a
+ * draft: a user could upload brand guidelines, see them labelled as overriding any conflicting
+ * instruction, and have long-form quietly ignore them.
+ *
+ * Deliberately NOT full parity with the social path (process-content-jobs dumps every section
+ * wholesale, and generate-post hard-fails on blocking gaps). Blog has always drafted without a
+ * blueprint, so failing closed here would break existing users over gaps like a missing DPA.
+ * This adds context only and returns null on any problem — a draft never fails because of it.
+ */
+export async function buildBlueprintGuardrailsBlock(
+    db: Db,
+    opts: { assistantId: number; organisationId: number; compiledBy: string },
+): Promise<string | null> {
+    try {
+        let [bp] = await db
+            .select({ sections: aiBlueprints.sections })
+            .from(aiBlueprints)
+            .where(and(
+                eq(aiBlueprints.assistantId, opts.assistantId),
+                eq(aiBlueprints.organisationId, opts.organisationId),
+            ))
+            .orderBy(desc(aiBlueprints.compiledAt))
+            .limit(1);
+
+        // Nothing compiles a blueprint for a Blog Writer today (generate-post and
+        // schedule-gap-fill are both social), so on the first draft there won't be one.
+        // Compile it now, exactly as generate-post does for a self-serve social assistant.
+        if (!bp) {
+            const result = await assembleBlueprint(opts.assistantId, opts.compiledBy, 'auto-on-demand');
+            bp = { sections: result.sections as unknown as Record<string, unknown> };
+        }
+
+        const sections = (bp.sections ?? {}) as Record<string, { content?: Record<string, unknown> }>;
+        const parts: string[] = [];
+
+        const rules = (sections['4-content-rules']?.content?.rules ?? []) as Array<{ text?: string; platform?: string }>;
+        if (rules.length) {
+            const lines = rules
+                .slice(0, MAX_RULES)
+                .map(r => (typeof r?.text === 'string' ? r.text.trim() : ''))
+                .filter(Boolean)
+                .map(t => `- ${t}`);
+            if (lines.length) {
+                parts.push(
+                    'CONTENT RULES — these are the workspace\'s standing rules and directives learned ' +
+                    'from past feedback. Follow every one of them:\n' + lines.join('\n'),
+                );
+            }
+        }
+
+        const knowledge = sections['11-business-knowledge']?.content ?? {};
+        const directive = typeof knowledge.directive === 'string' ? knowledge.directive : null;
+        const documents = (knowledge.documents ?? []) as Array<{ name?: string; text?: string }>;
+        const links = (knowledge.links ?? []) as Array<{ name?: string; url?: string }>;
+        if (directive && (documents.length || links.length)) {
+            const docBlocks = documents
+                .filter(d => typeof d?.text === 'string' && d.text.trim())
+                .map(d => `[${d.name ?? 'Document'}]\n${d.text!.trim()}`);
+            const linkLines = links
+                .filter(l => l?.url)
+                .map(l => `- ${l.name ?? l.url}: ${l.url}`);
+            parts.push(
+                `BUSINESS KNOWLEDGE — ${directive}\n\n` +
+                [docBlocks.join('\n\n'), linkLines.length ? `Reference links:\n${linkLines.join('\n')}` : '']
+                    .filter(Boolean).join('\n\n'),
+            );
+        }
+
+        return parts.length ? parts.join('\n\n') : null;
+    } catch (err) {
+        console.error(`buildBlueprintGuardrailsBlock: assistant ${opts.assistantId} failed`, err);
+        return null;
+    }
+}
 
 export const BLOG_MODEL = 'claude-haiku-4-5-20251001';
 export const DEFAULT_TONE = 'friendly and professional';
@@ -119,6 +204,16 @@ export async function generateBlogBody(
         })
         : null;
 
+    // Content Rules + Business Knowledge from the compiled blueprint. Null for a post with no
+    // authoring assistant, and null on any failure — never fails the draft.
+    const guardrailsBlock = post.assistantId
+        ? await buildBlueprintGuardrailsBlock(db, {
+            assistantId: post.assistantId,
+            organisationId,
+            compiledBy: String(userId),
+        })
+        : null;
+
     const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
     const response = await anthropic.messages.create({
         model: BLOG_MODEL,
@@ -129,6 +224,10 @@ export async function generateBlogBody(
             'Produce a complete, publish-ready blog post in Markdown: a single H1 title, a short ' +
             'hook intro, 3–6 H2 sections with substantive paragraphs, and a brief conclusion. Weave ' +
             'the target keywords in naturally — never keyword-stuff. Return ONLY the Markdown, no preamble.' +
+            // Order matters: the workspace's binding rules and authoritative business facts are
+            // established FIRST, so the Inspo styling that follows can shape the voice but never
+            // override them. Mirrors the social path, where inspo sits after the blueprint.
+            (guardrailsBlock ? `\n\n${guardrailsBlock}` : '') +
             (inspoBlock ? `\n\n${inspoBlock}` : ''),
         messages: [{ role: 'user', content: brief }],
     });

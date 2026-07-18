@@ -3024,6 +3024,10 @@ const SECTION_LABELS = {
   '8-plan':         'Section 8 — Plan & Capability Constraints',
   '9-compliance':   'Section 9 — Compliance & Governance',
   '10-execution':   'Section 10 — Execution Constraints',
+  // Section 11 is optional context and is excluded from the completeness denominator in
+  // blueprint.ts, but it IS compiled and sent — without a label here every renderer fell back
+  // to `|| key` and showed the raw '11-business-knowledge' string.
+  '11-business-knowledge': 'Section 11 — Business Knowledge',
 };
 
 const STATUS_BADGE = {

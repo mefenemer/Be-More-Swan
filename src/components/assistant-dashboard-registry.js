@@ -165,7 +165,10 @@
         hasReviewQueue: false, hasPostingSchedule: true, hasSocialStrategy: false,
         hasImpactRoi: false, hasCreativeBrief: false, hasSalesContext: false,
         hasContentAutomation: false, hasEmptyLibraryFallback: false, hasReviewCadence: false,
-        hasContentPublishing: false,
+        // Mirrors PUBLISHING_ROLE_KEYS in src/utils/notification-prefs.ts, which is the source of
+        // truth — the two must agree or the "Content & Publishing" toggle renders but the write is
+        // rejected server-side. Blog Writer drafts and publishes, so it gets the category.
+        hasContentPublishing: true,
       },
       // Ignored for blog_writer (assistants.js special-cases the button to open Blog Studio),
       // but kept coherent for any generic reader of the registry.

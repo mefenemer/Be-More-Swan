@@ -111,7 +111,13 @@ export const PREF_CATEGORIES: PrefCategory[] = [
         types: [
             'post_published', 'post_revised', 'post_draft_ready', 'post_generation_queued',
             'post_publish_failed', 'post_missed', 'post_generation_failed',
-            'content_calendar', 'draft_horizon_expanded', 'draft_horizon_shrunk',
+            // NB: 'content_calendar' itself used to be listed here — that's this category's own
+            // key, not a notification type. Nothing ever emitted it and it has no template, so it
+            // only ever mapped to the 'informational' fallback. Removed 2026-07-18.
+            'draft_horizon_expanded', 'draft_horizon_shrunk',
+            // Long-form equivalents. Without these the user cannot mute blog notifications at all:
+            // an uncategorised type is unreachable from the preferences matrix.
+            'blog_draft_ready', 'blog_content_decay',
         ],
     },
     {
@@ -182,7 +188,9 @@ export function categoryForType(type: string): PrefCategory {
 // in the UI and rejected on write. This is the single source of truth; the frontend
 // registry mirrors it via the `hasContentPublishing` module flag
 // (src/components/assistant-dashboard-registry.js). Keep the two in sync.
-export const PUBLISHING_ROLE_KEYS: ReadonlySet<string> = new Set(['social_media_manager']);
+// blog_writer joined 2026-07-18 with Blog Autopilot: it now drafts on a cadence and publishes via
+// publish-blog-posts, so it produces exactly the draft/publish notifications this category covers.
+export const PUBLISHING_ROLE_KEYS: ReadonlySet<string> = new Set(['social_media_manager', 'blog_writer']);
 
 // Assistant-scope categories that only apply to publishing roles, keyed by category key.
 const PUBLISHING_ONLY_CATEGORIES: ReadonlySet<string> = new Set(['content_calendar']);

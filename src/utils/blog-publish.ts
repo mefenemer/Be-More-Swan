@@ -14,6 +14,7 @@ import { renderMarkdown, excerpt } from './markdown-render';
 import { isC2paSigningEnabled, signStoredImageAsset, type ManifestSummary } from './c2pa-sign';
 import { stripMediaForSyndication as stripMedia } from '../lib/marked-bms-directives.js';
 import { resolveCanonical } from './blog-seo';
+import { fireOrchestrations } from './orchestration';
 
 const jwtSecret = process.env.JWT_SECRET || 'fallback';
 const C2PA_SCHEMA_VERSION = '1.0';
@@ -185,6 +186,29 @@ export async function publishBlogPost(db: any, post: BlogPostRow, organisationId
         await syndicatePublishedPost(db, organisationId, updated);
     } catch (err) {
         console.warn(`[publishBlogPost] syndication failed for post ${id}:`, err instanceof Error ? err.message : err);
+    }
+
+    // Cross-assistant hand-off. Fired HERE, in the shared core, rather than at each caller the way
+    // the social path does it (publish-social-posts.ts): both the interactive publish-blog.ts and
+    // the publish-blog-posts.ts cron route through this function, so a third caller can't forget it.
+    //
+    // Why this matters: orchestrations-content.html offers EVERY non-archived assistant as a
+    // hand-off source with a "publishes a post" event, so a user could already build a Blog Writer
+    // link, see it listed as active, and have it silently never fire — no blog path called
+    // fireOrchestrations at all. Human-authored posts (assistantId null) have no source assistant
+    // and are skipped. fireOrchestrations never throws by contract.
+    if (updated.assistantId) {
+        await fireOrchestrations(db, {
+            sourceAssistantId: updated.assistantId,
+            orgId: organisationId,
+            userId: updated.userId,
+            event: 'publishes_a_post',
+            // blog_posts.id, a different id space from scheduled_posts.id. Safe for the
+            // UNIQUE(link_id, source_post_id) idempotency guard because a given link's source
+            // assistant is either long-form or social, never both, so the spaces never mix.
+            sourcePostId: updated.id,
+            sourceCaption: updated.title,
+        });
     }
 
     return updated;

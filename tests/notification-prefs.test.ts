@@ -159,6 +159,9 @@ check('content_calendar is the only publishing-only assistant category', () => {
 check('publishing-only categories apply only to publishing roles; legacy/unknown = social', () => {
     // content_calendar: gated by role
     assert.equal(assistantCategoryAppliesToRole('content_calendar', 'social_media_manager'), true);
+    // Blog Autopilot made blog_writer a publishing role — it drafts on a cadence and publishes,
+    // so it must be able to reach these toggles (the endpoint rejects writes for roles that can't).
+    assert.equal(assistantCategoryAppliesToRole('content_calendar', 'blog_writer'), true);
     assert.equal(assistantCategoryAppliesToRole('content_calendar', 'lead_qualifier'), false);
     assert.equal(assistantCategoryAppliesToRole('content_calendar', 'accounts_receivable_clerk'), false);
     assert.equal(assistantCategoryAppliesToRole('content_calendar', 'tier1_support_agent'), false);
@@ -174,6 +177,18 @@ check('every publishing roleKey is a real assistant-scope-bearing role', () => {
     // Guardrail: PUBLISHING_ROLE_KEYS must be non-empty (else content_calendar is dead for all).
     assert.ok(PUBLISHING_ROLE_KEYS.size >= 1);
     assert.ok(PUBLISHING_ROLE_KEYS.has('social_media_manager'));
+    assert.ok(PUBLISHING_ROLE_KEYS.has('blog_writer'));
+});
+
+check('every type routed to content_calendar has a notification category', () => {
+    // An uncategorised type silently falls back to 'informational' in notification-actions.ts,
+    // which is how blog_draft_ready / blog_content_decay were filed under Updates instead of
+    // their proper buckets. Catch the next one at test time rather than in the feed.
+    const cat = PREF_CATEGORIES.find(c => c.key === 'content_calendar')!;
+    for (const type of cat.types) {
+        assert.notEqual(categoryOf(type), 'informational',
+            `${type} is uncategorised in TYPE_CATEGORY — it will default to 'informational'`);
+    }
 });
 
 console.log(`\n${passed} checks passed.`);

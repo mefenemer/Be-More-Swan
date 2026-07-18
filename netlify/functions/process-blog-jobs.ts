@@ -22,6 +22,7 @@ import { generateBlogBody } from '../../src/utils/blog-generate';
 import { ideateBlogTopic } from '../../src/utils/blog-topic-ideation';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { createNotification } from '../../src/utils/notify';
+import { fireOrchestrations } from '../../src/utils/orchestration';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BACKOFF_SECS = [30, 120, 300];
@@ -149,6 +150,17 @@ async function processBlogJob(db: ReturnType<typeof getDb>, job: BlogJobRow): Pr
             context: { assistant: { name: assistant.name }, post: { title: idea.title } },
             metadata: { assistantId: job.assistant_id, blogPostId: post.id },
         }).catch(err => console.error('[process-blog-jobs] notification failed', err));
+
+        // Cross-assistant hand-off on the drafting seam, mirroring process-content-jobs.ts. The
+        // publish-side counterpart lives in blog-publish.ts. Never throws by contract.
+        await fireOrchestrations(db, {
+            sourceAssistantId: job.assistant_id,
+            orgId: job.organisation_id,
+            userId: job.user_id,
+            event: 'drafts_a_post',
+            sourcePostId: post.id,
+            sourceCaption: idea.title,
+        });
     } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         console.error(`[process-blog-jobs] job ${job.job_id} failed`, err);
