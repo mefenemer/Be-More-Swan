@@ -25,6 +25,7 @@ import { generateQueries, type DiscoveryStrategy } from '../../src/lib/discovery
 import { scoreCandidates, type ScoreCandidate } from '../../src/lib/discovery-scoring';
 import { search, isSearchConfigured, normaliseDomain, SearchNotConfiguredError } from '../../src/lib/discovery-search';
 import { enrichLeadContact } from '../../src/lib/discovery-enrich';
+import { classifyCandidate } from '../../src/lib/discovery-domain-filter';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { enqueueScenarioTrigger } from '../../src/utils/scenario-engine';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -227,7 +228,17 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
             const candidates = results
                 .map((r) => ({ ...r, domain: normaliseDomain(r.domain || r.url) }))
                 .filter((r) => r.domain && !seen.has(r.domain) && (seen.add(r.domain), true))
-                .filter((r) => !isExcluded(r.domain!, `${r.title} ${r.snippet}`, guardrails));
+                .filter((r) => !isExcluded(r.domain!, `${r.title} ${r.snippet}`, guardrails))
+                // Drop non-prospects (directories, social, listicles, vendor blogs) BEFORE
+                // scoring — a live run qualified tiktok.com and cvent.com as warm leads.
+                // Runs pre-scoring so dropped candidates cost no tokens either.
+                .filter((r) => {
+                    const verdict = classifyCandidate({ domain: r.domain, url: r.url, title: r.title });
+                    if (verdict.excluded) {
+                        console.log(`[discovery] job ${job.job_id} dropped ${r.domain} (${verdict.category}): ${verdict.reason}`);
+                    }
+                    return !verdict.excluded;
+                });
 
             if (candidates.length === 0) continue;
 

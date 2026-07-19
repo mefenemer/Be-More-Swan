@@ -95,6 +95,14 @@ export async function scoreCandidates(
     const system =
 `You qualify OUTBOUND leads discovered on the public web for "${assistantName}", a business using Be More Swan. Score each candidate below against the ideal customer profile — strong fit + buying intent scores high; poor fit or no intent scores low. Your reasons must name which profile criteria each candidate met or missed. Only the public info provided is known — do not invent facts about a company.
 
+FIRST, for each candidate ask: is this an actual company we could SELL TO? Search results are full of pages that are merely ABOUT the target market rather than a business in it. Score 0-10 and rate "cold" for any of these, however topically relevant they look:
+- a directory, marketplace, listing or review site that AGGREGATES businesses of the target type
+- an article, blog post, guide, listicle, PDF or template about the target market
+- a news outlet, magazine or publisher covering the sector
+- a software vendor or agency that SELLS TO the target market (a competitor or peer supplier, not a customer)
+- a social network, forum, wiki or job board
+Topical relevance is NOT fit. "An article listing the best wedding venues" is not a wedding venue; "software for managing hotels" is not a hotel. Say so plainly in reasons.
+
 Ideal customer profile (from setup):
 ${icpBlock(icp)}
 

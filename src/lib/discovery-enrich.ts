@@ -39,6 +39,11 @@ const ROLE_PREFIXES = new Set([
     'info', 'hello', 'hi', 'contact', 'contactus', 'enquiries', 'enquiry', 'inquiries',
     'sales', 'admin', 'office', 'team', 'mail', 'general', 'reception', 'bookings',
     'support', 'help', 'ask', 'talk', 'connect', 'business',
+    // Hospitality/venue desks — a live staging run classified reservations@ as 'personal'
+    // and warned on it. Misclassifying role→personal only over-warns (the safe direction),
+    // but it puts needless friction on the reviewer, so keep this list current.
+    'reservations', 'reservation', 'booking', 'events', 'event', 'enquires', 'frontdesk',
+    'stay', 'guestservices', 'concierge', 'hire', 'orders', 'shop', 'studio', 'welcome',
 ]);
 
 // Never contact these, and never let them shadow a real address.

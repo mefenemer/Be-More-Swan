@@ -28,6 +28,15 @@ check('pulls an address written in body text', () => {
     assert.equal(hits[0].email, 'info@acme.co.uk');
 });
 
+check('classifies hospitality desk inboxes as role, not personal', () => {
+    // Regression: a live staging run classified reservations@ as 'personal' and put a
+    // "check before approving" warning on an obviously generic venue inbox.
+    for (const p of ['reservations', 'bookings', 'events', 'concierge']) {
+        const hits = extractEmails(page(`<p>${p}@venue.co.uk</p>`), 'venue.co.uk');
+        assert.equal(hits[0]?.kind, 'role', `${p}@ should be a role inbox`);
+    }
+});
+
 check('classifies a named inbox as personal, not role', () => {
     const hits = extractEmails(page('<a href="mailto:jane.smith@acme.co.uk">Jane</a>'), 'acme.co.uk');
     assert.equal(hits[0].kind, 'personal');
