@@ -218,6 +218,21 @@ Write an outreachDraft for hot/warm leads; use null for cold leads.`;
             logUsage(resp, 'score_lead');
             const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
             const card = normaliseLeadCard(parseJson(raw), title);
+
+            // Persist the address the user actually typed. Without this the only recipient
+            // source for a manual lead is whatever the model chose to echo into
+            // outreachDraft.to, so send_outreach could return 'no_recipient' for a lead whose
+            // email was filled in — see the resolution order at send_outreach below. Stored as
+            // contactEmail so that order (draft.to → contactEmail → lead.email) finds it, and
+            // so the Review Queue recipient line reads from the same field.
+            // emailSource 'manual' (not 'scrape') deliberately keeps the personal-inbox gate
+            // off: a hand-entered address is user-supplied, not harvested.
+            const submittedEmail = str(lead.email, 200);
+            if (submittedEmail) {
+                card.contactEmail = submittedEmail;
+                card.emailSource = 'manual';
+            }
+
             const id = await upsertRecord('lead', title, String(card.rating), card, 'manual');
             return json(200, { record: { id, title, status: card.rating, data: card } });
         }
