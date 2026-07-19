@@ -458,10 +458,17 @@ export async function publishThreads(
 //
 // Shared with sync-action.ts's youtube_upload_video handler.
 //
-// SCALE CAVEAT: the bytes are buffered fully in memory before the PUT, so a large video can exhaust
-// a serverless function's memory or wall-clock budget. That ceiling is inherited from the original
-// handler and is acceptable for the manual-upload flow (short marketing clips); genuine long-form
-// uploads need a chunked/streamed rewrite before they can be trusted.
+// The bytes go up in fixed-size chunks with Content-Range, each pulled from the source with its own
+// ranged GET, so peak memory is one chunk rather than the whole file. YouTube answers every
+// non-final chunk with 308 + a `Range` header naming the last byte it actually stored; we resume
+// from THAT offset rather than assuming our own, which is what makes a retried chunk safe.
+//
+// (This replaced a single buffered PUT — Buffer.from(await res.arrayBuffer()) — whose ceiling was
+// whatever the function's memory allowed. Fine for short marketing clips, fatal for long-form.)
+//
+// Wall clock is handled separately: pass `deadlineMs` and the loop stops at a chunk boundary,
+// returning `incomplete` state that a later invocation feeds back as `resume`. See
+// publish-youtube-background.ts. Without a deadline the call runs to completion as before.
 
 export const YOUTUBE_TITLE_MAX = 100;
 export const YOUTUBE_DESCRIPTION_MAX = 5000;
@@ -491,13 +498,136 @@ export function youtubeMetaFromCaption(caption: string, hashtags: string, format
     return { title, description, tags, format };
 }
 
-export async function publishYouTube(meta: YouTubeMeta, token: string, video: PostVideo | null): Promise<DriverResult> {
-    if (!video) return { ok: false, status: null, error: 'YouTube posts require a video — attach one before publishing.' };
+// Google requires every non-final chunk to be a multiple of 256 KiB.
+const YT_CHUNK_MULTIPLE = 256 * 1024;
+export const YT_CHUNK_SIZE = 8 * 1024 * 1024;   // 8 MiB — peak memory per chunk.
+const YT_CHUNK_ATTEMPTS = 4;                    // per-chunk retries before giving up.
+// Leave room for one more source GET + PUT round trip before the runtime kills us. Stopping a chunk
+// short of the deadline costs one extra invocation; overrunning loses the whole tick's work.
+const YT_DEADLINE_MARGIN_MS = 20_000;
 
-    // 1. Open the resumable session with the SEO metadata.
+/**
+ * Enough to continue an upload in a LATER function invocation. YouTube keeps a resumable session
+ * alive for about a week, so this survives comfortably between cron ticks.
+ *
+ * `offset` is advisory — a resume always re-queries the session for the authoritative offset before
+ * sending anything, because the previous invocation may have been killed after YouTube stored a
+ * chunk but before we recorded it.
+ */
+export interface YouTubeResumeState {
+    uploadUrl: string;
+    total: number;
+    offset: number;
+}
+
+export type YouTubeOutcome =
+    | { kind: 'done'; id: string }
+    | { kind: 'incomplete'; state: YouTubeResumeState }
+    | { kind: 'failed'; status: number | null; error: string };
+
+export interface YouTubePublishOpts {
+    chunkSize?: number;
+    /** Absolute epoch-ms wall-clock budget; the loop stops cleanly at a chunk boundary before it. */
+    deadlineMs?: number;
+    /** Continue a session opened by an earlier invocation (from a previous `incomplete`). */
+    resume?: YouTubeResumeState;
+}
+
+// What the source URL can support. A presigned R2 GET honours Range and reports a length, which is
+// the path that gets true chunking + resume; anything else gets a single streamed PUT, which still
+// avoids buffering but cannot resume.
+async function probeVideoSource(url: string): Promise<{ size: number | null; rangeSupported: boolean; contentType: string; reachable: boolean }> {
+    // A ranged GET is the honest probe: HEAD is often unsupported on object stores, and a 206 proves
+    // Range works rather than trusting an Accept-Ranges advertisement.
+    try {
+        const res = await fetch(url, { method: 'GET', headers: { Range: 'bytes=0-0' } });
+        const contentType = res.headers.get('content-type') || 'video/mp4';
+        if (res.status === 206) {
+            // Content-Range: bytes 0-0/12345 — the total is the only trustworthy size here.
+            const total = /\/(\d+)\s*$/.exec(res.headers.get('content-range') ?? '')?.[1];
+            await res.body?.cancel().catch(() => { /* already drained */ });
+            if (total) return { size: Number(total), rangeSupported: true, contentType, reachable: true };
+        }
+        await res.body?.cancel().catch(() => { /* already drained */ });
+        // 200 means Range was ignored and we were handed the whole file — don't chunk against it.
+        const len = res.headers.get('content-length');
+        return {
+            size: res.status === 200 && len ? Number(len) : null,
+            rangeSupported: false,
+            contentType,
+            reachable: res.ok || res.status === 206,
+        };
+    } catch {
+        return { size: null, rangeSupported: false, contentType: 'video/mp4', reachable: false };
+    }
+}
+
+// Ask the session where it actually is. Used on resume, and after a failed chunk, so we continue
+// from YouTube's offset rather than replaying bytes it already holds.
+async function queryYouTubeOffset(uploadUrl: string, total: number): Promise<number | null> {
+    const res = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Range': `bytes */${total}`, 'Content-Length': '0' },
+    });
+    // null means "the session is gone" — reserved for an HTTP failure. A live session that has
+    // stored NOTHING yet answers 308 with no Range header at all, which is offset 0, not death.
+    // Conflating the two aborts every upload interrupted before its first chunk landed.
+    if (res.status !== 308 && res.status !== 200 && res.status !== 201) return null;
+    return parseYouTubeOffset(res.headers.get('range')) ?? 0;
+}
+
+// `Range: bytes=0-262143` → the next byte to send (262144). Absent header means nothing stored yet.
+function parseYouTubeOffset(header: string | null): number | null {
+    const end = /bytes=0-(\d+)/.exec(header ?? '')?.[1];
+    return end == null ? null : Number(end) + 1;
+}
+
+/**
+ * Upload a video over YouTube's resumable protocol, chunked so peak memory is one chunk.
+ *
+ * Returns `incomplete` when a `deadlineMs` is set and the wall clock runs out mid-upload; feed that
+ * state back as `opts.resume` later to carry on. Without a deadline it runs to completion.
+ */
+export async function publishYouTubeResumable(
+    meta: YouTubeMeta,
+    token: string,
+    video: PostVideo | null,
+    opts: YouTubePublishOpts = {},
+): Promise<YouTubeOutcome> {
+    if (!video) return { kind: 'failed', status: null, error: 'YouTube posts require a video — attach one before publishing.' };
+
+    // Resuming: the session already exists, so skip the probe + init and go straight back to the
+    // bytes. Re-query for the true offset first — the invocation that produced this state may have
+    // been killed after YouTube stored a chunk but before the write landed.
+    if (opts.resume) {
+        const { uploadUrl, total } = opts.resume;
+        const confirmed = await queryYouTubeOffset(uploadUrl, total);
+        if (confirmed == null) {
+            return { kind: 'failed', status: null, error: 'The YouTube upload session expired before the video finished. It will start over.' };
+        }
+        if (confirmed >= total) {
+            return { kind: 'failed', status: null, error: 'YouTube has the whole video but did not confirm it. Check the channel before retrying.' };
+        }
+        return uploadYouTubeChunked(uploadUrl, video.url, total, opts.chunkSize ?? YT_CHUNK_SIZE, opts.deadlineMs, confirmed);
+    }
+
+    // 1. Probe the source FIRST — its size and media type belong on the session-open request, and a
+    // dead source should fail before we book a session against the channel's daily upload quota.
+    const probe = await probeVideoSource(video.url);
+    if (!probe.reachable) {
+        return { kind: 'failed', status: null, error: 'Could not fetch the video from storage — re-attach it and try again.' };
+    }
+
+    // 2. Open the resumable session with the SEO metadata. X-Upload-Content-* describe the MEDIA;
+    // this request's own Content-Type describes the metadata JSON in the body.
     const initRes = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=UTF-8' },
+        headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json; charset=UTF-8',
+            'X-Upload-Content-Type': video.mimeType || probe.contentType,
+            ...(probe.size ? { 'X-Upload-Content-Length': String(probe.size) } : {}),
+        },
         body: JSON.stringify({
             snippet: {
                 title: meta.title.slice(0, YOUTUBE_TITLE_MAX),
@@ -511,25 +641,139 @@ export async function publishYouTube(meta: YouTubeMeta, token: string, video: Po
     const uploadUrl = initRes.headers.get('location');
     if (!initRes.ok || !uploadUrl) {
         const err: any = await initRes.json().catch(() => ({}));
-        return { ok: false, status: initRes.status, error: err?.error?.message || `YouTube upload session error (${initRes.status})` };
+        return { kind: 'failed', status: initRes.status, error: err?.error?.message || `YouTube upload session error (${initRes.status})` };
     }
 
-    // 2. Stream the bytes into the session.
-    const videoRes = await fetch(video.url);
-    if (!videoRes.ok) {
-        return { ok: false, status: videoRes.status, error: 'Could not fetch the video from storage — re-attach it and try again.' };
+    // 3. Send the bytes.
+    return probe.rangeSupported && probe.size && probe.size > 0
+        ? uploadYouTubeChunked(uploadUrl, video.url, probe.size, opts.chunkSize ?? YT_CHUNK_SIZE, opts.deadlineMs, 0)
+        : uploadYouTubeStreamed(uploadUrl, video.url, probe.size, video.mimeType || probe.contentType);
+}
+
+// Chunked + resumable. Peak memory is one chunk.
+async function uploadYouTubeChunked(
+    uploadUrl: string,
+    videoUrl: string,
+    total: number,
+    rawChunkSize: number,
+    deadlineMs: number | undefined,
+    startOffset: number,
+): Promise<YouTubeOutcome> {
+    // Round down to a 256 KiB boundary; never below one multiple.
+    const chunkSize = Math.max(YT_CHUNK_MULTIPLE, Math.floor(rawChunkSize / YT_CHUNK_MULTIPLE) * YT_CHUNK_MULTIPLE);
+    let offset = startOffset;
+    let attempts = 0;
+
+    while (offset < total) {
+        // Stop at a chunk boundary while there's still time to hand back clean state. Being killed
+        // mid-chunk instead would lose the session URL and restart the whole video from zero.
+        if (deadlineMs != null && Date.now() + YT_DEADLINE_MARGIN_MS >= deadlineMs) {
+            return { kind: 'incomplete', state: { uploadUrl, total, offset } };
+        }
+
+        const end = Math.min(offset + chunkSize, total) - 1;
+
+        // Pull just this window from the source. `chunk` is the only video data we ever hold.
+        const srcRes = await fetch(videoUrl, { headers: { Range: `bytes=${offset}-${end}` } });
+        if (srcRes.status !== 206 && srcRes.status !== 200) {
+            return { kind: 'failed', status: srcRes.status, error: 'Could not fetch the video from storage — re-attach it and try again.' };
+        }
+        const chunk = Buffer.from(await srcRes.arrayBuffer());
+        if (chunk.byteLength === 0) {
+            return { kind: 'failed', status: null, error: 'The video source returned no bytes for the requested range.' };
+        }
+        // A source that ignored Range hands back more than we asked for; trim so Content-Range stays honest.
+        const body = chunk.byteLength > end - offset + 1 ? chunk.subarray(0, end - offset + 1) : chunk;
+        const last = offset + body.byteLength - 1;
+
+        const putRes = await fetch(uploadUrl, {
+            method: 'PUT',
+            headers: {
+                'Content-Range': `bytes ${offset}-${last}/${total}`,
+                'Content-Length': String(body.byteLength),
+            },
+            body,
+        });
+
+        // Terminal success — the final chunk carries the video resource.
+        if (putRes.status === 200 || putRes.status === 201) {
+            const data: any = await putRes.json().catch(() => ({}));
+            if (data?.id) return { kind: 'done', id: String(data.id) };
+            return { kind: 'failed', status: putRes.status, error: data?.error?.message || 'YouTube accepted the upload but returned no video id.' };
+        }
+
+        // Incomplete — advance to the offset YouTube reports it actually stored.
+        if (putRes.status === 308) {
+            const confirmed = parseYouTubeOffset(putRes.headers.get('range'));
+            const next = confirmed ?? last + 1;
+            // A 308 that doesn't move the offset would spin this loop forever (and a serverless
+            // function has no one to notice). Treat stalled progress like a transient failure.
+            if (next <= offset) {
+                if (++attempts >= YT_CHUNK_ATTEMPTS) {
+                    return { kind: 'failed', status: 308, error: 'YouTube stopped accepting the upload part-way through. Try again.' };
+                }
+                continue;
+            }
+            attempts = 0;
+            offset = next;
+            continue;
+        }
+
+        // Transient — re-sync against the session and retry the same window.
+        if (isDriverRetryable(putRes.status) && ++attempts < YT_CHUNK_ATTEMPTS) {
+            await new Promise((r) => setTimeout(r, 500 * 2 ** (attempts - 1)));
+            const confirmed = await queryYouTubeOffset(uploadUrl, total);
+            if (confirmed != null) offset = confirmed;
+            continue;
+        }
+
+        const data: any = await putRes.json().catch(() => ({}));
+        return { kind: 'failed', status: putRes.status, error: data?.error?.message || `YouTube upload error (${putRes.status})` };
     }
-    const bytes = Buffer.from(await videoRes.arrayBuffer());
+
+    // Loop drained without a terminal 200/201: YouTube has every byte but never returned the resource.
+    return { kind: 'failed', status: null, error: 'YouTube received the whole video but did not confirm it. Check the channel before retrying.' };
+}
+
+// Fallback for sources that won't serve ranges: stream the body straight through in one PUT. Still
+// no full-file buffer, but a failure restarts from zero — nothing to resume against.
+async function uploadYouTubeStreamed(
+    uploadUrl: string,
+    videoUrl: string,
+    size: number | null,
+    contentType: string,
+): Promise<YouTubeOutcome> {
+    const srcRes = await fetch(videoUrl);
+    if (!srcRes.ok || !srcRes.body) {
+        return { kind: 'failed', status: srcRes.status, error: 'Could not fetch the video from storage — re-attach it and try again.' };
+    }
+
+    const headers: Record<string, string> = { 'Content-Type': contentType };
+    if (size) headers['Content-Length'] = String(size);
+
     const putRes = await fetch(uploadUrl, {
         method: 'PUT',
-        headers: { 'Content-Type': video.mimeType || 'video/mp4', 'Content-Length': String(bytes.byteLength) },
-        body: bytes,
-    });
+        headers,
+        body: srcRes.body,
+        // Node streams a request body only in half-duplex mode; without this fetch rejects a stream body.
+        duplex: 'half',
+    } as RequestInit & { duplex: 'half' });
+
     const data: any = await putRes.json().catch(() => ({}));
-    if (!putRes.ok || !data?.id) {
-        return { ok: false, status: putRes.status, error: data?.error?.message || `YouTube upload error (${putRes.status})` };
-    }
-    return { ok: true, id: String(data.id) };
+    if (putRes.ok && data?.id) return { kind: 'done', id: String(data.id) };
+    return { kind: 'failed', status: putRes.status, error: data?.error?.message || `YouTube upload error (${putRes.status})` };
+}
+
+/**
+ * Run-to-completion wrapper for callers with no wall-clock budget (the cron's inline path and
+ * sync-action's chat handler). Flattens to the DriverResult every other driver returns; an
+ * `incomplete` here would mean a deadline was passed, which this signature can't express.
+ */
+export async function publishYouTube(meta: YouTubeMeta, token: string, video: PostVideo | null): Promise<DriverResult> {
+    const outcome = await publishYouTubeResumable(meta, token, video);
+    if (outcome.kind === 'done') return { ok: true, id: outcome.id };
+    if (outcome.kind === 'failed') return { ok: false, status: outcome.status, error: outcome.error };
+    return { ok: false, status: null, error: 'The upload ran out of time before finishing.' };
 }
 
 // ── Facebook (Graph API) ──────────────────────────────────────────────────────────────────────────
