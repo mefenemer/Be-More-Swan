@@ -57,6 +57,8 @@ interface FakeOpts {
     stallAtOffset?: number;
     /** Offset queries answer with this status, simulating a session YouTube has dropped. */
     offsetQueryStatus?: number;
+    /** Source honours Range for the probe, then stops honouring it for subsequent chunk reads. */
+    rangeStopsAfterProbe?: boolean;
 }
 
 interface FakeState {
@@ -75,8 +77,9 @@ interface FakeState {
 function installFake(opts: FakeOpts): { state: FakeState; restore: () => void } {
     const {
         video, rangeSupported = true, acceptLimit, failOnce = new Map(),
-        initStatus = 200, sourceStatus, stallAtOffset, offsetQueryStatus,
+        initStatus = 200, sourceStatus, stallAtOffset, offsetQueryStatus, rangeStopsAfterProbe,
     } = opts;
+    let sourceReads = 0;
     const state: FakeState = {
         received: Buffer.alloc(0), maxBodyBytes: 0, contentRanges: [], offsetQueries: 0,
         streamedPuts: 0, sessionsOpened: 0, uploadContentType: null, uploadContentLength: null,
@@ -94,7 +97,9 @@ function installFake(opts: FakeOpts): { state: FakeState; restore: () => void } 
         if (url === SOURCE_URL) {
             if (sourceStatus) return new Response('gone', { status: sourceStatus });
             const range = headers.range;
-            if (range && rangeSupported) {
+            // First read is the 0-0 probe; after that, pretend Range support vanished.
+            const honourRange = rangeSupported && !(rangeStopsAfterProbe && sourceReads++ > 0);
+            if (range && honourRange) {
                 const m = /bytes=(\d+)-(\d+)?/.exec(range)!;
                 const start = Number(m[1]);
                 const end = m[2] == null ? video.length - 1 : Math.min(Number(m[2]), video.length - 1);
@@ -282,6 +287,23 @@ await check('falls back to a streamed PUT when the source ignores Range', async 
         assert.strictEqual(outcome.kind, 'done', outcome.kind === 'failed' ? outcome.error : '');
         assert.strictEqual(state.streamedPuts, 1, 'fallback must stream the body, not buffer it');
         assert.ok(state.received.equals(video), 'streamed bytes differ from source');
+    } finally { restore(); }
+});
+
+await check('refuses to buffer the whole file if the source stops honouring Range', async () => {
+    // The chunk loop accepts a 200 (legitimate when the window spans the whole object), but a 200
+    // carrying the ENTIRE video mid-upload would reintroduce exactly the whole-file buffering this
+    // driver exists to remove. It must bail on the advertised length, before reading the body.
+    const video = makeVideo(4 * 1024 * 1024);
+    const { state, restore } = installFake({ video, rangeStopsAfterProbe: true });
+    try {
+        const outcome = await publishYouTubeResumable(META, 'token', VIDEO, { chunkSize: CHUNK });
+        assert.strictEqual(outcome.kind, 'failed', 'expected a clean failure, not a 4 MB buffer');
+        assert.match(outcome.kind === 'failed' ? outcome.error : '', /stopped honouring range/);
+        assert.ok(
+            state.maxBodyBytes <= CHUNK,
+            `a request carried ${state.maxBodyBytes} bytes — the whole file was buffered`,
+        );
     } finally { restore(); }
 });
 

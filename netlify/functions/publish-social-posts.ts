@@ -60,9 +60,21 @@ export default withLambda(async () => {
     // reclaim a perfectly healthy upload mid-flight and start a duplicate one alongside it.
     // The worker touches updated_at every time it parks resume state, so a row that has gone quiet
     // for this long really has died; clear the session so the retry starts cleanly.
+    // The attempt_count bump is load-bearing, not bookkeeping. A reclaim that only reset the status
+    // would retry forever: the worker's streamed fallback (a source that won't serve ranges) cannot
+    // stop at a chunk boundary, so a video too slow for the 15-minute budget is killed mid-PUT and
+    // returns nothing — leaving a row that goes stale, gets reclaimed, and is retried from zero on
+    // an endless 30-minute cycle. Counting the attempt lets it fail like any other stuck post.
     await db.execute(
         `UPDATE scheduled_posts
-            SET status = 'scheduled', retry_at = NULL, youtube_upload_state = NULL, updated_at = now()
+            SET status = CASE WHEN attempt_count + 1 >= ${MAX_ATTEMPTS} THEN 'failed' ELSE 'scheduled' END,
+                retry_at = NULL,
+                attempt_count = attempt_count + 1,
+                failure_reason = CASE WHEN attempt_count + 1 >= ${MAX_ATTEMPTS}
+                    THEN '{"httpStatus":null,"errorMessage":"The video upload did not finish within its time budget.","isRetryable":false}'::jsonb
+                    ELSE failure_reason END,
+                youtube_upload_state = NULL,
+                updated_at = now()
           WHERE status = 'publishing' AND platform = 'youtube'
             AND updated_at < now() - interval '${STALE_YOUTUBE_MINS} minutes'`
     );

@@ -703,17 +703,35 @@ async function uploadYouTubeChunked(
 
         const end = Math.min(offset + chunkSize, total) - 1;
 
-        // Pull just this window from the source. `chunk` is the only video data we ever hold.
+        // Pull just this window from the source.
+        const want = end - offset + 1;
         const srcRes = await fetch(videoUrl, { headers: { Range: `bytes=${offset}-${end}` } });
         if (srcRes.status !== 206 && srcRes.status !== 200) {
             return { kind: 'failed', status: srcRes.status, error: 'Could not fetch the video from storage — re-attach it and try again.' };
+        }
+        // 200 means the source ignored Range. That is legitimate when the window covers the whole
+        // object (many servers answer 200 rather than 206 for a range spanning everything), but on
+        // a large file it means the body is the ENTIRE video — reading it would reintroduce exactly
+        // the whole-file buffering this function exists to avoid. Check the advertised length and
+        // bail BEFORE touching the body, since arrayBuffer() is the point of no return.
+        if (srcRes.status === 200) {
+            const advertised = Number(srcRes.headers.get('content-length') ?? NaN);
+            if (Number.isFinite(advertised) && advertised > want) {
+                await srcRes.body?.cancel().catch(() => { /* already gone */ });
+                return {
+                    kind: 'failed',
+                    status: null,
+                    error: 'The video source stopped honouring range requests part-way through the upload.',
+                };
+            }
         }
         const chunk = Buffer.from(await srcRes.arrayBuffer());
         if (chunk.byteLength === 0) {
             return { kind: 'failed', status: null, error: 'The video source returned no bytes for the requested range.' };
         }
-        // A source that ignored Range hands back more than we asked for; trim so Content-Range stays honest.
-        const body = chunk.byteLength > end - offset + 1 ? chunk.subarray(0, end - offset + 1) : chunk;
+        // Trim anything past the window so Content-Range stays honest (a source with no
+        // content-length header can still overshoot without the guard above catching it).
+        const body = chunk.byteLength > want ? chunk.subarray(0, want) : chunk;
         const last = offset + body.byteLength - 1;
 
         const putRes = await fetch(uploadUrl, {
@@ -742,6 +760,9 @@ async function uploadYouTubeChunked(
                 if (++attempts >= YT_CHUNK_ATTEMPTS) {
                     return { kind: 'failed', status: 308, error: 'YouTube stopped accepting the upload part-way through. Try again.' };
                 }
+                // Back off like the transient path: re-sending the same window immediately just
+                // burns the retry budget against whatever is wedged on YouTube's side.
+                await new Promise((r) => setTimeout(r, 500 * 2 ** (attempts - 1)));
                 continue;
             }
             attempts = 0;
@@ -767,6 +788,11 @@ async function uploadYouTubeChunked(
 
 // Fallback for sources that won't serve ranges: stream the body straight through in one PUT. Still
 // no full-file buffer, but a failure restarts from zero — nothing to resume against.
+//
+// NOTE: this path cannot honour a deadline. There is no chunk boundary to stop at, so a video too
+// slow for the invocation's budget is simply killed mid-PUT and returns nothing at all. The caller
+// must therefore count attempts on its own (publish-social-posts' stale sweep does), or such a
+// video would be retried from zero forever.
 async function uploadYouTubeStreamed(
     uploadUrl: string,
     videoUrl: string,
