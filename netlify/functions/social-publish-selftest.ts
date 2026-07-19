@@ -18,16 +18,16 @@ import { systemConnections } from '../../db/schema';
 import { getSecret } from '../../src/utils/vault';
 import { requireTenant } from '../../src/utils/tenant';
 import {
-    fetchXIdentity, resolveLinkedInAuthor, resolveFacebookPageCredentials,
-    publishX, publishLinkedIn, publishFacebook, refreshXToken,
-    type DriverResult,
+    fetchXIdentity, resolveLinkedInAuthor, resolveFacebookPageCredentials, fetchYouTubeIdentity,
+    resolveSocialCredentials, publishX, publishLinkedIn, publishFacebook, publishYouTube,
+    refreshXToken, type DriverResult,
 } from '../../src/utils/social-publish';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
-const PLATFORMS = ['facebook', 'linkedin', 'x'] as const;
+const PLATFORMS = ['facebook', 'linkedin', 'x', 'youtube'] as const;
 type SelfTestPlatform = typeof PLATFORMS[number];
 
-const LABEL: Record<SelfTestPlatform, string> = { facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X (Twitter)' };
+const LABEL: Record<SelfTestPlatform, string> = { facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X (Twitter)', youtube: 'YouTube' };
 
 // A test post that is unmistakably a diagnostic, timestamped so repeated runs stay unique.
 function testMessage(): string {
@@ -36,6 +36,7 @@ function testMessage(): string {
 
 // How to remove the test post afterwards, per platform (surfaced to the user; we never auto-delete).
 function deleteHint(platform: SelfTestPlatform, id: string): string {
+    if (platform === 'youtube') return `Delete the video from YouTube Studio (video id ${id}) — it was uploaded PRIVATE.`;
     if (platform === 'x') return `Delete the tweet from your X account (post id ${id}).`;
     if (platform === 'linkedin') return `Delete the post from your LinkedIn feed (urn ${id}).`;
     return `Delete the post from your Facebook Page (post id ${id}).`;
@@ -67,7 +68,7 @@ export default withLambda(async (event) => {
     if ('error' in ctx) return ctx.error;
     const { organisationId, role } = ctx;
 
-    let body: { platform?: string; connectionId?: number; confirmTestPost?: boolean };
+    let body: { platform?: string; connectionId?: number; confirmTestPost?: boolean; videoUrl?: string };
     try { body = JSON.parse(event.body || '{}'); } catch { body = {}; }
 
     const platform = String(body.platform || '') as SelfTestPlatform;
@@ -85,6 +86,44 @@ export default withLambda(async (event) => {
         ({ statusCode: status, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform, label: LABEL[platform], ...payload }) });
 
     try {
+        // ── YouTube: verify the channel, then optionally run a REAL chunked upload. ──
+        // This is the only way to exercise the resumable protocol against the live API: real
+        // Content-Range handling, genuine 308 resume semantics and session expiry cannot be proven
+        // by a fake, however faithful. Two deliberate safety rails — the upload is forced PRIVATE
+        // (a diagnostic must never put a video on a real channel's public feed) and it requires an
+        // explicit videoUrl, so it can never fire by accident from a plain preflight call.
+        if (platform === 'youtube') {
+            let token: string;
+            try {
+                ({ token } = await resolveSocialCredentials(db, {
+                    organisationId, platform: 'youtube', connectionId: body.connectionId,
+                }));
+            } catch (e) {
+                return json(200, { preflight: 'fail', detail: e instanceof Error ? e.message : 'No connected YouTube channel for this organisation.' });
+            }
+            const idCheck = await fetchYouTubeIdentity(token);
+            if (!idCheck.ok) return json(200, { preflight: 'fail', detail: idCheck.error, status: idCheck.status });
+            if (!wantTestPost) return json(200, { preflight: 'ok', detail: `Authenticated as ${idCheck.id}.` });
+
+            const videoUrl = String(body.videoUrl || '');
+            if (!/^https:\/\//.test(videoUrl)) {
+                return json(400, { preflight: 'ok', detail: 'A YouTube test upload needs an https videoUrl. Pass a small test clip.' });
+            }
+            const result: DriverResult = await publishYouTube(
+                {
+                    title: `Be More Swan publisher self-test ${new Date().toISOString()}`.slice(0, 100),
+                    description: 'Automated publisher self-test — please ignore/delete.',
+                    tags: [],
+                },
+                token,
+                { url: videoUrl, mimeType: 'video/mp4' },
+                { privacyStatus: 'private' },
+            );
+            return result.ok
+                ? json(200, { preflight: 'ok', testPost: 'ok', postId: result.id, deleteHint: deleteHint(platform, result.id) })
+                : json(200, { preflight: 'ok', testPost: 'fail', detail: result.error, status: result.status });
+        }
+
         // ── Facebook: resolve the Page id + Page token (read-only Graph GET), then optionally post. ──
         if (platform === 'facebook') {
             let pageId: string, pageToken: string;

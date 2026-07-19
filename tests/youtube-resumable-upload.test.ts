@@ -67,6 +67,7 @@ interface FakeState {
     sessionsOpened: number;
     uploadContentType: string | null;
     uploadContentLength: string | null;
+    privacyStatus: string | null;
 }
 
 // Installs a globalThis.fetch emulating the R2 source + YouTube's resumable endpoint.
@@ -78,6 +79,7 @@ function installFake(opts: FakeOpts): { state: FakeState; restore: () => void } 
     const state: FakeState = {
         received: Buffer.alloc(0), maxBodyBytes: 0, contentRanges: [], offsetQueries: 0,
         streamedPuts: 0, sessionsOpened: 0, uploadContentType: null, uploadContentLength: null,
+        privacyStatus: null,
     };
     const realFetch = globalThis.fetch;
     let bytePutIndex = -1;
@@ -113,6 +115,7 @@ function installFake(opts: FakeOpts): { state: FakeState; restore: () => void } 
             state.sessionsOpened++;
             state.uploadContentType = headers['x-upload-content-type'] ?? null;
             state.uploadContentLength = headers['x-upload-content-length'] ?? null;
+            try { state.privacyStatus = JSON.parse(init.body).status?.privacyStatus ?? null; } catch { /* no body */ }
             if (initStatus !== 200) {
                 return new Response(JSON.stringify({ error: { message: 'Daily upload limit exceeded.' } }), { status: initStatus });
             }
@@ -401,6 +404,24 @@ await check('the run-to-completion wrapper returns a DriverResult', async () => 
         assert.strictEqual(res.ok && res.id, 'yt-video-id');
         assert.ok(state.received.equals(video));
     } finally { restore(); }
+});
+
+await check('publishes public by default but honours a privacy override', async () => {
+    // The self-test harness forces 'private' so a diagnostic upload never lands on a real
+    // channel's public feed; every other caller must keep the long-standing public default.
+    const video = makeVideo(300 * 1024);
+
+    const a = installFake({ video });
+    try {
+        await publishYouTubeResumable(META, 'token', VIDEO, { chunkSize: CHUNK });
+        assert.strictEqual(a.state.privacyStatus, 'public', 'default must stay public');
+    } finally { a.restore(); }
+
+    const b = installFake({ video });
+    try {
+        await publishYouTube(META, 'token', VIDEO, { privacyStatus: 'private' });
+        assert.strictEqual(b.state.privacyStatus, 'private', 'override must reach the API');
+    } finally { b.restore(); }
 });
 
 // ── youtubeMetaFromCaption ────────────────────────────────────────────────────────────────────

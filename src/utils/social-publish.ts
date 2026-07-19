@@ -498,6 +498,18 @@ export function youtubeMetaFromCaption(caption: string, hashtags: string, format
     return { title, description, tags, format };
 }
 
+// Read the authenticated channel (read-only preflight for the harness). Proves the OAuth token and
+// upload scope resolve to a real channel WITHOUT uploading anything.
+export async function fetchYouTubeIdentity(token: string): Promise<DriverResult> {
+    const res = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true', {
+        headers: { Authorization: `Bearer ${token}` },
+    });
+    const data: any = await res.json().catch(() => ({}));
+    const channel = data?.items?.[0];
+    if (res.ok && channel?.id) return { ok: true, id: `${channel.snippet?.title ?? 'channel'} (${channel.id})` };
+    return { ok: false, status: res.status, error: data?.error?.message || `YouTube API error (${res.status})` };
+}
+
 // Google requires every non-final chunk to be a multiple of 256 KiB.
 const YT_CHUNK_MULTIPLE = 256 * 1024;
 export const YT_CHUNK_SIZE = 8 * 1024 * 1024;   // 8 MiB — peak memory per chunk.
@@ -527,6 +539,12 @@ export type YouTubeOutcome =
 
 export interface YouTubePublishOpts {
     chunkSize?: number;
+    /**
+     * Defaults to 'public' — the long-standing behaviour for a scheduled publish. The self-test
+     * harness overrides this to 'private' so a diagnostic upload never lands on a real channel's
+     * public feed.
+     */
+    privacyStatus?: 'public' | 'private' | 'unlisted';
     /** Absolute epoch-ms wall-clock budget; the loop stops cleanly at a chunk boundary before it. */
     deadlineMs?: number;
     /** Continue a session opened by an earlier invocation (from a previous `incomplete`). */
@@ -635,7 +653,7 @@ export async function publishYouTubeResumable(
                 tags: meta.tags.slice(0, 30),
                 categoryId: '22', // People & Blogs (safe default)
             },
-            status: { privacyStatus: 'public', selfDeclaredMadeForKids: false },
+            status: { privacyStatus: opts.privacyStatus ?? 'public', selfDeclaredMadeForKids: false },
         }),
     });
     const uploadUrl = initRes.headers.get('location');
@@ -769,8 +787,13 @@ async function uploadYouTubeStreamed(
  * sync-action's chat handler). Flattens to the DriverResult every other driver returns; an
  * `incomplete` here would mean a deadline was passed, which this signature can't express.
  */
-export async function publishYouTube(meta: YouTubeMeta, token: string, video: PostVideo | null): Promise<DriverResult> {
-    const outcome = await publishYouTubeResumable(meta, token, video);
+export async function publishYouTube(
+    meta: YouTubeMeta,
+    token: string,
+    video: PostVideo | null,
+    opts: Omit<YouTubePublishOpts, 'deadlineMs' | 'resume'> = {},
+): Promise<DriverResult> {
+    const outcome = await publishYouTubeResumable(meta, token, video, opts);
     if (outcome.kind === 'done') return { ok: true, id: outcome.id };
     if (outcome.kind === 'failed') return { ok: false, status: outcome.status, error: outcome.error };
     return { ok: false, status: null, error: 'The upload ran out of time before finishing.' };
