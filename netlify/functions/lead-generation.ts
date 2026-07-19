@@ -24,6 +24,7 @@
 // treats it as untrusted and escapes on render.
 
 import { Handler } from '@netlify/functions';
+import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, desc, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
@@ -431,7 +432,24 @@ Return STRICT JSON only (no markdown), an array of exactly 3 objects:
 
         return json(400, { error: `Unknown action "${action}".` });
     } catch (err) {
-        console.error('[lead-generation]', action, err);
-        return json(502, { error: 'The Lead Generation Assistant is having trouble right now — please try again in a moment.' });
+        // Keep the friendly copy for the user, but make the failure traceable: the same
+        // errorId goes to the client and to the log line, so a screenshot is enough to
+        // find the real cause. Postgres detail (code + constraint) is logged explicitly —
+        // a bare `err` dump is how the assistant_records_source_check violation behind the
+        // dead "Add Lead" button stayed invisible (see db/assistant-records-lead-idea.sql).
+        const errorId = randomUUID().slice(0, 8);
+        const pg = err as { code?: string; constraint_name?: string; constraint?: string };
+        console.error('[lead-generation]', {
+            errorId,
+            action,
+            orgId,
+            assistantId,
+            pgCode: pg?.code,
+            pgConstraint: pg?.constraint_name ?? pg?.constraint,
+        }, err);
+        return json(502, {
+            errorId,
+            error: `The Lead Generation Assistant is having trouble right now — please try again in a moment. (ref ${errorId})`,
+        });
     }
 });
