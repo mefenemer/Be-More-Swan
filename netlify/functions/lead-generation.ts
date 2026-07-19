@@ -33,6 +33,7 @@ import { logAiUsage } from '../../src/utils/ai-usage';
 import { createDiscoveryRun } from '../../src/utils/discovery';
 import { isSearchConfigured } from '../../src/lib/discovery-search';
 import { sendGmailMessage } from '../../src/utils/gmail';
+import { sendOutlookMessage } from '../../src/utils/outlook';
 import { IntegrationError } from '../../src/utils/workspace-integrations';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -230,9 +231,12 @@ Write an outreachDraft for hot/warm leads; use null for cold leads.`;
             const recordId = Number(body.recordId);
             if (!Number.isInteger(recordId)) return json(400, { error: 'recordId is required.' });
 
+            // The onboarding answer says 'microsoft'; the OAuth provider key is 'outlook'
+            // (the env vars derive from the provider key, so they're OUTLOOK_CLIENT_*).
+            // Map here rather than renaming the stored answer, which would strand every
+            // assistant already onboarded.
             const provider = str(onboarding.outreachEmailProvider, 40);
-            if (provider === 'microsoft') return json(200, { sent: false, reason: 'microsoft_coming_soon' });
-            if (provider !== 'google') return json(200, { sent: false, reason: 'no_provider' });
+            if (provider !== 'google' && provider !== 'microsoft') return json(200, { sent: false, reason: 'no_provider' });
 
             const [rec] = await db
                 .select({ id: assistantRecords.id, title: assistantRecords.title, data: assistantRecords.data })
@@ -283,7 +287,8 @@ Write an outreachDraft for hot/warm leads; use null for cold leads.`;
             if (!subject) subject = `Quick note for ${rec.title}`;
 
             try {
-                await sendGmailMessage(db, orgId, { to: recipient, subject, body: bodyText });
+                if (provider === 'microsoft') await sendOutlookMessage(db, orgId, { to: recipient, subject, body: bodyText });
+                else await sendGmailMessage(db, orgId, { to: recipient, subject, body: bodyText });
             } catch (e) {
                 if (e instanceof IntegrationError) return json(200, { sent: false, reason: 'not_connected' });
                 throw e;

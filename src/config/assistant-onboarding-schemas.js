@@ -175,7 +175,7 @@
           {
             // Read by the outreach-send flow: when set to google/microsoft AND that provider is
             // connected, approving a lead sends its outreach email from the user's own inbox.
-            // Microsoft (Outlook/365) support is a fast-follow — selectable but flagged coming soon.
+            // 'google' → OAuth provider 'gmail'; 'microsoft' → OAuth provider 'outlook'.
             key: 'outreachEmailProvider',
             label: 'Send outreach emails from your own inbox?',
             type: 'radio',
@@ -184,7 +184,7 @@
             options: [
               { value: 'none', label: "No — I'll send outreach myself", description: 'Approved leads get a ready-to-send draft; you send it from your own email.' },
               { value: 'google', label: 'Yes — Google (Gmail / Workspace)', description: 'BMS sends approved outreach from your connected Google account.' },
-              { value: 'microsoft', label: 'Yes — Microsoft (Outlook / 365)', description: 'Coming soon — Microsoft support is on the way; we\'ll prompt you to connect once it\'s live.' },
+              { value: 'microsoft', label: 'Yes — Microsoft (Outlook / 365)', description: 'BMS sends approved outreach from your connected Outlook or Microsoft 365 account.' },
             ],
           },
         ],

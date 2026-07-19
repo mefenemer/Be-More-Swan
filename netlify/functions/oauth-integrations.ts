@@ -43,6 +43,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
 import {
     INTEGRATION_PROVIDERS,
+    OUTLOOK_SCOPE,
     isIntegrationProvider,
     type IntegrationProvider,
     saveIntegration,
@@ -68,6 +69,10 @@ const SCOPES: Record<IntegrationProvider, string> = {
     quickbooks: 'com.intuit.quickbooks.accounting',
     intercom: '', // Intercom has no scope param — permissions come from the app's configuration
     gmail: 'https://www.googleapis.com/auth/gmail.compose',
+    // Outlook/Microsoft 365 outbound email for the Lead Generator. Delegated (sends AS the
+    // signed-in user), never application permissions — those would allow sending as any
+    // mailbox in a customer tenant. Single source of truth so authorize/exchange/refresh agree.
+    outlook: OUTLOOK_SCOPE,
     // Phase 4 actions: Threads post publishing, TikTok video uploads, YouTube video uploads.
     threads: 'threads_basic,threads_content_publish',
     tiktok: 'user.info.basic,video.upload',
@@ -245,6 +250,11 @@ export default withLambda(async (event) => {
             // access_type=offline + prompt=consent forces Google to issue a refresh token
             // (it only does so on the first consent otherwise).
             authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.gmail)}&access_type=offline&prompt=consent&state=${state}`;
+        } else if (provider === 'outlook') {
+            // /common serves work, school AND personal Microsoft accounts — matches the app's
+            // "any Entra tenant + personal accounts" registration. offline_access lives in the
+            // scope string (unlike Google, Microsoft has no access_type param).
+            authUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.outlook)}&response_mode=query&prompt=consent&state=${state}`;
         } else if (provider === 'threads') {
             authUrl = `https://threads.net/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.threads)}&state=${state}`;
         } else if (provider === 'tiktok') {
@@ -563,6 +573,42 @@ export default withLambda(async (event) => {
                     tenantId: emailAddress,
                     externalAccountName: emailAddress,
                     scopes: tokenData.scope ?? SCOPES.gmail,
+                });
+            } else if (provider === 'outlook') {
+                const tokenRes = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: new URLSearchParams({
+                        grant_type: 'authorization_code',
+                        client_id: process.env.OUTLOOK_CLIENT_ID ?? '',
+                        client_secret: process.env.OUTLOOK_CLIENT_SECRET ?? '',
+                        redirect_uri: redirectUri,
+                        scope: SCOPES.outlook,
+                        code,
+                    }),
+                });
+                const tokenData: { access_token?: string; refresh_token?: string; expires_in?: number; scope?: string } = await tokenRes.json().catch(() => ({}));
+                if (!tokenData.access_token) return redirect(`/integrations.html?oauth_error=token_exchange&provider=outlook`);
+
+                // Graph /me gives the mailbox address for the card label. userPrincipalName is
+                // the reliable one — `mail` is null on many personal and unlicensed accounts.
+                let emailAddress: string | null = null;
+                try {
+                    const meRes = await fetch('https://graph.microsoft.com/v1.0/me', {
+                        headers: { Authorization: `Bearer ${tokenData.access_token}` },
+                    });
+                    const me: { mail?: string; userPrincipalName?: string } = meRes.ok ? await meRes.json() : {};
+                    emailAddress = me.mail ?? me.userPrincipalName ?? null;
+                } catch { /* label only — connection still succeeds */ }
+
+                await saveIntegration(db, {
+                    organisationId, userId, provider: 'outlook',
+                    accessToken: tokenData.access_token,
+                    refreshToken: tokenData.refresh_token ?? null,
+                    expiresInSec: tokenData.expires_in ?? null,
+                    tenantId: emailAddress,
+                    externalAccountName: emailAddress,
+                    scopes: tokenData.scope ?? SCOPES.outlook,
                 });
             } else if (provider === 'threads') {
                 // Step 1: code → short-lived (1h) token.

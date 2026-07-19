@@ -28,9 +28,17 @@ import { singleFlight } from './single-flight';
 type Db = ReturnType<typeof getDb>;
 type Tx = Parameters<Parameters<Db['transaction']>[0]>[0];
 
-export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail' | 'threads' | 'tiktok' | 'youtube' | 'wordpresscom' | 'searchconsole' | 'jira' | 'asana' | 'canva';
+export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 'zendesk' | 'notion' | 'quickbooks' | 'intercom' | 'gmail' | 'outlook' | 'threads' | 'tiktok' | 'youtube' | 'wordpresscom' | 'searchconsole' | 'jira' | 'asana' | 'canva';
 
-export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail', 'threads', 'tiktok', 'youtube', 'wordpresscom', 'searchconsole', 'jira', 'asana', 'canva'];
+export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail', 'outlook', 'threads', 'tiktok', 'youtube', 'wordpresscom', 'searchconsole', 'jira', 'asana', 'canva'];
+
+/**
+ * Microsoft Graph delegated scope for outbound email. Shared by the authorize URL, the
+ * code exchange and the refresh grant — Microsoft narrows the grant if refresh omits it,
+ * so all three MUST send the same string. offline_access is what yields a refresh token
+ * at all; without it a connection dies roughly an hour after consent.
+ */
+export const OUTLOOK_SCOPE = 'offline_access https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/User.Read';
 
 export function isIntegrationProvider(value: unknown): value is IntegrationProvider {
     return typeof value === 'string' && (INTEGRATION_PROVIDERS as string[]).includes(value);
@@ -262,6 +270,28 @@ async function refreshProviderToken(provider: IntegrationProvider, refreshToken:
         if (!res.ok || !data.access_token) throw new IntegrationError('refresh_failed', 'Gmail token refresh was rejected.', 401);
         // Google does not rotate the refresh token on use — keep the stored one.
         return { accessToken: data.access_token, refreshToken: null, expiresInSec: data.expires_in ?? null };
+    }
+
+    if (provider === 'outlook') {
+        // Microsoft identity platform v2.0. The /common authority serves both work/school
+        // (Entra ID) and personal Microsoft accounts, matching the app's "any tenant +
+        // personal" registration. The scope must be re-sent on refresh or Graph narrows the grant.
+        const res = await fetch('https://login.microsoftonline.com/common/oauth2/v2.0/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+                grant_type: 'refresh_token',
+                client_id: process.env.OUTLOOK_CLIENT_ID ?? '',
+                client_secret: process.env.OUTLOOK_CLIENT_SECRET ?? '',
+                refresh_token: refreshToken,
+                scope: OUTLOOK_SCOPE,
+            }),
+        });
+        const data: { access_token?: string; refresh_token?: string; expires_in?: number } = await res.json().catch(() => ({}));
+        if (!res.ok || !data.access_token) throw new IntegrationError('refresh_failed', 'Outlook token refresh was rejected.', 401);
+        // Microsoft ROTATES the refresh token on use — persist the new one, or the next
+        // refresh fails with invalid_grant and the user has to reconnect.
+        return { accessToken: data.access_token, refreshToken: data.refresh_token ?? null, expiresInSec: data.expires_in ?? null };
     }
 
     if (provider === 'threads') {
@@ -532,6 +562,7 @@ const PROVIDER_LABELS: Record<IntegrationProvider, string> = {
     quickbooks: 'QuickBooks',
     intercom: 'Intercom',
     gmail: 'Gmail',
+    outlook: 'Outlook',
     threads: 'Threads',
     tiktok: 'TikTok',
     youtube: 'YouTube',

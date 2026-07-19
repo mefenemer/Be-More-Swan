@@ -862,8 +862,6 @@ window._detailRqRecordAct = async function (btn, action) {
                     toast = `Outreach emailed to ${sdata.to} — chase reminder set${d ? ` for ${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}. See the Calendar.`;
                 } else if (sres.ok && sdata.reason === 'not_connected') {
                     toast = 'Lead approved. Connect your Google account (Integrations) to auto-send outreach.';
-                } else if (sres.ok && sdata.reason === 'microsoft_coming_soon') {
-                    toast = 'Lead approved. Microsoft email sending is coming soon — use “Mark outreach sent” for now.';
                 } else if (sres.ok && sdata.reason === 'no_recipient') {
                     toast = 'Lead approved — no email address on this lead, so nothing was sent.';
                 }
@@ -1978,25 +1976,19 @@ async function _renderOutreachEmailConnect(data) {
     card.className = 'mb-4';
     if (!existing) anchor.parentNode.insertBefore(card, anchor);
 
-    if (provider === 'microsoft') {
-        card.innerHTML = `
-          <div class="bg-amber-50 border border-amber-200 rounded-2xl p-5 flex items-start gap-3">
-            <span class="text-xl shrink-0">📧</span>
-            <div>
-              <p class="font-bold text-gray-900 text-sm">Microsoft email — coming soon</p>
-              <p class="text-sm text-gray-600 mt-0.5">You chose to send outreach from Outlook / Microsoft 365. That connection is on the way — until then, approved leads get a ready-to-send draft you send yourself.</p>
-            </div>
-          </div>`;
-        return;
-    }
+    // The onboarding answer is 'google' | 'microsoft'; the OAuth provider keys are
+    // 'gmail' | 'outlook'. Mapped here (and in lead-generation.ts send_outreach) rather
+    // than renaming the stored answer, which would strand already-onboarded assistants.
+    const M = provider === 'microsoft'
+        ? { key: 'outlook', brand: 'Microsoft', account: 'Outlook / Microsoft 365', cta: 'Connect Outlook' }
+        : { key: 'gmail',   brand: 'Google',    account: 'Gmail / Google Workspace', cta: 'Connect Gmail' };
 
-    // provider === 'google' → check the live connection status, then render connect vs confirmed.
-    card.innerHTML = '<div class="bg-white border border-gray-200 rounded-2xl p-5 text-sm text-gray-400">Checking your Google connection…</div>';
+    card.innerHTML = `<div class="bg-white border border-gray-200 rounded-2xl p-5 text-sm text-gray-400">Checking your ${esc(M.brand)} connection…</div>`;
     let connected = false, accountName = null;
     try {
         const res = await fetch('/api/oauth/status');
         if (res.ok) {
-            const g = ((await res.json()) || {}).providers?.gmail;
+            const g = ((await res.json()) || {}).providers?.[M.key];
             connected = !!(g && g.connected);
             accountName = g && g.accountName;
         }
@@ -2009,19 +2001,19 @@ async function _renderOutreachEmailConnect(data) {
         ? `<div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex items-start gap-3">
              <span class="text-xl shrink-0">✅</span>
              <div>
-               <p class="font-bold text-gray-900 text-sm">Google connected — outreach sends automatically</p>
-               <p class="text-sm text-gray-600 mt-0.5">Approving a lead emails your outreach from ${accountName ? `<span class="font-semibold text-gray-800">${esc(accountName)}</span>` : 'your connected Google account'} and sets a chase reminder on the Calendar.</p>
+               <p class="font-bold text-gray-900 text-sm">${esc(M.brand)} connected — outreach sends automatically</p>
+               <p class="text-sm text-gray-600 mt-0.5">Approving a lead emails your outreach from ${accountName ? `<span class="font-semibold text-gray-800">${esc(accountName)}</span>` : `your connected ${esc(M.brand)} account`} and sets a chase reminder on the Calendar.</p>
              </div>
            </div>`
         : `<div class="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
              <div class="flex items-start gap-3">
                <span class="text-xl shrink-0">📧</span>
                <div>
-                 <p class="font-bold text-gray-900 text-sm">Connect your Google account to send outreach</p>
-                 <p class="text-sm text-gray-600 mt-0.5">You chose to send outreach emails from your own inbox. Connect Gmail / Google Workspace and approved leads are emailed automatically, with a chase reminder set for you.</p>
+                 <p class="font-bold text-gray-900 text-sm">Connect your ${esc(M.brand)} account to send outreach</p>
+                 <p class="text-sm text-gray-600 mt-0.5">You chose to send outreach emails from your own inbox. Connect ${esc(M.account)} and approved leads are emailed automatically, with a chase reminder set for you.</p>
                </div>
              </div>
-             <a href="/api/oauth/gmail/connect" class="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition whitespace-nowrap">Connect Gmail</a>
+             <a href="/api/oauth/${esc(M.key)}/connect" class="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition whitespace-nowrap">${esc(M.cta)}</a>
            </div>`;
 }
 
