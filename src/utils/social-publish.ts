@@ -470,6 +470,19 @@ export async function publishThreads(
 // returning `incomplete` state that a later invocation feeds back as `resume`. See
 // publish-youtube-background.ts. Without a deadline the call runs to completion as before.
 
+// ⚠️ TEMPORARY — 'private' while the YouTube publish path is verified live for the first time
+// (2026-07-19). Scheduled posts are claimed and uploaded with no gate beyond approval, so a
+// 'public' default would put a real video on a real channel purely to test plumbing. A Google Cloud
+// project that has not passed the upload audit forces private regardless, so this also matches what
+// the API will actually do until that audit clears.
+//
+// REVERT TO 'public' once a live upload has been confirmed end-to-end. Leaving it here silently
+// makes every future scheduled upload private, which presents as "publishing is broken".
+//
+// This is the DEFAULT, not a hard override: callers may still pass an explicit privacyStatus, which
+// is how the self-test pins itself to 'private' in a way that survives the revert above.
+export const YOUTUBE_DEFAULT_PRIVACY: 'public' | 'private' | 'unlisted' = 'private';
+
 export const YOUTUBE_TITLE_MAX = 100;
 export const YOUTUBE_DESCRIPTION_MAX = 5000;
 
@@ -540,9 +553,8 @@ export type YouTubeOutcome =
 export interface YouTubePublishOpts {
     chunkSize?: number;
     /**
-     * Defaults to 'public' — the long-standing behaviour for a scheduled publish. The self-test
-     * harness overrides this to 'private' so a diagnostic upload never lands on a real channel's
-     * public feed.
+     * Defaults to YOUTUBE_DEFAULT_PRIVACY (currently 'private' pending live verification). The
+     * self-test passes 'private' explicitly so it stays private even after that default reverts.
      */
     privacyStatus?: 'public' | 'private' | 'unlisted';
     /** Absolute epoch-ms wall-clock budget; the loop stops cleanly at a chunk boundary before it. */
@@ -653,7 +665,7 @@ export async function publishYouTubeResumable(
                 tags: meta.tags.slice(0, 30),
                 categoryId: '22', // People & Blogs (safe default)
             },
-            status: { privacyStatus: opts.privacyStatus ?? 'public', selfDeclaredMadeForKids: false },
+            status: { privacyStatus: opts.privacyStatus ?? YOUTUBE_DEFAULT_PRIVACY, selfDeclaredMadeForKids: false },
         }),
     });
     const uploadUrl = initRes.headers.get('location');

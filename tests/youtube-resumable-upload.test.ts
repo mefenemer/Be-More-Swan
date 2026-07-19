@@ -20,6 +20,7 @@
 import assert from 'node:assert';
 import {
     publishYouTube, publishYouTubeResumable, youtubeMetaFromCaption, resolvePostVideo,
+    YOUTUBE_DEFAULT_PRIVACY,
 } from '../src/utils/social-publish';
 
 let passed = 0;
@@ -406,22 +407,35 @@ await check('the run-to-completion wrapper returns a DriverResult', async () => 
     } finally { restore(); }
 });
 
-await check('publishes public by default but honours a privacy override', async () => {
-    // The self-test harness forces 'private' so a diagnostic upload never lands on a real
-    // channel's public feed; every other caller must keep the long-standing public default.
+await check('applies the configured default privacy, and honours an explicit override', async () => {
+    // YOUTUBE_DEFAULT_PRIVACY is a deliberate, temporary 'private' pending live verification.
+    // Asserting against the constant rather than a literal means flipping it back to 'public'
+    // does not fail this test — but a caller-supplied override must always win over it.
     const video = makeVideo(300 * 1024);
 
     const a = installFake({ video });
     try {
         await publishYouTubeResumable(META, 'token', VIDEO, { chunkSize: CHUNK });
-        assert.strictEqual(a.state.privacyStatus, 'public', 'default must stay public');
+        assert.strictEqual(a.state.privacyStatus, YOUTUBE_DEFAULT_PRIVACY, 'unset must use the configured default');
     } finally { a.restore(); }
 
-    const b = installFake({ video });
-    try {
-        await publishYouTube(META, 'token', VIDEO, { privacyStatus: 'private' });
-        assert.strictEqual(b.state.privacyStatus, 'private', 'override must reach the API');
-    } finally { b.restore(); }
+    for (const want of ['private', 'public', 'unlisted'] as const) {
+        const b = installFake({ video });
+        try {
+            await publishYouTube(META, 'token', VIDEO, { privacyStatus: want });
+            assert.strictEqual(b.state.privacyStatus, want, `override '${want}' must reach the API`);
+        } finally { b.restore(); }
+    }
+});
+
+await check('the temporary private default is still in force', async () => {
+    // A deliberate tripwire, not a preference. While this holds, scheduled YouTube posts publish
+    // PRIVATE and will look broken to a user. It fails the moment someone reverts the constant,
+    // which is the prompt to delete this test along with it.
+    assert.strictEqual(
+        YOUTUBE_DEFAULT_PRIVACY, 'private',
+        'YOUTUBE_DEFAULT_PRIVACY changed — if live verification is done, delete this test; if not, put it back',
+    );
 });
 
 // ── youtubeMetaFromCaption ────────────────────────────────────────────────────────────────────
