@@ -234,7 +234,17 @@
         hasContentPublishing: false,
       },
       primaryAction: { label: 'Score New Leads', kind: 'chat' },
-      reviewQueue: { kind: 'records', recordType: 'lead' },
+      // `subtitle` overrides the generic records-queue line: approving a lead SENDS its drafted
+      // email straight away (lead-generation.ts `send_outreach`) rather than scheduling it, so
+      // the generic "approve, schedule or reject" copy described the wrong action entirely.
+      reviewQueue: {
+        kind: 'records',
+        recordType: 'lead',
+        // Hedged on the send because it's conditional: a user who picked manual outreach during
+        // onboarding (outreachMode 'none'), or who hasn't connected an inbox, gets the draft to
+        // send themselves — send_outreach returns 'no_provider' / 'not_connected' and nothing goes out.
+        subtitle: 'Leads awaiting your approval — read the drafted email on each one. Approving sends it from your connected inbox, if you have one, and sets a chase reminder.',
+      },
       hubTab: {
         id: 'datahub',
         label: 'Leads',

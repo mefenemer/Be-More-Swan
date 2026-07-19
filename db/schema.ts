@@ -2894,7 +2894,7 @@ export const assistantRecords = pgTable("assistant_records", {
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
   // The per-org assistant INSTANCE that produced/owns this record.
   aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
-  // 'lead' | 'enrichment' | 'meeting' | 'invoice' | 'ticket'
+  // 'lead' | 'enrichment' | 'meeting' | 'invoice' | 'ticket' | 'lead_idea'
   recordType: text("record_type").notNull(),
   // Display name + dedupe key within (assistant, recordType): lead/company name,
   // enriched record name, meeting title, invoice client, ticket subject.
@@ -2911,7 +2911,7 @@ export const assistantRecords = pgTable("assistant_records", {
   approvalStatus: text("approval_status").notNull().default("pending_approval"),
   // When approvalStatus='scheduled', the moment the work is due — read by the assistant Calendar.
   scheduledFor: timestamp("scheduled_for"),
-  // 'chat' | 'csv_import' | 'integration'
+  // 'chat' | 'csv_import' | 'integration' | 'manual' (Data Hub "Add Lead") | 'agent' (AI-proposed)
   source: text("source").notNull().default("chat"),
   // The serialised uiElement payload (see disruptive-ui-registry.js wire shapes).
   data: jsonb("data").notNull(),
@@ -2922,8 +2922,8 @@ export const assistantRecords = pgTable("assistant_records", {
   index("assistant_records_org_assistant_type_idx").on(t.organisationId, t.aiAssistantId, t.recordType),
   // Hot path for the Review Queue tab: one assistant's records of one type filtered by approval gate.
   index("assistant_records_approval_idx").on(t.organisationId, t.aiAssistantId, t.recordType, t.approvalStatus),
-  check("assistant_records_type_check", sql`${t.recordType} IN ('lead', 'enrichment', 'meeting', 'invoice', 'ticket')`),
-  check("assistant_records_source_check", sql`${t.source} IN ('chat', 'csv_import', 'integration')`),
+  check("assistant_records_type_check", sql`${t.recordType} IN ('lead', 'enrichment', 'meeting', 'invoice', 'ticket', 'lead_idea')`),
+  check("assistant_records_source_check", sql`${t.source} IN ('chat', 'csv_import', 'integration', 'manual', 'agent')`),
   check("assistant_records_approval_check", sql`${t.approvalStatus} IN ('pending_approval', 'approved', 'scheduled', 'rejected')`),
 ]);
 

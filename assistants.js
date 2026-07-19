@@ -626,6 +626,9 @@ function _detailRqGroupSection(g, items, render, statusKey) {
 // Schedule, or Reject before anything acts on them. Lifecycle columns map to approval states.
 const _RQ_RECORD_STATE = { review: 'pending_approval', approved: 'approved', scheduled: 'scheduled', posted: null, archived: 'rejected' };
 
+// Records currently on screen, by id — see the merge note in _detailRqRenderRecords.
+const _rqRecordsById = new Map();
+
 // Default chase reminder for an approved lead: 3 days out at 09:00 local, nudged off weekends.
 function _rqChaseDate() {
     const d = new Date();
@@ -645,6 +648,48 @@ function _rqRecordSnippet(r) {
     return d.summary || d.rationale || d.reason || (d.outreachDraft && d.outreachDraft.body) || d.draftReply || d.meetingSummary || '';
 }
 
+// The outreach email attached to a lead, or null. Approving a lead SENDS this email, so it is
+// the actual subject of the approval — not the lead record it hangs off.
+function _rqOutreachDraft(r) {
+    if (r.recordType !== 'lead') return null;
+    const d = (r.data || {}).outreachDraft;
+    return (d && typeof d === 'object' && typeof d.body === 'string' && d.body.trim()) ? d : null;
+}
+
+// Full email preview on the review card. Approving auto-sends (lead-generation.ts
+// `send_outreach`), so the reviewer must be able to read the exact subject + body they're
+// signing off — a truncated rationale snippet gave no clue what "Approve" actually did.
+// Open by default in the Review column; collapsed elsewhere, where it's just history.
+function _rqOutreachPreview(r, statusKey) {
+    const draft = _rqOutreachDraft(r);
+    if (!draft) return '';
+    const subject = draft.subject || '(no subject)';
+    const input = 'w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500';
+    return `<details class="mt-2 border border-gray-200 rounded-lg bg-gray-50"${statusKey === 'review' ? ' open' : ''}>
+      <summary class="cursor-pointer px-3 py-2 text-xs font-bold text-gray-700 select-none">Drafted email — read before approving</summary>
+      <div class="px-3 pb-3 pt-1 border-t border-gray-200">
+        <div class="rq-mail-view">
+          <p class="text-[11px] text-gray-500">Subject</p>
+          <p class="text-xs font-bold text-gray-900 break-words">${_rqEsc(subject)}</p>
+          <p class="text-[11px] text-gray-500 mt-2">Message</p>
+          <pre class="text-xs text-gray-700 whitespace-pre-wrap font-sans max-h-56 overflow-y-auto mt-0.5">${_rqEsc(draft.body)}</pre>
+        </div>
+        <div class="rq-mail-edit hidden">
+          <label class="block text-[11px] text-gray-500">Subject
+            <input type="text" class="rq-mail-subject ${input} mt-0.5" value="${_rqEsc(draft.subject || '')}">
+          </label>
+          <label class="block text-[11px] text-gray-500 mt-2">Message
+            <textarea rows="10" class="rq-mail-body ${input} mt-0.5 font-sans">${_rqEsc(draft.body)}</textarea>
+          </label>
+          <div class="flex items-center gap-2 mt-2">
+            <button type="button" onclick="_detailRqRecordAct(this,'saveEmail')" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white transition cursor-pointer">Save changes</button>
+            <button type="button" onclick="_detailRqRecordAct(this,'cancelEmail')" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-gray-300 transition cursor-pointer">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </details>`;
+}
+
 function _rqRecordActions(r, statusKey) {
     const secondary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 transition cursor-pointer';
     const primary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white transition cursor-pointer';
@@ -654,10 +699,15 @@ function _rqRecordActions(r, statusKey) {
     // Schedule"). The chase reminder (a scheduled_for that surfaces on the Calendar) is set later,
     // once the first outreach has gone out — via "Mark outreach sent" in the Approved column.
     const isLead = r.recordType === 'lead';
+    // Name the consequence on the button: for a lead carrying a draft, Approve sends that email.
+    const hasDraft = !!_rqOutreachDraft(r);
+    const leadApprove = hasDraft ? 'Approve &amp; send email' : 'Approve lead';
+    // Editing is only offered while the email is still unsent — once approved it has gone out.
+    const editMail = hasDraft ? btn('Edit email', 'editEmail', secondary) : '';
     let buttons = '';
     if (statusKey === 'review') {
         buttons = isLead
-            ? btn('Approve', 'approve', primary) + reject
+            ? btn(leadApprove, 'approve', primary) + editMail + reject
             : btn('Approve', 'approve', primary) + btn('Approve &amp; Schedule', 'showSchedule', secondary) + reject;
     } else if (statusKey === 'approved') {
         buttons = isLead
@@ -730,7 +780,10 @@ function _rqRecipient(r) {
 }
 
 function _detailRqRecordCard(r, statusKey) {
-    const snippet = _rqRecordSnippet(r);
+    const draft = _rqOutreachDraft(r);
+    let snippet = _rqRecordSnippet(r);
+    // Don't print the email body twice when it's also the fallback snippet — the preview owns it.
+    if (draft && snippet === draft.body) snippet = '';
     const schedVerb = r.recordType === 'lead' ? 'chase by' : 'scheduled';
     const sched = r.scheduledFor ? ` · ${schedVerb} ${new Date(r.scheduledFor).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : '';
     const sync = r.recordType === 'meeting' ? _rqMeetingSync(r) : { summary: '', pills: '' };
@@ -744,6 +797,7 @@ function _detailRqRecordCard(r, statusKey) {
           ${sched ? `<span class="text-[11px] font-semibold text-yellow-700">${_rqEsc(sched)}</span>` : ''}
         </div>
         ${_rqRecipient(r)}
+        ${_rqOutreachPreview(r, statusKey)}
         ${sync.pills}
       </div>
       ${_rqRecordActions(r, statusKey)}
@@ -779,6 +833,12 @@ async function _detailRqRenderRecords(statusKey) {
         window._updateOpSignals?.({ pendingReview: records.length });
     }
 
+    // Keep the rendered records addressable by id: PATCH replaces `data` wholesale, so editing
+    // the outreach draft has to send the record's OTHER data fields (score, rationale, emailKind,
+    // …) back untouched or they're dropped.
+    _rqRecordsById.clear();
+    for (const r of records) _rqRecordsById.set(r.id, r);
+
     container.innerHTML = records.length
         ? `<div class="divide-y divide-gray-100">${records.map((r) => _detailRqRecordCard(r, statusKey)).join('')}</div>`
         : `<p class="text-sm text-gray-400 py-10 text-center">${statusKey === 'review' ? 'Nothing awaiting your review.' : 'Nothing here yet.'}</p>`;
@@ -794,9 +854,36 @@ window._detailRqRecordAct = async function (btn, action) {
 
     if (action === 'showSchedule') { card.querySelector('.rq-sched-row')?.classList.remove('hidden'); return; }
 
+    // Swap the email preview between read and edit mode. `hidden` loses to some display rules
+    // here, so toggle the inline style too — see [[hidden-class-loses-to-inline-flex]].
+    if (action === 'editEmail' || action === 'cancelEmail') {
+        const editing = action === 'editEmail';
+        const view = card.querySelector('.rq-mail-view');
+        const edit = card.querySelector('.rq-mail-edit');
+        if (view) { view.classList.toggle('hidden', editing); view.style.display = editing ? 'none' : ''; }
+        if (edit) { edit.classList.toggle('hidden', !editing); edit.style.display = editing ? '' : 'none'; }
+        if (editing) card.querySelector('.rq-mail-body')?.focus();
+        return;
+    }
+
     const patch = { id: Number(card.getAttribute('data-rq-record')) };
+
+    // Save an edited outreach draft. Merged onto the record's existing data so nothing else is
+    // lost; lead-generation.ts `send_outreach` reads this stored draft, so what's saved here is
+    // exactly what goes out on approval.
+    if (action === 'saveEmail') {
+        const subject = card.querySelector('.rq-mail-subject')?.value ?? '';
+        const bodyText = card.querySelector('.rq-mail-body')?.value ?? '';
+        if (!bodyText.trim()) { showErr('The email body can’t be empty.'); return; }
+        const rec = _rqRecordsById.get(patch.id);
+        if (!rec) { showErr('Couldn’t load this lead — refresh and try again.'); return; }
+        const data = rec.data || {};
+        patch.data = { ...data, outreachDraft: { ...(data.outreachDraft || {}), subject: subject.trim(), body: bodyText } };
+    }
+
     let chaseWhen = null;
-    if (action === 'approve') patch.approvalStatus = 'approved';
+    if (action === 'saveEmail') { /* patch.data set above — no lifecycle change */ }
+    else if (action === 'approve') patch.approvalStatus = 'approved';
     else if (action === 'outreachSent') {
         // First outreach has gone out → move the approved lead to a chase reminder (default 3
         // days out, 09:00) that lands on the Calendar.
@@ -872,6 +959,7 @@ window._detailRqRecordAct = async function (btn, action) {
             const toast = action === 'outreachSent'
                 ? `First outreach logged — chase reminder set for ${chaseWhen.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}. See the Calendar.`
                 : action === 'schedule' ? 'Scheduled — it’s on the Calendar now.'
+                : action === 'saveEmail' ? 'Email updated — this is what will send when you approve.'
                 : action === 'reject' ? 'Rejected.' : 'Updated.';
             window.showToast?.(toast);
         }
@@ -2108,7 +2196,11 @@ function _applyDashboardRegistry(data) {
     // approve/schedule records — there's no "Posted" state and no post-generation button here.
     const rqIsRecords = window._detailReviewQueue.kind === 'records';
     const rqIsBlog = window._detailReviewQueue.source === 'blog_posts';
-    setText('detail-rq-subtitle', rqIsRecords
+    // A role can override the subtitle from the registry (reviewQueue.subtitle) when the generic
+    // copy would misdescribe what its Approve button actually does.
+    setText('detail-rq-subtitle', window._detailReviewQueue.subtitle
+        ? window._detailReviewQueue.subtitle
+        : rqIsRecords
         ? 'Records this assistant produced, awaiting your approval — approve, schedule or reject before anything acts on them.'
         : rqIsBlog
             ? 'Long-form drafts awaiting your review — open in Blog Studio to edit and approve, then schedule.'
