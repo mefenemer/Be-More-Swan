@@ -111,7 +111,8 @@ export default withLambda(async (event) => {
     if ('error' in ctx) return ctx.error;
     const { organisationId: orgId, userId } = ctx;
 
-    let body: { action?: string; assistantId?: number; ideaId?: number; recordId?: number; lead?: Record<string, unknown> };
+    // confirmPersonal: the caller has explicitly OK'd sending to a scraped personal inbox.
+    let body: { action?: string; assistantId?: number; ideaId?: number; recordId?: number; lead?: Record<string, unknown>; confirmPersonal?: boolean };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
     const action = String(body.action || '');
@@ -250,6 +251,17 @@ Write an outreachDraft for hot/warm leads; use null for cold leads.`;
             const leadObj = (data.lead && typeof data.lead === 'object') ? data.lead as Record<string, unknown> : {};
             const recipient = str(draft?.to as string, 200) || str(data.contactEmail as string, 200) || str(leadObj.email as string, 200);
             if (!recipient) return json(200, { sent: false, reason: 'no_recipient' });
+
+            // Personal-inbox gate. A SCRAPED address belonging to a named individual (rather
+            // than a generic info@/enquiries@ desk) is the weakest footing for cold B2B
+            // outreach under UK GDPR/PECR, and approval otherwise auto-sends with no further
+            // prompt. Require an explicit per-lead confirmation. Enforced HERE, not just in
+            // the UI, so the gate holds for any caller. See [[lead-generator-discovery-plan]].
+            const emailKind = str(data.emailKind as string, 20);
+            const emailSource = str(data.emailSource as string, 20);
+            if (emailKind === 'personal' && emailSource === 'scrape' && body.confirmPersonal !== true) {
+                return json(200, { sent: false, reason: 'personal_inbox_unconfirmed', to: recipient });
+            }
 
             // Use the stored draft if present; otherwise generate one from the lead's details.
             let subject = str(draft?.subject as string, 300);

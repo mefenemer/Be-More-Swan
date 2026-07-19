@@ -828,12 +828,36 @@ window._detailRqRecordAct = async function (btn, action) {
         if (action === 'approve' && (window._detailReviewQueue || {}).recordType === 'lead') {
             let toast = 'Lead approved.';
             try {
-                const sres = await fetch('/.netlify/functions/lead-generation', {
+                const postSend = (confirmPersonal) => fetch('/.netlify/functions/lead-generation', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'send_outreach', assistantId: window._currentAssistantId, recordId: patch.id }),
+                    body: JSON.stringify({
+                        action: 'send_outreach', assistantId: window._currentAssistantId, recordId: patch.id,
+                        ...(confirmPersonal ? { confirmPersonal: true } : {}),
+                    }),
                 });
-                const sdata = await sres.json().catch(() => ({}));
-                if (sres.ok && sdata.sent) {
+                let sres = await postSend(false);
+                let sdata = await sres.json().catch(() => ({}));
+
+                // The address was scraped from a named individual's inbox rather than a
+                // general one. Name it and make the user opt in before anything is sent —
+                // the server refuses to send until this comes back confirmed.
+                if (sres.ok && sdata.reason === 'personal_inbox_unconfirmed') {
+                    const ok = window.confirm(
+                        `This lead's only contact address looks like a personal inbox:\n\n${sdata.to}\n\n`
+                        + 'It was found on the company\'s website, not supplied by them, and it appears to belong to a named individual rather than a general enquiries address.\n\n'
+                        + 'Send the outreach email to this address?'
+                    );
+                    if (ok) {
+                        sres = await postSend(true);
+                        sdata = await sres.json().catch(() => ({}));
+                    } else {
+                        sdata = { sent: false, reason: 'personal_inbox_declined' };
+                    }
+                }
+
+                if (sres.ok && sdata.reason === 'personal_inbox_declined') {
+                    toast = 'Lead approved — nothing sent. Use “Mark outreach sent” if you contact them another way.';
+                } else if (sres.ok && sdata.sent) {
                     const d = sdata.chaseDate ? new Date(sdata.chaseDate) : null;
                     toast = `Outreach emailed to ${sdata.to} — chase reminder set${d ? ` for ${d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}` : ''}. See the Calendar.`;
                 } else if (sres.ok && sdata.reason === 'not_connected') {
