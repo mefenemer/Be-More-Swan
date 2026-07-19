@@ -184,7 +184,10 @@
             options: [
               { value: 'none', label: "No — I'll send outreach myself", description: 'Approved leads get a ready-to-send draft; you send it from your own email.' },
               { value: 'google', label: 'Yes — Google (Gmail / Workspace)', description: 'BMS sends approved outreach from your connected Google account.' },
-              { value: 'microsoft', label: 'Yes — Microsoft (Outlook / 365)', description: 'BMS sends approved outreach from your connected Outlook or Microsoft 365 account.' },
+              // Honest about the admin-approval wall: until Microsoft publisher verification
+              // completes, work/school accounts are likely to be blocked at the consent screen.
+              // Better said here than discovered as a dead end mid-connect.
+              { value: 'microsoft', label: 'Yes — Microsoft (Outlook / 365)', description: 'BMS sends approved outreach from your connected Outlook or Microsoft 365 account. Work and school accounts may need your IT administrator to approve the connection.' },
             ],
           },
         ],

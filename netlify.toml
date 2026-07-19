@@ -43,6 +43,14 @@
   to = "/.netlify/functions/sync-action"
   status = 200
 
+# Meta Platform compliance callbacks for the Threads app (uninstall + data deletion), plus the
+# public deletion-status page. Meta calls these unauthenticated server-to-server, so the URLs are
+# registered on the Threads use case Settings screen and meta-callbacks.ts verifies signed_request.
+[[redirects]]
+  from = "/api/meta/*"
+  to = "/.netlify/functions/meta-callbacks"
+  status = 200
+
 # Integration Scenario Library: browse/activate recipes + read execution logs. The original
 # /api/integrations/:resource path survives in event.rawUrl, which integration-scenarios.ts parses.
 [[redirects]]

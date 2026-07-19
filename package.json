@@ -11,6 +11,7 @@
     "test:tenant-guard": "tsx tests/tenant-guard.test.ts",
     "test:rls": "tsx tests/rls-enforcement.test.ts",
     "test:connection-policy": "tsx tests/connection-policy.test.ts",
+    "test:social-credentials": "tsx tests/social-credentials.test.ts",
     "test:webhook-verify": "tsx tests/webhook-verify.test.ts",
     "test:bias-parity": "tsx tests/bias-parity.test.ts",
     "test:env-routing": "tsx tests/env-routing.test.ts",

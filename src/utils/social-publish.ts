@@ -12,6 +12,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { and, eq, inArray } from 'drizzle-orm';
 import { contentAssets, systemConnections } from '../../db/schema';
 import { getSecret, storeSecret } from './vault';
+import { getFreshAccessToken, IntegrationError, type IntegrationProvider } from './workspace-integrations';
 
 function r2Client(): S3Client {
     return new S3Client({
@@ -100,6 +101,133 @@ export async function refreshXToken(db: any, vaultRefKey: string): Promise<strin
     // X rotates refresh tokens — persist the new one (fall back to the old if absent).
     await storeSecret(db, vaultRefKey, { token: data.access_token, refreshToken: data.refresh_token ?? refreshToken });
     return data.access_token as string;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+// Credential resolution across BOTH connection stores.
+//
+// Social platforms are split over two tables for historical reasons:
+//   • system_connections     — Facebook/Instagram/LinkedIn/X. Per-assistant (has assistantId),
+//                              token in vault under the row's own vaultRefKey.
+//   • workspace_integrations — Threads/YouTube (and the non-social connectors). Org-wide, one row
+//                              per (org, provider), refreshed by getFreshAccessToken().
+//
+// Rather than migrate the live publishers or duplicate OAuth into social-oauth-init, the publish
+// path resolves through here and reads from whichever store holds the platform. Callers get one
+// shape and never need to know which side answered.
+//
+// Per-assistant scoping for a workspace-backed platform works via a SHADOW ROW in
+// system_connections: same serviceName, but vaultRefKey NULL. It carries the assistantId/isActive
+// toggle and nothing else — token material is never copied between stores. A null vaultRefKey is
+// therefore not an error here (it is in the legacy path), it is the signal to fall through to
+// workspace_integrations.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+/** Platforms whose tokens live in workspace_integrations rather than system_connections. */
+export const WORKSPACE_BACKED_PLATFORMS = new Set<string>(['threads', 'youtube']);
+
+export interface SocialCredentials {
+    token: string;
+    /** Platform-side account id: system_connections.externalUserId, or the workspace row's tenantId. */
+    externalUserId: string | null;
+    /** The system_connections row id when one exists (including a shadow row), else null. */
+    connectionId: number | null;
+    /**
+     * Retry-once refresh for drivers that surface a 401. Null when the token is fresh by
+     * construction (workspace-backed platforms refresh proactively inside getFreshAccessToken).
+     */
+    refresh: (() => Promise<string | null>) | null;
+}
+
+/** The system_connections row shape the routing decision depends on. */
+export interface ConnectionRow {
+    id: number;
+    vaultRefKey: string | null;
+    externalUserId: string | null;
+}
+
+export type CredentialSource =
+    | { store: 'system_connections'; vaultRefKey: string; connectionId: number; externalUserId: string | null }
+    | { store: 'workspace_integrations'; connectionId: number | null }
+    | { store: 'none' };
+
+/**
+ * Which store holds this platform's token — the pure routing decision behind
+ * resolveSocialCredentials, split out so the branch logic is testable without a live DB
+ * (getSecret decrypts for real, so a faked one proves nothing).
+ *
+ * A row WITH a vaultRefKey owns its token → system_connections. A missing row, or a shadow row
+ * (vaultRefKey NULL, carrying only the per-assistant toggle), routes to workspace_integrations —
+ * but only for platforms actually backed there, so a genuinely missing Facebook connection still
+ * fails with its own message instead of a misleading "connect it on the Integrations page".
+ */
+export function chooseCredentialSource(platform: string, conn: ConnectionRow | undefined | null): CredentialSource {
+    if (conn?.vaultRefKey) {
+        return {
+            store: 'system_connections',
+            vaultRefKey: conn.vaultRefKey,
+            connectionId: conn.id,
+            externalUserId: conn.externalUserId ?? null,
+        };
+    }
+    if (WORKSPACE_BACKED_PLATFORMS.has(platform)) {
+        return { store: 'workspace_integrations', connectionId: conn?.id ?? null };
+    }
+    return { store: 'none' };
+}
+
+export async function resolveSocialCredentials(
+    db: any,
+    opts: { organisationId: number; platform: string; connectionId?: number | null },
+): Promise<SocialCredentials> {
+    const { organisationId, platform } = opts;
+
+    const connWhere = opts.connectionId
+        ? eq(systemConnections.id, opts.connectionId)
+        : and(
+            eq(systemConnections.organisationId, organisationId),
+            eq(systemConnections.serviceName, platform),
+            eq(systemConnections.isActive, true),
+          );
+    const [conn] = await db.select({
+        id: systemConnections.id,
+        vaultRefKey: systemConnections.vaultRefKey,
+        externalUserId: systemConnections.externalUserId,
+    }).from(systemConnections).where(connWhere).limit(1);
+
+    const source = chooseCredentialSource(platform, conn);
+
+    if (source.store === 'system_connections') {
+        const secret = await getSecret(db, source.vaultRefKey);
+        const token = secret?.token as string | undefined;
+        if (!token) throw new Error('No token in vault for connection.');
+        const { vaultRefKey } = source;
+        return {
+            token,
+            externalUserId: source.externalUserId,
+            connectionId: source.connectionId,
+            refresh: platform === 'x' ? () => refreshXToken(db, vaultRefKey) : null,
+        };
+    }
+
+    if (source.store === 'workspace_integrations') {
+        try {
+            const fresh = await getFreshAccessToken(db, organisationId, platform as IntegrationProvider);
+            return {
+                token: fresh.accessToken,
+                externalUserId: fresh.tenantId,
+                connectionId: source.connectionId,
+                refresh: null,
+            };
+        } catch (err) {
+            // Surface the provider-accurate message ("connect it on the Integrations page",
+            // "please reconnect") rather than flattening it to a generic publish failure.
+            if (err instanceof IntegrationError) throw new Error(err.message);
+            throw err;
+        }
+    }
+
+    throw new Error(`No active ${platform} connection for this post.`);
 }
 
 // Fetch image bytes from a (presigned/external) URL as an ArrayBuffer (a valid fetch body).

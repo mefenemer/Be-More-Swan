@@ -2011,6 +2011,7 @@ async function _renderOutreachEmailConnect(data) {
                <div>
                  <p class="font-bold text-gray-900 text-sm">Connect your ${esc(M.brand)} account to send outreach</p>
                  <p class="text-sm text-gray-600 mt-0.5">You chose to send outreach emails from your own inbox. Connect ${esc(M.account)} and approved leads are emailed automatically, with a chase reminder set for you.</p>
+                 ${provider === 'microsoft' ? `<p class="text-xs text-gray-500 mt-1.5">If you use a work or school Microsoft account, your IT administrator may need to approve the connection first.</p>` : ''}
                </div>
              </div>
              <a href="/api/oauth/${esc(M.key)}/connect" class="shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition whitespace-nowrap">${esc(M.cta)}</a>

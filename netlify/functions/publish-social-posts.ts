@@ -10,12 +10,11 @@
 // publisher (publish-facebook.ts) sharing the same driver module.
 
 import { Handler } from '@netlify/functions';
-import { and, eq, inArray } from 'drizzle-orm';
+import { inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts, systemConnections, rateLimitStates, publishCronLog } from '../../db/schema';
+import { scheduledPosts, rateLimitStates, publishCronLog } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
-import { getSecret } from '../../src/utils/vault';
-import { resolvePostImage, refreshXToken, publishX, publishLinkedIn, type DriverResult } from '../../src/utils/social-publish';
+import { resolvePostImage, resolveSocialCredentials, publishX, publishLinkedIn, type DriverResult } from '../../src/utils/social-publish';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -76,24 +75,14 @@ export default withLambda(async () => {
 
     await Promise.allSettled(posts.map(async post => {
         try {
-            // Resolve connection — by id, else the org's active connection for the platform.
-            const connWhere = post.connection_id
-                ? eq(systemConnections.id, post.connection_id)
-                : and(
-                    eq(systemConnections.organisationId, post.organisation_id),
-                    eq(systemConnections.serviceName, post.platform),
-                    eq(systemConnections.isActive, true),
-                  );
-            const [conn] = await db.select({
-                id: systemConnections.id,
-                vaultRefKey: systemConnections.vaultRefKey,
-                externalUserId: systemConnections.externalUserId,
-            }).from(systemConnections).where(connWhere).limit(1);
-            if (!conn?.vaultRefKey) throw new Error(`No active ${post.platform} connection for this post.`);
-
-            const secret = await getSecret(db, conn.vaultRefKey);
-            let token = secret?.token as string | undefined;
-            if (!token) throw new Error('No token in vault for connection.');
+            // Resolve credentials — by connection id, else the org's active connection for the
+            // platform. Reads from whichever store backs this platform (see resolveSocialCredentials).
+            const creds = await resolveSocialCredentials(db, {
+                organisationId: post.organisation_id,
+                platform: post.platform,
+                connectionId: post.connection_id,
+            });
+            let token = creds.token;
 
             const text = [post.caption, post.hashtags].filter(Boolean).join('\n\n').trim();
             if (!text) throw new Error('Post has no text to publish.');
@@ -105,12 +94,12 @@ export default withLambda(async () => {
             if (post.platform === 'x') {
                 result = await publishX(text, token, image);
                 // Token expired → refresh once and retry.
-                if (!result.ok && result.status === 401) {
-                    const fresh = await refreshXToken(db, conn.vaultRefKey);
+                if (!result.ok && result.status === 401 && creds.refresh) {
+                    const fresh = await creds.refresh();
                     if (fresh) { token = fresh; result = await publishX(text, token, image); }
                 }
             } else {
-                result = await publishLinkedIn(text, token, conn.externalUserId, image);
+                result = await publishLinkedIn(text, token, creds.externalUserId, image);
             }
 
             if (!result.ok) {
