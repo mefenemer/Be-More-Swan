@@ -121,6 +121,40 @@ const PLATFORMS = [
         ],
         note: 'X requires a free Developer account. The sign-up takes a few minutes and asks what you plan to build — describe it as "scheduling and publishing social media posts".',
     },
+    {
+        id: 'Threads',
+        oauthPlatform: true,
+        // Threads connects through the universal integrations router (/api/oauth/:provider/connect),
+        // not social-oauth-init like the four platforms above — its token lives in
+        // workspace_integrations. See resolveSocialCredentials for how publishing bridges the two.
+        oauthUrl: '/api/oauth/threads/connect',
+        emoji: '@',
+        iconBg: 'bg-gray-950',
+        iconText: 'text-white',
+        label: 'Threads',
+        tagline: 'Join the conversation with short, text-first posts on Threads.',
+        handleLabel: 'Threads Username',
+        handlePlaceholder: '@yourbrand',
+        handleHelp: 'Your Threads username. It matches the Instagram account the profile was created from.',
+        tokenLabel: 'Threads Access Token',
+        tokenHelp: 'Issued automatically when you connect — no manual token needed.',
+        steps: [
+            { text: 'Click <strong>Connect</strong> and sign in with the Instagram account your Threads profile belongs to.' },
+            { text: 'Approve the permissions Threads asks for so posts can be published on your behalf.' },
+        ],
+        note: 'Threads posts are limited to 500 characters — the composer will warn you before you go over.',
+        // Threads profiles are created from an Instagram account, so the common failure is a user
+        // trying to connect with a Facebook/Threads-less login and landing on a Meta error page.
+        preConnect: {
+            intro: 'You\'ll be sent to Meta to approve the connection. Check these first:',
+            steps: [
+                { text: 'You need an existing <strong>Threads profile</strong>. Create one from the Instagram app or at threads.net if you don\'t have one yet.', url: 'https://www.threads.net/' },
+                { text: 'Sign in with the <strong>Instagram account that owns the Threads profile</strong> — not a Facebook Page login.' },
+                { text: 'When Meta asks for permissions, <strong>approve everything requested</strong> — declining any permission stops us from publishing your posts.' },
+            ],
+            note: 'If any of these steps are incomplete, Meta will show an error instead of connecting. Finish the checklist, then come back and try again.',
+        },
+    },
 ];
 
 // ── Inbound source catalogue ─────────────────────────────────────
@@ -252,12 +286,15 @@ function _relevantSources() {
     return SOURCES.filter(s => allow.has(String(s.id).toLowerCase()));
 }
 
-// Append the selected assistant so the OAuth flow binds the connection to it
-// (and the server can enforce relevance). oauthUrl already carries a query string.
+// Append the selected assistant so the OAuth flow binds the connection to it (and the server
+// can enforce relevance). The separator is computed rather than assumed: the older platforms
+// route through social-oauth-init/meta-oauth and already carry a query string, but the
+// /api/oauth/:provider/connect routes (Threads, and any future workspace-integration platform)
+// do not — a hardcoded '&' produced '…/connect&assistantId=3', which the rewrite never matches.
 function _oauthUrl(platform) {
-    return _selectedAssistantId
-        ? `${platform.oauthUrl}&assistantId=${encodeURIComponent(_selectedAssistantId)}`
-        : platform.oauthUrl;
+    if (!_selectedAssistantId) return platform.oauthUrl;
+    const sep = platform.oauthUrl.includes('?') ? '&' : '?';
+    return `${platform.oauthUrl}${sep}assistantId=${encodeURIComponent(_selectedAssistantId)}`;
 }
 
 // Instagram Business accounts authenticate via Meta's Facebook Login (there is no

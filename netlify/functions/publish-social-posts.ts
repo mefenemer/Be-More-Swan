@@ -1,5 +1,5 @@
 // netlify/functions/publish-social-posts.ts
-// Publish due LinkedIn & X (Twitter) posts every minute — the non-Instagram half of the
+// Publish due LinkedIn, X (Twitter) & Threads posts every minute — the non-Instagram half of the
 // social publisher. Mirrors publish-instagram's orchestration (claim FOR UPDATE SKIP
 // LOCKED → 'publishing' → API call → 'published' | retry/backoff | 'failed'), minus the
 // Meta media-container flow. Posts the attached image when present (best-effort; falls
@@ -14,7 +14,7 @@ import { inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, rateLimitStates, publishCronLog } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
-import { resolvePostImage, resolveSocialCredentials, publishX, publishLinkedIn, type DriverResult } from '../../src/utils/social-publish';
+import { resolvePostImage, resolveSocialCredentials, publishX, publishLinkedIn, publishThreads, type DriverResult } from '../../src/utils/social-publish';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -22,7 +22,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 const BATCH = 100;
 const BACKOFF_MINS = [2, 8, 30];
 const MAX_ATTEMPTS = 3;
-const LABEL: Record<string, string> = { linkedin: 'LinkedIn', x: 'X (Twitter)' };
+const LABEL: Record<string, string> = { linkedin: 'LinkedIn', x: 'X (Twitter)', threads: 'Threads' };
 // A row left in 'publishing' longer than this was orphaned by a timed-out tick — reclaim it.
 const STALE_PUBLISHING_MINS = 10;
 
@@ -47,7 +47,7 @@ export default withLambda(async () => {
     // are retried instead of sitting un-published forever (nothing else re-selects 'publishing').
     await db.execute(
         `UPDATE scheduled_posts SET status = 'scheduled', retry_at = NULL, updated_at = now()
-         WHERE status = 'publishing' AND platform IN ('linkedin','x')
+         WHERE status = 'publishing' AND platform IN ('linkedin','x','threads')
            AND updated_at < now() - interval '${STALE_PUBLISHING_MINS} minutes'`
     );
 
@@ -56,7 +56,7 @@ export default withLambda(async () => {
                 attempt_count, publish_date, platform, content_asset_ids, assistant_id
          FROM scheduled_posts
          WHERE status = 'scheduled'
-           AND platform IN ('linkedin','x')
+           AND platform IN ('linkedin','x','threads')
            AND publish_date <= now()
            AND (retry_at IS NULL OR retry_at <= now())
          ORDER BY publish_date
@@ -90,6 +90,9 @@ export default withLambda(async () => {
             // Attached image (best-effort — text-only if absent/unresolvable).
             const image = await resolvePostImage(db, post.content_asset_ids).catch(() => null);
 
+            // Explicit per-platform dispatch. This was `if (x) … else → LinkedIn`; a catch-all
+            // else silently publishes every newly-claimed platform to LinkedIn, so each platform
+            // in the claim query above must have its own arm and anything unrecognised must throw.
             let result: DriverResult;
             if (post.platform === 'x') {
                 result = await publishX(text, token, image);
@@ -98,8 +101,12 @@ export default withLambda(async () => {
                     const fresh = await creds.refresh();
                     if (fresh) { token = fresh; result = await publishX(text, token, image); }
                 }
-            } else {
+            } else if (post.platform === 'linkedin') {
                 result = await publishLinkedIn(text, token, creds.externalUserId, image);
+            } else if (post.platform === 'threads') {
+                result = await publishThreads(text, token, creds.externalUserId, image);
+            } else {
+                throw new Error(`No publish driver for platform '${post.platform}'.`);
             }
 
             if (!result.ok) {

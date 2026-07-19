@@ -1,6 +1,6 @@
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
-import { eq, and, or, isNull } from 'drizzle-orm';
+import { eq, and, or, isNull, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { systemConnections, scheduledPosts, users, userOrganisations, auditLogs, workspaceIntegrations } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
@@ -72,15 +72,24 @@ export default withLambda(async (event) => {
                 }
             });
 
-            // Canva (and any future inbound source) authenticates through the org-scoped
-            // workspace_integrations store (src/utils/workspace-integrations.ts), not
-            // system_connections — so its real status must be merged in separately. Without
-            // this, system_connections never has a canva row, the card above always renders
-            // "Not connected", and the user can re-trigger the OAuth flow even when the org's
-            // Canva account is already linked (silently swapping which account is connected).
+            // Some connectors authenticate through the org-scoped workspace_integrations store
+            // (src/utils/workspace-integrations.ts) rather than system_connections, so their real
+            // status must be merged in separately. Without this, system_connections never has a
+            // row for them, the card always renders "Not connected", and the user can re-trigger
+            // the OAuth flow even when the org's account is already linked (silently swapping
+            // which account is connected).
+            //
+            //   canva   — inbound design source (_sourceCard)
+            //   threads — social platform whose token lives here rather than in system_connections
+            //             (see resolveSocialCredentials); the publish path bridges the two stores.
+            //
+            // A row that ALREADY exists in system_connections wins — for Threads that is the
+            // per-assistant shadow row, which carries the toggle state the UI needs.
             if (currentOrgId) {
-                const [canvaIntegration] = await db.select({
+                const WORKSPACE_BACKED = ['canva', 'threads'] as const;
+                const rows = await db.select({
                     id: workspaceIntegrations.id,
+                    provider: workspaceIntegrations.provider,
                     status: workspaceIntegrations.status,
                     externalAccountName: workspaceIntegrations.externalAccountName,
                     scopes: workspaceIntegrations.scopes,
@@ -89,9 +98,19 @@ export default withLambda(async (event) => {
                     updatedAt: workspaceIntegrations.updatedAt,
                 }).from(workspaceIntegrations).where(and(
                     eq(workspaceIntegrations.organisationId, currentOrgId),
-                    eq(workspaceIntegrations.provider, 'canva'),
-                )).limit(1);
-                if (canvaIntegration) {
+                    inArray(workspaceIntegrations.provider, [...WORKSPACE_BACKED]),
+                ));
+                for (const row of rows) {
+                    const existing = merged.find(m => m.serviceName === row.provider);
+                    if (existing) {
+                        // Shadow row present: keep its id/toggle state, but take the live
+                        // connection status from the store that actually holds the token.
+                        existing.connected = true;
+                        existing.status = row.status;
+                        existing.externalUserId = existing.externalUserId || row.externalAccountName;
+                        existing.tokenExpiresAt = row.expiresAt;
+                        continue;
+                    }
                     // Shape matches safeColumns + connected exactly (same fields `merged`'s other
                     // entries carry) — externalAccountName rides in externalUserId, which
                     // _sourceCard's account chip already falls back to when the dedicated field
@@ -101,17 +120,17 @@ export default withLambda(async (event) => {
                         // system_connections one — the two tables have independent id sequences,
                         // so a positive id here could collide with an unrelated row. The DELETE
                         // handler below reverses this to route disconnects to the right table.
-                        id: -canvaIntegration.id,
-                        serviceName: 'canva',
+                        id: -row.id,
+                        serviceName: row.provider,
                         connectionType: 'oauth',
-                        externalUserId: canvaIntegration.externalAccountName,
-                        scopes: canvaIntegration.scopes,
-                        status: canvaIntegration.status,
-                        isActive: canvaIntegration.status === 'active',
+                        externalUserId: row.externalAccountName,
+                        scopes: row.scopes,
+                        status: row.status,
+                        isActive: row.status === 'active',
                         metadata: null,
-                        createdAt: canvaIntegration.createdAt,
-                        updatedAt: canvaIntegration.updatedAt,
-                        tokenExpiresAt: canvaIntegration.expiresAt,
+                        createdAt: row.createdAt,
+                        updatedAt: row.updatedAt,
+                        tokenExpiresAt: row.expiresAt,
                         connected: true,
                     });
                 }

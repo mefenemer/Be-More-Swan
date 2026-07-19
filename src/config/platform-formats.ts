@@ -11,7 +11,7 @@
 
 import type { AspectRatio } from '../lib/fal-gateway';
 
-export type SocialPlatform = 'instagram' | 'facebook' | 'linkedin' | 'x';
+export type SocialPlatform = 'instagram' | 'facebook' | 'linkedin' | 'x' | 'threads';
 
 export interface PlatformFormat {
     /** Aspect ratio requested when generating/sourcing an image for this platform's feed. */
@@ -31,6 +31,9 @@ export const PLATFORM_FORMATS: Record<SocialPlatform, PlatformFormat> = {
     facebook:  { aspectRatio: '1:1',  charLimit: 63206, defaultPostFormat: 'image', mediaMandatory: false, label: 'Facebook' },
     linkedin:  { aspectRatio: '1:1',  charLimit: 3000,  defaultPostFormat: 'image', mediaMandatory: false, label: 'LinkedIn' },
     x:         { aspectRatio: '16:9', charLimit: 280,   defaultPostFormat: 'image', mediaMandatory: false, label: 'X (Twitter)' },
+    // Threads is text-first: an image is optional and the feed is conversational, so the drafter
+    // should not assume media. 500 chars is the hard API limit (THREADS_TEXT_MAX in social-publish).
+    threads:   { aspectRatio: '1:1',  charLimit: 500,   defaultPostFormat: 'text',  mediaMandatory: false, label: 'Threads' },
 };
 
 /** Format for a platform, tolerating unknown/legacy keys (e.g. 'twitter' → 'x'). Falls back to Instagram. */
@@ -51,6 +54,9 @@ export function normalizePlatform(raw: unknown): SocialPlatform | null {
     if (p === 'ig' || p.includes('instagram')) return 'instagram';
     if (p === 'fb' || p.includes('facebook')) return 'facebook';
     if (p === 'li' || p.includes('linkedin')) return 'linkedin';
+    // Must precede the 'x' branch: its /(^|\W)x(\W|$)/ fallback is loose enough that any future
+    // token containing a standalone "x" would be claimed by X before reaching a later check.
+    if (p === 'th' || p.includes('threads')) return 'threads';
     if (p === 'x' || p === 'twitter' || p.includes('twitter') || /(^|\W)x(\W|$)/.test(p)) return 'x';
     return null;
 }

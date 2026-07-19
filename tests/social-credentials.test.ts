@@ -14,7 +14,9 @@
 // Pure logic — no DB required.
 
 import assert from 'node:assert';
-import { chooseCredentialSource, WORKSPACE_BACKED_PLATFORMS, type ConnectionRow } from '../src/utils/social-publish';
+import { chooseCredentialSource, WORKSPACE_BACKED_PLATFORMS, THREADS_TEXT_MAX, type ConnectionRow } from '../src/utils/social-publish';
+import { normalizePlatform, platformFormat, PLATFORM_FORMATS } from '../src/config/platform-formats';
+import { AUTONOMOUS_DRAFT_PLATFORMS } from '../src/utils/publish-policy';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -98,6 +100,47 @@ check('the workspace-backed set stays limited to the intended platforms', () => 
     // deliberate edit that trips this test, not a drive-by.
     assert.deepEqual([...WORKSPACE_BACKED_PLATFORMS].sort(), ['threads', 'youtube']);
     for (const p of LEGACY) assert.equal(WORKSPACE_BACKED_PLATFORMS.has(p), false, p);
+});
+
+// ── Threads platform wiring (Phase 2) ───────────────────────────────────────
+
+check('normalizePlatform recognises Threads in every stored form', () => {
+    // primary_platforms holds short codes from onboarding ('th') or full names, and the
+    // onboarding checkbox has captured Threads since before it was publishable — those values
+    // were being silently dropped, which is the bug this fixes.
+    for (const raw of ['threads', 'Threads', 'th', ' THREADS ']) {
+        assert.equal(normalizePlatform(raw), 'threads', JSON.stringify(raw));
+    }
+});
+
+check('the loose X fallback does not swallow Threads', () => {
+    // normalizePlatform's X arm ends in /(^|\W)x(\W|$)/, so ordering is load-bearing.
+    assert.equal(normalizePlatform('threads'), 'threads');
+    assert.equal(normalizePlatform('x'), 'x');
+    assert.equal(normalizePlatform('twitter'), 'x');
+});
+
+check('Threads is text-first with the API character limit', () => {
+    const f = platformFormat('threads');
+    assert.equal(f.charLimit, 500);
+    assert.equal(f.charLimit, THREADS_TEXT_MAX, 'the composer limit and the driver truncation must agree');
+    assert.equal(f.mediaMandatory, false, 'Threads must never require an image');
+    assert.equal(f.defaultPostFormat, 'text');
+    assert.equal(f.label, 'Threads');
+});
+
+check('every autonomously-drafted platform has a format entry', () => {
+    // The drafter drives entirely off platformFormat(); a platform in the draft list with no
+    // format entry silently falls back to Instagram's 4:5 image-mandatory rules.
+    for (const p of AUTONOMOUS_DRAFT_PLATFORMS) {
+        assert.ok(PLATFORM_FORMATS[p], `${p} has no PLATFORM_FORMATS entry`);
+    }
+});
+
+check('Threads is drafted autonomously and resolves to its own format', () => {
+    assert.ok(AUTONOMOUS_DRAFT_PLATFORMS.includes('threads' as never));
+    // Guard the fallback: an unknown key returns Instagram, so a typo would look like it worked.
+    assert.notEqual(platformFormat('threads').label, PLATFORM_FORMATS.instagram.label);
 });
 
 console.log(`\n${passed} passed`);

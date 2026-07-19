@@ -378,6 +378,50 @@ export async function resolveLinkedInAuthor(token: string): Promise<{ ok: true; 
     return { ok: false, status: me.status, error: md?.message || `LinkedIn identity error (${me.status})` };
 }
 
+// ── Threads ───────────────────────────────────────────────────────────────────────────────────────
+// Two-step publish, same shape as Instagram: create a media container, then publish it by id.
+// Text-first — media_type TEXT unless the draft carries an image, in which case Threads fetches
+// image_url ITSELF (so the URL must be publicly reachable; a presigned R2 GET qualifies).
+//
+// Shared with sync-action.ts's threads_create_post handler so the chat-driven path and the
+// scheduled-publish path cannot drift apart.
+
+export const THREADS_TEXT_MAX = 500;
+
+export async function publishThreads(
+    text: string,
+    token: string,
+    threadsUserId: string | null,
+    image: PostImage | null,
+): Promise<DriverResult> {
+    // tenantId carries the Threads user id captured at connect time; 'me' is the documented
+    // fallback and resolves to the token's owner.
+    const uid = encodeURIComponent(threadsUserId || 'me');
+    const authHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded' };
+    const body = text.slice(0, THREADS_TEXT_MAX);
+
+    // 1. Create the container.
+    const containerParams = new URLSearchParams({ media_type: image ? 'IMAGE' : 'TEXT', text: body });
+    if (image) containerParams.set('image_url', image.url);
+    const containerRes = await fetch(`https://graph.threads.net/v1.0/${uid}/threads`, {
+        method: 'POST', headers: authHeaders, body: containerParams,
+    });
+    const containerData: any = await containerRes.json().catch(() => ({}));
+    if (!containerRes.ok || !containerData?.id) {
+        return { ok: false, status: containerRes.status, error: containerData?.error?.message || `Threads container error (${containerRes.status})` };
+    }
+
+    // 2. Publish it.
+    const publishRes = await fetch(`https://graph.threads.net/v1.0/${uid}/threads_publish`, {
+        method: 'POST', headers: authHeaders, body: new URLSearchParams({ creation_id: String(containerData.id) }),
+    });
+    const publishData: any = await publishRes.json().catch(() => ({}));
+    if (!publishRes.ok || !publishData?.id) {
+        return { ok: false, status: publishRes.status, error: publishData?.error?.message || `Threads publish error (${publishRes.status})` };
+    }
+    return { ok: true, id: String(publishData.id) };
+}
+
 // ── Facebook (Graph API) ──────────────────────────────────────────────────────────────────────────
 // Image → /{pageId}/photos (caption becomes the post text); text/link → /{pageId}/feed.
 export async function publishFacebook(pageId: string, pageToken: string, text: string, image: PostImage | null): Promise<DriverResult> {

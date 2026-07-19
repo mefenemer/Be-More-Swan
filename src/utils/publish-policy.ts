@@ -43,7 +43,7 @@ import { normalizePlatform } from '../config/platform-formats';
  * list to the settings UI so the toggles can't drift out of sync with what the backend does.
  * Adding a platform here without a drafter would render a toggle that silently does nothing.
  */
-export const AUTONOMOUS_DRAFT_PLATFORMS = ['instagram', 'facebook', 'linkedin', 'x'] as const;
+export const AUTONOMOUS_DRAFT_PLATFORMS = ['instagram', 'facebook', 'linkedin', 'x', 'threads'] as const;
 export type AutonomousDraftPlatform = typeof AUTONOMOUS_DRAFT_PLATFORMS[number];
 
 /**

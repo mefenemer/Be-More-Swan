@@ -53,6 +53,7 @@ import { actionItems } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logApiCall } from '../../src/utils/vault';
 import { getFreshAccessToken, getIntegration, IntegrationError, providerLabel } from '../../src/utils/workspace-integrations';
+import { publishThreads, THREADS_TEXT_MAX } from '../../src/utils/social-publish';
 import { sendGmailMessage } from '../../src/utils/gmail';
 import { injectAiFooter } from '../../src/utils/ai-email-footer';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -652,8 +653,8 @@ async function handleGmailCreateDraft(db: Db, userId: number, organisationId: nu
 }
 
 // ── Threads: two-step publish (create the container, then publish it) ─────────
-
-const THREADS_TEXT_MAX = 500;
+// The HTTP calls live in src/utils/social-publish.ts (publishThreads) so this chat-driven
+// path and the scheduled publisher run identical code.
 
 interface ThreadsPostPayload {
     caption?: unknown;
@@ -675,39 +676,17 @@ async function handleThreadsCreatePost(db: Db, userId: number, organisationId: n
 
     // tenantId carries the Threads user id captured at connect time (roots /{id}/threads).
     const { accessToken, tenantId } = await getFreshAccessToken(db, organisationId, 'threads');
-    const threadsUserId = tenantId || 'me';
-    const authHeaders = { Authorization: `Bearer ${accessToken}` };
 
-    // 1. Create the media container (TEXT, or IMAGE when the draft carries an asset).
     const imageUrl = typeof payload.imageUrl === 'string' && payload.imageUrl.trim()
         ? payload.imageUrl.trim()
         : typeof payload.mediaUrl === 'string' ? payload.mediaUrl.trim() : '';
-    const containerParams = new URLSearchParams({ media_type: imageUrl ? 'IMAGE' : 'TEXT', text });
-    if (imageUrl) containerParams.set('image_url', imageUrl);
-    const containerRes = await fetch(`https://graph.threads.net/v1.0/${encodeURIComponent(threadsUserId)}/threads`, {
-        method: 'POST',
-        headers: { ...authHeaders, 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: containerParams,
-    });
-    await logApiCall(db, { userId, endpoint: 'graph.threads.net/v1.0/threads', httpStatus: containerRes.status });
-    const containerData: { id?: string; error?: { message?: string } } = await containerRes.json().catch(() => ({}));
-    if (!containerRes.ok || !containerData.id) {
-        return json(502, { error: `Threads rejected the post container${containerData.error?.message ? `: ${containerData.error.message}` : '.'}` });
-    }
+    const image = imageUrl ? { url: imageUrl, mimeType: 'image/jpeg' } : null;
 
-    // 2. Publish the container.
-    const publishRes = await fetch(`https://graph.threads.net/v1.0/${encodeURIComponent(threadsUserId)}/threads_publish`, {
-        method: 'POST',
-        headers: { ...authHeaders, 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ creation_id: containerData.id }),
-    });
-    await logApiCall(db, { userId, endpoint: 'graph.threads.net/v1.0/threads_publish', httpStatus: publishRes.status });
-    const publishData: { id?: string; error?: { message?: string } } = await publishRes.json().catch(() => ({}));
-    if (!publishRes.ok || !publishData.id) {
-        return json(502, { error: `Threads rejected the publish step${publishData.error?.message ? `: ${publishData.error.message}` : '.'}` });
-    }
+    const result = await publishThreads(text, accessToken, tenantId, image);
+    await logApiCall(db, { userId, endpoint: 'graph.threads.net/v1.0/threads_publish', httpStatus: result.ok ? 200 : result.status });
+    if (!result.ok) return json(502, { error: `Threads rejected the post: ${result.error}` });
 
-    return json(200, { success: true, message: `Post published to Threads${imageUrl ? ' with image' : ''}.`, platformPostId: publishData.id });
+    return json(200, { success: true, message: `Post published to Threads${imageUrl ? ' with image' : ''}.`, platformPostId: result.id });
 }
 
 // ── TikTok: direct-post a video from a URL with the AI caption + hashtags ─────
