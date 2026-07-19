@@ -14,7 +14,8 @@ import { inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, rateLimitStates, publishCronLog } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
-import { resolvePostImage, resolvePostVideo, resolveSocialCredentials, publishX, publishLinkedIn, publishThreads, publishYouTube, youtubeMetaFromCaption, type DriverResult } from '../../src/utils/social-publish';
+import { resolvePostImage, resolveSocialCredentials, publishX, publishLinkedIn, publishThreads, type DriverResult } from '../../src/utils/social-publish';
+import { resolveBaseUrl } from '../../src/utils/base-url';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -25,6 +26,8 @@ const MAX_ATTEMPTS = 3;
 const LABEL: Record<string, string> = { linkedin: 'LinkedIn', x: 'X (Twitter)', threads: 'Threads', youtube: 'YouTube' };
 // A row left in 'publishing' longer than this was orphaned by a timed-out tick — reclaim it.
 const STALE_PUBLISHING_MINS = 10;
+// YouTube's upload lives in a background function that holds the row far longer — see the sweep below.
+const STALE_YOUTUBE_MINS = 30;
 
 type FailureReason = { httpStatus: number | null; errorMessage: string; isRetryable: boolean };
 type PostRow = {
@@ -47,8 +50,21 @@ export default withLambda(async () => {
     // are retried instead of sitting un-published forever (nothing else re-selects 'publishing').
     await db.execute(
         `UPDATE scheduled_posts SET status = 'scheduled', retry_at = NULL, updated_at = now()
-         WHERE status = 'publishing' AND platform IN ('linkedin','x','threads','youtube')
+         WHERE status = 'publishing' AND platform IN ('linkedin','x','threads')
            AND updated_at < now() - interval '${STALE_PUBLISHING_MINS} minutes'`
+    );
+
+    // YouTube needs its own, much longer window. Its upload runs in a background function that
+    // legitimately holds the row 'publishing' for up to ~12 minutes PER INVOCATION and re-triggers
+    // itself for as many invocations as the video needs. Sweeping it on the 10-minute rule would
+    // reclaim a perfectly healthy upload mid-flight and start a duplicate one alongside it.
+    // The worker touches updated_at every time it parks resume state, so a row that has gone quiet
+    // for this long really has died; clear the session so the retry starts cleanly.
+    await db.execute(
+        `UPDATE scheduled_posts
+            SET status = 'scheduled', retry_at = NULL, youtube_upload_state = NULL, updated_at = now()
+          WHERE status = 'publishing' AND platform = 'youtube'
+            AND updated_at < now() - interval '${STALE_YOUTUBE_MINS} minutes'`
     );
 
     const posts = await db.execute<PostRow>(
@@ -75,6 +91,17 @@ export default withLambda(async () => {
 
     await Promise.allSettled(posts.map(async post => {
         try {
+            // YouTube is never uploaded inline: this function is synchronous on Netlify's default
+            // ~10s timeout and may be handling 100 posts at once, which no real video upload fits
+            // inside. Hand it to the background worker (15-min ceiling, resumable across
+            // invocations) and leave the row claimed as 'publishing' — the worker owns credentials,
+            // the video, settling the row and notifying. Dispatched before anything else is
+            // resolved so the cron does no work the worker is about to repeat.
+            if (post.platform === 'youtube') {
+                await triggerYoutubeUpload(post.id);
+                return;
+            }
+
             // Resolve credentials — by connection id, else the org's active connection for the
             // platform. Reads from whichever store backs this platform (see resolveSocialCredentials).
             const creds = await resolveSocialCredentials(db, {
@@ -85,15 +112,10 @@ export default withLambda(async () => {
             let token = creds.token;
 
             const text = [post.caption, post.hashtags].filter(Boolean).join('\n\n').trim();
-            // YouTube carries its text as video metadata, so an empty caption is survivable there
-            // (the driver falls back to a placeholder title); every other platform needs body text.
-            if (!text && post.platform !== 'youtube') throw new Error('Post has no text to publish.');
+            if (!text) throw new Error('Post has no text to publish.');
 
-            // Attached image (best-effort — text-only if absent/unresolvable). Skipped for
-            // video-only platforms, which resolve their media below instead.
-            const image = post.platform === 'youtube'
-                ? null
-                : await resolvePostImage(db, post.content_asset_ids).catch(() => null);
+            // Attached image (best-effort — text-only if absent/unresolvable).
+            const image = await resolvePostImage(db, post.content_asset_ids).catch(() => null);
 
             // Explicit per-platform dispatch. This was `if (x) … else → LinkedIn`; a catch-all
             // else silently publishes every newly-claimed platform to LinkedIn, so each platform
@@ -110,21 +132,6 @@ export default withLambda(async () => {
                 result = await publishLinkedIn(text, token, creds.externalUserId, image);
             } else if (post.platform === 'threads') {
                 result = await publishThreads(text, token, creds.externalUserId, image);
-            } else if (post.platform === 'youtube') {
-                // Video-only: a YouTube draft with no video asset can never publish, so fail it
-                // permanently rather than retrying a post that will never acquire one.
-                const video = await resolvePostVideo(db, post.content_asset_ids).catch(() => null);
-                if (!video) {
-                    await handleFailure(db, post, {
-                        httpStatus: null,
-                        errorMessage: 'This YouTube post has no video attached — add one and reschedule it.',
-                        isRetryable: false,
-                    }, now);
-                    failed++;
-                    return;
-                }
-                const meta = youtubeMetaFromCaption(post.caption ?? '', post.hashtags ?? '');
-                result = await publishYouTube(meta, token, video);
             } else {
                 throw new Error(`No publish driver for platform '${post.platform}'.`);
             }
@@ -173,6 +180,29 @@ export default withLambda(async () => {
 });
 
 // ── Failure handling (rate-limit defer / retry backoff / permanent fail) ──────
+// Hand a claimed YouTube post to the background worker. MUST be awaited: on Lambda the runtime
+// freezes as soon as the handler returns, so an un-awaited trigger never reaches the worker and the
+// post sits 'publishing' until the stale sweep reclaims it. Posting to a `-background` function
+// returns 202 before the work starts, so the await costs only the trigger round-trip.
+async function triggerYoutubeUpload(postId: number): Promise<void> {
+    const baseUrl = resolveBaseUrl();
+    if (!baseUrl) { console.error('[publish-social-posts] no base URL — YouTube worker not triggered for post', postId); return; }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5_000);
+    try {
+        await fetch(`${baseUrl}/.netlify/functions/publish-youtube-background`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId }),
+            signal: controller.signal,
+        });
+    } catch (err) {
+        console.error('[publish-social-posts] failed to trigger YouTube worker:', err);
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 async function handleFailure(db: ReturnType<typeof getDb>, post: PostRow, reason: FailureReason, now: Date) {
     const attempt = post.attempt_count + 1;
 

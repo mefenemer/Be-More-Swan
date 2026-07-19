@@ -1796,6 +1796,12 @@ export const scheduledPosts = pgTable("scheduled_posts", {
   // out without anyone looking at it".
   autoPublishedAt: timestamp("auto_published_at"),
 
+  // In-flight YouTube resumable-upload session { uploadUrl, total, offset } (db/youtube-upload-resume.sql).
+  // A long video does not fit in one function invocation, so publish-youtube-background parks the
+  // session here and the next invocation resumes from it rather than re-uploading from zero.
+  // NULL = nothing in flight; cleared on success AND on terminal failure.
+  youtubeUploadState: jsonb("youtube_upload_state"),
+
   // US-GOV-3.2.1: C2PA provenance — FK set at publish time
   provenanceContentId: text("provenance_content_id"),      // references contentProvenance.contentId
 
