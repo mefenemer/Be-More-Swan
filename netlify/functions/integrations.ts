@@ -81,12 +81,13 @@ export default withLambda(async (event) => {
             //
             //   canva   — inbound design source (_sourceCard)
             //   threads — social platform whose token lives here rather than in system_connections
-            //             (see resolveSocialCredentials); the publish path bridges the two stores.
+            //   youtube — ditto (video-only; manual upload, never autonomously drafted)
+            //             see resolveSocialCredentials; the publish path bridges the two stores.
             //
             // A row that ALREADY exists in system_connections wins — for Threads that is the
             // per-assistant shadow row, which carries the toggle state the UI needs.
             if (currentOrgId) {
-                const WORKSPACE_BACKED = ['canva', 'threads'] as const;
+                const WORKSPACE_BACKED = ['canva', 'threads', 'youtube'] as const;
                 const rows = await db.select({
                     id: workspaceIntegrations.id,
                     provider: workspaceIntegrations.provider,

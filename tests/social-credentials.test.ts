@@ -14,13 +14,24 @@
 // Pure logic — no DB required.
 
 import assert from 'node:assert';
-import { chooseCredentialSource, WORKSPACE_BACKED_PLATFORMS, THREADS_TEXT_MAX, type ConnectionRow } from '../src/utils/social-publish';
+import {
+    chooseCredentialSource, WORKSPACE_BACKED_PLATFORMS, THREADS_TEXT_MAX,
+    youtubeMetaFromCaption, publishYouTube, YOUTUBE_TITLE_MAX,
+    type ConnectionRow,
+} from '../src/utils/social-publish';
 import { normalizePlatform, platformFormat, PLATFORM_FORMATS } from '../src/config/platform-formats';
 import { AUTONOMOUS_DRAFT_PLATFORMS } from '../src/utils/publish-policy';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
     try { fn(); passed++; console.log(`  ✓ ${name}`); }
+    catch (err) { console.error(`  ✗ ${name}\n    ${(err as Error).message}`); process.exitCode = 1; }
+}
+
+// Async variant — a rejected promise inside the sync `check` above would be swallowed as an
+// unhandled rejection and the test would report a false pass.
+async function checkAsync(name: string, fn: () => Promise<void>): Promise<void> {
+    try { await fn(); passed++; console.log(`  ✓ ${name}`); }
     catch (err) { console.error(`  ✗ ${name}\n    ${(err as Error).message}`); process.exitCode = 1; }
 }
 
@@ -143,4 +154,68 @@ check('Threads is drafted autonomously and resolves to its own format', () => {
     assert.notEqual(platformFormat('threads').label, PLATFORM_FORMATS.instagram.label);
 });
 
-console.log(`\n${passed} passed`);
+// ── YouTube wiring (Phase 3) ────────────────────────────────────────────────
+
+check('YouTube is video-only and never text-fallback', () => {
+    const f = platformFormat('youtube');
+    assert.equal(f.mediaKind, 'video');
+    assert.equal(f.mediaMandatory, true);
+    assert.equal(f.defaultPostFormat, 'video');
+});
+
+check('every image platform is tagged mediaKind image', () => {
+    // Guards the inverse of the YouTube case: mis-tagging an image platform as video would make
+    // the composer demand a video file for, say, Instagram.
+    for (const p of ['instagram', 'facebook', 'linkedin', 'x', 'threads'] as const) {
+        assert.equal(PLATFORM_FORMATS[p].mediaKind, 'image', p);
+    }
+});
+
+check('YouTube is NOT autonomously drafted', () => {
+    // Deliberate: every drafter produces stills, so an autonomous YouTube draft could never
+    // publish. If this ever flips, the drafter must be able to produce video first.
+    assert.equal(AUTONOMOUS_DRAFT_PLATFORMS.includes('youtube' as never), false);
+});
+
+// Top-level await isn't available under tsx's cjs transform, so the async checks run in a
+// main() that the runner awaits before printing the summary.
+async function asyncChecks(): Promise<void> {
+    await checkAsync('publishing YouTube without a video fails instead of uploading nothing', async () => {
+        // Pure guard — returns before any network call, so this is safe without credentials.
+        const res = await publishYouTube({ title: 't', description: 'd', tags: [] }, 'token', null);
+        assert.equal(res.ok, false);
+        if (res.ok) return;
+        assert.match(res.error, /require a video/i);
+    });
+}
+
+check('caption first line becomes the title, whole caption the description', () => {
+    const m = youtubeMetaFromCaption('Cold brew season\nOur new single-origin is here.', '#coffee #cold');
+    assert.equal(m.title, 'Cold brew season');
+    assert.match(m.description, /single-origin/);
+    assert.deepEqual(m.tags, ['coffee', 'cold']);
+});
+
+check('an empty caption still yields a usable title', () => {
+    // The publisher lets YouTube through with no caption, so the driver must not produce an
+    // empty title — YouTube rejects that.
+    assert.equal(youtubeMetaFromCaption('', '').title, 'New video');
+    assert.equal(youtubeMetaFromCaption('   \n  \n', '').title, 'New video');
+});
+
+check('titles are capped and the Shorts marker still fits', () => {
+    const long = 'x'.repeat(200);
+    assert.equal(youtubeMetaFromCaption(long, '').title.length, YOUTUBE_TITLE_MAX);
+    const shorts = youtubeMetaFromCaption(long, '', 'shorts');
+    assert.ok(shorts.title.length <= YOUTUBE_TITLE_MAX, `got ${shorts.title.length}`);
+    assert.match(shorts.title, /#Shorts$/, 'the marker must survive truncation, not be cut off');
+});
+
+check('the Shorts marker is not duplicated when already present', () => {
+    const m = youtubeMetaFromCaption('Behind the bar #shorts', '', 'shorts');
+    assert.equal((m.title.match(/#shorts/gi) || []).length, 1, m.title);
+});
+
+asyncChecks().then(() => {
+    console.log(`\n${passed} passed`);
+});

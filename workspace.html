@@ -5935,7 +5935,10 @@ function gpwTogglePlatform(btn) {
 }
 
 // ── Per-platform limits (mirrors CHAR_LIMITS in platform-post-preview.js) ────────────────────────
-const _GPW_CHAR_LIMITS = { instagram: 2200, facebook: 63206, linkedin: 3000, x: 280, twitter: 280, threads: 500 };
+const _GPW_CHAR_LIMITS = { instagram: 2200, facebook: 63206, linkedin: 3000, x: 280, twitter: 280, threads: 500, youtube: 5000 };
+// Display names for the counter chips. Only needed where naive capitalisation is wrong
+// ('Youtube', 'X'); anything absent falls back to capitalising the service name.
+const _GPW_PLATFORM_LABELS = { x: 'X', twitter: 'X', youtube: 'YouTube', linkedin: 'LinkedIn' };
 
 // Re-render the constraint-driven layer for Write-your-own: a counter chip per selected platform
 // plus a live, publish-accurate preview. Called on every platform / caption / hashtag / media change,
@@ -5959,15 +5962,21 @@ function gpwRefreshDynamic() {
     const combinedLen = (caption + (hashtags ? '\n\n' + hashtags : '')).length;
     if (meta) {
         meta.classList.remove('hidden');
+        const hasVideo = assets.some(a => a?.assetType === 'video');
         meta.innerHTML = platforms.map(p => {
             const limit = _GPW_CHAR_LIMITS[p] || null;
+            // Media requirements differ by KIND, not just presence: Instagram needs an image and
+            // YouTube needs a video, and attaching the wrong one is a publish failure. Mirrors
+            // mediaMandatory + mediaKind in src/config/platform-formats.ts.
             const needsImg = p === 'instagram' && !assets.length;
+            const needsVideo = p === 'youtube' && !hasVideo;
             let cls = 'border-gray-200 text-gray-600 bg-gray-50';
             let detail = limit ? `${combinedLen}/${limit}` : `${combinedLen} chars`;
             if (limit && combinedLen > limit) cls = 'border-red-300 text-red-700 bg-red-50 font-semibold';
             else if (limit && combinedLen > limit * 0.9) cls = 'border-amber-300 text-amber-700 bg-amber-50';
+            else if (needsVideo) { cls = 'border-red-300 text-red-700 bg-red-50 font-semibold'; detail = 'needs a video'; }
             else if (needsImg) { cls = 'border-amber-300 text-amber-700 bg-amber-50'; detail = 'needs an image'; }
-            const name = p === 'x' ? 'X' : p.charAt(0).toUpperCase() + p.slice(1);
+            const name = _GPW_PLATFORM_LABELS[p] || (p.charAt(0).toUpperCase() + p.slice(1));
             return `<span class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg border ${cls}">${name} · ${detail}</span>`;
         }).join('');
     }

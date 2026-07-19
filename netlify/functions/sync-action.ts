@@ -53,7 +53,7 @@ import { actionItems } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logApiCall } from '../../src/utils/vault';
 import { getFreshAccessToken, getIntegration, IntegrationError, providerLabel } from '../../src/utils/workspace-integrations';
-import { publishThreads, THREADS_TEXT_MAX } from '../../src/utils/social-publish';
+import { publishThreads, THREADS_TEXT_MAX, publishYouTube, YOUTUBE_TITLE_MAX, YOUTUBE_DESCRIPTION_MAX } from '../../src/utils/social-publish';
 import { sendGmailMessage } from '../../src/utils/gmail';
 import { injectAiFooter } from '../../src/utils/ai-email-footer';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -740,8 +740,6 @@ async function handleTiktokUploadVideo(db: Db, userId: number, organisationId: n
 
 // ── YouTube: resumable upload (Shorts or long-form) with SEO metadata ─────────
 
-const YOUTUBE_TITLE_MAX = 100;
-const YOUTUBE_DESCRIPTION_MAX = 5000;
 
 interface YoutubeUploadPayload {
     videoUrl?: unknown;
@@ -775,39 +773,15 @@ async function handleYoutubeUploadVideo(db: Db, userId: number, organisationId: 
 
     const { accessToken } = await getFreshAccessToken(db, organisationId, 'youtube');
 
-    // 1. Open the resumable upload session with the SEO metadata.
-    const initRes = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json; charset=UTF-8' },
-        body: JSON.stringify({
-            snippet: { title, description, tags, categoryId: '22' }, // 22 = People & Blogs (safe default)
-            status: { privacyStatus: 'public', selfDeclaredMadeForKids: false },
-        }),
-    });
-    await logApiCall(db, { userId, endpoint: 'googleapis.com/upload/youtube/v3/videos', httpStatus: initRes.status });
-    const uploadUrl = initRes.headers.get('location');
-    if (!initRes.ok || !uploadUrl) {
-        const err: { error?: { message?: string } } = await initRes.json().catch(() => ({}));
-        return json(502, { error: `YouTube rejected the upload session${err.error?.message ? `: ${err.error.message}` : '.'}` });
-    }
+    const result = await publishYouTube(
+        { title, description, tags, format: isShorts ? 'shorts' : undefined },
+        accessToken,
+        { url: videoUrl, mimeType: 'video/mp4' },
+    );
+    await logApiCall(db, { userId, endpoint: 'googleapis.com/upload/youtube/v3/videos', httpStatus: result.ok ? 200 : result.status });
+    if (!result.ok) return json(502, { error: `YouTube rejected the upload: ${result.error}` });
 
-    // 2. Stream the video bytes into the session.
-    const videoRes = await fetch(videoUrl);
-    if (!videoRes.ok) return json(502, { error: 'Could not fetch the video file from storage — try again or re-attach the video.' });
-    const videoBytes = Buffer.from(await videoRes.arrayBuffer());
-
-    const putRes = await fetch(uploadUrl, {
-        method: 'PUT',
-        headers: { 'Content-Type': videoRes.headers.get('content-type') ?? 'video/mp4', 'Content-Length': String(videoBytes.byteLength) },
-        body: videoBytes,
-    });
-    await logApiCall(db, { userId, endpoint: 'googleapis.com/upload/youtube/v3/videos (bytes)', httpStatus: putRes.status });
-    const videoData: { id?: string; error?: { message?: string } } = await putRes.json().catch(() => ({}));
-    if (!putRes.ok || !videoData.id) {
-        return json(502, { error: `YouTube rejected the video upload${videoData.error?.message ? `: ${videoData.error.message}` : '.'}` });
-    }
-
-    return json(200, { success: true, message: `${isShorts ? 'Short' : 'Video'} "${title}" uploaded to YouTube.`, platformPostId: videoData.id });
+    return json(200, { success: true, message: `${isShorts ? 'Short' : 'Video'} "${title}" uploaded to YouTube.`, platformPostId: result.id });
 }
 
 // ── Email: send a meeting follow-up to attendees from the user's inbox ─────────

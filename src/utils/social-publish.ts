@@ -81,6 +81,36 @@ export async function resolvePostImage(db: any, contentAssetIds: unknown): Promi
     return null;
 }
 
+export interface PostVideo { url: string; mimeType: string; }
+
+// First VIDEO asset attached to the post → a fetchable URL (presigned R2 or external).
+// Returns null when the post carries no video, which for YouTube is a hard publish failure
+// rather than a fall-back-to-text case (see resolvePostImage for the image equivalent).
+export async function resolvePostVideo(db: any, contentAssetIds: unknown): Promise<PostVideo | null> {
+    const ids = Array.isArray(contentAssetIds)
+        ? contentAssetIds.map(Number).filter(Number.isFinite)
+        : [];
+    if (!ids.length) return null;
+
+    const rows = await db.select({
+        assetType:  contentAssets.assetType,
+        mimeType:   contentAssets.mimeType,
+        storageKey: contentAssets.storageKey,
+        externalUrl: contentAssets.externalUrl,
+    }).from(contentAssets).where(inArray(contentAssets.id, ids));
+
+    const vid = rows.find((r: any) => (r.assetType ?? '').toLowerCase() === 'video' && (r.storageKey || r.externalUrl));
+    if (!vid) return null;
+    const mimeType = vid.mimeType || 'video/mp4';
+    if (vid.storageKey) {
+        // Longer TTL than the image presign: YouTube's resumable upload streams the whole file,
+        // and a large video can outlive a 10-minute URL mid-transfer.
+        try { return { url: await presignR2Get(vid.storageKey, 3600), mimeType }; } catch { /* fall through */ }
+    }
+    if (vid.externalUrl) return { url: vid.externalUrl, mimeType };
+    return null;
+}
+
 // Refresh an X OAuth2 access token from the stored refresh token; persists and returns
 // the new token, or null if refresh isn't possible (no creds / no refresh token / error).
 export async function refreshXToken(db: any, vaultRefKey: string): Promise<string | null> {
@@ -420,6 +450,86 @@ export async function publishThreads(
         return { ok: false, status: publishRes.status, error: publishData?.error?.message || `Threads publish error (${publishRes.status})` };
     }
     return { ok: true, id: String(publishData.id) };
+}
+
+// ── YouTube ───────────────────────────────────────────────────────────────────────────────────────
+// Resumable upload: POST the snippet/status metadata to open a session, then PUT the bytes to the
+// session URL returned in the Location header.
+//
+// Shared with sync-action.ts's youtube_upload_video handler.
+//
+// SCALE CAVEAT: the bytes are buffered fully in memory before the PUT, so a large video can exhaust
+// a serverless function's memory or wall-clock budget. That ceiling is inherited from the original
+// handler and is acceptable for the manual-upload flow (short marketing clips); genuine long-form
+// uploads need a chunked/streamed rewrite before they can be trusted.
+
+export const YOUTUBE_TITLE_MAX = 100;
+export const YOUTUBE_DESCRIPTION_MAX = 5000;
+
+export interface YouTubeMeta {
+    title: string;
+    description: string;
+    tags: string[];
+    /** 'shorts' appends the #Shorts marker YouTube uses to classify the upload. */
+    format?: string;
+}
+
+/**
+ * Split a composer caption into a YouTube title + description. The composer has one caption
+ * field, so the first non-empty line becomes the title (capped at 100) and the whole caption
+ * becomes the description — the same convention creators use when cross-posting.
+ */
+export function youtubeMetaFromCaption(caption: string, hashtags: string, format?: string): YouTubeMeta {
+    const text = (caption || '').trim();
+    const firstLine = text.split('\n').map(l => l.trim()).find(Boolean) || 'New video';
+    let title = firstLine.slice(0, YOUTUBE_TITLE_MAX);
+    if (String(format ?? '').toLowerCase() === 'shorts' && !/#shorts/i.test(title)) {
+        title = `${title.slice(0, YOUTUBE_TITLE_MAX - 8)} #Shorts`.trim();
+    }
+    const description = [text, hashtags].filter(Boolean).join('\n\n').slice(0, YOUTUBE_DESCRIPTION_MAX);
+    const tags = (hashtags || '').split(/[\s,]+/).map(t => t.replace(/^#/, '').trim()).filter(Boolean).slice(0, 30);
+    return { title, description, tags, format };
+}
+
+export async function publishYouTube(meta: YouTubeMeta, token: string, video: PostVideo | null): Promise<DriverResult> {
+    if (!video) return { ok: false, status: null, error: 'YouTube posts require a video — attach one before publishing.' };
+
+    // 1. Open the resumable session with the SEO metadata.
+    const initRes = await fetch('https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=UTF-8' },
+        body: JSON.stringify({
+            snippet: {
+                title: meta.title.slice(0, YOUTUBE_TITLE_MAX),
+                description: meta.description.slice(0, YOUTUBE_DESCRIPTION_MAX),
+                tags: meta.tags.slice(0, 30),
+                categoryId: '22', // People & Blogs (safe default)
+            },
+            status: { privacyStatus: 'public', selfDeclaredMadeForKids: false },
+        }),
+    });
+    const uploadUrl = initRes.headers.get('location');
+    if (!initRes.ok || !uploadUrl) {
+        const err: any = await initRes.json().catch(() => ({}));
+        return { ok: false, status: initRes.status, error: err?.error?.message || `YouTube upload session error (${initRes.status})` };
+    }
+
+    // 2. Stream the bytes into the session.
+    const videoRes = await fetch(video.url);
+    if (!videoRes.ok) {
+        return { ok: false, status: videoRes.status, error: 'Could not fetch the video from storage — re-attach it and try again.' };
+    }
+    const bytes = Buffer.from(await videoRes.arrayBuffer());
+    const putRes = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': video.mimeType || 'video/mp4', 'Content-Length': String(bytes.byteLength) },
+        body: bytes,
+    });
+    const data: any = await putRes.json().catch(() => ({}));
+    if (!putRes.ok || !data?.id) {
+        return { ok: false, status: putRes.status, error: data?.error?.message || `YouTube upload error (${putRes.status})` };
+    }
+    return { ok: true, id: String(data.id) };
 }
 
 // ── Facebook (Graph API) ──────────────────────────────────────────────────────────────────────────

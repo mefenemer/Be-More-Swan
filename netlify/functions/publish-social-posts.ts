@@ -1,6 +1,6 @@
 // netlify/functions/publish-social-posts.ts
-// Publish due LinkedIn, X (Twitter) & Threads posts every minute — the non-Instagram half of the
-// social publisher. Mirrors publish-instagram's orchestration (claim FOR UPDATE SKIP
+// Publish due LinkedIn, X (Twitter), Threads & YouTube posts every minute — the non-Instagram half
+// of the social publisher. Mirrors publish-instagram's orchestration (claim FOR UPDATE SKIP
 // LOCKED → 'publishing' → API call → 'published' | retry/backoff | 'failed'), minus the
 // Meta media-container flow. Posts the attached image when present (best-effort; falls
 // back to text-only if media upload fails). Refreshes expired X tokens on 401 and retries.
@@ -14,7 +14,7 @@ import { inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, rateLimitStates, publishCronLog } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
-import { resolvePostImage, resolveSocialCredentials, publishX, publishLinkedIn, publishThreads, type DriverResult } from '../../src/utils/social-publish';
+import { resolvePostImage, resolvePostVideo, resolveSocialCredentials, publishX, publishLinkedIn, publishThreads, publishYouTube, youtubeMetaFromCaption, type DriverResult } from '../../src/utils/social-publish';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -22,7 +22,7 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 const BATCH = 100;
 const BACKOFF_MINS = [2, 8, 30];
 const MAX_ATTEMPTS = 3;
-const LABEL: Record<string, string> = { linkedin: 'LinkedIn', x: 'X (Twitter)', threads: 'Threads' };
+const LABEL: Record<string, string> = { linkedin: 'LinkedIn', x: 'X (Twitter)', threads: 'Threads', youtube: 'YouTube' };
 // A row left in 'publishing' longer than this was orphaned by a timed-out tick — reclaim it.
 const STALE_PUBLISHING_MINS = 10;
 
@@ -47,7 +47,7 @@ export default withLambda(async () => {
     // are retried instead of sitting un-published forever (nothing else re-selects 'publishing').
     await db.execute(
         `UPDATE scheduled_posts SET status = 'scheduled', retry_at = NULL, updated_at = now()
-         WHERE status = 'publishing' AND platform IN ('linkedin','x','threads')
+         WHERE status = 'publishing' AND platform IN ('linkedin','x','threads','youtube')
            AND updated_at < now() - interval '${STALE_PUBLISHING_MINS} minutes'`
     );
 
@@ -56,7 +56,7 @@ export default withLambda(async () => {
                 attempt_count, publish_date, platform, content_asset_ids, assistant_id
          FROM scheduled_posts
          WHERE status = 'scheduled'
-           AND platform IN ('linkedin','x','threads')
+           AND platform IN ('linkedin','x','threads','youtube')
            AND publish_date <= now()
            AND (retry_at IS NULL OR retry_at <= now())
          ORDER BY publish_date
@@ -85,10 +85,15 @@ export default withLambda(async () => {
             let token = creds.token;
 
             const text = [post.caption, post.hashtags].filter(Boolean).join('\n\n').trim();
-            if (!text) throw new Error('Post has no text to publish.');
+            // YouTube carries its text as video metadata, so an empty caption is survivable there
+            // (the driver falls back to a placeholder title); every other platform needs body text.
+            if (!text && post.platform !== 'youtube') throw new Error('Post has no text to publish.');
 
-            // Attached image (best-effort — text-only if absent/unresolvable).
-            const image = await resolvePostImage(db, post.content_asset_ids).catch(() => null);
+            // Attached image (best-effort — text-only if absent/unresolvable). Skipped for
+            // video-only platforms, which resolve their media below instead.
+            const image = post.platform === 'youtube'
+                ? null
+                : await resolvePostImage(db, post.content_asset_ids).catch(() => null);
 
             // Explicit per-platform dispatch. This was `if (x) … else → LinkedIn`; a catch-all
             // else silently publishes every newly-claimed platform to LinkedIn, so each platform
@@ -105,6 +110,21 @@ export default withLambda(async () => {
                 result = await publishLinkedIn(text, token, creds.externalUserId, image);
             } else if (post.platform === 'threads') {
                 result = await publishThreads(text, token, creds.externalUserId, image);
+            } else if (post.platform === 'youtube') {
+                // Video-only: a YouTube draft with no video asset can never publish, so fail it
+                // permanently rather than retrying a post that will never acquire one.
+                const video = await resolvePostVideo(db, post.content_asset_ids).catch(() => null);
+                if (!video) {
+                    await handleFailure(db, post, {
+                        httpStatus: null,
+                        errorMessage: 'This YouTube post has no video attached — add one and reschedule it.',
+                        isRetryable: false,
+                    }, now);
+                    failed++;
+                    return;
+                }
+                const meta = youtubeMetaFromCaption(post.caption ?? '', post.hashtags ?? '');
+                result = await publishYouTube(meta, token, video);
             } else {
                 throw new Error(`No publish driver for platform '${post.platform}'.`);
             }

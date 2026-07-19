@@ -155,6 +155,38 @@ const PLATFORMS = [
             note: 'If any of these steps are incomplete, Meta will show an error instead of connecting. Finish the checklist, then come back and try again.',
         },
     },
+    {
+        id: 'YouTube',
+        oauthPlatform: true,
+        // Like Threads, YouTube's token lives in workspace_integrations via the universal router.
+        oauthUrl: '/api/oauth/youtube/connect',
+        emoji: '▶',
+        iconBg: 'bg-red-600',
+        iconText: 'text-white',
+        label: 'YouTube',
+        tagline: 'Upload videos and Shorts to your channel.',
+        handleLabel: 'YouTube Channel URL',
+        handlePlaceholder: 'https://youtube.com/@yourchannel',
+        handleHelp: 'The URL of the channel you want this assistant to upload to.',
+        tokenLabel: 'YouTube Access Token',
+        tokenHelp: 'Issued automatically when you connect — no manual token needed.',
+        steps: [
+            { text: 'Click <strong>Connect</strong> and sign in with the Google account that owns the channel.' },
+            { text: 'Approve the upload permission so videos can be published on your behalf.' },
+        ],
+        // Set expectations up front: YouTube is the one platform the assistant cannot draft for,
+        // because every drafter produces still images rather than video.
+        note: 'YouTube posts need a video file — attach one in the composer. Your assistant will not draft YouTube posts on its own.',
+        preConnect: {
+            intro: 'You\'ll be sent to Google to approve the connection. Check these first:',
+            steps: [
+                { text: 'Sign in with the Google account that <strong>owns the channel</strong> — an account with only viewing access cannot upload.' },
+                { text: 'Your channel must be <strong>verified</strong> to upload videos longer than 15 minutes.', url: 'https://www.youtube.com/verify' },
+                { text: 'When Google asks for permission to <strong>manage your YouTube videos</strong>, approve it — declining stops us from uploading.' },
+            ],
+            note: 'Google may warn that the app is not verified while our review is pending. Choose "Advanced" → "Go to Be More Swan" to continue.',
+        },
+    },
 ];
 
 // ── Inbound source catalogue ─────────────────────────────────────
