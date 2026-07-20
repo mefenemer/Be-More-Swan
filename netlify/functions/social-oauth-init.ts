@@ -1,6 +1,7 @@
 // netlify/functions/social-oauth-init.ts
 // US-SMM-4.1.1: OAuth 2.0 initiation for LinkedIn and X (Twitter).
 // GET ?platform=linkedin|x  — validates session, builds redirect URL with CSRF state.
+// The callback redirect_uri carries no query string; `platform` travels inside the signed state.
 // AC1.1.2: CSRF token stored server-side in vault with 10-minute TTL.
 // AC1.1.3: LinkedIn uses minimum required scopes only.
 
@@ -43,7 +44,10 @@ export default withLambda(async (event) => {
     const csrf = randomBytes(32).toString('hex');
     const expiresAt = Date.now() + CSRF_TTL_MS;
 
-    const callbackUri = `${baseUrl}/.netlify/functions/social-oauth-callback?platform=${platform}`;
+    // No query string: LinkedIn and X match the registered callback as an exact string, and a
+    // redirect URL carrying parameters is awkward-to-impossible to register in their portals.
+    // `platform` rides in the signed `state` instead (see buildState below).
+    const callbackUri = `${baseUrl}/.netlify/functions/social-oauth-callback`;
 
     let authUrl: string;
 
@@ -55,8 +59,14 @@ export default withLambda(async (event) => {
         const csrfKey = `oauth_csrf:${userId}:linkedin`;
         await storeSecret(db, csrfKey, { csrf, expiresAt, organisationId: String(organisationId), assistantId });
 
-        // AC1.1.3: minimum required scopes only
-        const scopes = 'r_organization_social,w_organization_social,r_basicprofile';
+        // AC1.1.3: minimum required scopes only.
+        // Space-delimited per RFC 6749 §3.3 — a comma-joined list is rejected outright.
+        // These match the app's approved products (Sign In with LinkedIn using OpenID Connect +
+        // Share on LinkedIn). The previous r_organization_social / w_organization_social /
+        // r_basicprofile set needs the Community Management product, which the app does not have,
+        // so LinkedIn refused the whole authorization. Publishing already posts as the member
+        // (urn:li:person via /v2/ugcPosts), which is exactly what w_member_social grants.
+        const scopes = 'openid profile email w_member_social';
         // State carries only non-sensitive routing info; CSRF is validated server-side
         const state = buildState({ platform, userId: String(userId), csrf });
         authUrl = `https://www.linkedin.com/oauth/v2/authorization?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(callbackUri)}&scope=${encodeURIComponent(scopes)}&state=${state}`;

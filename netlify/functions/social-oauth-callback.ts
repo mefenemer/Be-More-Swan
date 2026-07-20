@@ -1,6 +1,6 @@
 // netlify/functions/social-oauth-callback.ts
 // US-SMM-4.1.1: OAuth 2.0 callback/token exchange for LinkedIn and X (Twitter).
-// GET ?platform=linkedin|x&code=...&state=...
+// GET ?code=...&state=...   — the platform rides in `state` (see social-oauth-init.ts).
 // AC1.1.2: CSRF verified against server-side vault entry with 10-minute TTL.
 
 import { Handler } from '@netlify/functions';
@@ -22,11 +22,15 @@ function parseState(raw: string): Record<string, string> | null {
 }
 
 export default withLambda(async (event) => {
-    const platform = event.queryStringParameters?.platform;
-
     const baseUrl = resolveBaseUrl(event.headers);
     if (!baseUrl) return { statusCode: 500, body: 'Server misconfigured.' };
     const { code, state: rawState, error } = event.queryStringParameters ?? {};
+
+    // The platform now travels in `state`, so the redirect_uri stays free of query parameters —
+    // LinkedIn and X both match the registered callback as an exact string. The query-param form
+    // is still honoured so any authorization already in flight (or an older registered callback
+    // URL) completes rather than dead-ending.
+    const platform = parseState(rawState ?? '')?.platform ?? event.queryStringParameters?.platform;
 
     if (error) {
         return { statusCode: 302, headers: { Location: `/workspace.html?oauth_error=access_denied&platform=${platform}` }, body: '' };
@@ -64,7 +68,11 @@ export default withLambda(async (event) => {
         }
     }
 
-    const callbackUri = `${baseUrl}/.netlify/functions/social-oauth-callback?platform=${platform}`;
+    // Must be byte-identical to the redirect_uri sent at authorize time, or the token exchange is
+    // rejected. If this request arrived on the legacy query-param URL, echo that form back.
+    const callbackUri = event.queryStringParameters?.platform
+        ? `${baseUrl}/.netlify/functions/social-oauth-callback?platform=${platform}`
+        : `${baseUrl}/.netlify/functions/social-oauth-callback`;
 
     // ── LinkedIn ──────────────────────────────────────────────────────────────
     if (platform === 'linkedin') {
@@ -81,12 +89,18 @@ export default withLambda(async (event) => {
             return { statusCode: 302, headers: { Location: `/workspace.html?oauth_error=token_exchange&platform=linkedin` }, body: '' };
         }
 
-        // Fetch basic profile to get URN for future API calls
-        const profileRes = await fetch('https://api.linkedin.com/v2/me', {
+        // Identify the member. /v2/me needs r_liteprofile (a legacy scope the app is not approved
+        // for); under OpenID Connect the member id is `sub` from /v2/userinfo. This mirrors
+        // resolveLinkedInAuthor() in social-publish.ts, which builds urn:li:person:<sub>.
+        const profileRes = await fetch('https://api.linkedin.com/v2/userinfo', {
             headers: { Authorization: `Bearer ${tokenData.access_token}` },
         });
-        const profile: { id?: string; localizedFirstName?: string; localizedLastName?: string } = await profileRes.json();
-        const linkedinId = profile.id ?? 'unknown';
+        const profile: { sub?: string; name?: string; email?: string } = await profileRes.json();
+        const linkedinId = profile.sub;
+        if (!linkedinId) {
+            console.error('[social-oauth-callback] LinkedIn /v2/userinfo returned no sub');
+            return { statusCode: 302, headers: { Location: `/workspace.html?oauth_error=token_exchange&platform=linkedin` }, body: '' };
+        }
 
         // US1 AC1.3: reject if this LinkedIn tenant is already live in another workspace (before storing the token).
         const linkedinCollision = await findTenantCollision(db, { serviceName: 'linkedin', externalUserId: linkedinId, organisationId });
@@ -108,7 +122,7 @@ export default withLambda(async (event) => {
             .where(and(eq(systemConnections.organisationId, organisationId), eq(systemConnections.serviceName, 'linkedin')))
             .limit(1);
 
-        const scopes = 'r_organization_social,w_organization_social,r_basicprofile';
+        const scopes = 'openid profile email w_member_social'; // keep in step with social-oauth-init.ts
         if (existing) {
             await db.update(systemConnections).set({ vaultRefKey: refKey, externalUserId: linkedinId, tokenExpiresAt, status: 'active', isActive: true, scopes, ...(assistantId ? { assistantId } : {}), updatedAt: new Date() }).where(eq(systemConnections.id, existing.id));
         } else {
@@ -172,7 +186,7 @@ export default withLambda(async (event) => {
             .where(and(eq(systemConnections.organisationId, organisationId), eq(systemConnections.serviceName, 'x')))
             .limit(1);
 
-        const scopes = 'tweet.read,tweet.write,users.read,offline.access';
+        const scopes = 'tweet.read tweet.write users.read offline.access'; // keep in step with social-oauth-init.ts
         if (existing) {
             await db.update(systemConnections).set({ vaultRefKey: refKey, externalUserId: xUsername || xUserId, tokenExpiresAt, status: 'active', isActive: true, scopes, ...(assistantId ? { assistantId } : {}), updatedAt: new Date() }).where(eq(systemConnections.id, existing.id));
         } else {
