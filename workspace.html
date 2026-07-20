@@ -7407,11 +7407,15 @@ async function gpSubmitReject() {
       // Step 1 ("Choose your plan") opens the on-demand plan picker — the billing view can't
       // sell a plan to a no-plan user, so the wizard owns plan selection now.
       if (key === 'plan') {
-        btn.addEventListener('click', () => window.openPlanSelection?.());
+        btn.addEventListener('click', () => { collapse(); window.openPlanSelection?.(); });
         return;
       }
       if (!view) return;
       btn.addEventListener('click', () => {
+        // Every step click routes the main area, so the drawer always gets out of the way —
+        // it used to stay open as a companion (US1 AC2), which left it pinned over the very
+        // page the click had just navigated to (e.g. Hire a New Assistant).
+        collapse();
         // The compliance step routes to My Account → "My Agreements" (NOT Profile Information),
         // where the user reviews and accepts every outstanding agreement in one place. Accepting
         // them all auto-advances the wizard (see _onAgreementsComplete in initMyAgreements).
@@ -7429,16 +7433,6 @@ async function gpSubmitReject() {
           window.routeToAssistantDetail(data.primaryAssistantId);
           return;
         }
-        // "Business information" (assets.html) renders a centred form whose fields can sit
-        // directly under the fixed-width drawer strip, so — unlike the other steps, which
-        // stay open as a companion per US1 AC2 — this one must collapse on click or the
-        // fields it just routed to are left unreachable behind it.
-        if (key === 'business_info') {
-          collapse();
-          if (window.loadView) window.loadView(view);
-          return;
-        }
-        // US1 AC2 — route the main area, but keep the drawer open as a companion.
         if (window.loadView) window.loadView(view);
       });
     });
@@ -7448,6 +7442,7 @@ async function gpSubmitReject() {
     body.querySelectorAll('.setup-wizard-substep').forEach(btn => {
       const subkey = btn.getAttribute('data-subkey');
       btn.addEventListener('click', () => {
+        collapse();
         if (['tos', 'dpa', 'prohibited_use', 'conformity'].includes(subkey)) {
           Promise.resolve(window.loadView?.('settings')).then(() => window.activateSettingsTab?.('agreements'));
           return;
@@ -7465,6 +7460,7 @@ async function gpSubmitReject() {
     body.querySelectorAll('.setup-wizard-draft-resume').forEach(btn => {
       btn.addEventListener('click', async () => {
         const draftId = Number(btn.getAttribute('data-draft-id'));
+        collapse();
         try {
           const r = await fetch(`/.netlify/functions/onboarding-draft?id=${draftId}`);
           const d = r.ok ? (await r.json()).draft : null;

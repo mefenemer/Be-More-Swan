@@ -609,6 +609,17 @@ export default withLambda(async (event) => {
     // On attempt ≥ 3 (Stripe default final attempt): pause assistants immediately.
     if (stripeEvent.type === 'invoice.payment_failed') {
         const invoice = stripeEvent.data.object as Stripe.Invoice;
+
+        // A fully-discounted invoice (100%-off coupon) has nothing to collect, so a
+        // "failure" here is not a billing problem — there is no amount owed and no card
+        // to fix. Gating on it is a one-way door: recovery only runs on invoice.paid
+        // (see above), and a £0 subscription never produces a payable invoice to recover
+        // from, so the plan would sit in past_due forever.
+        if (!invoice.amount_due) {
+            console.warn('[stripe-webhook] Ignoring invoice.payment_failed with amount_due=0 (fully-discounted invoice):', invoice.id);
+            return { statusCode: 200, body: JSON.stringify({ received: true, ignored: 'zero_amount_due' }) };
+        }
+
         const userId  = await _resolveUserId(invoice.customer as string);
         if (userId) {
             const attemptCount = (invoice as any).attempt_count as number || 1;
