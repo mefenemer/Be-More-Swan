@@ -82,20 +82,20 @@ const PLATFORMS = [
         iconBg: 'bg-blue-700',
         iconText: 'text-white',
         label: 'LinkedIn',
-        tagline: 'Share thought leadership, company updates, and job posts.',
-        handleLabel: 'LinkedIn Page or Profile URL',
-        handlePlaceholder: 'https://linkedin.com/company/yourcompany',
-        handleHelp: 'Your LinkedIn Company Page URL, or your personal profile URL if posting as yourself.',
+        tagline: 'Share thought leadership and company updates from your own feed.',
+        handleLabel: 'LinkedIn Profile URL',
+        handlePlaceholder: 'https://linkedin.com/in/yourname',
+        handleHelp: 'Your personal LinkedIn profile URL — posts are published to your own feed.',
         tokenLabel: 'LinkedIn Access Token',
         tokenHelp: 'An OAuth 2.0 access token from the LinkedIn Developer Portal.',
         steps: [
             { text: 'Go to LinkedIn Developer Portal', url: 'https://www.linkedin.com/developers/apps/new' },
             { text: 'Click <strong>"Create App"</strong>. Give it a name and associate it with your Company Page.' },
-            { text: 'In the App, go to the <strong>"Auth"</strong> tab and request the following permissions: <code>r_liteprofile</code>, <code>w_member_social</code>, and <code>rw_company_admin</code>.' },
+            { text: 'In the App, go to the <strong>"Products"</strong> tab and add <strong>Sign In with LinkedIn using OpenID Connect</strong> and <strong>Share on LinkedIn</strong>. These grant <code>openid</code>, <code>profile</code>, <code>email</code> and <code>w_member_social</code>.' },
             { text: 'Go to the <strong>"OAuth 2.0 Tools"</strong> tab and click <strong>"Create token"</strong> with those scopes.' },
             { text: 'Copy the access token and paste it below.' },
         ],
-        note: 'To post on behalf of a Company Page, your LinkedIn account must be an Admin of that page.',
+        note: 'Posts are published to your personal LinkedIn feed. Posting to a Company Page needs LinkedIn’s Community Management access, which we have not been granted yet.',
     },
     {
         id: 'X',
@@ -1709,8 +1709,8 @@ function _intRenderBioChatPanel(draft) {
         <div class="flex items-start gap-3 p-5 border-b border-emerald-100">
             <div class="w-9 h-9 rounded-full bg-emerald-100 flex items-center justify-center shrink-0 text-emerald-700 font-bold text-sm">AI</div>
             <div class="flex-1 min-w-0">
-                <p class="text-sm font-semibold text-gray-900">Here are profile bios tailored to each platform. Edit any you like, then use <span class="font-bold">Sync Profile</span> to push the Facebook &amp; LinkedIn versions to your connected pages.</p>
-                <p class="text-xs text-gray-500 mt-1">Instagram bios must be pasted in manually — use Copy.</p>
+                <p class="text-sm font-semibold text-gray-900">Here are profile bios tailored to each platform. Edit any you like, then use <span class="font-bold">Sync Profile</span> to push the Facebook version to your connected Page.</p>
+                <p class="text-xs text-gray-500 mt-1">Instagram and LinkedIn bios must be pasted in manually — use Copy.</p>
             </div>
         </div>
         <div class="p-5 flex flex-col gap-3">

@@ -12,6 +12,7 @@ import { getSecret } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { LINKEDIN_ORGANISATION_ACCESS, LINKEDIN_MEMBER_ONLY_REASON } from '../../src/config/linkedin-capabilities';
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -131,7 +132,12 @@ export default withLambda(async (event) => {
         const secret = await getSecret(db, liConn.vaultRefKey);
         const token  = (secret as { token?: string } | null)?.token;
 
-        if (token) {
+        if (!LINKEDIN_ORGANISATION_ACCESS) {
+            // Without Community Management the organizationAcls / organizations calls below can
+            // only 403. Skip with the real reason rather than reporting "failed" or "you are not
+            // an admin of any organisation", which sends the user hunting for a problem on their end.
+            results.linkedin = { status: 'skipped', detail: LINKEDIN_MEMBER_ONLY_REASON };
+        } else if (token) {
             // Fetch the org URN via member roles API
             try {
                 const rolesRes = await fetch('https://api.linkedin.com/v2/organizationAcls?q=roleAssignee&role=ADMINISTRATOR&projection=(elements*(organization~(localizedName)))', {
