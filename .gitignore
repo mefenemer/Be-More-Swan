@@ -9,3 +9,7 @@ node_modules/
 # macOS finder metadata
 .DS_Store
 **/.DS_Store
+
+# Scratch scripts run from the repo root for node_modules resolution (one-off introspection,
+# debugging). The auto-commit hook sweeps anything untracked, so these need an explicit rule.
+.tmp-*
