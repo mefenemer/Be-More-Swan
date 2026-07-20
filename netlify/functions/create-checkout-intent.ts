@@ -115,8 +115,23 @@ export default withLambda(async (event) => {
       : LEGACY_NAME_TO_ROLEKEY[assistantName || ''] ?? null;
 
     if (resolvedRoleKey === 'social_media_manager') {
-      if (!onboardingContext?.target_audience || !onboardingContext?.content_pillars || !onboardingContext?.tone_of_voice || !onboardingContext?.primary_platforms?.length) {
-        return { statusCode: 400, body: JSON.stringify({ error: 'Missing required Social Media Manager context fields (Audience, Pillars, Tone, or Platforms).' }) };
+      // Keep in step with onboarding.ts and the wizard's * fields.
+      const REQUIRED_SMM_FIELDS: Array<[string, string]> = [
+        ['target_audience',   'Audience'],
+        ['content_pillars',   'Pillars'],
+        ['tone_of_voice',     'Tone'],
+        ['core_message',      'Core Message'],
+        ['cta',               'Primary CTA'],
+      ];
+      const missing = REQUIRED_SMM_FIELDS
+        .filter(([key]) => {
+          const v = (onboardingContext as Record<string, unknown> | undefined)?.[key];
+          return typeof v === 'string' ? !v.trim() : !v;
+        })
+        .map(([, label]) => label);
+      if (!onboardingContext?.primary_platforms?.length) missing.push('Platforms');
+      if (missing.length) {
+        return { statusCode: 400, body: JSON.stringify({ error: `Missing required Social Media Manager context fields (${missing.join(', ')}).` }) };
       }
     }
 
