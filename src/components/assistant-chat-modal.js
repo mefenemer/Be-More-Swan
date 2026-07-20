@@ -159,7 +159,7 @@
     showState('loading');
 
     el('bms-chat-backdrop').classList.add('ac-open');
-    document.body.style.overflow = 'hidden';
+    window.ScrollLock.lock('assistant-chat');
 
     state.escHandler = function (e) { if (e.key === 'Escape') closeAssistantChat(); };
     document.addEventListener('keydown', state.escHandler);
@@ -194,7 +194,7 @@
     if (!state.injected) return;
     if (state.chat && state.chat.destroy) { state.chat.destroy(); state.chat = null; }
     el('bms-chat-backdrop').classList.remove('ac-open');
-    document.body.style.overflow = '';
+    window.ScrollLock.release('assistant-chat');
     if (state.escHandler) { document.removeEventListener('keydown', state.escHandler); state.escHandler = null; }
   }
 

@@ -158,20 +158,12 @@
   }
 
   // Lock/unlock background page scroll so the site behind the modal can't be
-  // interacted with while it's open. The scroll container is <html> on these
-  // pages (body is a flex column), so lock the document element and body both.
-  // Restores whatever inline `overflow` each had before.
-  let _prevHtmlOverflow = '', _prevBodyOverflow = '';
-  function lockScroll() {
-    _prevHtmlOverflow = document.documentElement.style.overflow;
-    _prevBodyOverflow = document.body.style.overflow;
-    document.documentElement.style.overflow = 'hidden';
-    document.body.style.overflow = 'hidden';
-  }
-  function unlockScroll() {
-    document.documentElement.style.overflow = _prevHtmlOverflow;
-    document.body.style.overflow = _prevBodyOverflow;
-  }
+  // interacted with while it's open. Delegated to the shared refcounted manager
+  // (src/components/scroll-lock.js), which locks <html> and <body> both — the
+  // scroll container is <html> on these pages (body is a flex column) — and
+  // keeps the lock up if another overlay is also holding it.
+  function lockScroll() { window.ScrollLock.lock('assistant-detail'); }
+  function unlockScroll() { window.ScrollLock.release('assistant-detail'); }
 
   function close() {
     const modal = document.getElementById('assistant-detail-modal');

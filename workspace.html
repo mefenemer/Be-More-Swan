@@ -2,6 +2,9 @@
 <html lang="en">
 <head>
   <script src="./auth-check.js"></script>
+  <!-- Loaded in <head> (not with the body scripts) so window.ScrollLock exists before any
+       overlay or loadView call can reach for it. -->
+  <script src="/src/components/scroll-lock.js"></script>
   <script src="./session-timeout.js" defer></script>
   <script src="/src/i18n.js"></script>
   <meta charset="UTF-8">
@@ -1438,6 +1441,16 @@ function formatCurrency(amount, currency) {
       try {
         const response = await fetch(`./${route.file}?v=${VIEW_VERSION}`);
         if (!response.ok) throw new Error('Network component not found');
+
+        // Overlays rendered *inside* a view (the assistant profile drawer) lock page scroll
+        // while open, and their close handlers are the only thing that unlocks it. The
+        // innerHTML swap below destroys that markup without ever running the handler, so
+        // navigating away from an open drawer used to strand the lock and leave the next view
+        // (e.g. Business Information) unscrollable. Drop view-scoped locks on teardown.
+        // Body-level modals (chat, blog studio, assistant detail) survive the swap and keep
+        // their own locks — hence releaseScoped() rather than a blanket reset.
+        window.ScrollLock.releaseScoped();
+        document.body.classList.remove('brief-drawer-open');
 
         contentContainer.innerHTML = await response.text();
 

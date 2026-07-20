@@ -1332,7 +1332,10 @@ function _briefOpenChrome() {
     document.body.classList.add('brief-drawer-open');
     if (backdrop) { backdrop.style.display = 'block'; setTimeout(() => backdrop.style.opacity = '1', 10); }
     drawer.style.transform = 'translateX(0)';
-    document.body.style.overflow = 'hidden';
+    // Scoped: the drawer markup lives in assistant-detail.html, i.e. *inside* the swappable
+    // view, so navigating away destroys it without running _closeBriefDrawer. The scoped flag
+    // lets loadView drop this lock on teardown instead of stranding it.
+    window.ScrollLock.lock('brief-drawer', { scoped: true });
     const body = document.getElementById('brief-drawer-body');
     if (body) body.scrollTop = 0;
     _resizeBriefAutoGrow();
@@ -1547,7 +1550,7 @@ window._closeBriefDrawer = function() {
     if (drawer) drawer.style.transform = 'translateX(100%)';
     if (backdrop) { backdrop.style.opacity = '0'; setTimeout(() => { backdrop.style.display = 'none'; }, 250); }
     document.body.classList.remove('brief-drawer-open');
-    document.body.style.overflow = '';
+    window.ScrollLock.release('brief-drawer');
 };
 
 // ── Operational status pill (Epic 1 AC1.1.2) ──────────────────────────────────

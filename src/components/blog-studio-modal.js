@@ -1119,7 +1119,7 @@
     inject();
     state.assistantId = opts.assistantId != null ? opts.assistantId : null;
     el('bms-blog-backdrop').classList.add('bs-open');
-    document.body.style.overflow = 'hidden';
+    window.ScrollLock.lock('blog-studio');
 
     clearWorkspaceState();
     loadAssistants().then(function () {
@@ -1137,7 +1137,7 @@
     if (!state.injected) return;
     if (state.editor && state.editor.destroy) { state.editor.destroy(); state.editor = null; }
     el('bms-blog-backdrop').classList.remove('bs-open');
-    document.body.style.overflow = '';
+    window.ScrollLock.release('blog-studio');
   }
 
   window.openBlogStudio = openBlogStudio;
