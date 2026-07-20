@@ -8,6 +8,7 @@ import { scheduledPosts, aiAssistants, postIdeaSuggestions } from '../../db/sche
 import { resolvePostImage } from '../../src/utils/social-publish';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { displayCaption } from '../../src/utils/model-json';
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -82,7 +83,9 @@ export default withLambda(async (event) => {
                 archiveDeletesAt = new Date(deletesAt).toISOString();
                 daysRemaining = Math.max(0, Math.ceil((deletesAt - now) / (24 * 60 * 60 * 1000)));
             }
-            return { ...d, thumbnailUrl, archiveDeletesAt, daysRemaining };
+            // Older rows can hold a raw model reply (fenced JSON) in `caption` — unwrap it so the
+            // editor shows the copy, and an edit-and-save persists the repair.
+            return { ...d, caption: displayCaption(d.caption), thumbnailUrl, archiveDeletesAt, daysRemaining };
         }));
 
         return {

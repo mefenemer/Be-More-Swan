@@ -27,6 +27,7 @@ import {
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { displayCaption } from '../../src/utils/model-json';
 
 const _platformName = (p?: string | null): string => {
     if (!p) return '';
@@ -172,7 +173,7 @@ export default withLambda(async (event) => {
                 assistantName: p.assistantName || 'Your assistant',
                 platform: _platformName(p.platform),
                 title: `${p.isAutonomous ? 'Drafted' : 'Prepared'} ${_article(_platformName(p.platform) || 'social')} ${_platformName(p.platform) || 'social'} post for review`,
-                preview: (p.caption || '').slice(0, 140),
+                preview: displayCaption(p.caption).slice(0, 140),
                 reason: p.generationReason || null,
                 when: p.publishDate || null,
             })),

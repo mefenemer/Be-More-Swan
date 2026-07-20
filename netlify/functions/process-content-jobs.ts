@@ -24,6 +24,7 @@ import { DISCLOSURE } from '../../src/config/compliance';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { decideAutoPublish, describeDecision } from '../../src/utils/auto-publish-runtime';
 import { platformFormat } from '../../src/config/platform-formats';
+import { parseModelJson, toCaptionText } from '../../src/utils/model-json';
 import type { MediaSource } from '../../src/utils/publish-policy';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -260,12 +261,10 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             pillar?: string | null; reelScript?: string | null; textOverlays?: string[];
             conflictNotice?: string | null;
         } = {};
-        try {
-            const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-            if (jsonMatch) generated = JSON.parse(jsonMatch[0]);
-        } catch {
-            generated = { caption: rawText };
-        }
+        // A fenced or truncated reply must never reach the caption column as raw JSON —
+        // it surfaces verbatim on the dashboard's "Requires your attention" cards.
+        const parsedReply = parseModelJson<typeof generated>(rawText);
+        generated = parsedReply ?? { caption: toCaptionText(rawText) };
 
         const isAdminTest = job.trigger_type === 'admin_test';
 

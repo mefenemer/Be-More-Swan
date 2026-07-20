@@ -15,6 +15,7 @@ import { hasPermission } from '../../src/utils/rbac';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmark';
 import { DISCLOSURE } from '../../src/config/compliance';
+import { parseModelJson, toCaptionText } from '../../src/utils/model-json';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -144,12 +145,9 @@ export default withLambda(async (event) => {
         const gwResponse = await gatewayGenerate({ system: systemPrompt, messages });
         const { text: rawText, tokensInput, tokensOutput } = gwResponse;
         let generated: { caption?: string; hashtags?: string; suggestedMediaDescription?: string; conflictNotice?: string | null } = {};
-        try {
-            const m = rawText.match(/\{[\s\S]*\}/);
-            if (m) generated = JSON.parse(m[0]);
-        } catch (_e) {
-            generated = { caption: rawText };
-        }
+        // Same hardening as process-content-jobs: never persist raw JSON as the caption.
+        const parsedReply = parseModelJson<typeof generated>(rawText);
+        generated = parsedReply ?? { caption: toCaptionText(rawText) };
 
         const now = new Date();
         const [post] = await db.insert(scheduledPosts).values({

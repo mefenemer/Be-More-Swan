@@ -14,6 +14,7 @@ import { scheduledPosts, scheduledPostAssets, contentAssets, aiAssistants, organ
 import { requireTenant } from '../../src/utils/tenant';
 import { presignR2Get } from '../../src/utils/social-publish';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { displayCaption } from '../../src/utils/model-json';
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -72,7 +73,9 @@ export default withLambda(async (event) => {
         const mediaType = asset?.assetType ?? (d.postFormat === 'video' || d.postFormat === 'reel' ? 'video' : 'image');
         if (asset?.storageKey) { try { thumbnailUrl = await presignR2Get(asset.storageKey); } catch { /* ignore */ } }
         if (!thumbnailUrl && asset?.externalUrl) thumbnailUrl = asset.externalUrl;
-        return { ...d, mediaType, thumbnailUrl };
+        // Older rows can hold a raw model reply (fenced JSON) in `caption` — unwrap it so the
+        // reviewer sees the copy, not the scaffolding.
+        return { ...d, caption: displayCaption(d.caption), mediaType, thumbnailUrl };
     }));
 
     // Filters (US6 sorting & filtering).
