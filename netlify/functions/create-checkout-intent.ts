@@ -100,9 +100,23 @@ export default withLambda(async (event) => {
     // US-I18N-2.1 SC3: user's selected currency (from frontend localStorage), fallback to GBP
     const requestedCurrency = (body.currency || 'GBP').toUpperCase();
 
-    if (assistantName === 'Social Media Manager') {
+    // roleKey IDENTIFIES the role. master_assistants.name is admin-editable display copy, so a
+    // rename silently breaks any name match — which is exactly what happened when the Social
+    // Media Manager was retitled "Social Media Assistant" and this gate stopped firing. Mirrors
+    // the resolution in onboarding.ts; the name map is a fallback for older clients that post
+    // only assistantName.
+    const LEGACY_NAME_TO_ROLEKEY: Record<string, string> = {
+      'Social Media Manager':      'social_media_manager',
+      'The Social Media Manager':  'social_media_manager',
+      'Social Media Assistant':    'social_media_manager',
+    };
+    const resolvedRoleKey: string | null =
+      (typeof body.roleKey === 'string' && body.roleKey.trim()) ? body.roleKey.trim()
+      : LEGACY_NAME_TO_ROLEKEY[assistantName || ''] ?? null;
+
+    if (resolvedRoleKey === 'social_media_manager') {
       if (!onboardingContext?.target_audience || !onboardingContext?.content_pillars || !onboardingContext?.tone_of_voice || !onboardingContext?.primary_platforms?.length) {
-        return { statusCode: 400, body: JSON.stringify({ error: 'Missing required Social Media Manager context fields.' }) };
+        return { statusCode: 400, body: JSON.stringify({ error: 'Missing required Social Media Manager context fields (Audience, Pillars, Tone, or Platforms).' }) };
       }
     }
 
@@ -157,7 +171,12 @@ export default withLambda(async (event) => {
         // plans table has no currency column.
       }).returning();
 
-      const [assistantRecord] = await tx.select().from(masterAssistants).where(eq(masterAssistants.name, assistantName || 'Social Media Manager')).limit(1);
+      // Prefer roleKey (stable identifier); fall back to the display name only for older clients
+      // that post no roleKey. A name-only lookup breaks whenever a role is retitled in the
+      // catalog, silently downgrading the assistant to configuration.type 'custom'.
+      const [assistantRecord] = resolvedRoleKey
+        ? await tx.select().from(masterAssistants).where(eq(masterAssistants.roleKey, resolvedRoleKey)).limit(1)
+        : await tx.select().from(masterAssistants).where(eq(masterAssistants.name, assistantName || 'Social Media Manager')).limit(1);
 
       let secureSystemPrompt: string;
       try {
