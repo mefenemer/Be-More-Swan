@@ -470,18 +470,17 @@ export async function publishThreads(
 // returning `incomplete` state that a later invocation feeds back as `resume`. See
 // publish-youtube-background.ts. Without a deadline the call runs to completion as before.
 
-// ⚠️ TEMPORARY — 'private' while the YouTube publish path is verified live for the first time
-// (2026-07-19). Scheduled posts are claimed and uploaded with no gate beyond approval, so a
-// 'public' default would put a real video on a real channel purely to test plumbing. A Google Cloud
-// project that has not passed the upload audit forces private regardless, so this also matches what
-// the API will actually do until that audit clears.
+// Scheduled YouTube posts publish public. This was temporarily 'private' from 2026-07-19 while the
+// publish path was being verified live for the first time; flipped back on the prod promote
+// (2026-07-20) as that comment instructed.
 //
-// REVERT TO 'public' once a live upload has been confirmed end-to-end. Leaving it here silently
-// makes every future scheduled upload private, which presents as "publishing is broken".
+// Note this is only the ceiling we ask for. A Google Cloud project that has not passed YouTube's
+// upload audit forces private regardless of what we send, so if uploads still land private after
+// this change, the audit is the thing to check — not this constant.
 //
 // This is the DEFAULT, not a hard override: callers may still pass an explicit privacyStatus, which
-// is how the self-test pins itself to 'private' in a way that survives the revert above.
-export const YOUTUBE_DEFAULT_PRIVACY: 'public' | 'private' | 'unlisted' = 'private';
+// is how the self-test pins itself to 'private' independently of this value.
+export const YOUTUBE_DEFAULT_PRIVACY: 'public' | 'private' | 'unlisted' = 'public';
 
 export const YOUTUBE_TITLE_MAX = 100;
 export const YOUTUBE_DESCRIPTION_MAX = 5000;

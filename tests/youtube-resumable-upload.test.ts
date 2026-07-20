@@ -430,9 +430,9 @@ await check('the run-to-completion wrapper returns a DriverResult', async () => 
 });
 
 await check('applies the configured default privacy, and honours an explicit override', async () => {
-    // YOUTUBE_DEFAULT_PRIVACY is a deliberate, temporary 'private' pending live verification.
-    // Asserting against the constant rather than a literal means flipping it back to 'public'
-    // does not fail this test — but a caller-supplied override must always win over it.
+    // Asserting against the constant rather than a literal keeps this test about the wiring —
+    // an unset privacyStatus must reach the API as whatever YOUTUBE_DEFAULT_PRIVACY currently is,
+    // whatever that value happens to be — while a caller-supplied override must always win over it.
     const video = makeVideo(300 * 1024);
 
     const a = installFake({ video });
@@ -448,16 +448,6 @@ await check('applies the configured default privacy, and honours an explicit ove
             assert.strictEqual(b.state.privacyStatus, want, `override '${want}' must reach the API`);
         } finally { b.restore(); }
     }
-});
-
-await check('the temporary private default is still in force', async () => {
-    // A deliberate tripwire, not a preference. While this holds, scheduled YouTube posts publish
-    // PRIVATE and will look broken to a user. It fails the moment someone reverts the constant,
-    // which is the prompt to delete this test along with it.
-    assert.strictEqual(
-        YOUTUBE_DEFAULT_PRIVACY, 'private',
-        'YOUTUBE_DEFAULT_PRIVACY changed — if live verification is done, delete this test; if not, put it back',
-    );
 });
 
 // ── youtubeMetaFromCaption ────────────────────────────────────────────────────────────────────
