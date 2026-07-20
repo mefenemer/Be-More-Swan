@@ -8,6 +8,7 @@ import { users, userOrganisations } from '../../db/schema';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { parseModelJsonArray } from '../../src/utils/model-json';
 
 const jwtSecret = process.env.JWT_SECRET;
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -66,8 +67,7 @@ export default withLambda(async (event: HandlerEvent) => {
         });
 
         const raw = (response.content[0] as { text: string }).text.trim();
-        const jsonMatch = raw.match(/\[[\s\S]*\]/);
-        const names = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+        const names = parseModelJsonArray(raw);
         if (!Array.isArray(names) || names.length === 0) throw new Error('Invalid LLM response format.');
 
         // US-ADM-3.1.1: fire-and-forget usage log

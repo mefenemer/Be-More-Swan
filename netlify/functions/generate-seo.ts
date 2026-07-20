@@ -16,6 +16,7 @@ import { logAiUsage } from '../../src/utils/ai-usage';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { excerpt } from '../../src/utils/markdown-render';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { parseModelJson } from '../../src/utils/model-json';
 
 const MODEL = 'claude-haiku-4-5-20251001';
 
@@ -67,8 +68,7 @@ export default withLambda(async (event: HandlerEvent) => {
         });
 
         const raw = (response.content[0] as { text?: string })?.text?.trim() ?? '';
-        const match = raw.match(/\{[\s\S]*\}/);
-        const parsed = match ? JSON.parse(match[0]) : null;
+        const parsed = parseModelJson<Record<string, any>>(raw);
         if (!parsed || typeof parsed !== 'object') throw new Error('Invalid SEO response.');
 
         const metaTitle = String(parsed.metaTitle || post.title).slice(0, 70);

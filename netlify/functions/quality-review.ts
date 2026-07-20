@@ -23,6 +23,7 @@ import { getSession } from '../../src/utils/session';
 import { resolveActiveOrg } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { parseModelJson } from '../../src/utils/model-json';
 
 const jwtSecret   = process.env.JWT_SECRET;
 const anthropic   = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -209,11 +210,8 @@ export default withLambda(async (event) => {
         });
 
         const text = response.content[0].type === 'text' ? response.content[0].text : '';
-        let raw: Record<string, any> = {};
-        try {
-            const m = text.match(/\{[\s\S]*\}/);
-            raw = m ? JSON.parse(m[0]) : {};
-        } catch { /* leave raw empty; format will use pass defaults */ }
+        // An unparseable reply leaves raw empty; formatChecks then uses pass defaults.
+        const raw: Record<string, any> = parseModelJson<Record<string, any>>(text) ?? {};
 
         const checks = formatChecks(raw, isFull);
 

@@ -20,6 +20,7 @@ import { tierAllows, AUTONOMOUS_TUNABLE_FIELDS, funnelDiagnosticFor } from '../.
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { parseModelJson } from '../../src/utils/model-json';
 
 const BATCH = 50;
 
@@ -85,9 +86,8 @@ export default withLambda(async () => {
                 messages: [{ role: 'user', content: `Brief fields:\n${fieldList}` }],
                 maxTokens: 300,
             });
-            const match = text.match(/\{[\s\S]*\}/);
-            if (match) {
-                const parsed = JSON.parse(match[0]);
+            const parsed = parseModelJson<{ field?: string; value?: string }>(text);
+            if (parsed) {
                 field = String(parsed.field || '');
                 newValue = String(parsed.value || '').trim();
             }

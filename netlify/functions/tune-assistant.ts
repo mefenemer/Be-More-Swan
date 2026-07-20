@@ -22,6 +22,7 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { contentRules, aiAssistants } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { parseModelJson } from '../../src/utils/model-json';
 
 const jwtSecret = process.env.JWT_SECRET;
 
@@ -90,8 +91,8 @@ Respond with ONLY valid JSON: { "directive": "the instruction" }`;
             messages: [{ role: 'user', content: userMessage }],
         });
         const rawText = response.content[0]?.type === 'text' ? response.content[0].text : '';
-        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-        if (jsonMatch) directive = String(JSON.parse(jsonMatch[0]).directive || '').trim();
+        const parsed = parseModelJson<{ directive?: string }>(rawText);
+        if (parsed) directive = String(parsed.directive || '').trim();
     } catch (err) {
         console.error('[tune-assistant] Claude error:', err);
         // Fall back to the raw correction so a tuning session is never a dead end.

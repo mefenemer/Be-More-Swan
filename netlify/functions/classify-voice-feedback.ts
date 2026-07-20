@@ -26,6 +26,7 @@ import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, aiAssistants } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { parseModelJson } from '../../src/utils/model-json';
 
 const jwtSecret = process.env.JWT_SECRET;
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -111,11 +112,8 @@ Classify each piece of feedback.`;
         });
 
         const rawText = response.content[0].type === 'text' ? response.content[0].text : '';
-        const jsonMatch = rawText.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-            const parsed = JSON.parse(jsonMatch[0]);
-            items = Array.isArray(parsed.items) ? parsed.items : [];
-        }
+        const parsed = parseModelJson<{ items?: unknown }>(rawText);
+        if (parsed) items = Array.isArray(parsed.items) ? parsed.items as typeof items : [];
     } catch (err) {
         console.error('[classify-voice-feedback] Claude error:', err);
         return { statusCode: 502, body: JSON.stringify({ error: 'Failed to classify feedback.' }) };

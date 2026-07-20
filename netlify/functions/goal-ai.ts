@@ -18,6 +18,7 @@ import { funnelDiagnosticFor, getGoalMetric, strategyChanges, tierAllows, TUNABL
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { parseModelJson, parseModelJsonArray } from '../../src/utils/model-json';
 
 const json = (statusCode: number, payload: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
@@ -97,8 +98,7 @@ export default withLambda(async (event) => {
         let recommendations: string[] = [];
         try {
             const { text } = await gatewayGenerate({ system, messages: [{ role: 'user', content: userMsg }], maxTokens: 500 });
-            const match = text.match(/\[[\s\S]*\]/);
-            if (match) recommendations = JSON.parse(match[0]);
+            recommendations = parseModelJsonArray<string>(text) ?? [];
         } catch { /* fall through to graceful error below */ }
 
         recommendations = (recommendations || []).filter(r => typeof r === 'string' && r.trim()).slice(0, 3);
@@ -150,8 +150,7 @@ export default withLambda(async (event) => {
         let parsed: any = null;
         try {
             const { text } = await gatewayGenerate({ system, messages: [{ role: 'user', content: userMsg }], maxTokens: 700 });
-            const match = text.match(/\{[\s\S]*\}/);
-            if (match) parsed = JSON.parse(match[0]);
+            parsed = parseModelJson(text);
         } catch { /* fall through to graceful error below */ }
 
         const diagnosis = typeof parsed?.diagnosis === 'string' ? parsed.diagnosis.trim() : '';

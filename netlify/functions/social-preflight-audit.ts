@@ -12,6 +12,7 @@ import { systemConnections } from '../../db/schema';
 import { getSecret } from '../../src/utils/vault';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { parseModelJson } from '../../src/utils/model-json';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const HAIKU = 'claude-haiku-4-5-20251001';
@@ -307,8 +308,7 @@ export default withLambda(async (event) => {
                 }],
             });
             const raw = (llmRes.content[0] as { text: string }).text.trim();
-            const match = raw.match(/\{[\s\S]*\}/);
-            const parsed = match ? JSON.parse(match[0]) : null;
+            const parsed = parseModelJson<{ narrative?: string }>(raw);
             if (parsed?.narrative) {
                 executionConstraints = { ...constraintsInput, narrative: parsed.narrative };
             }

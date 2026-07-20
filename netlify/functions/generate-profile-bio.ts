@@ -17,6 +17,7 @@ import { aiAssistants, organisations } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { parseModelJson } from '../../src/utils/model-json';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -126,8 +127,7 @@ Rules:
                 messages: [{ role: 'user', content: prompt }],
             });
             const raw = (response.content[0] as { text: string }).text.trim();
-            const jsonMatch = raw.match(/\{[\s\S]*\}/);
-            const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+            const parsed = parseModelJson<BioDraft>(raw);
             if (parsed?.instagram && parsed?.facebook && parsed?.linkedin) {
                 draft = clampDraft(parsed);
                 break;

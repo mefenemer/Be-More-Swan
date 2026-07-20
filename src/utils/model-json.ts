@@ -63,6 +63,48 @@ export function parseModelJson<T = Record<string, unknown>>(raw: string): T | nu
     return null;
 }
 
+/**
+ * Slice out the first balanced `[…]` array, honouring quoted strings and escapes.
+ * Returns null when no `[` is present or the array never closes.
+ */
+function balancedArray(text: string): string | null {
+    const start = text.indexOf('[');
+    if (start === -1) return null;
+    let depth = 0, inStr = false, escaped = false;
+    for (let i = start; i < text.length; i++) {
+        const ch = text[i];
+        if (escaped) { escaped = false; continue; }
+        if (ch === '\\') { escaped = true; continue; }
+        if (ch === '"') { inStr = !inStr; continue; }
+        if (inStr) continue;
+        if (ch === '[') depth++;
+        else if (ch === ']' && --depth === 0) return text.slice(start, i + 1);
+    }
+    return null;
+}
+
+/**
+ * Array counterpart to parseModelJson, for the prompts that ask for a top-level list.
+ * Returns null (never a partial list) when nothing parses.
+ */
+export function parseModelJsonArray<T = unknown>(raw: string): T[] | null {
+    const text = stripCodeFences(raw);
+    if (!text) return null;
+
+    const candidates = [text, balancedArray(text)];
+    const greedy = text.match(/\[[\s\S]*\]/);
+    if (greedy) candidates.push(greedy[0]);
+
+    for (const c of candidates) {
+        if (!c) continue;
+        try {
+            const parsed = JSON.parse(c);
+            if (Array.isArray(parsed)) return parsed as T[];
+        } catch { /* try the next candidate */ }
+    }
+    return null;
+}
+
 /** JSON-unescape a raw string body (the bit between the quotes) without needing it terminated. */
 function unescapeJsonString(body: string): string {
     try {

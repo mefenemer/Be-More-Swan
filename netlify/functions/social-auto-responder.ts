@@ -12,6 +12,7 @@ import { getSecret } from '../../src/utils/vault';
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { parseModelJson } from '../../src/utils/model-json';
 
 const anthropic  = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL      = 'claude-haiku-4-5-20251001';
@@ -80,10 +81,11 @@ Rules:
 - Do not include placeholders like [NAME] or [DATE]
 - Ensure the Messenger greeting is ≤160 characters exactly${salesObjections ? `\n- Base objection replies on the playbook's preferred responses; never invent pricing or claims not present in the context` : ''}`;
 
-    let draft: {
+    type AutoResponderDraft = {
         messengerGreeting: string; messengerAutoReply: string; instagramDmAutoReply: string;
         objectionResponses?: { objection: string; reply: string }[];
-    } | null = null;
+    };
+    let draft: AutoResponderDraft | null = null;
     const MAX_RETRIES = 3;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
@@ -93,8 +95,7 @@ Rules:
                 messages: [{ role: 'user', content: prompt }],
             });
             const raw = (response.content[0] as { text: string }).text.trim();
-            const jsonMatch = raw.match(/\{[\s\S]*\}/);
-            const parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+            const parsed = parseModelJson<AutoResponderDraft>(raw);
             if (parsed?.messengerGreeting && parsed?.messengerAutoReply && parsed?.instagramDmAutoReply) {
                 draft = parsed;
                 break;

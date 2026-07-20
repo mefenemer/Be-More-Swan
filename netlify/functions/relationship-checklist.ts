@@ -16,6 +16,7 @@ import { aiAssistants, organisations, systemConnections, relationshipBuildingTas
 import { requireTenant } from '../../src/utils/tenant';
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { parseModelJsonArray } from '../../src/utils/model-json';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-haiku-4-5-20251001';
@@ -182,7 +183,8 @@ Rules:
 - Tailor to the connected platforms above.
 - Realistic for one day. No content-writing tasks. No placeholders.`;
 
-    let parsed: Array<{ title?: string; description?: string; category?: string }> | null = null;
+    type ChecklistItem = { title?: string; description?: string; category?: string };
+    let parsed: ChecklistItem[] | null = null;
     const MAX_RETRIES = 3;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
@@ -191,8 +193,7 @@ Rules:
                 messages: [{ role: 'user', content: prompt }],
             });
             const raw = (response.content[0] as { text: string }).text.trim();
-            const jsonMatch = raw.match(/\[[\s\S]*\]/);
-            const candidate = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
+            const candidate = parseModelJsonArray<ChecklistItem>(raw);
             if (Array.isArray(candidate) && candidate.length) { parsed = candidate; break; }
             console.warn(`[relationship-checklist] Attempt ${attempt}: invalid LLM response`);
         } catch (err) {
