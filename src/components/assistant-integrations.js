@@ -150,6 +150,9 @@
 
   function openModal(s) {
     editing = s;
+    // This list is rendered inside the Assistant Profile slide-over, which would otherwise
+    // stay open over the top of this modal (the drawer sits at z-9001, this at z-60).
+    if (document.body.classList.contains('brief-drawer-open')) window._closeBriefDrawer?.();
     const m = ensureModal();
     m.querySelector('[data-ai-title]').textContent = s.title;
     m.querySelector('[data-ai-desc]').textContent = s.description || '';

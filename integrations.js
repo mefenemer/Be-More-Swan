@@ -213,6 +213,16 @@ const SOURCES = [
     },
 ];
 
+// When this grid is rendered inside the Assistant Profile slide-over (assistant-detail.html),
+// every connector popup opens on top of a drawer that is still covering the right half of the
+// screen — and the modals are z-50 against the drawer's z-9001, so they render behind it.
+// Close the drawer first: the popup becomes the one thing on screen, and the drawer's own
+// close path flushes any pending profile save. No-op on the standalone Connections page.
+function _closeDrawerForModal() {
+    if (!document.body.classList.contains('brief-drawer-open')) return;
+    window._closeBriefDrawer?.();
+}
+
 // Sources connect straight through the OAuth router — no pre-connect checklist and no handle
 // gate, so unlike _intStartOAuth there is nothing to interstitial.
 window._intConnectSource = function (sourceId) {
@@ -227,6 +237,7 @@ window._intConnectSource = function (sourceId) {
 // CanvaBrowser is loaded by workspace.html, which hosts this tab as a fragment.
 window._intBrowseCanvaDesigns = function () {
     if (!window.CanvaBrowser) return;
+    _closeDrawerForModal();
     window.CanvaBrowser.open({
         // Count items, not designs: the importer writes one asset per PAGE, so a 2-page
         // presentation lands as 2 items and "2 designs" would contradict what the user picked.
@@ -342,6 +353,7 @@ window._intStartOAuth = function (platformId) {
     // checklist also covers the "connects through Facebook" warning below.
     if (platform.preConnect) { window._intOpenPreConnect(platformId); return; }
     if (platform.id === 'Instagram' && typeof window.showConfirmModal === 'function') {
+        _closeDrawerForModal();
         window.showConfirmModal(
             `Instagram connects through Meta's Facebook Login — you'll be asked to log into Facebook and choose the Facebook Page linked to your Instagram account. ${platform.note}`,
             () => { window.location.href = _oauthUrl(platform); },
@@ -1331,6 +1343,7 @@ window._intOpenPreConnect = function (platformId) {
         continueBtn.textContent = `I've done all this — continue to ${platform.label}`;
     }
 
+    _closeDrawerForModal();
     document.getElementById('modal-preconnect')?.classList.remove('hidden');
 };
 
@@ -1393,6 +1406,7 @@ window._intOpenModal = function (platformId) {
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
         ${existing ? 'Update Connection' : 'Encrypt &amp; Connect'}`;
 
+    _closeDrawerForModal();
     document.getElementById('modal-connect').classList.remove('hidden');
 };
 
@@ -1449,6 +1463,7 @@ window._intSubmit = async function (e) {
 // ── Disconnect ────────────────────────────────────────────────────
 window._intPromptDisconnect = function (connId) {
     _connToDelete = connId;
+    _closeDrawerForModal();
     document.getElementById('modal-disconnect').classList.remove('hidden');
 };
 
