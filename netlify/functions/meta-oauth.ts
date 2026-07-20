@@ -149,9 +149,25 @@ export default withLambda(async (event) => {
             return { statusCode: 302, headers: { Location: '/workspace.html?meta_error=token_exchange&platform=instagram' }, body: '' };
         }
 
+        // Distinguish the two failure modes — they have completely different remedies, and
+        // reporting both as "not_business" sent users to fix an Instagram setting when the real
+        // problem was that they never granted Page access on Meta's consent screen.
+        const pageList = pages.data ?? [];
+        console.log(`[meta-oauth] /me/accounts returned ${pageList.length} page(s); ${pageList.filter(p => p.instagram_business_account?.id).length} with a linked Instagram account`);
+
+        if (pageList.length === 0) {
+            // Either the account administers no Facebook Page, or the Page opt-in step of the
+            // Meta consent screen was skipped (it is easy to click past without selecting one).
+            return {
+                statusCode: 302,
+                headers: { Location: '/workspace.html?meta_error=no_pages' },
+                body: '',
+            };
+        }
+
         // Only a Business or Creator account can be linked to a Page as an
         // instagram_business_account, so the presence of the link IS the account-type check.
-        const linkedPage = (pages.data ?? []).find(p => p.instagram_business_account?.id);
+        const linkedPage = pageList.find(p => p.instagram_business_account?.id);
         if (!linkedPage) {
             return {
                 statusCode: 302,

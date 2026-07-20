@@ -2617,7 +2617,8 @@ function formatCurrency(amount, currency) {
         connection_not_relevant: `${label} isn’t a relevant connection for this assistant.`,
         unauthenticated: 'Your session has expired. Please sign in and try connecting again.',
         invalid_session: 'Your session has expired. Please sign in and try connecting again.',
-        not_business: 'It looks like your Meta setup isn’t finished — Instagram needs a Business or Creator account linked to a Facebook Page. Click “Connect with Instagram” again and follow the setup checklist, then retry.',
+        no_pages: 'We couldn’t see any Facebook Pages on your account. On Meta’s permission screen there is a step for choosing which Pages to share — make sure you tick your Page there rather than clicking straight past it. If you don’t have a Facebook Page yet, you’ll need to create one first: Instagram can only be connected through a Page.',
+        not_business: 'We can see your Facebook Page, but no Instagram account is linked to it. In Meta Business Suite, open your Page’s settings and link your Instagram account — it must be a Business or Creator account, not a personal one. Then try connecting again.',
         personal_account: 'Personal Instagram accounts can’t be connected. Click “Connect with Instagram” and follow the setup checklist to switch to a Business or Creator account, then try again.',
         // US1 AC1.4: tenant collision — this third-party account is already linked elsewhere.
         tenant_collision: `This ${label} account is already connected to another Be More Swan workspace. To use it, you must join the existing workspace or disconnect it from the other account.`,
