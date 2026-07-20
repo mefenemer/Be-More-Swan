@@ -360,7 +360,11 @@
         hasContentPublishing: false,
       },
       primaryAction: { label: 'Handle a Query', kind: 'chat' },
-      reviewQueue: { kind: 'records', recordType: 'ticket' },
+      reviewQueue: {
+        kind: 'records',
+        recordType: 'ticket',
+        subtitle: 'Triaged queries awaiting your approval — read the drafted reply on each one. Approving files it for you to send; nothing is emailed automatically.',
+      },
       hubTab: {
         id: 'datahub',
         label: 'Tickets',
@@ -463,7 +467,12 @@
       primaryAction: { label: 'Summarise a Meeting', kind: 'chat' },
       // Per-role tab label ("Inbox") — the brief forbids heavy "Review Queue" terminology for
       // the note-taker; other roles keep the default. Applied in _applyDashboardRegistry.
-      reviewQueue: { kind: 'records', recordType: 'meeting', label: 'Inbox' },
+      reviewQueue: {
+        kind: 'records',
+        recordType: 'meeting',
+        label: 'Inbox',
+        subtitle: 'Meetings awaiting your approval — read the drafted follow-up email on each one. Approving runs your handoff recipes, which can email the attendees and file action items.',
+      },
       hubTab: {
         id: 'datahub',
         label: 'Meeting Notes',

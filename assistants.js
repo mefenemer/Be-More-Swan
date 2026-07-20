@@ -648,36 +648,77 @@ function _rqRecordSnippet(r) {
     return d.summary || d.rationale || d.reason || (d.outreachDraft && d.outreachDraft.body) || d.draftReply || d.meetingSummary || '';
 }
 
-// The outreach email attached to a lead, or null. Approving a lead SENDS this email, so it is
-// the actual subject of the approval — not the lead record it hangs off.
-function _rqOutreachDraft(r) {
-    if (r.recordType !== 'lead') return null;
-    const d = (r.data || {}).outreachDraft;
-    return (d && typeof d === 'object' && typeof d.body === 'string' && d.body.trim()) ? d : null;
+// The draft message attached to a record, per type — what the reviewer is really signing off.
+// `sends` records what Approve actually does with it, which differs by type and drives the copy:
+//   lead    — auto-sent by lead-generation.ts `send_outreach` on approval. Unconditional.
+//   meeting — sent to attendees ONLY if the email_meeting_followup recipe is switched on
+//             (assistant-records.ts enqueueHandoffOnApproval → scenario-engine buildEmailPayload).
+//             The client can't see whether that recipe exists, so the copy stays conditional.
+//   ticket  — nothing is sent. enqueueHandoffOnApproval has no ticket trigger and returns early;
+//             the reply is copied out of the Data Hub by hand. Never promise a send here.
+const _RQ_DRAFT = {
+    lead: {
+        read: (d) => d.outreachDraft,
+        write: (d, subject, body) => ({ ...d, outreachDraft: { ...(d.outreachDraft || {}), subject, body } }),
+        heading: 'Drafted email — read before approving',
+        sends: 'This email is sent to the contact above as soon as you approve.',
+    },
+    meeting: {
+        read: (d) => d.followupEmail,
+        write: (d, subject, body) => ({ ...d, followupEmail: { ...(d.followupEmail || {}), subject, body } }),
+        heading: 'Drafted follow-up email — read before approving',
+        sends: 'Goes to the meeting’s attendees when you approve, if your follow-up recipe is switched on.',
+    },
+    ticket: {
+        // A plain string on the record, not a { subject, body } object — normalise both ways.
+        read: (d) => (typeof d.draftReply === 'string' ? { body: d.draftReply } : null),
+        write: (d, subject, body) => ({ ...d, draftReply: body }),
+        heading: 'Drafted reply — read before approving',
+        sends: 'Nothing is emailed automatically — approving files this reply for you to send.',
+        noSubject: true,
+    },
+};
+
+// The draft on this record plus its type config, or null when there's nothing to review.
+function _rqDraft(r) {
+    const cfg = _RQ_DRAFT[r.recordType];
+    if (!cfg) return null;
+    const d = cfg.read(r.data || {});
+    if (!d || typeof d !== 'object' || typeof d.body !== 'string' || !d.body.trim()) return null;
+    return { cfg, draft: d };
 }
 
-// Full email preview on the review card. Approving auto-sends (lead-generation.ts
-// `send_outreach`), so the reviewer must be able to read the exact subject + body they're
-// signing off — a truncated rationale snippet gave no clue what "Approve" actually did.
-// Open by default in the Review column; collapsed elsewhere, where it's just history.
+// Full draft preview on the review card. The reviewer must be able to read the exact message
+// they're signing off — a truncated snippet gave no clue what "Approve" actually did — and the
+// `sends` line spells out whether approving dispatches it. Open by default in the Review column;
+// collapsed elsewhere, where it's just history.
 function _rqOutreachPreview(r, statusKey) {
-    const draft = _rqOutreachDraft(r);
-    if (!draft) return '';
+    const found = _rqDraft(r);
+    if (!found) return '';
+    const { cfg, draft } = found;
+    // Suppress the generic "goes to the attendees" line when this meeting resolves to no
+    // recipients — the amber warning above the preview already states the real outcome, and
+    // leaving both in place would have the card contradict itself.
+    const noRecipients = r.recordType === 'meeting' && !_rqMeetingRecipients(r.data || {}).to.length;
+    const sendsLine = noRecipients ? '' : `<p class="text-[11px] text-gray-600 mb-2">${_rqEsc(cfg.sends)}</p>`;
     const subject = draft.subject || '(no subject)';
     const input = 'w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500';
-    return `<details class="mt-2 border border-gray-200 rounded-lg bg-gray-50"${statusKey === 'review' ? ' open' : ''}>
-      <summary class="cursor-pointer px-3 py-2 text-xs font-bold text-gray-700 select-none">Drafted email — read before approving</summary>
-      <div class="px-3 pb-3 pt-1 border-t border-gray-200">
-        <div class="rq-mail-view">
-          <p class="text-[11px] text-gray-500">Subject</p>
+    const subjectView = cfg.noSubject ? '' : `<p class="text-[11px] text-gray-500">Subject</p>
           <p class="text-xs font-bold text-gray-900 break-words">${_rqEsc(subject)}</p>
-          <p class="text-[11px] text-gray-500 mt-2">Message</p>
+          <p class="text-[11px] text-gray-500 mt-2">Message</p>`;
+    const subjectEdit = cfg.noSubject ? '' : `<label class="block text-[11px] text-gray-500">Subject
+            <input type="text" class="rq-mail-subject ${input} mt-0.5" value="${_rqEsc(draft.subject || '')}">
+          </label>`;
+    return `<details class="mt-2 border border-gray-200 rounded-lg bg-gray-50"${statusKey === 'review' ? ' open' : ''}>
+      <summary class="cursor-pointer px-3 py-2 text-xs font-bold text-gray-700 select-none">${_rqEsc(cfg.heading)}</summary>
+      <div class="px-3 pb-3 pt-1 border-t border-gray-200">
+        ${sendsLine}
+        <div class="rq-mail-view">
+          ${subjectView}
           <pre class="text-xs text-gray-700 whitespace-pre-wrap font-sans max-h-56 overflow-y-auto mt-0.5">${_rqEsc(draft.body)}</pre>
         </div>
         <div class="rq-mail-edit hidden">
-          <label class="block text-[11px] text-gray-500">Subject
-            <input type="text" class="rq-mail-subject ${input} mt-0.5" value="${_rqEsc(draft.subject || '')}">
-          </label>
+          ${subjectEdit}
           <label class="block text-[11px] text-gray-500 mt-2">Message
             <textarea rows="10" class="rq-mail-body ${input} mt-0.5 font-sans">${_rqEsc(draft.body)}</textarea>
           </label>
@@ -700,15 +741,17 @@ function _rqRecordActions(r, statusKey) {
     // once the first outreach has gone out — via "Mark outreach sent" in the Approved column.
     const isLead = r.recordType === 'lead';
     // Name the consequence on the button: for a lead carrying a draft, Approve sends that email.
-    const hasDraft = !!_rqOutreachDraft(r);
+    // ONLY the lead may say so — a meeting's send depends on the follow-up recipe being switched
+    // on and a ticket never sends, so promising a send there would be a lie. See _RQ_DRAFT.
+    const hasDraft = !!_rqDraft(r);
     const leadApprove = hasDraft ? 'Approve &amp; send email' : 'Approve lead';
-    // Editing is only offered while the email is still unsent — once approved it has gone out.
-    const editMail = hasDraft ? btn('Edit email', 'editEmail', secondary) : '';
+    // Editing is offered while the draft can still change the outcome — i.e. before approval.
+    const editDraft = hasDraft ? btn('Edit draft', 'editEmail', secondary) : '';
     let buttons = '';
     if (statusKey === 'review') {
         buttons = isLead
-            ? btn(leadApprove, 'approve', primary) + editMail + reject
-            : btn('Approve', 'approve', primary) + btn('Approve &amp; Schedule', 'showSchedule', secondary) + reject;
+            ? btn(leadApprove, 'approve', primary) + editDraft + reject
+            : btn('Approve', 'approve', primary) + btn('Approve &amp; Schedule', 'showSchedule', secondary) + editDraft + reject;
     } else if (statusKey === 'approved') {
         buttons = isLead
             ? btn('Mark outreach sent', 'outreachSent', primary) + btn('Send back to review', 'review', secondary)
@@ -766,7 +809,84 @@ function _rqMeetingSync(r) {
 // has to see who it goes to BEFORE clicking Approve, not after. 'personal' means a named
 // individual's inbox rather than a generic info@/enquiries@ one: weaker footing for cold
 // B2B outreach, so it gets an explicit warning rather than the same neutral treatment.
-function _rqRecipient(r) {
+// Who a meeting follow-up would actually reach. Mirrors scenario-engine.ts buildEmailPayload
+// EXACTLY — same address regex, same "valid attendee emails, else the single contactEmail"
+// fallback — plus the contactEmail ?? email ?? attendeeEmail mapping enqueueHandoffOnApproval
+// feeds it. Duplicated client-side rather than fetched: if buildEmailPayload's resolution ever
+// changes, this must change with it or the card will promise the wrong recipients.
+const _RQ_EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+function _rqMeetingRecipients(d) {
+    const attendees = Array.isArray(d.attendees) ? d.attendees : [];
+    const valid = (a) => a && typeof a === 'object' && typeof a.email === 'string' && _RQ_EMAIL_RE.test(a.email.trim());
+    const to = attendees.filter(valid).map((a) => a.email.trim());
+    const contact = d.contactEmail ?? d.email ?? d.attendeeEmail;
+    if (!to.length && typeof contact === 'string' && contact.includes('@')) to.push(contact.trim());
+    return { to, missing: attendees.length - attendees.filter(valid).length };
+}
+
+// Recipient line for a meeting: the resolved list, or a warning when the follow-up would reach
+// nobody. Attendees the assistant captured without an address are called out separately —
+// they're silently dropped by buildEmailPayload's filter, so the count would otherwise be a
+// surprise. No screen currently lets you type a missing address in, so the copy doesn't
+// pretend there is one.
+// `statusKey` gates the "Add … below" pointer: the editor only renders in the Review column, so
+// outside it the warning must state the problem without promising a fix that isn't on screen.
+function _rqMeetingRecipientLine(r, statusKey) {
+    const d = r.data || {};
+    const { to, missing } = _rqMeetingRecipients(d);
+    const warn = 'text-[11px] font-bold text-amber-900 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 mt-1 inline-block';
+    const fixable = statusKey === 'review';
+    if (!to.length) {
+        return `<div class="mt-2"><p class="${warn}">No usable email address on this meeting — approving will not email anyone.${fixable ? ' Add one below.' : ''}</p></div>`;
+    }
+    return `<div class="mt-2">
+      <p class="text-[11px] text-gray-500">Follow-up would go to <span class="font-bold text-gray-700 break-all">${_rqEsc(to.join(', '))}</span></p>
+      ${missing > 0 ? `<p class="${warn}">${missing} more attendee${missing === 1 ? '' : 's'} ${missing === 1 ? 'has' : 'have'} no email address and will be left out.${fixable ? ` Add ${missing === 1 ? 'it' : 'them'} below.` : ''}</p>` : ''}
+    </div>`;
+}
+
+// Fill in the addresses the follow-up needs. Until now nothing in the app could set these:
+// the chat card renders a read-only "email needed" placeholder, and enqueueHandoffOnApproval's
+// claim that they're "filled in on the inbox card" described UI that didn't exist — so a meeting
+// could sit there permanently unable to reach anyone. Two shapes:
+//   • attendees captured without an address → one input each, written back to attendees[i].email
+//   • no attendees at all                   → one input written to contactEmail, which is exactly
+//                                             the fallback buildEmailPayload already reads
+// Review column only: after approval the send has already happened (or not).
+function _rqAttendeeFix(r, statusKey) {
+    if (r.recordType !== 'meeting' || statusKey !== 'review' || !_rqDraft(r)) return '';
+    const d = r.data || {};
+    const attendees = Array.isArray(d.attendees) ? d.attendees : [];
+    const needs = attendees
+        .map((a, i) => ({ a, i }))
+        .filter(({ a }) => !(a && typeof a === 'object' && typeof a.email === 'string' && _RQ_EMAIL_RE.test(a.email.trim())));
+    if (attendees.length && !needs.length) return '';
+
+    const input = 'w-full border border-gray-300 rounded-lg px-2 py-1.5 text-xs focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500';
+    const rows = attendees.length
+        ? needs.map(({ a, i }) => `<label class="block text-[11px] text-gray-500 mt-1.5">${_rqEsc((a && a.name) || 'Attendee')}
+            <input type="email" class="rq-attendee ${input} mt-0.5" data-rq-attendee="${i}" placeholder="name@company.com" value="">
+          </label>`).join('')
+        : `<label class="block text-[11px] text-gray-500 mt-1.5">Send the follow-up to
+            <input type="email" class="rq-attendee ${input} mt-0.5" data-rq-attendee="contact" placeholder="name@company.com" value="${_rqEsc(typeof d.contactEmail === 'string' ? d.contactEmail : '')}">
+          </label>`;
+    // With no attendees but a usable contactEmail there's nothing "missing" — the field is there
+    // to change the recipient, so the label shouldn't claim otherwise.
+    const label = !attendees.length && typeof d.contactEmail === 'string' && _RQ_EMAIL_RE.test(d.contactEmail.trim())
+        ? 'Change who this goes to'
+        : 'Add missing email addresses';
+    return `<details class="mt-2 border border-gray-200 rounded-lg bg-gray-50">
+      <summary class="cursor-pointer px-3 py-2 text-xs font-bold text-gray-700 select-none">${label}</summary>
+      <div class="px-3 pb-3 pt-1 border-t border-gray-200">
+        ${rows}
+        <button type="button" onclick="_detailRqRecordAct(this,'saveAttendees')" class="px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white transition cursor-pointer mt-2">Save addresses</button>
+      </div>
+    </details>`;
+}
+
+function _rqRecipient(r, statusKey) {
+    if (r.recordType === 'meeting') return _rqDraft(r) ? _rqMeetingRecipientLine(r, statusKey) : '';
     if (r.recordType !== 'lead') return '';
     const d = r.data || {};
     const to = (d.outreachDraft && d.outreachDraft.to) || d.contactEmail || (d.lead && d.lead.email) || '';
@@ -780,10 +900,10 @@ function _rqRecipient(r) {
 }
 
 function _detailRqRecordCard(r, statusKey) {
-    const draft = _rqOutreachDraft(r);
+    const found = _rqDraft(r);
     let snippet = _rqRecordSnippet(r);
-    // Don't print the email body twice when it's also the fallback snippet — the preview owns it.
-    if (draft && snippet === draft.body) snippet = '';
+    // Don't print the body twice when it's also the fallback snippet — the preview owns it.
+    if (found && snippet === found.draft.body) snippet = '';
     const schedVerb = r.recordType === 'lead' ? 'chase by' : 'scheduled';
     const sched = r.scheduledFor ? ` · ${schedVerb} ${new Date(r.scheduledFor).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : '';
     const sync = r.recordType === 'meeting' ? _rqMeetingSync(r) : { summary: '', pills: '' };
@@ -796,7 +916,8 @@ function _detailRqRecordCard(r, statusKey) {
           ${sync.summary}
           ${sched ? `<span class="text-[11px] font-semibold text-yellow-700">${_rqEsc(sched)}</span>` : ''}
         </div>
-        ${_rqRecipient(r)}
+        ${_rqRecipient(r, statusKey)}
+        ${_rqAttendeeFix(r, statusKey)}
         ${_rqOutreachPreview(r, statusKey)}
         ${sync.pills}
       </div>
@@ -868,21 +989,43 @@ window._detailRqRecordAct = async function (btn, action) {
 
     const patch = { id: Number(card.getAttribute('data-rq-record')) };
 
-    // Save an edited outreach draft. Merged onto the record's existing data so nothing else is
-    // lost; lead-generation.ts `send_outreach` reads this stored draft, so what's saved here is
-    // exactly what goes out on approval.
+    // Save an edited draft. Merged onto the record's existing data via the type's `write` so
+    // nothing else is lost and each type's own shape is respected (a ticket's draftReply is a
+    // bare string, not { subject, body }). The senders read the STORED draft — send_outreach for
+    // leads, buildEmailPayload for meetings — so what's saved here is what actually goes out.
     if (action === 'saveEmail') {
+        const rec = _rqRecordsById.get(patch.id);
+        const found = rec && _rqDraft(rec);
+        if (!found) { showErr('Couldn’t load this draft — refresh and try again.'); return; }
         const subject = card.querySelector('.rq-mail-subject')?.value ?? '';
         const bodyText = card.querySelector('.rq-mail-body')?.value ?? '';
-        if (!bodyText.trim()) { showErr('The email body can’t be empty.'); return; }
+        if (!bodyText.trim()) { showErr('The message can’t be empty.'); return; }
+        patch.data = found.cfg.write(rec.data || {}, subject.trim(), bodyText);
+    }
+
+    // Save filled-in attendee addresses. Written back in place so each attendee keeps its name
+    // (and anything else on it); blank inputs are skipped rather than clearing an existing value.
+    if (action === 'saveAttendees') {
         const rec = _rqRecordsById.get(patch.id);
-        if (!rec) { showErr('Couldn’t load this lead — refresh and try again.'); return; }
+        if (!rec) { showErr('Couldn’t load this meeting — refresh and try again.'); return; }
+        const inputs = [...card.querySelectorAll('[data-rq-attendee]')];
+        const filled = inputs.map((el) => ({ key: el.getAttribute('data-rq-attendee'), value: (el.value || '').trim() }))
+            .filter((f) => f.value);
+        if (!filled.length) { showErr('Enter at least one email address.'); return; }
+        const bad = filled.find((f) => !_RQ_EMAIL_RE.test(f.value));
+        if (bad) { showErr(`“${bad.value}” doesn’t look like an email address.`); return; }
         const data = rec.data || {};
-        patch.data = { ...data, outreachDraft: { ...(data.outreachDraft || {}), subject: subject.trim(), body: bodyText } };
+        const attendees = Array.isArray(data.attendees) ? data.attendees.map((a) => ({ ...a })) : [];
+        let contactEmail = data.contactEmail;
+        for (const f of filled) {
+            if (f.key === 'contact') contactEmail = f.value;
+            else if (attendees[Number(f.key)]) attendees[Number(f.key)].email = f.value;
+        }
+        patch.data = { ...data, attendees, ...(contactEmail !== undefined ? { contactEmail } : {}) };
     }
 
     let chaseWhen = null;
-    if (action === 'saveEmail') { /* patch.data set above — no lifecycle change */ }
+    if (action === 'saveEmail' || action === 'saveAttendees') { /* patch.data set above — no lifecycle change */ }
     else if (action === 'approve') patch.approvalStatus = 'approved';
     else if (action === 'outreachSent') {
         // First outreach has gone out → move the approved lead to a chase reminder (default 3
@@ -959,7 +1102,8 @@ window._detailRqRecordAct = async function (btn, action) {
             const toast = action === 'outreachSent'
                 ? `First outreach logged — chase reminder set for ${chaseWhen.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' })}. See the Calendar.`
                 : action === 'schedule' ? 'Scheduled — it’s on the Calendar now.'
-                : action === 'saveEmail' ? 'Email updated — this is what will send when you approve.'
+                : action === 'saveEmail' ? 'Draft updated — this is the version your approval acts on.'
+                : action === 'saveAttendees' ? 'Addresses saved — the follow-up can reach them now.'
                 : action === 'reject' ? 'Rejected.' : 'Updated.';
             window.showToast?.(toast);
         }
