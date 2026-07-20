@@ -21,7 +21,9 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 const jwtSecret   = process.env.JWT_SECRET!;
 const metaAppId   = process.env.META_APP_ID!;
 const metaSecret  = process.env.META_APP_SECRET!;
-const SCOPES      = 'instagram_basic,instagram_content_publish,pages_read_engagement,pages_manage_metadata,pages_messaging,pages_manage_posts';
+// pages_show_list is what permits /me/accounts to enumerate the user's Pages — without it the
+// Instagram account behind the Page can never be discovered.
+const SCOPES      = 'instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,pages_manage_posts';
 const TOKEN_TTL_DAYS = 60;
 
 function csrfToken(): string {
@@ -128,19 +130,29 @@ export default withLambda(async (event) => {
         }
         const longLivedToken = llData.access_token;
 
-        // Fetch Instagram account info
-        const meRes = await fetch(
-            `https://graph.facebook.com/v19.0/me?fields=id,name,account_type,instagram_business_account,accounts&access_token=${longLivedToken}`
+        // Resolve the Instagram account via the user's PAGES.
+        //
+        // `instagram_business_account` is an edge on the Page node, not on the User node — asking
+        // /me for it always returned undefined, so every connect fell straight through to
+        // `not_business` no matter how the user's Instagram was set up. Same for `account_type`,
+        // which is an Instagram-node field and never present on a Facebook User.
+        const pagesRes = await fetch(
+            `https://graph.facebook.com/v19.0/me/accounts?fields=id,name,instagram_business_account{id,username}&access_token=${longLivedToken}`
         );
-        const me: {
-            id?: string; name?: string; account_type?: string;
-            instagram_business_account?: { id: string };
-            accounts?: { data: Array<{ id: string; name: string }> };
+        const pages: {
+            data?: Array<{ id: string; name?: string; instagram_business_account?: { id: string; username?: string } }>;
             error?: { message: string };
-        } = await meRes.json();
+        } = await pagesRes.json();
 
-        const igAccount = me.instagram_business_account;
-        if (!igAccount) {
+        if (pages.error) {
+            console.error('[meta-oauth] /me/accounts failed:', pages.error.message);
+            return { statusCode: 302, headers: { Location: '/workspace.html?meta_error=token_exchange&platform=instagram' }, body: '' };
+        }
+
+        // Only a Business or Creator account can be linked to a Page as an
+        // instagram_business_account, so the presence of the link IS the account-type check.
+        const linkedPage = (pages.data ?? []).find(p => p.instagram_business_account?.id);
+        if (!linkedPage) {
             return {
                 statusCode: 302,
                 headers: { Location: '/workspace.html?meta_error=not_business' },
@@ -148,18 +160,11 @@ export default withLambda(async (event) => {
             };
         }
 
-        // Validate account type (must be BUSINESS or CREATOR)
-        const accountType = me.account_type ?? '';
-        if (!['BUSINESS', 'CREATOR'].includes(accountType.toUpperCase())) {
-            return {
-                statusCode: 302,
-                headers: { Location: '/workspace.html?meta_error=personal_account' },
-                body: '',
-            };
-        }
-
-        const igUserId = igAccount.id;
-        const fbPageId = me.accounts?.data?.[0]?.id ?? null;
+        const igUserId = linkedPage.instagram_business_account!.id;
+        const igUsername = linkedPage.instagram_business_account!.username ?? null;
+        // The Page that actually owns the Instagram account — not merely the first page listed.
+        const fbPageId = linkedPage.id;
+        const accountType = 'BUSINESS';
 
         const db = getDb();
 
@@ -196,7 +201,7 @@ export default withLambda(async (event) => {
                 tokenExpiresAt,
                 status: 'active',
                 isActive: true,
-                metadata: { accountType, fbPageId },
+                metadata: { accountType, fbPageId, igUsername },
                 ...(assistantId ? { assistantId } : {}),
                 updatedAt: new Date(),
             }).where(eq(systemConnections.id, existing.id));
@@ -212,7 +217,7 @@ export default withLambda(async (event) => {
                 status: 'active',
                 isActive: true,
                 scopes: SCOPES,
-                metadata: { accountType, fbPageId },
+                metadata: { accountType, fbPageId, igUsername },
             });
         }
 
