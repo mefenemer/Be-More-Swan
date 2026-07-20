@@ -51,6 +51,14 @@ export default withLambda(async (event) => {
 
     // ── START: redirect to Meta OAuth ─────────────────────────────────────────
     if (action === 'start') {
+        // Without an app id we'd send the user to Facebook with `client_id=undefined` and they'd
+        // land on Meta's own error page. Degrade to the same friendly not_configured banner
+        // LinkedIn/X already use (social-oauth-init.ts). `platform` drives the message label —
+        // Instagram connects through Facebook, so honour the caller's platform when given.
+        if (!metaAppId || !metaSecret) {
+            const platform = event.queryStringParameters?.platform === 'instagram' ? 'instagram' : 'facebook';
+            return { statusCode: 302, headers: { Location: `/workspace.html?oauth_error=not_configured&platform=${platform}` }, body: '' };
+        }
         // Session carries `activeOrganisationId`, not `organisationId` — resolve via requireTenant
         // (re-verifies current membership) rather than reading the JWT claim directly.
         const ctx = await requireTenant(event, getDb());
