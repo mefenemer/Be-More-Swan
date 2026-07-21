@@ -1433,6 +1433,7 @@ function formatCurrency(amount, currency) {
     // Consolidated DOM element hooks
     const navLinks = {
       'dashboard': document.getElementById('nav-dashboard'),
+      'notifications': document.getElementById('nav-inbox'),
       'assistants': document.getElementById('nav-assistants'),
       'catalog': document.getElementById('nav-catalog'),
       'settings': document.getElementById('nav-settings'),
@@ -7780,22 +7781,37 @@ async function gpSubmitReject() {
   // caller happened to also confetti/open manually.
   function celebrate(data) {
     const prev = last || {};
+    const steps = data.steps || [];
     let newlyDone = false;
-    (data.steps || []).forEach(s => { if (s.done && prev[s.key] === false) newlyDone = true; });
+    steps.forEach(s => { if (s.done && prev[s.key] === false) newlyDone = true; });
     if (newlyDone && !data.allDone) {
       window.showToast?.('Great job — you\'re one step closer! 🎉', { icon: '✅' });
       window.fireConfetti?.();
     }
-    if (data.allDone && !celebratedGoLive && last !== null) {
+    if (data.allDone && !celebratedGoLive) {
+      // Fire the go-live celebration ONLY on a genuine transition into "all done".
+      // If the assistant was ALREADY live when this page began — last === null on a
+      // truly fresh session, or a persisted snapshot that was itself already all-done
+      // after a reload — record the flag *silently* so a subsequent hard refresh can't
+      // replay the confetti. (Previously the sole guard was `last !== null`, so a fresh
+      // load established the snapshot without setting the flag, and the *next* load —
+      // e.g. a hard refresh — then saw allDone + a populated snapshot + an unset flag
+      // and re-fired.) A real go-live always leaves a prior snapshot whose final step
+      // was still incomplete (the inline kick-off, or the full-page onboarding hop that
+      // writes `last` before leaving), so `justWentLive` stays true for it.
+      const prevAllDone = last !== null && steps.length > 0 && steps.every(s => prev[s.key] === true);
+      const justWentLive = last !== null && !prevAllDone;
       celebratedGoLive = true;
       writeGoLive(true);
-      window.showToast?.('Your assistant is live! 🎉', { icon: '🎉' });
-      window.fireConfetti?.();
+      if (justWentLive) {
+        window.showToast?.('Your assistant is live! 🎉', { icon: '🎉' });
+        window.fireConfetti?.();
+      }
       // The new-assistant journey is finished — drop back to normal (org-global) behaviour.
       if (isAddMode()) clearAddMode();
     }
     last = {};
-    (data.steps || []).forEach(s => { last[s.key] = s.done; });
+    steps.forEach(s => { last[s.key] = s.done; });
     writeLast(last);
     return newlyDone;
   }
