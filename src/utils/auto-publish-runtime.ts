@@ -20,11 +20,38 @@ import { scheduledPosts, systemConnections } from '../../db/schema';
 import {
     gateAutonomousDraft,
     autoPublishWeeklyCeiling,
+    AUTONOMOUS_DRAFT_PLATFORMS,
+    type AutonomousDraftPlatform,
     type GateDecision,
     type MediaSource,
 } from './publish-policy';
+import { normalizePlatform } from '../config/platform-formats';
 
 type Db = ReturnType<typeof getDb>;
+
+/**
+ * The platforms an assistant should autonomously DRAFT for: the org's LIVE connections
+ * (status='active', isActive) intersected with the platforms a drafter actually exists for. This
+ * mirrors findLiveConnection's liveness filter exactly, so we only ever draft for a platform the
+ * post could genuinely publish to — connecting a platform is all it takes, no onboarding config to
+ * keep in sync. Order follows AUTONOMOUS_DRAFT_PLATFORMS for determinism. Empty when the org has no
+ * live connection on any drafter platform — callers fall back to their legacy single-stream default.
+ */
+export async function resolveConnectedDraftPlatforms(db: Db, orgId: number): Promise<AutonomousDraftPlatform[]> {
+    const rows = await db
+        .select({ serviceName: systemConnections.serviceName })
+        .from(systemConnections)
+        .where(and(
+            eq(systemConnections.organisationId, orgId),
+            eq(systemConnections.status, 'active'),
+            eq(systemConnections.isActive, true),
+        ));
+    const connected = new Set(
+        rows.map(r => normalizePlatform(r.serviceName))
+            .filter((p): p is AutonomousDraftPlatform => p !== null && (AUTONOMOUS_DRAFT_PLATFORMS as readonly string[]).includes(p)),
+    );
+    return AUTONOMOUS_DRAFT_PLATFORMS.filter(p => connected.has(p));
+}
 
 export interface AutoPublishDecision extends GateDecision {
     /** The connection the post must publish through. Null when review-bound. */

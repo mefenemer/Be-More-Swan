@@ -29,7 +29,8 @@ import { FalContentPolicyError } from '../../src/lib/fal-gateway';
 import { resolveMediaForPost } from '../../src/utils/media-resolver';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { SMM_ROLE_KEYS } from '../../src/constants/roles';
-import { AUTONOMOUS_DRAFT_PLATFORMS, resolveAutonomousDraftPlatforms, type AutonomousDraftPlatform } from '../../src/utils/publish-policy';
+import { type AutonomousDraftPlatform } from '../../src/utils/publish-policy';
+import { resolveConnectedDraftPlatforms } from '../../src/utils/auto-publish-runtime';
 import { platformFormat } from '../../src/config/platform-formats';
 import { decideAutoPublish, describeDecision } from '../../src/utils/auto-publish-runtime';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -114,7 +115,7 @@ export default withLambda(async (event) => {
         // across every platform the assistant targets — siblings share a crosspost_group_id so the
         // Review Queue shows one card the human previews per platform (not N per-platform posts).
         // Legacy assistants with no recognised platforms stay Instagram-only.
-        const targetPlatforms = resolveAutonomousDraftPlatforms(a.onboardingContext);
+        const targetPlatforms = await resolveConnectedDraftPlatforms(db, a.organisationId);
         const platforms: AutonomousDraftPlatform[] = targetPlatforms.length ? targetPlatforms : ['instagram'];
         const representative = platforms[0];
         const fmt = platformFormat(representative);

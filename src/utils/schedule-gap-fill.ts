@@ -15,7 +15,7 @@ import { aiBlueprints, scheduledPosts, contentGenerationJobs, contentAssets, not
 import { createNotification } from './notify';
 import { resolvePostingSchedule, computeScheduleSlots } from '../config/posting-cadence';
 import { assembleBlueprint } from './blueprint';
-import { resolveAutonomousDraftPlatforms } from './publish-policy';
+import { resolveConnectedDraftPlatforms } from './auto-publish-runtime';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -82,13 +82,13 @@ export async function enqueueScheduleGapFill(
 
     const windowEnd = slots[slots.length - 1];
 
-    // Autopilot drafts ONE idea per slot and fans it across every platform the assistant targets
-    // (primary_platforms ∩ the platforms a drafter exists for). One content_generation_job per slot
+    // Autopilot drafts ONE idea per slot and fans it across every platform the org has a LIVE
+    // connection for (∩ the platforms a drafter exists for). One content_generation_job per slot
     // carries that platform list; process-content-jobs generates a single caption/media and creates one
     // post per platform, all sharing a crosspost_group_id → one Review Queue card, preview per platform.
-    // Legacy assistants with no recognised platforms keep the single stream (platforms null → the
+    // Orgs with no live connection on any drafter platform keep the single stream (platforms null → the
     // worker resolves the org's fallback connection).
-    const targetPlatforms = resolveAutonomousDraftPlatforms(assistant.onboardingContext);
+    const targetPlatforms = await resolveConnectedDraftPlatforms(db, assistant.organisationId);
 
     // A cross-post's per-platform rows all share ONE publish_date, so coverage is per SLOT, not per
     // platform: a day with two preferred times needs two cross-posts to be "covered". We dedupe planned

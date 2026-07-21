@@ -35,30 +35,18 @@ import {
     type ConfidenceResult,
 } from './post-confidence';
 import { resolvePostingSchedule, computeScheduleSlots } from '../config/posting-cadence';
-import { normalizePlatform } from '../config/platform-formats';
 
 /**
  * The platforms an autonomous drafter actually exists for. THE single source of truth:
  * autonomous-media-suggestions.ts drafts for these, and get-assistant-context.ts serves this
  * list to the settings UI so the toggles can't drift out of sync with what the backend does.
  * Adding a platform here without a drafter would render a toggle that silently does nothing.
+ *
+ * The set an assistant actually drafts for is resolveConnectedDraftPlatforms() in
+ * auto-publish-runtime.ts — this list intersected with the org's LIVE connections.
  */
 export const AUTONOMOUS_DRAFT_PLATFORMS = ['instagram', 'facebook', 'linkedin', 'x', 'threads'] as const;
 export type AutonomousDraftPlatform = typeof AUTONOMOUS_DRAFT_PLATFORMS[number];
-
-/**
- * The platforms an assistant should autonomously DRAFT for: its configured primary_platforms
- * (normalised) intersected with the platforms a drafter actually exists for. Order follows
- * AUTONOMOUS_DRAFT_PLATFORMS for determinism. Empty when the assistant has no recognised platforms
- * configured — callers fall back to their legacy single-platform behaviour in that case.
- */
-export function resolveAutonomousDraftPlatforms(onboardingContext: unknown): AutonomousDraftPlatform[] {
-    const ctx = (onboardingContext && typeof onboardingContext === 'object')
-        ? (onboardingContext as Record<string, unknown>) : {};
-    const raw = Array.isArray(ctx.primary_platforms) ? ctx.primary_platforms : [];
-    const wanted = new Set(raw.map(normalizePlatform).filter((p): p is AutonomousDraftPlatform => p !== null));
-    return AUTONOMOUS_DRAFT_PLATFORMS.filter(p => wanted.has(p));
-}
 
 /** 'review' = always queue for human approval. 'auto_publish' = allow a clean green post to schedule itself. */
 export type PublishMode = 'review' | 'auto_publish';
