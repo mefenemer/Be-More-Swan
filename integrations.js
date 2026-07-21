@@ -914,9 +914,13 @@ function _connHealth(conn) {
     if (conn.status === 'expired' || conn.status === 'failed' || conn.status === 'revoked' || conn.status === 'token_refresh_failed') {
         return { key: 'bad', label: 'Disconnected', problem: true };
     }
-    // Connections that carry an offline refresh token (e.g. X) are renewed silently by
-    // the refresh-social-tokens cron, so their short-lived expiry shouldn't alarm the user.
-    if (typeof conn.scopes === 'string' && conn.scopes.includes('offline.access')) {
+    // Connections that carry an offline refresh token are renewed silently (the
+    // refresh-social-tokens cron for X/LinkedIn, getFreshAccessToken at action time for the
+    // rest), so their short-lived access-token expiry shouldn't alarm the user. The server
+    // flags these via `autoRefresh`; otherwise a 1-hour Google token (YouTube, Gmail, Search
+    // Console) would forever render as "Expiring in 1d" the moment it's connected.
+    // (Legacy `offline.access` scope kept as a fallback for rows predating the flag.)
+    if (conn.autoRefresh || (typeof conn.scopes === 'string' && conn.scopes.includes('offline.access'))) {
         return { key: 'ok', label: 'Connected', problem: false };
     }
     if (conn.tokenExpiresAt) {

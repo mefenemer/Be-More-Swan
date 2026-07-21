@@ -33,6 +33,27 @@ export type IntegrationProvider = 'hubspot' | 'xero' | 'slack' | 'salesforce' | 
 export const INTEGRATION_PROVIDERS: IntegrationProvider[] = ['hubspot', 'xero', 'slack', 'salesforce', 'zendesk', 'notion', 'quickbooks', 'intercom', 'gmail', 'outlook', 'threads', 'tiktok', 'youtube', 'wordpresscom', 'searchconsole', 'jira', 'asana', 'canva'];
 
 /**
+ * Providers that carry an offline refresh token and are renewed silently by
+ * getFreshAccessToken() before/at the next action — so a short-lived access-token
+ * expiry is NOT something the user must act on. The UI uses this to suppress the
+ * "Expiring in Nd" reconnect nag (e.g. Google hands out 1-hour access tokens, which
+ * would otherwise always render as "Expiring in 1d" the moment you connect).
+ *
+ * Excludes notion/intercom/wordpresscom: their tokens never expire and refreshAccessToken
+ * throws for them — if one of those ever shows an expiry, it IS a real reconnect signal.
+ * Keep this in sync with the refresh_token branches in refreshAccessToken() below.
+ */
+export const AUTO_REFRESH_PROVIDERS: ReadonlySet<IntegrationProvider> = new Set<IntegrationProvider>([
+    'hubspot', 'xero', 'salesforce', 'zendesk', 'quickbooks', 'gmail', 'outlook',
+    'threads', 'tiktok', 'youtube', 'searchconsole', 'jira', 'asana', 'canva',
+]);
+
+/** True if the service silently auto-refreshes its access token (see AUTO_REFRESH_PROVIDERS). */
+export function serviceAutoRefreshes(serviceName: string): boolean {
+    return AUTO_REFRESH_PROVIDERS.has(serviceName as IntegrationProvider);
+}
+
+/**
  * Microsoft Graph delegated scope for outbound email. Shared by the authorize URL, the
  * code exchange and the refresh grant — Microsoft narrows the grant if refresh omits it,
  * so all three MUST send the same string. offline_access is what yields a refresh token
@@ -455,7 +476,7 @@ type RefreshOutcome =
  * refreshed, expiresAt is no longer in the skew window and we return their token
  * without touching the provider at all.
  */
-async function refreshUnderLock(tx: Tx, organisationId: number, provider: IntegrationProvider): Promise<RefreshOutcome> {
+async function refreshUnderLock(tx: Tx, organisationId: number, provider: IntegrationProvider, skewMs: number): Promise<RefreshOutcome> {
     await tx.execute(sql`SET LOCAL lock_timeout = ${sql.raw(`'${REFRESH_LOCK_TIMEOUT}'`)}`);
 
     const [row] = await tx
@@ -479,7 +500,7 @@ async function refreshUnderLock(tx: Tx, organisationId: number, provider: Integr
 
     // Re-check under the lock. We may have queued behind a concurrent refresh that has
     // already stored a good token — spending our (now dead) refresh token would burn it.
-    const stillExpired = row.expiresAt && row.expiresAt.getTime() - REFRESH_SKEW_MS < Date.now();
+    const stillExpired = row.expiresAt && row.expiresAt.getTime() - skewMs < Date.now();
     if (!stillExpired) {
         return { ok: true, token: { accessToken: secret.accessToken, tenantId: row.tenantId, integrationId: row.id } };
     }
@@ -515,7 +536,12 @@ async function refreshUnderLock(tx: Tx, organisationId: number, provider: Integr
  * Resolve a valid access token for (org, provider), refreshing it first when expired
  * or about to expire. Throws IntegrationError('not_connected' | 'refresh_failed').
  */
-export async function getFreshAccessToken(db: Db, organisationId: number, provider: IntegrationProvider): Promise<FreshToken> {
+export async function getFreshAccessToken(db: Db, organisationId: number, provider: IntegrationProvider, opts?: { refreshWithinMs?: number }): Promise<FreshToken> {
+    // How close to expiry triggers a refresh. Defaults to the 60s publish-path skew; the
+    // proactive refresh cron passes a much wider window so it renews tokens well before they
+    // lapse (and exercises the refresh grant on idle connections, catching dead grants early).
+    const skewMs = opts?.refreshWithinMs ?? REFRESH_SKEW_MS;
+
     const row = await getIntegration(db, organisationId, provider);
     if (!row || row.status === 'revoked') {
         throw new IntegrationError('not_connected', `${providerLabel(provider)} is not connected for this workspace. Connect it on the Integrations page first.`, 409);
@@ -528,7 +554,7 @@ export async function getFreshAccessToken(db: Db, organisationId: number, provid
 
     // Fast path: a healthy token needs no lock, so the common case never touches the
     // transaction and stays exactly as cheap as it was before.
-    const expired = row.expiresAt && row.expiresAt.getTime() - REFRESH_SKEW_MS < Date.now();
+    const expired = row.expiresAt && row.expiresAt.getTime() - skewMs < Date.now();
     if (!expired) {
         return { accessToken: secret.accessToken, tenantId: row.tenantId, integrationId: row.id };
     }
@@ -539,7 +565,7 @@ export async function getFreshAccessToken(db: Db, organisationId: number, provid
     // other serverless instances, which share nothing but the database. Joiners share one
     // outcome, so the 'expired' write below happens once per refresh, not once per caller.
     const outcome = await singleFlight(`integration-refresh:${organisationId}:${provider}`, async () => {
-        const result = await db.transaction((tx) => refreshUnderLock(tx as Tx, organisationId, provider));
+        const result = await db.transaction((tx) => refreshUnderLock(tx as Tx, organisationId, provider, skewMs));
         // Applied only after the transaction commits: this write must survive the throw,
         // and anything written inside the transaction would roll back with it.
         if (!result.ok && result.markExpired) {

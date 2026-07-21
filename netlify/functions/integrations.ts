@@ -5,7 +5,7 @@ import { getDb } from '../../db/client';
 import { systemConnections, scheduledPosts, users, userOrganisations, auditLogs, workspaceIntegrations } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { storeSecret, deleteSecret, buildRefKey } from '../../src/utils/vault';
-import { deleteIntegration, isIntegrationProvider } from '../../src/utils/workspace-integrations';
+import { deleteIntegration, isIntegrationProvider, serviceAutoRefreshes } from '../../src/utils/workspace-integrations';
 import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
@@ -135,6 +135,16 @@ export default withLambda(async (event) => {
                         connected: true,
                     });
                 }
+            }
+
+            // Flag connections that renew their access token silently, so the UI can suppress
+            // the "Expiring in Nd" reconnect nag for them. Covers the workspace_integrations
+            // providers that hold an offline refresh token (serviceAutoRefreshes) plus the
+            // system_connections social tokens rotated by the refresh-social-tokens cron.
+            const CRON_REFRESHED = new Set(['x', 'linkedin']);
+            for (const m of merged) {
+                (m as typeof m & { autoRefresh: boolean }).autoRefresh =
+                    serviceAutoRefreshes(m.serviceName) || CRON_REFRESHED.has(m.serviceName);
             }
 
             // Server-side connection sandboxing: when scoped to an assistant, return

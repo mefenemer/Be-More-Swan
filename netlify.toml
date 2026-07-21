@@ -256,6 +256,12 @@ node_bundler = "esbuild"
 [functions.refresh-social-tokens]
   schedule = "*/30 * * * *"
 
+# Proactive refresh for workspace_integrations Google OAuth tokens (YouTube, Gmail, Search
+# Console) — every 30 min so a ~1h token stays warm and a dead refresh grant surfaces before
+# the next use rather than at publish time.
+[functions.refresh-workspace-tokens]
+  schedule = "*/30 * * * *"
+
 # US-STOR-1.1.2 AC7: Nightly orphaned file cleanup — 03:00 UTC every day
 [functions.storage-lifecycle-cleanup]
   schedule = "0 3 * * *"
