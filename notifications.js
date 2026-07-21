@@ -519,8 +519,10 @@ window.initNotifications = async function() {
 
         const actions = notificationsData.filter(n => kindOf(n) === 'action');
         const updates = notificationsData.filter(n => kindOf(n) === 'info');
-        // Open = UNRESOLVED (not merely unread): a setup reminder counts until it's actually done.
-        const openActions = actions.filter(n => !isResolved(n)).length;
+        // Count = UNREAD, unresolved actions. Marking an action read (mute) drops it from the count
+        // but keeps it in the list (greyed) until it's truly resolved — read controls the number, the
+        // resolvedAt flag controls list membership. Resolved items are auto-read, so they never count.
+        const openActions = actions.filter(n => !isResolved(n) && !n.isRead).length;
         // Updates are cleared by reading, so their badge counts unread items (mirrors the action badge).
         const unreadUpdates = updates.filter(n => !n.isRead).length;
 
@@ -534,10 +536,16 @@ window.initNotifications = async function() {
         }
         setTabStyles();
 
-        // Mark-all-read only applies to the Updates tab.
+        // Mark-all-read acts on whichever tab is open: it clears the unread items in that tab. The
+        // button stays visible but is disabled + greyed when the current tab has nothing unread, so
+        // its state always reflects "is there anything here to mark read?".
         if (markAllBtn) {
-            const showMarkAll = activeTab === 'updates' && updates.some(n => !n.isRead);
-            markAllBtn.classList.toggle('hidden', !showMarkAll);
+            const currentUnread = activeTab === 'action'
+                ? actions.filter(n => !isResolved(n) && !n.isRead).length
+                : updates.filter(n => !n.isRead).length;
+            markAllBtn.disabled = currentUnread === 0;
+            markAllBtn.style.opacity = currentUnread === 0 ? '0.5' : '';
+            markAllBtn.style.cursor = currentUnread === 0 ? 'not-allowed' : '';
         }
 
         let list = (activeTab === 'action' ? actions : updates).filter(matchesSearch).slice();
@@ -665,12 +673,23 @@ window.initNotifications = async function() {
 
     if (markAllBtn) {
         markAllBtn.addEventListener('click', () => {
-            // Only clears informational updates; action items are cleared by acting.
-            notificationsData.filter(n => kindOf(n) === 'info').forEach(n => n.isRead = true);
+            if (markAllBtn.disabled) return;
+            // Scope to the open tab: mute all unread actions (read, not resolved) on the Action tab, or
+            // clear all unread updates on the Updates tab. We send the exact ids so the other tab's
+            // unread state is left untouched.
+            const isAction = activeTab === 'action';
+            const targets = notificationsData.filter(n =>
+                !n.isRead && (isAction ? (kindOf(n) === 'action' && !isResolved(n)) : kindOf(n) === 'info'));
+            if (!targets.length) return;
+            const ids = targets.map(n => n.id);
+            targets.forEach(n => n.isRead = true);
             renderList();
-            fetch('/.netlify/functions/notifications', { method: 'PUT' })
-                .then(() => { if (typeof window.updateNotificationBadge === 'function') window.updateNotificationBadge(); })
-                .catch(err => console.error("Bulk sync failed:", err));
+            fetch('/.netlify/functions/notifications', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids }),
+            }).then(() => { if (typeof window.updateNotificationBadge === 'function') window.updateNotificationBadge(); })
+              .catch(err => console.error("Bulk sync failed:", err));
         });
     }
 

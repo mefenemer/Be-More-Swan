@@ -15,8 +15,7 @@ import { aiBlueprints, scheduledPosts, contentGenerationJobs, contentAssets, not
 import { createNotification } from './notify';
 import { resolvePostingSchedule, computeScheduleSlots } from '../config/posting-cadence';
 import { assembleBlueprint } from './blueprint';
-import { resolveAutonomousDraftPlatforms, type AutonomousDraftPlatform } from './publish-policy';
-import { normalizePlatform } from '../config/platform-formats';
+import { resolveAutonomousDraftPlatforms } from './publish-policy';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -83,16 +82,20 @@ export async function enqueueScheduleGapFill(
 
     const windowEnd = slots[slots.length - 1];
 
-    // Autopilot drafts one post per slot PER platform the assistant targets (primary_platforms ∩ the
-    // platforms a drafter exists for). Legacy assistants with no recognised platforms keep the single
-    // stream (platform === null → process-content-jobs resolves the org's fallback connection).
+    // Autopilot drafts ONE idea per slot and fans it across every platform the assistant targets
+    // (primary_platforms ∩ the platforms a drafter exists for). One content_generation_job per slot
+    // carries that platform list; process-content-jobs generates a single caption/media and creates one
+    // post per platform, all sharing a crosspost_group_id → one Review Queue card, preview per platform.
+    // Legacy assistants with no recognised platforms keep the single stream (platforms null → the
+    // worker resolves the org's fallback connection).
     const targetPlatforms = resolveAutonomousDraftPlatforms(assistant.onboardingContext);
-    const multi = targetPlatforms.length > 0;
-    const platformsToDraft: (AutonomousDraftPlatform | null)[] = multi ? targetPlatforms : [null];
 
-    // Posts already planned within the window.
+    // A cross-post's per-platform rows all share ONE publish_date, so coverage is per SLOT, not per
+    // platform: a day with two preferred times needs two cross-posts to be "covered". We dedupe planned
+    // rows / in-flight jobs by their exact slot timestamp first so one cross-post counts once, then
+    // tally per calendar day.
     const plannedRows = await db
-        .select({ publishDate: scheduledPosts.publishDate, platform: scheduledPosts.platform })
+        .select({ publishDate: scheduledPosts.publishDate })
         .from(scheduledPosts)
         .where(and(
             eq(scheduledPosts.assistantId, assistant.id),
@@ -100,46 +103,30 @@ export async function enqueueScheduleGapFill(
             lte(scheduledPosts.publishDate, windowEnd),
             sql`status IN ('draft','pending_approval','in_review','approved','scheduled')`,
         ));
-
-    // Generation jobs still in flight that already target a slot in the window.
     const inflightRows = await db
-        .select({ targetPublishDate: contentGenerationJobs.targetPublishDate, platform: contentGenerationJobs.platform })
+        .select({ targetPublishDate: contentGenerationJobs.targetPublishDate })
         .from(contentGenerationJobs)
         .where(and(
             eq(contentGenerationJobs.assistantId, assistant.id),
             inArray(contentGenerationJobs.status, ['queued', 'processing']),
         ));
 
-    // Coverage counts keyed by (platform-bucket, calendar day). In single-stream mode the bucket is
-    // always 'any' (a post on any platform covers the day, preserving the historical behaviour); in
-    // multi-platform mode each platform is tracked independently so an Instagram post doesn't count
-    // as covering a LinkedIn slot. A day with two preferred times needs two posts to be "covered".
-    const bucketOf = (plat: string | null): string => multi ? (normalizePlatform(plat) ?? '__other__') : 'any';
-    const covKey = (bucket: string, d: Date): string => `${bucket}|${UTC_DAY(d)}`;
+    const coveredSlotTimes = new Set<number>();
+    plannedRows.forEach(r => { if (r.publishDate) coveredSlotTimes.add(new Date(r.publishDate).getTime()); });
+    inflightRows.forEach(r => { if (r.targetPublishDate) coveredSlotTimes.add(new Date(r.targetPublishDate).getTime()); });
     const coverage = new Map<string, number>();
-    const bump = (bucket: string, d: Date | null) => {
-        if (!d) return;
-        const key = covKey(bucket, new Date(d));
+    coveredSlotTimes.forEach(t => {
+        const key = UTC_DAY(new Date(t));
         coverage.set(key, (coverage.get(key) ?? 0) + 1);
-    };
-    plannedRows.forEach(r => bump(bucketOf(r.platform), r.publishDate));
-    inflightRows.forEach(r => {
-        // A legacy in-flight job carries no platform; in multi mode we can't tell which platform it
-        // will resolve to, so count it conservatively against every target platform that day.
-        if (multi && r.platform == null) targetPlatforms.forEach(tp => bump(tp, r.targetPublishDate));
-        else bump(bucketOf(r.platform), r.targetPublishDate);
     });
 
-    // Walk desired slots in chronological order, once per target platform; collect only the deficit.
-    const uncovered: Array<{ slot: Date; platform: AutonomousDraftPlatform | null }> = [];
-    for (const platform of platformsToDraft) {
-        const bucket = multi ? platform! : 'any';
-        for (const slot of slots) {
-            const key = covKey(bucket, slot);
-            const remaining = coverage.get(key) ?? 0;
-            if (remaining > 0) { coverage.set(key, remaining - 1); continue; } // already covered
-            uncovered.push({ slot, platform });
-        }
+    // Walk desired slots chronologically; collect only the deficit (one entry per uncovered slot).
+    const uncovered: Date[] = [];
+    for (const slot of slots) {
+        const key = UTC_DAY(slot);
+        const remaining = coverage.get(key) ?? 0;
+        if (remaining > 0) { coverage.set(key, remaining - 1); continue; } // already covered
+        uncovered.push(slot);
     }
     if (!uncovered.length) return { enqueued: 0, reason: 'fully_covered' };
 
@@ -159,21 +146,14 @@ export async function enqueueScheduleGapFill(
         }
     }
 
-    // A slot that fans out to 2+ platforms is one logical cross-post: stamp each of its jobs with a
-    // shared crosspost_group_id so process-content-jobs marks the resulting drafts as siblings and the
-    // Review Queue shows a single card. A slot with only one uncovered platform stays standalone (null).
-    const slotJobCount = new Map<number, number>();
-    for (const { slot } of uncovered) slotJobCount.set(slot.getTime(), (slotJobCount.get(slot.getTime()) ?? 0) + 1);
-    const slotGroupId = new Map<number, string>();
+    // One job per uncovered slot. When the assistant targets 2+ platforms the job fans out into a
+    // single cross-post (shared crosspost_group_id); a lone platform (or the legacy single stream)
+    // stays standalone (null group id, null platforms → the worker resolves the fallback connection).
+    const fanOut = targetPlatforms.length > 0;
+    const isCrossPost = targetPlatforms.length > 1;
 
     let enqueued = 0;
-    for (const { slot, platform } of uncovered) {
-        const slotKey = slot.getTime();
-        let crosspostGroupId: string | null = null;
-        if ((slotJobCount.get(slotKey) ?? 0) > 1) {
-            crosspostGroupId = slotGroupId.get(slotKey) ?? randomUUID();
-            slotGroupId.set(slotKey, crosspostGroupId);
-        }
+    for (const slot of uncovered) {
         await db.insert(contentGenerationJobs).values({
             jobId: randomUUID(),
             blueprintId: bp.id,
@@ -184,10 +164,12 @@ export async function enqueueScheduleGapFill(
             attempt: 0,
             maxAttempts: 3,
             triggerType: 'scheduled',
-            // Per-platform in multi mode; null lets process-content-jobs resolve the fallback platform.
-            platform: platform ?? null,
+            // platforms drives the fan-out; platform stays null (resolved from the list, or the org
+            // fallback when there is no list).
+            platform: null,
+            platforms: fanOut ? targetPlatforms : null,
             targetPublishDate: slot,
-            crosspostGroupId,
+            crosspostGroupId: isCrossPost ? randomUUID() : null,
         });
         enqueued++;
     }

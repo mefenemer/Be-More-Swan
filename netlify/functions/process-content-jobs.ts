@@ -74,9 +74,11 @@ export async function drainContentJobs(): Promise<number> {
         organisation_id: number; user_id: number; attempt: number; max_attempts: number;
         context_prompt: string | null; trigger_type: string | null; platform: string | null;
         admin_id: number | null; target_publish_date: string | null; crosspost_group_id: string | null;
+        platforms: string[] | null;
     }>(
         `SELECT id, job_id, blueprint_id, assistant_id, organisation_id, user_id, attempt, max_attempts,
-                context_prompt, trigger_type, platform, admin_id, target_publish_date, crosspost_group_id
+                context_prompt, trigger_type, platform, admin_id, target_publish_date, crosspost_group_id,
+                platforms
          FROM content_generation_jobs
          WHERE status = 'queued'
            AND content_type = 'social'
@@ -103,6 +105,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
     organisation_id: number; user_id: number; attempt: number; max_attempts: number;
     context_prompt: string | null; trigger_type: string | null; platform: string | null;
     admin_id: number | null; target_publish_date: string | null; crosspost_group_id: string | null;
+    platforms: string[] | null;
 }, now: Date) {
     await db.execute(
         `UPDATE content_generation_jobs SET status = 'processing', attempt = attempt + 1, updated_at = now() WHERE id = ${job.id}`
@@ -152,7 +155,19 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         const orgDisclosureText    = (compliance['orgFooterText'] as string) ?? DISCLOSURE.workspaceFooterDefault;
         const disclosureText = orgDisclosureEnabled ? orgDisclosureText : perAssistantDisclosure;
 
-        const platform      = job.platform || await resolveFallbackPlatform(db, job.organisation_id);
+        // One-idea fan-out: when the job carries a platforms list we generate ONE caption/media and
+        // create a post for each platform (siblings share crosspost_group_id → one Review Queue card).
+        // `platform` is the representative used for the prompt aspect ratio + the primary post; the
+        // rest are cloned after. Legacy single-platform jobs keep platforms empty → targetPlatforms is
+        // just [platform], and everything below runs exactly as before.
+        const fanoutPlatforms = Array.isArray(job.platforms)
+            ? job.platforms.filter((p): p is string => typeof p === 'string' && p.length > 0)
+            : [];
+        const fanOut = fanoutPlatforms.length > 1;
+        const platform      = (fanoutPlatforms[0] || job.platform) || await resolveFallbackPlatform(db, job.organisation_id);
+        const targetPlatforms = fanoutPlatforms.length ? fanoutPlatforms : [platform];
+        // Platform-agnostic wording when one idea spans several platforms (the same caption ships to all).
+        const promptPlatform = fanOut ? 'social media' : platform;
 
         const ctaLine         = answers['cta']          ? `Call to action: ${answers['cta']}` : '';
         const incentiveLine   = answers['incentive']    ? `Incentive/offer: ${answers['incentive']}` : '';
@@ -212,7 +227,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
 
         const baseInstruction = [
             `You are ${assistantName}, a social media assistant for ${businessName}.`,
-            `Generate a ${platform} post targeting ${audience} in a ${tone} voice.`,
+            `Generate a ${promptPlatform} post targeting ${audience} in a ${tone} voice.`,
             `Follow all strict and content rules in the system prompt.`,
             formatBlock,
             strategyBlock,
@@ -434,52 +449,52 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // auto-publish an AI-generated image, and the media source doesn't exist until now.
         // Admin-test drafts (status 'admin_test') are never real posts and are excluded.
         if (!isAdminTest && attachedMediaSource) {
+            autoPublished = await runAutoPublishGate(db, {
+                postId: post.id, platform, assistantId: job.assistant_id, organisationId: job.organisation_id,
+                caption: generated.caption ?? '', mediaSource: attachedMediaSource, now,
+            });
+        }
+
+        // One-idea fan-out: clone the finished primary post (final caption incl. any stock credit, its
+        // media, format, slot and crosspost_group_id) onto the remaining platforms, then run each one's
+        // own auto-publish gate — connection/policy/confidence are per platform. The siblings share the
+        // group id so the Review Queue shows a single card the human previews per platform.
+        if (fanOut && !isAdminTest) {
             try {
-                const [asst] = await db.select({ onboardingContext: aiAssistants.onboardingContext })
-                    .from(aiAssistants).where(eq(aiAssistants.id, job.assistant_id)).limit(1);
+                const [primary] = await db.select({
+                    caption: scheduledPosts.caption, hashtags: scheduledPosts.hashtags,
+                    suggestedMediaDescription: scheduledPosts.suggestedMediaDescription,
+                    pillar: scheduledPosts.pillar, postFormat: scheduledPosts.postFormat,
+                    publishDate: scheduledPosts.publishDate, contentAssetIds: scheduledPosts.contentAssetIds,
+                    crosspostGroupId: scheduledPosts.crosspostGroupId,
+                }).from(scheduledPosts).where(eq(scheduledPosts.id, post.id)).limit(1);
+                const sharedAssetIds = Array.isArray(primary?.contentAssetIds) ? (primary!.contentAssetIds as number[]) : [];
 
-                const decision = await decideAutoPublish(db, {
-                    assistantId: job.assistant_id,
-                    organisationId: job.organisation_id,
-                    platform,
-                    caption: generated.caption ?? '',
-                    mediaSource: attachedMediaSource,
-                    onboardingContext: asst?.onboardingContext ?? null,
-                    now,
-                });
+                for (const siblingPlatform of targetPlatforms.slice(1)) {
+                    const [sibling] = await db.insert(scheduledPosts).values({
+                        userId: job.user_id, organisationId: job.organisation_id, assistantId: job.assistant_id,
+                        blueprintId: job.blueprint_id, jobId: job.job_id,
+                        platform: siblingPlatform, postFormat: primary?.postFormat ?? format, pillar: primary?.pillar ?? null,
+                        publishDate: primary?.publishDate ?? new Date(now.getTime() + 24 * 60 * 60 * 1000),
+                        caption: primary?.caption ?? null, hashtags: primary?.hashtags ?? null,
+                        suggestedMediaDescription: primary?.suggestedMediaDescription ?? null,
+                        status: 'pending_approval', generatedAt: now, triggerType: job.trigger_type ?? 'scheduled',
+                        crosspostGroupId: primary?.crosspostGroupId ?? job.crosspost_group_id,
+                    }).returning({ id: scheduledPosts.id });
 
-                // Stamp the connection on every draft, published or not: a human-approved post needs
-                // it too, and publish-instagram.ts hard-fails without it.
-                const patch: Record<string, unknown> = { connectionId: decision.connectionId, updatedAt: now };
+                    for (const aid of sharedAssetIds) await attachAssetToPost(db, sibling.id, aid);
 
-                if (decision.confidence) {
-                    patch.confidenceScore = decision.confidence.confidenceScore;
-                    patch.factualClaimsCount = decision.confidence.factualClaimsCount;
-                    patch.factualClaims = decision.confidence.factualClaims;
-                    patch.confidenceAssessedAt = now;
-                    patch.confidenceAssessmentMs = decision.confidence.assessmentDurationMs;
+                    if (attachedMediaSource) {
+                        await runAutoPublishGate(db, {
+                            postId: sibling.id, platform: siblingPlatform, assistantId: job.assistant_id,
+                            organisationId: job.organisation_id, caption: primary?.caption ?? '',
+                            mediaSource: attachedMediaSource, now,
+                        });
+                    }
                 }
-
-                if (decision.status === 'scheduled') {
-                    patch.status = 'scheduled';
-                    patch.autoPublishedAt = now;   // marks it unattended + counts toward the weekly ceiling
-                    autoPublished = true;
-                }
-
-                // Only explain the routing when the deployer actually turned publish mode on —
-                // otherwise every draft in the product would carry a redundant "sent for review" note.
-                if (decision.reason !== 'platform_in_review_mode') {
-                    patch.generationReason = describeDecision(decision);
-                }
-
-                await db.update(scheduledPosts).set(patch).where(eq(scheduledPosts.id, post.id));
-
-                if (decision.reason === 'weekly_cap_reached') {
-                    console.warn(`[process-content-jobs] assistant ${job.assistant_id} hit its weekly auto-publish ceiling — post ${post.id} routed to review.`);
-                }
-            } catch (gateErr) {
-                // A broken gate must not publish and must not fail the job: the draft stays in review.
-                console.error(`[process-content-jobs] auto-publish gate failed for post ${post.id} (left in review):`, gateErr instanceof Error ? gateErr.message : gateErr);
+            } catch (fanErr) {
+                // A fan-out failure must not fail the job — the primary post is already safely drafted.
+                console.error(`[process-content-jobs] job ${job.job_id} fan-out to sibling platforms failed:`, fanErr instanceof Error ? fanErr.message : fanErr);
             }
         }
 
@@ -492,7 +507,9 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         if (!isAdminTest) {
             const [asst] = await db.select({ name: aiAssistants.name }).from(aiAssistants).where(eq(aiAssistants.id, job.assistant_id)).limit(1);
             const assistantLabel = asst?.name ?? 'Your assistant';
-            const platformLabel = platform.charAt(0).toUpperCase() + platform.slice(1);
+            const cap = (p: string) => p.charAt(0).toUpperCase() + p.slice(1);
+            // One notification for the whole cross-post; the label names every platform it fanned to.
+            const platformLabel = fanOut ? targetPlatforms.map(cap).join(', ') : cap(platform);
 
             if (autoPublished) {
                 // Nothing to review — it's already scheduled. Point at the calendar, where the user
@@ -541,6 +558,66 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 `UPDATE content_generation_jobs SET status = 'queued', next_retry_at = '${nextRetryAt}', error_message = '${errorMessage.replace(/'/g, "''")}', updated_at = now() WHERE id = ${job.id}`
             );
         }
+    }
+}
+
+// Autopilot publish gate for a single drafted post. Can only PROMOTE 'pending_approval' → 'scheduled'
+// (never demote); every failure leaves the draft safely in review. Runs per platform — connection,
+// policy and confidence are platform-specific — so the primary post and each fanned-out sibling each
+// call it with their own platform. Returns whether the post was auto-published. Never throws.
+async function runAutoPublishGate(db: ReturnType<typeof getDb>, args: {
+    postId: number; platform: string; assistantId: number; organisationId: number;
+    caption: string; mediaSource: MediaSource; now: Date;
+}): Promise<boolean> {
+    try {
+        const [asst] = await db.select({ onboardingContext: aiAssistants.onboardingContext })
+            .from(aiAssistants).where(eq(aiAssistants.id, args.assistantId)).limit(1);
+
+        const decision = await decideAutoPublish(db, {
+            assistantId: args.assistantId,
+            organisationId: args.organisationId,
+            platform: args.platform,
+            caption: args.caption,
+            mediaSource: args.mediaSource,
+            onboardingContext: asst?.onboardingContext ?? null,
+            now: args.now,
+        });
+
+        // Stamp the connection on every draft, published or not: a human-approved post needs it too,
+        // and publish-instagram.ts hard-fails without it.
+        const patch: Record<string, unknown> = { connectionId: decision.connectionId, updatedAt: args.now };
+
+        if (decision.confidence) {
+            patch.confidenceScore = decision.confidence.confidenceScore;
+            patch.factualClaimsCount = decision.confidence.factualClaimsCount;
+            patch.factualClaims = decision.confidence.factualClaims;
+            patch.confidenceAssessedAt = args.now;
+            patch.confidenceAssessmentMs = decision.confidence.assessmentDurationMs;
+        }
+
+        let autoPublished = false;
+        if (decision.status === 'scheduled') {
+            patch.status = 'scheduled';
+            patch.autoPublishedAt = args.now;   // marks it unattended + counts toward the weekly ceiling
+            autoPublished = true;
+        }
+
+        // Only explain the routing when the deployer actually turned publish mode on — otherwise every
+        // draft in the product would carry a redundant "sent for review" note.
+        if (decision.reason !== 'platform_in_review_mode') {
+            patch.generationReason = describeDecision(decision);
+        }
+
+        await db.update(scheduledPosts).set(patch).where(eq(scheduledPosts.id, args.postId));
+
+        if (decision.reason === 'weekly_cap_reached') {
+            console.warn(`[process-content-jobs] assistant ${args.assistantId} hit its weekly auto-publish ceiling — post ${args.postId} routed to review.`);
+        }
+        return autoPublished;
+    } catch (gateErr) {
+        // A broken gate must not publish and must not fail the job: the draft stays in review.
+        console.error(`[process-content-jobs] auto-publish gate failed for post ${args.postId} (left in review):`, gateErr instanceof Error ? gateErr.message : gateErr);
+        return false;
     }
 }
 

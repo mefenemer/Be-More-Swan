@@ -2731,10 +2731,14 @@ export const contentGenerationJobs = pgTable("content_generation_jobs", {
   // stamps the resulting scheduled_post with this publish_date; null ⇒ legacy "now + 24h".
   // Populated by the draft-horizon scheduler from the assistant's frequency/days/times. db/posting-schedule.sql.
   targetPublishDate: timestamp("target_publish_date"),
-  // Cross-post fan-out identity (db/crosspost-group-id.sql). Autopilot enqueues one job per platform
-  // for a shared slot; every job for the same slot carries the SAME uuid so process-content-jobs can
-  // stamp the resulting scheduled_posts rows as siblings of one logical post. NULL ⇒ standalone.
+  // Cross-post fan-out identity (db/crosspost-group-id.sql). Autopilot enqueues ONE job per slot; the
+  // job carries the SAME uuid it will stamp on every sibling post so process-content-jobs marks the
+  // resulting scheduled_posts rows as one logical cross-post. NULL ⇒ standalone (single platform).
   crosspostGroupId: text("crosspost_group_id"),
+  // One-idea cross-post fan-out (db/crosspost-fanout-platforms.sql). When set, process-content-jobs
+  // generates ONE caption/media for this job and creates a scheduled_posts row for EACH platform in
+  // this list (sharing crosspost_group_id). NULL/empty ⇒ legacy single-platform job (uses `platform`).
+  platforms: jsonb("platforms").$type<string[]>(),
   // US-ADM-4.3.3: Admin test generation fields
   adminId: integer("admin_id").references(() => users.id, { onDelete: "set null" }),
   tokensInput: integer("tokens_input"),                    // Anthropic input token count

@@ -102,16 +102,15 @@ export default withLambda(async (event: HandlerEvent) => {
                 n.assistantId ?? (n.metadata as any)?.assistantId ?? (n.metadata as any)?.assistant_id ?? null;
             allNotes = allNotes.filter(n => isInAppEnabledFor(inAppPrefs, assistantOverrides, assistantIdOf(n), n.type));
 
-            // Counts for the sidebar badge. actionCount = OPEN (unresolved) action items —
-            // the meaningful "things you must deal with" number. Unresolved (resolvedAt IS NULL),
-            // not merely unread: reading a setup reminder must not clear the badge; only the
-            // item's completion criteria being met (resolvedAt) does.
-            // updateUnread = unread "update" (info-kind) notifications. badgeCount combines both
-            // so the sidebar reflects open actions AND unread updates (no double-count: a
+            // Counts for the sidebar badge. actionCount = UNREAD, unresolved action items — reading
+            // (muting) an action drops it from the badge, but the item stays in the inbox list until
+            // it's truly resolved (resolvedAt). This mirrors the inbox tab pill so the two never
+            // disagree. updateUnread = unread "update" (info-kind) notifications. badgeCount combines
+            // both so the sidebar reflects unread actions AND unread updates (no double-count: a
             // notification is either action-kind or info-kind, never both).
             if (queryStringParameters && queryStringParameters.action === 'count') {
                 const unread = allNotes.filter(n => !n.isRead).length;
-                const actionCount = allNotes.filter(n => !n.resolvedAt && kindOf(n.type) === 'action').length;
+                const actionCount = allNotes.filter(n => !n.resolvedAt && !n.isRead && kindOf(n.type) === 'action').length;
                 const updateUnread = allNotes.filter(n => !n.isRead && kindOf(n.type) !== 'action').length;
                 const badgeCount = actionCount + updateUnread;
                 // Type of the newest visible notification (allNotes is ordered newest-first).
@@ -217,9 +216,17 @@ export default withLambda(async (event: HandlerEvent) => {
         // PUT: Bulk action - Mark ALL as read
         // -------------------------------------------------------------
         if (event.httpMethod === 'PUT') {
-            await db.update(notifications)
-                .set({ isRead: true })
-                .where(and(eq(notifications.userId, userId), eq(notifications.isRead, false)));
+            // Optional { ids: number[] } scopes the bulk-read to just those notifications (the client
+            // sends the current tab's unread ids so the other tab is left alone). No ids ⇒ legacy
+            // "mark absolutely everything read" for back-compat.
+            const putBody = event.body ? JSON.parse(event.body) : {};
+            const ids = Array.isArray(putBody.ids)
+                ? putBody.ids.filter((n: unknown): n is number => Number.isInteger(n))
+                : null;
+            const conds = [eq(notifications.userId, userId), eq(notifications.isRead, false)];
+            if (ids && ids.length) conds.push(inArray(notifications.id, ids));
+
+            await db.update(notifications).set({ isRead: true }).where(and(...conds));
 
             return { statusCode: 200, body: JSON.stringify({ success: true }) };
         }

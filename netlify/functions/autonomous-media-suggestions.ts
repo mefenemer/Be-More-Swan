@@ -14,6 +14,7 @@
 // Schedule: "0 7 * * *" (07:00 UTC daily), after draft-horizon-fill (06:00). Also POSTable for tests.
 
 import { Handler } from '@netlify/functions';
+import { randomUUID } from 'crypto';
 import { and, eq, gte, lte, sql, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
@@ -109,21 +110,22 @@ export default withLambda(async (event) => {
         const horizonDays = a.horizonDays ?? 7;
         const windowEnd = new Date(now.getTime() + horizonDays * 24 * 60 * 60 * 1000);
 
-        // Draft for each platform the assistant targets (∩ the platforms a drafter exists for);
-        // legacy assistants with no recognised platforms keep the Instagram-only behaviour.
+        // One idea per assistant: pick a single empty day, draft ONE caption + ONE image, and fan it
+        // across every platform the assistant targets — siblings share a crosspost_group_id so the
+        // Review Queue shows one card the human previews per platform (not N per-platform posts).
+        // Legacy assistants with no recognised platforms stay Instagram-only.
         const targetPlatforms = resolveAutonomousDraftPlatforms(a.onboardingContext);
         const platforms: AutonomousDraftPlatform[] = targetPlatforms.length ? targetPlatforms : ['instagram'];
+        const representative = platforms[0];
+        const fmt = platformFormat(representative);
 
-      for (const platform of platforms) {
-        const fmt = platformFormat(platform);
-
-        // Which upcoming days already have a planned post for this assistant on THIS platform?
+        // Coverage is per day now (one cross-post covers every platform that day): any planned post on
+        // a day means that day is already taken.
         const coveredRows = await db
             .select({ publishDate: scheduledPosts.publishDate })
             .from(scheduledPosts)
             .where(and(
                 eq(scheduledPosts.assistantId, a.id),
-                eq(scheduledPosts.platform, platform),
                 gte(scheduledPosts.publishDate, now),
                 lte(scheduledPosts.publishDate, windowEnd),
                 sql`status IN ('draft','in_review','approved','scheduled','pending_approval')`,
@@ -133,7 +135,7 @@ export default withLambda(async (event) => {
         const gapDay = firstGapDay(covered, horizonDays, now);
         if (!gapDay) { skippedNoGap++; continue; }
 
-        const copy = await draftCopy(a.orgName || 'our brand', a.name, platform);
+        const copy = await draftCopy(a.orgName || 'our brand', a.name, representative);
 
         // AI generation source — encapsulates the autonomous credit hold/settle + the generation-job
         // ledger, so the resolver only pays for AI when it actually reaches that source. A reached cap
@@ -193,67 +195,79 @@ export default withLambda(async (event) => {
         const dateLabel = gapDay.toLocaleDateString('en-GB', { day: 'numeric', month: 'long' });
         const sourceLabel = resolved.source === 'manual' ? 'your content library'
             : resolved.source === 'stock' ? 'a Pexels stock photo' : 'an AI-generated image';
+        // Siblings of this one idea share the group id (null when there's only one platform).
+        const crosspostGroupId = platforms.length > 1 ? randomUUID() : null;
 
-        // Autopilot publish gate — the same decision path the cadence engine (process-content-jobs)
-        // uses: platform policy, no AI media, green caption, a live connection, and the rolling
-        // weekly ceiling. Everything else lands in 'pending_approval'.
-        const gate = await decideAutoPublish(db, {
-            assistantId: a.id,
-            organisationId: a.organisationId,
-            platform,
-            caption: copy.caption,
-            mediaSource: resolved.source,
-            onboardingContext: a.onboardingContext,
-            now,
-        });
+        // Fan the one idea across the platforms. Caption, image and slot are shared; the auto-publish
+        // gate is per platform (connection, policy, confidence), so it runs inside the loop.
+        let stockReserved = false;
+        let anyAwaitingReview = false;
+        for (const platform of platforms) {
+            // Autopilot publish gate — platform policy, no AI media, green caption, a live connection,
+            // and the rolling weekly ceiling. Everything else lands in 'pending_approval'.
+            const gate = await decideAutoPublish(db, {
+                assistantId: a.id,
+                organisationId: a.organisationId,
+                platform,
+                caption: copy.caption,
+                mediaSource: resolved.source,
+                onboardingContext: a.onboardingContext,
+                now,
+            });
 
-        if (gate.reason === 'scoring_unavailable') {
-            scoringUnavailable++;
-            console.warn(`[autonomous-media] confidence scorer unavailable (${gate.confidence?.failureMode}) for assistant ${a.id} — routed to review.`);
+            if (gate.reason === 'scoring_unavailable') {
+                scoringUnavailable++;
+                console.warn(`[autonomous-media] confidence scorer unavailable (${gate.confidence?.failureMode}) for assistant ${a.id} — routed to review.`);
+            }
+            if (gate.reason === 'weekly_cap_reached') {
+                console.warn(`[autonomous-media] assistant ${a.id} hit its weekly auto-publish ceiling — routed to review.`);
+            }
+
+            const gateLabel = describeDecision(gate);
+
+            const [post] = await db.insert(scheduledPosts).values({
+                userId: a.userId, organisationId: a.organisationId, assistantId: a.id,
+                platform, postFormat: 'image', publishDate: gapDay,
+                caption: copy.caption, hashtags: copy.hashtags || null,
+                contentAssetIds: [assetId],
+                connectionId: gate.connectionId,
+                status: gate.status, isAutonomous: true, triggerType: 'scheduled',
+                // Marks the post unattended and counts toward the rolling weekly ceiling.
+                autoPublishedAt: gate.status === 'scheduled' ? new Date() : null,
+                ownerLabel: `AI: ${a.name}`,
+                generationReason: `Drafted to fill an empty slot on ${dateLabel} (media from ${sourceLabel}). ${gateLabel}`,
+                generatedAt: new Date(),
+                crosspostGroupId,
+                // Persist the scorer's verdict inline — the drafter calls scoreCaption directly, so
+                // there's no separate score-post-confidence round-trip to fill these in. Null when the
+                // platform is in review mode and scoring was skipped.
+                confidenceScore: gate.confidence?.confidenceScore ?? null,
+                factualClaimsCount: gate.confidence?.factualClaimsCount ?? null,
+                factualClaims: (gate.confidence?.factualClaims ?? null) as any,
+                confidenceAssessedAt: gate.confidence ? new Date() : null,
+                confidenceAssessmentMs: gate.confidence?.assessmentDurationMs ?? null,
+            }).returning({ id: scheduledPosts.id });
+
+            await db.insert(scheduledPostAssets).values({ scheduledPostId: post.id, contentAssetId: assetId, position: 0 }).onConflictDoNothing();
+
+            // Reserve the stock pick once for the group so the same Pexels asset can't be drafted twice.
+            if (resolved.source === 'stock' && !stockReserved) {
+                await recordPostedAssets(db, { orgId: a.organisationId, userId: a.userId, scheduledPostId: post.id }).catch(() => {});
+                stockReserved = true;
+            }
+
+            if (gate.status !== 'scheduled') anyAwaitingReview = true;
         }
-        if (gate.reason === 'weekly_cap_reached') {
-            console.warn(`[autonomous-media] assistant ${a.id} hit its weekly auto-publish ceiling — routed to review.`);
-        }
 
-        const gateLabel = describeDecision(gate);
-
-        const [post] = await db.insert(scheduledPosts).values({
-            userId: a.userId, organisationId: a.organisationId, assistantId: a.id,
-            platform, postFormat: 'image', publishDate: gapDay,
-            caption: copy.caption, hashtags: copy.hashtags || null,
-            contentAssetIds: [assetId],
-            connectionId: gate.connectionId,
-            status: gate.status, isAutonomous: true, triggerType: 'scheduled',
-            // Marks the post unattended and counts toward the rolling weekly ceiling.
-            autoPublishedAt: gate.status === 'scheduled' ? new Date() : null,
-            ownerLabel: `AI: ${a.name}`,
-            generationReason: `Drafted to fill an empty ${platform} slot on ${dateLabel} (media from ${sourceLabel}). ${gateLabel}`,
-            generatedAt: new Date(),
-            // Persist the scorer's verdict inline — the drafter calls scoreCaption directly, so
-            // there's no separate score-post-confidence round-trip to fill these in. Null when the
-            // platform is in review mode and scoring was skipped.
-            confidenceScore: gate.confidence?.confidenceScore ?? null,
-            factualClaimsCount: gate.confidence?.factualClaimsCount ?? null,
-            factualClaims: (gate.confidence?.factualClaims ?? null) as any,
-            confidenceAssessedAt: gate.confidence ? new Date() : null,
-            confidenceAssessmentMs: gate.confidence?.assessmentDurationMs ?? null,
-        }).returning({ id: scheduledPosts.id });
-
-        await db.insert(scheduledPostAssets).values({ scheduledPostId: post.id, contentAssetId: assetId, position: 0 }).onConflictDoNothing();
-
-        // Reserve a stock pick in the dedup ledger so the same Pexels asset can't be drafted twice.
-        if (resolved.source === 'stock') {
-            await recordPostedAssets(db, { orgId: a.organisationId, userId: a.userId, scheduledPostId: post.id }).catch(() => {});
-        }
-
-        if (gate.status === 'scheduled') {
+        // Count one idea (one Review Queue card), not one per platform: it shows in review if any
+        // platform awaits approval, else it's an all-scheduled auto-published cross-post.
+        if (anyAwaitingReview) {
+            draftedByUser.set(a.userId, (draftedByUser.get(a.userId) || 0) + 1);
+        } else {
             autoScheduledByUser.set(a.userId, (autoScheduledByUser.get(a.userId) || 0) + 1);
             autoScheduled++;
-        } else {
-            draftedByUser.set(a.userId, (draftedByUser.get(a.userId) || 0) + 1);
         }
         drafted++;
-      } // end per-platform loop
     }
 
     // US8 in-app alert: one summary notification per user ("drafted N new posts for your review").
