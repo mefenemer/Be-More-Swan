@@ -3474,15 +3474,22 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
 
     // ── Overview loading skeletons ────────────────────────────────
     // The content is revealed above, but the Overview's dynamic cards fill from the async
-    // fetches kicked off below and would otherwise pop in one at a time. Drop a spinner over
-    // each until its data lands. Social media assistant only for now — the render steps that
-    // resolve these fetches clear the matching skeleton (_endCardLoading), and Connections is
-    // cleared in _renderConnectionsStatusCard (integrations.js).
-    const _overviewSkeletons = currentData.roleKey === 'social_media_manager';
-    if (_overviewSkeletons) {
-        _beginCardLoading('autopilot-status-card');
+    // fetches kicked off below and would otherwise pop in one at a time. Skeleton the cards
+    // this role actually shows, and clear each where its fetch resolves (below):
+    //   • KPI grid  — present for every role; filled by _loadAssistantMetrics.
+    //   • Autopilot — only the posting-schedule roles (SMM, Blog), detected by _applyDashboardRegistry
+    //                 having left the card visible; filled by _fetchAndRenderAssistantMetrics.
+    //   • Connections — social only. It's the one role where the card is guaranteed to stay on
+    //                 screen (see connections-card-social-always-visible); every other role's card
+    //                 self-hides when it has no connectors, so a skeleton there would flash a
+    //                 spinner and then vanish. _beginCardLoading un-hides what it skeletons, so we
+    //                 must NOT call it on a card a role keeps hidden — hence the explicit guards.
+    const _skelAutopilot = !document.getElementById('autopilot-status-card')?.classList.contains('hidden');
+    const _skelConnections = currentData.roleKey === 'social_media_manager';
+    _OVERVIEW_SKELETON_KPI_CARDS.forEach(k => _beginCardLoading('kpi-card-' + k));
+    if (_skelAutopilot) _beginCardLoading('autopilot-status-card');
+    if (_skelConnections) {
         _beginCardLoading('connections-status-card');
-        _OVERVIEW_SKELETON_KPI_CARDS.forEach(k => _beginCardLoading('kpi-card-' + k));
         // Connections was un-hidden to reserve its slot; keep the status row two-up so its
         // real card slots straight into place instead of reflowing the row when it arrives.
         window._syncStatusRow?.();
@@ -3512,7 +3519,7 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     await _fetchAndRenderAssistantMetrics(assistantId);
     // Autopilot's post totals (Created/Scheduled/Published) fill from that fetch — clear its
     // skeleton now that they're in.
-    if (_overviewSkeletons) _endCardLoading('autopilot-status-card');
+    if (_skelAutopilot) _endCardLoading('autopilot-status-card');
 
     // ── Recent Activity ───────────────────────────────────────────
     const activityList = document.getElementById('recent-activity-list');
@@ -3643,13 +3650,13 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     // ── Performance Metrics (post_insights aggregation) ───────────
     await _loadAssistantMetrics(assistantId);
     // KPI figures are in (or settled on their "—" placeholders) — clear their skeletons.
-    if (_overviewSkeletons) _OVERVIEW_SKELETON_KPI_CARDS.forEach(k => _endCardLoading('kpi-card-' + k));
+    _OVERVIEW_SKELETON_KPI_CARDS.forEach(k => _endCardLoading('kpi-card-' + k));
 
     // ── Connections (full connect/manage UI, scoped to this assistant) ──
     await window.initAssistantConnections(assistantId, currentData);
     // The status card has rendered (or self-hidden if there's nothing to connect) — clear its
     // loading skeleton. _syncStatusRow already ran inside the render, so the row settles here.
-    if (_overviewSkeletons) _endCardLoading('connections-status-card');
+    if (_skelConnections) _endCardLoading('connections-status-card');
     // Synced actions — this assistant's Integration Scenario Library recipes, in the same tab.
     // Reads relevance from window._detailReviewQueue.recordType (set by the dashboard registry).
     window.AssistantIntegrations?.init({ assistantId });
