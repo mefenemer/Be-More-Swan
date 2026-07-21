@@ -44,6 +44,7 @@ export default withLambda(async (event) => {
                 generatedAt: scheduledPosts.generatedAt,
                 assistantId: scheduledPosts.assistantId,
                 jobId: scheduledPosts.jobId,
+                crosspostGroupId: scheduledPosts.crosspostGroupId,
                 rejectionReason: scheduledPosts.rejectionReason,
                 rejectedAt: scheduledPosts.rejectedAt,
                 ctaText: scheduledPosts.ctaText,

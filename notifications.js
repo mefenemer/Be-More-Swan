@@ -443,6 +443,7 @@ window.initNotifications = async function() {
                 <p class="text-xs text-gray-400 mt-1">${fmtDate(notif.createdAt)}</p>
             </div>
             ${resolved ? '' : `<button type="button" class="action-cta px-4 py-2 ${st.cta} text-white text-sm font-bold rounded-lg transition shrink-0 whitespace-nowrap">${action.label}</button>`}
+            ${resolved ? '' : `<button type="button" class="action-toggle-read shrink-0 text-xs font-semibold px-2.5 py-1 rounded-md border border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-700 whitespace-nowrap">${notif.isRead ? 'Mark as unread' : 'Mark as read'}</button>`}
             ${dismissBtnHTML(notif)}
         `;
         li.querySelector('.action-cta')?.addEventListener('click', (e) => {
@@ -451,6 +452,13 @@ window.initNotifications = async function() {
             if (resolvesClick(notif)) setResolved(notif.id);
             else setRead(notif.id, true);
             action.run();
+        });
+        // Mute-only acknowledge: marking an action read greys it but keeps it in the tab — the row
+        // stays open (and still counted) until it's truly resolved. Mirrors the Updates read toggle
+        // so an item you can't action right now can still be quietened. resolvedAt is untouched.
+        li.querySelector('.action-toggle-read')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            setRead(notif.id, !notif.isRead);
         });
         li.querySelector('.dismiss-btn')?.addEventListener('click', (e) => {
             e.stopPropagation();

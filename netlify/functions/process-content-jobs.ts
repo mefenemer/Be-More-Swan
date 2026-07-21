@@ -73,10 +73,10 @@ export async function drainContentJobs(): Promise<number> {
         id: number; job_id: string; blueprint_id: number; assistant_id: number;
         organisation_id: number; user_id: number; attempt: number; max_attempts: number;
         context_prompt: string | null; trigger_type: string | null; platform: string | null;
-        admin_id: number | null; target_publish_date: string | null;
+        admin_id: number | null; target_publish_date: string | null; crosspost_group_id: string | null;
     }>(
         `SELECT id, job_id, blueprint_id, assistant_id, organisation_id, user_id, attempt, max_attempts,
-                context_prompt, trigger_type, platform, admin_id, target_publish_date
+                context_prompt, trigger_type, platform, admin_id, target_publish_date, crosspost_group_id
          FROM content_generation_jobs
          WHERE status = 'queued'
            AND content_type = 'social'
@@ -102,7 +102,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
     id: number; job_id: string; blueprint_id: number; assistant_id: number;
     organisation_id: number; user_id: number; attempt: number; max_attempts: number;
     context_prompt: string | null; trigger_type: string | null; platform: string | null;
-    admin_id: number | null; target_publish_date: string | null;
+    admin_id: number | null; target_publish_date: string | null; crosspost_group_id: string | null;
 }, now: Date) {
     await db.execute(
         `UPDATE content_generation_jobs SET status = 'processing', attempt = attempt + 1, updated_at = now() WHERE id = ${job.id}`
@@ -303,6 +303,9 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             status: isAdminTest ? 'admin_test' : 'pending_approval',
             generatedAt: now,
             triggerType: job.trigger_type ?? 'scheduled',
+            // Siblings of one autopilot cross-post share the group id stamped at enqueue time, so the
+            // Review Queue collapses them into a single card. Null ⇒ standalone (single-platform slot).
+            crosspostGroupId: job.crosspost_group_id,
         }).returning({ id: scheduledPosts.id });
 
         // Mark the consumed user idea 'in_review' and link it to the draft it produced (best-effort).

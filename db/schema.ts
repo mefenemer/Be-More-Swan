@@ -1783,6 +1783,13 @@ export const scheduledPosts = pgTable("scheduled_posts", {
   revisedFromPostId: integer("revised_from_post_id"),    // FK to scheduledPosts.id (self-ref)
   isRevised: boolean("is_revised").notNull().default(false),
 
+  // Cross-post fan-out identity (db/crosspost-group-id.sql). A post the user asks to cross-post is
+  // fanned out into one row per platform; every sibling of the SAME logical post carries the SAME
+  // uuid here, stamped at fan-out time (create-manual-post / chat-orchestrator / schedule-gap-fill →
+  // process-content-jobs). The Review Queue groups siblings by this id. NULL for legacy rows and any
+  // standalone post — those never collapse together (each shows as its own card).
+  crosspostGroupId: text("crosspost_group_id"),
+
   // US-GOV-2.2.1: Confidence scoring & factual claim detection
   confidenceScore: text("confidence_score"),             // 'green' | 'amber' | 'red' | null (not yet scored)
   factualClaimsCount: integer("factual_claims_count"),   // number of factual claims detected
@@ -2724,6 +2731,10 @@ export const contentGenerationJobs = pgTable("content_generation_jobs", {
   // stamps the resulting scheduled_post with this publish_date; null ⇒ legacy "now + 24h".
   // Populated by the draft-horizon scheduler from the assistant's frequency/days/times. db/posting-schedule.sql.
   targetPublishDate: timestamp("target_publish_date"),
+  // Cross-post fan-out identity (db/crosspost-group-id.sql). Autopilot enqueues one job per platform
+  // for a shared slot; every job for the same slot carries the SAME uuid so process-content-jobs can
+  // stamp the resulting scheduled_posts rows as siblings of one logical post. NULL ⇒ standalone.
+  crosspostGroupId: text("crosspost_group_id"),
   // US-ADM-4.3.3: Admin test generation fields
   adminId: integer("admin_id").references(() => users.id, { onDelete: "set null" }),
   tokensInput: integer("tokens_input"),                    // Anthropic input token count

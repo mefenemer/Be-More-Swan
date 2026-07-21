@@ -6,6 +6,7 @@
 // generation, no blueprint, no content_generation_jobs.
 
 import { Handler } from '@netlify/functions';
+import { randomUUID } from 'crypto';
 import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
@@ -90,6 +91,11 @@ export default withLambda(async (event) => {
     const publishDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
     const postFormat = contentAssetIds.length > 0 ? 'image' : 'text';
 
+    // One shared id across the fanned-out platform rows so the Review Queue collapses them into one
+    // card. Only a genuine cross-post (2+ platforms) needs it — a single-platform post stays null
+    // (standalone), which the queue renders as its own card anyway.
+    const crosspostGroupId = platforms.length > 1 ? randomUUID() : null;
+
     const created: Array<{ id: number; platform: string }> = [];
     for (const platform of platforms) {
         const [post] = await db.insert(scheduledPosts).values({
@@ -109,6 +115,7 @@ export default withLambda(async (event) => {
             ownerId: userId,
             ownerLabel,
             generatedAt: now,
+            crosspostGroupId,
         }).returning({ id: scheduledPosts.id });
 
         // Junction rows for forward-compatibility (scheduled_post_assets is the SoT for new queries).

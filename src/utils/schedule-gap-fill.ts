@@ -159,8 +159,21 @@ export async function enqueueScheduleGapFill(
         }
     }
 
+    // A slot that fans out to 2+ platforms is one logical cross-post: stamp each of its jobs with a
+    // shared crosspost_group_id so process-content-jobs marks the resulting drafts as siblings and the
+    // Review Queue shows a single card. A slot with only one uncovered platform stays standalone (null).
+    const slotJobCount = new Map<number, number>();
+    for (const { slot } of uncovered) slotJobCount.set(slot.getTime(), (slotJobCount.get(slot.getTime()) ?? 0) + 1);
+    const slotGroupId = new Map<number, string>();
+
     let enqueued = 0;
     for (const { slot, platform } of uncovered) {
+        const slotKey = slot.getTime();
+        let crosspostGroupId: string | null = null;
+        if ((slotJobCount.get(slotKey) ?? 0) > 1) {
+            crosspostGroupId = slotGroupId.get(slotKey) ?? randomUUID();
+            slotGroupId.set(slotKey, crosspostGroupId);
+        }
         await db.insert(contentGenerationJobs).values({
             jobId: randomUUID(),
             blueprintId: bp.id,
@@ -174,6 +187,7 @@ export async function enqueueScheduleGapFill(
             // Per-platform in multi mode; null lets process-content-jobs resolve the fallback platform.
             platform: platform ?? null,
             targetPublishDate: slot,
+            crosspostGroupId,
         });
         enqueued++;
     }

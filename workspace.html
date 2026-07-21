@@ -4763,18 +4763,20 @@ let _rqReviewGroupIds = [];
 function rqCachePost(p) { if (p && p.id != null) _rqPostCache[p.id] = p; return p; }
 
 // ── Grouped review ───────────────────────────────────────────────────────────
-// A post the user asks to cross-post is fanned out into one scheduled_posts row per platform, and
-// every sibling shares the same assistant + the same publish slot (create-manual-post,
-// chat-orchestrator and the Autopilot schedule-gap-fill pipeline all stamp one publishDate/target
-// slot across the platforms). That natural key lets us collapse "one card per platform" down to one
-// card per post, so the reviewer approves once and previews/edits per platform instead of wading
-// through near-duplicate cards.
+// A post the user asks to cross-post is fanned out into one scheduled_posts row per platform. Every
+// sibling of one logical post carries the SAME crosspost_group_id, stamped at fan-out time
+// (create-manual-post, chat-orchestrator and the Autopilot schedule-gap-fill → process-content-jobs
+// pipeline). Grouping on that id lets us collapse "one card per platform" down to one card per post —
+// the reviewer approves once and previews/edits per platform — WITHOUT ever merging unrelated posts
+// that merely happen to share a publish slot (the old, fragile key). Rows with no group id (legacy or
+// genuinely standalone) key by their own id, so they always render as their own card.
 const _RQ_PLATFORM_ORDER = ['instagram', 'facebook', 'linkedin', 'x'];
 function _rqPlatformRank(p) { const i = _RQ_PLATFORM_ORDER.indexOf(p); return i < 0 ? 99 : i; }
 function _rqGroupKey(p) {
-    // publishDate is the shared fan-out slot; fall back to generatedAt so ungrouped/legacy rows still
-    // key deterministically (and never collapse unrelated posts). Status keeps lifecycle columns apart.
-    return `${p.assistantId ?? 'x'}|${p.publishDate || p.generatedAt || ('id' + p.id)}|${p.status ?? ''}`;
+    // Status keeps siblings in the same lifecycle column together (a render pass is single-status, so
+    // this is a no-op in practice, but it guards against a mixed list).
+    if (p.crosspostGroupId) return `g:${p.crosspostGroupId}|${p.status ?? ''}`;
+    return `id:${p.id}`;
 }
 
 // postId -> array of sibling post ids (same logical post, one per platform). Rebuilt on every render.

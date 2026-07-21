@@ -14,6 +14,7 @@
 // Auth: aura_session + active org via requireTenant (tenant isolation on every read).
 
 import { Handler } from '@netlify/functions';
+import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
@@ -449,6 +450,9 @@ async function persistSocialPostDraft(
         const [slot] = computeScheduleSlots({ schedule, horizonDays: 14 });
         const publishDate = slot ?? new Date(Date.now() + 24 * 60 * 60 * 1000);
         const now = new Date();
+        // Shared id across the fanned-out platform rows so the Review Queue shows one card; a
+        // single-platform draft stays standalone (null).
+        const crosspostGroupId = draft.platforms.length > 1 ? randomUUID() : null;
 
         const created: { id: number; platform: string }[] = [];
         for (const platform of draft.platforms) {
@@ -471,6 +475,7 @@ async function persistSocialPostDraft(
                 generatedAt: now,
                 mediaMissing: isInstagram,
                 mediaMissingNote: isInstagram ? 'Instagram needs an image — add one below before approving.' : null,
+                crosspostGroupId,
             }).returning({ id: scheduledPosts.id });
             created.push({ id: post.id, platform });
         }
