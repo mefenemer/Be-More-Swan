@@ -584,15 +584,21 @@ async function _detailRqRenderGroups(statusKey) {
         return;
     }
 
-    // Keep the Review column badge and the tab badge in sync.
+    // Collapse per-platform rows into one representative per logical post (grouped by assistant +
+    // publish slot) so the reviewer sees one card per post, not one per platform. rqGroupSocialDrafts
+    // is defined in workspace.html alongside rqRenderSocialCard.
+    const postGroups = typeof rqGroupSocialDrafts === 'function' ? rqGroupSocialDrafts(posts) : posts;
+
+    // Keep the Review column badge and the tab badge in sync (grouped count).
     if (statusKey === 'review') {
+        const groupedCount = postGroups.length;
         const colBadge = document.getElementById('detail-rq-col-count-review');
-        if (colBadge) { colBadge.textContent = posts.length || ''; colBadge.classList.toggle('hidden', !posts.length); }
+        if (colBadge) { colBadge.textContent = groupedCount || ''; colBadge.classList.toggle('hidden', !groupedCount); }
         const tabBadge = document.getElementById('detail-rq-pending-badge');
-        if (tabBadge) { tabBadge.textContent = posts.length || ''; tabBadge.classList.toggle('hidden', !posts.length); }
+        if (tabBadge) { tabBadge.textContent = groupedCount || ''; tabBadge.classList.toggle('hidden', !groupedCount); }
         // Keep the Overview action-bar badge + status pill in sync as the queue changes (e.g. after approving).
-        window._setReviewPendingBadge?.(posts.length);
-        window._updateOpSignals?.({ pendingReview: posts.length });
+        window._setReviewPendingBadge?.(groupedCount);
+        window._updateOpSignals?.({ pendingReview: groupedCount });
     }
 
     // Reuse the global render helper from workspace.html (rqRenderSocialCard).
@@ -600,7 +606,7 @@ async function _detailRqRenderGroups(statusKey) {
     const RQ_GROUPS = [
         { key: 'posts', label: 'Posts', empty: 'No posts here.', emptyReview: 'No posts awaiting review.' },
     ];
-    const itemsByGroup = { posts };
+    const itemsByGroup = { posts: postGroups };
     container.innerHTML = RQ_GROUPS.map(g => _detailRqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey)).join('');
 }
 
@@ -2395,7 +2401,7 @@ function _applyDashboardRegistry(data) {
     // Issue #206: the Time/Money strip moved into the always-visible hero header, so it needs the
     // same role gate — otherwise a non-social role shows a permanent "—" ROI strip under its name.
     const impactOn = mods.hasImpactRoi !== false;
-    for (const id of ['assistant-metrics-card', 'detail-roi-strip']) {
+    for (const id of ['autopilot-platform-breakdown', 'detail-roi-strip']) {
         const node = document.getElementById(id);
         if (!node) continue;
         if (impactOn) { delete node.dataset.roleHidden; }
@@ -3729,7 +3735,10 @@ async function _prefetchDetailRqBadge(assistantId) {
 // hit the identical issue (#132) and was fixed the same way — see the
 // matching comment in dashboard-content.html.
 async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
-    const card = document.getElementById('assistant-metrics-card');
+    // Issue: the "Content by platform" breakdown moved into the Autopilot card. `card` now points at
+    // that relocated block (#autopilot-platform-breakdown); the Created/Scheduled/Published totals it
+    // breaks down live alongside it in the same card and stay visible regardless of platform count.
+    const card = document.getElementById('autopilot-platform-breakdown');
     // Issue #206: the Time/Money pair and their period toggle now live in the hero header, in a
     // strip of their own. The hero is always on screen, so the strip has to be shown and hidden
     // explicitly here rather than riding on the card's own hidden class the way it used to.

@@ -233,20 +233,6 @@
     </div>
   </div>
 
-  <!-- Content by platform — what's left of the old "Impact & ROI" card now that the post totals
-       have gone to the Autopilot card (#205) and the Time/Money pair to the hero header (#206).
-       The list used to be folded away behind a <details> to keep this card short; it's the card's
-       only content now, so it renders open. _fetchAndRenderAssistantMetrics shows the card only
-       when this assistant has posted to 2+ platforms — with one platform there's nothing to
-       compare and the card would otherwise be an empty box. -->
-  <div id="assistant-metrics-card" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-4 sm:p-5 mb-6 hidden">
-    <div class="flex items-center justify-between gap-3 mb-3">
-      <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide shrink-0" id="metrics-breakdown-label">Content by platform</h3>
-      <p class="text-[11px] text-gray-400 shrink-0">All-time posts</p>
-    </div>
-    <div id="metrics-by-platform"></div>
-  </div>
-
   <!-- ── Status row: Autopilot + Connections, side by side. Each card hides on its own signal, and
        _syncStatusRow() (assistants.js) drops the row to one column so a lone card never sits in a
        half-empty grid. -->
@@ -304,6 +290,17 @@
           <p class="text-[11px] font-bold text-emerald-600 uppercase tracking-wide">Published</p>
           <p class="text-2xl font-black text-emerald-700 leading-tight" id="metrics-total-published">—</p>
         </div>
+      </div>
+      <!-- Content by platform — relocated here from the standalone "Impact & ROI" card so the
+           per-platform split sits with the Created/Scheduled/Published totals it breaks down.
+           _fetchAndRenderAssistantMetrics shows this block only when the assistant has posted to
+           2+ platforms (one platform has nothing to compare); it stays hidden otherwise. -->
+      <div id="autopilot-platform-breakdown" class="mt-4 pt-4 border-t border-gray-100 hidden">
+        <div class="flex items-center justify-between gap-3 mb-2">
+          <h4 class="text-[11px] font-bold text-gray-400 uppercase tracking-wide shrink-0" id="metrics-breakdown-label">Content by platform</h4>
+          <p class="text-[11px] text-gray-400 shrink-0">All-time posts</p>
+        </div>
+        <div id="metrics-by-platform"></div>
       </div>
     </div>
   </div>

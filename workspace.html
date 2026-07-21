@@ -570,6 +570,10 @@ window.showComplianceModals = function showComplianceModals(force) {
     <!-- Body: platform mock-up -->
     <div class="flex-1 overflow-y-auto bg-gray-50 px-4 py-5">
       <div id="post-review-media-alert" class="hidden mb-4 text-xs rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-red-700"></div>
+      <!-- Platform tab bar: one tab per platform this post is going out on. Shown only when the post
+           spans 2+ platforms (grouped by assistant + publish slot). Switching a tab previews and
+           edits that platform's copy; the footer's Approve/Reject act on every platform at once. -->
+      <div id="post-review-tabs" class="hidden mb-4"></div>
       <div id="post-review-body"></div>
       <div id="post-review-archive" class="hidden mt-4 text-xs"></div>
     </div>
@@ -580,6 +584,10 @@ window.showComplianceModals = function showComplianceModals(force) {
         <textarea id="post-review-caption" rows="4" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-300"></textarea>
         <label class="block text-xs font-semibold text-gray-600">Hashtags</label>
         <input id="post-review-hashtags" type="text" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-300">
+        <label id="post-review-amend-all" class="hidden items-center gap-2 text-xs font-semibold text-gray-600 cursor-pointer select-none">
+          <input id="post-review-amend-all-cb" type="checkbox" checked class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-300">
+          <span id="post-review-amend-all-label">Apply to all platforms</span>
+        </label>
         <div class="flex gap-2">
           <button onclick="rqReviewSaveAmend()" class="flex-1 py-2.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg cursor-pointer">Save changes</button>
           <button onclick="rqReviewToggle()" class="py-2.5 px-4 text-xs font-bold text-gray-500 hover:bg-gray-50 rounded-lg cursor-pointer">Cancel</button>
@@ -600,7 +608,7 @@ window.showComplianceModals = function showComplianceModals(force) {
         <label class="block text-xs font-semibold text-gray-600">Reason for rejecting (required)</label>
         <textarea id="post-review-reason" rows="2" maxlength="300" placeholder="This will be archived for 30 days, then deleted." class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-red-300"></textarea>
         <div class="flex gap-2">
-          <button onclick="rqReviewReject()" class="flex-1 py-2.5 text-xs font-bold bg-red-600 hover:bg-red-700 text-white rounded-lg cursor-pointer">Reject &amp; archive</button>
+          <button id="post-review-reject-btn" onclick="rqReviewReject()" class="flex-1 py-2.5 text-xs font-bold bg-red-600 hover:bg-red-700 text-white rounded-lg cursor-pointer">Reject &amp; archive</button>
           <button onclick="rqReviewToggle()" class="py-2.5 px-4 text-xs font-bold text-gray-500 hover:bg-gray-50 rounded-lg cursor-pointer">Cancel</button>
         </div>
       </div>
@@ -4384,18 +4392,22 @@ async function rqRenderGroups(statusKey) {
         return;
     }
 
-    // Keep the Review column badge in sync with the number of posts awaiting review.
+    // Collapse per-platform rows into one representative per logical post before counting/rendering,
+    // so "3 posts across 3 platforms" reads as 3 cards, not 9.
+    const postGroups = rqGroupSocialDrafts(posts);
+
+    // Keep the Review column badge in sync with the number of posts awaiting review (grouped count).
     if (statusKey === 'review') {
         const badge = document.getElementById('rq-col-count-review');
-        if (badge) { badge.textContent = posts.length || ''; badge.classList.toggle('hidden', !posts.length); }
+        if (badge) { badge.textContent = postGroups.length || ''; badge.classList.toggle('hidden', !postGroups.length); }
         document.querySelectorAll('.pending-badge').forEach(el => {
-            el.textContent = posts.length || '';
-            el.classList.toggle('hidden', !posts.length);
+            el.textContent = postGroups.length || '';
+            el.classList.toggle('hidden', !postGroups.length);
         });
     }
 
     const groups = _rqBlogWriterActive ? [...RQ_GROUPS, RQ_BLOG_GROUP] : RQ_GROUPS;
-    const itemsByGroup = { posts, blog: blogPosts };
+    const itemsByGroup = { posts: postGroups, blog: blogPosts };
     const renderByGroup = { posts: rqRenderSocialCard, blog: rqRenderBlogCard };
     container.innerHTML = groups.map(g => rqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey)).join('');
 }
@@ -4475,9 +4487,12 @@ function rqToggleGroup(key) {
 // actions live in openPostReview() so the list itself stays scannable (the old cramped inline-button
 // card was the source of the "confusing layout" feedback).
 function rqRenderSocialCard(draft) {
+    // `draft` is a group representative from rqGroupSocialDrafts (falls back to itself as a lone group).
+    const group = draft._group || [draft];
+    const platforms = draft._platforms || [draft.platform];
+    const multi = group.length > 1;
     rqCachePost(draft);
     const ago = rqTimeAgo(draft.generatedAt || draft.rejectedAt);
-    const platformLabel = { instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X' }[draft.platform] || draft.platform;
     const isOnDemand = draft.triggerType === 'on_demand';
     const isArchived = draft.status === 'rejected';
     const isVideo = draft.mediaType === 'video' || /video|reel/i.test(draft.postFormat || '');
@@ -4497,17 +4512,28 @@ function rqRenderSocialCard(draft) {
     };
     const chip = chipMap[draft.status] || { cls: 'bg-gray-100 border-gray-200 text-gray-500', label: draft.status || '' };
     const statusChip = `<span class="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border ${chip.cls}">${_rqEsc(chip.label)}</span>`;
+    // Title: single platform reads "Instagram post"; a group reads "Post · N platforms" with a chip
+    // per platform so the reviewer sees the reach at a glance without opening it.
+    const title = multi
+        ? `Post <span class="text-gray-400 font-medium">· ${group.length} platforms</span>`
+        : `${_rqEsc(rqPlatformLabel(draft.platform))} post`;
+    const chips = multi
+        ? `<div class="flex flex-wrap items-center gap-1 mt-1">${platforms.map(p =>
+              `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">${_rqEsc(rqPlatformLabel(p))}</span>`).join('')}</div>`
+        : '';
+    const anyMediaMissing = group.some(g => g.mediaMissing);
     return `<div onclick="openPostReview(${draft.id})" class="py-3.5 flex items-center gap-3 cursor-pointer hover:bg-gray-50 -mx-4 px-4 transition" data-post-id="${draft.id}">
       ${thumb}
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 mb-0.5">
-          <p class="text-sm font-semibold text-gray-900 truncate">${_rqEsc(platformLabel)} post</p>
+          <p class="text-sm font-semibold text-gray-900 truncate">${title}</p>
           ${isOnDemand && !isArchived ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">On Demand</span>' : ''}
         </div>
         <p class="text-xs text-gray-500 truncate">${_rqEsc(draft.assistantName || 'AI Assistant')} · ${ago}</p>
         ${draft.caption ? `<p class="text-xs text-gray-600 truncate mt-0.5 ${isArchived ? 'line-through opacity-60' : ''}">${_rqEsc(draft.caption)}</p>` : ''}
+        ${chips}
       </div>
-      ${draft.mediaMissing ? '<span class="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border bg-red-50 border-red-200 text-red-700">⚠ Media deleted</span>' : ''}
+      ${anyMediaMissing ? '<span class="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border bg-red-50 border-red-200 text-red-700">⚠ Media deleted</span>' : ''}
       ${statusChip}
       <svg class="w-4 h-4 text-gray-300 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
     </div>`;
@@ -4729,8 +4755,63 @@ function _rqEsc(s) {
 // render a believable mock-up without a second round trip.
 const _rqPostCache = {};
 let _rqReviewPostId = null;
+// The sibling group currently open in the review modal: the per-platform posts that make up one
+// logical post. _rqReviewPostId is whichever platform's tab is active within it.
+let _rqReviewGroupIds = [];
 
 function rqCachePost(p) { if (p && p.id != null) _rqPostCache[p.id] = p; return p; }
+
+// ── Grouped review ───────────────────────────────────────────────────────────
+// A post the user asks to cross-post is fanned out into one scheduled_posts row per platform, and
+// every sibling shares the same assistant + the same publish slot (create-manual-post,
+// chat-orchestrator and the Autopilot schedule-gap-fill pipeline all stamp one publishDate/target
+// slot across the platforms). That natural key lets us collapse "one card per platform" down to one
+// card per post, so the reviewer approves once and previews/edits per platform instead of wading
+// through near-duplicate cards.
+const _RQ_PLATFORM_ORDER = ['instagram', 'facebook', 'linkedin', 'x'];
+function _rqPlatformRank(p) { const i = _RQ_PLATFORM_ORDER.indexOf(p); return i < 0 ? 99 : i; }
+function _rqGroupKey(p) {
+    // publishDate is the shared fan-out slot; fall back to generatedAt so ungrouped/legacy rows still
+    // key deterministically (and never collapse unrelated posts). Status keeps lifecycle columns apart.
+    return `${p.assistantId ?? 'x'}|${p.publishDate || p.generatedAt || ('id' + p.id)}|${p.status ?? ''}`;
+}
+
+// postId -> array of sibling post ids (same logical post, one per platform). Rebuilt on every render.
+const _rqGroupMembers = {};
+
+// Collapse a flat drafts list into representative cards. Caches every sibling and records the
+// membership map so openPostReview can rebuild the group from an id alone. Returns representatives
+// (newest first), each carrying _group (platform-sorted siblings) and _platforms.
+function rqGroupSocialDrafts(posts) {
+    const byKey = new Map();
+    for (const p of (posts || [])) {
+        rqCachePost(p);
+        const k = _rqGroupKey(p);
+        if (!byKey.has(k)) byKey.set(k, []);
+        byKey.get(k).push(p);
+    }
+    const reps = [];
+    for (const siblings of byKey.values()) {
+        siblings.sort((a, b) => _rqPlatformRank(a.platform) - _rqPlatformRank(b.platform));
+        const ids = siblings.map(s => s.id);
+        siblings.forEach(s => { _rqGroupMembers[s.id] = ids; });
+        // Representative carries the card thumbnail — prefer a sibling that actually has media.
+        const rep = siblings.find(s => s.thumbnailUrl) || siblings[0];
+        rep._group = siblings;
+        rep._platforms = siblings.map(s => s.platform);
+        reps.push(rep);
+    }
+    reps.sort((a, b) => new Date(b.generatedAt || b.rejectedAt || 0) - new Date(a.generatedAt || a.rejectedAt || 0));
+    return reps;
+}
+
+// Resolve the sibling group for a post id from the membership map (falling back to the post alone).
+function rqResolveGroup(postId) {
+    const ids = _rqGroupMembers[postId] || [postId];
+    const group = ids.map(i => _rqPostCache[i]).filter(Boolean);
+    group.sort((a, b) => _rqPlatformRank(a.platform) - _rqPlatformRank(b.platform));
+    return group.length ? group : (_rqPostCache[postId] ? [_rqPostCache[postId]] : []);
+}
 
 // ── Per-platform connection gate (approve/schedule time) ─────────────────────
 // Setup no longer requires connecting accounts, so drafting is always allowed and the connection
@@ -4828,17 +4909,66 @@ function renderPlatformMockup(post) {
 async function openPostReview(postId) {
     // Cards elsewhere in the Review Queue warm this cache as they render, but callers outside
     // it (e.g. the dashboard's "Requires your attention" list) can invoke this on a cold cache —
-    // fall back to fetching the pending drafts once so the modal still has data to show.
+    // fall back to fetching the pending drafts once so the modal still has data to show. Running the
+    // result through rqGroupSocialDrafts also populates the sibling-membership map used below.
     if (!_rqPostCache[postId]) {
         try {
             const res = await fetch('/.netlify/functions/get-social-drafts?status=pending_approval');
-            if (res.ok) ((await res.json()).drafts || []).forEach(rqCachePost);
+            if (res.ok) rqGroupSocialDrafts((await res.json()).drafts || []);
         } catch { /* handled by the !post check below */ }
     }
     const post = _rqPostCache[postId];
     if (!post) return;
     _rqRestoreMediaPanel();   // ensure the shared media panel is home before (re)opening
+
+    // Establish the sibling group (this post's per-platform siblings) and open on the clicked platform.
+    const group = rqResolveGroup(postId);
+    _rqReviewGroupIds = group.map(p => p.id);
     _rqReviewPostId = postId;
+
+    _rqReviewRenderTabs();
+    _rqReviewRenderActive();
+
+    const modal = document.getElementById('post-review-modal');
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+
+// The platform tab bar. Hidden for a single-platform post; one tab per platform otherwise. A red dot
+// flags a platform that still needs an image before it can be approved.
+function _rqReviewRenderTabs() {
+    const host = document.getElementById('post-review-tabs');
+    if (!host) return;
+    const group = _rqReviewGroupIds.map(i => _rqPostCache[i]).filter(Boolean);
+    if (group.length < 2) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+    host.classList.remove('hidden');
+    host.innerHTML = `<div class="flex flex-wrap items-center gap-1 border-b border-gray-200">${group.map(p => {
+        const active = p.id === _rqReviewPostId;
+        const flag = p.mediaMissing || (p.platform === 'instagram' && !p.thumbnailUrl);
+        return `<button type="button" onclick="rqReviewSwitchPlatform(${p.id})"
+          class="relative px-3 py-1.5 text-xs font-bold -mb-px border-b-2 transition cursor-pointer ${active ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-gray-500 hover:text-gray-700'}">
+          ${_rqEsc(rqPlatformLabel(p.platform))}${flag ? '<span class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-red-500 align-middle" title="Needs an image"></span>' : ''}
+        </button>`;
+    }).join('')}</div>`;
+}
+
+// Switch which platform's copy is previewed/edited. Approve/Reject still act on the whole group.
+function rqReviewSwitchPlatform(id) {
+    if (!_rqReviewGroupIds.includes(id) || !_rqPostCache[id]) return;
+    _rqRestoreMediaPanel();   // any open media panel belonged to the previous platform
+    _rqReviewPostId = id;
+    _rqReviewRenderTabs();
+    _rqReviewRenderActive();
+}
+
+// Render the modal for the active platform (_rqReviewPostId). Approve/Reject/connection-gating are
+// group-wide; caption/media/regenerate edits target the active platform (with an "apply to all"
+// option on amend). Split out of openPostReview so switching a tab re-renders in place.
+function _rqReviewRenderActive() {
+    const post = _rqPostCache[_rqReviewPostId];
+    if (!post) return;
+    const groupSize = _rqReviewGroupIds.length;
+    const multi = groupSize > 1;
 
     document.getElementById('post-review-body').innerHTML = renderPlatformMockup(post);
 
@@ -4863,7 +4993,7 @@ async function openPostReview(postId) {
 
     const when = post.publishDate ? new Date(post.publishDate).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : null;
     document.getElementById('post-review-sub').textContent =
-        `${(post.assistantName || 'Assistant')}${when ? ' · planned for ' + when : ''}`;
+        `${(post.assistantName || 'Assistant')}${multi ? ` · ${groupSize} platforms` : ''}${when ? ' · planned for ' + when : ''}`;
     // Reviewable drafts get the action footer; archived (rejected) posts are read-only with a countdown.
     const reviewable = ['pending_approval', 'draft', 'in_review'].includes(post.status);
     document.getElementById('post-review-actions').classList.toggle('hidden', !reviewable);
@@ -4877,15 +5007,35 @@ async function openPostReview(postId) {
         return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
     })() : null;
     const approveBtn = document.getElementById('post-review-approve-btn');
-    if (approveBtn) approveBtn.textContent = whenNumeric ? `Approve & Confirm Schedule ${whenNumeric}` : 'Approve — let the assistant pick a time';
+    if (approveBtn) {
+        const prefix = multi ? `Approve all ${groupSize} platforms` : 'Approve';
+        approveBtn.textContent = whenNumeric
+            ? (multi ? `${prefix} & schedule ${whenNumeric}` : `Approve & Confirm Schedule ${whenNumeric}`)
+            : (multi ? `${prefix} — let the assistant pick times` : 'Approve — let the assistant pick a time');
+    }
 
-    // Approving needs a live connection for this post's platform (setup no longer requires one).
-    // Paint from the capacity cache immediately, then re-check with a forced refresh so a
+    // "Amend myself": show the "apply to all platforms" option only when there's more than one.
+    const amendAll = document.getElementById('post-review-amend-all');
+    if (amendAll) {
+        amendAll.classList.toggle('hidden', !multi);
+        amendAll.classList.toggle('flex', multi);
+        const cb = document.getElementById('post-review-amend-all-cb');
+        if (cb) cb.checked = true;
+        const lbl = document.getElementById('post-review-amend-all-label');
+        if (lbl) lbl.textContent = `Apply to all ${groupSize} platforms`;
+    }
+    // Reject button reads "all" for a group.
+    const rejectBtn = document.getElementById('post-review-reject-btn');
+    if (rejectBtn) rejectBtn.textContent = multi ? `Reject all ${groupSize} & archive` : 'Reject & archive';
+
+    // Approving needs a live connection for every platform in the group (setup no longer requires
+    // one). Paint from the capacity cache immediately, then re-check with a forced refresh so a
     // connection made elsewhere in the session lifts the gate without a reload.
-    rqReviewSetConnectGate(post, !reviewable || rqPlatformConnected(post.platform));
-    if (reviewable && !rqPlatformConnected(post.platform)) {
-        rqEnsurePlatformConnection(post.platform).then(connected => {
-            if (_rqReviewPostId === post.id) rqReviewSetConnectGate(post, connected);
+    rqReviewSetConnectGate();
+    const anyMissing = _rqReviewMissingPlatforms().length > 0;
+    if (reviewable && anyMissing && typeof window.checkCapacity === 'function') {
+        window.checkCapacity(true).catch(() => null).then(() => {
+            if (document.getElementById('post-review-modal')?.classList.contains('flex')) rqReviewSetConnectGate();
         });
     }
 
@@ -4921,10 +5071,19 @@ async function openPostReview(postId) {
     document.getElementById('post-review-feedback').value = '';
     document.getElementById('post-review-reason').value = '';
     rqReviewToggle();
+}
 
-    const modal = document.getElementById('post-review-modal');
-    modal.classList.remove('hidden');
-    modal.classList.add('flex');
+// The per-platform posts currently under review (falls back to the lone active post).
+function _rqReviewTargets() {
+    const group = _rqReviewGroupIds.map(i => _rqPostCache[i]).filter(Boolean);
+    if (group.length) return group;
+    return _rqReviewPostId && _rqPostCache[_rqReviewPostId] ? [_rqPostCache[_rqReviewPostId]] : [];
+}
+
+// Distinct platforms in the group that aren't connected yet.
+function _rqReviewMissingPlatforms() {
+    const platforms = [...new Set(_rqReviewTargets().map(p => p.platform))];
+    return platforms.filter(p => !rqPlatformConnected(p));
 }
 
 function closePostReview() {
@@ -4933,6 +5092,7 @@ function closePostReview() {
     modal.classList.add('hidden');
     modal.classList.remove('flex');
     _rqReviewPostId = null;
+    _rqReviewGroupIds = [];
 }
 
 // ── "💬 Chat" card action — mounts the shared ChatSession widget in a modal instead of
@@ -5042,57 +5202,101 @@ function _rqReviewRefresh() {
     if (typeof window.detailRqRefresh === 'function') { try { window.detailRqRefresh(); } catch { /* ignore */ } }
 }
 
-// Toggle the review modal's approve button + connect notice for a post's platform connection.
+// Toggle the review modal's approve button + connect notice for the group's platform connections.
 // Only Approve is gated — amend, request-changes, reschedule and reject all still work on drafts.
-function rqReviewSetConnectGate(post, connected) {
+// Reads the current group from _rqReviewTargets(); the (legacy) args are ignored.
+function rqReviewSetConnectGate() {
     const approveBtn = document.getElementById('post-review-approve-btn');
     const notice = document.getElementById('post-review-connect');
+    const targets = _rqReviewTargets();
+    if (!targets.length) return;
+    const reviewable = ['pending_approval', 'draft', 'in_review'].includes(targets[0].status);
+    if (!reviewable) {
+        if (approveBtn) approveBtn.disabled = false;
+        if (notice) notice.classList.add('hidden');
+        return;
+    }
+    const missing = _rqReviewMissingPlatforms();
+    const connected = missing.length === 0;
     if (approveBtn) approveBtn.disabled = !connected;
     if (notice) {
         notice.classList.toggle('hidden', connected);
         if (!connected) {
-            const label = rqPlatformLabel(post.platform);
+            const labels = missing.map(rqPlatformLabel);
+            const list = labels.length > 1
+                ? labels.slice(0, -1).join(', ') + ' and ' + labels[labels.length - 1]
+                : labels[0];
+            const plural = labels.length > 1;
             const textEl = document.getElementById('post-review-connect-text');
-            if (textEl) textEl.textContent = `Connect your ${label} account to approve and schedule this post. You can still amend or reject it.`;
+            if (textEl) textEl.textContent = `Connect your ${list} account${plural ? 's' : ''} to approve${plural ? ' every platform' : ''}. You can still amend or reject.`;
             const btn = document.getElementById('post-review-connect-btn');
-            if (btn) btn.onclick = () => rqGoConnect(post.assistantId);
+            if (btn) btn.onclick = () => rqGoConnect(targets[0].assistantId);
         }
     }
 }
 
+// Approve every platform in the group at once. The group shares one proposed slot, so the first
+// post's outcome (notably a past-schedule 409) predicts the rest — we act on it before committing
+// the others, avoiding a half-approved group.
 async function rqReviewApprove() {
-    const id = _rqReviewPostId;
-    if (!id) return;
-    const post = _rqPostCache[id];
-    if (post && !(await rqEnsurePlatformConnection(post.platform))) {
-        rqReviewSetConnectGate(post, false);
+    const targets = _rqReviewTargets();
+    if (!targets.length) return;
+    // Connection gate — every distinct platform must be live.
+    for (const pl of [...new Set(targets.map(t => t.platform))]) {
+        if (!(await rqEnsurePlatformConnection(pl))) { rqReviewSetConnectGate(); return; }
+    }
+    // Instagram needs an image.
+    const igNoImg = targets.filter(t => t.platform === 'instagram' && !t.thumbnailUrl);
+    if (igNoImg.length) {
+        const msg = igNoImg.length === targets.length
+            ? 'Instagram needs an image. Use "Add or change image" before approving.'
+            : 'Your Instagram post needs an image. Switch to the Instagram tab and use "Add or change image" before approving.';
+        if (window.showToast) window.showToast(msg, { icon: '🖼️', duration: 5000 }); else alert(msg);
         return;
     }
-    if (post && post.platform === 'instagram' && !post.thumbnailUrl) {
-        if (window.showToast) {
-            window.showToast('Instagram needs an image. Use "Amend" or "Request changes" to add one before approving.', { icon: '🖼️', duration: 5000 });
-        } else {
-            alert('Instagram needs an image. Use "Amend" or "Request changes" to add one before approving.');
-        }
-        return;
-    }
+    await _rqApproveTargets(targets, 'approve');
+}
+
+// POST one approve/publish action. Returns a small result object rather than throwing so the
+// orchestrator can decide how to handle each outcome across the group.
+async function _rqApproveOne(post, action) {
     try {
         const res = await fetch('/.netlify/functions/approve-post', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ postId: id, action: 'approve' }),
+            body: JSON.stringify({ postId: post.id, action }),
         });
         const d = await res.json().catch(() => ({}));
-        if (res.status === 409 && d.pastSchedule) {
-            if (confirm((d.message || 'The scheduled time has passed.') + '\n\nPublish now instead?')) {
-                return rqReviewPublishNow();
-            }
-            return;
+        if (res.status === 409 && d.pastSchedule) return { pastSchedule: true, message: d.message };
+        if (rqHandleNotConnected(res.status, d, post.assistantId)) { rqReviewSetConnectGate(); return { handled: true }; }
+        if (!res.ok) return { ok: false, error: d.error };
+        return { ok: true, confirmation: d.confirmation };
+    } catch { return { ok: false, error: 'Network error — please try again.' }; }
+}
+
+async function _rqApproveTargets(targets, action) {
+    const [first, ...rest] = targets;
+    const r0 = await _rqApproveOne(first, action);
+    if (r0.pastSchedule) {
+        // The whole group shares this slot — offer to publish everything now instead. (Nothing was
+        // approved: a past-schedule 409 leaves the first post untouched, so re-running is clean.)
+        if (confirm((r0.message || 'The scheduled time has passed.') + '\n\nPublish now instead?')) {
+            return _rqApproveTargets(targets, 'publish_now');
         }
-        if (rqHandleNotConnected(res.status, d, post?.assistantId)) { rqReviewSetConnectGate(post || {}, false); return; }
-        if (!res.ok) { alert(d.error || 'Failed to approve.'); return; }
-        if (d.confirmation && window.showToast) window.showToast(d.confirmation);
-        _rqReviewRefresh();
-    } catch { alert('Network error — please try again.'); }
+        return;
+    }
+    if (r0.handled) return;
+    if (!r0.ok) { alert(r0.error || 'Failed to approve.'); return; }
+    for (const p of rest) {
+        const r = await _rqApproveOne(p, action);
+        if (r.handled) return;
+        if (!r.ok) { alert(r.error || 'Failed to approve.'); return; }
+    }
+    if (window.showToast) {
+        window.showToast(targets.length > 1
+            ? `Approved across ${targets.length} platforms.`
+            : (r0.confirmation || 'Approved.'));
+    }
+    _rqReviewRefresh();
 }
 
 async function rqReviewPublishNow() {
@@ -5116,17 +5320,22 @@ async function rqReviewSaveAmend() {
     if (!id) return;
     const caption = document.getElementById('post-review-caption').value;
     const hashtags = document.getElementById('post-review-hashtags').value;
+    // "Apply to all platforms" (shared base) vs this platform only (per-platform override).
+    const applyAll = _rqReviewGroupIds.length > 1 && document.getElementById('post-review-amend-all-cb')?.checked;
+    const targetIds = applyAll ? _rqReviewGroupIds.slice() : [id];
     try {
-        const res = await fetch(`/.netlify/functions/scheduled-posts?id=${id}`, {
-            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ caption, hashtags }),
-        });
-        if (!res.ok) { alert('Could not save your changes.'); return; }
-        // Update the cache + re-render the mock-up in place so the edit is visible immediately.
-        if (_rqPostCache[id]) { _rqPostCache[id].caption = caption; _rqPostCache[id].hashtags = hashtags; }
+        for (const tid of targetIds) {
+            const res = await fetch(`/.netlify/functions/scheduled-posts?id=${tid}`, {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ caption, hashtags }),
+            });
+            if (!res.ok) { alert('Could not save your changes.'); return; }
+            // Update the cache so the edit is visible immediately (re-rendered below for the active tab).
+            if (_rqPostCache[tid]) { _rqPostCache[tid].caption = caption; _rqPostCache[tid].hashtags = hashtags; }
+        }
         document.getElementById('post-review-body').innerHTML = renderPlatformMockup(_rqPostCache[id]);
         rqReviewToggle();
-        if (window.showToast) window.showToast('Changes saved.');
+        if (window.showToast) window.showToast(applyAll ? `Changes saved to all ${targetIds.length} platforms.` : 'Changes saved.');
     } catch { alert('Network error — please try again.'); }
 }
 
@@ -5252,7 +5461,26 @@ async function rqReviewReschedule() {
             _rqPostCache[id].status = ['draft','pending_approval','in_review'].includes(_rqPostCache[id].status)
                 ? _rqPostCache[id].status : 'scheduled';
         }
-        if (window.showToast) window.showToast(d.confirmation || 'Post rescheduled.');
+        // Keep the group on one slot: apply the resolved time to the other platforms too, so the
+        // siblings don't split into separate cards (they group by shared publish slot).
+        const others = _rqReviewGroupIds.filter(i => i !== id);
+        if (d.scheduledFor && others.length) {
+            statusEl.textContent = 'Aligning the other platforms…';
+            await Promise.all(others.map(async oid => {
+                try {
+                    await fetch('/.netlify/functions/reschedule-post-chat', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ postId: oid, rescheduleAt: d.scheduledFor }),
+                    });
+                    if (_rqPostCache[oid]) {
+                        _rqPostCache[oid].publishDate = d.scheduledFor;
+                        _rqPostCache[oid].status = ['draft','pending_approval','in_review'].includes(_rqPostCache[oid].status)
+                            ? _rqPostCache[oid].status : 'scheduled';
+                    }
+                } catch { /* best-effort — the primary reschedule already landed */ }
+            }));
+        }
+        if (window.showToast) window.showToast(others.length ? `Rescheduled across ${_rqReviewGroupIds.length} platforms.` : (d.confirmation || 'Post rescheduled.'));
         _rqReviewRefresh();
     } catch {
         statusEl.textContent = 'Network error — please try again.';
@@ -5262,18 +5490,23 @@ async function rqReviewReschedule() {
 }
 
 async function rqReviewReject() {
-    const id = _rqReviewPostId;
-    if (!id) return;
     const reason = document.getElementById('post-review-reason').value.trim();
     if (!reason) { alert('Please enter a reason for rejecting.'); return; }
+    // Reject every platform in the group — it's one post to the reviewer.
+    const targets = _rqReviewTargets();
+    if (!targets.length) return;
     try {
-        const res = await fetch('/.netlify/functions/approve-post', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ postId: id, action: 'reject', rejectionReason: reason }),
-        });
-        const d = await res.json().catch(() => ({}));
-        if (!res.ok) { alert(d.error || 'Could not reject the post.'); return; }
-        if (window.showToast) window.showToast('Post rejected and moved to the Archive (kept for 30 days).');
+        for (const p of targets) {
+            const res = await fetch('/.netlify/functions/approve-post', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ postId: p.id, action: 'reject', rejectionReason: reason }),
+            });
+            const d = await res.json().catch(() => ({}));
+            if (!res.ok) { alert(d.error || 'Could not reject the post.'); return; }
+        }
+        if (window.showToast) window.showToast(targets.length > 1
+            ? `All ${targets.length} platforms rejected and archived (kept 30 days).`
+            : 'Post rejected and moved to the Archive (kept for 30 days).');
         _rqReviewRefresh();
     } catch { alert('Network error — please try again.'); }
 }
