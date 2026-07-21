@@ -14,6 +14,35 @@
     .ai-wand-img.is-casting { animation: aiWandPulse 0.9s ease-in-out infinite; }
     @keyframes aiWandPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
   }
+
+  /* Per-card loading skeleton — a spinning circle laid over an Overview card whose data is
+     still arriving (driven by _beginCardLoading / _endCardLoading in assistants.js). The
+     Overview's dynamic cards each fill from their own fetch, so without this they pop in
+     one-by-one and the status row reflows mid-load; the overlay holds each card's slot and
+     signals "loading" instead of leaving it looking finished-but-blank. Currently scoped to
+     the social media assistant. */
+  .card-loading-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 1rem;                 /* matches the cards' rounded-2xl */
+    background: rgba(253, 252, 249, 0.78); /* warm cream (gray-50) veil */
+  }
+  .card-loading-spinner {
+    width: 30px;
+    height: 30px;
+    border-radius: 9999px;
+    border: 3px solid #eae4d7;           /* gray-200 track */
+    border-top-color: #ff007f;           /* Neon Pink brand accent (emerald-700) */
+    animation: cardLoadingSpin 0.7s linear infinite;
+  }
+  @keyframes cardLoadingSpin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) {
+    .card-loading-spinner { animation-duration: 1.6s; }
+  }
 </style>
 <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full pb-20">
 
@@ -322,7 +351,7 @@
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
       <!-- KPI card 1 — label/title/desc injected from AssistantDashboardRegistry by role -->
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
+      <div id="kpi-card-engagement" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
         <div class="flex items-center justify-between">
           <span id="kpi-1-label" class="text-xs font-bold text-gray-400 uppercase tracking-wide"></span>
           <span id="metric-engagement-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
@@ -347,7 +376,7 @@
       </div>
 
       <!-- KPI card 2 -->
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
+      <div id="kpi-card-reach" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
         <div class="flex items-center justify-between">
           <span id="kpi-2-label" class="text-xs font-bold text-gray-400 uppercase tracking-wide"></span>
           <span id="metric-reach-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
@@ -372,7 +401,7 @@
       </div>
 
       <!-- KPI card 3 -->
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
+      <div id="kpi-card-ctr" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
         <div class="flex items-center justify-between">
           <span id="kpi-3-label" class="text-xs font-bold text-gray-400 uppercase tracking-wide"></span>
           <span id="metric-ctr-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>
@@ -397,7 +426,7 @@
       </div>
 
       <!-- KPI card 4 -->
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
+      <div id="kpi-card-value" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
         <div class="flex items-center justify-between">
           <span id="kpi-4-label" class="text-xs font-bold text-gray-400 uppercase tracking-wide"></span>
           <span id="metric-value-dot" class="w-2 h-2 rounded-full bg-gray-200"></span>

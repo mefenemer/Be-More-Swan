@@ -823,7 +823,13 @@ window._renderConnectionsStatusCard = function () {
     const sources = _assistantScoped ? _relevantSources() : [];
     // Blog destinations (cms) are org-wide like sources — a connected one is "on" with no switch.
     const blogDests = _assistantScoped ? _blogDestinations : [];
-    if (!list || (!platforms.length && !sources.length && !blogDests.length)) {
+    const nothingRelevant = !platforms.length && !sources.length && !blogDests.length;
+    // A social media assistant always keeps its Connections card — even before anything is
+    // connected the user needs a permanent place to add a channel, so it shows an empty state
+    // rather than vanishing. Other roles (whose "connectors" are Synced-action recipes living
+    // in the drawer) still hide the card when they have none.
+    const keepForSocial = window._detailCurrentData?.roleKey === 'social_media_manager';
+    if (!list || (nothingRelevant && !keepForSocial)) {
         card.classList.add('hidden');
         window._syncStatusRow && window._syncStatusRow();
         return;
@@ -869,9 +875,13 @@ window._renderConnectionsStatusCard = function () {
     // A toggle re-renders the list it lives in, so the switch the user just flipped is replaced
     // mid-interaction. Put focus back on its successor, or keyboard users lose their place.
     const focused = list.contains(document.activeElement) ? document.activeElement.getAttribute('aria-label') : null;
-    list.innerHTML = rows.map(r => _connStatusRow(r.p, r.conn)).join('')
+    const rowsHtml = rows.map(r => _connStatusRow(r.p, r.conn)).join('')
         + sourceRows.map(r => _sourceStatusRow(r.s, r.conn)).join('')
         + blogDests.map(d => _blogDestStatusRow(d)).join('');
+    // Empty only in the social keep-visible edge case (no relevant channels at all) — the card
+    // stays put with a plain message rather than an empty box; "Manage connections" adds one.
+    list.innerHTML = rowsHtml
+        || '<p class="text-xs font-semibold text-gray-400 py-2">No channels connected yet — use “Manage connections” to add one.</p>';
     if (focused) list.querySelector(`input[aria-label="${focused}"]`)?.focus();
     window._syncStatusRow && window._syncStatusRow();
 };

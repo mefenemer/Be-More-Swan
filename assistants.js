@@ -3045,6 +3045,42 @@ function _detailSetSaveStatus(msg, colour) {
     }
 }
 
+// ── Per-card loading skeletons (Overview) ─────────────────────────────────────
+// The Overview's dynamic cards each fill from their own async fetch (metrics, KPIs,
+// connections), so without a placeholder they pop in one-by-one and the status row
+// reflows mid-load — the page looks "done" while cards are still arriving. These two
+// helpers drop a spinning circle over a card while its data loads and clear it when the
+// data lands. A card that only reveals itself once its data exists (Connections) is
+// un-hidden first so its skeleton reserves the slot; _endCardLoading leaves the card's
+// own hidden/shown decision untouched. Styling lives in assistant-detail.html
+// (.card-loading-overlay / .card-loading-spinner).
+//
+// Which cards get skeletons is decided per role in initAssistantDetail — currently only
+// the social media assistant. Rolling out to other roles is just widening that list.
+function _beginCardLoading(id) {
+    const card = document.getElementById(id);
+    if (!card) return;
+    // Reserve the slot for a card that hasn't revealed itself yet (e.g. Connections, which
+    // stays hidden until its fetch confirms there are channels). Its own renderer re-decides
+    // hidden state when it runs, so we don't need to restore anything on clear.
+    if (card.classList.contains('hidden')) card.classList.remove('hidden');
+    if (getComputedStyle(card).position === 'static') card.style.position = 'relative';
+    if (card.querySelector(':scope > .card-loading-overlay')) return; // already loading
+    const ov = document.createElement('div');
+    ov.className = 'card-loading-overlay';
+    ov.setAttribute('aria-hidden', 'true');
+    ov.innerHTML = '<div class="card-loading-spinner"></div>';
+    card.appendChild(ov);
+}
+
+function _endCardLoading(id) {
+    document.getElementById(id)?.querySelector(':scope > .card-loading-overlay')?.remove();
+}
+
+// The Overview cards skeletoned on first load, in the order they resolve. Kept as one list so
+// the reveal (initAssistantDetail) and each fetch's clear stay in sync.
+const _OVERVIEW_SKELETON_KPI_CARDS = ['engagement', 'reach', 'ctr', 'value'];
+
 window.initAssistantDetail = async function(assistantId, loadViewCb) {
     if (!assistantId) {
         // No assistant to load — don't leave the loading skeleton stuck on screen forever.
@@ -3436,6 +3472,22 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         document.getElementById('assistant-detail-content')?.classList.remove('hidden');
     }
 
+    // ── Overview loading skeletons ────────────────────────────────
+    // The content is revealed above, but the Overview's dynamic cards fill from the async
+    // fetches kicked off below and would otherwise pop in one at a time. Drop a spinner over
+    // each until its data lands. Social media assistant only for now — the render steps that
+    // resolve these fetches clear the matching skeleton (_endCardLoading), and Connections is
+    // cleared in _renderConnectionsStatusCard (integrations.js).
+    const _overviewSkeletons = currentData.roleKey === 'social_media_manager';
+    if (_overviewSkeletons) {
+        _beginCardLoading('autopilot-status-card');
+        _beginCardLoading('connections-status-card');
+        _OVERVIEW_SKELETON_KPI_CARDS.forEach(k => _beginCardLoading('kpi-card-' + k));
+        // Connections was un-hidden to reserve its slot; keep the status row two-up so its
+        // real card slots straight into place instead of reflowing the row when it arrives.
+        window._syncStatusRow?.();
+    }
+
     // ── Name generator ────────────────────────────────────────────
     const genBtn = document.getElementById('btn-generate-name');
     if (genBtn) {
@@ -3458,6 +3510,9 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     // ── Impact & ROI metrics card — fetched first so the card is visible before
     //    Completed Tasks loads, preserving the DOM order on first render. ─────
     await _fetchAndRenderAssistantMetrics(assistantId);
+    // Autopilot's post totals (Created/Scheduled/Published) fill from that fetch — clear its
+    // skeleton now that they're in.
+    if (_overviewSkeletons) _endCardLoading('autopilot-status-card');
 
     // ── Recent Activity ───────────────────────────────────────────
     const activityList = document.getElementById('recent-activity-list');
@@ -3587,9 +3642,14 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
 
     // ── Performance Metrics (post_insights aggregation) ───────────
     await _loadAssistantMetrics(assistantId);
+    // KPI figures are in (or settled on their "—" placeholders) — clear their skeletons.
+    if (_overviewSkeletons) _OVERVIEW_SKELETON_KPI_CARDS.forEach(k => _endCardLoading('kpi-card-' + k));
 
     // ── Connections (full connect/manage UI, scoped to this assistant) ──
     await window.initAssistantConnections(assistantId, currentData);
+    // The status card has rendered (or self-hidden if there's nothing to connect) — clear its
+    // loading skeleton. _syncStatusRow already ran inside the render, so the row settles here.
+    if (_overviewSkeletons) _endCardLoading('connections-status-card');
     // Synced actions — this assistant's Integration Scenario Library recipes, in the same tab.
     // Reads relevance from window._detailReviewQueue.recordType (set by the dashboard registry).
     window.AssistantIntegrations?.init({ assistantId });
