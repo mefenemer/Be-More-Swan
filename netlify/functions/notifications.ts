@@ -114,7 +114,12 @@ export default withLambda(async (event: HandlerEvent) => {
                 const actionCount = allNotes.filter(n => !n.resolvedAt && kindOf(n.type) === 'action').length;
                 const updateUnread = allNotes.filter(n => !n.isRead && kindOf(n.type) !== 'action').length;
                 const badgeCount = actionCount + updateUnread;
-                return { statusCode: 200, body: JSON.stringify({ unreadCount: unread, actionCount, updateUnread, badgeCount }) };
+                // Type of the newest visible notification (allNotes is ordered newest-first).
+                // When badgeCount rises, this is the item that just arrived — the client uses
+                // it to decide which sound to play (Aurora chime for milestones / "assistant
+                // ready to work", the Swan & Wand sound for everything else).
+                const latestType = allNotes[0]?.type ?? null;
+                return { statusCode: 200, body: JSON.stringify({ unreadCount: unread, actionCount, updateUnread, badgeCount, latestType }) };
             }
 
             // Actor identity: resolve each assistant-attributed notification to its assistant's

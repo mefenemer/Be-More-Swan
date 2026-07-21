@@ -228,8 +228,17 @@ export default withLambda(async (event) => {
             ...(codeVerifier ? { codeVerifier } : {}),
         });
 
+        // When the connect flow is launched from an assistant's Connections tab, the page
+        // appends ?assistantId=N (see _oauthUrl in integrations.js). Carry it through `state`
+        // so the callback can return the user to that assistant's Connections tab instead of
+        // stranding them on the workspace-wide integrations.html. Validate to a positive
+        // integer — `state` is client-visible, so we never echo an arbitrary value back.
+        const rawAssistantId = event.queryStringParameters?.assistantId;
+        const assistantId = rawAssistantId && /^\d+$/.test(rawAssistantId) && Number(rawAssistantId) > 0
+            ? rawAssistantId : null;
+
         const redirectUri = `${baseUrl}/api/oauth/${provider}/callback`;
-        const state = buildState({ provider, userId: String(userId), csrf });
+        const state = buildState({ provider, userId: String(userId), csrf, ...(assistantId ? { assistantId } : {}) });
 
         let authUrl: string;
         if (provider === 'hubspot') {
@@ -943,8 +952,16 @@ export default withLambda(async (event) => {
             return redirect(`/integrations.html?oauth_error=token_exchange&provider=${provider}`);
         }
 
-        // The blog connectors (WordPress.com, Search Console) are managed from Blog Studio, not
-        // integrations.html, so send the user back there; every other provider lands on integrations.
+        // If the connect began inside an assistant's Connections tab, return the user there —
+        // workspace.html?oauth_success mirrors the social-OAuth flow (handleOAuthSuccess opens
+        // the assistant on its 'platforms'/Connections tab). Re-validate the id defensively
+        // since `state` is client-supplied. Otherwise fall back to the workspace-wide surfaces:
+        // the blog connectors (WordPress.com, Search Console) are managed from Blog Studio, so
+        // send those back there; every other provider lands on integrations.html.
+        const returnAssistantId = state.assistantId && /^\d+$/.test(state.assistantId) ? state.assistantId : null;
+        if (returnAssistantId) {
+            return redirect(`/workspace.html?oauth_success=${provider}&assistantId=${returnAssistantId}`);
+        }
         const blogProvider = provider === 'wordpresscom' || provider === 'searchconsole';
         return redirect(blogProvider ? `/blog-studio.html?connected=${provider}` : `/integrations.html?connected=${provider}`);
     }

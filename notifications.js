@@ -4,6 +4,46 @@
 // Issue #156: tracks the previous badge count across polls so we can ding only when it
 // *rises* (a new notification arrived) rather than on every poll or on the initial load.
 let _lastNotifBadgeCount = null;
+
+// ── One-time "focus the inbox" on login ───────────────────────────────────────
+// On the first badge refresh after a successful login, count the bell up from 0 to the
+// current unread total, retriggering the notification sound on each step, then settle on
+// the real number. Runs once per login: verify-account.html sets bms_freshLogin before
+// handing off to the workspace, and we consume it here (once), so reloads don't replay it.
+let _freshLoginResolved = false;   // have we checked the flag yet this page load?
+let _isFreshLogin = false;         // …and what did it say
+let _inboxFocusAnimating = false;  // owns the badge while the count-up runs (polls stand off)
+function _consumeFreshLoginFlag() {
+    if (_freshLoginResolved) return _isFreshLogin;
+    _freshLoginResolved = true;
+    try {
+        _isFreshLogin = sessionStorage.getItem('bms_freshLogin') === '1';
+        if (_isFreshLogin) sessionStorage.removeItem('bms_freshLogin');
+    } catch { _isFreshLogin = false; }
+    return _isFreshLogin;
+}
+function _animateInboxFocus(badge, total) {
+    return new Promise((resolve) => {
+        if (!badge || total <= 0) return resolve();
+        badge.textContent = '0';
+        badge.classList.remove('hidden');
+        // Pace the whole run to land around ~1.6s regardless of the total, clamped so a
+        // small inbox still feels deliberate and a large one doesn't drag. Each step
+        // restarts the short notification sound (same <audio> element), giving a rapid
+        // "counting" chatter that ends on one clean final play at the total.
+        const stepMs = Math.min(320, Math.max(80, Math.round(1600 / total)));
+        let n = 0;
+        const tick = () => {
+            n += 1;
+            badge.textContent = String(n);
+            window._playNotificationSound?.();
+            if (n >= total) return resolve();   // reached the total → no further steps or sound
+            setTimeout(tick, stepMs);
+        };
+        setTimeout(tick, stepMs);
+    });
+}
+
 window.updateNotificationBadge = async function() {
     try {
         const res = await fetch('/.netlify/functions/notifications?action=count');
@@ -15,6 +55,24 @@ window.updateNotificationBadge = async function() {
             const count = (typeof data.badgeCount === 'number') ? data.badgeCount
                 : (typeof data.actionCount === 'number') ? data.actionCount
                 : (data.unreadCount || 0);
+
+            // First refresh after login: run the one-time inbox-focus count-up, then adopt
+            // the count as the baseline so the normal rise-ding doesn't also fire for it.
+            if (!_inboxFocusAnimating && _lastNotifBadgeCount === null && _consumeFreshLoginFlag() && count > 0) {
+                _inboxFocusAnimating = true;
+                // The count-up owns the login "sound moment" — silence the Aurora welcome chime
+                // so it doesn't play over the counting notification sound. Only when that sound
+                // is actually enabled: if notification sound is muted the count-up is silent, so
+                // there's nothing to clash with and the welcome chime should still play.
+                if (localStorage.getItem('bms_soundOnNotification') !== '0') window._suppressWelcomeSound?.();
+                await _animateInboxFocus(badge, count);
+                _inboxFocusAnimating = false;
+                _lastNotifBadgeCount = count;
+                return;
+            }
+            // A concurrent poll must not fight the running animation for the badge.
+            if (_inboxFocusAnimating) return;
+
             if (badge) {
                 if (count > 0) {
                     badge.textContent = count;
@@ -24,7 +82,18 @@ window.updateNotificationBadge = async function() {
                 }
             }
             if (_lastNotifBadgeCount !== null && count > _lastNotifBadgeCount) {
-                window._playNotificationSound?.();
+                // Sound choice by the newly-arrived notification's type. The two "achievement"
+                // moments — a milestone reached, or an assistant becoming ready to work
+                // (provisioning_complete) — play the celebratory Aurora chime, gated by the
+                // "sound on milestone" preference. Every other notification plays the softer
+                // bubbling-water alert, gated by the "sound on notification" preference. Each
+                // helper self-gates on its own preference (My Account → Sounds).
+                const MILESTONE_TYPES = new Set(['milestone', 'milestone_unlock', 'roi_milestone', 'provisioning_complete']);
+                if (MILESTONE_TYPES.has(data.latestType)) {
+                    window._playMilestoneSound?.();
+                } else {
+                    window._playNotificationSound?.();
+                }
             }
             _lastNotifBadgeCount = count;
         }

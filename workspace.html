@@ -814,8 +814,10 @@ window.showComplianceModals = function showComplianceModals(force) {
       Awesome!
     </button>
   </div>
+  <!-- milestone / "assistant ready to work" keep the celebratory Aurora chime; a new
+       notification uses a distinct, softer bubbling-water alert so the two are tellable apart. -->
   <audio id="milestone-audio" src="/Aurora.mp3" preload="auto"></audio>
-  <audio id="notification-audio" src="/Aurora.mp3" preload="auto"></audio>
+  <audio id="notification-audio" src="/notification.wav" preload="auto"></audio>
 </div>
 
 <!-- Savings tasks modal (#3) -->
@@ -1160,13 +1162,25 @@ function formatCurrency(amount, currency) {
       const audio = new Audio('/Aurora.mp3');
       audio.volume = 0.6;
       let done = false;
+      let suppressed = false;
+      const stopListening = () => {
+        window.removeEventListener('pointerdown', tryPlay);
+        window.removeEventListener('keydown', tryPlay);
+      };
       const tryPlay = () => {
-        if (done) return;
+        if (done || suppressed) return;
         audio.play().then(() => {
           done = true;
-          window.removeEventListener('pointerdown', tryPlay);
-          window.removeEventListener('keydown', tryPlay);
+          stopListening();
         }).catch(() => { /* autoplay blocked — wait for a user gesture */ });
+      };
+      // The one-time login inbox count-up (notifications.js) owns the audio for that moment,
+      // so it calls this to silence the welcome chime: cancel a still-pending gesture retry
+      // and pause it if autoplay already started it before the count-up kicked in.
+      window._suppressWelcomeSound = () => {
+        suppressed = true;
+        stopListening();
+        try { audio.pause(); audio.currentTime = 0; } catch {}
       };
       tryPlay();
       window.addEventListener('pointerdown', tryPlay);
@@ -2671,8 +2685,17 @@ function formatCurrency(amount, currency) {
       url.searchParams.delete('oauth_success');
       url.searchParams.delete('assistantId');
       history.replaceState(null, '', url.toString());
-      const LABELS = { instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X (Twitter)' };
-      const label = LABELS[platform] || platform;
+      // Socials plus the workspace-integration providers that can now return here (their
+      // connect flow carries assistantId — see oauth-integrations.ts). Proper-cased brand
+      // names where a naive capitalise would get them wrong (YouTube, HubSpot, QuickBooks…).
+      const LABELS = {
+        instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X (Twitter)',
+        threads: 'Threads', youtube: 'YouTube', canva: 'Canva', tiktok: 'TikTok',
+        hubspot: 'HubSpot', salesforce: 'Salesforce', zendesk: 'Zendesk', notion: 'Notion',
+        quickbooks: 'QuickBooks', intercom: 'Intercom', gmail: 'Gmail', outlook: 'Outlook',
+        slack: 'Slack', xero: 'Xero', jira: 'Jira', asana: 'Asana',
+      };
+      const label = LABELS[platform] || (platform.charAt(0).toUpperCase() + platform.slice(1));
       const toast = document.getElementById('oauth-error-toast');
       const msgEl = document.getElementById('oauth-error-toast-msg');
       if (toast && msgEl) {
@@ -3961,6 +3984,15 @@ function formatCurrency(amount, currency) {
     } catch {}
   };
 
+  // The celebratory Aurora chime for the two "achievement" moments — a milestone reached and
+  // an assistant becoming ready to work. Best-effort: browsers block autoplay without a prior
+  // user gesture, so any accompanying modal/confetti still show even if the audio is deferred.
+  // Gated by the "sound on milestone" preference (My Account → Sounds); defaults to ON.
+  window._playMilestoneSound = function () {
+    if (localStorage.getItem('bms_soundOnMilestone') === '0') return;
+    try { const a = document.getElementById('milestone-audio'); if (a) { a.currentTime = 0; a.play().catch(() => {}); } } catch {}
+  };
+
   // ── Milestone celebration (#2): modal + Aurora.mp3 + confetti, 10s auto-close ──
   window._celebrateMilestone = function (note) {
     const modal = document.getElementById('milestone-modal');
@@ -3969,13 +4001,8 @@ function formatCurrency(amount, currency) {
     document.getElementById('milestone-modal-msg').textContent = note.message || '';
     modal.classList.remove('hidden');
     window.fireConfetti?.();
-    // Best-effort sound — browsers block autoplay without a prior user gesture; the
-    // modal + confetti still show. Plays once the user has interacted with the page.
-    // Gated by the "sound on milestone" preference (My Account → Sounds); the modal +
-    // confetti always show, only the audio is suppressed. Defaults to ON when unset.
-    if (localStorage.getItem('bms_soundOnMilestone') !== '0') {
-      try { const a = document.getElementById('milestone-audio'); if (a) { a.currentTime = 0; a.play().catch(() => {}); } } catch {}
-    }
+    // Sound is gated by the milestone preference; the modal + confetti always show.
+    window._playMilestoneSound();
 
     let timer;
     const close = () => { modal.classList.add('hidden'); clearTimeout(timer); };

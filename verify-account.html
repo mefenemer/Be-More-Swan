@@ -65,6 +65,10 @@
       if (response.ok) {
         const data = await response.json();
         // The backend successfully set the HTTPOnly cookie.
+        // Mark this as a fresh login so the workspace can run its one-time "focus the inbox"
+        // bell count-up once (consumed there). sessionStorage is per-tab and survives the
+        // redirect + any reload within this session, so it fires once per login, not per reload.
+        try { sessionStorage.setItem('bms_freshLogin', '1'); } catch {}
         // Redirect the user to the protected dashboard.
         window.location.href = data.redirect || '/onboarding.html';
       } else {
