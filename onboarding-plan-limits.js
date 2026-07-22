@@ -18,7 +18,7 @@
 (function () {
     // Mirrors master_plans.app_connection_limit / the published pricing cards. Only used until
     // check-capacity answers — the live column wins whenever it's reachable.
-    const MAX_APPS_BY_TIER  = { saver: 2, buster: 5, employee: 15 };
+    const MAX_APPS_BY_TIER  = { saver: 4, buster: 10, employee: 15 };
     // Workflow-step ceilings have no master_plans column, so they stay tier-keyed — but off the
     // tier check-capacity reports, not whatever sessionStorage happens to hold. Ordered entry → top.
     const MAX_STEPS_BY_TIER = { saver: 1, buster: 4, employee: 5 };

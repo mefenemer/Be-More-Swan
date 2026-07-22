@@ -63,7 +63,7 @@ const DEFS: Def[] = [
       category: 'Capacity', valueType: 'number', storageTarget: 'column', columnName: 'appConnectionLimit', unlimitedLabel: 'Custom', enterpriseValue: 'Custom' },
     { key: 'app_connections', label: 'App Connection Details', description: 'The tools and platforms your assistants can connect to and work within',
       category: 'Capacity', valueType: 'text', storageTarget: 'feature', enterpriseValue: 'Bespoke app limits & custom internal system integrations',
-      values: { saver: 'Connect up to 2 everyday apps', buster: 'Connect up to 5 standard apps to power your digital department', employee: 'Connect up to 15 apps (unlocks Premium Tool integrations like CRM and e-commerce)' } },
+      values: { saver: 'Connect up to 4 everyday apps', buster: 'Connect up to 10 standard apps to power your digital department', employee: 'Connect up to 15 apps (unlocks Premium Tool integrations like CRM and e-commerce)' } },
 
     // ── AI Media Generation ───────────────────────────────────────────────────
     { key: 'monthly_ai_credits', label: 'AI Media Credits / Month', description: 'Credits included each month for AI media generation (image = 1 credit, video = 5 credits)',
