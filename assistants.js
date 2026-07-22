@@ -4054,6 +4054,11 @@ async function _renderKickOff(assistantId) {
         } else if (attn.kind === 'limit') {
             reason = "This assistant is paused because your plan's assistant limit was exceeded.";
             ctaLabel = 'Manage Plan'; ctaKind = 'billing';
+        } else if (attn.kind === 'quota') {
+            // Monthly TASK allowance spent — the only self-clearing pause, so say so. Upgrading is
+            // the way to resume now, but doing nothing also works, and the user should know that.
+            reason = "Your workspace has used its monthly task allowance, so your assistants are paused. They restart automatically when the allowance resets on the 1st — or upgrade to resume now.";
+            ctaLabel = 'Upgrade Plan'; ctaKind = 'billing';
         } else {
             reason = 'This assistant needs attention before it can run again.';
             ctaLabel = 'Review Connections'; ctaKind = 'platforms';

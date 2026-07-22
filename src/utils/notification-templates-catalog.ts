@@ -819,12 +819,29 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         name: 'Monthly task limit reached',
         category: 'Billing',
         type: 'task_limit_reached',
-        title: 'Monthly Task Limit Reached — Automated Tasks Paused',
-        message: 'You\'ve used all {{usage.limit}} tasks included in your {{plan.tier_name}} plan for {{usage.month}}. Automated tasks have been paused. Manual "on-command" tasks still work. Upgrade your plan to resume automation immediately, or tasks will restart at the beginning of next month.',
+        title: 'Monthly Task Limit Reached — Your Assistants Are Paused',
+        // NB: manual/on-command tasks are NOT exempt. atomicCapCheck gates every task, including
+        // chat turns (chat-orchestrator.ts → consumeTaskCredit), so the old "manual tasks still
+        // work" line promised something the enforcement code refuses.
+        message: 'You\'ve used all {{usage.limit}} tasks included in your {{plan.tier_name}} plan for {{usage.month}}, so your assistants have paused. You are never charged for going over — the limit is a hard stop, not an overage. Upgrade to resume straight away, or your assistants restart automatically on the 1st of next month.',
         variables: [
             v('usage.limit', 'Task limit', '2,500'),
             v('plan.tier_name', 'Plan tier name', 'Growth'),
             v('usage.month', 'Month label', 'July 2026'),
+        ],
+    },
+    {
+        templateKey: 'task_limit_resumed',
+        name: 'Assistants resumed after task limit',
+        category: 'Billing',
+        type: 'task_limit_resumed',
+        title: 'Your assistants are back to work',
+        message: 'Your monthly task allowance has reset, so the {{resumed.assistant_phrase}} paused when you reached your {{plan.tier_name}} limit {{resumed.verb}} been switched back on: {{resumed.names}}. Nothing else changed — any assistant you paused yourself stays paused.',
+        variables: [
+            v('resumed.assistant_phrase', '"assistant" or "assistants"', 'assistants'),
+            v('resumed.verb', '"has" or "have"', 'have'),
+            v('resumed.names', 'Resumed assistant names', 'Aura, Blog Writer'),
+            v('plan.tier_name', 'Plan tier name', 'Growth'),
         ],
     },
     {

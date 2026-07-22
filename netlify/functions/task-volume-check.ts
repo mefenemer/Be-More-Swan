@@ -1,18 +1,21 @@
 // task-volume-check.ts
-// Scheduled Netlify function — runs daily to check each user's monthly task usage.
-// SC3: fires a notification at 80% of monthly allowance and pauses automated
-//      tasks + notifies again at 100%.
+// Scheduled Netlify function — runs daily to check each org's monthly task usage.
+// SC3: fires a notification at 80% of monthly allowance and pauses the org's assistants
+//      + notifies again at 100%.
+//
+// The pause is REVERSED by resume-quota-paused.ts once the allowance resets — see the note on the
+// paused_quota update below for why that needs its own provisioning status rather than is_active.
 //
 // Schedule: configure in netlify.toml as:
 //   [functions.task-volume-check]
 //   schedule = "0 8 * * *"   # 08:00 UTC every day
 
-import { Handler } from '@netlify/functions';
-import { eq, and, gte, count, isNotNull } from 'drizzle-orm';
+import { eq, and, gte, isNotNull } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
-import { users, plans, masterPlans, taskRuns, notifications, aiAssistants } from '../../db/schema';
+import { plans, masterPlans, notifications, aiAssistants, usageCounters } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { effectiveLimit, type FeatureOverrides } from '../../src/utils/plan-features';
+import { getPeriodStart } from '../../src/utils/atomic-cap-check';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -28,6 +31,7 @@ export default withLambda(async (event) => {
         const activePlans = await db
             .select({
                 userId: plans.userId,
+                organisationId: plans.organisationId,
                 planId: plans.id,
                 tierKey: masterPlans.tierKey,
                 tierName: masterPlans.name,
@@ -42,7 +46,12 @@ export default withLambda(async (event) => {
             ));
 
         const now = new Date();
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        // MUST match enforcement exactly. atomicCapCheck (src/utils/atomic-cap-check.ts) counts
+        // usage_counters.task_count per ORGANISATION over a UTC calendar month. This job used to
+        // COUNT(*) task_runs per USER over a LOCAL-time month, so the two could disagree: a user
+        // could be hard-stopped having never seen the 80% warning, or be told "limit reached"
+        // while still able to run tasks. Same source, same period, same scope — no drift.
+        const periodStart = getPeriodStart();
         const monthLabel = now.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
 
         let notified80 = 0;
@@ -55,14 +64,17 @@ export default withLambda(async (event) => {
             if (plan.userId == null) continue; // plans.userId is nullable; skip org-only plans
             const userId = plan.userId;
 
-            // Count tasks this month
-            const [{ value: taskCount }] = await db
-                .select({ value: count() })
-                .from(taskRuns)
+            // Read the SAME counter enforcement decrements, for the same UTC period. A missing row
+            // just means no task has run yet this month (atomicCapCheck upserts it on first use).
+            const [counter] = await db
+                .select({ taskCount: usageCounters.taskCount })
+                .from(usageCounters)
                 .where(and(
-                    eq(taskRuns.userId, userId),
-                    gte(taskRuns.createdAt, monthStart),
-                ));
+                    eq(usageCounters.organisationId, plan.organisationId),
+                    eq(usageCounters.periodStart, periodStart),
+                ))
+                .limit(1);
+            const taskCount = counter?.taskCount ?? 0;
 
             const pct = Math.round((taskCount / limit) * 100);
 
@@ -74,7 +86,7 @@ export default withLambda(async (event) => {
                     .where(and(
                         eq(notifications.userId, userId),
                         eq(notifications.type, 'task_limit_reached'),
-                        gte(notifications.createdAt, monthStart),
+                        gte(notifications.createdAt, periodStart),
                     ))
                     .limit(1);
 
@@ -85,15 +97,23 @@ export default withLambda(async (event) => {
                 });
 
                 if (!alreadyPaused) {
-                    // Pause all active assistants' automated tasks (set status hint in metadata)
-                    // Actual task execution is gated via check-capacity; this notification is
-                    // the user-facing signal. For immediate effect we mark assistants as paused.
+                    // Pause the user's working assistants. Actual task execution is already gated by
+                    // atomicCapCheck; this is the visible signal (and stops the drafting crons).
+                    //
+                    // The pause is stamped with provisioningStatus='paused_quota', NOT just
+                    // isActive=false. isActive is the USER's own on/off switch, so a quota pause
+                    // written only there is indistinguishable from a deliberate user action — which
+                    // is why nothing could ever safely un-pause it, and assistants stayed dark
+                    // forever after a single cap hit (resume-quota-paused.ts now reverses exactly
+                    // these rows). Scoped to currently-WORKING assistants so we never touch one the
+                    // user paused themselves, nor overwrite paused_payment / paused_limit.
                     await db
                         .update(aiAssistants)
-                        .set(withUpdatedAt({ isActive: false }))
+                        .set(withUpdatedAt({ isActive: false, provisioningStatus: 'paused_quota' }))
                         .where(and(
                             eq(aiAssistants.userId, userId),
                             eq(aiAssistants.provisioningStatus, 'complete'),
+                            eq(aiAssistants.isActive, true),
                         ))
                         .catch(err => console.warn('[task-volume-check] Pause assistants failed:', err.message));
 
@@ -114,7 +134,7 @@ export default withLambda(async (event) => {
                     .where(and(
                         eq(notifications.userId, userId),
                         eq(notifications.type, 'task_limit_warning'),
-                        gte(notifications.createdAt, monthStart),
+                        gte(notifications.createdAt, periodStart),
                     ))
                     .limit(1);
 

@@ -97,6 +97,11 @@ export async function computeAssistantReadiness(db: Db, orgId: number, assistant
                 attention = { kind: 'billing', services: [] };
             } else if (assistant.provisioningStatus === 'paused_limit') {
                 attention = { kind: 'limit', services: [] };
+            } else if (assistant.provisioningStatus === 'paused_quota') {
+                // Monthly TASK allowance exhausted (task-volume-check). Distinct from 'paused_limit',
+                // which is the plan's ASSISTANT-count limit after a downgrade — different cause,
+                // different fix, and this one clears itself when the allowance resets.
+                attention = { kind: 'quota', services: [] };
             } else if (brokenConnections.length) {
                 attention = { kind: 'connection', services: brokenConnections };
             }

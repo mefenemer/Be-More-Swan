@@ -316,7 +316,14 @@ export const aiAssistants = pgTable("ai_assistants", {
 
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-  // provisioningStatus: 'pending' | 'complete' | 'failed' | 'cancelled' | 'paused_limit' | 'paused_payment' | 'blocked'
+  // provisioningStatus: 'pending' | 'complete' | 'failed' | 'cancelled' | 'paused_limit'
+  //                   | 'paused_payment' | 'paused_quota' | 'blocked'
+  // 'paused_limit'  = plan downgrade left more assistants than the tier allows (stripe-webhook.ts).
+  // 'paused_quota'  = the org exhausted its monthly TASK allowance (task-volume-check.ts). Distinct
+  // from paused_limit on purpose: it is self-clearing, and resume-quota-paused.ts reverses exactly
+  // these rows. Do NOT record a system pause with is_active alone — that is the user's own on/off
+  // switch, so a pause written only there can never be safely un-paused in bulk.
+  // db/assistant-quota-pause.sql teaches assistant_lifecycle_from_legacy() about it.
   // 'blocked' = a compliance/readiness gate stopped provisioning (see provisioningBlockedReason).
   // It still derives lifecycle_status='provisioning', but is distinguishable + user-actionable +
   // re-triggerable (retry-provision-assistant / retryBlockedAssistants). db/assistant-provisioning-blocked.sql.

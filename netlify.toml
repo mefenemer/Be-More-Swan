@@ -145,6 +145,13 @@ node_bundler = "esbuild"
 [functions.task-volume-check]
   schedule = "0 8 * * *"
 
+# Reverse the quota pause task-volume-check applies, once the org is back under its allowance.
+# 00:15 UTC daily — just after the UTC month rolls over (usage_counters.period_start), so a
+# customer whose allowance has reset finds their assistants already working. Daily rather than
+# monthly so a mid-month upgrade also resumes them.
+[functions.resume-quota-paused]
+  schedule = "15 0 * * *"
+
 # US 5.2: resolve widget A/B hook tests (promote the winning variant) — hourly
 [functions.resolve-ab-tests]
   schedule = "0 * * * *"
