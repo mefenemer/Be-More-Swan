@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-audience",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4192",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/ca2603d2-6686-443f-99b4-fb9af2708b7d/scratchpad/demo"
+      ],
+      "port": 4192,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-threads-card",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

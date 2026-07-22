@@ -71,8 +71,9 @@ window._PLATFORM_ICONS = {
     facebook: `<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>`,
     linkedin: `<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433a2.062 2.062 0 01-2.063-2.065 2.064 2.064 0 112.063 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/></svg>`,
     x: `<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-4.714-6.231-5.401 6.231H2.744l7.737-8.835L1.254 2.25H8.08l4.253 5.622 5.911-5.622zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>`,
+    youtube: `<svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 00-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 00.502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 002.121 2.136c1.872.505 9.377.505 9.377.505s7.505 0 9.376-.505a3.015 3.015 0 002.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>`,
 };
-window._PLATFORM_LABEL = { instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X' };
+window._PLATFORM_LABEL = { instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X', youtube: 'YouTube', threads: 'Threads' };
 
 // ── Shared lifecycle badge resolver (Epic 1 AC1.1.2) ──────────────────────────
 // Single source of truth for the "My Assistants" list card and the Assistant Details pill,
@@ -1654,11 +1655,12 @@ function _syncAutopilotPending(count) {
 window._syncStatusRow = function() {
     const row = document.getElementById('overview-status-row');
     if (!row) return;
-    const shown = ['autopilot-status-card', 'connections-status-card']
-        .filter(id => !document.getElementById(id)?.classList.contains('hidden'));
-    // In the compiled stylesheet `.hidden` doesn't beat `.grid`, so hide the row inline.
-    row.style.display = shown.length ? '' : 'none';
-    row.classList.toggle('lg:grid-cols-2', shown.length === 2);
+    // Connections moved into the hero card — the status row now holds only the Autopilot card, so it's
+    // always single-column. Hide the row inline (compiled `.hidden` doesn't beat `.grid`) when Autopilot
+    // is hidden too.
+    const autopilotShown = !document.getElementById('autopilot-status-card')?.classList.contains('hidden');
+    row.style.display = autopilotShown ? '' : 'none';
+    row.classList.remove('lg:grid-cols-2');
 };
 
 // The Posting Schedule controls drive both autopilot engines off the same context keys, so the
@@ -3526,6 +3528,9 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     // Autopilot's post totals (Created/Scheduled/Published) fill from that fetch — clear its
     // skeleton now that they're in.
     if (_skelAutopilot) _endCardLoading('autopilot-status-card');
+    // Audience counts hit the platform APIs, so they're deliberately not awaited — the Autopilot
+    // card is already complete without them and the block reveals itself when they land.
+    _fetchAndRenderFollowerCounts();
 
     // ── Recent Activity ───────────────────────────────────────────
     const activityList = document.getElementById('recent-activity-list');
@@ -3823,6 +3828,56 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
         }
     } catch {
         // silently skip — metrics are supplementary
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Audience — live follower/subscriber counts for each connected platform, rendered under the
+// "Content by platform" breakdown in the Autopilot card. get-follower-counts.ts does the per-platform
+// API calls and caches each result ~1h, so this is cheap to call on every detail load.
+//
+// Coverage is uneven and that's deliberate rather than a bug: YouTube gives subscriberCount (unless
+// the channel hides it), Instagram/Facebook come from the Graph API, X depends on the app's API tier,
+// and LinkedIn simply doesn't expose personal-profile follower counts. Anything unavailable renders
+// "—" with the reason on hover instead of a fabricated number.
+// ─────────────────────────────────────────────────────────────────
+// Truncates rather than rounds (12,999 → 12.9k, never 13k) so the figure on screen is never larger
+// than the real one. One decimal below 100k/100M, matching how the platforms themselves abbreviate.
+function _formatFollowerCount(n) {
+    const short = (v, unit) => `${(Math.floor(v * 10) / 10).toString().replace(/\.0$/, '')}${unit}`;
+    if (n < 1000) return String(n);
+    if (n < 1000000) return n < 100000 ? short(n / 1000, 'k') : `${Math.floor(n / 1000)}k`;
+    return n < 100000000 ? short(n / 1000000, 'M') : `${Math.floor(n / 1000000)}M`;
+}
+
+async function _fetchAndRenderFollowerCounts() {
+    const block = document.getElementById('autopilot-audience');
+    const list = document.getElementById('audience-by-platform');
+    if (!block || !list) return;
+    try {
+        const res = await fetch('/.netlify/functions/get-follower-counts');
+        if (!res.ok) return;
+        const { counts } = await res.json();
+        if (!Array.isArray(counts) || !counts.length) return;
+
+        // Platforms that report a number sort to the top, largest first; the "—" rows trail behind
+        // so the useful figures are the first thing read.
+        const rows = counts.slice().sort((a, b) => (b.available - a.available) || ((b.count || 0) - (a.count || 0)));
+        list.innerHTML = rows.map(r => {
+            const icon = (window._PLATFORM_ICONS || {})[r.platform] || '';
+            const label = (window._PLATFORM_LABEL || {})[r.platform] || r.platform.charAt(0).toUpperCase() + r.platform.slice(1);
+            const unit = r.platform === 'youtube' ? 'subscribers' : 'followers';
+            const value = r.available && r.count != null
+                ? `<span class="text-sm font-black text-gray-900" style="font-variant-numeric:tabular-nums" title="${r.count.toLocaleString()} ${unit}">${_formatFollowerCount(r.count)}</span>`
+                : `<span class="text-sm font-black text-gray-300" title="Not available${r.note ? ` — ${r.note}` : ''}">—</span>`;
+            return `<div class="flex items-center justify-between gap-3 py-1">
+                <span class="flex items-center gap-1.5 text-xs font-semibold text-gray-700 min-w-0"><span class="text-gray-400 shrink-0" style="width:14px">${icon}</span><span class="truncate">${label}</span></span>
+                ${value}
+            </div>`;
+        }).join('');
+        block.classList.remove('hidden');
+    } catch {
+        // silently skip — the audience block is supplementary
     }
 }
 
