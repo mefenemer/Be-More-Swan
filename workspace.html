@@ -593,14 +593,18 @@ window.showComplianceModals = function showComplianceModals(force) {
             <div id="prq-warnings" class="space-y-2"></div>
             <p class="text-[11px] text-gray-500 mt-2">Settle each one, or approve anyway — either way it's recorded.</p>
           </div>
-          <!-- Suggestions are advice, shown once and never regenerated on their own. -->
+          <!-- Suggestions are advice, shown once and never regenerated on their own.
+               The button APPLIES the list above — it does not produce more suggestions. It was
+               briefly labelled "Suggest an improvement", which read as "give me more" when three
+               were already on screen, so nobody could tell it was the accept action. -->
           <div id="prq-suggestions-wrap" class="hidden">
             <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Suggestions</p>
             <ul id="prq-suggestions" class="space-y-1.5 text-xs text-gray-600"></ul>
             <button type="button" id="prq-apply-btn" onclick="rqPreviewSuggestions()"
               class="mt-2.5 w-full px-3 py-2 text-xs font-bold rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 transition">
-              Suggest an improvement
+              Apply these suggestions
             </button>
+            <p class="text-[11px] text-gray-400 mt-1.5 text-center">You'll see the rewrite and can edit it before saving.</p>
           </div>
           <!-- The proposal is EDITABLE before it is saved, and what gets saved is exactly what is
                in this box — the server no longer re-generates on accept. -->
@@ -5006,6 +5010,9 @@ let _prqPostId = null;
 // The verdict currently on screen. Warning ACTIONS look their text up here by index rather than
 // carrying it in an onclick attribute — see _prqWarningCard.
 let _prqReview = null;
+// Sources the assistant found, keyed by warning index, pending the human's acceptance. Cleared per
+// post — indexes are positional, so carrying them over would offer post A's source for post B.
+let _prqVerified = {};
 
 // Warnings and suggestions are model-generated free text going into innerHTML — escape them.
 // (workspace.html's other `esc` helpers are function-local, so this panel needs its own.)
@@ -5016,6 +5023,7 @@ const _prqShow = (id, on) => document.getElementById(id)?.classList.toggle('hidd
 
 async function _rqLoadQualityReview(postId) {
     _prqPostId = postId;
+    _prqVerified = {};
     const wrap = document.getElementById('post-review-quality');
     if (!wrap) return;
     wrap.classList.remove('hidden');
@@ -5107,11 +5115,14 @@ function _prqWarningCard(warning, disposition, index) {
       <div class="text-xs bg-red-50 border border-red-200 rounded-lg px-2.5 py-2">
         <div class="flex gap-2 text-red-700"><span class="shrink-0">⚠</span><span>${_prqEsc(warning)}</span></div>
         <div class="flex flex-wrap gap-1.5 mt-2">
+          <button type="button" onclick="rqVerifyWarning(${index})"
+            class="px-2 py-1 text-[11px] font-bold rounded-md bg-red-600 text-white hover:bg-red-700">Ask the assistant to check</button>
           <button type="button" onclick="rqSourceWarning(${index})"
             class="px-2 py-1 text-[11px] font-bold rounded-md border border-red-300 text-red-700 bg-white hover:bg-red-100">Add a source</button>
           <button type="button" onclick="rqDismissWarning(${index})"
             class="px-2 py-1 text-[11px] font-semibold rounded-md border border-gray-300 text-gray-600 bg-white hover:bg-gray-100">Doesn't apply</button>
         </div>
+        <div data-prq-verify="${index}" class="hidden mt-2"></div>
       </div>`;
 }
 
@@ -5157,13 +5168,124 @@ window.rqReopenWarning = function (index) {
     if (warning) _prqResolve(warning, 'reopen', {});
 };
 
-// Ask for ONE rewrite. Costs a task credit and is capped per caption, so it is always an explicit
-// act — never something the panel does to itself.
+// ── Assistant-led verification ───────────────────────────────────────────────
+// The assistant searches the web for a real source. It PROPOSES an outcome; the human accepts it.
+// Nothing here records a disposition on its own — the accept buttons below route back through
+// rqSourceWarning / the normal rewrite path, so the audit trail always has a human behind it.
+window.rqVerifyWarning = async function (index) {
+    const warning = _prqWarningAt(index);
+    const host = document.querySelector(`[data-prq-verify="${index}"]`);
+    if (!warning || !host || !_prqPostId) return;
+
+    host.classList.remove('hidden');
+    host.innerHTML = `<p class="text-[11px] text-gray-500 italic">Searching for a source…</p>`;
+
+    let d;
+    try {
+        const res = await fetch('/.netlify/functions/verify-compliance-warning', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId: _prqPostId, warning }),
+        });
+        d = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            host.innerHTML = `<p class="text-[11px] text-red-600">${_prqEsc(d.error || 'Could not run the check.')}</p>`;
+            return;
+        }
+    } catch {
+        host.innerHTML = `<p class="text-[11px] text-red-600">Network error — please try again.</p>`;
+        return;
+    }
+
+    const searched = d.searchCount ? `Checked ${d.searchCount} search${d.searchCount === 1 ? '' : 'es'}.` : '';
+
+    if (d.outcome === 'sourced') {
+        // The URL came from the search tool's own results — the server discards anything the model
+        // merely asserted. Still shown for the human to open and accept, never auto-filed.
+        _prqVerified[index] = { sourceUrl: d.sourceUrl, note: d.note };
+        host.innerHTML = `
+          <div class="rounded-lg border border-emerald-200 bg-emerald-50 p-2">
+            <p class="text-[11px] font-bold text-emerald-700">Found a source</p>
+            <p class="mt-1 text-[11px] text-gray-700">${_prqEsc(d.note || '')}</p>
+            <a href="${_prqEsc(d.sourceUrl)}" target="_blank" rel="noopener noreferrer"
+               class="mt-1 block text-[11px] text-emerald-700 underline break-all">${_prqEsc(d.sourceUrl)}</a>
+            <p class="mt-1 text-[10px] text-gray-500">Open it and check it says what the post claims. ${_prqEsc(searched)}</p>
+            <button type="button" onclick="rqAcceptVerified(${index})"
+              class="mt-2 w-full px-2 py-1.5 text-[11px] font-bold rounded-md bg-emerald-600 text-white hover:bg-emerald-700">Use this source</button>
+          </div>`;
+        return;
+    }
+
+    if (d.outcome === 'rewrite') {
+        // Nothing credible found, so the honest fix is to stop making the claim. Editable, like
+        // every other rewrite in this panel.
+        host.innerHTML = `
+          <div class="rounded-lg border border-amber-200 bg-amber-50 p-2">
+            <p class="text-[11px] font-bold text-amber-700">Couldn't verify it — suggested rewrite</p>
+            <p class="mt-1 text-[11px] text-gray-700">${_prqEsc(d.reason || '')} ${_prqEsc(searched)}</p>
+            <textarea id="prq-verify-text-${index}" rows="6"
+              class="mt-2 w-full p-2 text-[11px] text-gray-800 rounded-md border border-amber-200 resize-y"></textarea>
+            <div class="flex gap-1.5 mt-1.5">
+              <button type="button" onclick="rqDiscardVerify(${index})"
+                class="flex-1 px-2 py-1.5 text-[11px] font-semibold rounded-md border border-gray-300 text-gray-600 bg-white hover:bg-gray-50">Discard</button>
+              <button type="button" onclick="rqAcceptVerifyRewrite(${index})"
+                class="flex-1 px-2 py-1.5 text-[11px] font-bold rounded-md bg-amber-600 text-white hover:bg-amber-700">Save this version</button>
+            </div>
+          </div>`;
+        // Set via .value, not markup — the caption is user content and must not be parsed as HTML.
+        document.getElementById(`prq-verify-text-${index}`).value = d.after || '';
+        return;
+    }
+
+    host.innerHTML = `
+      <div class="rounded-lg border border-gray-200 bg-gray-50 p-2">
+        <p class="text-[11px] font-bold text-gray-600">Needs your judgement</p>
+        <p class="mt-1 text-[11px] text-gray-600">${_prqEsc(d.reason || '')} ${_prqEsc(searched)}</p>
+      </div>`;
+};
+
+window.rqDiscardVerify = function (index) {
+    document.querySelector(`[data-prq-verify="${index}"]`)?.classList.add('hidden');
+};
+
+// File the assistant's source as a normal 'sourced' disposition — same endpoint, same audit record
+// as one the user pasted in themselves. The note records that the assistant found it.
+window.rqAcceptVerified = function (index) {
+    const warning = _prqWarningAt(index);
+    const found = _prqVerified[index];
+    if (!warning || !found) return;
+    _prqResolve(warning, 'sourced', {
+        sourceUrl: found.sourceUrl,
+        note: `Found by the assistant via web search. ${found.note || ''}`.trim(),
+    });
+};
+
+// Save the de-claimed caption. Goes through apply-post-suggestions' accept path, so it gets the
+// same concurrency guard, audit entry, and compliance re-check as any other rewrite.
+window.rqAcceptVerifyRewrite = async function (index) {
+    const caption = document.getElementById(`prq-verify-text-${index}`)?.value ?? '';
+    if (!_prqPostId || !caption.trim()) return;
+    try {
+        const res = await fetch('/.netlify/functions/apply-post-suggestions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId: _prqPostId, mode: 'accept', caption }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) { alert(d.error || 'Could not save the rewrite.'); return; }
+        if (window.showToast) window.showToast('Caption updated', { icon: '✏️' });
+        if (typeof rqLoadItems === 'function') rqLoadItems();
+        window.detailRqRefresh?.();
+        openPostReview(_prqPostId);
+    } catch { alert('Network error — please try again.'); }
+};
+
+// Apply the suggestions ALREADY on screen — one rewrite, previewed. This never asks for a new set
+// of suggestions. Costs a task credit and is capped per caption, so it is always an explicit act,
+// never something the panel does to itself.
 window.rqPreviewSuggestions = async function () {
     const btn = document.getElementById('prq-apply-btn');
     if (!btn || !_prqPostId) return;
     const original = btn.textContent;
-    btn.disabled = true; btn.textContent = 'Rewriting…';
+    btn.disabled = true; btn.textContent = 'Applying…';
     try {
         const res = await fetch('/.netlify/functions/apply-post-suggestions', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
