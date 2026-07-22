@@ -127,7 +127,10 @@ export default withLambda(async (event) => {
                         customer: customer.id,
                         status: 'all',
                         limit: 20,
-                        expand: ['data.default_payment_method'],
+                        // discounts.promotion_code resolves the promo id to the customer-facing
+                        // voucher code ("LAUNCH50") — without it we'd only have `promo_…`.
+                        // The Coupon itself is embedded in each Discount, so it needs no expand.
+                        expand: ['data.default_payment_method', 'data.discounts.promotion_code'],
                     });
 
                     stripeSubscriptions = subs.data.map(sub => {
@@ -142,9 +145,14 @@ export default withLambda(async (event) => {
                                 priceId: i.price.id,
                                 productName: (i.price.product as any)?.name || null,
                                 amount: i.price.unit_amount,
+                                quantity: i.quantity ?? 1,
                                 currency: i.price.currency,
                                 interval: i.price.recurring?.interval,
                             })),
+                            // Raw discounts; summarised into a display shape further down. Cast
+                            // because the SDK types these as (string | Discount)[] and we expanded
+                            // them, matching how `payment_intent` is read off Invoice in this file.
+                            discounts: ((sub as any).discounts || []) as any[],
                             paymentMethod: card ? {
                                 brand: card.brand,
                                 last4: card.last4,
@@ -199,6 +207,68 @@ export default withLambda(async (event) => {
         }
 
         // ── 4. Build response ─────────────────────────────────────
+
+        const CURRENCY_SYMBOL: Record<string, string> = { gbp: '£', usd: '$', eur: '€', aud: 'A$', cad: 'C$' };
+        const fmtMinor = (minor: number, currency: string) =>
+            `${CURRENCY_SYMBOL[currency?.toLowerCase()] ?? ''}${(minor / 100).toFixed(2)}`;
+
+        /**
+         * Summarise a Stripe subscription's voucher into what the billing page needs to answer
+         * three questions: which voucher was used, how much of the price it covers, and what is
+         * left to pay. Percent and fixed-amount coupons both resolve to the same shape, so the UI
+         * renders one thing. Returns null when no voucher is applied.
+         *
+         * `grossMinor` is the undiscounted recurring total in minor units — the figure the coupon
+         * applies to. Stripe applies multiple discounts sequentially, so they are folded in order
+         * rather than summed against the original.
+         */
+        function summariseDiscount(discounts: any[], grossMinor: number, currency: string) {
+            const active = (discounts || []).filter(d => d && typeof d === 'object' && d.coupon);
+            if (!active.length || !(grossMinor > 0)) return null;
+
+            let remaining = grossMinor;
+            const parts: Array<{ code: string | null; name: string | null; label: string }> = [];
+            let endsAt: string | null = null;
+            let duration: string | null = null;
+            let durationInMonths: number | null = null;
+
+            for (const d of active) {
+                const c = d.coupon;
+                if (c.percent_off) {
+                    remaining -= Math.round(remaining * (c.percent_off / 100));
+                    parts.push({ code: d.promotion_code?.code ?? null, name: c.name ?? null, label: `${c.percent_off}% off` });
+                } else if (c.amount_off) {
+                    remaining = Math.max(0, remaining - c.amount_off);
+                    parts.push({ code: d.promotion_code?.code ?? null, name: c.name ?? null, label: `${fmtMinor(c.amount_off, currency)} off` });
+                } else {
+                    continue;
+                }
+                // Surface the shortest-lived discount's end date — that's when the price changes.
+                if (d.end) {
+                    const iso = new Date(d.end * 1000).toISOString();
+                    if (!endsAt || iso < endsAt) endsAt = iso;
+                }
+                if (!duration) { duration = c.duration ?? null; durationInMonths = c.duration_in_months ?? null; }
+            }
+            if (!parts.length) return null;
+
+            const discountMinor = grossMinor - remaining;
+            return {
+                codes: parts.map(p => p.code).filter(Boolean) as string[],
+                name: parts[0].name,
+                label: parts.map(p => p.label).join(' + '),
+                grossAmount: grossMinor / 100,
+                discountAmount: discountMinor / 100,
+                netAmount: remaining / 100,
+                // Derived for BOTH coupon types so the UI always has a "% covered" to show.
+                percentCovered: Math.round((discountMinor / grossMinor) * 1000) / 10,
+                duration,
+                durationInMonths,
+                endsAt,
+                currency,
+            };
+        }
+
         const subscriptions = userPlans.map(plan => {
             const mp = plan.masterPlanId ? masterPlanMap[plan.masterPlanId] : null;
             // Try to match a Stripe subscription by plan start proximity (best effort)
@@ -206,14 +276,30 @@ export default withLambda(async (event) => {
                 s.status === 'active' || s.status === 'trialing'
             ) || stripeSubscriptions[0] || null;
 
+            // Undiscounted recurring total for this subscription, in minor units. Quantity matters
+            // for seat-based items. null when Stripe gave us nothing to work from.
+            const stripeGrossMinor = matchedSub?.items?.length
+                ? matchedSub.items.reduce((sum: number, i: any) => sum + (i.amount ?? 0) * (i.quantity ?? 1), 0)
+                : null;
+
             return {
                 id: plan.id,
                 planName: plan.planName,
                 planType: plan.planType,
                 status: plan.status,
                 billingCycle: matchedSub?.items?.[0]?.interval || 'month',
-                amountGbp: mp?.monthlyPriceGbp || null,
+                // What this subscription is ACTUALLY billed, taken from its own Stripe price rather
+                // than the plan's current list price. Those diverge whenever a plan is re-priced:
+                // Stripe leaves existing subscriptions on the archived price, so a subscriber who
+                // signed up before a change keeps paying the old amount while master_plans shows
+                // the new one. Falls back to the list price when Stripe isn't reachable.
+                amountGbp: stripeGrossMinor != null ? (stripeGrossMinor / 100).toFixed(2) : (mp?.monthlyPriceGbp || null),
+                listAmountGbp: mp?.monthlyPriceGbp || null,
                 currency: matchedSub?.items?.[0]?.currency || 'gbp',
+                // Voucher summary: which code, how much it covers, what's left. Null when none.
+                discount: stripeGrossMinor != null
+                    ? summariseDiscount(matchedSub?.discounts || [], stripeGrossMinor, matchedSub?.items?.[0]?.currency || 'gbp')
+                    : null,
                 startedAt: plan.startedAt,
                 expiresAt: plan.expiresAt,
                 renewalDate: matchedSub?.currentPeriodEnd

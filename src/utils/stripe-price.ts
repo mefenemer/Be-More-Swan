@@ -18,13 +18,23 @@ export interface PlanForPricing {
 }
 
 /**
+ * The lookup_key that identifies a plan's monthly GBP Price at a given amount. Exported so the
+ * admin price-change path (src/utils/plan-pricing.ts) mints its Price under the SAME key this
+ * resolver searches for — otherwise the two paths mint separate Price objects for the same amount
+ * and a plan ends up with duplicates in the Stripe catalog.
+ */
+export function monthlyLookupKey(tierKey: string, unitAmountMinor: number): string {
+    return `${tierKey}_monthly_gbp_${unitAmountMinor}`;
+}
+
+/**
  * Find-or-create the stable monthly GBP Price for a plan at its current master_plans amount.
  * Minted on the plan's own Stripe product (backfilled); falls back to a fresh product only if the
  * plan has no product id yet. Returns the Stripe price id.
  */
 export async function resolveMonthlyPriceId(stripe: Stripe, plan: PlanForPricing): Promise<string> {
     const unitAmount = Math.round(Number(plan.monthlyPriceGbp) * 100);
-    const lookupKey  = `${plan.tierKey}_monthly_gbp_${unitAmount}`;
+    const lookupKey  = monthlyLookupKey(plan.tierKey, unitAmount);
 
     const existing = await stripe.prices.list({ lookup_keys: [lookupKey], active: true, limit: 1 });
     if (existing.data.length > 0) return existing.data[0].id;

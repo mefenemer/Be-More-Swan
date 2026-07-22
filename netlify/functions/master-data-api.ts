@@ -206,7 +206,7 @@ async function handleMasterPlans(event: any, adminId: number, role: string, ip?:
                     effectiveFrom: new Date(), status: 'active', createdBy: adminId,
                 }).returning();
                 await applyPlanPrice(db, stripe, {
-                    plan: { id, stripeProductId: prev.stripeProductId },
+                    plan: { id, tierKey: prev.tierKey, stripeProductId: prev.stripeProductId },
                     currency: 'GBP', newPriceGbp: monthlyPriceGbp, historyRowId: histRow.id,
                 });
             }
@@ -350,7 +350,7 @@ async function handlePlanPriceChange(event: any, adminId: number, ip?: string, u
     }).returning();
     try {
         await applyPlanPrice(db, stripe, {
-            plan: { id: planId, stripeProductId: plan.stripeProductId },
+            plan: { id: planId, tierKey: plan.tierKey, stripeProductId: plan.stripeProductId },
             currency: 'GBP', newPriceGbp, historyRowId: histRow.id,
         });
     } catch (err: any) {

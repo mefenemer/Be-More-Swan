@@ -49,7 +49,7 @@ export default withLambda(async () => {
 
         try {
             await applyPlanPrice(db, stripe, {
-                plan: { id: plan.id, stripeProductId: plan.stripeProductId },
+                plan: { id: plan.id, tierKey: plan.tierKey, stripeProductId: plan.stripeProductId },
                 currency: row.currency, newPriceGbp: row.price, historyRowId: row.id,
             });
             activated++;

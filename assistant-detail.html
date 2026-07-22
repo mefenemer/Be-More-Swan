@@ -15,6 +15,20 @@
     @keyframes aiWandPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.45; } }
   }
 
+  /* Autopilot card: "Content by platform" and "Audience" side by side from the md breakpoint up,
+     stacked below it. Written here rather than with Tailwind utilities because md:flex-1 /
+     md:min-w-0 / md:gap-8 are not in the compiled style.css, and rebuilding Tailwind churns
+     unrelated selectors across the whole app.
+     The two blocks show and hide independently, so this deliberately only sets flex sizing at
+     md+: a `hidden` child is display:none and drops out of the row, letting the surviving block
+     take the full width. Below md the children are plain block elements keeping their own
+     mt-4/pt-4/border-t, which is exactly how they stacked before. min-width:0 lets the bar chart
+     shrink inside its column instead of forcing the row wider. */
+  @media (width >= 48rem) {
+    .autopilot-split { display: flex; flex-direction: row; gap: 2rem; }
+    .autopilot-split > * { flex: 1 1 0%; min-width: 0; }
+  }
+
   /* Per-card loading skeleton — a spinning circle laid over an Overview card whose data is
      still arriving (driven by _beginCardLoading / _endCardLoading in assistants.js). The
      Overview's dynamic cards each fill from their own fetch, so without this they pop in
@@ -298,6 +312,12 @@
            per-platform split sits with the Created/Scheduled/Published totals it breaks down.
            _fetchAndRenderAssistantMetrics shows this block only when the assistant has posted to
            2+ platforms (one platform has nothing to compare); it stays hidden otherwise. -->
+      <!-- Content by platform (left) and Audience (right) sit side by side from md up, stacking on
+           narrow screens. They stay INDEPENDENT siblings rather than one block: each shows and
+           hides on its own signal, so each keeps its own mt/pt/border-t and whichever one is
+           visible alone simply takes the full width (a `hidden` flex child is display:none and
+           leaves no gap). min-w-0 lets the bar chart shrink instead of overflowing the column. -->
+      <div class="autopilot-split">
       <div id="autopilot-platform-breakdown" class="mt-4 pt-4 border-t border-gray-100 hidden">
         <div class="flex items-center justify-between gap-3 mb-2">
           <h4 class="text-[11px] font-bold text-gray-400 uppercase tracking-wide shrink-0" id="metrics-breakdown-label">Content by platform</h4>
@@ -307,7 +327,7 @@
       </div>
       <!-- Audience — follower/subscriber counts pulled live from each connected platform's own API
            (get-follower-counts.ts, cached ~1h per connection). Deliberately a sibling of the
-           breakdown above rather than part of it: the breakdown hides below 2 platforms, but a
+           breakdown rather than part of it: the breakdown hides below 2 platforms, but a
            single-connection assistant still has an audience worth showing. Availability varies —
            LinkedIn never exposes personal-profile followers and X depends on the API tier, so those
            rows render "—" with the reason on hover. Hidden until at least one row comes back. -->
@@ -317,6 +337,7 @@
           <p class="text-[11px] text-gray-400 shrink-0">Followers &amp; subscribers</p>
         </div>
         <div id="audience-by-platform"></div>
+      </div>
       </div>
     </div>
   </div>

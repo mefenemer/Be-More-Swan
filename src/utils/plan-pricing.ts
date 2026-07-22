@@ -4,7 +4,8 @@
 // Used by both the immediate path (master-data-api.ts → "plan-price-change" / master-plans
 // PATCH) and the scheduled activation worker (activate-scheduled-prices.ts) so the two never
 // diverge. "Applying" a price means promoting a plan_price_history row to the live price:
-//   1. Mint a NEW Stripe recurring price (archive the old one — legacy subs keep billing on it).
+//   1. Mint a NEW Stripe recurring price under the shared monthly lookup_key, promote it to the
+//      product's default_price, and archive the old one (legacy subs keep billing on it).
 //   2. Close the current live history row (effective_to = now, status = 'superseded').
 //   3. Promote the target history row (status = 'active', stripe_price_id = new, effective_to = null).
 //   4. Update master_plans.monthly_price_gbp + the GBP plan_prices row so checkout + the plan
@@ -17,13 +18,14 @@
 import type Stripe from 'stripe';
 import { and, eq, ne } from 'drizzle-orm';
 import { masterPlans, planPrices, planPriceHistory } from '../../db/schema';
+import { monthlyLookupKey } from './stripe-price';
 
 // `db` is a drizzle instance (getDb()); typed loosely to avoid import cycles, matching the
 // convention in the other src/utils helpers.
 type Db = any;
 
 export interface ApplyPlanPriceArgs {
-    plan: { id: number; stripeProductId: string | null };
+    plan: { id: number; tierKey: string; stripeProductId: string | null };
     currency: string;                    // 'GBP'
     newPriceGbp: number | string;        // major units, e.g. 29 or '29.00'
     historyRowId: number;                // plan_price_history row to promote to 'active'
@@ -46,17 +48,31 @@ export async function applyPlanPrice(
     const [livePrice] = await db.select().from(planPrices)
         .where(and(eq(planPrices.masterPlanId, plan.id), eq(planPrices.currency, currency))).limit(1);
 
-    // 1. Stripe first — mint the new price, archive the old.
+    // 1. Stripe first — mint the new price, promote it, archive the old.
     let newStripePriceId: string | null = null;
     if (stripe && plan.stripeProductId) {
+        const unitAmount = Math.round(priceNum * 100);
+        // Mint under the SAME lookup_key resolveMonthlyPriceId searches for, so the checkout path
+        // (plan_prices.stripe_price_id) and the subscription path (lookup_key) converge on one
+        // Price. Without this they each mint their own Price at the same amount.
+        // transfer_lookup_key moves the key off whichever Price currently holds it.
         const created = await stripe.prices.create({
             product: plan.stripeProductId,
-            unit_amount: Math.round(priceNum * 100),
+            unit_amount: unitAmount,
             currency: currency.toLowerCase(),
             recurring: { interval },
+            ...(currency === 'GBP' && interval === 'month'
+                ? { lookup_key: monthlyLookupKey(plan.tierKey, unitAmount), transfer_lookup_key: true }
+                : {}),
         });
         newStripePriceId = created.id;
-        if (livePrice?.stripePriceId) {
+        // Promote it to the product's default. Nothing in this codebase reads default_price, but
+        // the Stripe dashboard shows it as "Default" and anything created by hand there (payment
+        // links, manual subscriptions) picks it up — so leaving it on the OLD price is a trap.
+        await stripe.products.update(plan.stripeProductId, { default_price: created.id }).catch(() => {});
+        // Archiving is best-effort and only possible when we know the outgoing Price. Before
+        // plan_prices was populated this was null, which is why an old Price can still be active.
+        if (livePrice?.stripePriceId && livePrice.stripePriceId !== created.id) {
             await stripe.prices.update(livePrice.stripePriceId, { active: false }).catch(() => {});
         }
     }
