@@ -575,6 +575,44 @@ window.showComplianceModals = function showComplianceModals(force) {
            edits that platform's copy; the footer's Approve/Reject act on every platform at once. -->
       <div id="post-review-tabs" class="hidden mb-4"></div>
       <div id="post-review-body"></div>
+      <!-- Quality review (The Quality Reviewer, plan-gated). This panel existed ONLY in the
+           calendar, so the Review Queue — where people actually approve — showed no warnings, no
+           suggestions and no score. Populated by _rqLoadQualityReview(). -->
+      <div id="post-review-quality" class="hidden mt-4 rounded-xl border border-gray-200 overflow-hidden">
+        <div class="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-100">
+          <p class="text-xs font-bold text-gray-600">Quality review</p>
+          <span id="prq-score" class="hidden text-xs font-extrabold"></span>
+        </div>
+        <div class="p-3 space-y-3">
+          <div id="prq-loading" class="text-xs text-gray-400">Checking this post…</div>
+          <div id="prq-warnings-wrap" class="hidden">
+            <p class="text-[11px] font-bold text-red-600 uppercase tracking-wider mb-1.5">Compliance — needs your check</p>
+            <div id="prq-warnings" class="space-y-1.5"></div>
+            <p class="text-[11px] text-gray-500 mt-2">You can still approve, but you'll be asked to confirm and it's recorded.</p>
+          </div>
+          <div id="prq-suggestions-wrap" class="hidden">
+            <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Suggestions</p>
+            <ul id="prq-suggestions" class="space-y-1.5 text-xs text-gray-600"></ul>
+            <button type="button" id="prq-apply-btn" onclick="rqPreviewSuggestions()"
+              class="mt-2.5 w-full px-3 py-2 text-xs font-bold rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 transition">
+              Let the assistant apply these
+            </button>
+          </div>
+          <!-- Diff: the rewrite is ALWAYS previewed before it is saved. -->
+          <div id="prq-diff-wrap" class="hidden">
+            <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Proposed rewrite</p>
+            <div class="rounded-lg border border-gray-200 divide-y divide-gray-100 text-xs">
+              <div class="p-2 bg-red-50/60"><span class="font-bold text-red-500">Before</span><p id="prq-diff-before" class="mt-1 text-gray-600 whitespace-pre-wrap"></p></div>
+              <div class="p-2 bg-emerald-50/60"><span class="font-bold text-emerald-600">After</span><p id="prq-diff-after" class="mt-1 text-gray-800 whitespace-pre-wrap"></p></div>
+            </div>
+            <div class="flex gap-2 mt-2">
+              <button type="button" onclick="rqCancelSuggestions()" class="flex-1 px-3 py-2 text-xs font-semibold rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">Discard</button>
+              <button type="button" onclick="rqApplySuggestions()" class="flex-1 px-3 py-2 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Use this version</button>
+            </div>
+          </div>
+          <div id="prq-clean" class="hidden text-xs text-emerald-700 font-semibold">✓ No compliance issues found.</div>
+        </div>
+      </div>
       <div id="post-review-archive" class="hidden mt-4 text-xs"></div>
     </div>
     <!-- Footer: actions -->
@@ -4938,7 +4976,129 @@ async function openPostReview(postId) {
     const modal = document.getElementById('post-review-modal');
     modal.classList.remove('hidden');
     modal.classList.add('flex');
+
+    // Load the quality verdict for this post. Not awaited — the modal must open instantly; the
+    // panel fills in when the answer arrives (usually from cache, since the review now runs at
+    // draft time rather than lazily on first calendar open).
+    _rqLoadQualityReview(postId);
 }
+
+// ── Quality review panel (Review Queue) ──────────────────────────────────────
+// Mirrors the calendar's panel, against the same endpoint. It only ever RENDERS the verdict —
+// the approval gate itself lives in approve-post.ts, because a disabled button is not a control.
+let _prqPostId = null;
+let _prqPendingRewrite = null;
+
+// Warnings and suggestions are model-generated free text going into innerHTML — escape them.
+// (workspace.html's other `esc` helpers are function-local, so this panel needs its own.)
+const _prqEsc = s => String(s ?? '').replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+async function _rqLoadQualityReview(postId) {
+    _prqPostId = postId;
+    _prqPendingRewrite = null;
+    const wrap = document.getElementById('post-review-quality');
+    if (!wrap) return;
+    const show = (id, on) => document.getElementById(id)?.classList.toggle('hidden', !on);
+    wrap.classList.remove('hidden');
+    show('prq-loading', true);
+    ['prq-warnings-wrap', 'prq-suggestions-wrap', 'prq-diff-wrap', 'prq-clean'].forEach(id => show(id, false));
+    document.getElementById('prq-score')?.classList.add('hidden');
+    // rqPreviewSuggestions() hides this button while its diff is on screen. Restore it here or the
+    // NEXT post opened after a preview shows suggestions with no way to act on them.
+    document.getElementById('prq-apply-btn')?.classList.remove('hidden');
+
+    let data;
+    try {
+        const res = await fetch('/.netlify/functions/review-post-quality', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId }),
+        });
+        // Plan doesn't include The Quality Reviewer → hide the panel rather than advertise a
+        // feature this workspace can't use.
+        if (res.status === 403) { wrap.classList.add('hidden'); return; }
+        if (!res.ok) { wrap.classList.add('hidden'); return; }
+        data = await res.json();
+    } catch { wrap.classList.add('hidden'); return; }
+
+    if (_prqPostId !== postId) return; // a different post was opened while this was in flight
+    show('prq-loading', false);
+
+    const scoreEl = document.getElementById('prq-score');
+    if (scoreEl && typeof data.brandVoiceScore === 'number') {
+        const s = data.brandVoiceScore;
+        scoreEl.className = `text-xs font-extrabold ${s >= 75 ? 'text-emerald-600' : s >= 50 ? 'text-amber-500' : 'text-red-500'}`;
+        scoreEl.textContent = `Brand voice ${s}/100`;
+        scoreEl.classList.remove('hidden');
+    }
+
+    const warnings = data.complianceWarnings || [];
+    if (warnings.length) {
+        document.getElementById('prq-warnings').innerHTML = warnings.map(w =>
+            `<div class="flex gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5">
+               <span class="shrink-0">⚠</span><span>${_prqEsc(w)}</span></div>`).join('');
+        show('prq-warnings-wrap', true);
+    }
+
+    const suggestions = data.suggestions || [];
+    if (suggestions.length) {
+        document.getElementById('prq-suggestions').innerHTML = suggestions.map(s =>
+            `<li class="flex gap-2"><span class="text-emerald-500 shrink-0">•</span><span>${_prqEsc(s)}</span></li>`).join('');
+        show('prq-suggestions-wrap', true);
+    }
+
+    if (!warnings.length && !suggestions.length) show('prq-clean', true);
+}
+
+// Ask for the rewrite WITHOUT saving it, so the human sees exactly what would change.
+window.rqPreviewSuggestions = async function () {
+    const btn = document.getElementById('prq-apply-btn');
+    if (!btn || !_prqPostId) return;
+    const original = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Rewriting…';
+    try {
+        const res = await fetch('/.netlify/functions/apply-post-suggestions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId: _prqPostId, apply: false }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) { alert(d.error || 'Could not produce a rewrite.'); return; }
+        if (d.unchanged) { alert('The assistant had nothing to change here.'); return; }
+        _prqPendingRewrite = { before: d.before, after: d.after };
+        document.getElementById('prq-diff-before').textContent = d.before;
+        document.getElementById('prq-diff-after').textContent = d.after;
+        document.getElementById('prq-diff-wrap').classList.remove('hidden');
+        btn.classList.add('hidden');
+    } catch { alert('Network error — please try again.'); }
+    finally { btn.disabled = false; btn.textContent = original; }
+};
+
+window.rqCancelSuggestions = function () {
+    _prqPendingRewrite = null;
+    document.getElementById('prq-diff-wrap')?.classList.add('hidden');
+    document.getElementById('prq-apply-btn')?.classList.remove('hidden');
+};
+
+// Commit the previewed rewrite. Saves the caption and re-runs the review — which does NOT approve
+// anything: a surviving compliance warning still stops approve-post until it's acknowledged.
+window.rqApplySuggestions = async function () {
+    if (!_prqPostId || !_prqPendingRewrite) return;
+    try {
+        const res = await fetch('/.netlify/functions/apply-post-suggestions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId: _prqPostId, apply: true }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) { alert(d.error || 'Could not save the rewrite.'); return; }
+        if (window.showToast) window.showToast('Caption updated', { icon: '✏️' });
+        rqCancelSuggestions();
+        // Both surfaces render this queue; refresh whichever is mounted.
+        if (typeof rqLoadItems === 'function') rqLoadItems();
+        window.detailRqRefresh?.();
+        // Re-open on the same post so the refreshed caption and new verdict are both visible.
+        openPostReview(_prqPostId);
+    } catch { alert('Network error — please try again.'); }
+};
 
 // The platform tab bar. Hidden for a single-platform post; one tab per platform otherwise. A red dot
 // flags a platform that still needs an image before it can be approved.
@@ -5265,23 +5425,40 @@ async function rqReviewApprove() {
 
 // POST one approve/publish action. Returns a small result object rather than throwing so the
 // orchestrator can decide how to handle each outcome across the group.
-async function _rqApproveOne(post, action) {
+async function _rqApproveOne(post, action, opts = {}) {
     try {
         const res = await fetch('/.netlify/functions/approve-post', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ postId: post.id, action }),
+            body: JSON.stringify({ postId: post.id, action, acknowledgeWarnings: !!opts.acknowledgeWarnings }),
         });
         const d = await res.json().catch(() => ({}));
         if (res.status === 409 && d.pastSchedule) return { pastSchedule: true, message: d.message };
+        // The compliance gate is now enforced server-side (approve-post). It is an acknowledgement,
+        // not a hard block: the warnings come from an LLM and are often things only a human can
+        // settle, so refusing outright would strand legitimate posts on a false positive. Show
+        // exactly what was flagged and let the user accept it — the acceptance is written to the
+        // audit log alongside the warning text.
+        if (res.status === 409 && d.complianceBlocked) return { complianceBlocked: true, warnings: d.warnings || [] };
         if (rqHandleNotConnected(res.status, d, post.assistantId)) { rqReviewSetConnectGate(); return { handled: true }; }
         if (!res.ok) return { ok: false, error: d.error };
         return { ok: true, confirmation: d.confirmation };
     } catch { return { ok: false, error: 'Network error — please try again.' }; }
 }
 
-async function _rqApproveTargets(targets, action) {
+async function _rqApproveTargets(targets, action, opts = {}) {
     const [first, ...rest] = targets;
-    const r0 = await _rqApproveOne(first, action);
+    const r0 = await _rqApproveOne(first, action, opts);
+    if (r0.complianceBlocked) {
+        // Siblings of a cross-post share one caption, so one acknowledgement covers the group.
+        const list = r0.warnings.map(w => `\n  • ${w}`).join('');
+        const ok = confirm(
+            `This post has ${r0.warnings.length} compliance warning${r0.warnings.length === 1 ? '' : 's'}:${list}` +
+            `\n\nThese are flagged for a human to check — a price, a claim, or a required disclosure.` +
+            `\n\nApprove anyway? Your decision and these warnings are recorded in the audit log.`
+        );
+        if (!ok) return;
+        return _rqApproveTargets(targets, action, { ...opts, acknowledgeWarnings: true });
+    }
     if (r0.pastSchedule) {
         // The whole group shares this slot — offer to publish everything now instead. (Nothing was
         // approved: a past-schedule 409 leaves the first post untouched, so re-running is clean.)

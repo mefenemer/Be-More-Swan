@@ -17,6 +17,7 @@ import { aiAssistants, auditLogs, contentRules, postIdeaSuggestions, scheduledPo
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { resolvePostImage } from '../../src/utils/social-publish';
 import { resolvePostingSchedule, computeScheduleSlots, intervalHoursFor } from '../../src/config/posting-cadence';
+import { readCachedReview, hasComplianceWarnings } from '../../src/utils/post-quality-review';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
@@ -101,7 +102,9 @@ export default withLambda(async (event) => {
         return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON.' }) };
     }
 
-    const { postId, action = 'approve', rescheduleAt, rejectionReason } = body;
+    // acknowledgeWarnings: the user has SEEN the compliance warnings and chosen to proceed. Set by
+    // the confirm step the 409 below drives; never defaulted true.
+    const { postId, action = 'approve', rescheduleAt, rejectionReason, acknowledgeWarnings = false } = body;
     if (!postId) {
         return { statusCode: 400, body: JSON.stringify({ error: 'postId is required.' }) };
     }
@@ -199,6 +202,31 @@ export default withLambda(async (event) => {
                 }),
             };
         }
+    }
+
+    // ── Compliance gate ────────────────────────────────────────────────────────
+    // The "Approval blocked — resolve compliance warnings before publishing" banner used to be
+    // client-side ONLY, and only in calendar.js (it disabled #btn-panel-approve). Nothing enforced
+    // it here, so the very same post could be approved in one click from the Review Queue — the
+    // primary approval surface, which did not even run the review. The gate is now real.
+    //
+    // Deliberately an ACKNOWLEDGEMENT, not a hard block. The warnings come from an LLM and are
+    // frequently things only a human can settle ("verify this price is the current lowest tier"),
+    // so a hard block with no override would strand legitimate posts on a false positive. The user
+    // must see the warnings and consciously accept them; the acceptance is recorded in the audit
+    // log below, which is what makes this defensible after the fact.
+    const review = readCachedReview((post as any).qualityReview, post.caption);
+    if (hasComplianceWarnings(review) && !acknowledgeWarnings) {
+        return {
+            statusCode: 409,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                complianceBlocked: true,
+                code: 'COMPLIANCE_WARNINGS',
+                warnings: review!.complianceWarnings,
+                message: 'This post has unresolved compliance warnings. Review them, then confirm you want to approve anyway.',
+            }),
+        };
     }
 
     // Instagram cannot publish a text-only post — an image is mandatory. Enforce server-side so a draft
@@ -308,6 +336,14 @@ export default withLambda(async (event) => {
             approvedAt:   now.toISOString(),
             scheduledFor: newPublishDate.toISOString(),
             platform:     post.platform,
+            // Record WHICH warnings were overridden, not just that an override happened. If a claim
+            // later turns out to be a problem, this is the evidence of what the approver was shown
+            // and accepted. Absent on a clean approval.
+            ...(hasComplianceWarnings(review) ? {
+                complianceOverride: true,
+                acknowledgedWarnings: review!.complianceWarnings,
+                brandVoiceScore: review!.brandVoiceScore,
+            } : {}),
         },
     }).catch(() => {});
 

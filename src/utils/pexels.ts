@@ -267,6 +267,10 @@ export async function createPexelsAsset(
         providerAssetId: candidate.providerAssetId,
         attributionName: candidate.photographer,   // US3 AC3.2
         attributionUrl: candidate.photographerUrl, // US3 AC3.2
+        // Pexels returns real pixel dimensions — store them so the platform preview can check the
+        // aspect ratio against the slot instead of showing its "we don't know" fallback warning.
+        width: candidate.width || null,
+        height: candidate.height || null,
         status: 'pending',
     }).returning({ id: contentAssets.id });
 

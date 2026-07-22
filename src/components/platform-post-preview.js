@@ -97,19 +97,34 @@
     const fallbackKey = platform?.toLowerCase();
     const rule = ASPECT_RULES[key] || ASPECT_RULES[fallbackKey];
     if (!rule) return null;
-    // We can only check if the asset has dimensions stored; otherwise warn generically
     const [rw, rh, label] = rule;
     const asset = assets[0];
     if (asset?.width && asset?.height) {
+      // Compare RATIOS, tolerating a few percent. Only a genuine mismatch is worth interrupting for.
       const ratio = asset.width / asset.height;
       const expected = rw / rh;
-      if (Math.abs(ratio - expected) > 0.05) {
-        return `Asset ratio ${asset.width}×${asset.height} doesn't match recommended ${label}.`;
+      if (Math.abs(ratio - expected) / expected > 0.05) {
+        return { level: 'warn', text: `Asset is ${asset.width}×${asset.height} (${_ratioLabel(ratio)}) but this slot wants ${label}. It may be cropped.` };
       }
-      return null;
+      return null; // verified good — say nothing
     }
-    // No dimensions — surface the expected ratio as a reminder
-    return `Recommended aspect ratio for this slot: ${label}. Verify your asset before publishing.`;
+    // No stored dimensions. Historically this was the ONLY branch ever reached, because
+    // content_assets had no width/height columns at all — so every post with media showed the same
+    // warning forever, whether or not anything was wrong. Now it means what it says: we genuinely
+    // don't know this asset's shape (a legacy row, or a file we couldn't measure). Downgraded to an
+    // informational note so it reads as context, not as a defect.
+    return { level: 'info', text: `This slot is designed for ${label}. We couldn't read this asset's dimensions to check it.` };
+  }
+
+  /** Human-readable ratio for a measured asset, e.g. 1.78 → "16:9". */
+  function _ratioLabel(ratio) {
+    const known = [[1, 1], [4, 5], [9, 16], [16, 9], [1.91, 1]];
+    let best = null, bestErr = Infinity;
+    for (const [w, h] of known) {
+      const err = Math.abs(ratio - w / h);
+      if (err < bestErr) { bestErr = err; best = `${w}:${h}`; }
+    }
+    return bestErr / ratio < 0.06 ? best : `${ratio.toFixed(2)}:1`;
   }
 
   // ── Media placeholder ────────────────────────────────────────────────────
@@ -118,9 +133,14 @@
     if (!assets?.length) return '';
     const asset = assets[0];
     const src = asset.storageUrl || asset.previewUrl || null;
+    // `warning` is { level:'warn'|'info', text } — an actual ratio mismatch is red and warns; an
+    // unmeasurable asset is neutral grey and merely informs. They used to look identical, which is
+    // how a purely informational note ended up reading as a defect on every post.
     const warnBanner = warning
-      ? `<div style="position:absolute;bottom:0;left:0;right:0;background:rgba(239,68,68,0.85);
-           color:#fff;font-size:11px;padding:4px 8px;">⚠ ${_escHtml(warning)}</div>`
+      ? `<div style="position:absolute;bottom:0;left:0;right:0;background:${
+           warning.level === 'warn' ? 'rgba(239,68,68,0.85)' : 'rgba(55,65,81,0.82)'
+         };color:#fff;font-size:11px;padding:4px 8px;">${
+           warning.level === 'warn' ? '⚠' : 'ⓘ'} ${_escHtml(warning.text)}</div>`
       : '';
     if (src) {
       return `<div style="position:relative;width:100%;${aspectClass}overflow:hidden;background:#000;border-radius:4px;">
@@ -306,7 +326,9 @@
       const issues = platformList.map(p => {
         const over = _overLimit(post.caption, p);
         const aspectWarn = _aspectWarning(assets, p, post.postFormat);
-        return { platform: p, over, aspectWarn, hasIssue: over > 0 || !!aspectWarn };
+        // Only a real mismatch flags the platform tab. An info-level note ("couldn't measure this
+        // asset") is not an issue and must not put a red dot on every tab of every post.
+        return { platform: p, over, aspectWarn, hasIssue: over > 0 || aspectWarn?.level === 'warn' };
       });
 
       const anyBlocked = issues.some(i => i.over > 0);

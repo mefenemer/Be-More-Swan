@@ -104,6 +104,11 @@ export async function generateAndPersistImage(db: Db, params: {
         assetType: 'image', mimeType,
         fileSize, storageKey, externalUrl,
         provider: 'fal', prompt: params.prompt, aspectRatio: params.aspectRatio,
+        // fal already returns the real dimensions; they were being discarded. Storing them lets the
+        // platform preview verify the generated image actually matches the slot's ratio rather than
+        // assuming it does because we asked for it.
+        width: image.width || null,
+        height: image.height || null,
         generationJobId: params.generationJobId ?? null,
         status: 'pending',
     }).returning({ id: contentAssets.id });

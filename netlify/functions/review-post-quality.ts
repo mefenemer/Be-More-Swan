@@ -7,15 +7,12 @@
 // SC7: requires tierKey 'saver' or 'employee'
 // SC8: result cached in scheduled_posts.qualityReview jsonb; re-run only on caption change
 
-import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import {
-    users, userOrganisations, scheduledPosts, aiAssistants, aiBlueprints,
-} from '../../db/schema';
-import { gatewayGenerate } from '../../src/lib/ai-gateway';
+import { userOrganisations, scheduledPosts } from '../../db/schema';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
+import { runQualityReview, readCachedReview } from '../../src/utils/post-quality-review';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -78,90 +75,29 @@ export default withLambda(async (event) => {
         return { statusCode: 403, body: JSON.stringify({ error: 'tier_required', feature: QUALITY_REVIEW_FEATURE }) };
     }
 
-    // SC8: return cached result if caption unchanged
-    const cached = post.qualityReview as Record<string, unknown> | null;
-    if (cached && cached.captionHash === _hash(post.caption || '')) {
+    // SC8: return the cached verdict when the caption has not changed since it was computed.
+    // A caption edit MUST invalidate it — otherwise a user could edit away the text a warning was
+    // raised about, keep the clean review, and approve against a verdict for different content.
+    const cached = readCachedReview(post.qualityReview, post.caption);
+    if (cached) {
         return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...cached, fromCache: true }) };
     }
 
-    // Load blueprint for brand voice context
-    let brandVoice = 'professional';
-    let contentRulesText = '';
-    if (post.assistantId) {
-        const [bp] = await db
-            .select({ sections: aiBlueprints.sections })
-            .from(aiBlueprints)
-            .where(eq(aiBlueprints.assistantId, post.assistantId))
-            .orderBy(desc(aiBlueprints.compiledAt))
-            .limit(1);
-        if (bp) {
-            const sections = bp.sections as Record<string, { content: Record<string, unknown> }>;
-            brandVoice = (sections['5-org-context']?.content?.brandVoice as string) ?? brandVoice;
-            const rules = sections['4-content-rules']?.content;
-            if (rules) contentRulesText = JSON.stringify(rules);
-        }
-    }
-
-    const caption = post.caption || '';
-    const hashtags = post.hashtags || '';
-    const platform = post.platform || 'instagram';
-
-    const prompt = `You are a social media quality reviewer. Analyse the following ${platform} post and return a JSON object with these exact fields:
-- brandVoiceScore: integer 0-100 measuring how well the post matches the brand voice "${brandVoice}"
-- complianceWarnings: array of short string warnings (regulatory, brand, policy issues). Empty array if none.
-- suggestions: array of up to 3 actionable improvement suggestions as strings.
-
-Caption:
-"""
-${caption}
-"""
-Hashtags: ${hashtags}
-${contentRulesText ? `Content rules:\n${contentRulesText}` : ''}
-
-Return ONLY valid JSON, no markdown, no explanation.`;
-
-    const gwResponse = await gatewayGenerate({
-        system: 'You are a social media content quality reviewer. Always respond with valid JSON only.',
-        messages: [{ role: 'user', content: prompt }],
-        maxTokens: 600,
-    });
-
-    let parsed: { brandVoiceScore: number; complianceWarnings: string[]; suggestions: string[] };
     try {
-        parsed = JSON.parse(gwResponse.text);
-    } catch {
-        return { statusCode: 502, body: JSON.stringify({ error: 'Quality review parsing failed.' }) };
+        const result = await runQualityReview(db, {
+            id: post.id,
+            assistantId: post.assistantId,
+            caption: post.caption,
+            hashtags: post.hashtags as string | null,
+            platform: post.platform,
+        });
+        return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(result) };
+    } catch (e: any) {
+        return { statusCode: 502, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: e?.message || 'Quality review failed.' }) };
     }
-
-    const result = {
-        brandVoiceScore: Math.max(0, Math.min(100, Math.round(parsed.brandVoiceScore ?? 0))),
-        complianceWarnings: Array.isArray(parsed.complianceWarnings) ? parsed.complianceWarnings.slice(0, 5) : [],
-        suggestions: Array.isArray(parsed.suggestions) ? parsed.suggestions.slice(0, 3) : [],
-        cachedAt: new Date().toISOString(),
-        captionHash: _hash(caption),
-    };
-
-    // SC8: persist to DB
-    try {
-        await db.execute({
-            sql: `UPDATE scheduled_posts SET quality_review = $1::jsonb WHERE id = $2`,
-            args: [JSON.stringify(result), postId],
-        } as any);
-    } catch { /* non-fatal — still return result */ }
-
-    return {
-        statusCode: 200,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(result),
-    };
     } catch (err: any) {
         console.error('[review-post-quality] Unhandled error:', err);
         return { statusCode: 500, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: 'Quality review failed. Please try again.' }) };
     }
 });
 
-function _hash(s: string): string {
-    let h = 0;
-    for (let i = 0; i < s.length; i++) { h = (Math.imul(31, h) + s.charCodeAt(i)) | 0; }
-    return h.toString(36);
-}

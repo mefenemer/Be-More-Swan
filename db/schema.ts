@@ -1622,6 +1622,13 @@ export const contentAssets = pgTable("content_assets", {
   assetType: text("asset_type").notNull(), // 'image' | 'video' | 'audio' | 'link'
   mimeType: text("mime_type"),
   fileSize: integer("file_size"),
+  // Pixel dimensions. Nullable — legacy rows and links have none. Without these the platform
+  // preview's aspect-ratio check could NEVER compare anything, so it always fell through to the
+  // generic "Recommended aspect ratio for this slot… verify your asset" nag, on every post with
+  // media, forever. Populated on upload, on AI generation, and from the stock provider.
+  // db/content-asset-dimensions.sql.
+  width: integer("width"),
+  height: integer("height"),
 
   // Storage — one of these will be populated
   storageKey: text("storage_key"),

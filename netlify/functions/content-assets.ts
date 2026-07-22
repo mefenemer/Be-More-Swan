@@ -242,6 +242,11 @@ export default withLambda(async (event) => {
         if (event.httpMethod === 'POST') {
             const body = JSON.parse(event.body || '{}');
             const { name, assetType, mimeType, fileSize, storageKey, storageUrl, externalUrl } = body;
+            // Pixel dimensions, measured client-side before upload (my-content.js). Optional and
+            // coerced: an older client that doesn't send them leaves NULL, which the preview reads
+            // as "unknown" and falls back to its generic reminder rather than a false mismatch.
+            const width  = Number.isFinite(Number(body.width))  && Number(body.width)  > 0 ? Math.round(Number(body.width))  : null;
+            const height = Number.isFinite(Number(body.height)) && Number(body.height) > 0 ? Math.round(Number(body.height)) : null;
 
             if (!name || !assetType) {
                 return { statusCode: 400, body: JSON.stringify({ error: 'name and assetType are required.' }) };
@@ -265,6 +270,8 @@ export default withLambda(async (event) => {
                 assetType,
                 mimeType: mimeType || null,
                 fileSize: fileSize || null,
+                width,
+                height,
                 storageKey: storageKey || null,
                 storageUrl: storageUrl || null,
                 externalUrl: externalUrl || null,

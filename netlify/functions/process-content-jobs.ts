@@ -26,6 +26,8 @@ import { fireOrchestrations } from '../../src/utils/orchestration';
 import { decideAutoPublish, describeDecision } from '../../src/utils/auto-publish-runtime';
 import { platformFormat } from '../../src/config/platform-formats';
 import { parseModelJson } from '../../src/utils/model-json';
+import { hasFeatureByOrg } from '../../src/utils/plan-features';
+import { reviewDraftGroup } from '../../src/utils/post-quality-review';
 import type { MediaSource } from '../../src/utils/publish-policy';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -595,6 +597,22 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 // A fan-out failure must not fail the job — the primary post is already safely drafted.
                 console.error(`[process-content-jobs] job ${job.job_id} fan-out to sibling platforms failed:`, fanErr instanceof Error ? fanErr.message : fanErr);
             }
+        }
+
+        // Quality review at DRAFT time, once per slot, copied to the cross-post siblings.
+        // Previously the review only ran when someone opened the post in the calendar panel, so the
+        // Review Queue — the primary approval surface — showed no warnings, no suggestions and no
+        // score, and approve-post had nothing to enforce its compliance gate against. Running it
+        // here means the human sees the verdict at the moment they're asked to approve.
+        // Best-effort by construction: reviewDraftGroup swallows its own failures.
+        if (!isAdminTest) {
+            const hasQualityReviewFeature = await hasFeatureByOrg(db, job.organisation_id, 'quality_reviewer')
+                .catch(() => false);
+            await reviewDraftGroup(db, {
+                postId: post.id,
+                organisationId: job.organisation_id,
+                hasQualityReviewFeature,
+            });
         }
 
         const tokenCols = tokensInput != null ? `, tokens_input = ${tokensInput}, tokens_output = ${tokensOutput ?? 0}` : '';

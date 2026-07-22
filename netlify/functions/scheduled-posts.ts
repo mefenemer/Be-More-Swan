@@ -68,6 +68,11 @@ export default withLambda(async (event) => {
                         storageKey: contentAssets.storageKey,
                         externalUrl: contentAssets.externalUrl,
                         mimeType: contentAssets.mimeType,
+                        // The platform preview needs these to check the asset against the slot's
+                        // aspect ratio. Omitted here, every asset looks dimensionless to the client
+                        // and the preview falls back to its generic "couldn't measure" note.
+                        width: contentAssets.width,
+                        height: contentAssets.height,
                     }).from(contentAssets)
                       .where(eq(contentAssets.userId, userId));
                     assets = assets.filter(a => assetIds.includes(a.id));

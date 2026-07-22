@@ -879,6 +879,11 @@ window._mcSubmitUpload = async function () {
 
         // 3. Create DB record (server also runs safety scan synchronously)
         const assetType = _pendingFile.type.startsWith('video/') ? 'video' : 'image';
+        // Measure pixel dimensions before we hand the file off. The post preview compares these
+        // against the platform's recommended aspect ratio; with no dimensions stored it can only
+        // show a generic "verify your asset" reminder on every single post. Best-effort — a failed
+        // probe just means NULL, which the preview reads as "unknown" rather than as a mismatch.
+        const dims = await _probeDimensions(_pendingFile, assetType).catch(() => null);
         const createRes = await fetch('/.netlify/functions/content-assets', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -887,6 +892,8 @@ window._mcSubmitUpload = async function () {
                 assetType,
                 mimeType: _pendingFile.type,
                 fileSize: _pendingFile.size,
+                width: dims?.width ?? null,
+                height: dims?.height ?? null,
                 storageKey,
                 storageUrl,
             }),
@@ -989,6 +996,41 @@ async function _doDetach() {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
+/**
+ * Read a local file's pixel dimensions before upload, so content_assets.width/height are populated
+ * and the post preview can do a real aspect-ratio check instead of always showing its "we don't
+ * know your asset's shape" reminder.
+ *
+ * Resolves null rather than rejecting for anything we can't measure (audio, links, a codec the
+ * browser won't decode) — NULL dimensions are a legitimate "unknown", and the preview treats them
+ * as such. Object URLs are always revoked, including on the error path.
+ */
+function _probeDimensions(file, assetType) {
+    return new Promise((resolve) => {
+        if (!file || (assetType !== 'image' && assetType !== 'video')) return resolve(null);
+        const url = URL.createObjectURL(file);
+        const done = (dims) => { URL.revokeObjectURL(url); resolve(dims); };
+        // Don't hang the upload on a file the browser struggles with.
+        const timer = setTimeout(() => done(null), 5000);
+        const finish = (w, h) => {
+            clearTimeout(timer);
+            done(w > 0 && h > 0 ? { width: w, height: h } : null);
+        };
+        if (assetType === 'image') {
+            const img = new Image();
+            img.onload = () => finish(img.naturalWidth, img.naturalHeight);
+            img.onerror = () => finish(0, 0);
+            img.src = url;
+        } else {
+            const vid = document.createElement('video');
+            vid.preload = 'metadata';
+            vid.onloadedmetadata = () => finish(vid.videoWidth, vid.videoHeight);
+            vid.onerror = () => finish(0, 0);
+            vid.src = url;
+        }
+    });
+}
+
 function _escHtml(str) {
     return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
