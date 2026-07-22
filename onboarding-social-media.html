@@ -860,12 +860,9 @@
   const missingFallback = "⚠️ [MISSING - PLEASE UPDATE]";
 
   const currentTierKey = sessionStorage.getItem('aura_tier') || 'employee';
-  const tierConfig = {
-    'buster': { maxApps: 1, maxSteps: 1 },
-    'saver': { maxApps: 3, maxSteps: 4 },
-    'employee': { maxApps: 99, maxSteps: 5 }
-  };
-  const activeTier = tierConfig[currentTierKey];
+  // No activeTier here: this wizard gates through GATED_FEATURE_META / initFeatureGating (which
+  // reads the real tier from check-capacity), not through maxApps/maxSteps. The per-tier limits
+  // map that used to sit here was assigned and never read.
 
   const handlePatterns = {
     'fb': { regex: /^(https?:\/\/)?(www\.)?facebook\.com\/[\w.-]+$/, example: "https://facebook.com/yourpage" },
@@ -1720,10 +1717,14 @@
   function showUpsellModal(m) { document.getElementById('upsell-message').innerHTML = m; document.getElementById('upsell-modal').classList.remove('hidden', 'opacity-0'); }
   function closeUpsellModal() { document.getElementById('upsell-modal').classList.add('hidden', 'opacity-0'); }
 
+  // Cheapest → dearest. Was ['buster','saver','employee'], which stopped being true when the plans
+  // were re-ordered and left every 'saver'-gated feature effectively ungated (saver became rank 0).
+  const TIER_ORDER = ['saver', 'buster', 'employee'];
+  const TIER_NAME = { saver: 'Workflow Saver', buster: 'Busywork Buster', employee: 'Digital Employee' };
+
   function checkTier(tier, feat) {
-    const tiers = ['buster', 'saver', 'employee'];
-    if (tiers.indexOf(currentTierKey) < tiers.indexOf(tier)) {
-      showUpsellModal(`The <strong>${feat}</strong> feature is available on the <strong>${tier.toUpperCase()}</strong> plan.`);
+    if (TIER_ORDER.indexOf(currentTierKey) < TIER_ORDER.indexOf(tier)) {
+      showUpsellModal(`The <strong>${feat}</strong> feature is available on the <strong>${TIER_NAME[tier] || tier}</strong> plan.`);
       return false;
     }
     return true;
@@ -1732,14 +1733,17 @@
   // ══════════════════════════════════════════════════════════════════════════
   //  Assistant Onboarding & Feature Gating (US1–US3)
   // ══════════════════════════════════════════════════════════════════════════
-  const TIER_RANK = { buster: 0, saver: 1, employee: 2 };
+  // Derived from TIER_ORDER above so there is one ordering in this file, not two that can drift.
+  const TIER_RANK = Object.fromEntries(TIER_ORDER.map((t, i) => [t, i]));
+  // These are upsell features — they gate at the FIRST paid step above the entry plan. That was
+  // 'saver' when saver was the middle tier; it's 'buster' now that saver is the £29 entry plan.
   const GATED_FEATURE_META = {
-    fb_opt_groups:  { tier: 'saver', name: 'Facebook Group drafts',      desc: 'Drafts tailored versions of your post for niche Facebook Groups to maximise reach in targeted communities.' },
-    ig_opt_audio:   { tier: 'saver', name: 'Trending audio suggestions', desc: 'AI analyses TikTok/Instagram trends to recommend viral audio tracks for your reels.' },
-    li_opt_sliders: { tier: 'saver', name: 'PDF carousel outlines',      desc: 'Generates multi-slide PDF carousel outlines that boost LinkedIn dwell time and engagement.' },
-    x_opt_media:    { tier: 'saver', name: 'Media placeholders',         desc: 'Inserts smart media placeholders so every post ships with eye-catching visuals.' },
-    tiktok_opt_hooks: { tier: 'saver', name: 'Viral text hooks',         desc: 'Auto-generates scroll-stopping text hooks for the opening seconds of each TikTok video.' },
-    youtube_opt_seo:  { tier: 'saver', name: 'YouTube SEO optimisation', desc: 'Optimises every video description for YouTube search — keywords, chapters and links.' },
+    fb_opt_groups:  { tier: 'buster', name: 'Facebook Group drafts',      desc: 'Drafts tailored versions of your post for niche Facebook Groups to maximise reach in targeted communities.' },
+    ig_opt_audio:   { tier: 'buster', name: 'Trending audio suggestions', desc: 'AI analyses TikTok/Instagram trends to recommend viral audio tracks for your reels.' },
+    li_opt_sliders: { tier: 'buster', name: 'PDF carousel outlines',      desc: 'Generates multi-slide PDF carousel outlines that boost LinkedIn dwell time and engagement.' },
+    x_opt_media:    { tier: 'buster', name: 'Media placeholders',         desc: 'Inserts smart media placeholders so every post ships with eye-catching visuals.' },
+    tiktok_opt_hooks: { tier: 'buster', name: 'Viral text hooks',         desc: 'Auto-generates scroll-stopping text hooks for the opening seconds of each TikTok video.' },
+    youtube_opt_seo:  { tier: 'buster', name: 'YouTube SEO optimisation', desc: 'Optimises every video description for YouTube search — keywords, chapters and links.' },
   };
   let _gatingTier = currentTierKey;   // AC1.1 — refined from check-capacity on load
   let _pendingUnlock = null;          // { featureKey, tier }

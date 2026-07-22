@@ -26,14 +26,18 @@ async function seed() {
         // 1. Seed the Master Plans
         console.log('Seeding Master Plans...');
         await db.insert(masterPlans).values([
-            { tierKey: 'saver', name: 'The Workflow Saver', monthlyPriceGbp: '50.00',
+            // Ordered entry → top: saver £29, buster £99, employee £349. These carried the original
+            // £50 saver / £20 buster figures long after the plans were re-priced and re-ordered.
+            // seed/data/master_plans.json (via `npm run db:seed`) is the fuller source of truth —
+            // it also carries the limits and the features map; this list only creates the rows.
+            { tierKey: 'saver', name: 'The Workflow Saver', monthlyPriceGbp: '29.00',
               tierDescription: 'Tier 1 · Best for Solo Operators',
               description: 'Reclaim hours every day. Hand your most draining task to a helper that never takes a day off.' },
-            { tierKey: 'buster', name: 'The Busywork Buster', monthlyPriceGbp: '20.00',
+            { tierKey: 'buster', name: 'The Busywork Buster', monthlyPriceGbp: '99.00',
               tierDescription: 'Tier 2 · Best for Scaling Founders',
               description: 'Scale your business with autonomous goal tracking, advanced analytics, and your own mini digital department.',
               isMostPopular: true },
-            { tierKey: 'employee', name: 'The Digital Employee', monthlyPriceGbp: '100.00',
+            { tierKey: 'employee', name: 'The Digital Employee', monthlyPriceGbp: '349.00',
               tierDescription: 'Tier 3 · Best for Teams',
               description: 'A complete digital workforce built for growing businesses and collaborative teams.' },
             // Enterprise: non-purchasable (contact-sales) so its pricing card is admin-editable too.

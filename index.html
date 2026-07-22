@@ -509,9 +509,17 @@
     // CTA router — every "get started" button opens the Register page, unless this device is already
     // known to belong to a registered Be More Swan user, in which case we send them to Login instead.
     // The flag is set in the authenticated workspace and on successful registration.
+    // `tier` is the plan the case study is pitching. It's written to `pending_tier` — the same key
+    // pricing.html's choosePlan() uses for "the plan they intended to buy" — which register.html and
+    // verify.ts read to route the user to checkout for that plan after sign-up.
+    //
+    // It must NOT be written to `aura_tier`: that key means "the plan this workspace is ON", and the
+    // onboarding wizards read it to decide which roles and features to unlock. Setting it from a
+    // marketing page handed an unpaid visitor a fabricated entitlement — and because the paid-ads
+    // case study passed 'buster', it then also collided with the role locks keyed off the same value.
     function bmsStart(ev, tier) {
         if (ev && ev.preventDefault) ev.preventDefault();
-        try { if (tier) sessionStorage.setItem('aura_tier', tier); } catch (e) {}
+        try { if (tier) sessionStorage.setItem('pending_tier', tier); } catch (e) {}
         let known = false;
         try { known = localStorage.getItem('bms_known_user') === '1'; } catch (e) {}
         window.location.href = known ? 'login.html' : 'register.html';

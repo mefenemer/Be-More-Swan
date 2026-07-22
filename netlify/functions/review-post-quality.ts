@@ -15,14 +15,18 @@ import {
     users, userOrganisations, scheduledPosts, aiAssistants, aiBlueprints,
 } from '../../db/schema';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
-import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
+import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// Tier keys are 'buster' | 'saver' | 'employee' (see db/schema.ts, seed/data/master_plans.json).
-// Quality review is a premium feature — available on Saver and above.
-const GATED_TIERS = new Set(['saver', 'employee']);
+// Gated on the plan's `quality_reviewer` feature flag, NOT on a hardcoded tier-key list. The old
+// list read `['saver','employee']`, which dated from when 'saver' was the middle tier — after the
+// plans were re-ordered ('saver' is now the entry plan, 'buster' the mid one) it silently granted
+// quality review to the cheapest plan and 403'd the plan that actually sells it. master_plans.features
+// is the published source of truth (it matches the pricing comparison table), so read that instead
+// and the gate can never invert again.
+const QUALITY_REVIEW_FEATURE = 'quality_reviewer';
 
 export default withLambda(async (event) => {
     try {
@@ -69,10 +73,9 @@ export default withLambda(async (event) => {
         .limit(1);
     if (!membership) return { statusCode: 403, body: JSON.stringify({ error: 'Forbidden.' }) };
 
-    // SC7: tier gate — saver/employee only
-    const tierKey = await getActiveTierKeyByOrg(db, post.organisationId!);
-    if (!tierKey || !GATED_TIERS.has(tierKey)) {
-        return { statusCode: 403, body: JSON.stringify({ error: 'tier_required', requiredTier: 'saver' }) };
+    // SC7: plan gate — the plan must include The Quality Reviewer.
+    if (!await hasFeatureByOrg(db, post.organisationId!, QUALITY_REVIEW_FEATURE)) {
+        return { statusCode: 403, body: JSON.stringify({ error: 'tier_required', feature: QUALITY_REVIEW_FEATURE }) };
     }
 
     // SC8: return cached result if caption unchanged

@@ -5,10 +5,10 @@
 //   Auth: aura_session
 //   Body: { content: string, assistantId?: number }
 //
-// Tier gate (by tierKey on active plan):
-//   'buster' (Tier 1) → 403 with upgrade callout
-//   'saver'  (Tier 2) → Quick Review: 3 checks (factual, tone, hallucination); ✅/⚠️; max 3 lines; 5s timeout
-//   'employee'+ (Tier 3/4) → Full Review: Quick checks + brand voice score + competitor + legal/compliance
+// Plan gate:
+//   plan without the `quality_reviewer` feature → 403 with upgrade callout
+//   plan with it                                → Quick Review: 3 checks (factual, tone, hallucination); ✅/⚠️; max 3 lines; 5s timeout
+//   'employee'+ (top tier)                      → Full Review: Quick checks + brand voice score + competitor + legal/compliance
 //
 // No usage cap — all eligible paid tiers may call without restriction.
 
@@ -24,16 +24,22 @@ import { resolveActiveOrg } from '../../src/utils/tenant';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJson } from '../../src/utils/model-json';
+import { hasFeature } from '../../src/utils/plan-features';
 
 const jwtSecret   = process.env.JWT_SECRET;
 const anthropic   = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const REVIEW_MODEL = 'claude-haiku-4-5-20251001';
 const TIMEOUT_MS   = 5_000;
 
-// Tiers that receive Full Review
+// Access is gated on the plan's `quality_reviewer` feature flag, NOT a hardcoded tier-key list.
+// The old list blocked 'buster' — correct back when 'buster' was the entry plan, but the plans were
+// re-ordered ('saver' is now the £29 entry, 'buster' the mid plan) and the list wasn't, so it ended
+// up 403'ing the very plan that sells this feature while handing it to the cheapest one.
+// master_plans.features is the published source of truth (it backs the pricing comparison table).
+const QUALITY_REVIEW_FEATURE = 'quality_reviewer';
+// Review DEPTH is still tier-keyed: only the top plan gets the Full Review. There's no feature key
+// for depth in the catalog, and 'employee' being the top tier isn't what got re-ordered.
 const FULL_REVIEW_TIERS = new Set(['employee']);
-// Tiers blocked from Quick Review (upgrade callout only)
-const BLOCKED_TIERS = new Set(['buster']);
 
 interface ReviewCheck {
     label: string;
@@ -160,19 +166,19 @@ export default withLambda(async (event) => {
 
     const tierKey = await getUserPlanTierKey(db, userId);
 
-    // Tier 1 (buster) — upgrade callout
-    if (!tierKey || BLOCKED_TIERS.has(tierKey)) {
+    // Entry plan — upgrade callout. Gated on the plan's own `quality_reviewer` feature flag.
+    if (!await hasFeature(db, userId, QUALITY_REVIEW_FEATURE)) {
         return {
             statusCode: 403,
             body: JSON.stringify({
-                error: 'Quality Review is available on Saver and above.',
+                error: 'Quality Review is not included on your plan.',
                 upgradeRequired: true,
                 upgradeMessage: 'Upgrade your plan to unlock AI Quality Review — instant fact-checking, tone analysis, and hallucination detection for every output.',
             }),
         };
     }
 
-    const isFull = FULL_REVIEW_TIERS.has(tierKey);
+    const isFull = !!tierKey && FULL_REVIEW_TIERS.has(tierKey);
     const reviewType: 'quick' | 'full' = isFull ? 'full' : 'quick';
 
     // Fetch brand voice context for Full Review

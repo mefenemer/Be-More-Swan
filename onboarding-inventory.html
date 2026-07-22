@@ -6,6 +6,9 @@
   <title>Inventory & Orders Setup | Be More Swan</title>
   <link href="./style.css" rel="stylesheet">
   <script src="./explainers.js?v=20260630-2" defer></script>
+  <!-- Plan limits (maxApps/maxSteps) for the wizard gates. Not deferred: the inline scripts
+       below read window.planLimitsForTier synchronously as they parse. -->
+  <script src="./onboarding-plan-limits.js"></script>
 </head>
 <body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
 
@@ -337,12 +340,13 @@
   const missingFallback = "⚠️ [MISSING - PLEASE UPDATE]";
 
   const currentTierKey = sessionStorage.getItem('aura_tier') || 'employee';
-  const tierConfig = {
-    'buster': { maxApps: 1, maxSteps: 1 },
-    'saver': { maxApps: 3, maxSteps: 4 },
-    'employee': { maxApps: 99, maxSteps: 5 }
-  };
-  const activeTier = tierConfig[currentTierKey];
+  // Starts from the sessionStorage tier so the gates work before the network answers, then gets
+  // refined from check-capacity — which reads the live master_plans limits AND honours
+  // plans.featureOverrides, so a grandfathered subscriber keeps their real limits. The static
+  // per-tier map this replaced lived in four files and couldn't see either. See
+  // onboarding-plan-limits.js.
+  let activeTier = window.planLimitsForTier(currentTierKey);
+  window.getOnboardingPlanLimits(currentTierKey).then(limits => { activeTier = limits; });
 
   document.addEventListener("DOMContentLoaded", async () => {
     loadComponent("footer-placeholder", "./components/footer.html");

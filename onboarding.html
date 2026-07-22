@@ -269,13 +269,48 @@
     const urlParams = new URLSearchParams(window.location.search);
     const currentTierKey = urlParams.get('tier') || sessionStorage.getItem('aura_tier');
 
+    // Ordered entry → top. The locked lists were originally keyed the other way round (buster locking
+    // three roles, saver one), which dated from buster being the entry plan; once the plans were
+    // re-ordered that left the £99 plan locked out of more roles than the £29 one.
     const tierConfig = {
-        'buster': { name: 'The Busywork Buster', lockedRoles: ['paid_ads', 'custom', 'data_entry'] },
-        'saver': { name: 'The Workflow Saver', lockedRoles: ['custom'] },
+        'saver': { name: 'The Workflow Saver', lockedRoles: ['paid_ads', 'custom', 'data_entry'] },
+        'buster': { name: 'The Busywork Buster', lockedRoles: ['custom'] },
         'employee': { name: 'The Digital Employee', lockedRoles: [] }
     };
 
-    const activeTier = (currentTierKey && tierConfig[currentTierKey]) ? tierConfig[currentTierKey] : { name: '', lockedRoles: [] };
+    // Pre-fetch guess only. sessionStorage.aura_tier is a hint — it can be stale, and it's absent
+    // for anyone who arrived from a marketing CTA — so it's refined from check-capacity below,
+    // which is what the workspace actually pays for (and is override-aware).
+    let activeTier = (currentTierKey && tierConfig[currentTierKey]) ? tierConfig[currentTierKey] : { name: '', lockedRoles: [] };
+
+    // Re-runnable so the server answer can repaint the locks without a reload.
+    function applyTierLocks() {
+        const badge = document.getElementById('tier-badge');
+        if (badge) {
+            badge.innerText = activeTier.name;
+            badge.classList.toggle('hidden', activeTier.name === '');
+            badge.classList.toggle('flex', activeTier.name !== '');
+        }
+        document.querySelectorAll('.role-card').forEach(card => {
+            const locked = activeTier.lockedRoles.includes(card.dataset.role);
+            card.classList.toggle('opacity-50', locked);
+            const lockIcon = card.querySelector(`#lock_${card.dataset.role}`);
+            if (lockIcon) lockIcon.classList.toggle('hidden', !locked);
+        });
+    }
+
+    async function refineTierFromServer() {
+        try {
+            const res = await fetch('/.netlify/functions/check-capacity');
+            if (!res.ok) return;                     // logged out / no plan — keep the guess
+            const cap = await res.json();
+            if (!cap.tierKey || !tierConfig[cap.tierKey]) return;
+            activeTier = tierConfig[cap.tierKey];
+            // Heal the hint for the per-role wizards downstream, which start from this key.
+            try { sessionStorage.setItem('aura_tier', cap.tierKey); } catch (e) {}
+            applyTierLocks();
+        } catch { /* keep the pre-fetch guess */ }
+    }
 
     document.addEventListener("DOMContentLoaded", async () => {
         loadComponent("footer-placeholder", "./components/footer.html");
@@ -283,22 +318,9 @@
         // Resuming an existing draft happens explicitly via its "Onboarding" card → Setup
         // Checklist → deep-link (onboarding-<path>.html?draftId=N&step=M), so we no longer
         // auto-redirect into the most recent draft here (which would hijack a fresh hire).
-        const badge = document.getElementById('tier-badge');
-        if (badge && activeTier.name !== '') {
-            badge.innerText = activeTier.name;
-            badge.classList.remove('hidden');
-            badge.classList.add('flex');
-        }
-
-        // Apply visual locks based on tier
-        activeTier.lockedRoles.forEach(role => {
-            const card = document.querySelector(`.role-card[data-role="${role}"]`);
-            if(card) {
-                card.classList.add('opacity-50');
-                const lockIcon = card.querySelector(`#lock_${role}`);
-                if (lockIcon) lockIcon.classList.remove('hidden');
-            }
-        });
+        // Paint from the pre-fetch guess, then correct it from the server without blocking.
+        applyTierLocks();
+        refineTierFromServer();
 
         // Clear error styling on input
         document.querySelectorAll('input').forEach(el => {
@@ -323,7 +345,9 @@
     function checkRoleAccess(event, role) {
         if (activeTier.lockedRoles.includes(role)) {
             event.preventDefault();
-            let requiredTier = role === 'custom' ? 'The Digital Employee' : 'The Workflow Saver';
+            // The non-custom roles unlock one step above the entry plan — that's the Busywork Buster
+            // now, not the Workflow Saver (which became the entry plan in the re-order).
+            let requiredTier = role === 'custom' ? 'The Digital Employee' : 'The Busywork Buster';
             showUpsellModal(`<b>${activeTier.name}</b> does not support this setup. To unlock it, upgrade to <b>${requiredTier}</b>.`);
         }
     }

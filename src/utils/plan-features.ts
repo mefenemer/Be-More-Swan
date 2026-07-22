@@ -75,6 +75,27 @@ export async function hasFeature(db: Db, userId: number, featureKey: string): Pr
     return !!features[featureKey];
 }
 
+/** The active plan's feature map for an organisation (snapshot-aware) — org-scoped `getActiveFeatures`. */
+export async function getActiveFeaturesByOrg(db: Db, orgId: number): Promise<Record<string, unknown>> {
+    const [row] = await db
+        .select({ features: masterPlans.features, featureOverrides: plans.featureOverrides })
+        .from(plans)
+        .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
+        .where(and(eq(plans.organisationId, orgId), eq(plans.status, 'active')))
+        .orderBy(plans.startedAt)
+        .limit(1);
+    return effectiveFeatures(
+        row?.featureOverrides as FeatureOverrides | null,
+        row?.features as Record<string, unknown> | null,
+    );
+}
+
+/** True when the organisation's active plan unlocks `featureKey` (truthy value). */
+export async function hasFeatureByOrg(db: Db, orgId: number, featureKey: string): Promise<boolean> {
+    const features = await getActiveFeaturesByOrg(db, orgId);
+    return !!features[featureKey];
+}
+
 /** The active plan's tier key for an organisation (e.g. 'saver' | 'employee'), or null if none. */
 export async function getActiveTierKeyByOrg(db: Db, orgId: number): Promise<string | null> {
     const [row] = await db

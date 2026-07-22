@@ -1513,9 +1513,12 @@ function formatCurrency(amount, currency) {
           const cap = await window.checkCapacity(true);
           if (cap && cap.assistantLimit !== null && cap.assistantCount >= cap.assistantLimit) {
             // Build delta: what the NEXT tier unlocks (keyed by current tierKey)
+            // Keyed by the tier the user is ON; the value describes what the NEXT tier up unlocks.
+            // saver (£29) → buster, buster (£99) → employee. These were the other way round before
+            // the plans were re-ordered, so £99 customers were shown a downgrade as their upgrade.
             const TIER_DELTA = {
-              buster:   ['Up to 3 active assistants', 'Multi-step workflow support', 'Connect up to 3 apps'],
-              saver:    ['Up to 5 active assistants', 'Full process automation (up to 5 steps)', 'Connect all standard apps', '24/7 monitoring'],
+              saver:    ['Up to 3 active assistants', '2,500 tasks per month', 'Connect up to 5 standard apps', 'Autonomous goal tracking'],
+              buster:   ['Up to 10 active assistants', '10,000 tasks per month', 'Connect up to 15 apps incl. premium tools', 'Workspace collaboration for your team'],
               employee: ['Unlimited assistants', 'Dedicated account manager', 'Custom SLA & priority support'],
             };
             const delta = TIER_DELTA[cap.tierKey] || ['More active assistants', 'Higher monthly task volume'];
