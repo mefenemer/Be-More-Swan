@@ -95,7 +95,11 @@ export async function enqueueScheduleGapFill(
     // rows / in-flight jobs by their exact slot timestamp first so one cross-post counts once, then
     // tally per calendar day.
     const plannedRows = await db
-        .select({ publishDate: scheduledPosts.publishDate })
+        .select({
+            id: scheduledPosts.id,
+            publishDate: scheduledPosts.publishDate,
+            crosspostGroupId: scheduledPosts.crosspostGroupId,
+        })
         .from(scheduledPosts)
         .where(and(
             eq(scheduledPosts.assistantId, assistant.id),
@@ -104,20 +108,38 @@ export async function enqueueScheduleGapFill(
             sql`status IN ('draft','pending_approval','in_review','approved','scheduled')`,
         ));
     const inflightRows = await db
-        .select({ targetPublishDate: contentGenerationJobs.targetPublishDate })
+        .select({
+            jobId: contentGenerationJobs.jobId,
+            targetPublishDate: contentGenerationJobs.targetPublishDate,
+        })
         .from(contentGenerationJobs)
         .where(and(
             eq(contentGenerationJobs.assistantId, assistant.id),
             inArray(contentGenerationJobs.status, ['queued', 'processing']),
         ));
 
-    const coveredSlotTimes = new Set<number>();
-    plannedRows.forEach(r => { if (r.publishDate) coveredSlotTimes.add(new Date(r.publishDate).getTime()); });
-    inflightRows.forEach(r => { if (r.targetPublishDate) coveredSlotTimes.add(new Date(r.targetPublishDate).getTime()); });
+    // Count DISTINCT LOGICAL posts per day. A cross-post's per-platform rows share one
+    // crosspost_group_id and one publish_date, so they collapse to a single unit — but two
+    // INDEPENDENT posts that happen to sit on the same instant must still count as two.
+    // The previous code deduped by timestamp alone, so N independent posts on one slot counted
+    // as 1, the day looked under-covered, and the cron kept enqueuing more jobs onto a slot that
+    // was already over-subscribed. Keying on the group id (falling back to the row's own id)
+    // preserves the cross-post collapse without swallowing genuine duplicates.
+    const seenUnits = new Set<string>();
     const coverage = new Map<string, number>();
-    coveredSlotTimes.forEach(t => {
-        const key = UTC_DAY(new Date(t));
+    const addCoverage = (when: Date | string, unitKey: string) => {
+        if (seenUnits.has(unitKey)) return;
+        seenUnits.add(unitKey);
+        const key = UTC_DAY(new Date(when));
         coverage.set(key, (coverage.get(key) ?? 0) + 1);
+    };
+    plannedRows.forEach(r => {
+        if (!r.publishDate) return;
+        addCoverage(r.publishDate, r.crosspostGroupId ? `grp:${r.crosspostGroupId}` : `post:${r.id}`);
+    });
+    inflightRows.forEach(r => {
+        if (!r.targetPublishDate) return;
+        addCoverage(r.targetPublishDate, `job:${r.jobId}`);
     });
 
     // Walk desired slots chronologically; collect only the deficit (one entry per uncovered slot).

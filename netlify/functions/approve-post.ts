@@ -16,7 +16,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants, auditLogs, contentRules, postIdeaSuggestions, scheduledPosts, systemConnections } from '../../db/schema';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { resolvePostImage } from '../../src/utils/social-publish';
-import { resolvePostingSchedule, computeScheduleSlots } from '../../src/config/posting-cadence';
+import { resolvePostingSchedule, computeScheduleSlots, intervalHoursFor } from '../../src/config/posting-cadence';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
@@ -35,7 +35,13 @@ async function pickOptimalSlot(
 ): Promise<Date | null> {
     const ctx = (assistant.onboardingContext as Record<string, unknown>) ?? {};
     const schedule = resolvePostingSchedule(ctx);
-    const slots = computeScheduleSlots({ schedule, horizonDays: assistant.draftHorizonDays ?? 7, now });
+    const horizonDays = assistant.draftHorizonDays ?? 7;
+
+    // Look BEYOND the draft horizon when hunting for a free slot. The horizon governs how far ahead
+    // the assistant pre-drafts; it must not cap where an approved post may land, or a full horizon
+    // leaves nowhere to put this post. computeScheduleSlots caps horizon at 30 days internally.
+    const searchDays = Math.min(30, Math.max(horizonDays, horizonDays * 3, 14));
+    const slots = computeScheduleSlots({ schedule, horizonDays: searchDays, now });
     if (!slots.length) return null;
 
     const windowEnd = slots[slots.length - 1];
@@ -49,9 +55,23 @@ async function pickOptimalSlot(
             lte(scheduledPosts.publishDate, windowEnd),
             sql`status IN ('draft','pending_approval','in_review','approved','scheduled')`,
         ));
+    // A cross-post group legitimately shares one instant, so "taken" means "has at least one active
+    // post on it" — we only need to know whether the slot is free, not how many sit there.
     const takenMs = new Set(taken.map(r => new Date(r.publishDate).getTime()));
-    // Earliest slot not already occupied by another active post; if every slot is taken, use the first.
-    return slots.find(s => !takenMs.has(s.getTime())) ?? slots[0];
+    const free = slots.find(s => !takenMs.has(s.getTime()));
+    if (free) return free;
+
+    // Every slot in the search window is occupied. Returning slots[0] here (the old behaviour) piled
+    // every approval onto the same instant — approving a batch against a full calendar stacked five
+    // posts on one 09:00. Extend past the last slot by the cadence interval instead, so a busy
+    // calendar pushes work forward in cadence rather than collapsing it onto the front.
+    const stepHours = intervalHoursFor(schedule.frequency) ?? 24;
+    let candidate = new Date(slots[slots.length - 1].getTime() + stepHours * 3600 * 1000);
+    // Don't land on top of something already out past the window.
+    for (let guard = 0; guard < 60 && takenMs.has(candidate.getTime()); guard++) {
+        candidate = new Date(candidate.getTime() + stepHours * 3600 * 1000);
+    }
+    return candidate;
 }
 
 function getUserId(event: any): number | null {

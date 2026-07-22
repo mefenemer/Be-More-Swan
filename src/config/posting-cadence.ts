@@ -121,14 +121,50 @@ export function resolvePostingSchedule(ctx: Record<string, unknown> | null | und
         .map(t => normaliseTime(t))
         .filter((t): t is string => t !== null);
 
+    const frequency = typeof c.posting_frequency === 'string' && c.posting_frequency.trim()
+        ? c.posting_frequency : DEFAULT_POSTING_FREQUENCY;
+
+    // posting_frequency is free text (the autonomous goal optimiser writes it, and legacy briefs
+    // carry hand-typed values), so users end up with things like "5 times a week at 8.30am". Only
+    // the RATE was ever read from it — the stated time was silently dropped and every post went out
+    // at the 09:00 default, which reads as "the schedule I agreed isn't what I got". When no
+    // explicit posting_times exists, honour the time the frequency actually states.
+    const impliedTime = times.length ? null : timeFromFreeText(frequency);
+
     return {
-        frequency: typeof c.posting_frequency === 'string' && c.posting_frequency.trim()
-            ? c.posting_frequency : DEFAULT_POSTING_FREQUENCY,
+        frequency,
         days: days.length ? dedupe(days) : DEFAULT_POSTING_DAYS,
-        times: times.length ? dedupe(times) : DEFAULT_POSTING_TIMES,
+        times: times.length ? dedupe(times) : (impliedTime ? [impliedTime] : DEFAULT_POSTING_TIMES),
         timezone: typeof c.posting_timezone === 'string' && c.posting_timezone.trim()
             ? c.posting_timezone : DEFAULT_POSTING_TIMEZONE,
     };
+}
+
+/**
+ * Pull a time-of-day out of a free-text cadence directive — "5 times a week at 8.30am",
+ * "daily at 17:00", "twice a week, 8:30 am". Returns 'HH:MM' (24h) or null when none is stated.
+ *
+ * Only used as a fallback when onboarding_context.posting_times is empty; an explicit posting_times
+ * always wins. Deliberately conservative: it requires an am/pm marker or a ':'/'.' separator, so a
+ * bare number in "3 times a week" is never mistaken for an hour.
+ */
+export function timeFromFreeText(value: unknown): string | null {
+    const raw = String(value ?? '').toLowerCase();
+    // Anchor on "at " where present so "5 times a week" can't donate its 5 as an hour.
+    const m = raw.match(/\bat\s+(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?/)
+        || raw.match(/\b(\d{1,2})[:.](\d{2})\s*(am|pm)?/)
+        || raw.match(/\b(\d{1,2})()\s*(am|pm)/);
+    if (!m) return null;
+
+    let hour = Number(m[1]);
+    const minute = m[2] ? Number(m[2]) : 0;
+    const meridiem = m[3];
+    if (Number.isNaN(hour) || minute < 0 || minute > 59) return null;
+    if (meridiem === 'pm' && hour < 12) hour += 12;
+    if (meridiem === 'am' && hour === 12) hour = 0;
+    // Without am/pm an out-of-range hour is not a time at all (e.g. "at 30 posts").
+    if (hour < 0 || hour > 23) return null;
+    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
 /** Validate / normalise a 'HH:MM' (24h) string; returns null when unparseable. */
@@ -230,9 +266,13 @@ export function computeScheduleSlots({ schedule, horizonDays, now = new Date() }
     const target = Math.max(1, Math.round((perWeek / 7) * horizon));
     if (target >= candidates.length) return candidates;
 
+    // Midpoint sampling: index = floor((i + 0.5) * n / target). The previous formula,
+    // floor(i * n / target), always picked index 0 and then clustered toward the start of the
+    // window — for 3-a-week over Mon–Fri it produced Thu/Fri/Tue (two adjacent days, then a gap)
+    // instead of an even Mon/Wed/Fri spread. Midpoint sampling centres each pick in its bucket.
     const picked: Date[] = [];
     for (let i = 0; i < target; i++) {
-        picked.push(candidates[Math.floor((i * candidates.length) / target)]);
+        picked.push(candidates[Math.floor(((i + 0.5) * candidates.length) / target)]);
     }
     return picked;
 }
