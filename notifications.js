@@ -56,6 +56,15 @@ window.updateNotificationBadge = async function() {
                 : (typeof data.actionCount === 'number') ? data.actionCount
                 : (data.unreadCount || 0);
 
+            // The side-menu Inbox item mirrors the bell's count (same inbox, two entry points).
+            const inboxNavBadge = document.getElementById('nav-inbox-badge');
+            const setInboxNavBadge = (n) => {
+                if (!inboxNavBadge) return;
+                if (n > 0) { inboxNavBadge.textContent = n; inboxNavBadge.classList.remove('hidden'); }
+                else inboxNavBadge.classList.add('hidden');
+            };
+            setInboxNavBadge(count);
+
             // First refresh after login: run the one-time inbox-focus count-up, then adopt
             // the count as the baseline so the normal rise-ding doesn't also fire for it.
             if (!_inboxFocusAnimating && _lastNotifBadgeCount === null && _consumeFreshLoginFlag() && count > 0) {

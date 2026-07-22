@@ -15,6 +15,7 @@ import { createNotification } from '../../src/utils/notify';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { buildInspoBlock } from '../../src/utils/inspo-profile';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmark';
+import { CONTENT_QUALITY_STANDARDS } from '../../src/constants/content-quality';
 import { creditLine } from '../../src/utils/pexels';
 import { resolveMediaForPost } from '../../src/utils/media-resolver';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
@@ -231,6 +232,28 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 ? `Content Pillars (categorise this post under EXACTLY ONE, returned verbatim in the "pillar" field): ${pillarList.map(p => `"${p}"`).join(', ')}.`
                 : '');
 
+        // Batch-internal variety: assign each slot a DIFFERENT opening-hook style so the parallel
+        // siblings in one drafting batch don't all reach for the same hook — they generate
+        // independently and can't see each other, so pillar rotation alone still let every post open
+        // with the same formula. Derived deterministically from the slot's hour (no coordination or
+        // storage needed); a prime-length (7) list coprime with the 24h day-step keeps daily slots
+        // cycling through ALL styles instead of aliasing onto one. On-demand jobs (no slot) stay free.
+        const HOOK_STYLES = [
+            'a provocative question aimed straight at the target reader',
+            'a surprising statistic or a concrete number',
+            'a short, vivid "this is you right now" scenario (one or two lines)',
+            'a widely-believed myth stated plainly, then busted',
+            'a bold, mildly contrarian claim',
+            'a sharp pain-point callout',
+            'a before/after contrast (the messy now vs. the calmer after)',
+        ];
+        const hookStyle = job.target_publish_date
+            ? HOOK_STYLES[Math.floor(new Date(job.target_publish_date).getTime() / 3_600_000) % HOOK_STYLES.length]
+            : null;
+        const hookLine = hookStyle
+            ? `OPENING HOOK for THIS post — open with ${hookStyle}. (The standing hook rules — vary the opening, never reuse a formula, the banned "you didn't start a business to become…" line — are in the Content Quality Standards below.)`
+            : '';
+
         const objective = (answers['primary_objective'] as string) || '';
         const objectiveLine = objective ? `Primary objective for this account: ${objective}.` : '';
 
@@ -270,17 +293,11 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         const format = ['image', 'carousel', 'reel', 'video', 'story'].includes(requestedFormat) ? requestedFormat : 'image';
         const isVideo = format === 'reel' || format === 'video';
 
-        // US-SMM (AC4): algorithmic focus on Saves & Shares over vanity Likes.
-        // US-SMM (AC5): steer away from fleeting trends / vanity formats unless explicitly asked.
-        const strategyBlock = [
-            `STRATEGIC PRINCIPLES — apply these to every piece of content:`,
-            `- Optimise for SAVES: make the post genuinely useful — structured educational value, practical tools, step-by-step or list formats the reader will want to keep.`,
-            `- Optimise for SHARES: write relatable, "this is me" perspective content that makes the reader want to send it to someone who needs it.`,
-            `- Do NOT optimise purely for Likes or follower count. Meaningful engagement (saves, shares, comments, DMs) is the goal.`,
-            `- Avoid fleeting trends, viral dances, and vanity gimmicks unless the user's context explicitly asks for them. Favour authentic, on-brand value.`,
-            pillarLine,
-            objectiveLine,
-        ].filter(Boolean).join('\n');
+        // The standing strategic principles (saves/shares, no vanity metrics, avoid fleeting trends)
+        // now live in the CONTENT_QUALITY_STANDARDS system-prompt block, appended below like the safety
+        // benchmark. This block carries only what's dynamic per post: the slot's rotated pillar and the
+        // account's objective.
+        const strategyBlock = [pillarLine, objectiveLine].filter(Boolean).join('\n');
 
         const formatBlock = isVideo
             ? `This is a ${format.toUpperCase()}. In addition to the caption, return a "reelScript" (concise shot-by-shot or beat-by-beat script the user can film with their available assets and comfort on camera) and "textOverlays" (an array of short on-screen text lines). Keep it simple and authentic — talking-to-camera or b-roll, not choreography.`
@@ -292,6 +309,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             `Follow all strict and content rules in the system prompt.`,
             formatBlock,
             strategyBlock,
+            hookLine,
             recentBlock,
             conversionBlock,
             extraLines,
@@ -329,6 +347,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         });
         if (inspoBlock) systemPrompt += `\n\n${inspoBlock}`;
 
+        systemPrompt += `\n\n${CONTENT_QUALITY_STANDARDS}`;
         systemPrompt += `\n\n${AURA_SAFE_CONTENT_BENCHMARK}`;
 
         // A long founder-story caption + hashtags + media description in one JSON blob overran the
