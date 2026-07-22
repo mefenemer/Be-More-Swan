@@ -51,9 +51,13 @@
                     The deliverable you just received was produced with the help of AI assistants — specialized digital team members that automate the hard work behind every output.
                 </p>
                 <div class="flex flex-col sm:flex-row gap-4 justify-center">
-                    <a href="/checkout.html" id="pb-trial-cta"
+                    <!-- The free trial was removed (product decision), so this CTA promised something
+                         that no longer exists and dropped the visitor straight onto a paywall. It now
+                         says what actually happens next. The id stays: the script below rewrites the
+                         href to carry the referring agency's slug. -->
+                    <a href="/pricing.html" id="pb-trial-cta"
                        class="inline-block bg-emerald-700 text-white font-bold px-8 py-4 rounded-xl text-lg shadow-lg hover:bg-emerald-800 transition">
-                        Start Your Free Trial
+                        See Plans &amp; Pricing
                     </a>
                     <a href="/assistants.html"
                        class="inline-block bg-white text-gray-800 font-bold px-8 py-4 rounded-xl text-lg border border-gray-200 shadow-sm hover:bg-gray-50 transition">
@@ -135,8 +139,9 @@
         document.title = `${data.name} × Be More Swan`;
         document.getElementById('pb-agency-name').textContent = data.name;
 
-        // Append referral slug to CTA links for attribution tracking (SC5)
-        document.getElementById('pb-trial-cta').href = `/checkout.html?ref=${encodeURIComponent(slug)}`;
+        // Append referral slug to CTA links for attribution tracking (SC5). Points at pricing,
+        // not checkout — a cold visitor arriving from a delivered asset has not chosen a plan yet.
+        document.getElementById('pb-trial-cta').href = `/pricing.html?ref=${encodeURIComponent(slug)}`;
 
         loadingEl.classList.add('hidden');
         contentEl.classList.remove('hidden');

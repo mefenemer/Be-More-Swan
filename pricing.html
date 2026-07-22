@@ -31,9 +31,11 @@
         .pk-divider    { border-color: #fce7f3; }
         .pk-ent-label  { color: #f9a8d4; }
         .pk-ent-check  { color: #f9a8d4; }
-        /* Force 4-column grid at 1024px — overrides any compiled Tailwind cascade issues */
+        /* Force 3-column grid at 1024px — overrides any compiled Tailwind cascade issues.
+           Enterprise is NOT a 4th card: it sits in the contact-sales bar below the grid, so the
+           three purchasable plans get the full width and the buyer has three options, not four. */
         @media (min-width: 1024px) {
-            .pricing-grid { grid-template-columns: repeat(4, minmax(0, 1fr)) !important; }
+            .pricing-grid { grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
         }
         /* Billing cycle toggle */
         .billing-toggle-track {
@@ -89,7 +91,9 @@
                 </button>
                 <button id="toggle-annual" class="billing-toggle-btn" onclick="setBillingCycle('annual')">
                     Pay Annually
-                    <span style="background:#dcfce7;color:#166534;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;margin-left:6px;">2 Months Free</span>
+                    <!-- The annual price is monthly × 0.8 (see syncLivePricesGBP), i.e. a flat 20% —
+                         which is ~2.4 months free. The old "2 Months Free" label (16.7%) undersold it. -->
+                    <span style="background:#dcfce7;color:#166534;font-size:11px;font-weight:700;padding:2px 8px;border-radius:999px;margin-left:6px;">Save 20%</span>
                 </button>
             </div>
             <p id="billing-cycle-note" class="text-sm text-gray-400" style="display:none;">
@@ -104,16 +108,28 @@
                  renderPlanCards() below overwrites these from get-plans → master_plans. The static
                  text here is only a pre-fetch fallback. -->
             <div class="flex flex-col bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200 overflow-hidden relative">
-                <div class="absolute top-4 right-4" id="card-pill-t1"></div>
                 <div class="p-6 pb-5 border-b border-gray-100">
-                    <p id="card-tier-t1" class="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Tier 1 · Best for Solo Operators</p>
-                    <h2 id="card-name-t1" class="text-lg font-extrabold text-gray-900 mb-3">The Workflow Saver</h2>
+                    <!-- Audience line is the visual headline; the plan's name is the eyebrow above it.
+                         A buyer can rank "Solo Operators → Scaling Founders → Teams" at a glance, which
+                         the plan names alone ("Workflow Saver"/"Busywork Buster") do not let them do.
+                         The Most-Popular pill sits IN this row rather than absolutely positioned — the
+                         plan name is admin-editable, and a longer one used to slide under the pill. -->
+                    <div class="flex items-center justify-between gap-2 mb-1.5">
+                        <p class="text-[10px] font-bold uppercase tracking-widest min-w-0">
+                            <span class="text-gray-400">Tier 1</span>
+                            <span class="text-gray-300 mx-1">·</span>
+                            <span id="card-name-t1" class="pk-text">The Workflow Saver</span>
+                        </p>
+                        <div id="card-pill-t1" class="flex-shrink-0"></div>
+                    </div>
+                    <h2 id="card-tier-t1" class="text-xl font-extrabold text-gray-900 mb-3 leading-snug">Best for Solo Operators</h2>
                     <p id="card-desc-t1" class="text-sm text-gray-500 leading-relaxed mb-4 italic">Reclaim hours every day. Hand your most draining task to a helper that never takes a day off.</p>
                     <div class="flex items-end gap-1 mb-1">
                         <span id="card-price-t1" class="text-4xl font-extrabold text-gray-900 leading-none">£29</span>
                         <span class="text-gray-400 text-base font-medium mb-1">/month</span>
                     </div>
                     <p id="card-note-t1" class="text-xs text-gray-400 mt-1">Billed monthly · cancel any time</p>
+                    <p id="card-save-t1" class="text-xs font-bold pk-text-dark mt-1.5" style="display:none;"></p>
                 </div>
                 <div class="p-6 flex-grow flex flex-col">
                     <!-- Capacity stat boxes — pink. DB-driven: renderPlanCards() fills these from
@@ -135,15 +151,18 @@
                     </div>
                     <!-- Divider after stat boxes -->
                     <hr class="pk-divider border-t mb-5">
-                    <ul class="space-y-2.5 text-sm text-gray-600 flex-grow">
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>20 AI Media Credits / month</strong> — generate on-brand AI images (1 credit each). Unused credits roll over, and you can top up any time</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Monthly Recap</strong> — a simple snapshot of every task your assistant took off your plate this month</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Sounds Just Like You</strong> — learns your unique style from day one so posts and emails always sound authentic</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Works While You Sleep</strong> — background habits keep your business moving 24/7 after you log off</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>You Have the Final Say</strong> — nothing goes live or gets sent without your quick thumbs-up first</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Simple Visual Planner</strong> — one easy calendar to see exactly what your assistant is working on next</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Your Inspiration Folder</strong> — dump raw photos, quick videos, and messy notes for your assistant to turn into polished work</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Zero Embarrassing Mistakes</strong> — built-in safety guardrails guarantee your assistant never posts anything inappropriate</span></li>
+                    <!-- Feature names only. The full explanation lives in the `title` tooltip and in
+                         the comparison table below — repeating it here made a wall of text in a
+                         narrow column that nobody reads across three cards. -->
+                    <ul class="feat-list space-y-2.5 text-sm text-gray-700 flex-grow">
+                        <li class="flex gap-3" title="Generate on-brand AI images (1 credit each). Unused credits roll over, and you can top up any time."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>20 AI Media Credits</strong> / month</span></li>
+                        <li class="flex gap-3" title="A simple snapshot of every task your assistant took off your plate this month."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Monthly Recap</span></li>
+                        <li class="flex gap-3" title="Learns your unique style from day one so posts and emails always sound authentic."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Sounds Just Like You</span></li>
+                        <li class="flex gap-3" title="Background habits keep your business moving 24/7 after you log off."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Works While You Sleep</span></li>
+                        <li class="flex gap-3" title="Nothing goes live or gets sent without your quick thumbs-up first."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>You Have the Final Say</span></li>
+                        <li class="flex gap-3" title="One easy calendar to see exactly what your assistant is working on next."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Simple Visual Planner</span></li>
+                        <li class="flex gap-3" title="Dump raw photos, quick videos, and messy notes for your assistant to turn into polished work."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Your Inspiration Folder</span></li>
+                        <li class="flex gap-3" title="Built-in safety guardrails keep your assistant from posting anything inappropriate."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Zero Embarrassing Mistakes</span></li>
                     </ul>
                 </div>
                 <div class="px-6 pb-6">
@@ -151,23 +170,31 @@
                        class="pk-btn w-full block text-center px-6 py-3.5 font-bold rounded-xl shadow-sm transition">
                         Get Started
                     </a>
+                    <p class="text-center text-xs text-gray-400 mt-2.5">Cancel any time · no setup fee</p>
                 </div>
             </div>
 
             <!-- ── Tier 2: The Busywork Buster ────────────────────── -->
             <div class="flex flex-col bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200 overflow-hidden relative">
-                <div class="absolute top-4 right-4" id="card-pill-t2">
-                    <span class="pk-pill text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full">Most Popular</span>
-                </div>
                 <div class="p-6 pb-5 border-b border-gray-100">
-                    <p id="card-tier-t2" class="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Tier 2 · Best for Scaling Founders</p>
-                    <h2 id="card-name-t2" class="text-lg font-extrabold text-gray-900 mb-3">The Busywork Buster</h2>
+                    <div class="flex items-center justify-between gap-2 mb-1.5">
+                        <p class="text-[10px] font-bold uppercase tracking-widest min-w-0">
+                            <span class="text-gray-400">Tier 2</span>
+                            <span class="text-gray-300 mx-1">·</span>
+                            <span id="card-name-t2" class="pk-text">The Busywork Buster</span>
+                        </p>
+                        <div id="card-pill-t2" class="flex-shrink-0">
+                            <span class="pk-pill text-xs font-bold uppercase tracking-widest px-3 py-1 rounded-full">Most Popular</span>
+                        </div>
+                    </div>
+                    <h2 id="card-tier-t2" class="text-xl font-extrabold text-gray-900 mb-3 leading-snug">Best for Scaling Founders</h2>
                     <p id="card-desc-t2" class="text-sm text-gray-500 leading-relaxed mb-4 italic">Scale your business with autonomous goal tracking, advanced analytics, and your own mini digital department.</p>
                     <div class="flex items-end gap-1 mb-1">
                         <span id="card-price-t2" class="text-4xl font-extrabold text-gray-900 leading-none">£79</span>
                         <span class="text-gray-400 text-base font-medium mb-1">/month</span>
                     </div>
                     <p id="card-note-t2" class="text-xs text-gray-400 mt-1">Billed monthly · cancel any time</p>
+                    <p id="card-save-t2" class="text-xs font-bold pk-text-dark mt-1.5" style="display:none;"></p>
                 </div>
                 <div class="p-6 flex-grow flex flex-col">
                     <div class="grid grid-cols-3 gap-2 mb-6">
@@ -186,15 +213,15 @@
                     </div>
                     <hr class="pk-divider border-t mb-5">
                     <p class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Everything in Tier 1, plus:</p>
-                    <ul class="space-y-2.5 text-sm text-gray-600 flex-grow">
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>50 AI Media Credits / month</strong> — generate AI images (1 credit) and videos (5 credits). Unused credits roll over; top up any time</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>3 Distinct Digital Assistants</strong> — run multiple specialised roles at the same time (social media, emails, calendar, and more)</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Connect Standard Apps You Use</strong> — connect your digital department to up to 10 standard everyday business tools (like Gmail, Slack, and Google Calendar)</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Autonomous Goal Tracking</strong> — set a SMART target and your assistants track progress and adjust their own tactics to hit it</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Advanced Analytics &amp; Time-Saved Dashboard</strong> — detailed breakdowns of assistant performance plus charts showing exactly how many hours of manual labour you've saved each week</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>The In-House Editor</strong> — a dedicated assistant that proofreads and perfects the work of your other assistants before it reaches your desk</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Be the First to Hire New Assistants</strong> — early access to brand-new digital roles before they're released to the public</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Fast-Track Support</strong> — jump to the front of the queue with priority email and chat support whenever you need help</span></li>
+                    <ul class="feat-list space-y-2.5 text-sm text-gray-700 flex-grow">
+                        <li class="flex gap-3" title="Generate AI images (1 credit) and videos (5 credits). Unused credits roll over; top up any time."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>50 AI Media Credits</strong> / month</span></li>
+                        <li class="flex gap-3" title="Run multiple specialised roles at the same time — social media, emails, calendar, and more."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>3 Distinct Digital Assistants</strong></span></li>
+                        <li class="flex gap-3" title="Connect your digital department to up to 10 standard everyday business tools, like Gmail, Slack, and Google Calendar."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Connect Standard Apps You Use</span></li>
+                        <li class="flex gap-3" title="Set a SMART target and your assistants track progress and adjust their own tactics to hit it."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Autonomous Goal Tracking</span></li>
+                        <li class="flex gap-3" title="Detailed breakdowns of assistant performance, plus charts showing how many hours of manual labour you've saved each week."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Advanced Analytics &amp; Time-Saved Dashboard</span></li>
+                        <li class="flex gap-3" title="A dedicated assistant that proofreads and perfects the work of your other assistants before it reaches your desk."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>The In-House Editor</span></li>
+                        <li class="flex gap-3" title="Early access to brand-new digital roles before they're released to the public."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Be the First to Hire New Assistants</span></li>
+                        <li class="flex gap-3" title="Jump to the front of the queue with priority email and chat support whenever you need help."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Fast-Track Support</span></li>
                     </ul>
                 </div>
                 <div class="px-6 pb-6">
@@ -202,21 +229,29 @@
                        class="pk-btn w-full block text-center px-6 py-3.5 font-bold rounded-xl shadow-sm transition">
                         Automate My Workflow
                     </a>
+                    <p class="text-center text-xs text-gray-400 mt-2.5">Cancel any time · no setup fee</p>
                 </div>
             </div>
 
             <!-- ── Tier 3: The Digital Employee ───────────────────── -->
             <div class="flex flex-col bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200 overflow-hidden relative">
-                <div class="absolute top-4 right-4" id="card-pill-t3"></div>
                 <div class="p-6 pb-5 border-b border-gray-100">
-                    <p id="card-tier-t3" class="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Tier 3 · Best for Teams</p>
-                    <h2 id="card-name-t3" class="text-lg font-extrabold text-gray-900 mb-3">The Digital Employee</h2>
+                    <div class="flex items-center justify-between gap-2 mb-1.5">
+                        <p class="text-[10px] font-bold uppercase tracking-widest min-w-0">
+                            <span class="text-gray-400">Tier 3</span>
+                            <span class="text-gray-300 mx-1">·</span>
+                            <span id="card-name-t3" class="pk-text">The Digital Employee</span>
+                        </p>
+                        <div id="card-pill-t3" class="flex-shrink-0"></div>
+                    </div>
+                    <h2 id="card-tier-t3" class="text-xl font-extrabold text-gray-900 mb-3 leading-snug">Best for Teams</h2>
                     <p id="card-desc-t3" class="text-sm text-gray-500 leading-relaxed mb-4 italic">A complete digital workforce built for growing businesses and collaborative teams.</p>
                     <div class="flex items-end gap-1 mb-1">
                         <span id="card-price-t3" class="text-4xl font-extrabold text-gray-900 leading-none">£349</span>
                         <span class="text-gray-400 text-base font-medium mb-1">/month</span>
                     </div>
                     <p id="card-note-t3" class="text-xs text-gray-400 mt-1">Billed monthly · cancel any time</p>
+                    <p id="card-save-t3" class="text-xs font-bold pk-text-dark mt-1.5" style="display:none;"></p>
                 </div>
                 <div class="p-6 flex-grow flex flex-col">
                     <div class="grid grid-cols-3 gap-2 mb-6">
@@ -235,13 +270,13 @@
                     </div>
                     <hr class="pk-divider border-t mb-5">
                     <p class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Everything in Tier 2, plus:</p>
-                    <ul class="space-y-2.5 text-sm text-gray-600 flex-grow">
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>100 AI Media Credits / month</strong> — generate AI images (1 credit) and videos (5 credits). Unused credits roll over; top up any time</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Your Personal Scorecard</strong> — custom tracking dashboards built around the specific goals and numbers that matter to your business</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Shared Virtual Workspace</strong> — invite partners, team members, or clients to log in, review drafts, and collaborate on approvals together</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Premium Software Vault</strong> — securely unlock connections to your specialised, high-tier, or premium third-party software</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>1-on-1 Kick-off Strategy Call</strong> — a personal session with an Be More Swan expert to build out your digital department and map your automation goals</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Shape Our Future Features</strong> — cast your vote on what new digital assistant roles we build next, directly guiding our engineering queue</span></li>
+                    <ul class="feat-list space-y-2.5 text-sm text-gray-700 flex-grow">
+                        <li class="flex gap-3" title="Generate AI images (1 credit) and videos (5 credits). Unused credits roll over; top up any time."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>100 AI Media Credits</strong> / month</span></li>
+                        <li class="flex gap-3" title="Custom tracking dashboards built around the specific goals and numbers that matter to your business."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Your Personal Scorecard</span></li>
+                        <li class="flex gap-3" title="Invite partners, team members, or clients to log in, review drafts, and collaborate on approvals together."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Shared Virtual Workspace</span></li>
+                        <li class="flex gap-3" title="Securely unlock connections to your specialised, high-tier, or premium third-party software."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Premium Software Vault</span></li>
+                        <li class="flex gap-3" title="A personal session with a Be More Swan expert to build out your digital department and map your automation goals."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>1-on-1 Kick-off Strategy Call</span></li>
+                        <li class="flex gap-3" title="Cast your vote on what new digital assistant roles we build next, directly guiding our engineering queue."><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Shape Our Future Features</span></li>
                     </ul>
                 </div>
                 <div class="px-6 pb-6">
@@ -249,64 +284,153 @@
                        class="pk-btn w-full block text-center px-6 py-3.5 font-bold rounded-xl shadow-sm transition">
                         Scale My Business
                     </a>
-                </div>
-            </div>
-
-            <!-- ── Tier 4: Custom Enterprise ─────────────────────── -->
-            <div id="enterprise" class="flex flex-col bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-md hover:border-gray-300 transition-all duration-200 overflow-hidden relative">
-                <div class="absolute top-4 right-4" id="card-pill-t4"></div>
-                <div class="p-6 pb-5 border-b border-gray-100">
-                    <p id="card-tier-t4" class="text-xs font-bold uppercase tracking-widest text-gray-400 mb-2">Tier 4 · Enterprise</p>
-                    <h2 id="card-name-t4" class="text-lg font-extrabold text-gray-900 mb-3">Custom Enterprise</h2>
-                    <p id="card-desc-t4" class="text-sm text-gray-500 leading-relaxed mb-4 italic">Bespoke digital architecture for complex corporate environments.</p>
-                    <div class="flex items-end gap-1 mb-1">
-                        <span class="text-4xl font-extrabold text-gray-900 leading-none">£1,199</span>
-                        <span class="text-gray-400 text-base font-medium mb-1">+/mo</span>
-                    </div>
-                    <p class="text-xs text-gray-400 mt-1">Scoped to your requirements</p>
-                </div>
-                <div class="p-6 flex-grow flex flex-col">
-                    <div class="grid grid-cols-3 gap-2 mb-6">
-                        <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div id="stat-asst-t4" class="text-xl font-extrabold pk-stat-num">∞</div>
-                            <div id="stat-asst-lbl-t4" class="text-xs pk-stat-lbl mt-0.5 leading-tight">Assistants</div>
-                        </div>
-                        <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div id="stat-task-t4" class="text-xl font-extrabold pk-stat-num">∞</div>
-                            <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Tasks/mo</div>
-                        </div>
-                        <div class="text-center pk-stat-box rounded-xl py-3 px-1">
-                            <div id="stat-app-t4" class="text-xl font-extrabold pk-stat-num" style="font-size:1rem;">Bespoke</div>
-                            <div class="text-xs pk-stat-lbl mt-0.5 leading-tight">Apps</div>
-                        </div>
-                    </div>
-                    <hr class="pk-divider border-t mb-5">
-                    <p class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-3">Everything in Tier 3, plus:</p>
-                    <ul class="space-y-2.5 text-sm text-gray-600 flex-grow">
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span><strong>Custom AI Media Credit allowance</strong> — high-volume image &amp; video generation with bespoke top-up bundles</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Tailored assistant &amp; task volume limits</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Dedicated account manager</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Custom AI model training on your proprietary data</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Full API access for your own integrations</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>SSO integration for corporate-wide access</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>SMS &amp; WhatsApp alerts for critical approvals</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>Internal systems &amp; legacy software access</span></li>
-                        <li class="flex gap-3"><svg class="w-4 h-4 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg><span>➕ VIP Engineering Co-Creation add-on available</span></li>
-                    </ul>
-                </div>
-                <div class="px-6 pb-6">
-                    <span class="block text-center mb-3 bg-gray-900 text-white text-xs font-bold uppercase tracking-widest px-3 py-1.5 rounded-full">Quote in 24 hrs</span>
-                    <button onclick="openEnterpriseModal()"
-                            class="pk-btn w-full block text-center px-6 py-3.5 font-bold rounded-xl shadow-sm transition">
-                        Book a Discovery Call
-                    </button>
+                    <p class="text-center text-xs text-gray-400 mt-2.5">Cancel any time · no setup fee</p>
                 </div>
             </div>
 
         </div><!-- /grid -->
 
-        <!-- ── AI Credits explainer ──────────────────────────────── -->
+        <!-- ── Risk reversal ─────────────────────────────────────────
+             There is no free trial (removed by product decision), so the card is asked for up
+             front. These four lines are the only thing standing between the buyer and that ask,
+             and each one is literally true of the billing code:
+               · billing-cancel.ts sets cancel_at_period_end — access runs to the end of the period
+               · billing-upgrade.ts uses proration_behavior:'create_prorations'
+               · billing-downgrade.ts schedules at period end with proration_behavior:'none'
+               · no setup/onboarding fee exists anywhere in the Stripe wiring          -->
+        <div class="max-w-4xl mx-auto mt-10">
+            <div class="rounded-2xl bg-white border pk-divider shadow-sm px-6 py-5">
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-4">
+                    <div class="flex gap-3">
+                        <svg class="w-5 h-5 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                        <p class="text-sm text-gray-700"><strong class="text-gray-900">Cancel any time, in one click.</strong> No contract, no notice period, no cancellation call — and you keep full access until the end of the period you've already paid for.</p>
+                    </div>
+                    <div class="flex gap-3">
+                        <svg class="w-5 h-5 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                        <p class="text-sm text-gray-700"><strong class="text-gray-900">No setup fee, ever.</strong> The monthly price is the whole price. There is no onboarding charge, implementation fee, or minimum term.</p>
+                    </div>
+                    <div class="flex gap-3">
+                        <svg class="w-5 h-5 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                        <p class="text-sm text-gray-700"><strong class="text-gray-900">Start small, move up later.</strong> Upgrade whenever you like and you only pay the difference for the days remaining. Downgrades take effect at your next renewal.</p>
+                    </div>
+                    <div class="flex gap-3">
+                        <svg class="w-5 h-5 pk-check flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                        <p class="text-sm text-gray-700"><strong class="text-gray-900">You can't be surprise-billed.</strong> Your plan's task allowance is a hard ceiling, not a meter — if you reach it we stop and tell you. We never bill you for going over.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Enterprise: contact-sales bar (NOT a 4th card) ────────
+             Demoted out of the grid so the buyer chooses between three options instead of four.
+             Keeps the `card-name-t4` / `card-desc-t4` ids so renderPlanCards() still drives the
+             copy from the DB; the stat boxes and pill are gone and renderPlanCards no-ops on the
+             missing ids. `id="enterprise"` stays — it's the anchor other pages link to. -->
+        <div id="enterprise" class="max-w-4xl mx-auto mt-6">
+            <div class="rounded-2xl bg-gray-900 shadow-sm px-6 py-6 sm:px-8 flex flex-col md:flex-row md:items-center gap-5">
+                <div class="flex-grow">
+                    <p class="text-[10px] font-bold uppercase tracking-widest pk-ent-label mb-1.5">
+                        Tier 4 · <span id="card-name-t4">Custom Enterprise</span>
+                    </p>
+                    <!-- The number is the top purchasable tier's assistant limit — filled by
+                         renderPlanCards() so it tracks master_plans instead of drifting. -->
+                    <h2 class="text-lg font-extrabold text-white mb-1.5">Need more than <span id="ent-bar-limit">10</span> assistants?</h2>
+                    <p id="card-desc-t4" class="text-sm text-gray-400 leading-relaxed max-w-xl">Bespoke digital architecture for complex corporate environments — unlimited assistants and tasks, SSO, full API access, custom model training on your own data, and a dedicated account manager.</p>
+                </div>
+                <div class="flex-shrink-0 md:text-right">
+                    <p class="text-white mb-3"><span class="text-2xl font-extrabold">£1,199</span><span class="text-gray-400 text-sm font-medium">+/mo</span></p>
+                    <button onclick="openEnterpriseModal()"
+                            class="pk-btn w-full md:w-auto inline-block text-center px-6 py-3 font-bold rounded-xl shadow-sm transition whitespace-nowrap">
+                        Book a Discovery Call
+                    </button>
+                    <p class="text-xs text-gray-500 mt-2">Quote in 24 hrs</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── Value anchor: what it costs vs what it replaces ───────
+             The hero's strongest line ("less than the cost of a single day of agency time") was
+             asserted once and never made checkable. This makes the arithmetic explicit. The
+             comparison figures are typical UK market RANGES, labelled as illustrative — they are
+             not quotes and must not be presented as ours. Update `cost-per-day` if prices move:
+             it is derived in updatePriceDisplay() from the same source as the cards. -->
+        <div class="max-w-4xl mx-auto mt-14">
+            <h2 class="text-2xl font-extrabold text-gray-900 text-center mb-2">What you'd pay to get this done otherwise</h2>
+            <p class="text-gray-500 text-center text-sm mb-8 max-w-2xl mx-auto">
+                Your assistants cover work that normally means hiring someone. Here's the same job priced the usual ways.
+            </p>
+            <div class="rounded-2xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+                <div class="divide-y divide-gray-100">
+                    <div class="flex items-center justify-between gap-4 px-6 py-4">
+                        <div>
+                            <p class="font-semibold text-gray-900 text-sm">A part-time virtual assistant</p>
+                            <p class="text-xs text-gray-400 mt-0.5">10 hours a week at typical UK freelance rates</p>
+                        </div>
+                        <p class="text-base font-bold text-gray-500 whitespace-nowrap">≈ £800–1,200<span class="text-xs font-medium text-gray-400">/mo</span></p>
+                    </div>
+                    <div class="flex items-center justify-between gap-4 px-6 py-4">
+                        <div>
+                            <p class="font-semibold text-gray-900 text-sm">A freelance social media manager</p>
+                            <p class="text-xs text-gray-400 mt-0.5">Content, scheduling, and reporting on retainer</p>
+                        </div>
+                        <p class="text-base font-bold text-gray-500 whitespace-nowrap">≈ £500–1,500<span class="text-xs font-medium text-gray-400">/mo</span></p>
+                    </div>
+                    <div class="flex items-center justify-between gap-4 px-6 py-4">
+                        <div>
+                            <p class="font-semibold text-gray-900 text-sm">A junior marketing hire</p>
+                            <p class="text-xs text-gray-400 mt-0.5">Salary, employer NI, pension, holiday, and equipment</p>
+                        </div>
+                        <p class="text-base font-bold text-gray-500 whitespace-nowrap">≈ £2,400+<span class="text-xs font-medium text-gray-400">/mo</span></p>
+                    </div>
+                    <div class="flex items-center justify-between gap-4 px-6 py-5 pk-stat-box">
+                        <div>
+                            <p class="font-extrabold pk-stat-num text-sm">Be More Swan — <span id="anchor-plan-name">The Busywork Buster</span></p>
+                            <p class="text-xs pk-stat-lbl mt-0.5">3 assistants working around the clock, no holiday, no sick pay, no notice period</p>
+                        </div>
+                        <p class="text-xl font-extrabold pk-stat-num whitespace-nowrap"><span id="anchor-price">£79</span><span class="text-xs font-medium pk-stat-lbl">/mo</span></p>
+                    </div>
+                </div>
+            </div>
+            <p class="text-center text-sm text-gray-500 mt-4">
+                That's <strong id="cost-per-day" class="pk-text-dark">about £2.60 a day</strong> — and it doesn't stop at 5pm.
+            </p>
+            <p class="text-center text-[11px] text-gray-400 mt-2">
+                Comparison figures are illustrative UK market ranges for equivalent work, not quotations.
+            </p>
+        </div>
+
+        <!-- ── Task allowance explainer ──────────────────────────────
+             The hero promises "no surprise bills" and the enforcement code genuinely delivers it:
+             atomicCapCheck (src/utils/atomic-cap-check.ts) only increments while
+             task_count + 1 <= limit, so at the cap the task is refused — there is no metered
+             billing path anywhere. That is a real differentiator against credit-based tools and
+             it was previously stated nowhere on the page. Keep this in step with the matching
+             faq.html answers if the enforcement behaviour ever changes. -->
         <div class="max-w-3xl mx-auto mt-12">
+            <div class="rounded-2xl border pk-divider bg-white shadow-sm p-6 sm:p-8">
+                <div class="flex items-start gap-4">
+                    <div class="pk-stat-box rounded-xl flex items-center justify-center flex-shrink-0" style="width:44px;height:44px;">
+                        <span style="font-size:22px;">🛑</span>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-extrabold text-gray-900 mb-1.5">What happens if I use all my tasks?</h3>
+                        <p class="text-sm text-gray-600 leading-relaxed mb-3">
+                            We tell you at <strong>80%</strong> how many tasks you have left. At <strong>100%</strong>
+                            your assistants stop and wait — and your allowance resets on the 1st of the next month.
+                        </p>
+                        <p class="text-sm text-gray-500 leading-relaxed">
+                            Your task limit is a <strong class="pk-text-dark">hard ceiling, not a meter</strong>. We
+                            do not bill you for going over it, because you cannot go over it. There is no overage
+                            rate, no automatic top-up, and no invoice you didn't expect — if you want more capacity
+                            you choose to upgrade, and nothing happens until you do.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── AI Credits explainer ──────────────────────────────── -->
+        <div class="max-w-3xl mx-auto mt-6">
             <div class="rounded-2xl border pk-divider bg-white shadow-sm p-6 sm:p-8">
                 <div class="flex items-start gap-4">
                     <div class="pk-stat-box rounded-xl flex items-center justify-center flex-shrink-0" style="width:44px;height:44px;">
@@ -643,19 +767,19 @@
                             <td class="px-6 py-5"></td>
                             <td class="px-4 py-5 text-center">
                                 <a href="#" onclick="event.preventDefault(); choosePlan('starter');"
-                                   class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Choose</a>
+                                   class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Get Started</a>
                             </td>
                             <td class="px-4 py-5 text-center pk-col-tint">
                                 <a href="#" onclick="event.preventDefault(); choosePlan('pro_team');"
-                                   class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Choose</a>
+                                   class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Automate My Workflow</a>
                             </td>
                             <td class="px-4 py-5 text-center">
                                 <a href="#" onclick="event.preventDefault(); choosePlan('business');"
-                                   class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Choose</a>
+                                   class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Scale My Business</a>
                             </td>
                             <td class="px-4 py-5 text-center">
                                 <button onclick="openEnterpriseModal()"
-                                        class="inline-block px-5 py-2 text-sm font-bold rounded-lg text-white bg-pink-600 hover:bg-pink-700 transition">Choose</button>
+                                        class="inline-block px-5 py-2 text-sm font-bold rounded-lg text-white bg-pink-600 hover:bg-pink-700 transition">Book a Call</button>
                             </td>
                         </tr>
                     </tbody>
@@ -670,9 +794,12 @@
             <h2 class="text-3xl font-extrabold text-white mb-3">Ready to reclaim your time?</h2>
             <p class="text-emerald-100 mb-8 text-lg">Join teams already saving hours every week with their Be More Swan digital assistants.</p>
             <div class="flex flex-col sm:flex-row gap-3 justify-center">
+                <!-- Name and price are filled by renderPlanCards()/updatePriceDisplay() from the same
+                     source as the cards. They were hardcoded here, so the button kept saying "£79/mo"
+                     after a price change in the DB and ignored the monthly/annual toggle entirely. -->
                 <a href="#" onclick="event.preventDefault(); choosePlan('pro_team');"
                    class="inline-flex items-center justify-center gap-2 px-8 py-4 bg-white text-emerald-700 font-bold rounded-xl shadow-md hover:bg-emerald-50 transition text-base">
-                    Start with The Busywork Buster — £79/mo
+                    Start with <span id="final-cta-name">The Busywork Buster</span> — <span id="final-cta-price">£79</span>/mo
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
                 </a>
                 <button onclick="openEnterpriseModal()"
@@ -696,40 +823,28 @@
             <button onclick="closeEnterpriseModal()" class="text-gray-500 hover:text-gray-300 transition text-2xl leading-none ml-4 mt-0.5">&times;</button>
         </div>
         <form id="enterprise-form" class="px-8 py-6 space-y-4" onsubmit="submitEnterpriseForm(event)">
+            <!-- Three required fields. Last name and team size were dropped and the use-case made
+                 optional: this books a discovery CALL, and everything cut here is a question the
+                 call itself answers. Every extra required field costs submissions. -->
             <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label class="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wider" for="ent-first-name">First name</label>
-                    <input id="ent-first-name" type="text" required placeholder="Sarah" class="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
+                    <label class="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wider" for="ent-first-name">Name</label>
+                    <input id="ent-first-name" type="text" required placeholder="Sarah Johnson" class="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
                 </div>
                 <div>
-                    <label class="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wider" for="ent-last-name">Last name</label>
-                    <input id="ent-last-name" type="text" required placeholder="Johnson" class="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
+                    <label class="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wider" for="ent-company">Company</label>
+                    <input id="ent-company" type="text" required placeholder="Acme Corp" class="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
                 </div>
             </div>
             <div>
                 <label class="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wider" for="ent-email">Work email</label>
                 <input id="ent-email" type="email" required placeholder="sarah@acmecorp.com" class="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
             </div>
-            <div class="grid grid-cols-2 gap-4">
-                <div>
-                    <label class="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wider" for="ent-company">Company</label>
-                    <input id="ent-company" type="text" required placeholder="Acme Corp" class="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500">
-                </div>
-                <div>
-                    <label class="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wider" for="ent-team-size">Team size</label>
-                    <select id="ent-team-size" class="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white">
-                        <option value="">Select…</option>
-                        <option value="1-10">1–10 people</option>
-                        <option value="11-50">11–50 people</option>
-                        <option value="51-200">51–200 people</option>
-                        <option value="201-1000">201–1,000 people</option>
-                        <option value="1000+">1,000+ people</option>
-                    </select>
-                </div>
-            </div>
             <div>
-                <label class="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wider" for="ent-use-case">What do you want to automate?</label>
-                <textarea id="ent-use-case" rows="3" required placeholder="e.g. Route and summarise inbound support emails, then update our CRM automatically…" class="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 resize-none"></textarea>
+                <label class="block text-xs font-semibold text-gray-600 mb-1.5 uppercase tracking-wider" for="ent-use-case">
+                    What do you want to automate? <span class="text-gray-400 font-normal normal-case tracking-normal">(optional)</span>
+                </label>
+                <textarea id="ent-use-case" rows="3" placeholder="e.g. Route and summarise inbound support emails, then update our CRM automatically…" class="w-full border border-gray-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 resize-none"></textarea>
             </div>
             <p id="ent-form-error" class="text-red-600 text-sm hidden bg-red-50 border border-red-200 rounded-lg px-4 py-2.5"></p>
             <div class="flex gap-3 pt-1">
@@ -782,6 +897,9 @@
         if (sel) sel.value = c;
     };
 
+    /** Average days in a month — turns a monthly price into the "about £X a day" anchor. */
+    const DAYS_PER_MONTH = 30.44;
+
     function updatePriceDisplay() {
         const cfg = CURRENCY_CONFIG[_currency] || CURRENCY_CONFIG.GBP;
         const isAnnual = _billingCycle === 'annual';
@@ -790,6 +908,7 @@
         tiers.forEach((t, i) => {
             const priceEl = document.getElementById('card-price-' + t);
             const noteEl  = document.getElementById('card-note-' + t);
+            const saveEl  = document.getElementById('card-save-' + t);
             const tblEl   = document.getElementById('tbl-price-' + t);
             const priceStr = fmtPrice(prices[i], _currency);
             if (priceEl) priceEl.textContent = priceStr;
@@ -801,7 +920,32 @@
                     noteEl.textContent = 'Billed monthly · cancel any time';
                 }
             }
+            // Annual saving in cash. A concrete "Save £192 a year" reads harder than the 20% badge
+            // on the toggle, so the card carries the amount and the toggle carries the rate.
+            if (saveEl) {
+                const saving = (cfg.monthly[i] * 12) - cfg.annualTotal[i];
+                if (isAnnual && saving > 0) {
+                    saveEl.textContent = `Save ${fmtPrice(saving, _currency)} a year`;
+                    saveEl.style.display = '';
+                } else {
+                    saveEl.style.display = 'none';
+                }
+            }
         });
+
+        // Value anchor + final CTA both quote the middle tier (t2) at its CURRENT cycle price,
+        // so they can never drift from the cards the way the old hardcoded "£79/mo" did.
+        const t2Monthly = prices[1];
+        const anchorEl = document.getElementById('anchor-price');
+        if (anchorEl) anchorEl.textContent = fmtPrice(t2Monthly, _currency);
+        const perDayEl = document.getElementById('cost-per-day');
+        if (perDayEl) {
+            const perDay = t2Monthly / DAYS_PER_MONTH;
+            const cur = CURRENCY_CONFIG[_currency] || CURRENCY_CONFIG.GBP;
+            perDayEl.textContent = `about ${cur.symbol}${perDay.toFixed(2)} a day`;
+        }
+        const finalPriceEl = document.getElementById('final-cta-price');
+        if (finalPriceEl) finalPriceEl.textContent = fmtPrice(t2Monthly, _currency);
     }
 
     // Single source of truth: pull the live GBP prices from the DB (get-plans → master_plans)
@@ -904,13 +1048,14 @@
             html += '</tr>';
         }
 
-        // CTA row — reproduces the static footer (choosePlan / openEnterpriseModal).
+        // CTA row — reproduces the static footer (choosePlan / openEnterpriseModal). Verbs match the
+        // cards; four identical "Choose" buttons threw away the intent the card CTAs establish.
         html += '<tr class="border-t-2 border-gray-200 bg-gray-50">' +
             '<td class="px-6 py-5"></td>' +
-            '<td class="px-4 py-5 text-center"><a href="#" onclick="event.preventDefault(); choosePlan(\'starter\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Choose</a></td>' +
-            '<td class="px-4 py-5 text-center pk-col-tint"><a href="#" onclick="event.preventDefault(); choosePlan(\'pro_team\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Choose</a></td>' +
-            '<td class="px-4 py-5 text-center"><a href="#" onclick="event.preventDefault(); choosePlan(\'business\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Choose</a></td>' +
-            '<td class="px-4 py-5 text-center"><button onclick="openEnterpriseModal()" class="inline-block px-5 py-2 text-sm font-bold rounded-lg text-white bg-pink-600 hover:bg-pink-700 transition">Choose</button></td>' +
+            '<td class="px-4 py-5 text-center"><a href="#" onclick="event.preventDefault(); choosePlan(\'starter\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Get Started</a></td>' +
+            '<td class="px-4 py-5 text-center pk-col-tint"><a href="#" onclick="event.preventDefault(); choosePlan(\'pro_team\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Automate My Workflow</a></td>' +
+            '<td class="px-4 py-5 text-center"><a href="#" onclick="event.preventDefault(); choosePlan(\'business\');" class="pk-btn inline-block px-5 py-2 text-sm font-bold rounded-lg transition">Scale My Business</a></td>' +
+            '<td class="px-4 py-5 text-center"><button onclick="openEnterpriseModal()" class="inline-block px-5 py-2 text-sm font-bold rounded-lg text-white bg-pink-600 hover:bg-pink-700 transition">Book a Call</button></td>' +
             '</tr>';
 
         tbody.innerHTML = html;
@@ -928,6 +1073,14 @@
         const el = document.getElementById(id);
         // Only overwrite when the DB supplies a non-empty value — otherwise keep the static fallback.
         if (el && val != null && String(val).trim() !== '') el.textContent = String(val);
+    }
+
+    // master_plans.tierDescription reads "Tier 2 · Best for Scaling Founders". The card shows the
+    // tier number in its own eyebrow chip, so strip the redundant "Tier N ·" prefix before using
+    // the rest as the card headline. Values without the prefix pass through untouched.
+    function stripTierPrefix(val) {
+        if (val == null) return val;
+        return String(val).replace(/^\s*tier\s*\d+\s*[·|:—-]\s*/i, '');
     }
 
     // ── Capacity stat boxes (pink) ───────────────────────────────────────────
@@ -955,10 +1108,18 @@
         for (const plan of cards) {
             const slot = CARD_SLOT_BY_TIER[plan && plan.tierKey];
             if (!slot) continue;
-            setCardText('card-tier-' + slot, plan.tierDescription);
+            // card-tier-* is the card HEADLINE (the audience line); card-name-* is the eyebrow.
+            setCardText('card-tier-' + slot, stripTierPrefix(plan.tierDescription));
             setCardText('card-name-' + slot, plan.name);
             setCardText('card-desc-' + slot, plan.description);
             setCardText('tbl-name-'  + slot, plan.name);
+            // The value anchor and the final CTA both name the middle tier — keep them on the DB name.
+            if (plan.tierKey === 'buster') {
+                setCardText('anchor-plan-name', plan.name);
+                setCardText('final-cta-name', plan.name);
+            }
+            // "Need more than N assistants?" on the enterprise bar = the top purchasable tier's limit.
+            if (plan.tierKey === 'employee') setCardText('ent-bar-limit', plan.assistantLimit);
             // Capacity stat boxes — straight from the master_plans capacity columns, so an admin
             // edit in Master Data → Plan Features moves the pink boxes with no code change.
             // Contact-sales (Enterprise) has no numeric limits: apps read "Bespoke", the rest "∞".
@@ -1086,9 +1247,10 @@
                 body: JSON.stringify({
                     email:             document.getElementById('ent-email').value.trim(),
                     role:              'Enterprise',
-                    name:              `${document.getElementById('ent-first-name').value.trim()} ${document.getElementById('ent-last-name').value.trim()}`,
+                    // Single "Name" field now — the split first/last inputs and the team-size
+                    // select were removed from the form (see the comment on the fieldset).
+                    name:              document.getElementById('ent-first-name').value.trim(),
                     company:           document.getElementById('ent-company').value.trim(),
-                    teamSize:          document.getElementById('ent-team-size').value,
                     useCase:           document.getElementById('ent-use-case').value.trim(),
                     opportunityReason: 'Enterprise pricing enquiry',
                     leadType:          'enterprise_enquiry',
@@ -1149,6 +1311,12 @@
             toggleArea.parentElement.insertAdjacentElement('afterend', wrap);
             document.getElementById('currency-selector').value = _currency;
         }
+
+        // US-GAP-8.2: capture a referral code arriving on ?ref= (e.g. the co-branded powered-by
+        // page) into the same sessionStorage key register.html reads, so attribution survives the
+        // pricing → register hop. Mirrors register.html's own handler.
+        const refParam = new URLSearchParams(window.location.search).get('ref');
+        if (refParam) sessionStorage.setItem('referral_ref', refParam.toUpperCase());
 
         // US-AUD-3.1.1 SC5: Track pricing page view for churn Signal 4 detection.
         fetch('/.netlify/functions/page-events', {
