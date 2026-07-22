@@ -507,6 +507,8 @@ window._activateMainTab = function(name) {
     // branches on window._detailReviewQueue.kind (posts vs records) internally.
     if (name === 'review-queue') {
         const renderDone = detailRqOpenStatus('review');
+        // Populate every lifecycle column's count, not just the one being rendered.
+        window._detailRqRefreshColumnCounts?.();
         // Issue #180 follow-up: a chat "review & approve" link can name the exact post it
         // just drafted (window._assistantDetailInitialPostId, set by workspace.html's
         // ?postId= deep-link) — pop the review modal to it once the list has rendered and
@@ -557,7 +559,58 @@ window.detailRqOpenStatus = function(statusKey, btn) {
 // Re-render whichever column is currently open, e.g. after a new post is added elsewhere
 // (the Create Post sheet) so the list reflects it without the user manually switching tabs.
 window.detailRqRefresh = function() {
-    if (document.getElementById('detail-rq-groups')) _detailRqRenderGroups(_detailRqCurrentStatus);
+    if (!document.getElementById('detail-rq-groups')) return;
+    window._detailRqRefreshColumnCounts();
+    return _detailRqRenderGroups(_detailRqCurrentStatus);
+};
+
+// ── Lifecycle column counts ──────────────────────────────────────────────────
+// Every column carries its own count, not just Review. Previously only the Review badge was
+// populated (inside _detailRqRenderGroups, gated on statusKey === 'review'), so a post that moved
+// to Scheduled vanished from the only visible number and the Scheduled tab gave no indication that
+// anything was in it. Counts are fetched per column in parallel and reflect GROUPED posts (a
+// cross-post's per-platform rows count once), matching what the list actually renders.
+async function _detailRqColumnCount(statusKey, assistantId) {
+    const col = _DETAIL_RQ_COLUMNS[statusKey];
+    if (!col) return 0;
+    try {
+        const res = await fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}&assistantId=${assistantId}`);
+        if (!res.ok) return 0;
+        const drafts = (await res.json()).drafts || [];
+        return (typeof rqGroupSocialDrafts === 'function' ? rqGroupSocialDrafts(drafts) : drafts).length;
+    } catch { return 0; }
+}
+
+function _detailRqSetColumnBadge(statusKey, count) {
+    const badge = document.getElementById('detail-rq-col-count-' + statusKey);
+    if (!badge) return;
+    badge.textContent = count || '';
+    badge.classList.toggle('hidden', !count);
+}
+
+// A notification arriving usually MEANS the queue changed — the assistant finished drafting, a
+// scheduled post went live. Re-read the open Review Queue so the user doesn't have to navigate
+// away and back to see what they were just told about. Guarded on the panel being on screen, so
+// this is a no-op on every other page and every other tab.
+document.addEventListener('bms:notifications-arrived', () => {
+    const panel = document.getElementById('maintab-review-queue');
+    if (!panel || panel.classList.contains('hidden')) return;
+    window.detailRqRefresh?.();
+});
+
+window._detailRqRefreshColumnCounts = async function() {
+    const aid = window._currentAssistantId;
+    if (!aid) return;
+    // Records and blog queues have their own data sources; their counts are set by those renderers.
+    const rq = window._detailReviewQueue || {};
+    if (rq.kind === 'records' || rq.source === 'blog_posts') return;
+    // Only count columns that are actually on screen (Approved is hidden for posts queues).
+    const visible = Object.keys(_DETAIL_RQ_COLUMNS).filter(k => {
+        const btn = document.querySelector(`.detail-rq-col[data-status="${k}"]`);
+        return btn && !btn.classList.contains('hidden');
+    });
+    const counts = await Promise.all(visible.map(k => _detailRqColumnCount(k, aid)));
+    visible.forEach((k, i) => _detailRqSetColumnBadge(k, counts[i]));
 };
 
 async function _detailRqRenderGroups(statusKey) {
@@ -2363,6 +2416,10 @@ function _applyDashboardRegistry(data) {
     // Records queues have no post-generation button; blog re-points it at Blog Studio.
     toggleBtn('detail-rq-primary-btn', !rqIsRecords);
     toggle('detail-rq-col-posted', !rqIsRecords);
+    // 'approved' is only a real resting state for records queues. For posts, approve-post.ts moves
+    // the post straight to 'scheduled' (approval IS the scheduling act), so the column would always
+    // be empty — hide it rather than show a permanently blank tab.
+    toggle('detail-rq-col-approved', rqIsRecords);
     if (rqIsBlog) {
         setText('detail-rq-primary-label', 'Write Blog Post');
         const rqBtn = document.getElementById('detail-rq-primary-btn');

@@ -103,6 +103,14 @@ window.updateNotificationBadge = async function() {
                 } else {
                     window._playNotificationSound?.();
                 }
+                // Something new arrived. Any view showing derived lists (the Assistant Detail
+                // Review Queue, the workspace queue) was rendered before it existed and is now
+                // stale — telling the user "your assistant drafted 3 posts" and then showing them
+                // an unchanged, empty Review tab is the worst of both. Broadcast so open views can
+                // re-read themselves; listeners are responsible for being cheap and idempotent.
+                document.dispatchEvent(new CustomEvent('bms:notifications-arrived', {
+                    detail: { count, previous: _lastNotifBadgeCount, latestType: data.latestType },
+                }));
             }
             _lastNotifBadgeCount = count;
         }
@@ -728,7 +736,7 @@ window.routeToSupportTicket = function() {
 window.NotificationPopover = (function () {
     const K = window.NotifKit;
     const MAX_PER_TAB = 5;        // cap the popover; overflow lives behind "Open inbox".
-    let panel = null, listEl = null, tabActionBtn = null, tabUpdatesBtn = null;
+    let panel = null, listEl = null, tabActionBtn = null, tabUpdatesBtn = null, markAllBtn = null;
     let anchorEl = null, activeTab = 'action', data = [];
 
     const openInbox = () => { close(); (window.loadView ? window.loadView('notifications') : (window.location.href = 'workspace.html?view=notifications')); };
@@ -742,7 +750,10 @@ window.NotificationPopover = (function () {
             <div class="bg-white rounded-xl border border-gray-200 shadow-2xl overflow-hidden" style="width:400px;max-width:calc(100vw - 24px);max-height:min(70vh,560px);display:flex;flex-direction:column;">
                 <div class="flex items-center justify-between px-4 py-3 border-b border-gray-100 shrink-0">
                     <span class="text-sm font-bold text-gray-900">Notifications</span>
-                    <button type="button" id="notif-pop-inbox" class="text-xs font-bold text-emerald-700 hover:text-emerald-800 inline-flex items-center gap-1">Open inbox<span aria-hidden="true">&rarr;</span></button>
+                    <div class="flex items-center gap-3">
+                        <button type="button" id="notif-pop-mark-all" class="text-xs font-semibold text-gray-500 hover:text-gray-800 disabled:opacity-40 disabled:cursor-not-allowed">Mark all read</button>
+                        <button type="button" id="notif-pop-inbox" class="text-xs font-bold text-emerald-700 hover:text-emerald-800 inline-flex items-center gap-1">Open inbox<span aria-hidden="true">&rarr;</span></button>
+                    </div>
                 </div>
                 <div class="flex gap-1 px-3 pt-2 shrink-0">
                     <button type="button" id="notif-pop-tab-action" class="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg"></button>
@@ -754,7 +765,9 @@ window.NotificationPopover = (function () {
         listEl = panel.querySelector('#notif-pop-list');
         tabActionBtn = panel.querySelector('#notif-pop-tab-action');
         tabUpdatesBtn = panel.querySelector('#notif-pop-tab-updates');
+        markAllBtn = panel.querySelector('#notif-pop-mark-all');
         panel.querySelector('#notif-pop-inbox').addEventListener('click', openInbox);
+        markAllBtn.addEventListener('click', markAllRead);
         tabActionBtn.addEventListener('click', () => { activeTab = 'action'; render(); });
         tabUpdatesBtn.addEventListener('click', () => { activeTab = 'updates'; render(); });
         // Dismiss on outside-click / Esc. Registered once; guarded by panel visibility.
@@ -779,6 +792,42 @@ window.NotificationPopover = (function () {
     }).then(() => window.updateNotificationBadge && window.updateNotificationBadge())
       .catch(err => console.error('Popover sync failed:', err));
 
+    /**
+     * Mark every unread item in the CURRENTLY OPEN tab as read. Scoped to the open tab (matching
+     * the full inbox page's behaviour) so clearing Updates never silently buries an unactioned
+     * Action-required item. PUT accepts an explicit id list; refreshing the badge afterwards also
+     * updates the side-menu Inbox count, which mirrors it.
+     */
+    const markAllRead = async () => {
+        if (!markAllBtn || markAllBtn.disabled) return;
+        const ids = data
+            .filter(n => K.kindOf(n) === (activeTab === 'action' ? 'action' : 'info') && !n.isRead)
+            .map(n => n.id);
+        if (!ids.length) return;
+        markAllBtn.disabled = true;
+        // Optimistic: flip locally and re-render so the popover reacts instantly.
+        data.forEach(n => { if (ids.includes(n.id)) n.isRead = true; });
+        render();
+        try {
+            await fetch('/.netlify/functions/notifications', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids }),
+            });
+        } catch (err) {
+            console.error('Mark all read failed:', err);
+        }
+        // Badge + side-menu Inbox count both come from this one call.
+        await window.updateNotificationBadge?.();
+    };
+
+    /** Enable/disable "Mark all read" for the open tab, and label it with what it will clear. */
+    const syncMarkAllBtn = () => {
+        if (!markAllBtn) return;
+        const unread = data.filter(n => K.kindOf(n) === (activeTab === 'action' ? 'action' : 'info') && !n.isRead).length;
+        markAllBtn.disabled = unread === 0;
+        markAllBtn.textContent = unread > 0 ? `Mark ${unread} read` : 'Mark all read';
+    };
+
     const compactCard = (n) => {
         const st = K.styleOf(n);
         const isAction = K.kindOf(n) === 'action';
@@ -797,9 +846,18 @@ window.NotificationPopover = (function () {
                 ${n.message ? `<p class="text-xs text-gray-500 mt-0.5 line-clamp-2">${K.sanitizeText(n.message)}</p>` : ''}
                 <div class="mt-2 flex items-center gap-2">
                     ${action ? `<button type="button" class="pop-cta px-3 py-1.5 ${st.cta} text-white text-xs font-bold rounded-lg transition whitespace-nowrap">${K.escHtml(action.label)}</button>` : ''}
+                    ${n.isRead ? '' : '<button type="button" class="pop-read text-[11px] font-semibold text-gray-400 hover:text-gray-700 whitespace-nowrap">Mark read</button>'}
                     <span class="text-[11px] text-gray-400">${K.fmtDate(n.createdAt)}</span>
                 </div>
             </div>`;
+        // Dismiss a single item without acting on it — the popover previously offered no way to
+        // clear anything, so the badge could only ever be reduced by opening the full inbox.
+        li.querySelector('.pop-read')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            n.isRead = true;
+            render();
+            patch(n.id, { isRead: true });
+        });
         li.querySelector('.pop-cta')?.addEventListener('click', (e) => {
             e.stopPropagation();
             if (isAction) {
@@ -836,6 +894,7 @@ window.NotificationPopover = (function () {
         const openActions = actions.filter(n => !K.isResolved(n)).length;
         const unreadUpdates = updates.filter(n => !n.isRead).length;
         styleTabs(openActions, unreadUpdates);
+        syncMarkAllBtn();
 
         const byCreated = (a, b) => new Date(b.createdAt) - new Date(a.createdAt) || (b.id - a.id);
         let list = (activeTab === 'action' ? actions : updates).slice();

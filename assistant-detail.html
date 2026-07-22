@@ -577,14 +577,27 @@
           Review
           <span id="detail-rq-col-count-review" class="ml-1 bg-amber-100 text-amber-700 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
         </button>
+        <!-- Approved is hidden for post-backed queues (social / blog): approve-post.ts commits an
+             approved post straight to 'scheduled' because that is what approval MEANS here — the
+             assistant books it into the next free cadence slot. The column could therefore never
+             be anything but empty. _applyDashboardRegistry un-hides it for records-based roles,
+             where 'approved' is a real resting state. -->
+        <button id="detail-rq-col-approved" class="detail-rq-col hidden px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
+          data-status="approved" onclick="detailRqOpenStatus('approved', this)">Approved
+          <span id="detail-rq-col-count-approved" class="ml-1 bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
+        </button>
         <button class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
-          data-status="approved" onclick="detailRqOpenStatus('approved', this)">Approved</button>
-        <button class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
-          data-status="scheduled" onclick="detailRqOpenStatus('scheduled', this)">Scheduled</button>
+          data-status="scheduled" onclick="detailRqOpenStatus('scheduled', this)">Scheduled
+          <span id="detail-rq-col-count-scheduled" class="ml-1 bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
+        </button>
         <button id="detail-rq-col-posted" class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
-          data-status="posted" onclick="detailRqOpenStatus('posted', this)">Posted</button>
+          data-status="posted" onclick="detailRqOpenStatus('posted', this)">Posted
+          <span id="detail-rq-col-count-posted" class="ml-1 bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
+        </button>
         <button class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
-          data-status="archived" onclick="detailRqOpenStatus('archived', this)">Archived</button>
+          data-status="archived" onclick="detailRqOpenStatus('archived', this)">Archived
+          <span id="detail-rq-col-count-archived" class="ml-1 bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
+        </button>
       </div>
       <!-- Content -->
       <div id="detail-rq-groups" class="px-4 py-2 min-h-[200px]"></div>
