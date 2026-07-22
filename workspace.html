@@ -585,29 +585,38 @@ window.showComplianceModals = function showComplianceModals(force) {
         </div>
         <div class="p-3 space-y-3">
           <div id="prq-loading" class="text-xs text-gray-400">Checking this post…</div>
+          <!-- Each warning carries its OWN actions (source it / doesn't apply / reopen). The list
+               used to be inert text whose only exit was the blanket "approve anyway" confirm, which
+               is how a compliance control ends up training people to click through it. -->
           <div id="prq-warnings-wrap" class="hidden">
             <p class="text-[11px] font-bold text-red-600 uppercase tracking-wider mb-1.5">Compliance — needs your check</p>
-            <div id="prq-warnings" class="space-y-1.5"></div>
-            <p class="text-[11px] text-gray-500 mt-2">You can still approve, but you'll be asked to confirm and it's recorded.</p>
+            <div id="prq-warnings" class="space-y-2"></div>
+            <p class="text-[11px] text-gray-500 mt-2">Settle each one, or approve anyway — either way it's recorded.</p>
           </div>
+          <!-- Suggestions are advice, shown once and never regenerated on their own. -->
           <div id="prq-suggestions-wrap" class="hidden">
             <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Suggestions</p>
             <ul id="prq-suggestions" class="space-y-1.5 text-xs text-gray-600"></ul>
             <button type="button" id="prq-apply-btn" onclick="rqPreviewSuggestions()"
               class="mt-2.5 w-full px-3 py-2 text-xs font-bold rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 transition">
-              Let the assistant apply these
+              Suggest an improvement
             </button>
           </div>
-          <!-- Diff: the rewrite is ALWAYS previewed before it is saved. -->
-          <div id="prq-diff-wrap" class="hidden">
-            <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Proposed rewrite</p>
-            <div class="rounded-lg border border-gray-200 divide-y divide-gray-100 text-xs">
-              <div class="p-2 bg-red-50/60"><span class="font-bold text-red-500">Before</span><p id="prq-diff-before" class="mt-1 text-gray-600 whitespace-pre-wrap"></p></div>
-              <div class="p-2 bg-emerald-50/60"><span class="font-bold text-emerald-600">After</span><p id="prq-diff-after" class="mt-1 text-gray-800 whitespace-pre-wrap"></p></div>
+          <!-- The proposal is EDITABLE before it is saved, and what gets saved is exactly what is
+               in this box — the server no longer re-generates on accept. -->
+          <div id="prq-rewrite-wrap" class="hidden">
+            <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Proposed rewrite — edit anything you like</p>
+            <div class="rounded-lg border border-gray-200 text-xs overflow-hidden">
+              <div class="p-2 bg-gray-50 border-b border-gray-100">
+                <span class="font-bold text-gray-400 text-[10px] uppercase tracking-wider">Current</span>
+                <p id="prq-rewrite-before" class="mt-1 text-gray-500 whitespace-pre-wrap"></p>
+              </div>
+              <textarea id="prq-rewrite-after" rows="7"
+                class="w-full p-2 text-xs text-gray-800 border-0 focus:ring-0 focus:outline-none resize-y"></textarea>
             </div>
             <div class="flex gap-2 mt-2">
               <button type="button" onclick="rqCancelSuggestions()" class="flex-1 px-3 py-2 text-xs font-semibold rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">Discard</button>
-              <button type="button" onclick="rqApplySuggestions()" class="flex-1 px-3 py-2 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Use this version</button>
+              <button type="button" id="prq-save-btn" onclick="rqApplySuggestions()" class="flex-1 px-3 py-2 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Save this version</button>
             </div>
           </div>
           <div id="prq-clean" class="hidden text-xs text-emerald-700 font-semibold">✓ No compliance issues found.</div>
@@ -4986,43 +4995,60 @@ async function openPostReview(postId) {
 // ── Quality review panel (Review Queue) ──────────────────────────────────────
 // Mirrors the calendar's panel, against the same endpoint. It only ever RENDERS the verdict —
 // the approval gate itself lives in approve-post.ts, because a disabled button is not a control.
+//
+// Two rules this panel exists to honour, both learned from the version that shipped before it:
+//   1. Every compliance warning must have something to DO about it. A list of problems with no
+//      affordances is not a control, it is a nag.
+//   2. Suggestions are never regenerated on their own. Opening a post, saving a rewrite, or
+//      resolving a warning must not produce a fresh crop — otherwise the panel refills itself and
+//      the user is on a treadmill they cannot finish.
 let _prqPostId = null;
-let _prqPendingRewrite = null;
+// The verdict currently on screen. Warning ACTIONS look their text up here by index rather than
+// carrying it in an onclick attribute — see _prqWarningCard.
+let _prqReview = null;
 
 // Warnings and suggestions are model-generated free text going into innerHTML — escape them.
 // (workspace.html's other `esc` helpers are function-local, so this panel needs its own.)
 const _prqEsc = s => String(s ?? '').replace(/[&<>"']/g,
     c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+const _prqShow = (id, on) => document.getElementById(id)?.classList.toggle('hidden', !on);
+
 async function _rqLoadQualityReview(postId) {
     _prqPostId = postId;
-    _prqPendingRewrite = null;
     const wrap = document.getElementById('post-review-quality');
     if (!wrap) return;
-    const show = (id, on) => document.getElementById(id)?.classList.toggle('hidden', !on);
     wrap.classList.remove('hidden');
-    show('prq-loading', true);
-    ['prq-warnings-wrap', 'prq-suggestions-wrap', 'prq-diff-wrap', 'prq-clean'].forEach(id => show(id, false));
+    _prqShow('prq-loading', true);
+    ['prq-warnings-wrap', 'prq-suggestions-wrap', 'prq-rewrite-wrap', 'prq-clean']
+        .forEach(id => _prqShow(id, false));
     document.getElementById('prq-score')?.classList.add('hidden');
-    // rqPreviewSuggestions() hides this button while its diff is on screen. Restore it here or the
-    // NEXT post opened after a preview shows suggestions with no way to act on them.
+    // rqPreviewSuggestions() hides this button while its proposal is on screen. Restore it here or
+    // the NEXT post opened after a proposal shows suggestions with no way to act on them.
     document.getElementById('prq-apply-btn')?.classList.remove('hidden');
 
     let data;
     try {
+        // NOTE: no includeSuggestions. Opening a post is not a request for fresh style feedback —
+        // it returns the stored verdict, or a compliance-only recheck if the caption moved on.
         const res = await fetch('/.netlify/functions/review-post-quality', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ postId }),
         });
         // Plan doesn't include The Quality Reviewer → hide the panel rather than advertise a
         // feature this workspace can't use.
-        if (res.status === 403) { wrap.classList.add('hidden'); return; }
         if (!res.ok) { wrap.classList.add('hidden'); return; }
         data = await res.json();
     } catch { wrap.classList.add('hidden'); return; }
 
     if (_prqPostId !== postId) return; // a different post was opened while this was in flight
-    show('prq-loading', false);
+    _prqShow('prq-loading', false);
+    _prqRenderReview(data);
+}
+
+/** Paint a verdict. Used on open and after every action, so there is one rendering path. */
+function _prqRenderReview(data) {
+    _prqReview = data;
 
     const scoreEl = document.getElementById('prq-score');
     if (scoreEl && typeof data.brandVoiceScore === 'number') {
@@ -5033,24 +5059,106 @@ async function _rqLoadQualityReview(postId) {
     }
 
     const warnings = data.complianceWarnings || [];
+    const dispositions = data.dispositions || {};
     if (warnings.length) {
-        document.getElementById('prq-warnings').innerHTML = warnings.map(w =>
-            `<div class="flex gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-2.5 py-1.5">
-               <span class="shrink-0">⚠</span><span>${_prqEsc(w)}</span></div>`).join('');
-        show('prq-warnings-wrap', true);
+        document.getElementById('prq-warnings').innerHTML = warnings
+            .map((w, i) => _prqWarningCard(w, dispositions[w], i)).join('');
+        _prqShow('prq-warnings-wrap', true);
+    } else {
+        _prqShow('prq-warnings-wrap', false);
     }
 
     const suggestions = data.suggestions || [];
+    _prqShow('prq-suggestions-wrap', suggestions.length > 0);
     if (suggestions.length) {
         document.getElementById('prq-suggestions').innerHTML = suggestions.map(s =>
             `<li class="flex gap-2"><span class="text-emerald-500 shrink-0">•</span><span>${_prqEsc(s)}</span></li>`).join('');
-        show('prq-suggestions-wrap', true);
     }
 
-    if (!warnings.length && !suggestions.length) show('prq-clean', true);
+    const openCount = (data.openWarnings || warnings.filter(w => !dispositions[w])).length;
+    _prqShow('prq-clean', openCount === 0 && !suggestions.length);
 }
 
-// Ask for the rewrite WITHOUT saving it, so the human sees exactly what would change.
+/**
+ * One warning, with its actions. Settled warnings stay visible showing HOW they were settled —
+ * deleting them would hide the fact that the reviewer raised something at all.
+ *
+ * The handlers take the warning's INDEX, never its text. encodeURIComponent does not escape the
+ * apostrophe, and these warnings quote the phrase they are flagging — "the statistic '8.2 different
+ * software subscriptions' should be sourced" — so embedding one in an onclick="fn('…')" attribute
+ * closed the JS string early and left the button silently dead. Which is to say: dead on precisely
+ * the warnings people most need to act on. Model output does not belong in an event attribute.
+ */
+function _prqWarningCard(warning, disposition, index) {
+    if (disposition) {
+        const detail = disposition.action === 'sourced'
+            ? `Sourced — <a href="${_prqEsc(disposition.sourceUrl)}" target="_blank" rel="noopener noreferrer"
+                 class="underline hover:no-underline">${_prqEsc(disposition.sourceUrl)}</a>`
+            : `Marked not applicable — ${_prqEsc(disposition.note || '')}`;
+        return `
+          <div class="text-xs bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-2">
+            <div class="flex gap-2 text-gray-500 line-through"><span class="shrink-0 no-underline">✓</span><span>${_prqEsc(warning)}</span></div>
+            <p class="mt-1 text-[11px] text-gray-500 break-words">${detail}</p>
+            <button type="button" onclick="rqReopenWarning(${index})"
+              class="mt-1.5 text-[11px] font-semibold text-gray-500 hover:text-gray-800 underline">Reopen</button>
+          </div>`;
+    }
+    return `
+      <div class="text-xs bg-red-50 border border-red-200 rounded-lg px-2.5 py-2">
+        <div class="flex gap-2 text-red-700"><span class="shrink-0">⚠</span><span>${_prqEsc(warning)}</span></div>
+        <div class="flex flex-wrap gap-1.5 mt-2">
+          <button type="button" onclick="rqSourceWarning(${index})"
+            class="px-2 py-1 text-[11px] font-bold rounded-md border border-red-300 text-red-700 bg-white hover:bg-red-100">Add a source</button>
+          <button type="button" onclick="rqDismissWarning(${index})"
+            class="px-2 py-1 text-[11px] font-semibold rounded-md border border-gray-300 text-gray-600 bg-white hover:bg-gray-100">Doesn't apply</button>
+        </div>
+      </div>`;
+}
+
+/** Resolve a warning index back to its text against the verdict currently rendered. */
+function _prqWarningAt(index) {
+    return (_prqReview?.complianceWarnings || [])[index] ?? null;
+}
+
+/** POST a disposition and repaint from the server's copy of the verdict. */
+async function _prqResolve(warning, action, extra) {
+    try {
+        const res = await fetch('/.netlify/functions/resolve-compliance-warning', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId: _prqPostId, warning, action, ...extra }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) { alert(d.error || 'Could not update that warning.'); return; }
+        _prqRenderReview({ ...d.review, openWarnings: d.openWarnings });
+    } catch { alert('Network error — please try again.'); }
+}
+
+window.rqSourceWarning = function (index) {
+    const warning = _prqWarningAt(index);
+    if (!warning) return;
+    const url = prompt(`Where does this come from?\n\n${warning}\n\nPaste the source URL:`);
+    if (url === null) return;
+    if (!url.trim()) { alert('A source URL is needed to mark this as sourced.'); return; }
+    const note = prompt('Any note to go with it? (optional)') || '';
+    _prqResolve(warning, 'sourced', { sourceUrl: url.trim(), note });
+};
+
+window.rqDismissWarning = function (index) {
+    const warning = _prqWarningAt(index);
+    if (!warning) return;
+    const note = prompt(`Why does this not apply?\n\n${warning}\n\nThis is recorded against the post:`);
+    if (note === null) return;
+    if (!note.trim()) { alert('Please give a brief reason.'); return; }
+    _prqResolve(warning, 'not_applicable', { note: note.trim() });
+};
+
+window.rqReopenWarning = function (index) {
+    const warning = _prqWarningAt(index);
+    if (warning) _prqResolve(warning, 'reopen', {});
+};
+
+// Ask for ONE rewrite. Costs a task credit and is capped per caption, so it is always an explicit
+// act — never something the panel does to itself.
 window.rqPreviewSuggestions = async function () {
     const btn = document.getElementById('prq-apply-btn');
     if (!btn || !_prqPostId) return;
@@ -5059,34 +5167,38 @@ window.rqPreviewSuggestions = async function () {
     try {
         const res = await fetch('/.netlify/functions/apply-post-suggestions', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ postId: _prqPostId, apply: false }),
+            body: JSON.stringify({ postId: _prqPostId, mode: 'suggest' }),
         });
         const d = await res.json().catch(() => ({}));
         if (!res.ok) { alert(d.error || 'Could not produce a rewrite.'); return; }
         if (d.unchanged) { alert('The assistant had nothing to change here.'); return; }
-        _prqPendingRewrite = { before: d.before, after: d.after };
-        document.getElementById('prq-diff-before').textContent = d.before;
-        document.getElementById('prq-diff-after').textContent = d.after;
-        document.getElementById('prq-diff-wrap').classList.remove('hidden');
+        document.getElementById('prq-rewrite-before').textContent = d.before;
+        // Editable on purpose: the human accepts, edits, or discards, and whatever is in this box
+        // is exactly what gets saved.
+        document.getElementById('prq-rewrite-after').value = d.after;
+        _prqShow('prq-rewrite-wrap', true);
         btn.classList.add('hidden');
     } catch { alert('Network error — please try again.'); }
     finally { btn.disabled = false; btn.textContent = original; }
 };
 
 window.rqCancelSuggestions = function () {
-    _prqPendingRewrite = null;
-    document.getElementById('prq-diff-wrap')?.classList.add('hidden');
+    _prqShow('prq-rewrite-wrap', false);
     document.getElementById('prq-apply-btn')?.classList.remove('hidden');
 };
 
-// Commit the previewed rewrite. Saves the caption and re-runs the review — which does NOT approve
-// anything: a surviving compliance warning still stops approve-post until it's acknowledged.
+// Save the caption as it stands in the textarea — the human's version, edits and all. The server
+// re-checks compliance against the new text and returns no new suggestions, so this ends here
+// rather than offering another round.
 window.rqApplySuggestions = async function () {
-    if (!_prqPostId || !_prqPendingRewrite) return;
+    const btn = document.getElementById('prq-save-btn');
+    const caption = document.getElementById('prq-rewrite-after')?.value ?? '';
+    if (!_prqPostId || !caption.trim()) return;
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
     try {
         const res = await fetch('/.netlify/functions/apply-post-suggestions', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ postId: _prqPostId, apply: true }),
+            body: JSON.stringify({ postId: _prqPostId, mode: 'accept', caption }),
         });
         const d = await res.json().catch(() => ({}));
         if (!res.ok) { alert(d.error || 'Could not save the rewrite.'); return; }
@@ -5095,9 +5207,12 @@ window.rqApplySuggestions = async function () {
         // Both surfaces render this queue; refresh whichever is mounted.
         if (typeof rqLoadItems === 'function') rqLoadItems();
         window.detailRqRefresh?.();
-        // Re-open on the same post so the refreshed caption and new verdict are both visible.
+        // Re-open so the new caption shows in the post body. The quality panel reloads with it and
+        // hits the cache — the server persisted this verdict a moment ago, so the captionHash
+        // matches and no model call happens.
         openPostReview(_prqPostId);
     } catch { alert('Network error — please try again.'); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = 'Save this version'; } }
 };
 
 // The platform tab bar. Hidden for a single-platform post; one tab per platform otherwise. A red dot

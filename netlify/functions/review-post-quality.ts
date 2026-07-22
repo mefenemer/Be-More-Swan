@@ -12,7 +12,10 @@ import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { userOrganisations, scheduledPosts } from '../../db/schema';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
-import { runQualityReview, readCachedReview } from '../../src/utils/post-quality-review';
+import {
+    MAX_SUGGESTION_ROUNDS, openWarnings, readCachedReview, runQualityReview,
+} from '../../src/utils/post-quality-review';
+import { consumeTaskCredit } from '../../src/utils/task-credit';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -37,11 +40,11 @@ export default withLambda(async (event) => {
     try { userId = (jwt.verify(cookie, JWT_SECRET) as { userId: number }).userId; }
     catch { return { statusCode: 401, body: JSON.stringify({ error: 'Invalid session.' }) }; }
 
-    let body: { postId?: number };
+    let body: { postId?: number; includeSuggestions?: boolean };
     try { body = JSON.parse(event.body || '{}'); }
     catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON.' }) }; }
 
-    const { postId } = body;
+    const { postId, includeSuggestions = false } = body;
     if (!postId) return { statusCode: 400, body: JSON.stringify({ error: 'postId required.' }) };
 
     const db = getDb();
@@ -79,8 +82,41 @@ export default withLambda(async (event) => {
     // A caption edit MUST invalidate it — otherwise a user could edit away the text a warning was
     // raised about, keep the clean review, and approve against a verdict for different content.
     const cached = readCachedReview(post.qualityReview, post.caption);
-    if (cached) {
-        return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...cached, fromCache: true }) };
+    if (cached && !includeSuggestions) {
+        return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...cached, openWarnings: openWarnings(cached), fromCache: true }),
+        };
+    }
+
+    // A cache miss means the caption changed since the last verdict, and simply opening a post is
+    // not a request for fresh style feedback — so this recomputes COMPLIANCE ONLY by default.
+    // Generating suggestions here is what made the panel refill itself after every rewrite and
+    // turned the feature into a treadmill; suggestions now require includeSuggestions, which only
+    // an explicit user action sets.
+    if (includeSuggestions && (cached?.suggestionRounds ?? 0) >= MAX_SUGGESTION_ROUNDS) {
+        return {
+            statusCode: 429,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                error: `You've used all ${MAX_SUGGESTION_ROUNDS} suggestion rounds for this caption.`,
+                code: 'ROUNDS_EXHAUSTED',
+            }),
+        };
+    }
+
+    // Fresh suggestions are discretionary work a human asked for, so they cost a task credit. The
+    // automatic compliance re-check does not — the system requires that for its own correctness.
+    if (includeSuggestions) {
+        const credit = await consumeTaskCredit(db, post.organisationId!);
+        if (!credit.allowed) {
+            return {
+                statusCode: 429,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ error: credit.limitMessage, code: 'TASK_LIMIT' }),
+            };
+        }
     }
 
     try {
@@ -90,8 +126,12 @@ export default withLambda(async (event) => {
             caption: post.caption,
             hashtags: post.hashtags as string | null,
             platform: post.platform,
-        });
-        return { statusCode: 200, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(result) };
+        }, { withSuggestions: includeSuggestions, previous: cached });
+        return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ...result, openWarnings: openWarnings(result) }),
+        };
     } catch (e: any) {
         return { statusCode: 502, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ error: e?.message || 'Quality review failed.' }) };
     }

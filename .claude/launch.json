@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-quality-panel",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4193",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/98f43d4f-27e3-46b9-be46-f06e64ee9900/scratchpad/demo"
+      ],
+      "port": 4193,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-audience",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

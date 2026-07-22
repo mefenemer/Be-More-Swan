@@ -17,7 +17,7 @@ import { aiAssistants, auditLogs, contentRules, postIdeaSuggestions, scheduledPo
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { resolvePostImage } from '../../src/utils/social-publish';
 import { resolvePostingSchedule, computeScheduleSlots, intervalHoursFor } from '../../src/config/posting-cadence';
-import { readCachedReview, hasComplianceWarnings } from '../../src/utils/post-quality-review';
+import { readCachedReview, openWarnings } from '../../src/utils/post-quality-review';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
@@ -215,15 +215,21 @@ export default withLambda(async (event) => {
     // so a hard block with no override would strand legitimate posts on a false positive. The user
     // must see the warnings and consciously accept them; the acceptance is recorded in the audit
     // log below, which is what makes this defensible after the fact.
+    //
+    // Gates on OPEN warnings only. A warning the approver already settled individually — a citation
+    // supplied, or a written reason it doesn't apply (resolve-compliance-warning.ts) — has been
+    // answered on the record and must not re-prompt. Blanket acknowledgement is the last resort for
+    // the ones nobody could settle, not the only door out.
     const review = readCachedReview((post as any).qualityReview, post.caption);
-    if (hasComplianceWarnings(review) && !acknowledgeWarnings) {
+    const unresolved = openWarnings(review);
+    if (unresolved.length > 0 && !acknowledgeWarnings) {
         return {
             statusCode: 409,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 complianceBlocked: true,
                 code: 'COMPLIANCE_WARNINGS',
-                warnings: review!.complianceWarnings,
+                warnings: unresolved,
                 message: 'This post has unresolved compliance warnings. Review them, then confirm you want to approve anyway.',
             }),
         };
@@ -339,9 +345,14 @@ export default withLambda(async (event) => {
             // Record WHICH warnings were overridden, not just that an override happened. If a claim
             // later turns out to be a problem, this is the evidence of what the approver was shown
             // and accepted. Absent on a clean approval.
-            ...(hasComplianceWarnings(review) ? {
+            //
+            // Only the warnings that were still OPEN count as an override — the individually
+            // settled ones already have their own audit entries carrying the citation or the
+            // reason, and folding them in here would misreport a sourced claim as a click-through.
+            ...(unresolved.length > 0 ? {
                 complianceOverride: true,
-                acknowledgedWarnings: review!.complianceWarnings,
+                acknowledgedWarnings: unresolved,
+                resolvedWarnings: review?.dispositions ?? undefined,
                 brandVoiceScore: review!.brandVoiceScore,
             } : {}),
         },

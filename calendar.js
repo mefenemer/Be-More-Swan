@@ -1054,16 +1054,25 @@ async function _loadPostQuality(postId) {
             scoreWrap.classList.remove('hidden');
         }
 
-        // SC5: Compliance warnings
+        // SC5: Compliance warnings.
+        // Gates on OPEN warnings — ones nobody has settled yet. A warning answered in the Review
+        // Queue (a citation supplied, or a written reason it doesn't apply) must not still be
+        // disabling Approve over here; the server returns openWarnings so both surfaces agree.
         if (warningsEl && warningsWrap) {
             const warnings = data.complianceWarnings || [];
+            const dispositions = data.dispositions || {};
+            const unresolved = data.openWarnings || warnings.filter(w => !dispositions[w]);
             if (warnings.length > 0) {
-                warningsEl.innerHTML = warnings.map(w =>
-                    `<span class="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-200">${_escHtml(w)}</span>`
+                warningsEl.innerHTML = warnings.map(w => dispositions[w]
+                    ? `<span class="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-gray-100 text-gray-500 border border-gray-200" title="Resolved — see the Review Queue for the reason">✓ ${_escHtml(w)}</span>`
+                    : `<span class="inline-flex items-center gap-1 text-[11px] font-semibold px-2.5 py-1 rounded-full bg-red-50 text-red-700 border border-red-200">${_escHtml(w)}</span>`
                 ).join('');
                 warningsWrap.classList.remove('hidden');
+            }
+            if (unresolved.length > 0) {
                 if (approveBlock) approveBlock.classList.remove('hidden');
-                // Gate the approve button
+                // Visual signal only. approve-post.ts enforces this for real — a disabled button
+                // stops nobody, which is exactly how the Review Queue used to bypass this entirely.
                 const btn = document.getElementById('btn-panel-approve');
                 if (btn) { btn.disabled = true; btn.title = 'Resolve compliance warnings first.'; btn.classList.add('opacity-50'); }
             }

@@ -18,11 +18,10 @@ import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, assistantRecords, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, masterPlans, organisations, plans, scheduledPosts } from '../../db/schema';
+import { aiAssistants, assistantRecords, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
-import { atomicCapCheck } from '../../src/utils/atomic-cap-check';
-import { effectiveLimit, type FeatureOverrides } from '../../src/utils/plan-features';
+import { consumeTaskCredit } from '../../src/utils/task-credit';
 import { embedTexts } from '../../src/utils/kb-embeddings';
 import { computeScheduleSlots, resolvePostingSchedule } from '../../src/config/posting-cadence';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -72,38 +71,9 @@ function upgradeRequired(reason: string | undefined, extra: Record<string, unkno
     });
 }
 
-/**
- * Resolve the org's monthly task limit from its plan (active preferred, then past_due —
- * a lapsed plan keeps its limits through the grace window, mirroring check-capacity.ts)
- * and atomically consume one credit.
- *
- * No active/past_due plan = HARD BLOCK: the free trial was removed (product decision), so
- * an org with no paid plan can run no tasks at all — a null limit no longer means unlimited.
- * A master plan whose monthlyTaskLimit is null is still a legitimately uncapped paid tier.
- */
-async function consumeTaskCredit(db: ReturnType<typeof getDb>, organisationId: number) {
-    const [plan] = await db
-        .select({ monthlyTaskLimit: masterPlans.monthlyTaskLimit, featureOverrides: plans.featureOverrides })
-        .from(plans)
-        .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
-        .where(and(eq(plans.organisationId, organisationId), inArray(plans.status, ['active', 'past_due'])))
-        // 'active' sorts before 'past_due', so an active plan always wins.
-        .orderBy(asc(plans.status), asc(plans.startedAt))
-        .limit(1);
-
-    // No plan at all → paywall. Without this, a no-plan org resolves to limit=null and
-    // atomicCapCheck would wave every task through as "unlimited".
-    if (!plan) {
-        return { allowed: false, limitMessage: 'Choose a plan to activate your assistant and start running tasks.' };
-    }
-
-    return atomicCapCheck({
-        organisationId,
-        counterKey: 'taskCount',
-        // Plan Features: prefer a "new subscribers only" frozen snapshot over the live master limit.
-        limit: effectiveLimit(plan.featureOverrides as FeatureOverrides | null, 'monthlyTaskLimit', plan.monthlyTaskLimit ?? null),
-    });
-}
+// consumeTaskCredit now lives in src/utils/task-credit.ts — the quality reviewer's assisted
+// rewrite needed the same metering, and a second copy of the plan-resolution rules is how the two
+// drift apart.
 
 // ── Router factory ────────────────────────────────────────────────────────────
 // One AssistantRoute per masterAssistants.roleKey. Each route owns its system prompt and
