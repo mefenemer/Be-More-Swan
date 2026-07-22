@@ -4,7 +4,7 @@
 
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, inArray, desc, isNotNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     contentGenerationJobs, aiBlueprints, aiAssistants,
@@ -24,7 +24,7 @@ import { DISCLOSURE } from '../../src/config/compliance';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { decideAutoPublish, describeDecision } from '../../src/utils/auto-publish-runtime';
 import { platformFormat } from '../../src/config/platform-formats';
-import { parseModelJson, toCaptionText } from '../../src/utils/model-json';
+import { parseModelJson } from '../../src/utils/model-json';
 import type { MediaSource } from '../../src/utils/publish-policy';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -68,6 +68,13 @@ export async function drainContentJobs(): Promise<number> {
          WHERE status = 'processing' AND content_type = 'social'
            AND updated_at < now() - interval '3 minutes' AND attempt < max_attempts`
     );
+    // ...and terminally-stuck ones (already at max attempts) get failed rather than lingering in
+    // 'processing' forever — the reclaimer above only requeues those with retries left.
+    await db.execute(
+        `UPDATE content_generation_jobs SET status = 'failed', error_message = 'stuck in processing (timed out) at max attempts', updated_at = now()
+         WHERE status = 'processing' AND content_type = 'social'
+           AND updated_at < now() - interval '3 minutes' AND attempt >= max_attempts`
+    );
 
     const jobs = await db.execute<{
         id: number; job_id: string; blueprint_id: number; assistant_id: number;
@@ -90,9 +97,24 @@ export async function drainContentJobs(): Promise<number> {
 
     if (!jobs.length) return 0;
 
-    await Promise.allSettled(jobs.map(job => processJob(db, job, now)));
+    // Heavy fan-out jobs (AI image gen + a confidence-scoring call PER platform) can each run ~15-20s,
+    // so draining all fetched jobs at once in parallel blows the 26s function cap → 504, and jobs die
+    // mid-run in 'processing' (recovered by the reclaimer above, but only after 3 min). Instead process
+    // in small concurrent chunks and stop STARTING new work once we're near the budget; whatever we
+    // didn't start is still 'queued' for the next 10-min cron tick (or manual trigger). Light text-only
+    // jobs finish fast, so several chunks fit; heavy image jobs get ~one chunk per invocation.
+    const CONCURRENCY = 2;
+    const START_BUDGET_MS = 8_000;   // ~18s slowest chunk started by 8s still lands under the 26s cap
+    const startedAt = Date.now();
+    let processed = 0;
+    for (let i = 0; i < jobs.length; i += CONCURRENCY) {
+        if (i > 0 && Date.now() - startedAt > START_BUDGET_MS) break; // always run at least one chunk
+        const chunk = jobs.slice(i, i + CONCURRENCY);
+        await Promise.allSettled(chunk.map(job => processJob(db, job, now)));
+        processed += chunk.length;
+    }
 
-    return jobs.length;
+    return processed;
 }
 
 export default withLambda(async () => {
@@ -118,14 +140,25 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
     let consumedIdeaId: number | null = null;
     if (!job.context_prompt && (job.trigger_type === 'scheduled' || job.trigger_type === 'conversion')) {
         try {
+            // Atomically CLAIM the oldest pending idea in one statement: FOR UPDATE SKIP LOCKED means
+            // sibling jobs draining the same batch in parallel each lock and take a DIFFERENT row, and
+            // flipping status here (not after the insert) closes the window where two jobs could read
+            // the same 'pending' idea and generate identical posts. Reverted to 'pending' on failure
+            // (see the catch below) so a crashed job doesn't strand the idea.
             const [idea] = await db.execute<{ id: number; idea: string }>(
-                `SELECT id, idea FROM post_idea_suggestions
-                 WHERE assistant_id = ${job.assistant_id} AND status = 'pending'
-                 ORDER BY created_at ASC LIMIT 1`
+                `UPDATE post_idea_suggestions SET status = 'in_review', used_at = now()
+                 WHERE id = (
+                     SELECT id FROM post_idea_suggestions
+                     WHERE assistant_id = ${job.assistant_id} AND status = 'pending'
+                     ORDER BY created_at ASC
+                     FOR UPDATE SKIP LOCKED
+                     LIMIT 1
+                 )
+                 RETURNING id, idea`
             );
             if (idea) { job.context_prompt = idea.idea; consumedIdeaId = idea.id; }
         } catch (e) {
-            console.warn(`[process-content-jobs] idea lookup skipped for job ${job.job_id}:`, e instanceof Error ? e.message : e);
+            console.warn(`[process-content-jobs] idea claim skipped for job ${job.job_id}:`, e instanceof Error ? e.message : e);
         }
     }
 
@@ -185,9 +218,18 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             .map(p => p.trim())
             .filter(Boolean)
             .slice(0, 5);
-        const pillarLine = pillarList.length
-            ? `Content Pillars (categorise this post under EXACTLY ONE, returned verbatim in the "pillar" field): ${pillarList.map(p => `"${p}"`).join(', ')}.`
-            : '';
+        // Variety: rotate the pillar by the slot's calendar day instead of letting every slot pick the
+        // same (strongest) pillar. Day-of-epoch % pillarCount walks the pillars across the calendar, so
+        // consecutive scheduled posts land on different themes with no cross-job coordination needed.
+        // On-demand jobs (no slot) keep the "choose exactly one" behaviour.
+        const rotatedPillar = (pillarList.length && job.target_publish_date)
+            ? pillarList[Math.floor(new Date(job.target_publish_date).getTime() / 86_400_000) % pillarList.length]
+            : null;
+        const pillarLine = rotatedPillar
+            ? `Content Pillar for THIS post — write it under this pillar and return it verbatim in the "pillar" field: "${rotatedPillar}". Do NOT drift to another pillar; rotating pillars across the calendar is what keeps the feed varied.`
+            : (pillarList.length
+                ? `Content Pillars (categorise this post under EXACTLY ONE, returned verbatim in the "pillar" field): ${pillarList.map(p => `"${p}"`).join(', ')}.`
+                : '');
 
         const objective = (answers['primary_objective'] as string) || '';
         const objectiveLine = objective ? `Primary objective for this account: ${objective}.` : '';
@@ -201,6 +243,25 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 ? `CONVERSION POST: write a direct "path-to-working-with-me" post. Make one of these offerings the clear next step, paired with the CTA${answers['incentive'] ? ' and incentive' : ''} above. Lead with value/proof, then invite — confident, never pushy. Offerings: ${serviceOfferings}`
                 : `Commercial offerings to weave in NATURALLY where it fits — never force a sell, most posts should give value first: ${serviceOfferings}`)
             : '';
+
+        // Variety (anti-repetition): show the model this assistant's most recent captions so it brings
+        // a fresh angle instead of collapsing onto the same premise every slot. Best-effort — a lookup
+        // failure never blocks the draft. Siblings drafted in the SAME parallel batch aren't visible
+        // here yet; the pillar rotation above + the distinct claimed idea keep those apart.
+        let recentBlock = '';
+        try {
+            const recent = await db.select({ caption: scheduledPosts.caption })
+                .from(scheduledPosts)
+                .where(and(eq(scheduledPosts.assistantId, job.assistant_id), isNotNull(scheduledPosts.caption)))
+                .orderBy(desc(scheduledPosts.generatedAt))
+                .limit(8);
+            const hooks = recent
+                .map(r => (r.caption || '').replace(/\s+/g, ' ').trim().slice(0, 140))
+                .filter(Boolean);
+            if (hooks.length) {
+                recentBlock = `ALREADY DRAFTED RECENTLY — bring a genuinely DIFFERENT angle. Do NOT reuse the opening hook, core premise, or overall structure of any of these:\n${hooks.map(h => `- "${h}…"`).join('\n')}`;
+            }
+        } catch { /* best-effort; variety context is a nicety, never a blocker */ }
 
         // US-SMM (AC5): the requested format drives the creative. Reels/video need a shot-by-shot
         // script and on-screen text overlays, not just a caption. Default to a single image.
@@ -231,6 +292,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             `Follow all strict and content rules in the system prompt.`,
             formatBlock,
             strategyBlock,
+            recentBlock,
             conversionBlock,
             extraLines,
             disclosureText ? `You MUST append the following disclosure verbatim at the end of the caption, on a new line: "${disclosureText}"` : '',
@@ -269,17 +331,26 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
 
         systemPrompt += `\n\n${AURA_SAFE_CONTENT_BENCHMARK}`;
 
-        const gwResponse = await gatewayGenerate({ system: systemPrompt, messages });
+        // A long founder-story caption + hashtags + media description in one JSON blob overran the
+        // gateway's 1024-token default and got cut off mid-sentence (the JSON then fails to parse and
+        // a half-caption shipped). Give the structured reply real headroom.
+        const gwResponse = await gatewayGenerate({ system: systemPrompt, messages, maxTokens: 2048 });
         const { text: rawText, tokensInput, tokensOutput } = gwResponse;
         let generated: {
             caption?: string; hashtags?: string; suggestedMediaDescription?: string;
             pillar?: string | null; reelScript?: string | null; textOverlays?: string[];
             conflictNotice?: string | null;
         } = {};
-        // A fenced or truncated reply must never reach the caption column as raw JSON —
-        // it surfaces verbatim on the dashboard's "Requires your attention" cards.
+        // The reply MUST be the JSON we asked for. If it doesn't parse (truncated, or the model went
+        // off-format), throw rather than shipping toCaptionText(rawText) — that fallback surfaced
+        // truncated half-captions in the review queue. Throwing lets the job retry (bounded by
+        // max_attempts); a persistent format failure ends as 'failed' + a notification, never a
+        // broken draft. A caption present but empty is treated the same way.
         const parsedReply = parseModelJson<typeof generated>(rawText);
-        generated = parsedReply ?? { caption: toCaptionText(rawText) };
+        if (!parsedReply || !parsedReply.caption || !String(parsedReply.caption).trim()) {
+            throw new Error('Model reply was not valid JSON with a caption (likely truncated) — retrying');
+        }
+        generated = parsedReply;
 
         const isAdminTest = job.trigger_type === 'admin_test';
 
@@ -323,13 +394,13 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             crosspostGroupId: job.crosspost_group_id,
         }).returning({ id: scheduledPosts.id });
 
-        // Mark the consumed user idea 'in_review' and link it to the draft it produced (best-effort).
-        // The idea now rides with this draft through the Review Queue; approve-post.ts flips it to
-        // 'delivered' once the draft is approved, closing the loop back to the user who suggested it.
+        // Link the already-claimed idea (status was flipped to 'in_review' when we claimed it above)
+        // to the draft it produced (best-effort). The idea now rides with this draft through the
+        // Review Queue; approve-post.ts flips it to 'delivered' once approved, closing the loop.
         if (consumedIdeaId) {
             await db.execute(
-                `UPDATE post_idea_suggestions SET status = 'in_review', used_post_id = ${post.id}, used_at = now()
-                 WHERE id = ${consumedIdeaId} AND status = 'pending'`
+                `UPDATE post_idea_suggestions SET used_post_id = ${post.id}
+                 WHERE id = ${consumedIdeaId}`
             ).catch(() => {});
         }
 
@@ -541,6 +612,15 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         const attempt = job.attempt + 1;
         const errorMessage = err instanceof Error ? err.message : String(err);
         console.error(`[process-content-jobs] job ${job.job_id} attempt ${attempt} failed:`, errorMessage);
+
+        // Release the idea we claimed up-front so this failure doesn't strand it in 'in_review'
+        // forever — back to 'pending' (only if it never produced a post) so a retry can reclaim it.
+        if (consumedIdeaId) {
+            await db.execute(
+                `UPDATE post_idea_suggestions SET status = 'pending', used_at = NULL
+                 WHERE id = ${consumedIdeaId} AND used_post_id IS NULL`
+            ).catch(() => {});
+        }
 
         if (attempt >= job.max_attempts) {
             await db.execute(

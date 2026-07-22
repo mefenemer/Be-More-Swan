@@ -16,6 +16,7 @@ import { eq, and, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, contentRules, users, aiAssistants, workspaceAssets } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
+import { assembleBlueprint } from '../../src/utils/blueprint';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -74,8 +75,9 @@ export default withLambda(async (event) => {
     let ruleId: number | undefined;
     const ruleText = feedbackText.trim();
     if (applyAsRule && post.assistantId && post.organisationId) {
+        const assistantId = post.assistantId;
         const [rule] = await db.insert(contentRules).values({
-            assistantId: post.assistantId,
+            assistantId,
             workspaceId: post.organisationId,
             ruleText,
             platform: platform || null,
@@ -85,6 +87,16 @@ export default withLambda(async (event) => {
             originPostId: postId,
         }).returning({ id: contentRules.id });
         ruleId = rule?.id;
+
+        // Recompile the blueprint so the rule actually reaches generation. process-content-jobs reads
+        // the COMPILED blueprint snapshot, not live content_rules — without this, rejection feedback
+        // sits dormant until some unrelated recompile happens. Best-effort (data-assembly, no LLM); a
+        // failure must never fail the rejection.
+        try {
+            await assembleBlueprint(assistantId, `user-${userId}`, 'rejection_feedback_rule');
+        } catch (e) {
+            console.warn('[reject-post] blueprint recompile after rule save failed (rule still saved):', e instanceof Error ? e.message : e);
+        }
     }
 
     // Create a revised draft (clone of original) for AI regeneration
