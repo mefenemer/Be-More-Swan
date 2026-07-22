@@ -18,10 +18,13 @@ if (!stripeSecret) throw new Error('CRITICAL: STRIPE_SECRET_KEY is missing.');
 const stripe    = new Stripe(stripeSecret, { apiVersion: '2026-05-27.dahlia' });
 const isTestMode = stripeSecret.startsWith('sk_test_');
 
-// Monthly prices by tier (must stay in sync with create-subscription.ts)
+// Monthly prices by tier, used only to preview a promo code's discount. The authoritative price
+// is master_plans.monthly_price_gbp (what create-subscription.ts actually charges) — these are a
+// hardcoded mirror, so they have to be updated by hand whenever a plan price changes in the Admin
+// Portal, or the discount shown at checkout is computed off the old price.
 const MONTHLY_PRICES_GBP: Record<string, number> = isTestMode
-    ? { buster: 99, saver: 29, employee: 349 }
-    : { buster: 99, saver: 29, employee: 349 };
+    ? { buster: 79, saver: 29, employee: 349 }
+    : { buster: 79, saver: 29, employee: 349 };
 
 const ANNUAL_DISCOUNT = 0.80;
 

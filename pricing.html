@@ -164,7 +164,7 @@
                     <h2 id="card-name-t2" class="text-lg font-extrabold text-gray-900 mb-3">The Busywork Buster</h2>
                     <p id="card-desc-t2" class="text-sm text-gray-500 leading-relaxed mb-4 italic">Scale your business with autonomous goal tracking, advanced analytics, and your own mini digital department.</p>
                     <div class="flex items-end gap-1 mb-1">
-                        <span id="card-price-t2" class="text-4xl font-extrabold text-gray-900 leading-none">£99</span>
+                        <span id="card-price-t2" class="text-4xl font-extrabold text-gray-900 leading-none">£79</span>
                         <span class="text-gray-400 text-base font-medium mb-1">/month</span>
                     </div>
                     <p id="card-note-t2" class="text-xs text-gray-400 mt-1">Billed monthly · cancel any time</p>
@@ -352,7 +352,7 @@
                             <th class="text-center px-4 py-5 w-[15%] pk-col-th" style="vertical-align:top">
                                 <div class="text-[10px] font-bold uppercase tracking-wider pk-text mb-0.5">Tier 2</div>
                                 <div id="tbl-name-t2" class="font-extrabold text-gray-900 text-sm leading-snug">The Busywork<br>Buster</div>
-                                <div id="tbl-price-t2" class="font-extrabold text-gray-900 text-base mt-1.5">£99</div>
+                                <div id="tbl-price-t2" class="font-extrabold text-gray-900 text-base mt-1.5">£79</div>
                                 <div class="text-[10px] text-gray-400 mt-0.5">/ month</div>
                                 <div class="mt-2" id="tbl-pill-t2"><span class="pk-pill inline-block text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full">Popular</span></div>
                             </th>
@@ -672,7 +672,7 @@
             <div class="flex flex-col sm:flex-row gap-3 justify-center">
                 <a href="#" onclick="event.preventDefault(); choosePlan('pro_team');"
                    class="inline-flex items-center justify-center gap-2 px-8 py-4 bg-white text-emerald-700 font-bold rounded-xl shadow-md hover:bg-emerald-50 transition text-base">
-                    Start with The Busywork Buster — £99/mo
+                    Start with The Busywork Buster — £79/mo
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 8l4 4m0 0l-4 4m4-4H3"/></svg>
                 </a>
                 <button onclick="openEnterpriseModal()"
@@ -757,11 +757,11 @@
 
     // ── US-I18N-2.1: Multi-currency support ───────────────────────
     const CURRENCY_CONFIG = {
-        GBP: { symbol: '£', locale: 'en-GB', monthly: [29,  99,  349],  annual: [23,  79,  279],  annualTotal: [276,  948,  3348] },
-        USD: { symbol: '$', locale: 'en-US', monthly: [35,  119, 419],  annual: [28,  95,  335],  annualTotal: [336,  1140, 4020] },
-        EUR: { symbol: '€', locale: 'de-DE', monthly: [29,  99,  349],  annual: [23,  79,  279],  annualTotal: [276,  948,  3348] },
-        AUD: { symbol: 'A$', locale: 'en-AU', monthly: [55,  179, 629],  annual: [44,  143, 503],  annualTotal: [528,  1716, 6036] },
-        CAD: { symbol: 'C$', locale: 'en-CA', monthly: [49,  159, 559],  annual: [39,  127, 447],  annualTotal: [468,  1524, 5364] },
+        GBP: { symbol: '£', locale: 'en-GB', monthly: [29,  79,  349],  annual: [23,  63,  279],  annualTotal: [276,  756,  3348] },
+        USD: { symbol: '$', locale: 'en-US', monthly: [35,  95,  419],  annual: [28,  76,  335],  annualTotal: [336,  912,  4020] },
+        EUR: { symbol: '€', locale: 'de-DE', monthly: [29,  79,  349],  annual: [23,  63,  279],  annualTotal: [276,  756,  3348] },
+        AUD: { symbol: 'A$', locale: 'en-AU', monthly: [55,  143, 629],  annual: [44,  114, 503],  annualTotal: [528,  1368, 6036] },
+        CAD: { symbol: 'C$', locale: 'en-CA', monthly: [49,  127, 559],  annual: [39,  102, 447],  annualTotal: [468,  1224, 5364] },
     };
     const SUPPORTED_CURRENCIES = Object.keys(CURRENCY_CONFIG);
     let _currency = localStorage.getItem('aura_currency') || 'GBP';
@@ -981,13 +981,13 @@
     const BILLING_CONFIG = {
         monthly: {
             t1: { price: '£29',  note: 'Billed monthly · cancel any time' },
-            t2: { price: '£99',  note: 'Billed monthly · cancel any time' },
+            t2: { price: '£79',  note: 'Billed monthly · cancel any time' },
             t3: { price: '£349', note: 'Billed monthly · cancel any time' },
         },
         annual: {
             // Monthly equivalent shown on cards; actual charge is the annual total below.
             t1: { price: '£23',  note: 'Billed £276 annually · cancel any time' },
-            t2: { price: '£79',  note: 'Billed £948 annually · cancel any time' },
+            t2: { price: '£63',  note: 'Billed £756 annually · cancel any time' },
             t3: { price: '£279', note: 'Billed £3,348 annually · cancel any time' },
         },
     };
@@ -1037,7 +1037,7 @@
 
     // Card CTA identifiers → canonical master_plans tier keys. The cards use legacy labels
     // (starter/pro_team/business); the system + Stripe speak saver/buster/employee. Anchored on
-    // the advertised price: starter £29 = saver, pro_team £99 = buster, business £349 = employee.
+    // the advertised price: starter £29 = saver, pro_team £79 = buster, business £349 = employee.
     const CARD_TIER = { starter: 'saver', pro_team: 'buster', business: 'employee' };
     window.choosePlan = function (tier) {
         if (tier === 'enterprise') { openEnterpriseModal(); return; }
