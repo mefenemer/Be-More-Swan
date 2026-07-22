@@ -273,7 +273,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // here yet; the pillar rotation above + the distinct claimed idea keep those apart.
         let recentBlock = '';
         try {
-            const recent = await db.select({ caption: scheduledPosts.caption })
+            const recent = await db.select({ caption: scheduledPosts.caption, media: scheduledPosts.suggestedMediaDescription })
                 .from(scheduledPosts)
                 .where(and(eq(scheduledPosts.assistantId, job.assistant_id), isNotNull(scheduledPosts.caption)))
                 .orderBy(desc(scheduledPosts.generatedAt))
@@ -281,9 +281,18 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             const hooks = recent
                 .map(r => (r.caption || '').replace(/\s+/g, ' ').trim().slice(0, 140))
                 .filter(Boolean);
+            // Recent VISUALS too, so the model doesn't reuse the same image concept (e.g. every post a laptop).
+            const visuals = recent
+                .map(r => (r.media || '').replace(/\s+/g, ' ').trim().slice(0, 120))
+                .filter(Boolean);
+            const parts = [];
             if (hooks.length) {
-                recentBlock = `ALREADY DRAFTED RECENTLY — bring a genuinely DIFFERENT angle. Do NOT reuse the opening hook, core premise, or overall structure of any of these:\n${hooks.map(h => `- "${h}…"`).join('\n')}`;
+                parts.push(`ALREADY DRAFTED RECENTLY — bring a genuinely DIFFERENT angle. Do NOT reuse the opening hook, core premise, or overall structure of any of these:\n${hooks.map(h => `- "${h}…"`).join('\n')}`);
             }
+            if (visuals.length) {
+                parts.push(`RECENT VISUALS — the "suggestedMediaDescription" for this post MUST use a different visual concept from these (and never a laptop/desk cliché):\n${visuals.map(v => `- "${v}…"`).join('\n')}`);
+            }
+            recentBlock = parts.join('\n\n');
         } catch { /* best-effort; variety context is a nicety, never a blocker */ }
 
         // US-SMM (AC5): the requested format drives the creative. Reels/video need a shot-by-shot

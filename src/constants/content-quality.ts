@@ -14,4 +14,5 @@ CONTENT QUALITY STANDARDS — apply these to every post, without exception:
 - VARY THE OPENING HOOK. Every post must open with a genuinely distinct first line. NEVER reuse an opening formula from one post to the next.
 - BANNED opening: do NOT open with "You didn't start a business to become a [software engineer / expert in N apps / IT department / …]" or any close variant. It is overused — reach for a different angle.
 - Do NOT repeat the same core premise, angle or structure you have used in recent posts.
+- VISUALS (the "suggestedMediaDescription" field): each post needs a genuinely DIFFERENT visual concept. Do NOT default to laptops, screens, generic office desks, or "person typing at a computer" — those are clichés and must not repeat across posts. Reach for varied, concrete, on-brand scenes (e.g. a real workplace moment, a physical product/place, hands doing the actual craft, an outdoor or lifestyle setting, a bold graphic concept). Never describe the same core visual as a recent post.
 `.trim();

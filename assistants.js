@@ -3802,17 +3802,21 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
                 .sort(([, a], [, b]) => b.created - a.created);
             card.classList.toggle('hidden', entries.length < 2);
             el('metrics-breakdown-label').textContent = `Content by platform (${entries.length})`;
+            // Horizontal bar chart: bar length is each platform's created count, normalised to the
+            // busiest platform, with the published/created figure alongside. Widths are inline (dynamic);
+            // the fill uses bg-emerald-500 (the brand accent) which is present in the compiled CSS.
+            const maxCreated = Math.max(1, ...entries.map(([, v]) => v.created));
             platformEl.innerHTML = entries.map(([p, v]) => {
                 const icon = (window._PLATFORM_ICONS || {})[p] || '';
                 const label = (window._PLATFORM_LABEL || {})[p] || p.charAt(0).toUpperCase() + p.slice(1);
-                return `<div class="flex items-center justify-between py-1 border-b border-gray-50 last:border-0">
-                    <div class="flex items-center gap-2 text-xs font-semibold text-gray-700">
-                        <span class="text-gray-400">${icon}</span>${label}
+                const pct = Math.round((v.created / maxCreated) * 100);
+                return `<div class="mb-2.5 last:mb-0" title="${label}: ${v.created} created · ${v.scheduled} scheduled · ${v.published} published">
+                    <div class="flex items-center justify-between text-xs font-semibold mb-1">
+                        <span class="flex items-center gap-1.5 text-gray-700"><span class="text-gray-400">${icon}</span>${label}</span>
+                        <span class="text-gray-500" style="font-variant-numeric:tabular-nums">${v.published}/${v.created}</span>
                     </div>
-                    <div class="grid grid-cols-3 gap-4 text-xs font-semibold text-right" style="min-width:220px;font-variant-numeric:tabular-nums">
-                        <span class="text-gray-500">${v.created} created</span>
-                        <span class="text-blue-600">${v.scheduled} scheduled</span>
-                        <span class="text-emerald-600">${v.published} published</span>
+                    <div class="rounded-full overflow-hidden" style="height:8px;background:#f3f4f6;">
+                        <div class="bg-emerald-500 h-full rounded-full" style="width:${pct}%"></div>
                     </div>
                 </div>`;
             }).join('');

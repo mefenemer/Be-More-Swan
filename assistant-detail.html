@@ -233,6 +233,11 @@
     </div>
   </div>
 
+  <!-- Overview stack: Performance Metrics render first (order:-1), then the Autopilot + Connections
+       status row. Flex-column + inline order keeps the DOM order (status row, then metrics) while
+       displaying metrics on top — no reliance on Tailwind order-* utilities (prebuilt CSS). -->
+  <div style="display:flex;flex-direction:column">
+
   <!-- ── Status row: Autopilot + Connections, side by side. Each card hides on its own signal, and
        _syncStatusRow() (assistants.js) drops the row to one column so a lone card never sits in a
        half-empty grid. -->
@@ -326,12 +331,10 @@
               <span id="connections-save-status" class="text-xs font-bold text-emerald-600 transition-all"></span>
             </div>
             <p id="connections-headline" class="text-sm text-gray-700 mt-1 font-semibold"></p>
-            <p id="connections-subtext" class="text-xs text-gray-500 mt-0.5">Switch a channel off and this assistant stops posting there. The account stays connected for your other assistants.</p>
           </div>
         </div>
         <button type="button" onclick="window._openBriefDrawer && window._openBriefDrawer('platforms')" class="shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Manage connections</button>
       </div>
-      <div id="connections-status-list" class="mt-4 pt-4 border-t border-gray-100 space-y-1"></div>
     </div>
   </div>
 
@@ -339,8 +342,9 @@
   <!-- ── end status row ── -->
 
   <!-- Performance KPIs — issue #183: moved beneath the assistant name/header section (out of the
-       now-removed Overview tab) so it's visible without needing to click into a tab. -->
-  <div class="mb-8">
+       now-removed Overview tab) so it's visible without needing to click into a tab.
+       order:-1 pulls this above the status row within the flex-column wrapper. -->
+  <div class="mb-8" style="order:-1">
     <div class="flex items-center justify-between mb-4">
       <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Performance Metrics</h3>
       <span id="metrics-status-note" class="text-xs text-gray-400 font-medium">Last 30 days</span>
@@ -451,6 +455,9 @@
     <!-- Value wins: posts that converted on saves/shares regardless of reach (AC8) -->
     <p id="metric-value-wins" class="hidden text-xs text-emerald-700 font-medium mt-3"></p>
   </div>
+
+  </div>
+  <!-- ── end overview stack ── -->
 
   <!-- ── Main tab bar ───────────────────────────────────────────────
        Top-level sections. Configuration nests the existing child tab control. -->

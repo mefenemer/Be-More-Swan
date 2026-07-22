@@ -818,7 +818,6 @@ function _sourceStatusRow(source, conn) {
 window._renderConnectionsStatusCard = function () {
     const card = document.getElementById('connections-status-card');
     if (!card) return;
-    const list = document.getElementById('connections-status-list');
     const platforms = _assistantScoped ? _relevantPlatforms() : [];
     const sources = _assistantScoped ? _relevantSources() : [];
     // Blog destinations (cms) are org-wide like sources — a connected one is "on" with no switch.
@@ -829,7 +828,7 @@ window._renderConnectionsStatusCard = function () {
     // rather than vanishing. Other roles (whose "connectors" are Synced-action recipes living
     // in the drawer) still hide the card when they have none.
     const keepForSocial = window._detailCurrentData?.roleKey === 'social_media_manager';
-    if (!list || (nothingRelevant && !keepForSocial)) {
+    if (nothingRelevant && !keepForSocial) {
         card.classList.add('hidden');
         window._syncStatusRow && window._syncStatusRow();
         return;
@@ -865,24 +864,10 @@ window._renderConnectionsStatusCard = function () {
             ? parts.join(' · ')
             : 'Connected — but no channel is switched on for this assistant';
     }
-    // The card's footnote is about the per-channel switch, which only platform rows have.
-    const subtext = document.getElementById('connections-subtext');
-    if (subtext) {
-        subtext.textContent = platforms.length
-            ? 'Switch a channel off and this assistant stops posting there. The account stays connected for your other assistants.'
-            : 'Connections are shared across your workspace — connecting here connects for your other assistants too.';
-    }
-    // A toggle re-renders the list it lives in, so the switch the user just flipped is replaced
-    // mid-interaction. Put focus back on its successor, or keyboard users lose their place.
-    const focused = list.contains(document.activeElement) ? document.activeElement.getAttribute('aria-label') : null;
-    const rowsHtml = rows.map(r => _connStatusRow(r.p, r.conn)).join('')
-        + sourceRows.map(r => _sourceStatusRow(r.s, r.conn)).join('')
-        + blogDests.map(d => _blogDestStatusRow(d)).join('');
-    // Empty only in the social keep-visible edge case (no relevant channels at all) — the card
-    // stays put with a plain message rather than an empty box; "Manage connections" adds one.
-    list.innerHTML = rowsHtml
-        || '<p class="text-xs font-semibold text-gray-400 py-2">No channels connected yet — use “Manage connections” to add one.</p>';
-    if (focused) list.querySelector(`input[aria-label="${focused}"]`)?.focus();
+    // The per-connection list + toggles were removed from this summary card — they were slow to
+    // render here and rarely acted on. The card now shows only the "N of M on" pill and the
+    // "Posting to …" headline; the full connect / manage / per-assistant switch UI lives behind the
+    // "Manage connections" button (the Connections tab). rows/enabled above still drive the summary.
     window._syncStatusRow && window._syncStatusRow();
 };
 
