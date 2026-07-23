@@ -265,6 +265,10 @@ export default withLambda(async (event) => {
             // scope string (unlike Google, Microsoft has no access_type param).
             authUrl = `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.outlook)}&response_mode=query&prompt=consent&state=${state}`;
         } else if (provider === 'threads') {
+            // `redirectUri` (= ${baseUrl}/api/oauth/threads/callback) must be whitelisted under the
+            // Threads use case → Settings → Redirect Callback URLs, or Meta blocks with error 1349168
+            // ("URL blocked"). That screen also requires the Uninstall/Delete callback URLs — see the
+            // full dashboard checklist in netlify/functions/meta-callbacks.ts.
             authUrl = `https://threads.net/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(SCOPES.threads)}&state=${state}`;
         } else if (provider === 'tiktok') {
             // TikTok for Business names the id param client_key (env still TIKTOK_CLIENT_ID).

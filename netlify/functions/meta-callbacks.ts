@@ -11,6 +11,20 @@
 // NO session and NO bearer token — the only authentication is the signed_request HMAC,
 // so verifySignedRequest is the whole security boundary. Never trust the payload before it.
 //
+// ── Threads app dashboard setup (developers.facebook.com → the THREADS_CLIENT_ID app) ──
+// Use case "Access the Threads API" → Settings. ALL FOUR fields below must be filled or the
+// form refuses to save with a generic "Form can't be saved" error (the two callback URLs are
+// required, not optional). This is a SEPARATE app from the Facebook/Instagram one, with its own
+// whitelist — which is why FB/IG can work while Threads is blocked.
+//   Redirect Callback URLs : https://bemoreswan.com/api/oauth/threads/callback
+//                            https://staging--bemoreswan.netlify.app/api/oauth/threads/callback
+//                            (clean paths, no query string; the OAuth redirect is built in
+//                             oauth-integrations.ts as `${baseUrl}/api/oauth/threads/callback`)
+//   Uninstall Callback URL : https://bemoreswan.com/api/meta/threads/uninstall
+//   Delete Callback URL    : https://bemoreswan.com/api/meta/threads/delete
+// Client OAuth Login + Web OAuth Login must both be ON. Meta accepts only ONE value each for the
+// uninstall/delete callbacks, so they point at prod (staging rides the same handlers if needed).
+//
 // Meta posts application/x-www-form-urlencoded with a single `signed_request` field:
 //   <base64url(HMAC-SHA256(payload, APP_SECRET))>.<base64url(JSON payload)>
 // The payload's `user_id` is the Threads user id, which is exactly what the OAuth callback
