@@ -10,19 +10,17 @@ import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { eq } from 'drizzle-orm';
 import { getDb, withUpdatedAt } from '../../db/client';
-import { users, organisations, plans, userOrganisations } from '../../db/schema';
-import { and } from 'drizzle-orm';
+import { users, organisations, plans, userOrganisations, aiAssistants } from '../../db/schema';
+import { and, isNull, desc } from 'drizzle-orm';
 import Stripe from 'stripe';
-import { DISCLOSURE, isEuCountry } from '../../src/config/compliance';
+import { isEuCountry } from '../../src/config/compliance';
+import { resolveWorkspaceFooterDefault } from '../../src/utils/disclosure-footer';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
 const stripe = process.env.STRIPE_SECRET_KEY
     ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' })
     : null;
-
-// Default disclosure copy + EU jurisdiction list live in src/config/compliance.ts (AC4.1).
-const DEFAULT_FOOTER_TEXT = DISCLOSURE.workspaceFooterDefault;
 
 async function getOrgBillingCountry(stripeCustomerId: string | null | undefined): Promise<string | null> {
     if (!stripe || !stripeCustomerId) return null;
@@ -82,6 +80,16 @@ export default withLambda(async (event) => {
         const billingCountry = await getOrgBillingCountry(plan?.stripeCustomerId);
         const isEuJurisdiction = isEuCountry(billingCountry);
 
+        // The default footer names the user's assistant. The footer resolves per-assistant at
+        // generation time; here (org-level settings) we fill the token with a representative assistant
+        // — the org's most recent non-archived one — purely so the placeholder reads naturally.
+        const [sampleAssistant] = await db.select({ name: aiAssistants.name })
+            .from(aiAssistants)
+            .where(and(eq(aiAssistants.organisationId, orgId), isNull(aiAssistants.archivedAt)))
+            .orderBy(desc(aiAssistants.createdAt))
+            .limit(1);
+        const defaultText = resolveWorkspaceFooterDefault(sampleAssistant?.name);
+
         // Auto-enable disclosure footer for EU orgs that haven't explicitly opted in yet
         if (isEuJurisdiction && !org.aiDisclosureFooterEnabled) {
             await db.update(organisations)
@@ -101,7 +109,7 @@ export default withLambda(async (event) => {
                 // never reach that org again.
                 text: org.aiDisclosureFooterText ?? '',
                 isEuJurisdiction,
-                defaultText: DEFAULT_FOOTER_TEXT,
+                defaultText,
             }),
         };
     }

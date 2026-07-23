@@ -14,7 +14,7 @@ import { users, aiBlueprints, contentGenerationJobs, scheduledPosts } from '../.
 import { hasPermission } from '../../src/utils/rbac';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmark';
-import { DISCLOSURE } from '../../src/config/compliance';
+import { resolveDisclosureFooter, appendFooter } from '../../src/utils/disclosure-footer';
 import { parseModelJson, toCaptionText } from '../../src/utils/model-json';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -105,9 +105,13 @@ export default withLambda(async (event) => {
         const audience       = (orgContext['targetAudience'] as string) ?? (answers['target_audience'] as string) ?? 'their audience';
         const tone           = (orgContext['brandVoice']     as string) ?? (answers['tone_of_voice']   as string) ?? 'professional';
         const perAssistantDisclosure = (compliance['disclosureText'] as string) ?? null;
-        const orgFooterEnabled = (compliance['orgFooterEnabled'] as boolean) ?? false;
-        const orgFooterText    = (compliance['orgFooterText'] as string) ?? DISCLOSURE.workspaceFooterDefault;
-        const disclosureText = orgFooterEnabled ? orgFooterText : perAssistantDisclosure;
+        // Disclosure footer appended deterministically after generation (see process-content-jobs).
+        const disclosureFooter = resolveDisclosureFooter({
+            orgEnabled: (compliance['orgFooterEnabled'] as boolean) ?? false,
+            orgText: (compliance['orgFooterText'] as string | null) ?? null,
+            perAssistantText: perAssistantDisclosure,
+            assistantName,
+        });
         const platform       = job.platform || 'instagram';
         const platformLimit  = PLATFORM_CHAR_LIMITS[platform] ?? 2200;
 
@@ -121,7 +125,7 @@ export default withLambda(async (event) => {
             `Generate a ${platform} post (character limit: ${platformLimit}) targeting ${audience} in a ${tone} voice.`,
             `Follow all strict and content rules in the system prompt.`,
             extraLines,
-            disclosureText ? `You MUST append the following disclosure verbatim at the end of the caption, on a new line: "${disclosureText}"` : '',
+            // Disclosure footer is appended in code after generation, not requested from the model.
             job.contextPrompt ? `If the additional context conflicts with any strict rule in the system prompt, apply the strict rule and include a "conflictNotice" field in your JSON explaining which rule took precedence.` : '',
             `Return JSON: { "caption": "...", "hashtags": "...", "suggestedMediaDescription": "...", "conflictNotice": null }`,
         ].filter(Boolean).join('\n');
@@ -148,6 +152,7 @@ export default withLambda(async (event) => {
         // Same hardening as process-content-jobs: never persist raw JSON as the caption.
         const parsedReply = parseModelJson<typeof generated>(rawText);
         generated = parsedReply ?? { caption: toCaptionText(rawText) };
+        generated.caption = appendFooter(generated.caption, disclosureFooter);
 
         const now = new Date();
         const [post] = await db.insert(scheduledPosts).values({

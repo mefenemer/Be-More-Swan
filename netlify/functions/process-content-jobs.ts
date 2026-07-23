@@ -21,7 +21,7 @@ import { resolveMediaForPost } from '../../src/utils/media-resolver';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
 import { generateAndPersistImage } from '../../src/lib/media-persist';
 import { FalContentPolicyError } from '../../src/lib/fal-gateway';
-import { DISCLOSURE } from '../../src/config/compliance';
+import { resolveDisclosureFooter, appendFooter } from '../../src/utils/disclosure-footer';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { decideAutoPublish, describeDecision } from '../../src/utils/auto-publish-runtime';
 import { platformFormat } from '../../src/config/platform-formats';
@@ -186,10 +186,17 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         const tone          = (onboarding['brandVoice'] as string) ?? (answers['tone_of_voice'] as string) ?? 'professional';
         const perAssistantDisclosure = (compliance['disclosureText'] as string) ?? null;
 
-        // Org-level disclosure flag takes precedence (EU AI Act Art. 50) — read from blueprint section
-        const orgDisclosureEnabled = (compliance['orgFooterEnabled'] as boolean) ?? false;
-        const orgDisclosureText    = (compliance['orgFooterText'] as string) ?? DISCLOSURE.workspaceFooterDefault;
-        const disclosureText = orgDisclosureEnabled ? orgDisclosureText : perAssistantDisclosure;
+        // EU AI Act Art. 50 disclosure footer, resolved DETERMINISTICALLY (was an LLM "append this
+        // verbatim" instruction). Doing it in code guarantees the exact compliance string is never
+        // reworded/dropped by the model, and — because the text is now known — lets the user strip it
+        // from a single post (per-post opt-out; see toggle-post-disclosure.ts). Org footer wins when
+        // enabled (Art. 50), else the per-assistant disclosure. {assistant} → this assistant's name.
+        const disclosureFooter = resolveDisclosureFooter({
+            orgEnabled: (compliance['orgFooterEnabled'] as boolean) ?? false,
+            orgText: (compliance['orgFooterText'] as string | null) ?? null,
+            perAssistantText: perAssistantDisclosure,
+            assistantName,
+        });
 
         // One-idea fan-out: when the job carries a platforms list we generate ONE caption/media and
         // create a post for each platform (siblings share crosspost_group_id → one Review Queue card).
@@ -324,7 +331,8 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             recentBlock,
             conversionBlock,
             extraLines,
-            disclosureText ? `You MUST append the following disclosure verbatim at the end of the caption, on a new line: "${disclosureText}"` : '',
+            // NB: the disclosure footer is appended in code after generation (see disclosureFooter /
+            // appendFooter below), NOT requested from the model — so it is never reworded or omitted.
             job.context_prompt ? `If the additional context conflicts with any strict rule in the system prompt, apply the strict rule and include a "conflictNotice" field in your JSON explaining which rule took precedence.` : '',
             `Return JSON: { "caption": "...", "hashtags": "...", "suggestedMediaDescription": "...", "pillar": ${pillarList.length ? '"<one of the pillars above>"' : 'null'}, ${isVideo ? '"reelScript": "...", "textOverlays": ["..."], ' : ''}"conflictNotice": null }`,
         ].filter(Boolean).join('\n');
@@ -395,6 +403,10 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 : `Model reply was not valid JSON with a caption (stop_reason: ${gwResponse.stopReason ?? 'unknown'}) — retrying`);
         }
         generated = parsedReply;
+        // Deterministically append the resolved disclosure footer (EU AI Act Art. 50). Idempotent.
+        // The exact stored text is what the per-post opt-out strips. Fan-out clones copy this caption,
+        // so every sibling inherits the footer.
+        generated.caption = appendFooter(generated.caption, disclosureFooter);
 
         const isAdminTest = job.trigger_type === 'admin_test';
 

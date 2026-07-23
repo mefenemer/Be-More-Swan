@@ -251,10 +251,14 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
     const flags = await db.select().from(featureFlags)
         .where(eq(featureFlags.enabled, true));
     if (plan) hashParts.push({ id: `plan:${plan.id}`, updatedAt: plan.updatedAt });
+    // master_plans has no updatedAt, so key the hash on the price value itself — this is what makes
+    // a price change re-hash the blueprint (and is why applyPlanPrice fires a platform-wide recompile).
+    if (masterPlan) hashParts.push({ id: `plan-price:${masterPlan.id}:${masterPlan.monthlyPriceGbp}`, updatedAt: null });
 
     const s8content = {
         planName: masterPlan?.name ?? plan?.planName ?? null,
         tierKey: masterPlan?.tierKey ?? null,
+        monthlyPriceGbp: masterPlan?.monthlyPriceGbp ?? null,
         monthlyTaskLimit: masterPlan?.monthlyTaskLimit ?? null,
         monthlyTokenLimit: masterPlan?.monthlyTokenLimit ?? null,
         appConnectionLimit: masterPlan?.appConnectionLimit ?? null,
@@ -269,6 +273,7 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
         sources: [
             src('plans', 'plan_name', plan?.id ?? null, plan?.updatedAt),
             src('master_plans', 'tier_key', masterPlan?.id ?? null, null),
+            src('master_plans', 'monthly_price_gbp', masterPlan?.id ?? null, null),
         ],
     };
 

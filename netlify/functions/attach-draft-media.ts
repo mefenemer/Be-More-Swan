@@ -24,7 +24,7 @@ export default withLambda(async (event) => {
     if ('error' in ctx) return ctx.error;
     const { organisationId: orgId } = ctx;
 
-    let body: { postId?: number; assetId?: number };
+    let body: { postId?: number; assetId?: number; keepOverlays?: boolean };
     try { body = JSON.parse(event.body || '{}'); }
     catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON.' }) }; }
 
@@ -59,8 +59,12 @@ export default withLambda(async (event) => {
         .values({ scheduledPostId: postId, contentAssetId: assetId, position: 0 })
         .onConflictDoNothing();
     // Issue #55: swapping in new media resolves any "media deleted" flag from the Review Queue.
+    // Text overlays are designed against a specific image, so swapping the photo through the normal
+    // media UI clears them (and the base pin). The approve-time bake attaches its flattened image
+    // with keepOverlays:true so the design/pin survive that internal swap (idempotent re-bake).
+    const overlayReset = body.keepOverlays ? {} : { imageOverlays: null, overlayBaseAssetId: null };
     await db.update(scheduledPosts)
-        .set({ contentAssetIds: [assetId], mediaMissing: false, mediaMissingNote: null, updatedAt: new Date() })
+        .set({ contentAssetIds: [assetId], mediaMissing: false, mediaMissingNote: null, updatedAt: new Date(), ...overlayReset })
         .where(eq(scheduledPosts.id, postId));
 
     let thumbnailUrl: string | null = null;

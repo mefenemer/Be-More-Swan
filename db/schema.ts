@@ -1768,6 +1768,15 @@ export const scheduledPosts = pgTable("scheduled_posts", {
   // DEPRECATED (US-DB-1.2.1): use scheduledPostAssets junction table for all new queries.
   // Retained until one-time migration script populates scheduledPostAssets from existing rows; drop after migration.
   contentAssetIds: jsonb("content_asset_ids").default([]),
+  // User-authored text overlays composited onto the post image (see db/post-image-overlays.sql).
+  // image_overlays is the editable design; overlay_base_asset_id is the clean pre-bake image so a
+  // re-edit composites onto the original, not an already-flattened one.
+  imageOverlays: jsonb("image_overlays"),
+  overlayBaseAssetId: integer("overlay_base_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
+  // Per-post opt-out for the EU AI Act Art. 50 disclosure footer. The footer is on by default (org
+  // setting); a reviewer can strip it from this single post. See db/post-disclosure-footer-optout.sql
+  // + toggle-post-disclosure.ts.
+  disclosureFooterDisabled: boolean("disclosure_footer_disabled").notNull().default(false),
   linkUrl: text("link_url"),
   ctaText: text("cta_text"),
   hashtags: text("hashtags"),                    // space-separated or newline-separated

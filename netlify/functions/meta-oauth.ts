@@ -68,9 +68,12 @@ export default withLambda(async (event) => {
         const { organisationId } = ctx;
 
         const assistantId = event.queryStringParameters?.assistantId;
+        // Carry the platform the user clicked (Instagram connects through Facebook) so an error
+        // redirect can label the toast correctly and route back to the right Connections tab.
+        const platform = event.queryStringParameters?.platform === 'instagram' ? 'instagram' : 'facebook';
         const csrf = csrfToken();
         const csrfHmac = createHmac('sha256', jwtSecret).update(csrf).digest('hex');
-        const state = signState({ organisationId: String(organisationId), assistantId: assistantId ?? '', csrf, csrfHmac });
+        const state = signState({ organisationId: String(organisationId), assistantId: assistantId ?? '', platform, csrf, csrfHmac });
 
         const url = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${metaAppId}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${SCOPES}&state=${state}&response_type=code`;
 
@@ -82,7 +85,12 @@ export default withLambda(async (event) => {
         const { code, state: rawState, error } = event.queryStringParameters ?? {};
 
         if (error) {
-            return { statusCode: 302, headers: { Location: '/workspace.html?meta_error=access_denied' }, body: '' };
+            // Best-effort route hint so a cancel also lands back on the Connections tab (state is not
+            // yet CSRF-validated, but it's only used to pick which page to show).
+            const s = rawState ? parseState(rawState) : null;
+            const plat = s?.platform === 'instagram' ? 'instagram' : 'facebook';
+            const aId = s?.assistantId ? `&assistantId=${parseInt(s.assistantId)}` : '';
+            return { statusCode: 302, headers: { Location: `/workspace.html?meta_error=access_denied&platform=${plat}${aId}` }, body: '' };
         }
         if (!code || !rawState) {
             return { statusCode: 400, body: 'Missing code or state' };
@@ -100,13 +108,21 @@ export default withLambda(async (event) => {
 
         const organisationId = parseInt(state.organisationId);
         const assistantId   = state.assistantId ? parseInt(state.assistantId) : null;
+        const platform      = state.platform === 'instagram' ? 'instagram' : 'facebook';
+
+        // Build an error redirect that keeps the user on the assistant's Connections tab (not the
+        // Dashboard) and labels the toast for the platform they were connecting. workspace.html reads
+        // assistantId + platform to route back and colour the message.
+        const metaErr = (code: string) =>
+            `/workspace.html?meta_error=${code}&platform=${platform}` +
+            (assistantId ? `&assistantId=${assistantId}` : '');
 
         // Connection sandboxing: if this connect was initiated for a specific
         // assistant, Instagram must be relevant to that assistant's role.
         if (assistantId) {
             const assistant = await resolveAssistantRole(getDb(), organisationId, assistantId);
             if (!assistant || !isServiceAllowedForAssistant('instagram', assistant)) {
-                return { statusCode: 302, headers: { Location: '/workspace.html?meta_error=connection_not_relevant' }, body: '' };
+                return { statusCode: 302, headers: { Location: metaErr('connection_not_relevant') }, body: '' };
             }
         }
 
@@ -117,7 +133,7 @@ export default withLambda(async (event) => {
         const tokenData: { access_token?: string; error?: { message: string } } = await tokenRes.json();
         if (!tokenData.access_token) {
             // Redirect back to the workspace toast rather than dumping raw JSON at the user.
-            return { statusCode: 302, headers: { Location: '/workspace.html?meta_error=token_exchange&platform=instagram' }, body: '' };
+            return { statusCode: 302, headers: { Location: metaErr('token_exchange') }, body: '' };
         }
 
         // Exchange for 60-day long-lived token
@@ -126,7 +142,7 @@ export default withLambda(async (event) => {
         );
         const llData: { access_token?: string; expires_in?: number; error?: { message: string } } = await llRes.json();
         if (!llData.access_token) {
-            return { statusCode: 302, headers: { Location: '/workspace.html?meta_error=token_exchange&platform=instagram' }, body: '' };
+            return { statusCode: 302, headers: { Location: metaErr('token_exchange') }, body: '' };
         }
         const longLivedToken = llData.access_token;
 
@@ -146,7 +162,7 @@ export default withLambda(async (event) => {
 
         if (pages.error) {
             console.error('[meta-oauth] /me/accounts failed:', pages.error.message);
-            return { statusCode: 302, headers: { Location: '/workspace.html?meta_error=token_exchange&platform=instagram' }, body: '' };
+            return { statusCode: 302, headers: { Location: metaErr('token_exchange') }, body: '' };
         }
 
         // Distinguish the two failure modes — they have completely different remedies, and
@@ -160,7 +176,7 @@ export default withLambda(async (event) => {
             // Meta consent screen was skipped (it is easy to click past without selecting one).
             return {
                 statusCode: 302,
-                headers: { Location: '/workspace.html?meta_error=no_pages' },
+                headers: { Location: metaErr('no_pages') },
                 body: '',
             };
         }
@@ -171,7 +187,7 @@ export default withLambda(async (event) => {
         if (!linkedPage) {
             return {
                 statusCode: 302,
-                headers: { Location: '/workspace.html?meta_error=not_business' },
+                headers: { Location: metaErr('not_business') },
                 body: '',
             };
         }
@@ -189,7 +205,7 @@ export default withLambda(async (event) => {
         const collision = await findTenantCollision(db, { serviceName: 'instagram', externalUserId: igUserId, organisationId });
         if (collision) {
             await recordCollisionAttempt(db, { requestingOrgId: organisationId, existingOrgId: collision.organisationId, serviceName: 'instagram', externalUserId: igUserId });
-            return { statusCode: 302, headers: { Location: '/workspace.html?meta_error=tenant_collision&platform=instagram' }, body: '' };
+            return { statusCode: 302, headers: { Location: metaErr('tenant_collision') }, body: '' };
         }
 
         // Store token in vault

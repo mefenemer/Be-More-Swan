@@ -4,7 +4,7 @@
 import { Handler } from '@netlify/functions';
 import { eq, and, desc } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts, aiAssistants, postIdeaSuggestions } from '../../db/schema';
+import { scheduledPosts, aiAssistants, postIdeaSuggestions, organisations } from '../../db/schema';
 import { resolvePostImage } from '../../src/utils/social-publish';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -52,6 +52,7 @@ export default withLambda(async (event) => {
                 postFormat: scheduledPosts.postFormat,
                 publishedAt: scheduledPosts.publishedAt,
                 platformPostUrl: scheduledPosts.platformPostUrl,
+                disclosureFooterDisabled: scheduledPosts.disclosureFooterDisabled,
                 assistantName: aiAssistants.name,
                 // When this draft was generated from a user-suggested idea, surface the original
                 // idea text on the card so the reviewer can see what it was built from (closes the
@@ -89,10 +90,15 @@ export default withLambda(async (event) => {
             return { ...d, caption: displayCaption(d.caption), thumbnailUrl, archiveDeletesAt, daysRemaining };
         }));
 
+        // Workspace-wide footer state — drives whether the per-post "include disclosure footer"
+        // toggle is shown in the review modal (there's nothing to opt out of when it's off).
+        const [org] = await db.select({ enabled: organisations.aiDisclosureFooterEnabled })
+            .from(organisations).where(eq(organisations.id, organisationId)).limit(1);
+
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ drafts: withThumbs }),
+            body: JSON.stringify({ drafts: withThumbs, disclosureFooterEnabled: org?.enabled ?? false }),
         };
     } catch (err) {
         console.error('[get-social-drafts]', err);

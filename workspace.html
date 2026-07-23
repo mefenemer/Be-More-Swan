@@ -445,6 +445,11 @@ window.showComplianceModals = function showComplianceModals(force) {
           <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
           <span id="gp-ai-gen-label">Generate with AI</span>
         </button>
+        <!-- Text overlays — shown by gpAiShowThumb only when an IMAGE is attached (see gpAiAddText). -->
+        <button type="button" id="gp-ai-text-btn" onclick="gpAiAddText()" class="hidden px-2.5 py-1 text-xs font-semibold border border-pink-300 text-pink-700 hover:bg-pink-50 rounded-lg transition cursor-pointer items-center gap-1">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7V5a1 1 0 011-1h14a1 1 0 011 1v2M9 20h6M12 4v16"/></svg>
+          <span id="gp-ai-text-label">Add text</span>
+        </button>
       </div>
       <p id="gp-ai-media-status" class="hidden text-xs"></p>
       <!-- Stock search box (shown by "Find a photo"/"Find a video"). Pre-filled with the post's own
@@ -738,6 +743,15 @@ window.showComplianceModals = function showComplianceModals(force) {
         <span class="flex-1"><span id="post-review-connect-text">Connect this platform to approve and schedule this post.</span></span>
         <button type="button" id="post-review-connect-btn" class="shrink-0 px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-lg transition cursor-pointer">Connect</button>
       </div>
+      <!-- Per-post AI disclosure footer opt-out. Shown only when the workspace footer is on (there's
+           nothing to remove otherwise). Checked = footer included; unchecking strips it from this post. -->
+      <label id="post-review-disclosure" class="hidden items-center justify-between gap-2 text-xs text-gray-600 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 mb-2 cursor-pointer select-none">
+        <span class="flex items-center gap-1.5">
+          <svg class="w-3.5 h-3.5 shrink-0 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          <span>Include the AI disclosure footer on this post</span>
+        </span>
+        <input id="post-review-disclosure-cb" type="checkbox" checked onchange="rqReviewToggleDisclosure(this.checked)" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-300 cursor-pointer">
+      </label>
       <div id="post-review-buttons" class="grid grid-cols-2 gap-2">
         <button id="post-review-approve-btn" onclick="rqReviewApprove()" class="col-span-2 py-3 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600">Approve — let the assistant pick a time</button>
         <button onclick="rqReviewAddMedia()" class="col-span-2 py-2.5 text-xs font-bold border border-emerald-300 text-emerald-700 hover:bg-emerald-50 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5">
@@ -2713,12 +2727,24 @@ function formatCurrency(amount, currency) {
       const errorParam = qs.get('oauth_error') || qs.get('meta_error') || qs.get('error');
       if (!errorParam) return;
       const platform = qs.get('platform');
+      const assistantId = qs.get('assistantId');
       const url = new URL(window.location.href);
       url.searchParams.delete('error');
       url.searchParams.delete('oauth_error');
       url.searchParams.delete('meta_error');
       url.searchParams.delete('platform');
+      url.searchParams.delete('assistantId');
       history.replaceState(null, '', url.toString());
+
+      // A failed connect must leave the user where they started — the assistant's Connections tab —
+      // not bounce them to the Dashboard. Mirrors the success flow. Safe to call before the toast:
+      // routing swaps the view but the toast is a fixed-position overlay that survives it.
+      const routeBackToConnections = () => {
+        if (assistantId && typeof window.routeToAssistantDetail === 'function') {
+          window._assistantDetailInitialTab = 'platforms';
+          window.routeToAssistantDetail(assistantId);
+        }
+      };
 
       const LABELS = { instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X (Twitter)' };
       const label = LABELS[platform] || 'The platform';
@@ -2748,6 +2774,7 @@ function formatCurrency(amount, currency) {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ event: 'oauth_error', error: errorParam, path: window.location.pathname }),
         }).catch(() => {});
+        routeBackToConnections();
         return;
       }
 
@@ -2775,6 +2802,9 @@ function formatCurrency(amount, currency) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ event: 'oauth_error', error: errorParam, path: window.location.pathname }),
       }).catch(() => {/* non-blocking */});
+
+      // Keep the user on the assistant's Connections tab rather than the default Dashboard view.
+      routeBackToConnections();
     })();
 
     // US-SMM-4.1.1: oauth_success toast — shown after successful social platform OAuth
@@ -4301,6 +4331,7 @@ function formatCurrency(amount, currency) {
 <script src="/help.js"></script>
 <script src="/my-content.js"></script>
 <script src="/src/components/platform-post-preview.js"></script>
+<script src="/src/components/image-overlay-editor.js"></script>
 <script src="/src/components/confidence-badge.js"></script>
 <!-- Canva design picker — shared by the Create Post sheet's media section and the Blog Studio's
      feature/inline image pickers. Imports land in content_assets, so both hosts just refresh
@@ -4514,7 +4545,12 @@ async function rqRenderGroups(statusKey) {
             fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}`),
             _rqBlogWriterActive ? fetch('/.netlify/functions/blog-posts') : Promise.resolve(null),
         ]);
-        if (pRes.ok) posts = (await pRes.json()).drafts || [];
+        if (pRes.ok) {
+            const pj = await pRes.json();
+            posts = pj.drafts || [];
+            // Workspace-wide footer state drives whether the per-post disclosure toggle appears.
+            window._rqDisclosureFooterEnabled = !!pj.disclosureFooterEnabled;
+        }
         if (bRes && bRes.ok) {
             const allBlog = (await bRes.json()).posts || [];
             const wanted = RQ_BLOG_STATUSES[statusKey] || [];
@@ -4674,6 +4710,11 @@ function rqRenderSocialCard(draft) {
 
 async function sdApprove(postId, action) {
     try {
+        // Bake user text overlays into the image before approval (fail-closed); skip on reject.
+        if (action !== 'reject') {
+            try { await gpApplyOverlaysBeforeApprove(postId); }
+            catch (e) { alert(e && e.message ? e.message : 'Could not apply your text overlays.'); return false; }
+        }
         const res = await fetch('/.netlify/functions/approve-post', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -4764,6 +4805,9 @@ function rqRenderAiCard(d) {
 
 async function aiApprove(postId) {
     try {
+        // Bake user text overlays into the image before approval (fail-closed).
+        try { await gpApplyOverlaysBeforeApprove(postId); }
+        catch (e) { alert(e && e.message ? e.message : 'Could not apply your text overlays.'); return; }
         const res = await fetch('/.netlify/functions/approve-post', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ postId, action: 'approve' }),
@@ -5561,6 +5605,16 @@ function _rqReviewRenderActive() {
     const rejectBtn = document.getElementById('post-review-reject-btn');
     if (rejectBtn) rejectBtn.textContent = multi ? `Reject all ${groupSize} & archive` : 'Reject & archive';
 
+    // Per-post AI disclosure footer opt-out — only meaningful when the workspace footer is enabled.
+    const discRow = document.getElementById('post-review-disclosure');
+    if (discRow) {
+        const show = reviewable && !!window._rqDisclosureFooterEnabled;
+        discRow.classList.toggle('hidden', !show);
+        discRow.classList.toggle('flex', show);
+        const cb = document.getElementById('post-review-disclosure-cb');
+        if (cb) cb.checked = !post.disclosureFooterDisabled;   // checked = footer included
+    }
+
     // Approving needs a live connection for every platform in the group (setup no longer requires
     // one). Paint from the capacity cache immediately, then re-check with a forced refresh so a
     // connection made elsewhere in the session lifts the gate without a reload.
@@ -5794,6 +5848,12 @@ async function rqReviewApprove() {
 // orchestrator can decide how to handle each outcome across the group.
 async function _rqApproveOne(post, action, opts = {}) {
     try {
+        // Bake any user-authored text overlays into the image before it enters the publish queue.
+        // Fail-closed: if baking fails we do NOT approve, so the un-overlaid image can never publish.
+        if (action !== 'reject') {
+            try { await gpApplyOverlaysBeforeApprove(post.id); }
+            catch (e) { return { ok: false, error: e && e.message ? e.message : 'Could not apply your text overlays.' }; }
+        }
         const res = await fetch('/.netlify/functions/approve-post', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ postId: post.id, action, acknowledgeWarnings: !!opts.acknowledgeWarnings }),
@@ -5853,6 +5913,9 @@ async function rqReviewPublishNow() {
     const id = _rqReviewPostId;
     if (!id) return;
     try {
+        // Bake user text overlays into the image before publishing (fail-closed).
+        try { await gpApplyOverlaysBeforeApprove(id); }
+        catch (e) { alert(e && e.message ? e.message : 'Could not apply your text overlays.'); return; }
         const res = await fetch('/.netlify/functions/approve-post', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ postId: id, action: 'publish_now' }),
@@ -5863,6 +5926,35 @@ async function rqReviewPublishNow() {
         if (d.confirmation && window.showToast) window.showToast(d.confirmation);
         _rqReviewRefresh();
     } catch { alert('Network error — please try again.'); }
+}
+
+// Add/remove the AI disclosure footer for this post (and its cross-post siblings, which share the
+// caption). Server strips/appends the exact footer and flips the flag; we mirror the returned caption
+// into the cache and re-render the preview.
+async function rqReviewToggleDisclosure(included) {
+    const ids = (_rqReviewGroupIds && _rqReviewGroupIds.length) ? _rqReviewGroupIds.slice() : [_rqReviewPostId];
+    const cb = document.getElementById('post-review-disclosure-cb');
+    if (cb) cb.disabled = true;
+    try {
+        for (const id of ids) {
+            if (!id) continue;
+            const res = await fetch('/.netlify/functions/toggle-post-disclosure', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ postId: id, disabled: !included }),
+            });
+            const d = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(d.error || 'Could not update the footer.');
+            if (_rqPostCache[id]) { _rqPostCache[id].caption = d.caption; _rqPostCache[id].disclosureFooterDisabled = d.disabled; }
+        }
+        const active = _rqPostCache[_rqReviewPostId];
+        if (active) document.getElementById('post-review-body').innerHTML = renderPlatformMockup(active);
+    } catch (e) {
+        if (cb) cb.checked = !included;   // revert the switch on failure
+        if (window.showToast) window.showToast(e.message || 'Could not update the footer.');
+        else alert(e.message || 'Could not update the footer.');
+    } finally {
+        if (cb) cb.disabled = false;
+    }
 }
 
 async function rqReviewSaveAmend() {
@@ -7219,6 +7311,16 @@ function gpAiShowThumb(url, type) {
     document.getElementById('gp-ai-own')?.classList.add('hidden');
     gpAiMediaBusy(false);
 
+    // Text overlays apply to images only. Toggle the "Add text" button and refresh its count.
+    // (Set style.display too — the `hidden` class loses to the button's inline-flex layout.)
+    const textBtn = document.getElementById('gp-ai-text-btn');
+    if (textBtn) {
+        const showText = !!url && !isVideo;
+        textBtn.classList.toggle('hidden', !showText);
+        textBtn.style.display = showText ? 'inline-flex' : 'none';
+        if (showText) gpAiRefreshOverlayCount();
+    }
+
     // If the panel is currently driving a Review-Queue draft, mirror the new media into that modal's
     // cache + mock-up so the preview updates and the Instagram approve-guard clears immediately.
     if (url && _rqReviewPostId != null && _gpCurrentPostId === _rqReviewPostId && _rqPostCache[_rqReviewPostId]) {
@@ -7227,6 +7329,115 @@ function gpAiShowThumb(url, type) {
         p.mediaType = (type ? type === 'video' : /\.mp4(\?|$)/i.test(url)) ? 'video' : 'image';
         const body = document.getElementById('post-review-body');
         if (body) body.innerHTML = renderPlatformMockup(p);
+    }
+}
+
+// ── Text overlays on the post image ─────────────────────────────────────────────────────────────
+// The user authors draggable, styled text boxes over the image; the design is stored as data
+// (save-post-overlays) and FLATTENED into the published image at approval time (see
+// gpApplyOverlaysBeforeApprove). Baking runs in the browser so emoji and every font render exactly
+// as designed — no server-side image library involved.
+let _gpOverlayCountByPost = {};   // postId → number of saved overlays (for the button label)
+
+function gpAiRefreshOverlayCount() {
+    const label = document.getElementById('gp-ai-text-label');
+    if (!label) return;
+    const n = _gpOverlayCountByPost[_gpCurrentPostId] || 0;
+    label.textContent = n > 0 ? `Text (${n})` : 'Add text';
+}
+
+async function gpAiAddText() {
+    if (!_gpCurrentPostId) return;
+    if (!window.ImageOverlayEditor) { gpAiMediaStatus('Text editor could not load. Please refresh.', 'error'); return; }
+    const postId = _gpCurrentPostId;
+    gpAiMediaBusy(true);
+    gpAiMediaStatus('Opening the text editor…');
+    let base;
+    try {
+        const res = await fetch(`/.netlify/functions/get-post-image?postId=${encodeURIComponent(postId)}`);
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(err.error || 'Could not load the image.');
+        }
+        base = await res.json();   // { dataUrl, assetId, overlays }
+    } catch (err) {
+        gpAiMediaBusy(false);
+        gpAiMediaStatus(err.message || 'Could not load the image.', 'error');
+        return;
+    }
+    gpAiMediaBusy(false);
+    gpAiMediaStatus('');
+
+    window.ImageOverlayEditor.open({
+        imageUrl: base.dataUrl,
+        overlays: base.overlays || [],
+        onDone: async (overlays) => {
+            if (overlays == null) return;   // cancelled
+            gpAiMediaBusy(true);
+            gpAiMediaStatus('Saving your text…');
+            try {
+                const res = await fetch('/.netlify/functions/save-post-overlays', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ postId, overlays, baseAssetId: base.assetId }),
+                });
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err.error || 'Could not save your text.');
+                }
+                _gpOverlayCountByPost[postId] = overlays.length;
+                gpAiRefreshOverlayCount();
+                // Show a flattened PREVIEW in the thumbnail so the user sees the result immediately.
+                // The stored image stays clean — the real bake+attach happens on approval.
+                try {
+                    const blob = await window.ImageOverlayEditor.bake(base.dataUrl, overlays);
+                    const previewUrl = URL.createObjectURL(blob);
+                    const img = document.getElementById('gp-ai-media-thumb-img');
+                    if (img) { img.src = previewUrl; img.classList.remove('hidden'); }
+                    // Mirror the preview into the Review-Queue mock-up if this panel drives a draft.
+                    if (_rqReviewPostId != null && postId === _rqReviewPostId && _rqPostCache[_rqReviewPostId]) {
+                        _rqPostCache[_rqReviewPostId].thumbnailUrl = previewUrl;
+                        const body = document.getElementById('post-review-body');
+                        if (body) body.innerHTML = renderPlatformMockup(_rqPostCache[_rqReviewPostId]);
+                    }
+                } catch { /* preview only — non-fatal */ }
+                gpAiMediaStatus(overlays.length ? `${overlays.length} text overlay${overlays.length > 1 ? 's' : ''} saved. It will be applied to the published image on approval.` : 'Text overlays cleared.', 'success');
+            } catch (err) {
+                gpAiMediaStatus(err.message || 'Could not save your text.', 'error');
+            } finally {
+                gpAiMediaBusy(false);
+            }
+        },
+    });
+}
+
+// Flatten any saved overlays into the post's image right before it is approved/published. Idempotent
+// and a no-op when the post has none. Throws on failure so the approve flow surfaces the error rather
+// than silently publishing the un-overlaid image. Composites onto the CLEAN base returned by
+// get-post-image (the pinned pre-bake original), so calling it twice never double-bakes.
+async function gpApplyOverlaysBeforeApprove(postId) {
+    if (!postId || !window.ImageOverlayEditor) return;
+    const res = await fetch(`/.netlify/functions/get-post-image?postId=${encodeURIComponent(postId)}`);
+    if (!res.ok) {
+        // No image (text-only post) → nothing to overlay. Only a real image is an error.
+        if (res.status === 404) return;
+        throw new Error('Could not load the image to apply your text overlays.');
+    }
+    const base = await res.json();   // { dataUrl, assetId, overlays }
+    const overlays = Array.isArray(base.overlays) ? base.overlays.filter(o => String(o.text || '').trim()) : [];
+    if (!overlays.length) return;    // nothing to bake
+
+    const blob = await window.ImageOverlayEditor.bake(base.dataUrl, overlays);
+    const file = new File([blob], `overlay-post-${postId}.png`, { type: 'image/png' });
+    const asset = await gpUploadContentAsset(file);
+    const attachRes = await fetch('/.netlify/functions/attach-draft-media', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ postId, assetId: asset.id, keepOverlays: true }),
+    });
+    if (!attachRes.ok) {
+        const err = await attachRes.json().catch(() => ({}));
+        throw new Error(err.error || 'Could not attach the text-overlaid image.');
     }
 }
 
