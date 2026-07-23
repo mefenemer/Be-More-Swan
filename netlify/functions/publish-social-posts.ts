@@ -18,6 +18,7 @@ import { resolvePostImage, resolveSocialCredentials, publishX, publishLinkedIn, 
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { fireOrchestrations } from '../../src/utils/orchestration';
+import { holdXCredits, settleXHold, xPostCost, xPostHasLink } from '../../src/utils/ai-credits';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BATCH = 100;
@@ -79,6 +80,15 @@ export default withLambda(async () => {
             AND updated_at < now() - interval '${STALE_YOUTUBE_MINS} minutes'`
     );
 
+    // Resume X posts paused for credit exhaustion once their hold-until (the first of next month)
+    // has passed: the monthly X allowance has reset, so they re-enter the normal scheduled flow and
+    // publish on this tick (their publish_date is already in the past). See pauseForXCredits.
+    await db.execute(
+        `UPDATE scheduled_posts SET status = 'scheduled', retry_at = NULL, updated_at = now()
+         WHERE status = 'paused_credits' AND platform = 'x'
+           AND (retry_at IS NULL OR retry_at <= now())`
+    );
+
     const posts = await db.execute<PostRow>(
         `SELECT id, user_id, organisation_id, caption, hashtags, connection_id,
                 attempt_count, publish_date, platform, content_asset_ids, assistant_id
@@ -100,6 +110,10 @@ export default withLambda(async () => {
     await db.update(scheduledPosts).set({ status: 'publishing', updatedAt: new Date() })
         .where(inArray(scheduledPosts.id, posts.map(p => p.id)));
     processed = posts.length;
+
+    // Orgs already notified this tick that their X allowance is spent — one notification per org,
+    // not one per paused post.
+    const xPausedOrgs = new Set<number>();
 
     await Promise.allSettled(posts.map(async post => {
         try {
@@ -134,11 +148,37 @@ export default withLambda(async () => {
             // in the claim query above must have its own arm and anything unrecognised must throw.
             let result: DriverResult;
             if (post.platform === 'x') {
+                // X charges per request (text ~$0.015, any link ~$0.20), so hold from this org's
+                // monthly X allowance BEFORE calling the API. If the allowance is spent, PAUSE the
+                // post — no API call, no spend — and it auto-resumes next month.
+                // Fail OPEN: if the credit engine itself errors (e.g. the migration hasn't run yet),
+                // never block a legitimate post on it — publish unmetered and log.
+                const xCost = xPostCost(text);
+                let metered = false;
+                try {
+                    const xHold = await holdXCredits(db, { orgId: post.organisation_id, amount: xCost });
+                    if (!xHold.ok) {
+                        await pauseForXCredits(db, post, xPausedOrgs, now);
+                        return;
+                    }
+                    metered = true;
+                } catch (e) {
+                    console.warn(`[publish-social-posts] X credit hold failed for post ${post.id}, publishing unmetered:`, (e as Error)?.message || e);
+                }
                 result = await publishX(text, token, image);
                 // Token expired → refresh once and retry.
                 if (!result.ok && result.status === 401 && creds.refresh) {
                     const fresh = await creds.refresh();
                     if (fresh) { token = fresh; result = await publishX(text, token, image); }
+                }
+                // Settle: success keeps + ledgers the spend; any failure refunds it (a failed post
+                // is never charged, and the retry re-holds on its next attempt).
+                if (metered) {
+                    try {
+                        await settleXHold(db, { orgId: post.organisation_id, amount: xCost, success: result.ok, hasLink: xPostHasLink(text), userId: post.user_id });
+                    } catch (e) {
+                        console.warn(`[publish-social-posts] X credit settle failed for post ${post.id}:`, (e as Error)?.message || e);
+                    }
                 }
             } else if (post.platform === 'linkedin') {
                 result = await publishLinkedIn(text, token, creds.externalUserId, image);
@@ -245,5 +285,28 @@ async function handleFailure(db: ReturnType<typeof getDb>, post: PostRow, reason
         await db.execute(
             `UPDATE scheduled_posts SET status = 'scheduled', retry_at = '${retryAt}', attempt_count = ${attempt}, failure_reason = '${esc(JSON.stringify(reason))}', updated_at = now() WHERE id = ${post.id}`
         );
+    }
+}
+
+// The org has spent its monthly X allowance. Move the post to the distinct 'paused_credits' status
+// (never picked up by the publisher, never counted as a failure or an attempt) and stamp retry_at
+// at the first of next month, when the allowance resets and the resume sweep re-queues it. Notify
+// the org at most once per tick. This is NOT a failure — no attempt_count bump, no post_publish_failed.
+async function pauseForXCredits(db: ReturnType<typeof getDb>, post: PostRow, notifiedOrgs: Set<number>, now: Date) {
+    const resumeAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 5, 0));
+    await db.execute(
+        `UPDATE scheduled_posts
+            SET status = 'paused_credits',
+                retry_at = '${resumeAt.toISOString()}',
+                failure_reason = '${esc(JSON.stringify({ httpStatus: null, errorMessage: 'X monthly posting allowance reached — paused until it resets.', isRetryable: false, reason: 'x_credits_exhausted' }))}',
+                updated_at = now()
+          WHERE id = ${post.id}`
+    );
+    if (!notifiedOrgs.has(post.organisation_id)) {
+        notifiedOrgs.add(post.organisation_id);
+        await createNotification(db, 'x_credits_exhausted', {
+            userId: post.user_id,
+            metadata: { postId: post.id, platform: 'x', assistantId: post.assistant_id },
+        });
     }
 }

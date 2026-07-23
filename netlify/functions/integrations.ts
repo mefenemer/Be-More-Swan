@@ -7,6 +7,7 @@ import { createNotification } from '../../src/utils/notify';
 import { storeSecret, deleteSecret, buildRefKey } from '../../src/utils/vault';
 import { deleteIntegration, isIntegrationProvider, serviceAutoRefreshes } from '../../src/utils/workspace-integrations';
 import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsForAssistant, supportedToolsForAssistant } from '../../src/utils/connection-map';
+import { getXUsage } from '../../src/utils/ai-credits';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -147,6 +148,16 @@ export default withLambda(async (event) => {
                     serviceAutoRefreshes(m.serviceName) || CRON_REFRESHED.has(m.serviceName);
             }
 
+            // X posting usage for the monthly-allowance gauge on the X connection card (Phase 1).
+            // Defensive: never let the gauge lookup break the connections page — e.g. before the
+            // db/x-post-credits.sql migration has run, its columns don't exist. Degrade to no gauge.
+            let xCredits: { used: number; allowance: number; remaining: number } | null = null;
+            try {
+                if (currentOrgId) xCredits = await getXUsage(db, currentOrgId);
+            } catch (e) {
+                console.warn('[integrations] X usage lookup failed (migration pending?):', (e as Error).message);
+            }
+
             // Server-side connection sandboxing: when scoped to an assistant, return
             // only the connectors relevant to its role (defence in depth — the UI also
             // filters, but the server is authoritative). Invalid assistant → 400.
@@ -168,10 +179,10 @@ export default withLambda(async (event) => {
                 // Connections grid and onboarding summary can show what the assistant
                 // supports, not just what already has a connector.
                 const supportedTools = supportedToolsForAssistant(assistant);
-                return { statusCode: 200, body: JSON.stringify({ connections: visible, allowedServices, supportedTools }) };
+                return { statusCode: 200, body: JSON.stringify({ connections: visible, allowedServices, supportedTools, xCredits }) };
             }
 
-            return { statusCode: 200, body: JSON.stringify({ connections: merged }) };
+            return { statusCode: 200, body: JSON.stringify({ connections: merged, xCredits }) };
         }
 
         // --- POST: SECURE CONNECTION CREATION ---

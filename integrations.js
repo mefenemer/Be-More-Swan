@@ -253,6 +253,32 @@ window._intBrowseCanvaDesigns = function () {
 
 let _connToDelete = null;
 let _userConnections = [];
+// Monthly X posting usage { used, allowance, remaining } (Phase 1) — drives the X-card gauge.
+let _xCredits = null;
+
+// A slim usage gauge for the X card: "X posts this month — used / allowance", bar turns amber near
+// the cap and red when spent. Only rendered for the X platform when the org has an allowance.
+function _xUsageGauge(platform) {
+    if (platform.id !== 'X' || !_xCredits || _xCredits.allowance <= 0) return '';
+    const used = Math.max(0, _xCredits.used);
+    const allowance = _xCredits.allowance;
+    const pct = Math.min(100, Math.round((used / allowance) * 100));
+    const spent = used >= allowance;
+    const near = !spent && pct >= 80;
+    const barColor = spent ? 'bg-red-500' : near ? 'bg-amber-500' : 'bg-emerald-600';
+    const textColor = spent ? 'text-red-700' : near ? 'text-amber-700' : 'text-gray-500';
+    const note = spent
+        ? 'Monthly limit reached — new X posts pause until next month.'
+        : `${_xCredits.remaining} left this month (links cost 13×).`;
+    return `
+        <div class="mt-1">
+            <div class="flex items-center justify-between text-[11px] font-semibold ${textColor} mb-1">
+                <span>X posts this month</span><span>${used} / ${allowance}</span>
+            </div>
+            <div class="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden"><div class="h-full ${barColor} rounded-full" style="width:${pct}%"></div></div>
+            <p class="text-[11px] ${textColor} mt-1">${_esc(note)}</p>
+        </div>`;
+}
 
 // ── Per-assistant relevance ──────────────────────────────────────
 // The relevance policy is owned and ENFORCED server-side (src/utils/connection-map.ts).
@@ -496,6 +522,8 @@ async function _loadConnections() {
         _allowedServices = Array.isArray(data.allowedServices) ? data.allowedServices : null;
         // Supported external tools for this assistant's role, incl. "coming soon" ones.
         _supportedTools = Array.isArray(data.supportedTools) ? data.supportedTools : [];
+        // Monthly X posting usage { used, allowance, remaining } for the X-card gauge (Phase 1).
+        _xCredits = (data.xCredits && typeof data.xCredits.allowance === 'number') ? data.xCredits : null;
     } catch (e) {
         console.warn('Could not load connections:', e);
     }
@@ -1206,6 +1234,7 @@ function _platformCard(platform, conn) {
                 <p class="font-bold text-gray-900">Publish approved posts to ${_esc(platform.label)}</p>
                 <p class="text-sm text-gray-500 mt-1">${_esc(platform.tagline)}</p>
                 ${handleChip}
+                ${_xUsageGauge(platform)}
             </div>
             ${connectControl}
             ${enableToggle}
@@ -1226,6 +1255,7 @@ function _platformCard(platform, conn) {
                 <div class="shrink-0">${statusBadge}</div>
             </div>
             ${handleChip}
+            ${_xUsageGauge(platform)}
             ${preflightBadge ? `<div>${preflightBadge}</div>` : ''}
             ${action}
             ${useToggle}

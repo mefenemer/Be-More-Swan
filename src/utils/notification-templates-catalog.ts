@@ -607,6 +607,15 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [v('facebook.page_name', 'Connected Facebook Page name', 'your Page')],
     },
     {
+        templateKey: 'x_credits_exhausted',
+        name: 'X monthly limit reached',
+        category: 'Connections',
+        type: 'x_credits_exhausted',
+        title: 'X posting paused — monthly limit reached',
+        message: 'You’ve used this month’s X (Twitter) posting allowance, so new X posts are paused. They resume automatically at the start of next month — or upgrade your plan for a higher allowance.',
+        variables: [],
+    },
+    {
         templateKey: 'social_disconnected',
         name: 'Connection disconnected',
         category: 'Connections',

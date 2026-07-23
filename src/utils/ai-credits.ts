@@ -209,6 +209,117 @@ export async function settleHold(db: Db, params: {
     }
 }
 
+// ── X (Twitter) posting credits (Phase 1) ────────────────────────────────────────────────────────
+// A SEPARATE budget from the image/video pool above (Option A): X posts never touch `balance`.
+// Instead x_used counts spend within the current UTC month against the plan's monthly_x_credits
+// ceiling, RESET (not rolled over) each month so per-tier exposure is fixed. A text post costs 1;
+// a post containing any URL costs 13 — mirroring X's ~$0.015 vs ~$0.20 per-request pricing (the
+// "link penalty"). See db/x-post-credits.sql.
+export const X_TEXT_COST = 1;
+export const X_LINK_COST = 13;
+
+// A post "contains a link" if the exact text we send to X has a URL — X applies its link penalty
+// to any post carrying one. Matches http(s)://, www., and bare domains on common TLDs.
+const X_URL_RE = /(https?:\/\/|www\.)\S+|\b[a-z0-9][a-z0-9-]*\.(?:com|net|org|io|co|uk|ai|app|dev|me|xyz|link|shop|store|biz|info|news|blog|social|gg|ly)\b/i;
+export function xPostHasLink(text: string): boolean {
+    return X_URL_RE.test(text || '');
+}
+export function xPostCost(text: string): number {
+    return xPostHasLink(text) ? X_LINK_COST : X_TEXT_COST;
+}
+
+/** The active plan's monthly X-post allowance for an org (0 if none / not configured). */
+export async function monthlyXAllowance(db: Db, orgId: number): Promise<number> {
+    // Mirrors monthlyAllowance(): honour a frozen feature_overrides snapshot, else live features.
+    const rows = await db.execute<{ monthly_x_credits: unknown }>(sql`
+        SELECT CASE WHEN p.feature_overrides IS NOT NULL
+                    THEN p.feature_overrides -> 'features' ->> 'monthly_x_credits'
+                    ELSE mp.features ->> 'monthly_x_credits' END AS monthly_x_credits
+        FROM plans p
+        JOIN master_plans mp ON mp.id = p.master_plan_id
+        WHERE p.organisation_id = ${orgId} AND p.status = 'active'
+        ORDER BY p.started_at
+        LIMIT 1
+    `);
+    const raw = rows[0]?.monthly_x_credits;
+    const n = raw == null ? 0 : parseInt(String(raw), 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/** RESET x_used at the start of a new UTC month (not rollover). Ensures the balance row exists. */
+async function ensureXPeriod(db: Db, orgId: number): Promise<void> {
+    const period = ymd(getPeriodStart());
+    await db.execute(sql`
+        INSERT INTO ai_credit_balance (organisation_id, balance, held, x_used, x_period_start)
+        VALUES (${orgId}, 0, 0, 0, ${period}::date)
+        ON CONFLICT (organisation_id) DO NOTHING
+    `);
+    await db.execute(sql`
+        UPDATE ai_credit_balance
+        SET x_used = 0, x_period_start = ${period}::date, updated_at = now()
+        WHERE organisation_id = ${orgId}
+          AND (x_period_start IS NULL OR x_period_start < ${period}::date)
+    `);
+}
+
+export interface XUsage { used: number; allowance: number; remaining: number; }
+
+/** Current-month X usage for an org (applies the monthly reset first). */
+export async function getXUsage(db: Db, orgId: number): Promise<XUsage> {
+    await ensureXPeriod(db, orgId);
+    const allowance = await monthlyXAllowance(db, orgId);
+    const rows = await db.execute<{ x_used: number }>(sql`
+        SELECT x_used FROM ai_credit_balance WHERE organisation_id = ${orgId}
+    `);
+    const used = rows[0]?.x_used ?? 0;
+    return { used, allowance, remaining: Math.max(allowance - used, 0) };
+}
+
+/**
+ * Atomically reserve `amount` X credits within the month's allowance (x_used += amount, capped).
+ * Returns { ok:false } when the cap would be exceeded — the caller PAUSES the post rather than
+ * calling X (no API request, no spend). Race-safe via the single guarded UPDATE.
+ */
+export async function holdXCredits(db: Db, params: { orgId: number; amount: number }): Promise<{ ok: boolean; used: number; allowance: number }> {
+    await ensureXPeriod(db, params.orgId);
+    const allowance = await monthlyXAllowance(db, params.orgId);
+    const rows = await db.execute<{ x_used: number }>(sql`
+        UPDATE ai_credit_balance
+        SET x_used = x_used + ${params.amount}, updated_at = now()
+        WHERE organisation_id = ${params.orgId}
+          AND x_used + ${params.amount} <= ${allowance}
+        RETURNING x_used
+    `);
+    if (rows[0]) return { ok: true, used: rows[0].x_used, allowance };
+    const cur = await getXUsage(db, params.orgId);
+    return { ok: false, used: cur.used, allowance };
+}
+
+/**
+ * Settle a held X charge after the publish attempt.
+ *   success=true  → keep the spend and record a debit in ai_credit_ledger.
+ *   success=false → refund (x_used -= amount); a failed post is never charged (mirrors settleHold).
+ */
+export async function settleXHold(db: Db, params: {
+    orgId: number; amount: number; success: boolean; hasLink: boolean; userId?: number | null;
+}): Promise<void> {
+    if (params.success) {
+        // balance_after / job_id are image/video concepts — leave them null for X debits so the
+        // ledger column semantics stay clean; the reason + delta + timestamp are the X audit trail.
+        await db.execute(sql`
+            INSERT INTO ai_credit_ledger (organisation_id, user_id, delta, reason, balance_after)
+            VALUES (${params.orgId}, ${params.userId ?? null}, ${-params.amount},
+                    ${params.hasLink ? 'x_post_link' : 'x_post_text'}, NULL)
+        `);
+    } else {
+        await db.execute(sql`
+            UPDATE ai_credit_balance
+            SET x_used = GREATEST(x_used - ${params.amount}, 0), updated_at = now()
+            WHERE organisation_id = ${params.orgId}
+        `);
+    }
+}
+
 /** Admin credit grant/deduction (Epic 2, US4 admin tooling). Positive = grant, negative = deduct. */
 export async function adminAdjust(db: Db, params: {
     orgId: number;
