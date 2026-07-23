@@ -286,16 +286,29 @@ function _xUsageGauge(platform) {
         </div>`;
 }
 
-// Booster-pack picker (Phase 2). Labels/prices mirror X_CREDIT_PACKS in src/utils/ai-credits.ts;
-// the server re-validates packId, so any drift fails safe with a 400 rather than a wrong charge.
-const _X_PACKS = [
-    { id: 'x_small',  label: '500 X credits',   price: '£12' },
-    { id: 'x_medium', label: '1,500 X credits', price: '£30' },
-    { id: 'x_large',  label: '5,000 X credits', price: '£90' },
-];
+// Booster-pack picker (Phase 2). Prices/currencies MIRROR X_CREDIT_PACKS + xPackPrice in
+// src/utils/ai-credits.ts — keep in sync. The server re-prices authoritatively, so any drift fails
+// safe (display-only). Currency follows the user's pricing-page choice (localStorage 'aura_currency').
+const _X_PACK_PRICES = {
+    x_small:  { credits: 500,  prices: { GBP: 1200, USD: 1500,  EUR: 1300, AUD: 2200,  CAD: 1900 } },
+    x_medium: { credits: 1500, prices: { GBP: 3000, USD: 3800,  EUR: 3300, AUD: 5500,  CAD: 4800 } },
+    x_large:  { credits: 5000, prices: { GBP: 9000, USD: 11500, EUR: 9900, AUD: 16500, CAD: 14500 } },
+};
+const _X_CUR_SYMBOL = { GBP: '£', USD: '$', EUR: '€', AUD: 'A$', CAD: 'C$' };
+function _xCurrency() {
+    let c = 'GBP';
+    try { c = (localStorage.getItem('aura_currency') || 'GBP').toUpperCase(); } catch { /* ignore */ }
+    return _X_CUR_SYMBOL[c] ? c : 'GBP';
+}
+function _xFmtPrice(packId, currency) {
+    const p = _X_PACK_PRICES[packId];
+    const minor = p && p.prices[currency] != null ? p.prices[currency] : p.prices.GBP;
+    return `${_X_CUR_SYMBOL[currency] || '£'}${(minor / 100).toLocaleString()}`;
+}
 window._xOpenBuyCredits = function () {
     const existing = document.getElementById('x-buy-credits-modal');
     if (existing) existing.remove();
+    const currency = _xCurrency();
     const modal = document.createElement('div');
     modal.id = 'x-buy-credits-modal';
     modal.className = 'fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 p-4';
@@ -307,10 +320,10 @@ window._xOpenBuyCredits = function () {
         </div>
         <p class="text-xs text-gray-500 mb-4">Top up your X allowance. Purchased credits don’t expire and are used after your monthly allowance. A link post costs 13 credits; a text post costs 1.</p>
         <div class="flex flex-col gap-2">
-          ${_X_PACKS.map(p => `
-            <button type="button" onclick="window._xBuyCredits('${p.id}', this)" class="flex items-center justify-between w-full px-4 py-3 border border-gray-200 rounded-xl hover:border-emerald-300 hover:bg-emerald-50 transition cursor-pointer text-left">
-              <span class="text-sm font-bold text-gray-800">${p.label}</span>
-              <span class="text-sm font-bold text-emerald-700">${p.price}</span>
+          ${Object.keys(_X_PACK_PRICES).map(id => `
+            <button type="button" onclick="window._xBuyCredits('${id}', this)" class="flex items-center justify-between w-full px-4 py-3 border border-gray-200 rounded-xl hover:border-emerald-300 hover:bg-emerald-50 transition cursor-pointer text-left">
+              <span class="text-sm font-bold text-gray-800">${_X_PACK_PRICES[id].credits.toLocaleString()} X credits</span>
+              <span class="text-sm font-bold text-emerald-700">${_xFmtPrice(id, currency)}</span>
             </button>`).join('')}
         </div>
         <p id="x-buy-credits-err" class="hidden text-xs font-semibold text-red-600 mt-3"></p>
@@ -325,7 +338,7 @@ window._xBuyCredits = async function (packId, btn) {
     try {
         const res = await fetch('/.netlify/functions/create-x-credit-checkout', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ packId }),
+            body: JSON.stringify({ packId, currency: _xCurrency() }),
         });
         const data = await res.json().catch(() => ({}));
         if (res.ok && data.url) { window.location.href = data.url; return; }

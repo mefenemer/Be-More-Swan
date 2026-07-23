@@ -332,14 +332,26 @@ export async function settleXHold(db: Db, params: {
 // Self-serve top-up: purchased credits land in x_bonus (persistent, consumed after the monthly
 // allowance). Priced ~£0.02/credit (raw X cost ≈ £0.012/credit) for margin; bulk packs discount.
 // `id` is the stable key sent to Stripe metadata — never renumber existing packs.
-export interface XCreditPack { id: string; credits: number; priceGbpMinor: number; label: string; }
+//
+// Multi-currency: `prices` holds the minor-unit amount PER currency (mirrors the 5 currencies the
+// plan checkout supports). The keys are lowercase Stripe currency codes. GBP is the base; the
+// others track the plan-price FX ratios (pricing.html CURRENCY_CONFIG), rounded to clean amounts.
+export const X_PACK_CURRENCIES = ['gbp', 'usd', 'eur', 'aud', 'cad'] as const;
+export interface XCreditPack { id: string; credits: number; label: string; prices: Record<string, number>; }
 export const X_CREDIT_PACKS: XCreditPack[] = [
-    { id: 'x_small',  credits: 500,  priceGbpMinor: 1200, label: '500 X credits' },
-    { id: 'x_medium', credits: 1500, priceGbpMinor: 3000, label: '1,500 X credits' },
-    { id: 'x_large',  credits: 5000, priceGbpMinor: 9000, label: '5,000 X credits' },
+    { id: 'x_small',  credits: 500,  label: '500 X credits',   prices: { gbp: 1200, usd: 1500,  eur: 1300, aud: 2200,  cad: 1900 } },
+    { id: 'x_medium', credits: 1500, label: '1,500 X credits', prices: { gbp: 3000, usd: 3800,  eur: 3300, aud: 5500,  cad: 4800 } },
+    { id: 'x_large',  credits: 5000, label: '5,000 X credits', prices: { gbp: 9000, usd: 11500, eur: 9900, aud: 16500, cad: 14500 } },
 ];
 export function xCreditPack(id: string): XCreditPack | undefined {
     return X_CREDIT_PACKS.find(p => p.id === id);
+}
+/** Minor-unit price of a pack in the requested currency, falling back to GBP for anything unknown. */
+export function xPackPrice(pack: XCreditPack, currency: string): { currency: string; amountMinor: number } {
+    const cur = (currency || 'gbp').toLowerCase();
+    return pack.prices[cur] != null
+        ? { currency: cur, amountMinor: pack.prices[cur] }
+        : { currency: 'gbp', amountMinor: pack.prices.gbp };
 }
 
 /**

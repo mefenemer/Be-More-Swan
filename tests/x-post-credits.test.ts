@@ -8,7 +8,7 @@
 // over-charges it. Pure logic — no DB required.
 
 import assert from 'node:assert';
-import { xPostHasLink, xPostCost, X_TEXT_COST, X_LINK_COST, X_CREDIT_PACKS, xCreditPack } from '../src/utils/ai-credits';
+import { xPostHasLink, xPostCost, X_TEXT_COST, X_LINK_COST, X_CREDIT_PACKS, xCreditPack, xPackPrice, X_PACK_CURRENCIES } from '../src/utils/ai-credits';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -56,12 +56,16 @@ check('the link multiplier matches X pricing intent (~13×)', () => {
     assert.equal(X_LINK_COST, 13);
 });
 
-check('booster packs are well-formed and priced with margin over raw X cost', () => {
+check('booster packs are well-formed, multi-currency, and priced with margin over raw X cost', () => {
     assert.ok(X_CREDIT_PACKS.length >= 1, 'at least one pack');
     for (const p of X_CREDIT_PACKS) {
-        assert.ok(p.id && p.credits > 0 && p.priceGbpMinor > 0, `${p.id} well-formed`);
-        // Raw X cost per credit ≈ £0.012 ($0.015). A pack must charge MORE than that (margin).
-        const pencePerCredit = p.priceGbpMinor / p.credits;
+        assert.ok(p.id && p.credits > 0, `${p.id} well-formed`);
+        // Every supported currency must be priced.
+        for (const cur of X_PACK_CURRENCIES) {
+            assert.ok(p.prices[cur] > 0, `${p.id} has a ${cur} price`);
+        }
+        // Raw X cost per credit ≈ £0.012 ($0.015). The GBP price must charge MORE than that (margin).
+        const pencePerCredit = p.prices.gbp / p.credits;
         assert.ok(pencePerCredit > 1.2, `${p.id} priced above raw cost (${pencePerCredit.toFixed(2)}p/credit)`);
     }
     // Ids must be unique — they're the stable Stripe metadata key.
@@ -72,6 +76,15 @@ check('xCreditPack resolves known ids and rejects unknown ones', () => {
     assert.equal(xCreditPack('x_medium')?.credits, 1500);
     assert.equal(xCreditPack('nope'), undefined);
     assert.equal(xCreditPack(''), undefined);
+});
+
+check('xPackPrice returns the requested currency, falling back to GBP', () => {
+    const pack = xCreditPack('x_medium')!;
+    assert.deepEqual(xPackPrice(pack, 'USD'), { currency: 'usd', amountMinor: pack.prices.usd });
+    assert.deepEqual(xPackPrice(pack, 'eur'), { currency: 'eur', amountMinor: pack.prices.eur });
+    // Unknown / unsupported currency → GBP.
+    assert.deepEqual(xPackPrice(pack, 'JPY'), { currency: 'gbp', amountMinor: pack.prices.gbp });
+    assert.deepEqual(xPackPrice(pack, ''),    { currency: 'gbp', amountMinor: pack.prices.gbp });
 });
 
 console.log(`\n${passed} passed`);

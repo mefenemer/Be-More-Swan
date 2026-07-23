@@ -64,6 +64,9 @@ const DEFS: Def[] = [
     { key: 'app_connections', label: 'App Connection Details', description: 'The tools and platforms your assistants can connect to and work within',
       category: 'Capacity', valueType: 'text', storageTarget: 'feature', enterpriseValue: 'Bespoke app limits & custom internal system integrations',
       values: { saver: 'Connect up to 4 everyday apps', buster: 'Connect up to 10 standard apps to power your digital department', employee: 'Connect up to 15 apps (unlocks Premium Tool integrations like CRM and e-commerce)' } },
+    { key: 'monthly_x_credits', label: 'X (Twitter) Posting Credits / Month', description: 'Credits for posting to X each month — a text post costs 1 credit, a post with a link costs 13. Buy more any time; purchased credits never expire.',
+      category: 'Capacity', valueType: 'number', storageTarget: 'feature', unlimitedLabel: 'Custom', enterpriseValue: 'Custom',
+      values: { saver: 150, buster: 500, employee: 1500 } },
 
     // ── AI Media Generation ───────────────────────────────────────────────────
     { key: 'monthly_ai_credits', label: 'AI Media Credits / Month', description: 'Credits included each month for AI media generation (image = 1 credit, video = 5 credits)',

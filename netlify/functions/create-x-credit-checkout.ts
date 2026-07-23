@@ -13,7 +13,7 @@ import { getDb } from '../../db/client';
 import { users } from '../../db/schema';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
-import { xCreditPack } from '../../src/utils/ai-credits';
+import { xCreditPack, xPackPrice } from '../../src/utils/ai-credits';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' });
@@ -29,12 +29,15 @@ export default withLambda(async (event) => {
     const baseUrl = resolveBaseUrl(event.headers);
     if (!baseUrl) return { statusCode: 500, body: JSON.stringify({ error: 'Server misconfigured: base URL unavailable' }) };
 
-    let packId: string;
-    try { ({ packId } = JSON.parse(event.body || '{}')); }
+    let packId: string; let requestedCurrency: string | undefined;
+    try { ({ packId, currency: requestedCurrency } = JSON.parse(event.body || '{}')); }
     catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON body' }) }; }
 
     const pack = xCreditPack(packId);
     if (!pack) return { statusCode: 400, body: JSON.stringify({ error: 'Unknown X credit pack' }) };
+
+    // Price authoritatively server-side in the requested currency (unknown → GBP).
+    const { currency, amountMinor } = xPackPrice(pack, requestedCurrency || 'gbp');
 
     const [user] = await db.select({ id: users.id, email: users.email })
         .from(users).where(eq(users.id, currentUserId)).limit(1);
@@ -46,9 +49,9 @@ export default withLambda(async (event) => {
             line_items: [{
                 quantity: 1,
                 price_data: {
-                    currency: 'gbp',
+                    currency,
                     product_data: { name: `Be More Swan — ${pack.label}` },
-                    unit_amount: pack.priceGbpMinor,
+                    unit_amount: amountMinor,
                 },
             }],
             customer_email: user.email,
