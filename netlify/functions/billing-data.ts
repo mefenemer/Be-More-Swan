@@ -9,6 +9,7 @@ import Stripe from 'stripe';
 import { eq, desc, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, plans, payments, masterPlans, storageUsage, userOrganisations } from '../../db/schema';
+import { summariseDiscount } from '../../src/utils/billing-doc';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -207,67 +208,8 @@ export default withLambda(async (event) => {
         }
 
         // ── 4. Build response ─────────────────────────────────────
-
-        const CURRENCY_SYMBOL: Record<string, string> = { gbp: '£', usd: '$', eur: '€', aud: 'A$', cad: 'C$' };
-        const fmtMinor = (minor: number, currency: string) =>
-            `${CURRENCY_SYMBOL[currency?.toLowerCase()] ?? ''}${(minor / 100).toFixed(2)}`;
-
-        /**
-         * Summarise a Stripe subscription's voucher into what the billing page needs to answer
-         * three questions: which voucher was used, how much of the price it covers, and what is
-         * left to pay. Percent and fixed-amount coupons both resolve to the same shape, so the UI
-         * renders one thing. Returns null when no voucher is applied.
-         *
-         * `grossMinor` is the undiscounted recurring total in minor units — the figure the coupon
-         * applies to. Stripe applies multiple discounts sequentially, so they are folded in order
-         * rather than summed against the original.
-         */
-        function summariseDiscount(discounts: any[], grossMinor: number, currency: string) {
-            const active = (discounts || []).filter(d => d && typeof d === 'object' && d.coupon);
-            if (!active.length || !(grossMinor > 0)) return null;
-
-            let remaining = grossMinor;
-            const parts: Array<{ code: string | null; name: string | null; label: string }> = [];
-            let endsAt: string | null = null;
-            let duration: string | null = null;
-            let durationInMonths: number | null = null;
-
-            for (const d of active) {
-                const c = d.coupon;
-                if (c.percent_off) {
-                    remaining -= Math.round(remaining * (c.percent_off / 100));
-                    parts.push({ code: d.promotion_code?.code ?? null, name: c.name ?? null, label: `${c.percent_off}% off` });
-                } else if (c.amount_off) {
-                    remaining = Math.max(0, remaining - c.amount_off);
-                    parts.push({ code: d.promotion_code?.code ?? null, name: c.name ?? null, label: `${fmtMinor(c.amount_off, currency)} off` });
-                } else {
-                    continue;
-                }
-                // Surface the shortest-lived discount's end date — that's when the price changes.
-                if (d.end) {
-                    const iso = new Date(d.end * 1000).toISOString();
-                    if (!endsAt || iso < endsAt) endsAt = iso;
-                }
-                if (!duration) { duration = c.duration ?? null; durationInMonths = c.duration_in_months ?? null; }
-            }
-            if (!parts.length) return null;
-
-            const discountMinor = grossMinor - remaining;
-            return {
-                codes: parts.map(p => p.code).filter(Boolean) as string[],
-                name: parts[0].name,
-                label: parts.map(p => p.label).join(' + '),
-                grossAmount: grossMinor / 100,
-                discountAmount: discountMinor / 100,
-                netAmount: remaining / 100,
-                // Derived for BOTH coupon types so the UI always has a "% covered" to show.
-                percentCovered: Math.round((discountMinor / grossMinor) * 1000) / 10,
-                duration,
-                durationInMonths,
-                endsAt,
-                currency,
-            };
-        }
+        // Voucher summary logic is shared with the printable invoice/receipt — see
+        // src/utils/billing-doc.ts::summariseDiscount so all three surfaces show the same figures.
 
         const subscriptions = userPlans.map(plan => {
             const mp = plan.masterPlanId ? masterPlanMap[plan.masterPlanId] : null;

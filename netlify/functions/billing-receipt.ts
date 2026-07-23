@@ -5,12 +5,18 @@
 
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
+import Stripe from 'stripe';
 import { eq, and } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, payments, plans, organisations, userOrganisations } from '../../db/schema';
+import { users, payments, plans, organisations, userOrganisations, invoices } from '../../db/schema';
+import { bmsDocCss, bmsHeader, voucherCallout, resolveInvoiceVoucher, currencySymbol, BMS } from '../../src/utils/billing-doc';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
+const stripe = process.env.STRIPE_SECRET_KEY
+    ? new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2026-05-27.dahlia' })
+    : null;
+const LOGO_URL = '/images/BeMoreSwan_SwanAI.png';
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -91,7 +97,28 @@ export default withLambda(async (event) => {
         })();
 
         const statusLabel = payment.status === 'completed' || payment.status === 'paid' ? 'Paid' : _cap(payment.status || '');
-        const statusColor = statusLabel === 'Paid' ? '#059669' : '#d97706';
+        const statusColor = statusLabel === 'Paid' ? BMS.green : '#d97706';
+
+        // ── Voucher (best-effort) ─────────────────────────────────
+        // payments store no discount; resolve the voucher from the payment's linked Stripe invoice
+        // (found via the invoices table, which shares the payment-intent id). Same figures as the
+        // billing page. Null when Stripe is off, unlinked, or no voucher applied.
+        let voucher = null as Awaited<ReturnType<typeof resolveInvoiceVoucher>>;
+        if (payment.externalPaymentId) {
+            const [linkedInvoice] = await db.select({ stripeInvoiceId: invoices.stripeInvoiceId })
+                .from(invoices)
+                .where(and(eq(invoices.userId, userId), eq(invoices.stripePaymentIntentId, payment.externalPaymentId)))
+                .limit(1);
+            voucher = await resolveInvoiceVoucher(stripe, linkedInvoice?.stripeInvoiceId);
+        }
+        const netPaidNum = payment.amount ? parseFloat(String(payment.amount)) : 0;
+        const csym = currencySymbol(currency);
+
+        // Voucher-aware amount breakdown: the payment stores the NET paid, so the pre-voucher price
+        // is net + saved. Shown as rows above the total only when a voucher applied.
+        const voucherRows = voucher ? `
+      <div class="row"><span class="label">Price before voucher</span><span class="value">${csym}${(netPaidNum + voucher.discountAmount).toFixed(2)}</span></div>
+      <div class="row"><span class="label">Voucher${voucher.codes[0] ? ` (${_esc(voucher.codes[0])})` : ''} — ${_esc(voucher.label)}</span><span class="value" style="color:${BMS.pinkDeep}">−${csym}${voucher.discountAmount.toFixed(2)}</span></div>` : '';
 
         const html = `<!DOCTYPE html>
 <html lang="en">
@@ -99,48 +126,18 @@ export default withLambda(async (event) => {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Receipt ${receiptNo} — Be More Swan</title>
-<style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f9fafb; color: #111827; }
-  .page { max-width: 680px; margin: 40px auto; background: #fff; border-radius: 16px; box-shadow: 0 4px 24px rgba(0,0,0,.08); overflow: hidden; }
-  .header { background: linear-gradient(135deg, #064e3b 0%, #065f46 100%); padding: 36px 40px; color: #fff; display: flex; justify-content: space-between; align-items: flex-start; }
-  .logo { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }
-  .logo span { color: #6ee7b7; }
-  .receipt-label { text-align: right; }
-  .receipt-label p { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; opacity: .7; }
-  .receipt-label h2 { font-size: 20px; font-weight: 700; margin-top: 2px; }
-  .receipt-label .date { font-size: 13px; opacity: .8; margin-top: 4px; }
-  .body { padding: 36px 40px; }
-  .section { margin-bottom: 28px; }
-  .section-title { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: #9ca3af; margin-bottom: 12px; }
-  .row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f3f4f6; font-size: 14px; }
-  .row:last-child { border-bottom: none; }
-  .row .label { color: #6b7280; }
-  .row .value { font-weight: 600; color: #111827; text-align: right; }
-  .total-row { display: flex; justify-content: space-between; align-items: center; padding: 16px 0; border-top: 2px solid #111827; margin-top: 8px; }
-  .total-row .label { font-size: 15px; font-weight: 700; }
-  .total-row .value { font-size: 24px; font-weight: 800; }
-  .status-badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; color: #fff; background: ${statusColor}; }
-  .footer { background: #f9fafb; border-top: 1px solid #f3f4f6; padding: 20px 40px; display: flex; justify-content: space-between; align-items: center; }
-  .footer p { font-size: 12px; color: #9ca3af; }
-  .footer a { color: #059669; text-decoration: none; font-weight: 600; }
-  @media print {
-    body { background: #fff; }
-    .page { box-shadow: none; margin: 0; border-radius: 0; }
-    .no-print { display: none; }
-  }
-</style>
+<style>${bmsDocCss(statusColor)}</style>
 </head>
 <body>
 <div class="page">
-  <div class="header">
-    <div class="logo">Be More Swan</div>
-    <div class="receipt-label">
-      <p>Payment Receipt</p>
-      <h2>${receiptNo}</h2>
-      <div class="date">${dateStr}</div>
-    </div>
-  </div>
+${bmsHeader({
+    logoUrl: LOGO_URL,
+    subtitle: 'AI teammates for your business',
+    metaHtml: `
+      <div class="eyebrow">Payment Receipt</div>
+      <div class="num">${receiptNo}</div>
+      <div class="date">${dateStr}</div>`,
+})}
 
   <div class="body">
 
@@ -158,19 +155,21 @@ export default withLambda(async (event) => {
       ${payment.cardPostalCode ? `<div class="row"><span class="label">Billing Postcode</span><span class="value">${_esc(payment.cardPostalCode)}</span></div>` : ''}
       <div class="row"><span class="label">Date</span><span class="value">${dateStr}</span></div>
       <div class="row"><span class="label">Status</span><span class="value"><span class="status-badge">${statusLabel}</span></span></div>
-      ${payment.externalPaymentId ? `<div class="row"><span class="label">Transaction ID</span><span class="value" style="font-size:12px;font-family:monospace">${_esc(payment.externalPaymentId)}</span></div>` : ''}
+      ${payment.externalPaymentId ? `<div class="row"><span class="label">Transaction ID</span><span class="value" style="font-size:12px;font-family:ui-monospace,monospace">${_esc(payment.externalPaymentId)}</span></div>` : ''}
     </div>
 
-    <div class="total-row">
-      <span class="label">Total Paid</span>
-      <span class="value">${_esc(amount)}</span>
+    ${voucherCallout(voucher)}
+
+    <div class="totals">
+      ${voucherRows}
+      <div class="t-total"><span class="t-label">Total Paid</span><span class="t-val">${_esc(amount)}</span></div>
     </div>
 
   </div>
 
   <div class="footer">
     <p>Be More Swan · <a href="mailto:support@bemoreswan.com">support@bemoreswan.com</a></p>
-    <p class="no-print"><a href="javascript:window.print()">🖨 Print / Save as PDF</a></p>
+    <p class="no-print"><button class="print-btn" onclick="window.print()">&#128438; Print / Save as PDF</button></p>
   </div>
 </div>
 </body>
