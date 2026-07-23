@@ -522,7 +522,16 @@ window._activateMainTab = function(name) {
     // Re-read the Data Hub each time it's opened, so records produced after page-load —
     // discovery-promoted leads, chat/integration records, Review-Queue approvals — appear
     // without a full reload. init() already ran at page setup; this only refetches.
-    if (name === 'datahub') window.AssistantDataHub?.refresh();
+    if (name === 'datahub') {
+        // A "post failed to publish" notification deep-links to the exact post (Request 6).
+        // Register the focus before refreshing so it lands on the render that follows.
+        const focusPostId = window._assistantDetailFocusPostId;
+        if (focusPostId != null) {
+            window._assistantDetailFocusPostId = null;
+            window.AssistantDataHub?.focusRecord(focusPostId);
+        }
+        window.AssistantDataHub?.refresh();
+    }
     // Render the per-assistant Calendar on first open (component scopes calendar.js to this assistant).
     if (name === 'calendar') window.AssistantCalendar?.show();
     // Render the My Content library on first open (component reuses my-content.html/.js).

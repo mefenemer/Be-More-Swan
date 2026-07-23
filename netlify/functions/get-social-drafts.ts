@@ -47,6 +47,11 @@ export default withLambda(async (event) => {
                 crosspostGroupId: scheduledPosts.crosspostGroupId,
                 rejectionReason: scheduledPosts.rejectionReason,
                 rejectedAt: scheduledPosts.rejectedAt,
+                // Failure state — without these a 'failed' post surfaces in the Content Library with
+                // no explanation and no way back into the queue (Request 6).
+                failureReason: scheduledPosts.failureReason,
+                attemptCount: scheduledPosts.attemptCount,
+                retryAt: scheduledPosts.retryAt,
                 ctaText: scheduledPosts.ctaText,
                 linkUrl: scheduledPosts.linkUrl,
                 postFormat: scheduledPosts.postFormat,
@@ -90,9 +95,19 @@ export default withLambda(async (event) => {
                 archiveDeletesAt = new Date(deletesAt).toISOString();
                 daysRemaining = Math.max(0, Math.ceil((deletesAt - now) / (24 * 60 * 60 * 1000)));
             }
+            // Every publisher stores failure_reason as { httpStatus, errorMessage, isRetryable },
+            // but flatten it defensively — older/foreign rows may hold a bare string, and the UI
+            // must show *something* useful rather than "[object Object]".
+            let failureMessage: string | null = null;
+            if (d.status === 'failed' && d.failureReason != null) {
+                const fr = d.failureReason as Record<string, unknown> | string;
+                failureMessage = typeof fr === 'string'
+                    ? fr
+                    : (typeof fr?.errorMessage === 'string' ? fr.errorMessage : null);
+            }
             // Older rows can hold a raw model reply (fenced JSON) in `caption` — unwrap it so the
             // editor shows the copy, and an edit-and-save persists the repair.
-            return { ...d, caption: displayCaption(d.caption), thumbnailUrl, archiveDeletesAt, daysRemaining };
+            return { ...d, caption: displayCaption(d.caption), thumbnailUrl, archiveDeletesAt, daysRemaining, failureMessage };
         }));
 
         // Workspace-wide footer state — drives whether the per-post "include disclosure footer"

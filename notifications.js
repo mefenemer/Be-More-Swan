@@ -211,6 +211,17 @@ window.NotifKit = (function () {
         // Draft post ready to review (incl. the media-needed/out-of-credits variant of ai_review) —
         // deep-link straight to that post's review modal instead of dropping the user on the
         // queue list to hunt for it.
+        // A post that failed to publish — deep-link to the post itself in its assistant's Content
+        // Library, where the row opens with the failure reason and the re-queue actions. Needs the
+        // assistant to route to; without it there's no page that can show the single post, so fall
+        // through to the generic "View content" CTA below.
+        if (notif.type === 'post_publish_failed' && meta.postId && meta.assistantId) {
+            return { label: 'View failed post', run: () => {
+                window._assistantDetailInitialTab = 'datahub';
+                window._assistantDetailFocusPostId = meta.postId;
+                window.routeToAssistantDetail?.(meta.assistantId);
+            } };
+        }
         if ((notif.type === 'post_draft_ready' || notif.type === 'ai_review') && meta.postId) {
             return { label: 'Review draft', run: () => window.loadView?.('review-queue', { postId: meta.postId }) };
         }

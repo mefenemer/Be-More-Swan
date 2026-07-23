@@ -134,7 +134,7 @@ export default withLambda(async (event: HandlerEvent) => {
 // a later attempt resume into a video the user may have edited or replaced in the meantime.
 async function settleFailure(
     db: ReturnType<typeof getDb>,
-    post: { id: number; userId: number; attemptCount: number | null },
+    post: { id: number; userId: number; attemptCount: number | null; assistantId?: number | null },
     error: string,
     retryable: boolean,
     httpStatus: number | null = null,
@@ -156,8 +156,11 @@ async function settleFailure(
     if (giveUp) {
         await createNotification(db, 'post_publish_failed', {
             userId: post.userId,
-            context: { platform: { label: 'YouTube' } },
-            metadata: { postId: post.id, platform: 'youtube', error },
+            // The template renders "Publishing to {{platform.label}} failed: {{failure.reason}}",
+            // and the CTA deep-links via assistantId — both were missing here, so the YouTube
+            // failure notice read as a truncated sentence with no way through to the post.
+            context: { platform: { label: 'YouTube' }, failure: { reason: error } },
+            metadata: { postId: post.id, platform: 'youtube', error, assistantId: post.assistantId },
         }).catch(() => { /* a notification failure must not mask the publish failure */ });
     }
     return { statusCode: 200, body: `Upload failed: ${error}` };

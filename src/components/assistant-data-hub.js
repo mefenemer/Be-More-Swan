@@ -60,7 +60,7 @@
     return String(v);
   }
 
-  const state = { hub: null, assistantId: null, records: [] };
+  const state = { hub: null, assistantId: null, records: [], pendingFocusId: null };
 
   async function fetchRecords() {
     // Content Library (social/blog Data Hub) reads posts, not assistant_records.
@@ -319,8 +319,76 @@
     return bar;
   }
 
+  // A post that failed to publish is a dead end everywhere else — the Review Queue has no
+  // 'failed' column and the Calendar only shows what's still coming. So the Content Library
+  // row is where the failure is explained and where the user gets back out of it: why it
+  // failed, and a way to re-queue it now or at a chosen time (Request 6).
+  function failureBanner(record) {
+    const p = record.data || {};
+    const wrap = document.createElement('div');
+    wrap.className = 'mb-4 rounded-xl border border-red-200 bg-red-50 p-4';
+    const reason = p.failureMessage || 'No reason was recorded for this failure.';
+    const attempts = Number(p.attemptCount) || 0;
+    wrap.innerHTML = `
+      <p class="text-xs font-bold text-red-700 uppercase tracking-wide">Failed to publish</p>
+      <p class="text-sm text-red-800 mt-1 whitespace-pre-line">${esc(reason)}</p>
+      ${attempts ? `<p class="text-xs text-red-600 mt-1">After ${attempts} attempt${attempts === 1 ? '' : 's'}.</p>` : ''}
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <button type="button" data-retry-now
+          class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Try again now</button>
+        <input type="datetime-local" data-retry-at
+          class="px-2 py-1.5 bg-white border border-red-200 text-xs text-gray-700 rounded-lg">
+        <button type="button" data-retry-schedule
+          class="px-3 py-1.5 bg-white border border-red-200 text-red-700 hover:bg-red-100 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Reschedule</button>
+      </div>
+      <p class="hidden text-xs font-semibold mt-2" data-retry-status></p>
+    `;
+
+    const status = wrap.querySelector('[data-retry-status]');
+    const buttons = [wrap.querySelector('[data-retry-now]'), wrap.querySelector('[data-retry-schedule]')];
+
+    async function requeue(publishDate) {
+      buttons.forEach((b) => { b.disabled = true; });
+      status.className = 'text-xs font-semibold mt-2 text-gray-500';
+      status.textContent = 'Re-queueing…';
+      try {
+        const res = await fetch('/.netlify/functions/retry-failed-post', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ postId: record.id, ...(publishDate ? { publishDate } : {}) }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not re-queue this post.');
+        status.className = 'text-xs font-semibold mt-2 text-emerald-700';
+        status.textContent = publishDate
+          ? `Rescheduled for ${new Date(data.publishDate).toLocaleString()}.`
+          : 'Back in the queue — it will publish on the next run.';
+        // Reflect the new status in the library without the user re-opening the tab.
+        refresh();
+      } catch (err) {
+        buttons.forEach((b) => { b.disabled = false; });
+        status.className = 'text-xs font-semibold mt-2 text-red-700';
+        status.textContent = err.message;
+      }
+    }
+
+    buttons[0].addEventListener('click', () => requeue(null));
+    buttons[1].addEventListener('click', () => {
+      const when = wrap.querySelector('[data-retry-at]').value;
+      if (!when) {
+        status.className = 'text-xs font-semibold mt-2 text-red-700';
+        status.textContent = 'Pick a date and time to reschedule to.';
+        return;
+      }
+      requeue(new Date(when).toISOString());
+    });
+
+    return wrap;
+  }
+
   // Content Library row detail — the post content, read-only. Approval/scheduling actions
-  // deliberately live in the Review Queue / Calendar, so this stays a browse-only view.
+  // deliberately live in the Review Queue / Calendar, so this stays a browse-only view —
+  // except for a failed post, which has nowhere else to be recovered from.
   function libraryDetail(record) {
     const p = record.data || {};
     const wrap = document.createElement('div');
@@ -331,6 +399,7 @@
       ${tags ? `<p class="text-xs text-emerald-700 mt-3">${esc(tags)}</p>` : ''}
       <p class="text-xs text-gray-400 mt-4 pt-3 border-t border-gray-100">Approve or reject this in <span class="font-semibold text-gray-600">Review</span>; scheduled posts appear on the <span class="font-semibold text-gray-600">Calendar</span>.</p>
     `;
+    if (record.status === 'failed') wrap.insertBefore(failureBanner(record), wrap.firstChild);
     return wrap;
   }
 
@@ -436,6 +505,31 @@
       tbody.appendChild(tr);
       tbody.appendChild(detailTr);
     }
+
+    applyPendingFocus();
+  }
+
+  // Deep link (Request 6): a "post failed to publish" notification names the post, so open its
+  // row expanded, scroll it into view and flash a highlight — otherwise the user lands on a
+  // library of dozens of rows and has to hunt for the one that failed. One-shot: consumed on
+  // the first render that actually contains the row, so a later refresh doesn't re-scroll.
+  function applyPendingFocus() {
+    const id = state.pendingFocusId;
+    if (id == null) return;
+    const tr = document.querySelector(`#datahub-table-host tr[data-record-id="${id}"]`);
+    if (!tr) return;                       // not in this hub's records — leave it pending
+    state.pendingFocusId = null;
+    tr.click();                            // expands the detail panel (failure banner + actions)
+    tr.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    tr.classList.add('ring-2', 'ring-inset', 'ring-red-400', 'bg-red-50');
+    setTimeout(() => tr.classList.remove('ring-2', 'ring-inset', 'ring-red-400', 'bg-red-50'), 4000);
+  }
+
+  // Called before/after the Data Hub tab is opened. If the table is already on screen the focus
+  // applies immediately; otherwise it's picked up by the next renderTable().
+  function focusRecord(recordId) {
+    state.pendingFocusId = recordId == null ? null : Number(recordId);
+    applyPendingFocus();
   }
 
   // Content Library toolbar — a "Create Post" button opens the same post-creation surface as
@@ -749,5 +843,5 @@
     }
   }
 
-  window.AssistantDataHub = { init, refresh };
+  window.AssistantDataHub = { init, refresh, focusRecord };
 })();
