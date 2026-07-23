@@ -3924,11 +3924,33 @@ async function _fetchAndRenderFollowerCounts() {
             const icon = (window._PLATFORM_ICONS || {})[r.platform] || '';
             const label = (window._PLATFORM_LABEL || {})[r.platform] || r.platform.charAt(0).toUpperCase() + r.platform.slice(1);
             const unit = r.platform === 'youtube' ? 'subscribers' : 'followers';
+            const labelSpan = `<span class="flex items-center gap-1.5 text-xs font-semibold text-gray-700 min-w-0"><span class="text-gray-400 shrink-0" style="width:14px">${icon}</span><span class="truncate">${label}</span></span>`;
             const value = r.available && r.count != null
                 ? `<span class="text-sm font-black text-gray-900" style="font-variant-numeric:tabular-nums" title="${r.count.toLocaleString()} ${unit}">${_formatFollowerCount(r.count)}</span>`
                 : `<span class="text-sm font-black text-gray-300" title="Not available${r.note ? ` — ${r.note}` : ''}">—</span>`;
+
+            // Manual-entry platforms (LinkedIn): show the last-entered count with its date and an
+            // Add/Update input, since the platform's API can't supply a follower count.
+            if (r.manualAllowed) {
+                const asOf = r.recordedAt ? `<span class="text-[10px] text-gray-400 ml-1.5">as of ${new Date(r.recordedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>` : '';
+                const cta = r.available ? 'Update' : 'Add';
+                return `<div class="py-1">
+                    <div class="flex items-center justify-between gap-3">
+                        ${labelSpan}
+                        <span class="flex items-center gap-1.5 shrink-0">${value}${asOf}
+                            <button type="button" onclick="window._toggleFollowerInput('${r.platform}')" class="text-[11px] font-bold text-emerald-700 hover:underline cursor-pointer">${cta}</button>
+                        </span>
+                    </div>
+                    <div id="follower-input-${r.platform}" class="hidden mt-1.5 flex items-center gap-2 justify-end">
+                        <input type="number" min="0" inputmode="numeric" placeholder="Followers" class="w-28 border border-gray-300 rounded-lg px-2 py-1 text-xs focus:ring-2 focus:ring-emerald-300 focus:outline-none">
+                        <button type="button" onclick="window._saveFollowerCount('${r.platform}', this)" class="text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg px-2.5 py-1 cursor-pointer">Save</button>
+                        <span class="follower-input-err text-[11px] text-red-600 hidden"></span>
+                    </div>
+                </div>`;
+            }
+
             return `<div class="flex items-center justify-between gap-3 py-1">
-                <span class="flex items-center gap-1.5 text-xs font-semibold text-gray-700 min-w-0"><span class="text-gray-400 shrink-0" style="width:14px">${icon}</span><span class="truncate">${label}</span></span>
+                ${labelSpan}
                 ${value}
             </div>`;
         }).join('');
@@ -3937,6 +3959,42 @@ async function _fetchAndRenderFollowerCounts() {
         // silently skip — the audience block is supplementary
     }
 }
+
+// Reveal / hide the manual follower-count input for a platform (LinkedIn).
+window._toggleFollowerInput = function (platform) {
+    const el = document.getElementById(`follower-input-${platform}`);
+    if (!el) return;
+    el.classList.toggle('hidden');
+    const inp = el.querySelector('input');
+    if (inp && !el.classList.contains('hidden')) inp.focus();
+};
+
+// Persist a manually-entered follower count (date-stamped server-side), then re-render the block so
+// the new figure + "as of {today}" show immediately.
+window._saveFollowerCount = async function (platform, btn) {
+    const wrap = document.getElementById(`follower-input-${platform}`);
+    if (!wrap) return;
+    const inp = wrap.querySelector('input');
+    const err = wrap.querySelector('.follower-input-err');
+    if (err) { err.classList.add('hidden'); err.textContent = ''; }
+    const val = Math.floor(Number(inp && inp.value));
+    if (!Number.isFinite(val) || val < 0) {
+        if (err) { err.textContent = 'Enter a number'; err.classList.remove('hidden'); }
+        return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+    try {
+        const res = await fetch('/.netlify/functions/save-follower-count', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ platform, count: val }),
+        });
+        if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'Could not save'); }
+        await _fetchAndRenderFollowerCounts();
+    } catch (e) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+        if (err) { err.textContent = e.message || 'Could not save'; err.classList.remove('hidden'); }
+    }
+};
 
 // ─────────────────────────────────────────────────────────────────
 // AC6: Daily Relationship-Building Checklist — loads today's actions, renders

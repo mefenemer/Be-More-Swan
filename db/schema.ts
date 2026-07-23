@@ -605,11 +605,27 @@ export const workspaceIntegrations = pgTable("workspace_integrations", {
   status: text("status").notNull().default("active"),   // 'active' | 'expired' | 'revoked' | 'error'
   connectedBy: integer("connected_by").references(() => users.id, { onDelete: "set null" }),
   expiresAt: timestamp("expires_at"),                   // access-token expiry; null = non-expiring (Slack bot tokens)
+  metadata: jsonb("metadata"),                          // provider-specific cache, e.g. followerCount/followerCountAt (get-follower-counts.ts)
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => [
   unique("workspace_integrations_org_provider_unique").on(t.organisationId, t.provider),
   index("workspace_integrations_org_idx").on(t.organisationId),
+]);
+
+// Manually-entered, date-stamped follower counts. LinkedIn's member API does not expose a
+// personal-profile follower count, so the user types it in periodically; each entry is a new dated
+// row (history preserved), the latest is the current count. See save-follower-count.ts /
+// get-follower-counts.ts. LinkedIn is the only manual platform today.
+export const manualFollowerCounts = pgTable("manual_follower_counts", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  platform: text("platform").notNull(),
+  count: integer("count").notNull(),
+  recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+  enteredBy: integer("entered_by").references(() => users.id, { onDelete: "set null" }),
+}, (t) => [
+  index("manual_follower_counts_org_platform_idx").on(t.organisationId, t.platform, t.recordedAt),
 ]);
 
 // Abuse Prevention (US1/US2): a record of a rejected OAuth connection because the third-party
