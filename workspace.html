@@ -446,6 +446,30 @@ window.showComplianceModals = function showComplianceModals(force) {
         </button>
       </div>
       <p id="gp-ai-media-status" class="hidden text-xs"></p>
+      <!-- Stock search box (shown by "Find a photo"/"Find a video"). Pre-filled with the post's own
+           media suggestion, so pressing Search straight away reproduces the old one-click behaviour
+           — but the terms are now visible and editable, which is the point: when the automatic
+           result was wrong there was previously no way to say what you actually wanted. Stays open
+           after a search so you can refine without starting over. -->
+      <div id="gp-ai-find-box" class="hidden mt-2">
+        <label for="gp-ai-find-query" class="block text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1">
+          What should the <span id="gp-ai-find-noun">photo</span> show?
+        </label>
+        <div class="flex gap-1.5">
+          <input type="text" id="gp-ai-find-query" maxlength="120"
+            placeholder="e.g. barista pouring latte art, warm tones"
+            onkeydown="if (event.key === 'Enter') { event.preventDefault(); gpAiRunFind(); }"
+            class="flex-1 min-w-0 px-2.5 py-1.5 text-xs border border-sky-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-sky-200">
+          <!-- bg-sky-500 / hover:opacity-80, NOT bg-sky-600 / hover:bg-sky-700: the compiled
+               style.css has no sky-600, sky-700 or hover:bg-sky-* utility, so those class names
+               produce a transparent background — i.e. white text on white, an invisible button.
+               Rebuilding Tailwind to add them churns unrelated classes across the sheet, so pick
+               from what is already compiled. Verify with: grep -F ".bg-sky-500" style.css -->
+          <button type="button" id="gp-ai-find-go" onclick="gpAiRunFind()"
+            class="px-3 py-1.5 text-xs font-bold rounded-lg bg-sky-500 text-white hover:opacity-80 transition">Search</button>
+        </div>
+        <p class="text-[11px] text-gray-400 mt-1">Leave blank to search on the post's own topic.</p>
+      </div>
       <!-- Library picker (shown after "Use my own") — already-uploaded content-assets -->
       <div id="gp-ai-own" class="hidden mt-2 border border-gray-200 rounded-xl p-2 max-h-48 overflow-y-auto">
         <div id="gp-ai-own-grid" class="grid grid-cols-3 gap-2"></div>
@@ -6181,6 +6205,9 @@ function gpGoConnect() {
 // Reset every mode's in-progress state. The active panel is (re)selected by gpChooseMode; there's
 // no longer a chooser screen to return to, so this only clears state.
 function gpBackToChooser() {
+    // New post in the panel — drop the last search so the box re-prefills from THIS post's
+    // media suggestion rather than inheriting the previous one's terms.
+    { const q = document.getElementById('gp-ai-find-query'); if (q) { q.value = ''; delete q.dataset.touched; } }
     clearInterval(_gpPollInterval);
 
     // Reset AI mode controls.
@@ -6207,6 +6234,7 @@ function gpBackToChooser() {
     _gpAiMediaType = 'image';
     document.getElementById('gp-ai-media')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
+    document.getElementById('gp-ai-find-box')?.classList.add('hidden');
     document.getElementById('gp-ai-media-thumb')?.classList.add('hidden');
     gpAiMediaStatus('');
 
@@ -6424,6 +6452,9 @@ async function gpPollJob() {
 }
 
 async function gpLoadPreview(postId) {
+    // New post in the panel — drop the last search so the box re-prefills from THIS post's
+    // media suggestion rather than inheriting the previous one's terms.
+    { const q = document.getElementById('gp-ai-find-query'); if (q) { q.value = ''; delete q.dataset.touched; } }
     try {
         const res = await fetch(`/.netlify/functions/get-social-drafts?status=pending_approval`);
         if (!res.ok) return;
@@ -6445,6 +6476,7 @@ async function gpLoadPreview(postId) {
         gpAiMediaStatus('');
         gpAiMediaBusy(false);
         document.getElementById('gp-ai-pexels')?.classList.add('hidden');
+    document.getElementById('gp-ai-find-box')?.classList.add('hidden');
         document.getElementById('gp-ai-own')?.classList.add('hidden');
         document.getElementById('gp-ai-media-thumb')?.classList.add('hidden');
         gpAiSetMediaType('image');           // default the type toggle back to Image each open
@@ -7047,6 +7079,7 @@ function gpAiSetMediaType(type) {
     if (findLabel) findLabel.textContent = _gpAiMediaType === 'video' ? 'Find a video' : 'Find a photo';
     document.getElementById('gp-ai-own')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
+    document.getElementById('gp-ai-find-box')?.classList.add('hidden');
     gpAiMediaStatus('');
 }
 
@@ -7068,6 +7101,7 @@ function gpAiShowThumb(url, type) {
     }
     _gpHasMedia = !!url;
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
+    document.getElementById('gp-ai-find-box')?.classList.add('hidden');
     document.getElementById('gp-ai-own')?.classList.add('hidden');
     gpAiMediaBusy(false);
 
@@ -7090,6 +7124,7 @@ async function gpAiUseOwn() {
     const empty = document.getElementById('gp-ai-own-empty');
     if (!panel || !grid) return;
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
+    document.getElementById('gp-ai-find-box')?.classList.add('hidden');
     panel.classList.remove('hidden');
     empty?.classList.add('hidden');
     grid.innerHTML = '<p class="col-span-3 text-xs text-gray-400 text-center py-4">Loading your media…</p>';
@@ -7151,6 +7186,7 @@ async function gpAiUploadSelected(e) {
     if (uploadType !== _gpAiMediaType) gpAiSetMediaType(uploadType);
     document.getElementById('gp-ai-own')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
+    document.getElementById('gp-ai-find-box')?.classList.add('hidden');
     gpAiMediaBusy(true);
     gpAiMediaStatus('Uploading…');
     try {
@@ -7172,6 +7208,7 @@ function gpAiBrowseCanva() {
     if (!_gpCurrentPostId || !window.CanvaBrowser) return;
     document.getElementById('gp-ai-own')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
+    document.getElementById('gp-ai-find-box')?.classList.add('hidden');
     window.CanvaBrowser.open({
         assetType: _gpAiMediaType === 'video' ? 'any' : 'image',
         multiple: false,
@@ -7183,25 +7220,71 @@ function gpAiBrowseCanva() {
 }
 
 // ── Source: Find with AI (Pexels stock, image or video) ─────────────────────
-async function gpAiFind() {
+// Two steps now. The button OPENS a search box; the box runs the search.
+//
+// It used to search immediately on terms derived server-side from the post's suggestedMediaDescription
+// (or its caption). That is a fine first guess and it stays the default — the box is pre-filled with
+// it, so one click on Search is the old behaviour exactly. What was missing was any way to say what
+// you actually wanted when the guess was wrong: the terms were invisible and unchangeable, so a bad
+// result left you with nothing to do but generate an AI image or give up.
+function gpAiFind() {
+    if (!_gpCurrentPostId) return;
+    const isVideo = _gpAiMediaType === 'video';
+    document.getElementById('gp-ai-own')?.classList.add('hidden');
+
+    const noun = document.getElementById('gp-ai-find-noun');
+    if (noun) noun.textContent = isVideo ? 'video' : 'photo';
+
+    const box = document.getElementById('gp-ai-find-box');
+    const input = document.getElementById('gp-ai-find-query');
+    if (!box || !input) return;
+
+    // Pre-fill with the post's own media suggestion the first time it's opened, then leave whatever
+    // the user typed alone — re-opening the box shouldn't discard their last search terms.
+    if (!input.dataset.touched) {
+        input.value = (_gpAiMediaPrompt || '').trim().slice(0, 120);
+        input.dataset.touched = '1';
+    }
+    input.placeholder = isVideo
+        ? 'e.g. slow pan over a busy coffee shop'
+        : 'e.g. barista pouring latte art, warm tones';
+
+    box.classList.remove('hidden');
+    input.focus();
+    input.select();
+}
+
+/** Run the stock search using whatever is in the box. Blank falls back to the post's own topic. */
+async function gpAiRunFind() {
     if (!_gpCurrentPostId) return;
     const noun = _gpAiMediaType === 'video' ? 'video' : 'photo';
+    const topic = (document.getElementById('gp-ai-find-query')?.value || '').trim();
+
     gpAiMediaBusy(true);
-    document.getElementById('gp-ai-own')?.classList.add('hidden');
-    gpAiMediaStatus(`Searching for a ${noun}…`);
+    gpAiMediaStatus(topic ? `Searching for “${topic}”…` : `Searching for a ${noun}…`);
     try {
         const res = await fetch('/.netlify/functions/pexels-search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ postId: _gpCurrentPostId, mediaType: _gpAiMediaType }),
+            // topic omitted when blank so the server falls back to the post's own content —
+            // sending an empty string would trip its "topic or postId required" guard.
+            body: JSON.stringify({ postId: _gpCurrentPostId, mediaType: _gpAiMediaType, ...(topic ? { topic } : {}) }),
         });
         const d = await res.json().catch(() => ({}));
         if (res.status === 429) { gpAiMediaStatus(d.error || 'Stock search is resting — try again shortly.', 'error'); gpAiMediaBusy(false); return; }
         if (!res.ok) { gpAiMediaStatus(d.error || `Could not search for a ${noun}.`, 'error'); gpAiMediaBusy(false); return; }
         const candidates = d.candidates || [];
-        if (!candidates.length) { gpAiMediaStatus(`No fresh ${noun}s found for this topic — try generating one instead.`, 'error'); gpAiMediaBusy(false); return; }
+        if (!candidates.length) {
+            // Name the terms that found nothing — "no results for this topic" gives no clue what to
+            // change, and the whole point of the box is that the terms are now yours to fix.
+            gpAiMediaStatus(topic
+                ? `No ${noun}s found for “${topic}” — try different words, or generate one with AI.`
+                : `No fresh ${noun}s found for this topic — try describing what you want above.`, 'error');
+            gpAiMediaBusy(false);
+            return;
+        }
         gpAiRenderPexels(candidates);
-        gpAiMediaStatus(`Pick a ${noun} to attach it to your post.`);
+        gpAiMediaStatus(`Pick a ${noun} to attach it to your post, or refine your search above.`);
         gpAiMediaBusy(false);
     } catch {
         gpAiMediaStatus('Network error — please try again.', 'error');
@@ -7258,6 +7341,7 @@ async function gpAiGenerate() {
     if (!_gpCurrentPostId) return;
     document.getElementById('gp-ai-own')?.classList.add('hidden');
     document.getElementById('gp-ai-pexels')?.classList.add('hidden');
+    document.getElementById('gp-ai-find-box')?.classList.add('hidden');
     if (_gpAiMediaType === 'video') return gpAiGenerateVideo();
     gpAiMediaBusy(true);
     gpAiMediaStatus('Generating an image… this usually takes ~20 seconds.');

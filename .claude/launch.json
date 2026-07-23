@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-find-photo",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4194",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/98f43d4f-27e3-46b9-be46-f06e64ee9900/scratchpad/media"
+      ],
+      "port": 4194,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-quality-panel",
       "runtimeExecutable": "python3",
       "runtimeArgs": [
