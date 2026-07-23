@@ -364,7 +364,14 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // A long founder-story caption + hashtags + media description in one JSON blob overran the
         // gateway's 1024-token default and got cut off mid-sentence (the JSON then fails to parse and
         // a half-caption shipped). Give the structured reply real headroom.
-        const gwResponse = await gatewayGenerate({ system: systemPrompt, messages, maxTokens: 2048 });
+        //
+        // Raised 2048 → 4096 on 2026-07-23: 2048 was still overrunning in production (2 of 42 jobs
+        // failed to parse). The reply carries caption + hashtags + suggestedMediaDescription +
+        // reelScript + textOverlays in ONE object — a LinkedIn-length caption alone can be ~750
+        // tokens, so the budget was being spent before the later fields were written. Output tokens
+        // are only billed for what is generated, so the higher ceiling costs nothing on the replies
+        // that were already fitting.
+        const gwResponse = await gatewayGenerate({ system: systemPrompt, messages, maxTokens: 4096 });
         const { text: rawText, tokensInput, tokensOutput } = gwResponse;
         let generated: {
             caption?: string; hashtags?: string; suggestedMediaDescription?: string;
@@ -378,7 +385,14 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // broken draft. A caption present but empty is treated the same way.
         const parsedReply = parseModelJson<typeof generated>(rawText);
         if (!parsedReply || !parsedReply.caption || !String(parsedReply.caption).trim()) {
-            throw new Error('Model reply was not valid JSON with a caption (likely truncated) — retrying');
+            // Say WHICH failure it was. 'likely truncated' was a guess that sent us looking at the
+            // prompt when the answer was the token ceiling — the gateway now reports stop_reason, so
+            // a cut-off reply and a mis-formatted one are distinguishable in the logs and in the
+            // error stored on the job.
+            const truncated = gwResponse.stopReason === 'max_tokens';
+            throw new Error(truncated
+                ? `Model reply was cut off at the ${4096}-token ceiling before the JSON closed (wrote ${gwResponse.tokensOutput ?? '?'} tokens) — retrying`
+                : `Model reply was not valid JSON with a caption (stop_reason: ${gwResponse.stopReason ?? 'unknown'}) — retrying`);
         }
         generated = parsedReply;
 
@@ -683,6 +697,20 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             await db.execute(
                 `UPDATE content_generation_jobs SET status = 'queued', next_retry_at = '${nextRetryAt}', error_message = '${errorMessage.replace(/'/g, "''")}', updated_at = now() WHERE id = ${job.id}`
             );
+
+            // Tell the human their post is retrying rather than hung. Before this, the only
+            // notification was "Generating your post…" at enqueue, so a failed-and-retrying job was
+            // indistinguishable from a stuck one — which is exactly how it got reported.
+            //
+            // Only for work someone asked for, and only on the FIRST retry: per-attempt pings would
+            // be three notifications for one post. Best-effort — a notification failure must never
+            // turn a retryable job into a lost one.
+            if (attempt === 1 && job.trigger_type === 'on_demand') {
+                await createNotification(db, 'post_generation_retrying', {
+                    userId: job.user_id,
+                    metadata: { jobId: job.job_id, assistantId: job.assistant_id, error: errorMessage },
+                }).catch(() => {});
+            }
         }
     }
 }

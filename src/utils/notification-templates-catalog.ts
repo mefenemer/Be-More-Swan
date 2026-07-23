@@ -368,6 +368,20 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [],
     },
     {
+        // Sent ONCE, on the first retry of a job someone is waiting on. Without it the only
+        // notification is "Generating your post…" at enqueue, so a job that failed and is retrying
+        // is indistinguishable from a job that has hung — which is exactly how it was reported.
+        // Deliberately not sent per attempt (that would be three notifications for one post) and
+        // not sent for scheduled drafting, where nobody is watching the clock.
+        templateKey: 'post_generation_retrying',
+        name: 'Post generation retrying',
+        category: 'Content',
+        type: 'post_generation_queued',
+        title: 'Still working on your post…',
+        message: 'The first attempt didn\'t come back cleanly, so {{assistant.name}} is trying again. This adds a few minutes — we\'ll let you know when the draft is ready.',
+        variables: [ASSISTANT_NAME],
+    },
+    {
         templateKey: 'instagram_rate_limited',
         name: 'Instagram publishing delayed',
         category: 'Content',

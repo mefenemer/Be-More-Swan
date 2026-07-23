@@ -17,6 +17,12 @@ export interface GatewayRequest {
 }
 
 export interface GatewayResponse {
+    /**
+     * Why the model stopped. 'max_tokens' means the reply was CUT OFF — the single most useful
+     * thing to know when a structured reply fails to parse, and previously invisible to callers,
+     * which is why process-content-jobs could only report "likely truncated" as a guess.
+     */
+    stopReason: string | null;
     text: string;
     model: string;
     usedFallback: boolean;
@@ -67,6 +73,7 @@ export async function gatewayGenerate(req: GatewayRequest): Promise<GatewayRespo
     const text = response.content.find(b => b.type === 'text')?.text ?? '';
     return {
         text,
+        stopReason: response.stop_reason ?? null,
         model: response.model,
         usedFallback,
         tokensInput:  response.usage?.input_tokens  ?? null,
@@ -165,6 +172,7 @@ export async function gatewayGenerateGrounded(req: GatewayRequest): Promise<Grou
 
     return {
         text,
+        stopReason: response.stop_reason ?? null,
         model: response.model,
         usedFallback,
         tokensInput:  response.usage?.input_tokens  ?? null,

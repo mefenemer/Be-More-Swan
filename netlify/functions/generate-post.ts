@@ -11,7 +11,9 @@ import { createNotification } from '../../src/utils/notify';
 import { enforcePromptModeration } from '../../src/utils/moderation';
 import { requireTenant } from '../../src/utils/tenant';
 import { assembleBlueprint } from '../../src/utils/blueprint';
+import { triggerContentDrain } from '../../src/utils/trigger-drain';
 import { withLambda } from '@netlify/aws-lambda-compat';
+
 
 export default withLambda(async (event) => {
     const db = getDb();
@@ -151,9 +153,16 @@ export default withLambda(async (event) => {
         metadata: { jobId, assistantId },
     });
 
+    // Someone is waiting on this one — start the drain rather than leaving it for the cron.
+    // Scheduled and conversion jobs deliberately do NOT poke the queue: nobody is watching them,
+    // and batching them onto the cron tick is what keeps Neon asleep between runs.
+    if (triggerType === 'on_demand') {
+        await triggerContentDrain(event.headers as Record<string, string | undefined>, jobId, 'generate-post');
+    }
+
     return {
         statusCode: 202,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId, status: 'queued', estimatedReadyIn: '30–60 seconds' }),
+        body: JSON.stringify({ jobId, status: 'queued' }),
     };
 });

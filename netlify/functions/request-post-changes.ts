@@ -15,6 +15,7 @@ import { getDb } from '../../db/client';
 import { aiBlueprints, auditLogs, contentGenerationJobs, scheduledPosts } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { requireTenant } from '../../src/utils/tenant';
+import { triggerContentDrain } from '../../src/utils/trigger-drain';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const MAX_FEEDBACK = 500;
@@ -116,9 +117,13 @@ export default withLambda(async (event) => {
         metadata: { jobId, originalPostId: postId, assistantId: post.assistantId },
     });
 
+    // The user just cancelled their draft to ask for a rewrite — they are unambiguously waiting.
+    // Without this the review queue sits empty for up to ten minutes while the cron comes round.
+    await triggerContentDrain(event.headers as Record<string, string | undefined>, jobId, 'request-post-changes');
+
     return {
         statusCode: 202,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ requested: true, jobId, status: 'queued', estimatedReadyIn: '30–60 seconds' }),
+        body: JSON.stringify({ requested: true, jobId, status: 'queued' }),
     };
 });
