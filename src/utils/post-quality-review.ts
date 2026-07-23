@@ -148,6 +148,41 @@ export interface ReviewablePost {
     platform: string | null;
 }
 
+/**
+ * The org's OWN declared facts, pulled out of the blueprint so the reviewer can check a claim
+ * against them instead of flagging it as unverifiable.
+ *
+ * This is what stopped "Post states pricing 'starting from £29/mo' — verify this is current"
+ * appearing on every pricing post. The prices are declared in the assistant's own onboarding
+ * answers (`service_offerings`), so the assistant already knows them — the reviewer just never
+ * saw them, and a reviewer with no facts can only ever say "I can't confirm this".
+ *
+ * Deliberately narrow: only fields the business stated about ITSELF, which are therefore the
+ * authority on their own pricing, offers and objection-handling. A claim NOT covered here is still
+ * flagged — this removes false positives, it does not soften the check.
+ */
+function collectKnownFacts(sections: Record<string, { content: Record<string, unknown> }>): string {
+    const answers = (sections['6-onboarding']?.content?.answers ?? {}) as Record<string, unknown>;
+    const org = (sections['5-org-context']?.content ?? {}) as Record<string, unknown>;
+
+    const parts: string[] = [];
+    const add = (label: string, value: unknown) => {
+        const s = typeof value === 'string' ? value.trim() : '';
+        if (s) parts.push(`${label}: ${s}`);
+    };
+
+    add('Products, services and prices', answers.service_offerings);
+    add('Standard offer / incentive', answers.incentive);
+    add('Approved answers to objections (including price)', answers.sales_objections);
+    add('Core message', answers.core_message);
+    add('Business', org.businessName);
+    add('What the business does', org.businessDescription);
+    add('Website', org.website);
+
+    // Free text from onboarding — cap it so a verbose answer can't crowd out the caption.
+    return parts.join('\n').slice(0, 2500);
+}
+
 export interface RunReviewOptions {
     /**
      * Generate a fresh set of style suggestions. DEFAULTS TO FALSE — see the header. Pass true only
@@ -178,6 +213,7 @@ export async function runQualityReview(
     // Brand-voice + content-rule context from the assistant's latest blueprint.
     let brandVoice = 'professional';
     let contentRulesText = '';
+    let knownFacts = '';
     if (post.assistantId) {
         const [bp] = await db
             .select({ sections: aiBlueprints.sections })
@@ -190,6 +226,7 @@ export async function runQualityReview(
             brandVoice = (sections['5-org-context']?.content?.brandVoice as string) ?? brandVoice;
             const rules = sections['4-content-rules']?.content;
             if (rules) contentRulesText = JSON.stringify(rules);
+            knownFacts = collectKnownFacts(sections);
         }
     }
 
@@ -200,19 +237,27 @@ export async function runQualityReview(
     const prompt = `You are a social media quality reviewer. Analyse the following ${platform} post and return a JSON object with these exact fields:
 - brandVoiceScore: integer 0-100 measuring how well the post matches the brand voice "${brandVoice}"
 - complianceWarnings: array of short string warnings (regulatory, brand, policy issues). Empty array if none.${
-    withSuggestions ? '\n- suggestions: array of up to 3 actionable improvement suggestions as strings.' : ''}
+    withSuggestions ? '\n- suggestions: array containing EXACTLY ONE actionable improvement suggestion as a string — your single highest-value change.' : ''}
 
 Only raise a complianceWarning for something a human must verify or correct before publishing —
 an unsubstantiated claim, a pricing or performance statement that may mislead, a missing
 disclosure, or a breach of the content rules below. Do NOT raise one for matters of style, tone,
-length or hashtag choice.${withSuggestions ? ' Those belong in suggestions.' : ''}
+length or hashtag choice.${withSuggestions ? ' Those belong in the suggestion.' : ''}
 
 Raise a warning ONLY where there is a specific, nameable problem a person can act on. A caption
 with nothing to verify must return an empty array — do not invent a warning to seem thorough.${
     withSuggestions ? '' : `
 
 Do NOT return a suggestions field. Style feedback is not being requested here.`}
+${knownFacts ? `
+THE BUSINESS'S OWN DECLARED FACTS — treat these as established and true. They come from the
+business itself, so it is the authority on them. A statement in the caption that AGREES with
+anything below is already verified: do NOT raise a warning asking someone to check it. In
+particular, do not ask for confirmation of a price, package, offer or claim that matches these.
+Only flag a statement that CONTRADICTS them, or a factual claim they do not cover at all.
 
+${knownFacts}
+` : ''}
 Caption:
 """
 ${caption}
@@ -248,7 +293,10 @@ Return ONLY valid JSON, no markdown, no explanation.`;
         // Ignore any suggestions the model volunteered when we didn't ask. Persisting them would
         // repopulate the panel behind the user's back and restart the loop.
         suggestions: withSuggestions && Array.isArray(parsed.suggestions)
-            ? parsed.suggestions.map(String).slice(0, 3) : [],
+            // ONE, enforced here as well as asked for in the prompt. Three at a time read as a
+            // to-do list the user was expected to work through; one is a single decision — take it
+            // or dismiss it — which is the whole interaction the panel now offers.
+            ? parsed.suggestions.map(String).slice(0, 1) : [],
         cachedAt: new Date().toISOString(),
         captionHash: hashCaption(caption),
         dispositions: carryDispositions(previous, complianceWarnings),
@@ -314,17 +362,18 @@ export async function reviewDraftGroup(
             .limit(1);
         if (!post || !post.caption) return null;
 
-        // Draft time is the ONE place suggestions are generated without a human asking, and it is
-        // the free round: the post is brand new, nobody has read it yet, and the advice arrives
-        // with the draft rather than as a response to the user's own edit. Every later set costs
-        // an explicit click.
+        // Compliance only. Draft time used to also generate suggestions, so every post arrived in
+        // the queue with a list of nits nobody asked for — which read as work to get through
+        // before approving, on a draft the user might have been perfectly happy with. Advice is now
+        // pull, not push: the panel offers a button, and nothing appears until it is pressed.
+        // Cheaper too — no post pays for style feedback that is never read.
         const review = await runQualityReview(db, {
             id: post.id,
             assistantId: post.assistantId,
             caption: post.caption,
             hashtags: post.hashtags as string | null,
             platform: post.platform,
-        }, { withSuggestions: true, previous: null });
+        }, { withSuggestions: false, previous: null });
 
         // Copy onto the siblings — same caption, same verdict. Guarded on the caption still matching
         // so a sibling that diverged (per-platform edit) keeps its own review rather than inheriting.

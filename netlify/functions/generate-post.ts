@@ -55,6 +55,7 @@ export default withLambda(async (event) => {
         assistantId?: number;
         contextPrompt?: string;
         platform?: string;
+        platforms?: string[];
         triggerType?: string;
     };
     try { body = JSON.parse(event.body || '{}'); } catch { body = {}; }
@@ -66,6 +67,19 @@ export default withLambda(async (event) => {
         platform,
         triggerType = 'scheduled',
     } = body;
+
+    // Multi-platform: ONE idea generated once and fanned out to each target, which is what
+    // process-content-jobs already does for scheduled jobs via the job's `platforms` array. Stored
+    // only when it names 2+ targets — a single-platform job stays on the legacy `platform` column
+    // so nothing downstream has to special-case a one-element array.
+    const ALLOWED_PLATFORMS = ['instagram', 'facebook', 'linkedin', 'x'];
+    const platforms = Array.isArray(body.platforms)
+        ? [...new Set(body.platforms.filter(p => typeof p === 'string' && ALLOWED_PLATFORMS.includes(p)))]
+        : [];
+    if (Array.isArray(body.platforms) && body.platforms.length > 0 && platforms.length === 0) {
+        return { statusCode: 400, body: JSON.stringify({ error: 'No recognised platform selected.' }) };
+    }
+    const primaryPlatform = platform || platforms[0] || null;
 
     if (!assistantId) {
         return { statusCode: 400, body: JSON.stringify({ error: 'assistantId is required.' }) };
@@ -145,7 +159,8 @@ export default withLambda(async (event) => {
         maxAttempts: 3,
         contextPrompt: contextPrompt || null,
         triggerType,
-        platform: platform || null,
+        platform: primaryPlatform,
+        platforms: platforms.length > 1 ? platforms : null,
     });
 
     await createNotification(db, triggerType === 'on_demand' ? 'post_generation_queued_on_demand' : 'post_generation_queued', {

@@ -381,13 +381,14 @@ window.showComplianceModals = function showComplianceModals(force) {
     </button>
     <!-- Platform selector -->
     <div class="mb-4">
-      <label class="block text-xs font-semibold text-gray-700 mb-1.5">Platform</label>
+      <label class="block text-xs font-semibold text-gray-700 mb-1.5">Platforms</label>
       <div id="gen-post-platforms" class="flex flex-wrap gap-2">
         <button type="button" class="gen-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="instagram" onclick="gpSelectPlatform(this)">Instagram</button>
         <button type="button" class="gen-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="facebook" onclick="gpSelectPlatform(this)">Facebook</button>
         <button type="button" class="gen-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="linkedin" onclick="gpSelectPlatform(this)">LinkedIn</button>
         <button type="button" class="gen-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="x" onclick="gpSelectPlatform(this)">X</button>
       </div>
+      <p id="gen-post-platform-hint" class="text-xs text-gray-400 mt-1.5">Tap more than one to cross-post the same idea.</p>
     </div>
     <!-- Context prompt -->
     <div class="mb-4">
@@ -617,12 +618,20 @@ window.showComplianceModals = function showComplianceModals(force) {
             <div id="prq-warnings" class="space-y-2"></div>
             <p class="text-[11px] text-gray-500 mt-2">Settle each one, or approve anyway — either way it's recorded.</p>
           </div>
-          <!-- Suggestions are advice, shown once and never regenerated on their own.
-               The button APPLIES the list above — it does not produce more suggestions. It was
-               briefly labelled "Suggest an improvement", which read as "give me more" when three
-               were already on screen, so nobody could tell it was the accept action. -->
+          <!-- Suggestions are PULL, not push. Nothing appears here until the button below is
+               pressed, and then exactly one suggestion appears. Ignore removes it; Accept rewrites
+               the post. Neither is followed by another suggestion — a fresh one costs another
+               deliberate press.
+               Previously three arrived unbidden with every draft, which read as a checklist to work
+               through before approving, on a post the user may have been perfectly happy with. -->
+          <div id="prq-ask-wrap" class="hidden">
+            <button type="button" id="prq-ask-btn" onclick="rqAskForSuggestion()"
+              class="w-full px-3 py-2 text-xs font-bold rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition">
+              Suggest an improvement
+            </button>
+          </div>
           <div id="prq-suggestions-wrap" class="hidden">
-            <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Suggestions</p>
+            <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Suggested improvement</p>
             <ul id="prq-suggestions" class="space-y-1.5 text-xs text-gray-600"></ul>
             <div id="prq-suggestion-actions" class="flex gap-2 mt-2.5">
               <button type="button" id="prq-ignore-btn" onclick="rqIgnoreSuggestions()"
@@ -631,10 +640,9 @@ window.showComplianceModals = function showComplianceModals(force) {
               </button>
               <button type="button" id="prq-apply-btn" onclick="rqPreviewSuggestions()"
                 class="flex-1 px-3 py-2 text-xs font-bold rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 transition">
-                Apply these suggestions
+                Accept
               </button>
             </div>
-            <p class="text-[11px] text-gray-400 mt-1.5 text-center">Either way they're done with — we won't suggest more unless you ask.</p>
           </div>
           <!-- The proposal is EDITABLE before it is saved, and what gets saved is exactly what is
                in this box — the server no longer re-generates on accept. -->
@@ -4366,6 +4374,34 @@ function formatCurrency(amount, currency) {
 // ── Pending badge ────────────────────────────────────────────────────────────
 let _rqPollInterval = null;
 
+// Last social-draft count seen by the poll. null = first run, so the very first poll after load
+// establishes a baseline instead of firing a pointless refresh of a list that just rendered.
+let _rqLastSocialCount = null;
+
+/**
+ * Re-render whichever review surface is actually on screen. Both are covered because a draft can
+ * land while the user sits on either: the Review page from the sidebar (#rq-groups) or the Review
+ * tab inside Assistant Details (window.detailRqRefresh).
+ *
+ * Visibility-checked via offsetParent so this doesn't re-fetch for a surface that is in the DOM but
+ * hidden behind another view — the badge is enough for those.
+ */
+function rqRefreshVisibleReviewSurface() {
+    const groups = document.getElementById('rq-groups');
+    if (groups && groups.offsetParent !== null && typeof rqLoadItems === 'function') {
+        try { rqLoadItems(); } catch { /* non-blocking */ }
+    }
+    if (typeof window.detailRqRefresh === 'function') {
+        try { window.detailRqRefresh(); } catch { /* non-blocking */ }
+    }
+}
+
+// Coming back to the tab is the other moment a stale list gets noticed — the poll may be up to a
+// minute away, and the user has just switched to the window specifically to look.
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') refreshPendingBadge();
+});
+
 async function refreshPendingBadge() {
     try {
         const [hitlRes, socialRes] = await Promise.all([
@@ -4388,6 +4424,18 @@ async function refreshPendingBadge() {
             socialTabCount.textContent = socialCount || '';
             socialTabCount.classList.toggle('hidden', !socialCount);
         }
+
+        // A newly-drafted post landing while the user is ALREADY looking at the review list used to
+        // update only the badge — the list itself sat stale until a manual reload, so the
+        // notification said "your post is ready" and the screen showed nothing. This poll already
+        // knows the draft count, so use the change as the refresh trigger.
+        //
+        // Fires on any change, not just an increase: approving elsewhere (another tab, the calendar)
+        // should also drop the item from a list that is on screen.
+        if (_rqLastSocialCount !== null && socialCount !== _rqLastSocialCount) {
+            rqRefreshVisibleReviewSurface();
+        }
+        _rqLastSocialCount = socialCount;
     } catch { /* non-blocking */ }
 }
 
@@ -5058,7 +5106,7 @@ async function _rqLoadQualityReview(postId) {
     if (!wrap) return;
     wrap.classList.remove('hidden');
     _prqShow('prq-loading', true);
-    ['prq-warnings-wrap', 'prq-suggestions-wrap', 'prq-rewrite-wrap', 'prq-clean']
+    ['prq-warnings-wrap', 'prq-suggestions-wrap', 'prq-ask-wrap', 'prq-rewrite-wrap', 'prq-clean']
         .forEach(id => _prqShow(id, false));
     document.getElementById('prq-score')?.classList.add('hidden');
     // rqPreviewSuggestions() hides these while its proposal is on screen. Restore them here or the
@@ -5106,8 +5154,11 @@ function _prqRenderReview(data) {
         _prqShow('prq-warnings-wrap', false);
     }
 
+    // Exactly one of these is ever on screen: the suggestion, or the button that asks for one.
+    // Never both, and never a suggestion nobody requested.
     const suggestions = data.suggestions || [];
     _prqShow('prq-suggestions-wrap', suggestions.length > 0);
+    _prqShow('prq-ask-wrap', suggestions.length === 0);
     if (suggestions.length) {
         document.getElementById('prq-suggestions').innerHTML = suggestions.map(s =>
             `<li class="flex gap-2"><span class="text-emerald-500 shrink-0">•</span><span>${_prqEsc(s)}</span></li>`).join('');
@@ -5116,6 +5167,32 @@ function _prqRenderReview(data) {
     const openCount = (data.openWarnings || warnings.filter(w => !dispositions[w])).length;
     _prqShow('prq-clean', openCount === 0 && !suggestions.length);
 }
+
+// Ask for ONE suggestion. This is the only path that produces one — nothing else in the panel
+// generates advice, so the list cannot refill itself behind the user's back. Costs a task credit
+// and is capped per caption by the server.
+window.rqAskForSuggestion = async function () {
+    const btn = document.getElementById('prq-ask-btn');
+    if (!btn || !_prqPostId) return;
+    const original = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Thinking…';
+    try {
+        const res = await fetch('/.netlify/functions/review-post-quality', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId: _prqPostId, includeSuggestions: true }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) { alert(d.error || 'Could not produce a suggestion.'); return; }
+        if (!(d.suggestions || []).length) {
+            // An honest "nothing to add" is a real answer, and better than inventing a nit.
+            btn.textContent = 'Nothing to suggest — this reads well';
+            setTimeout(() => { btn.textContent = original; }, 4000);
+            return;
+        }
+        _prqRenderReview({ ...d, openWarnings: d.openWarnings });
+    } catch { alert('Network error — please try again.'); }
+    finally { btn.disabled = false; if (btn.textContent === 'Thinking…') btn.textContent = original; }
+};
 
 /**
  * One warning, with its actions. Settled warnings stay visible showing HOW they were settled —
@@ -6359,19 +6436,53 @@ function closeGeneratePostSheet() {
     document.getElementById('gen-post-sheet')?.classList.add('hidden');
 }
 
-function gpSelectPlatform(btn) {
+// Platform picker — MULTI-select. One idea is generated and fanned out to each chosen platform
+// (process-content-jobs has done this for scheduled jobs all along via the job's `platforms`
+// array; on-demand generation was the only path still limited to a single choice).
+//
+// _gpSelectedPlatform is kept in sync as the FIRST selection because a dozen downstream readers
+// (approval connect-gates, preview, character limits) still expect a single platform. Those
+// operate on the resulting draft, which is per-platform anyway.
+let _gpSelectedPlatforms = ['instagram'];
+
+function gpRenderPlatformSelection() {
     document.querySelectorAll('.gen-platform-btn').forEach(b => {
-        b.classList.remove('border-emerald-600', 'text-emerald-700', 'font-semibold');
-        b.classList.add('border-gray-300', 'text-gray-700');
+        const on = _gpSelectedPlatforms.includes(b.dataset.platform);
+        b.classList.toggle('border-emerald-600', on);
+        b.classList.toggle('text-emerald-700', on);
+        b.classList.toggle('font-semibold', on);
+        b.classList.toggle('border-gray-300', !on);
+        b.classList.toggle('text-gray-700', !on);
+        b.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
-    btn.classList.add('border-emerald-600', 'text-emerald-700', 'font-semibold');
-    btn.classList.remove('border-gray-300', 'text-gray-700');
-    _gpSelectedPlatform = btn.dataset.platform;
+    _gpSelectedPlatform = _gpSelectedPlatforms[0] || 'instagram';
+    const hint = document.getElementById('gen-post-platform-hint');
+    if (hint) {
+        hint.textContent = _gpSelectedPlatforms.length > 1
+            ? `One post, published to ${_gpSelectedPlatforms.length} platforms.`
+            : 'Tap more than one to cross-post the same idea.';
+    }
 }
 
+function gpSelectPlatform(btn) {
+    const p = btn.dataset.platform;
+    if (!p) return;
+    if (_gpSelectedPlatforms.includes(p)) {
+        // Never let the user deselect everything — a generation with no target is just an error
+        // message later, so refuse it at the point of the click instead.
+        if (_gpSelectedPlatforms.length === 1) return;
+        _gpSelectedPlatforms = _gpSelectedPlatforms.filter(x => x !== p);
+    } else {
+        _gpSelectedPlatforms.push(p);
+    }
+    gpRenderPlatformSelection();
+}
+
+/** Set the selection to exactly one platform (used to preselect the first connected one). */
 function gpSelectPlatformByValue(val) {
-    const btn = document.querySelector(`.gen-platform-btn[data-platform="${val}"]`);
-    if (btn) gpSelectPlatform(btn);
+    if (!val) return;
+    _gpSelectedPlatforms = [val];
+    gpRenderPlatformSelection();
 }
 
 function gpSetStatus(msg, type) {
@@ -6399,7 +6510,10 @@ async function gpSubmit() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 assistantId: _gpCurrentAssistantId,
+                // `platform` stays for the single-target case and for any older client/server
+                // pairing; `platforms` is what drives the fan-out when more than one is chosen.
                 platform: _gpSelectedPlatform,
+                platforms: _gpSelectedPlatforms,
                 triggerType: 'on_demand',
                 contextPrompt: contextPrompt || undefined,
             }),
