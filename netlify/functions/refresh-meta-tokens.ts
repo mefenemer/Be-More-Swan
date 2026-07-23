@@ -34,7 +34,9 @@ export default withLambda(async () => {
         })
         .from(systemConnections)
         .where(and(
-            eq(systemConnections.serviceName, 'instagram'),
+            // Both Meta products store a 60-day long-lived user token refreshed the same way
+            // (fb_exchange_token), so refresh 'facebook' Page connections alongside 'instagram'.
+            inArray(systemConnections.serviceName, ['instagram', 'facebook']),
             eq(systemConnections.status, 'active'),
             lt(systemConnections.tokenExpiresAt, fourteenDaysFromNow),
         ));

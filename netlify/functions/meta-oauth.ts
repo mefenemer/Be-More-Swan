@@ -123,10 +123,10 @@ export default withLambda(async (event) => {
             (assistantId ? `&assistantId=${assistantId}` : '');
 
         // Connection sandboxing: if this connect was initiated for a specific
-        // assistant, Instagram must be relevant to that assistant's role.
+        // assistant, the platform being connected must be relevant to that assistant's role.
         if (assistantId) {
             const assistant = await resolveAssistantRole(getDb(), organisationId, assistantId);
-            if (!assistant || !isServiceAllowedForAssistant('instagram', assistant)) {
+            if (!assistant || !isServiceAllowedForAssistant(platform, assistant)) {
                 return { statusCode: 302, headers: { Location: metaErr('connection_not_relevant') }, body: '' };
             }
         }
@@ -249,47 +249,68 @@ export default withLambda(async (event) => {
             };
         }
 
-        // Only a Business or Creator account can be linked to a Page as an
-        // instagram_business_account, so the presence of the link IS the account-type check.
-        const linkedPage = pageList.find(p => p.instagram_business_account?.id);
-        if (!linkedPage) {
-            return {
-                statusCode: 302,
-                headers: { Location: metaErr('not_business') },
-                body: '',
-            };
-        }
-
-        const igUserId = linkedPage.instagram_business_account!.id;
-        const igUsername = linkedPage.instagram_business_account!.username ?? null;
-        // The Page that actually owns the Instagram account — not merely the first page listed.
-        const fbPageId = linkedPage.id;
-        const accountType = 'BUSINESS';
-
+        // ── Resolve the target account for the product being connected ────────────────────
+        // Instagram and Facebook are discovered from the same Meta Pages but store DIFFERENT
+        // connections: Instagram keys on the linked IG account (and REQUIRES one); Facebook keys
+        // on the Page itself and needs no linked Instagram. Publishing for both derives a Page
+        // token from the stored long-lived user token (resolveFacebookPageCredentials /
+        // publish-instagram), so the token model is identical — only the row differs.
         const db = getDb();
 
-        // US1 AC1.3: block if this Instagram tenant is already live in a different workspace.
-        // Checked before any token is persisted, so nothing is stored on rejection.
-        const collision = await findTenantCollision(db, { serviceName: 'instagram', externalUserId: igUserId, organisationId });
+        let serviceName: 'instagram' | 'facebook';
+        let externalUserId: string;          // the id the connection row is keyed on
+        let fbPageId: string;                // the Facebook Page id (both products need a Page)
+        let pageName: string | null = null;
+        let igUsername: string | null = null;
+
+        if (platform === 'instagram') {
+            // Only a Business/Creator account can be linked to a Page as an
+            // instagram_business_account, so the presence of the link IS the account-type check.
+            const linkedPage = pageList.find(p => p.instagram_business_account?.id);
+            if (!linkedPage) {
+                return { statusCode: 302, headers: { Location: metaErr('not_business') }, body: '' };
+            }
+            serviceName = 'instagram';
+            externalUserId = linkedPage.instagram_business_account!.id;
+            igUsername = linkedPage.instagram_business_account!.username ?? null;
+            fbPageId = linkedPage.id;        // the Page that owns the IG account
+            pageName = linkedPage.name ?? null;
+        } else {
+            // Facebook needs only a Page. Prefer the Page that also carries the Instagram account
+            // (so Facebook and Instagram align on one Page); otherwise the first Page shared.
+            const fbPage = pageList.find(p => p.instagram_business_account?.id) ?? pageList[0];
+            serviceName = 'facebook';
+            externalUserId = fbPage.id;      // the connection is keyed on the Page id
+            fbPageId = fbPage.id;
+            pageName = fbPage.name ?? null;
+            igUsername = fbPage.instagram_business_account?.username ?? null;
+        }
+        const accountType = 'BUSINESS';
+        const connMetadata = { accountType, fbPageId, igUsername, pageName };
+
+        // US1 AC1.3: block if this tenant is already live in a different workspace. Checked before
+        // any token is persisted, so nothing is stored on rejection.
+        const collision = await findTenantCollision(db, { serviceName, externalUserId, organisationId });
         if (collision) {
-            await recordCollisionAttempt(db, { requestingOrgId: organisationId, existingOrgId: collision.organisationId, serviceName: 'instagram', externalUserId: igUserId });
+            await recordCollisionAttempt(db, { requestingOrgId: organisationId, existingOrgId: collision.organisationId, serviceName, externalUserId });
             return { statusCode: 302, headers: { Location: metaErr('tenant_collision') }, body: '' };
         }
 
-        // Store token in vault
-        const refKey = `aura/org-${organisationId}/instagram-token`;
+        // Store token in vault — a separate ref per product so disconnecting one leaves the other's
+        // token intact.
+        const refKey = `aura/org-${organisationId}/${serviceName}-token`;
         await storeSecret(db, refKey, { token: longLivedToken });
 
         const tokenExpiresAt = new Date(Date.now() + TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
 
-        // Upsert system_connections — update existing if same instagramAccountId, else create
+        // Upsert system_connections — update existing if same external id, else create.
         const [existing] = await db
             .select({ id: systemConnections.id })
             .from(systemConnections)
             .where(and(
                 eq(systemConnections.organisationId, organisationId),
-                eq(systemConnections.serviceName, 'instagram'),
-                eq(systemConnections.externalUserId, igUserId),
+                eq(systemConnections.serviceName, serviceName),
+                eq(systemConnections.externalUserId, externalUserId),
             ))
             .limit(1);
 
@@ -301,7 +322,7 @@ export default withLambda(async (event) => {
                 tokenExpiresAt,
                 status: 'active',
                 isActive: true,
-                metadata: { accountType, fbPageId, igUsername },
+                metadata: connMetadata,
                 ...(assistantId ? { assistantId } : {}),
                 updatedAt: new Date(),
             }).where(eq(systemConnections.id, existing.id));
@@ -309,49 +330,55 @@ export default withLambda(async (event) => {
             await db.insert(systemConnections).values({
                 organisationId,
                 assistantId,
-                serviceName: 'instagram',
+                serviceName,
                 connectionType: 'oauth',
-                externalUserId: igUserId,
+                externalUserId,
                 vaultRefKey: refKey,
                 tokenExpiresAt,
                 status: 'active',
                 isActive: true,
                 scopes: SCOPES,
-                metadata: { accountType, fbPageId, igUsername },
+                metadata: connMetadata,
             });
         }
 
         // Find userId from org (use first active user for notification)
         const [orgUser] = await db.select({ id: users.id }).from(users).innerJoin(userOrganisations, eq(users.id, userOrganisations.userId)).where(eq(userOrganisations.organisationId, organisationId)).limit(1);
         if (orgUser) {
-            await createNotification(db, isReconnect ? 'instagram_reconnected' : 'instagram_connected', {
-                userId: orgUser.id,
-                context: { instagram: { page_warning: !fbPageId ? ' Note: No Facebook Page linked — some features may be limited.' : '' } },
-                metadata: { igUserId, accountType, fbPageId, assistantId },
-            });
-            // Connection is live again — clear any open "reconnect Instagram" action items.
+            if (serviceName === 'instagram') {
+                await createNotification(db, isReconnect ? 'instagram_reconnected' : 'instagram_connected', {
+                    userId: orgUser.id,
+                    context: { instagram: { page_warning: !fbPageId ? ' Note: No Facebook Page linked — some features may be limited.' : '' } },
+                    metadata: { igUserId: externalUserId, accountType, fbPageId, assistantId },
+                });
+            } else {
+                await createNotification(db, isReconnect ? 'facebook_reconnected' : 'facebook_connected', {
+                    userId: orgUser.id,
+                    context: { facebook: { page_name: pageName || 'your Page' } },
+                    metadata: { fbPageId, pageName, assistantId },
+                });
+            }
+            // Connection is live again — clear any open "reconnect" action items.
             await resolveActionNotifications(db, orgUser.id, CONNECTION_RESTORED_TYPES);
         }
 
-        await db.insert(auditLogs).values({ actionType: isReconnect ? 'instagram_reconnected' : 'instagram_connected', resourceType: 'system_connections', resourceId: igUserId, newState: { organisationId, accountType, fbPageId } });
+        await db.insert(auditLogs).values({ actionType: isReconnect ? `${serviceName}_reconnected` : `${serviceName}_connected`, resourceType: 'system_connections', resourceId: externalUserId, newState: { organisationId, accountType, fbPageId } });
 
-        // US-SMM-4.2.2: trigger profile sync fire-and-forget after successful OAuth
+        // US-SMM-4.2.2 / 4.3.1: trigger profile sync + pre-flight audit fire-and-forget after OAuth.
         fetch(`${baseUrl}/.netlify/functions/social-profile-sync`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ organisationId }),
         }).catch(() => {});
-
-        // US-SMM-4.3.1: trigger pre-flight audit fire-and-forget after successful OAuth
         fetch(`${baseUrl}/.netlify/functions/social-preflight-audit`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ organisationId, platform: 'instagram' }),
+            body: JSON.stringify({ organisationId, platform: serviceName }),
         }).catch(() => {});
 
         return {
             statusCode: 302,
-            headers: { Location: `/workspace.html?oauth_success=instagram${assistantId ? `&assistantId=${assistantId}` : ''}` },
+            headers: { Location: `/workspace.html?oauth_success=${serviceName}${assistantId ? `&assistantId=${assistantId}` : ''}` },
             body: '',
         };
     }

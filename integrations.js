@@ -5,7 +5,10 @@ const PLATFORMS = [
     {
         id: 'Facebook',
         oauthPlatform: true,
-        oauthUrl: '/.netlify/functions/meta-oauth?action=start',
+        // platform= tells meta-oauth which product to connect: Facebook stores a standalone
+        // 'facebook' Page connection, Instagram stores the linked IG account. Without it the
+        // callback can't tell them apart and every Meta connect became an Instagram one.
+        oauthUrl: '/.netlify/functions/meta-oauth?action=start&platform=facebook',
         emoji: '📘',
         iconBg: 'bg-blue-600',
         iconText: 'text-white',
@@ -40,7 +43,7 @@ const PLATFORMS = [
     {
         id: 'Instagram',
         oauthPlatform: true,
-        oauthUrl: '/.netlify/functions/meta-oauth?action=start',
+        oauthUrl: '/.netlify/functions/meta-oauth?action=start&platform=instagram',
         emoji: '📸',
         iconBg: 'bg-gradient-to-br from-purple-600 via-pink-500 to-orange-400',
         iconText: 'text-white',
@@ -1167,13 +1170,26 @@ function _platformCard(platform, conn) {
             : `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-500 border-gray-200">Not enabled</span>`;
         // Keep a health pill visible only when the token needs attention (expiring/disconnected).
         const healthPill = (isConnected && connProblem) ? statusBadge : '';
-        // Primary CTA mirrors the recipe cards: Connect-first gate, then Enable, then the
-        // enabled toggle. Enable = "use this connection for this assistant" (real state).
-        const primary = !isActive
-            ? connectBtn
-            : inUse
-            ? `<button type="button" onclick="window._intToggleUseForAssistant(${conn.id}, false)" class="inline-flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm font-bold text-gray-700 cursor-pointer"><span class="w-1.5 h-1.5 rounded-full bg-emerald-600"></span> Enabled</button>`
-            : `<button type="button" onclick="window._intToggleUseForAssistant(${conn.id}, true)" class="w-full px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition cursor-pointer">Enable</button>`;
+        // Connect button is ALWAYS visible. When the connection is already active it's greyed out
+        // and disabled (nothing left to connect); when inactive it's the live connect CTA — which
+        // itself still gates on a missing Business-Information handle.
+        const connectControl = isActive
+            ? `<button disabled class="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-gray-100 text-gray-400 text-sm font-bold rounded-xl cursor-not-allowed" type="button">${connectIcon} Connect ${_esc(platform.label)}</button>`
+            : connectBtn;
+        // Enabling this connection for the assistant is a toggle switch (was an Enable/Enabled
+        // button). Only meaningful once the connection is active.
+        const enableToggle = isActive
+            ? `<label class="flex items-center justify-between gap-3 rounded-xl bg-emerald-50 border border-emerald-100 px-3.5 py-3 cursor-pointer">
+                   <span class="min-w-0">
+                       <span class="block text-sm font-bold text-gray-800">Use for this assistant</span>
+                       <span class="block text-xs text-gray-500 mt-0.5 leading-snug">Let this assistant post to ${_esc(platform.label)}.</span>
+                   </span>
+                   <span class="relative shrink-0">
+                       <input type="checkbox" class="sr-only peer" ${inUse ? 'checked' : ''} onchange="window._intToggleUseForAssistant(${conn.id}, this.checked)">
+                       <span class="block w-11 h-6 bg-gray-200 rounded-full peer-checked:bg-emerald-700 peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-200 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:shadow-sm after:transition-all peer-checked:after:translate-x-full peer-checked:after:border-white"></span>
+                   </span>
+               </label>`
+            : '';
         const manage = isConnected
             ? `<details class="mt-1">
                    <summary class="text-xs font-semibold text-gray-500 cursor-pointer hover:text-gray-700 select-none">Manage connection</summary>
@@ -1191,7 +1207,8 @@ function _platformCard(platform, conn) {
                 <p class="text-sm text-gray-500 mt-1">${_esc(platform.tagline)}</p>
                 ${handleChip}
             </div>
-            ${primary}
+            ${connectControl}
+            ${enableToggle}
             ${manage}
         </div>`;
     }
