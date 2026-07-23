@@ -2758,7 +2758,8 @@ function formatCurrency(amount, currency) {
         connection_not_relevant: `${label} isn’t a relevant connection for this assistant.`,
         unauthenticated: 'Your session has expired. Please sign in and try connecting again.',
         invalid_session: 'Your session has expired. Please sign in and try connecting again.',
-        no_pages: 'We couldn’t see any Facebook Pages on your account. On Meta’s permission screen there is a step for choosing which Pages to share — make sure you tick your Page there rather than clicking straight past it. If you don’t have a Facebook Page yet, you’ll need to create one first: Instagram can only be connected through a Page.',
+        no_pages: 'We connected to Meta but couldn’t see a Facebook Page you directly manage. This usually means your Page is owned by a Business or Meta Business Suite portfolio — open Business Settings, and under your Page’s “People” or “Partners” add yourself with full control so it shows up as a Page you administer, then try again. (If you don’t have a Facebook Page at all, create one first — Instagram connects through a Page.)',
+        pages_permission: 'You connected your account, but Be More Swan wasn’t granted permission to see your Facebook Pages. Try connecting again and, on Meta’s screen, make sure the Pages access stays switched on rather than being toggled off.',
         not_business: 'We can see your Facebook Page, but no Instagram account is linked to it. In Meta Business Suite, open your Page’s settings and link your Instagram account — it must be a Business or Creator account, not a personal one. Then try connecting again.',
         personal_account: 'Personal Instagram accounts can’t be connected. Click “Connect with Instagram” and follow the setup checklist to switch to a Business or Creator account, then try again.',
         // US1 AC1.4: tenant collision — this third-party account is already linked elsewhere.

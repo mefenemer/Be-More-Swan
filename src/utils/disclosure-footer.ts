@@ -8,7 +8,7 @@
 //
 // `{assistant}` in either the default template or a workspace override is filled with the generating
 // assistant's name at resolve time, e.g.
-//   "Composed with Ava, my Be More Swan Digital Assistant. What's yours called ;-)?"
+//   "Composed with Ava, my Be More Swan Digital Assistant. What's yours called 😉?"
 
 import { DISCLOSURE } from '../config/compliance';
 

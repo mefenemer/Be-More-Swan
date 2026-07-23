@@ -55,13 +55,10 @@ check('isPublicInterestText flags AC1.3 trigger topics', () => {
     assert.equal(isPublicInterestText(null), false);
 });
 
-check('disclosure defaults are non-empty and disclose AI/assistant authorship', () => {
+check('disclosure defaults are non-empty and mention AI', () => {
     for (const [k, v] of Object.entries(DISCLOSURE)) {
         assert.ok(v && v.length > 0, `${k} non-empty`);
-        // Each default must signal machine authorship: literally "AI", or "assistant".
-        // workspaceFooterDefaultTemplate uses the product-facing wording "…my Be More Swan
-        // Digital Assistant" rather than the word "AI", so accept either token.
-        assert.ok(/ai\b|assistant/i.test(v), `${k} discloses AI/assistant authorship`);
+        assert.ok(/ai\b/i.test(v), `${k} mentions AI`);
     }
 });
 

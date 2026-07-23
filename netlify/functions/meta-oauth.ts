@@ -172,11 +172,35 @@ export default withLambda(async (event) => {
         console.log(`[meta-oauth] /me/accounts returned ${pageList.length} page(s); ${pageList.filter(p => p.instagram_business_account?.id).length} with a linked Instagram account`);
 
         if (pageList.length === 0) {
-            // Either the account administers no Facebook Page, or the Page opt-in step of the
-            // Meta consent screen was skipped (it is easy to click past without selecting one).
+            // A successful login that returns zero Pages is ambiguous — it has three distinct causes
+            // with different remedies, and blaming "no Pages" for all of them is what makes this feel
+            // broken to a user who *did* pick a Page on Meta's consent screen:
+            //   1. the Page is owned by a Business/Meta portfolio (/me/accounts only lists Pages the
+            //      user administers DIRECTLY, so portfolio Pages come back empty here);
+            //   2. the per-permission `pages_show_list` toggle was declined (an empty list, not an error);
+            //   3. the account genuinely administers no Page.
+            // Ask Meta which permissions were actually granted so the logs — and the user-facing
+            // message — reflect the real cause instead of always pointing at case 3.
+            let pagesScopeGranted = true; // assume granted; only flip on positive evidence it wasn't
+            try {
+                const permRes = await fetch(`https://graph.facebook.com/v19.0/me/permissions?access_token=${longLivedToken}`);
+                const perms: { data?: Array<{ permission: string; status: string }> } = await permRes.json();
+                const granted = (perms.data ?? []).filter(p => p.status === 'granted').map(p => p.permission);
+                const declined = (perms.data ?? []).filter(p => p.status !== 'granted').map(p => p.permission);
+                console.log(`[meta-oauth] zero pages after successful auth — permissions granted=[${granted.join(',')}] declined=[${declined.join(',')}]`);
+                // Only treat as "declined" when the endpoint actually answered and pages_show_list is
+                // absent from the granted set; a failed lookup must not mislabel the cause.
+                if (perms.data) pagesScopeGranted = granted.includes('pages_show_list');
+            } catch (e) {
+                console.error('[meta-oauth] /me/permissions lookup failed:', e);
+            }
+
+            // `pages_permission` → the user withheld Page access (actionable: re-consent).
+            // `no_pages` → the permission is granted but no directly-administered Page was returned,
+            // which in practice now means the Page lives in a Business portfolio.
             return {
                 statusCode: 302,
-                headers: { Location: metaErr('no_pages') },
+                headers: { Location: metaErr(pagesScopeGranted ? 'no_pages' : 'pages_permission') },
                 body: '',
             };
         }
