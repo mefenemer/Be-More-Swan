@@ -600,11 +600,17 @@ window.showComplianceModals = function showComplianceModals(force) {
           <div id="prq-suggestions-wrap" class="hidden">
             <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Suggestions</p>
             <ul id="prq-suggestions" class="space-y-1.5 text-xs text-gray-600"></ul>
-            <button type="button" id="prq-apply-btn" onclick="rqPreviewSuggestions()"
-              class="mt-2.5 w-full px-3 py-2 text-xs font-bold rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 transition">
-              Apply these suggestions
-            </button>
-            <p class="text-[11px] text-gray-400 mt-1.5 text-center">You'll see the rewrite and can edit it before saving.</p>
+            <div id="prq-suggestion-actions" class="flex gap-2 mt-2.5">
+              <button type="button" id="prq-ignore-btn" onclick="rqIgnoreSuggestions()"
+                class="flex-1 px-3 py-2 text-xs font-semibold rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition">
+                Ignore
+              </button>
+              <button type="button" id="prq-apply-btn" onclick="rqPreviewSuggestions()"
+                class="flex-1 px-3 py-2 text-xs font-bold rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 transition">
+                Apply these suggestions
+              </button>
+            </div>
+            <p class="text-[11px] text-gray-400 mt-1.5 text-center">Either way they're done with — we won't suggest more unless you ask.</p>
           </div>
           <!-- The proposal is EDITABLE before it is saved, and what gets saved is exactly what is
                in this box — the server no longer re-generates on accept. -->
@@ -5031,9 +5037,9 @@ async function _rqLoadQualityReview(postId) {
     ['prq-warnings-wrap', 'prq-suggestions-wrap', 'prq-rewrite-wrap', 'prq-clean']
         .forEach(id => _prqShow(id, false));
     document.getElementById('prq-score')?.classList.add('hidden');
-    // rqPreviewSuggestions() hides this button while its proposal is on screen. Restore it here or
-    // the NEXT post opened after a proposal shows suggestions with no way to act on them.
-    document.getElementById('prq-apply-btn')?.classList.remove('hidden');
+    // rqPreviewSuggestions() hides these while its proposal is on screen. Restore them here or the
+    // NEXT post opened after a proposal shows suggestions with no way to act on them.
+    document.getElementById('prq-suggestion-actions')?.classList.remove('hidden');
 
     let data;
     try {
@@ -5115,10 +5121,10 @@ function _prqWarningCard(warning, disposition, index) {
       <div class="text-xs bg-red-50 border border-red-200 rounded-lg px-2.5 py-2">
         <div class="flex gap-2 text-red-700"><span class="shrink-0">⚠</span><span>${_prqEsc(warning)}</span></div>
         <div class="flex flex-wrap gap-1.5 mt-2">
-          <button type="button" onclick="rqVerifyWarning(${index})"
-            class="px-2 py-1 text-[11px] font-bold rounded-md bg-red-600 text-white hover:bg-red-700">Ask the assistant to check</button>
           <button type="button" onclick="rqSourceWarning(${index})"
             class="px-2 py-1 text-[11px] font-bold rounded-md border border-red-300 text-red-700 bg-white hover:bg-red-100">Add a source</button>
+          <button type="button" onclick="rqVerifyWarning(${index})"
+            class="px-2 py-1 text-[11px] font-bold rounded-md bg-red-600 text-white hover:bg-red-700">AI Resolve</button>
           <button type="button" onclick="rqDismissWarning(${index})"
             class="px-2 py-1 text-[11px] font-semibold rounded-md border border-gray-300 text-gray-600 bg-white hover:bg-gray-100">Doesn't apply</button>
         </div>
@@ -5299,14 +5305,37 @@ window.rqPreviewSuggestions = async function () {
         // is exactly what gets saved.
         document.getElementById('prq-rewrite-after').value = d.after;
         _prqShow('prq-rewrite-wrap', true);
-        btn.classList.add('hidden');
+        // Hide BOTH actions while the proposal is up — offering "Ignore" next to a pending rewrite
+        // is ambiguous (ignore the suggestions, or the rewrite?). Discard on the proposal does that.
+        document.getElementById('prq-suggestion-actions')?.classList.add('hidden');
     } catch { alert('Network error — please try again.'); }
     finally { btn.disabled = false; btn.textContent = original; }
 };
 
 window.rqCancelSuggestions = function () {
     _prqShow('prq-rewrite-wrap', false);
-    document.getElementById('prq-apply-btn')?.classList.remove('hidden');
+    document.getElementById('prq-suggestion-actions')?.classList.remove('hidden');
+};
+
+// Decline the advice. Clears the list for good — no model call, no credit, and crucially no
+// replacement set: suggestions only ever regenerate when a human explicitly asks, so an empty list
+// stays empty. This is the whole point of the button; a "dismiss" that quietly refilled would be
+// the treadmill wearing a different hat.
+window.rqIgnoreSuggestions = async function () {
+    const btn = document.getElementById('prq-ignore-btn');
+    if (!_prqPostId || !btn) return;
+    btn.disabled = true;
+    try {
+        const res = await fetch('/.netlify/functions/apply-post-suggestions', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId: _prqPostId, mode: 'dismiss' }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) { alert(d.error || 'Could not dismiss those suggestions.'); return; }
+        // Repaint from the server's copy so the panel reflects what was actually stored.
+        _prqRenderReview({ ...d.review, openWarnings: d.openWarnings });
+    } catch { alert('Network error — please try again.'); }
+    finally { btn.disabled = false; }
 };
 
 // Save the caption as it stands in the textarea — the human's version, edits and all. The server

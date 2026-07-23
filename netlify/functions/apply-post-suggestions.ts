@@ -43,7 +43,7 @@ import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import { consumeTaskCredit } from '../../src/utils/task-credit';
 import {
-    MAX_SUGGESTION_ROUNDS, openWarnings, readCachedReview, runQualityReview,
+    MAX_SUGGESTION_ROUNDS, openWarnings, persistReview, readCachedReview, runQualityReview,
 } from '../../src/utils/post-quality-review';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -77,8 +77,8 @@ export default withLambda(async (event) => {
 
         const { postId, mode = 'suggest' } = body;
         if (!postId) return json(400, { error: 'postId required.' });
-        if (mode !== 'suggest' && mode !== 'accept') {
-            return json(400, { error: "mode must be 'suggest' or 'accept'." });
+        if (mode !== 'suggest' && mode !== 'accept' && mode !== 'dismiss') {
+            return json(400, { error: "mode must be 'suggest', 'accept' or 'dismiss'." });
         }
 
         const db = getDb();
@@ -118,6 +118,48 @@ export default withLambda(async (event) => {
         const before = post.caption || '';
         const platform = post.platform || 'instagram';
         const review = readCachedReview(post.qualityReview, post.caption);
+
+        // ── dismiss: the human read the advice and declined it ───────────────────────────────
+        // Clears the list for good. No model call, no task credit — declining advice is not work,
+        // and charging for it would be absurd.
+        //
+        // "For good" is the requirement: suggestions must not come back on the next open, and must
+        // not be silently replaced by a fresh set. Both hold because suggestions are only ever
+        // generated on an explicit request (see post-quality-review.ts) — so an empty list stays
+        // empty until a human asks again, and persisting [] IS the dismissal.
+        if (mode === 'dismiss') {
+            if (!review) {
+                return json(409, {
+                    error: 'This post has no current quality review. Reload to see the latest.',
+                    code: 'REVIEW_STALE',
+                });
+            }
+            const cleared = { ...review, suggestions: [] };
+            await persistReview(db, postId, cleared);
+
+            // Siblings share the caption, so they share the advice — dismissing it once should not
+            // leave the same three suggestions waiting on the other platform's card.
+            if (post.crosspostGroupId) {
+                await db
+                    .update(scheduledPosts)
+                    .set({ qualityReview: cleared as unknown as Record<string, unknown> })
+                    .where(and(
+                        eq(scheduledPosts.crosspostGroupId, post.crosspostGroupId),
+                        eq(scheduledPosts.caption, before),
+                    ))
+                    .catch(() => {});
+            }
+
+            await db.insert(auditLogs).values({
+                userId,
+                actionType: 'POST_SUGGESTIONS_DISMISSED',
+                resourceType: 'scheduled_posts',
+                resourceId: String(postId),
+                newState: { dismissedSuggestions: review.suggestions },
+            }).catch(() => {});
+
+            return json(200, { dismissed: true, review: cleared, openWarnings: openWarnings(cleared) });
+        }
 
         // ── accept: persist exactly what the human approved ──────────────────────────────────
         if (mode === 'accept') {
