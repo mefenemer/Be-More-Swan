@@ -632,9 +632,13 @@
         // the Stripe subscription's own discounts, so it reflects what is actually being charged.
         const d = sub.discount;
         const money = v => `£${Number(v).toFixed(2)}`;
-        // The headline number becomes what they actually pay, with the pre-voucher price struck
-        // through beside it — so "what's left to pay" is the figure read first.
-        const priceBlock = d
+        // 'subscription' source = an ONGOING discount (what they'll keep paying). 'invoice' source =
+        // a CONSUMED one-time voucher surfaced from the invoice it was applied to — the ongoing price
+        // is now full, so it's framed as history ("you saved …, renews at full price …").
+        const ongoingDiscount = d && sub.discountSource === 'subscription';
+        // Headline: ongoing → what they actually pay (net) with the pre-voucher price struck through;
+        // otherwise → the full price (a consumed voucher no longer reduces the ongoing charge).
+        const priceBlock = ongoingDiscount
             ? `<p class="text-2xl font-extrabold text-gray-900">${money(d.netAmount)}</p>
                <p class="text-xs text-gray-400"><span class="line-through">${money(d.grossAmount)}</span> per ${_esc(sub.billingCycle || 'month')}</p>`
             : `<p class="text-2xl font-extrabold text-gray-900">${amount}</p>
@@ -645,32 +649,55 @@
             const codeLabel = d.codes && d.codes.length
                 ? d.codes.map(c => `<span class="font-mono font-bold px-1.5 py-0.5 rounded bg-white border border-emerald-200 text-emerald-800">${_esc(c)}</span>`).join(' + ')
                 : (d.name ? `<span class="font-semibold">${_esc(d.name)}</span>` : '<span class="font-semibold">Voucher</span>');
-            // How long it lasts. 'forever' needs no caveat; the other two do, because the price
-            // goes back up and the customer should be able to see when.
-            let durationNote = '';
-            if (d.duration === 'once') {
-                durationNote = 'Applies to one billing period';
-            } else if (d.duration === 'repeating' && d.durationInMonths) {
-                durationNote = `Applies for ${d.durationInMonths} month${d.durationInMonths === 1 ? '' : 's'}`;
+            if (ongoingDiscount) {
+                // How long it lasts. 'forever' needs no caveat; the other two do, because the price
+                // goes back up and the customer should be able to see when.
+                let durationNote = '';
+                if (d.duration === 'once') {
+                    durationNote = 'Applies to one billing period';
+                } else if (d.duration === 'repeating' && d.durationInMonths) {
+                    durationNote = `Applies for ${d.durationInMonths} month${d.durationInMonths === 1 ? '' : 's'}`;
+                }
+                if (d.endsAt) {
+                    durationNote += `${durationNote ? ' · ' : ''}Full price from ${_fmtDate(d.endsAt)}`;
+                }
+                voucherStrip = `
+                <div class="mt-4 pt-4 border-t border-gray-100">
+                  <div class="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-3">
+                    <div class="flex items-center justify-between gap-3 flex-wrap">
+                      <p class="text-sm text-emerald-900">Voucher ${codeLabel} applied — <span class="font-bold">${_esc(d.label)}</span></p>
+                      <p class="text-xs font-bold text-emerald-700">${d.percentCovered}% of the price covered</p>
+                    </div>
+                    <div class="mt-2 flex items-baseline gap-4 flex-wrap text-xs text-emerald-800">
+                      <span>Price <span class="font-semibold">${money(d.grossAmount)}</span></span>
+                      <span>Voucher <span class="font-semibold">−${money(d.discountAmount)}</span></span>
+                      <span class="text-emerald-900">Left to pay <span class="font-extrabold">${money(d.netAmount)}</span></span>
+                    </div>
+                    ${durationNote ? `<p class="mt-1.5 text-[11px] text-emerald-700">${_esc(durationNote)}</p>` : ''}
+                  </div>
+                </div>`;
+            } else {
+                // Consumed one-time voucher (surfaced from its invoice). Show what was saved and when
+                // the next FULL charge lands, so the customer understands why the price is now full.
+                const appliedOn = sub.discountAppliedOn ? _fmtDate(sub.discountAppliedOn) : null;
+                const nextNote = sub.cancelAtPeriodEnd
+                    ? (sub.renewalDate ? `Cancels ${_fmtDate(sub.renewalDate)}` : '')
+                    : (sub.renewalDate ? `Renews at full price (${amount}) on ${_fmtDate(sub.renewalDate)}` : '');
+                voucherStrip = `
+                <div class="mt-4 pt-4 border-t border-gray-100">
+                  <div class="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-3">
+                    <div class="flex items-center justify-between gap-3 flex-wrap">
+                      <p class="text-sm text-emerald-900">Voucher ${codeLabel} applied${appliedOn ? ` on ${appliedOn}` : ''} — <span class="font-bold">${_esc(d.label)}</span></p>
+                      <p class="text-xs font-bold text-emerald-700">Saved ${money(d.discountAmount)}</p>
+                    </div>
+                    <div class="mt-2 flex items-baseline gap-4 flex-wrap text-xs text-emerald-800">
+                      <span>Full price <span class="font-semibold">${money(d.grossAmount)}</span></span>
+                      <span class="text-emerald-900">You paid <span class="font-extrabold">${money(d.netAmount)}</span></span>
+                    </div>
+                    ${nextNote ? `<p class="mt-1.5 text-[11px] text-emerald-700">${_esc(nextNote)}</p>` : ''}
+                  </div>
+                </div>`;
             }
-            if (d.endsAt) {
-                durationNote += `${durationNote ? ' · ' : ''}Full price from ${_fmtDate(d.endsAt)}`;
-            }
-            voucherStrip = `
-            <div class="mt-4 pt-4 border-t border-gray-100">
-              <div class="rounded-xl bg-emerald-50 border border-emerald-100 px-4 py-3">
-                <div class="flex items-center justify-between gap-3 flex-wrap">
-                  <p class="text-sm text-emerald-900">Voucher ${codeLabel} applied — <span class="font-bold">${_esc(d.label)}</span></p>
-                  <p class="text-xs font-bold text-emerald-700">${d.percentCovered}% of the price covered</p>
-                </div>
-                <div class="mt-2 flex items-baseline gap-4 flex-wrap text-xs text-emerald-800">
-                  <span>Price <span class="font-semibold">${money(d.grossAmount)}</span></span>
-                  <span>Voucher <span class="font-semibold">−${money(d.discountAmount)}</span></span>
-                  <span class="text-emerald-900">Left to pay <span class="font-extrabold">${money(d.netAmount)}</span></span>
-                </div>
-                ${durationNote ? `<p class="mt-1.5 text-[11px] text-emerald-700">${_esc(durationNote)}</p>` : ''}
-              </div>
-            </div>`;
         }
 
         const renewalLine = sub.cancelAtPeriodEnd

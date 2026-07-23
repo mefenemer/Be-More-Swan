@@ -90,6 +90,11 @@ export default withLambda(async (event) => {
         let stripeSubscriptions: any[] = [];
         let stripePaymentMethods: Record<string, any> = {};
         let stripeInvoiceUrls: Record<string, { hostedUrl: string; pdfUrl: string | null }> = {};
+        // Fallback voucher source: a one-time (`duration: once`) voucher is consumed on its first
+        // invoice and then DROPPED from the subscription's ongoing discounts, so it vanishes from the
+        // billing page even though it was genuinely used. Capture the most recent invoice that
+        // carried a discount so the page can still surface it (see the mapping below).
+        let latestVoucherInvoice: { summary: any; invoiceDate: string | null; invoiceNumber: string | null } | null = null;
 
         if (stripeSecret) {
             try {
@@ -163,10 +168,12 @@ export default withLambda(async (event) => {
                         };
                     });
 
-                    // Invoices for receipt URLs
+                    // Invoices for receipt URLs (+ voucher fallback). Expand discounts so a consumed
+                    // one-time voucher can still be surfaced when the subscription no longer carries it.
                     const invoices = await stripe.invoices.list({
                         customer: customer.id,
                         limit: 50,
+                        expand: ['data.discounts.promotion_code'],
                     });
                     invoices.data.forEach(inv => {
                         // Stripe SDK v22 / API 2026-05-27 removed `payment_intent` from the Invoice type;
@@ -177,6 +184,19 @@ export default withLambda(async (event) => {
                                 hostedUrl: inv.hosted_invoice_url,
                                 pdfUrl: (inv as any).invoice_pdf || null,
                             };
+                        }
+                        // Keep the most recent invoice that actually carried a voucher. invoices.list
+                        // returns newest-first, so the first match is the latest.
+                        if (!latestVoucherInvoice) {
+                            const invDiscounts = ((inv as any).discounts || []) as any[];
+                            const summary = summariseDiscount(invDiscounts, typeof inv.subtotal === 'number' ? inv.subtotal : 0, inv.currency || 'gbp');
+                            if (summary) {
+                                latestVoucherInvoice = {
+                                    summary,
+                                    invoiceDate: inv.created ? new Date(inv.created * 1000).toISOString() : null,
+                                    invoiceNumber: inv.number || null,
+                                };
+                            }
                         }
                     });
 
@@ -238,10 +258,18 @@ export default withLambda(async (event) => {
                 amountGbp: stripeGrossMinor != null ? (stripeGrossMinor / 100).toFixed(2) : (mp?.monthlyPriceGbp || null),
                 listAmountGbp: mp?.monthlyPriceGbp || null,
                 currency: matchedSub?.items?.[0]?.currency || 'gbp',
-                // Voucher summary: which code, how much it covers, what's left. Null when none.
-                discount: stripeGrossMinor != null
-                    ? summariseDiscount(matchedSub?.discounts || [], stripeGrossMinor, matchedSub?.items?.[0]?.currency || 'gbp')
-                    : null,
+                // Voucher summary: which code, how much it covers, what's left. Prefer the
+                // subscription's ONGOING discount (authoritative for what's charged going forward);
+                // fall back to the latest invoice that carried a voucher so a consumed one-time
+                // voucher stays visible. `discountSource` tells the UI how to frame it.
+                ...(() => {
+                    const ongoing = stripeGrossMinor != null
+                        ? summariseDiscount(matchedSub?.discounts || [], stripeGrossMinor, matchedSub?.items?.[0]?.currency || 'gbp')
+                        : null;
+                    if (ongoing) return { discount: ongoing, discountSource: 'subscription', discountAppliedOn: null };
+                    if (latestVoucherInvoice) return { discount: latestVoucherInvoice.summary, discountSource: 'invoice', discountAppliedOn: latestVoucherInvoice.invoiceDate };
+                    return { discount: null, discountSource: null, discountAppliedOn: null };
+                })(),
                 startedAt: plan.startedAt,
                 expiresAt: plan.expiresAt,
                 renewalDate: matchedSub?.currentPeriodEnd
