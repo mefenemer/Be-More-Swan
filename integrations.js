@@ -256,29 +256,85 @@ let _userConnections = [];
 // Monthly X posting usage { used, allowance, remaining } (Phase 1) — drives the X-card gauge.
 let _xCredits = null;
 
-// A slim usage gauge for the X card: "X posts this month — used / allowance", bar turns amber near
-// the cap and red when spent. Only rendered for the X platform when the org has an allowance.
+// A slim usage gauge for the X card: "X posts this month — used / total", where total = monthly
+// allowance + any purchased (non-expiring) bonus. Bar turns amber near the cap, red when spent.
+// Includes a "Buy credits" affordance (Phase 2 booster packs).
 function _xUsageGauge(platform) {
     if (platform.id !== 'X' || !_xCredits || _xCredits.allowance <= 0) return '';
     const used = Math.max(0, _xCredits.used);
-    const allowance = _xCredits.allowance;
-    const pct = Math.min(100, Math.round((used / allowance) * 100));
-    const spent = used >= allowance;
+    const bonus = Math.max(0, _xCredits.bonus || 0);
+    const total = _xCredits.allowance + bonus;
+    const remaining = Math.max(0, _xCredits.remaining != null ? _xCredits.remaining : (total - used));
+    const pct = total > 0 ? Math.min(100, Math.round((used / total) * 100)) : 100;
+    const spent = remaining <= 0;
     const near = !spent && pct >= 80;
     const barColor = spent ? 'bg-red-500' : near ? 'bg-amber-500' : 'bg-emerald-600';
     const textColor = spent ? 'text-red-700' : near ? 'text-amber-700' : 'text-gray-500';
     const note = spent
-        ? 'Monthly limit reached — new X posts pause until next month.'
-        : `${_xCredits.remaining} left this month (links cost 13×).`;
+        ? 'Monthly limit reached — new X posts pause until you add credits or it resets next month.'
+        : `${remaining} left${bonus ? ` (incl. ${bonus} purchased)` : ''} · links cost 13×.`;
     return `
         <div class="mt-1">
             <div class="flex items-center justify-between text-[11px] font-semibold ${textColor} mb-1">
-                <span>X posts this month</span><span>${used} / ${allowance}</span>
+                <span>X posts this month</span><span>${used} / ${total}</span>
             </div>
             <div class="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden"><div class="h-full ${barColor} rounded-full" style="width:${pct}%"></div></div>
-            <p class="text-[11px] ${textColor} mt-1">${_esc(note)}</p>
+            <div class="flex items-center justify-between mt-1 gap-2">
+                <p class="text-[11px] ${textColor} min-w-0 truncate">${_esc(note)}</p>
+                <button type="button" onclick="window._xOpenBuyCredits()" class="shrink-0 text-[11px] font-bold text-emerald-700 hover:underline cursor-pointer">Buy credits</button>
+            </div>
         </div>`;
 }
+
+// Booster-pack picker (Phase 2). Labels/prices mirror X_CREDIT_PACKS in src/utils/ai-credits.ts;
+// the server re-validates packId, so any drift fails safe with a 400 rather than a wrong charge.
+const _X_PACKS = [
+    { id: 'x_small',  label: '500 X credits',   price: '£12' },
+    { id: 'x_medium', label: '1,500 X credits', price: '£30' },
+    { id: 'x_large',  label: '5,000 X credits', price: '£90' },
+];
+window._xOpenBuyCredits = function () {
+    const existing = document.getElementById('x-buy-credits-modal');
+    if (existing) existing.remove();
+    const modal = document.createElement('div');
+    modal.id = 'x-buy-credits-modal';
+    modal.className = 'fixed inset-0 z-[9999] flex items-center justify-center bg-black/40 p-4';
+    modal.innerHTML = `
+      <div class="bg-white rounded-2xl shadow-xl max-w-sm w-full p-5" onclick="event.stopPropagation()">
+        <div class="flex items-center justify-between mb-1">
+          <h3 class="text-base font-bold text-gray-900">Buy X posting credits</h3>
+          <button type="button" onclick="document.getElementById('x-buy-credits-modal').remove()" class="text-gray-400 hover:text-gray-600 cursor-pointer text-lg leading-none">&times;</button>
+        </div>
+        <p class="text-xs text-gray-500 mb-4">Top up your X allowance. Purchased credits don’t expire and are used after your monthly allowance. A link post costs 13 credits; a text post costs 1.</p>
+        <div class="flex flex-col gap-2">
+          ${_X_PACKS.map(p => `
+            <button type="button" onclick="window._xBuyCredits('${p.id}', this)" class="flex items-center justify-between w-full px-4 py-3 border border-gray-200 rounded-xl hover:border-emerald-300 hover:bg-emerald-50 transition cursor-pointer text-left">
+              <span class="text-sm font-bold text-gray-800">${p.label}</span>
+              <span class="text-sm font-bold text-emerald-700">${p.price}</span>
+            </button>`).join('')}
+        </div>
+        <p id="x-buy-credits-err" class="hidden text-xs font-semibold text-red-600 mt-3"></p>
+      </div>`;
+    modal.onclick = () => modal.remove();
+    document.body.appendChild(modal);
+};
+window._xBuyCredits = async function (packId, btn) {
+    const err = document.getElementById('x-buy-credits-err');
+    if (err) { err.classList.add('hidden'); err.textContent = ''; }
+    if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
+    try {
+        const res = await fetch('/.netlify/functions/create-x-credit-checkout', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ packId }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.url) { window.location.href = data.url; return; }
+        throw new Error(data.error || 'Could not start checkout.');
+    } catch (e) {
+        if (err) { err.textContent = e.message || 'Could not start checkout.'; err.classList.remove('hidden'); }
+        if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+    }
+};
 
 // ── Per-assistant relevance ──────────────────────────────────────
 // The relevance policy is owned and ENFORCED server-side (src/utils/connection-map.ts).

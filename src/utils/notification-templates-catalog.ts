@@ -616,6 +616,15 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [],
     },
     {
+        templateKey: 'x_credits_purchased',
+        name: 'X credits added',
+        category: 'Connections',
+        type: 'x_credits_purchased',
+        title: 'X credits added',
+        message: '{{x.credits}} X posting credits have been added to your account. Any paused X posts will resume on the next publish run.',
+        variables: [v('x.credits', 'Number of X credits purchased', '1500')],
+    },
+    {
         templateKey: 'social_disconnected',
         name: 'Connection disconnected',
         category: 'Connections',

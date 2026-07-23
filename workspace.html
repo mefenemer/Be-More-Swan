@@ -2868,6 +2868,32 @@ function formatCurrency(amount, currency) {
       setTimeout(() => { toast.classList.remove('opacity-100'); toast.classList.add('opacity-0'); setTimeout(() => toast.classList.add('hidden'), 500); }, 5000);
     })();
 
+    // X credit booster pack — returned from Stripe. Success shows a green toast (the webhook grants
+    // the credits + resumes any paused X posts); cancel is a gentle note.
+    (function handleXCreditsPurchase() {
+      const bought = qs.get('x_credits_purchased');
+      const cancelled = qs.get('x_credits_cancelled');
+      if (!bought && !cancelled) return;
+      const url = new URL(window.location.href);
+      url.searchParams.delete('x_credits_purchased');
+      url.searchParams.delete('x_credits_cancelled');
+      history.replaceState(null, '', url.toString());
+      const toast = document.getElementById('oauth-error-toast');
+      const msgEl = document.getElementById('oauth-error-toast-msg');
+      if (!toast || !msgEl) return;
+      if (bought) {
+        toast.style.backgroundColor = '#059669';
+        const icon = toast.querySelector('svg path'); if (icon) icon.setAttribute('d', 'M5 13l4 4L19 7');
+        msgEl.textContent = `${bought} X credits added. Any paused X posts will resume shortly.`;
+      } else {
+        toast.style.backgroundColor = '';
+        msgEl.textContent = 'X credit purchase cancelled — no charge was made.';
+      }
+      toast.classList.remove('hidden', 'opacity-0');
+      toast.classList.add('opacity-100');
+      setTimeout(() => { toast.classList.remove('opacity-100'); toast.classList.add('opacity-0'); setTimeout(() => toast.classList.add('hidden'), 500); }, 6000);
+    })();
+
     // Show saved-draft toast if returning from "Save & Continue Later"
     if (new URLSearchParams(window.location.search).get('draft') === 'saved') {
       history.replaceState(null, '', window.location.pathname);
@@ -4678,6 +4704,7 @@ function rqRenderSocialCard(draft) {
         in_review:        { cls: 'bg-amber-50 border-amber-200 text-amber-700',       label: 'Needs review' },
         approved:         { cls: 'bg-emerald-50 border-emerald-200 text-emerald-700', label: 'Approved' },
         scheduled:        { cls: 'bg-blue-50 border-blue-200 text-blue-700',          label: 'Scheduled' },
+        paused_credits:   { cls: 'bg-amber-50 border-amber-200 text-amber-700',       label: 'Paused · X credits' },
         published:        { cls: 'bg-emerald-50 border-emerald-200 text-emerald-700', label: 'Posted' },
         rejected:         { cls: 'bg-gray-100 border-gray-200 text-gray-500',         label: `Archived${draft.daysRemaining != null ? ` · ${draft.daysRemaining}d left` : ''}` },
     };

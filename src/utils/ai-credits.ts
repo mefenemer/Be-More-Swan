@@ -246,48 +246,56 @@ export async function monthlyXAllowance(db: Db, orgId: number): Promise<number> 
     return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
-/** RESET x_used at the start of a new UTC month (not rollover). Ensures the balance row exists. */
-async function ensureXPeriod(db: Db, orgId: number): Promise<void> {
+// New UTC month → reconcile the PURCHASED bonus actually consumed last month, then reset x_used.
+// (Deferred accounting: during the month x_used just counts total spend and the cap is
+// allowance + x_bonus; the bonus-vs-included split is settled here at rollover.) consumed-from-bonus
+// = max(x_used - allowance, 0), floored at 0 against x_bonus. Purchased credits carry over; the
+// included allowance does not. `allowance` is passed so callers don't double-fetch it.
+async function ensureXPeriod(db: Db, orgId: number, allowance: number): Promise<void> {
     const period = ymd(getPeriodStart());
     await db.execute(sql`
-        INSERT INTO ai_credit_balance (organisation_id, balance, held, x_used, x_period_start)
-        VALUES (${orgId}, 0, 0, 0, ${period}::date)
+        INSERT INTO ai_credit_balance (organisation_id, balance, held, x_used, x_bonus, x_period_start)
+        VALUES (${orgId}, 0, 0, 0, 0, ${period}::date)
         ON CONFLICT (organisation_id) DO NOTHING
     `);
     await db.execute(sql`
         UPDATE ai_credit_balance
-        SET x_used = 0, x_period_start = ${period}::date, updated_at = now()
+        SET x_bonus = GREATEST(x_bonus - GREATEST(x_used - ${allowance}, 0), 0),
+            x_used = 0,
+            x_period_start = ${period}::date,
+            updated_at = now()
         WHERE organisation_id = ${orgId}
           AND (x_period_start IS NULL OR x_period_start < ${period}::date)
     `);
 }
 
-export interface XUsage { used: number; allowance: number; remaining: number; }
+export interface XUsage { used: number; allowance: number; bonus: number; remaining: number; }
 
-/** Current-month X usage for an org (applies the monthly reset first). */
+/** Current-month X usage for an org (applies the monthly reset first). remaining spans allowance + bonus. */
 export async function getXUsage(db: Db, orgId: number): Promise<XUsage> {
-    await ensureXPeriod(db, orgId);
     const allowance = await monthlyXAllowance(db, orgId);
-    const rows = await db.execute<{ x_used: number }>(sql`
-        SELECT x_used FROM ai_credit_balance WHERE organisation_id = ${orgId}
+    await ensureXPeriod(db, orgId, allowance);
+    const rows = await db.execute<{ x_used: number; x_bonus: number }>(sql`
+        SELECT x_used, x_bonus FROM ai_credit_balance WHERE organisation_id = ${orgId}
     `);
     const used = rows[0]?.x_used ?? 0;
-    return { used, allowance, remaining: Math.max(allowance - used, 0) };
+    const bonus = rows[0]?.x_bonus ?? 0;
+    return { used, allowance, bonus, remaining: Math.max((allowance + bonus) - used, 0) };
 }
 
 /**
- * Atomically reserve `amount` X credits within the month's allowance (x_used += amount, capped).
- * Returns { ok:false } when the cap would be exceeded — the caller PAUSES the post rather than
- * calling X (no API request, no spend). Race-safe via the single guarded UPDATE.
+ * Atomically reserve `amount` X credits within the month's allowance PLUS any purchased bonus
+ * (x_used += amount, capped at allowance + x_bonus). Returns { ok:false } when the combined cap
+ * would be exceeded — the caller PAUSES the post (no API request, no spend). Race-safe single UPDATE.
  */
 export async function holdXCredits(db: Db, params: { orgId: number; amount: number }): Promise<{ ok: boolean; used: number; allowance: number }> {
-    await ensureXPeriod(db, params.orgId);
     const allowance = await monthlyXAllowance(db, params.orgId);
+    await ensureXPeriod(db, params.orgId, allowance);
     const rows = await db.execute<{ x_used: number }>(sql`
         UPDATE ai_credit_balance
         SET x_used = x_used + ${params.amount}, updated_at = now()
         WHERE organisation_id = ${params.orgId}
-          AND x_used + ${params.amount} <= ${allowance}
+          AND x_used + ${params.amount} <= ${allowance} + x_bonus
         RETURNING x_used
     `);
     if (rows[0]) return { ok: true, used: rows[0].x_used, allowance };
@@ -318,6 +326,43 @@ export async function settleXHold(db: Db, params: {
             WHERE organisation_id = ${params.orgId}
         `);
     }
+}
+
+// ── X credit booster packs (Phase 2) ───────────────────────────────────────────────────────────
+// Self-serve top-up: purchased credits land in x_bonus (persistent, consumed after the monthly
+// allowance). Priced ~£0.02/credit (raw X cost ≈ £0.012/credit) for margin; bulk packs discount.
+// `id` is the stable key sent to Stripe metadata — never renumber existing packs.
+export interface XCreditPack { id: string; credits: number; priceGbpMinor: number; label: string; }
+export const X_CREDIT_PACKS: XCreditPack[] = [
+    { id: 'x_small',  credits: 500,  priceGbpMinor: 1200, label: '500 X credits' },
+    { id: 'x_medium', credits: 1500, priceGbpMinor: 3000, label: '1,500 X credits' },
+    { id: 'x_large',  credits: 5000, priceGbpMinor: 9000, label: '5,000 X credits' },
+];
+export function xCreditPack(id: string): XCreditPack | undefined {
+    return X_CREDIT_PACKS.find(p => p.id === id);
+}
+
+/**
+ * Grant purchased X credits to an org (called from the Stripe webhook on a completed pack checkout).
+ * Adds to the persistent x_bonus pool and ledgers the purchase. Idempotent-safe to the extent the
+ * caller dedupes on the Stripe event; this itself always applies the grant.
+ */
+export async function grantXCredits(db: Db, params: { orgId: number; credits: number; userId?: number | null }): Promise<void> {
+    const allowance = await monthlyXAllowance(db, params.orgId);
+    await ensureXPeriod(db, params.orgId, allowance); // ensure the row exists + period is current
+    // Balance bump + ledger entry in ONE atomic statement (data-modifying CTE), so a mid-grant
+    // failure can never leave the balance credited without a ledger record (or vice versa).
+    await db.execute(sql`
+        WITH bump AS (
+            UPDATE ai_credit_balance
+            SET x_bonus = x_bonus + ${params.credits}, updated_at = now()
+            WHERE organisation_id = ${params.orgId}
+            RETURNING organisation_id
+        )
+        INSERT INTO ai_credit_ledger (organisation_id, user_id, delta, reason, balance_after)
+        SELECT ${params.orgId}, ${params.userId ?? null}, ${params.credits}, 'x_credit_purchase', NULL
+        FROM bump
+    `);
 }
 
 /** Admin credit grant/deduction (Epic 2, US4 admin tooling). Positive = grant, negative = deduct. */

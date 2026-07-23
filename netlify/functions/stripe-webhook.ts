@@ -7,6 +7,7 @@ import { createNotification, createNotifications } from '../../src/utils/notify'
 import { sendEmail, buildAnnualRenewalEmail, buildDunningEmail } from '../../src/utils/email';
 import { resolveActionNotifications, PAYMENT_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { recordCardFingerprint } from '../../src/utils/billing-fingerprint';
+import { grantXCredits } from '../../src/utils/ai-credits';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, { apiVersion: '2026-05-27.dahlia' });
@@ -84,6 +85,37 @@ export default withLambda(async (event) => {
     // otherwise check-capacity never sees an active plan and the plan-gate modal keeps reappearing.
     if (stripeEvent.type === 'checkout.session.completed') {
         const session = stripeEvent.data.object as Stripe.Checkout.Session;
+
+        // ── X credit booster pack (Phase 2, one-time payment) ─────────────────────────────
+        // A pack checkout is mode:'payment' carrying purpose='x_credit_pack' + credits in metadata
+        // (create-x-credit-checkout.ts). Grant the purchased credits to x_bonus and stop — this is
+        // not a plan activation. The idempotency guard above ensures a retry never double-grants.
+        if (session.metadata?.purpose === 'x_credit_pack') {
+            const packOrgId  = parseInt(session.metadata.organisationId || '');
+            const packCredits = parseInt(session.metadata.credits || '');
+            const packUserId = session.metadata.userId ? parseInt(session.metadata.userId) : null;
+            if (Number.isFinite(packOrgId) && Number.isFinite(packCredits) && packCredits > 0) {
+                await grantXCredits(db, { orgId: packOrgId, credits: packCredits, userId: packUserId });
+                // Unblock this org's paused X posts now (don't wait for the month-end reset): they
+                // re-enter the scheduled flow and the publisher re-holds against the new balance.
+                await db.execute(sql`
+                    UPDATE scheduled_posts SET status = 'scheduled', retry_at = NULL, updated_at = now()
+                    WHERE organisation_id = ${packOrgId} AND status = 'paused_credits' AND platform = 'x'
+                `);
+                console.log(`[stripe-webhook] granted ${packCredits} X credits to org ${packOrgId} (pack ${session.metadata.packId})`);
+                if (packUserId) {
+                    await createNotification(db, 'x_credits_purchased', {
+                        userId: packUserId,
+                        context: { x: { credits: String(packCredits) } },
+                        metadata: { credits: packCredits, packId: session.metadata.packId },
+                    }).catch(() => {});
+                }
+            } else {
+                console.error('[stripe-webhook] x_credit_pack session missing/invalid metadata:', session.id);
+            }
+            return { statusCode: 200, body: JSON.stringify({ received: true }) };
+        }
+
         const { userId, organisationId, masterPlanId, planName: metaPlanName, referralCode, billingCycle } = session.metadata || {};
 
         // Only our plan-gate subscription sessions carry userId + organisationId in metadata;

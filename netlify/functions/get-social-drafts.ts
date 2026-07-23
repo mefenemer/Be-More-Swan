@@ -2,7 +2,7 @@
 // US-SMM-3.4.1: Returns scheduled_posts with status='pending_approval' for the authenticated org.
 
 import { Handler } from '@netlify/functions';
-import { eq, and, desc } from 'drizzle-orm';
+import { eq, and, desc, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, aiAssistants, postIdeaSuggestions, organisations } from '../../db/schema';
 import { resolvePostImage } from '../../src/utils/social-publish';
@@ -64,7 +64,12 @@ export default withLambda(async (event) => {
             .leftJoin(postIdeaSuggestions, eq(postIdeaSuggestions.usedPostId, scheduledPosts.id))
             .where(and(
                 eq(scheduledPosts.organisationId, organisationId),
-                eq(scheduledPosts.status, statusFilter),
+                // X posts paused for credit exhaustion ('paused_credits') are scheduled posts waiting
+                // on next month's X allowance — not failures — so surface them in the Scheduled tab
+                // alongside 'scheduled' rather than leaving them invisible.
+                statusFilter === 'scheduled'
+                    ? inArray(scheduledPosts.status, ['scheduled', 'paused_credits'])
+                    : eq(scheduledPosts.status, statusFilter),
                 ...(assistantIdFilter ? [eq(scheduledPosts.assistantId, assistantIdFilter)] : []),
             ))
             .orderBy(desc(scheduledPosts.generatedAt))

@@ -8,7 +8,7 @@
 // over-charges it. Pure logic — no DB required.
 
 import assert from 'node:assert';
-import { xPostHasLink, xPostCost, X_TEXT_COST, X_LINK_COST } from '../src/utils/ai-credits';
+import { xPostHasLink, xPostCost, X_TEXT_COST, X_LINK_COST, X_CREDIT_PACKS, xCreditPack } from '../src/utils/ai-credits';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -54,6 +54,24 @@ check('empty / nullish text is a text post, never throws', () => {
 check('the link multiplier matches X pricing intent (~13×)', () => {
     assert.equal(X_TEXT_COST, 1);
     assert.equal(X_LINK_COST, 13);
+});
+
+check('booster packs are well-formed and priced with margin over raw X cost', () => {
+    assert.ok(X_CREDIT_PACKS.length >= 1, 'at least one pack');
+    for (const p of X_CREDIT_PACKS) {
+        assert.ok(p.id && p.credits > 0 && p.priceGbpMinor > 0, `${p.id} well-formed`);
+        // Raw X cost per credit ≈ £0.012 ($0.015). A pack must charge MORE than that (margin).
+        const pencePerCredit = p.priceGbpMinor / p.credits;
+        assert.ok(pencePerCredit > 1.2, `${p.id} priced above raw cost (${pencePerCredit.toFixed(2)}p/credit)`);
+    }
+    // Ids must be unique — they're the stable Stripe metadata key.
+    assert.equal(new Set(X_CREDIT_PACKS.map(p => p.id)).size, X_CREDIT_PACKS.length, 'unique pack ids');
+});
+
+check('xCreditPack resolves known ids and rejects unknown ones', () => {
+    assert.equal(xCreditPack('x_medium')?.credits, 1500);
+    assert.equal(xCreditPack('nope'), undefined);
+    assert.equal(xCreditPack(''), undefined);
 });
 
 console.log(`\n${passed} passed`);
