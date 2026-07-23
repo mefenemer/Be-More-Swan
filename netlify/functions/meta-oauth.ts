@@ -23,7 +23,12 @@ const metaAppId   = process.env.META_APP_ID!;
 const metaSecret  = process.env.META_APP_SECRET!;
 // pages_show_list is what permits /me/accounts to enumerate the user's Pages — without it the
 // Instagram account behind the Page can never be discovered.
-const SCOPES      = 'instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,pages_manage_posts';
+// business_management lets us fall back to enumerating Pages via the user's Business portfolios:
+// /me/accounts only lists Pages a user administers DIRECTLY, so a Page owned by a Business/Meta
+// portfolio is invisible there and its Instagram account can never be found without this scope.
+// NOTE: business_management is an advanced permission — it works immediately for app admins/testers
+// and in Development mode, but requires Meta App Review before general (Live-mode) users can grant it.
+const SCOPES      = 'instagram_basic,instagram_content_publish,pages_show_list,pages_read_engagement,pages_manage_metadata,pages_messaging,pages_manage_posts,business_management';
 const TOKEN_TTL_DAYS = 60;
 
 function csrfToken(): string {
@@ -152,13 +157,12 @@ export default withLambda(async (event) => {
         // /me for it always returned undefined, so every connect fell straight through to
         // `not_business` no matter how the user's Instagram was set up. Same for `account_type`,
         // which is an Instagram-node field and never present on a Facebook User.
+        type IgPage = { id: string; name?: string; instagram_business_account?: { id: string; username?: string } };
+
         const pagesRes = await fetch(
             `https://graph.facebook.com/v19.0/me/accounts?fields=id,name,instagram_business_account{id,username}&access_token=${longLivedToken}`
         );
-        const pages: {
-            data?: Array<{ id: string; name?: string; instagram_business_account?: { id: string; username?: string } }>;
-            error?: { message: string };
-        } = await pagesRes.json();
+        const pages: { data?: IgPage[]; error?: { message: string } } = await pagesRes.json();
 
         if (pages.error) {
             console.error('[meta-oauth] /me/accounts failed:', pages.error.message);
@@ -168,8 +172,41 @@ export default withLambda(async (event) => {
         // Distinguish the two failure modes — they have completely different remedies, and
         // reporting both as "not_business" sent users to fix an Instagram setting when the real
         // problem was that they never granted Page access on Meta's consent screen.
-        const pageList = pages.data ?? [];
+        const pageList: IgPage[] = pages.data ?? [];
         console.log(`[meta-oauth] /me/accounts returned ${pageList.length} page(s); ${pageList.filter(p => p.instagram_business_account?.id).length} with a linked Instagram account`);
+
+        // Business/Meta-portfolio fallback. /me/accounts only lists Pages the user administers
+        // DIRECTLY, so a Page owned by a Business portfolio (the now-default setup) never appears
+        // above — its linked Instagram account is invisible and every connect dead-ends at no_pages.
+        // When nothing here has a linked Instagram account, enumerate the user's businesses and their
+        // owned + client Pages instead. Needs business_management (see SCOPES).
+        let businessMgmtDenied = false;
+        if (!pageList.some(p => p.instagram_business_account?.id)) {
+            const bizRes = await fetch(`https://graph.facebook.com/v19.0/me/businesses?fields=id,name&access_token=${longLivedToken}`);
+            const biz: { data?: Array<{ id: string; name?: string }>; error?: { message: string } } = await bizRes.json();
+            if (biz.error) {
+                // Almost always means business_management wasn't granted/approved. Record it so the
+                // final diagnostic can point the user at the real fix rather than "no Pages".
+                console.error('[meta-oauth] /me/businesses failed (business_management likely not granted):', biz.error.message);
+                businessMgmtDenied = true;
+            } else {
+                const businesses = biz.data ?? [];
+                console.log(`[meta-oauth] business fallback: scanning ${businesses.length} business(es) for portfolio-owned Pages`);
+                const seen = new Set(pageList.map(p => p.id));
+                for (const b of businesses) {
+                    // owned_pages = Pages the business owns; client_pages = Pages shared into it.
+                    for (const edge of ['owned_pages', 'client_pages'] as const) {
+                        const r = await fetch(`https://graph.facebook.com/v19.0/${b.id}/${edge}?fields=id,name,instagram_business_account{id,username}&access_token=${longLivedToken}`);
+                        const j: { data?: IgPage[]; error?: { message: string } } = await r.json();
+                        if (j.error) { console.error(`[meta-oauth] ${edge} for business ${b.id} failed:`, j.error.message); continue; }
+                        for (const p of j.data ?? []) {
+                            if (!seen.has(p.id)) { seen.add(p.id); pageList.push(p); }
+                        }
+                    }
+                }
+                console.log(`[meta-oauth] after business fallback: ${pageList.length} page(s); ${pageList.filter(p => p.instagram_business_account?.id).length} with a linked Instagram account`);
+            }
+        }
 
         if (pageList.length === 0) {
             // A successful login that returns zero Pages is ambiguous — it has three distinct causes
@@ -195,12 +232,19 @@ export default withLambda(async (event) => {
                 console.error('[meta-oauth] /me/permissions lookup failed:', e);
             }
 
-            // `pages_permission` → the user withheld Page access (actionable: re-consent).
-            // `no_pages` → the permission is granted but no directly-administered Page was returned,
-            // which in practice now means the Page lives in a Business portfolio.
+            // Pick the most specific, actionable cause:
+            //   pages_permission   → the user withheld Page access on the consent screen.
+            //   business_permission → Page access was granted but we couldn't read the user's Business
+            //                         portfolios (business_management not granted/approved), so a
+            //                         portfolio-owned Page stays invisible.
+            //   no_pages           → everything was granted and even the business scan found nothing,
+            //                         i.e. the account genuinely administers no Page anywhere.
+            const cause = !pagesScopeGranted ? 'pages_permission'
+                : businessMgmtDenied ? 'business_permission'
+                : 'no_pages';
             return {
                 statusCode: 302,
-                headers: { Location: metaErr(pagesScopeGranted ? 'no_pages' : 'pages_permission') },
+                headers: { Location: metaErr(cause) },
                 body: '',
             };
         }
