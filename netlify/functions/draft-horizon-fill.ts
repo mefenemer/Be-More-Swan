@@ -1,9 +1,11 @@
 // netlify/functions/draft-horizon-fill.ts
-// US-SMM-2.4.1 (+ Posting Schedule): Daily job — for each active Social Media Manager assistant,
+// US-SMM-2.4.1 (+ Posting Schedule): Hourly job — for each active Social Media Manager assistant,
 // fill any uncovered posting slots inside its draft horizon by enqueuing generation jobs, each
 // stamped with the exact target_publish_date derived from the assistant's frequency / days / times.
 //
-// Schedule: "0 6 * * *"  (06:00 UTC daily)
+// Schedule: "0 * * * *"  (hourly, on the hour). Was daily at 06:00 — see netlify.toml for why it
+// moved. Safe at this cadence because enqueueScheduleGapFill counts in-flight jobs as coverage, so
+// re-running fills only genuine deficits.
 // The jobs land in content_generation_jobs; process-content-jobs.ts turns each into a dated draft
 // in the Review Queue. This function no longer enqueues opaque task runs — it directly tops up the
 // generation queue so the user always has content N days ahead.

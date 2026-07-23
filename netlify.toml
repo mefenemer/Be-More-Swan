@@ -203,9 +203,23 @@ node_bundler = "esbuild"
 [functions.quarterly-bias-reminder]
   schedule = "0 8 1 1,4,7,10 *"
 
-# US-SMM-2.4.1: Daily draft horizon gap-fill — 06:00 UTC every day
+# US-SMM-2.4.1: Draft horizon gap-fill — HOURLY, on the hour.
+#
+# Was 06:00 UTC daily. That made the assistant look broken: nothing watches for gaps appearing, so
+# deleting or rejecting a batch of drafts left the Review Queue empty for up to 24 hours with no
+# sign anything would happen.
+#
+# Hourly is safe to run because enqueueScheduleGapFill is genuinely idempotent — it counts existing
+# posts in the window AND in-flight queued/processing jobs before deciding a slot is uncovered, so
+# repeat runs fill only real deficits and never double-book a slot. It therefore enqueues the same
+# total number of jobs as the daily run did; they just arrive sooner. A fully-covered assistant
+# costs two queries and exits.
+#
+# On the hour deliberately: :00 coincides with the */10 drain tick, so this rides an existing
+# compute window rather than waking Neon on its own. (It now shares 05:00 with blog-horizon-fill
+# once a day — acceptable, since blog is daily and low-volume.)
 [functions.draft-horizon-fill]
-  schedule = "0 6 * * *"
+  schedule = "0 * * * *"
 
 # Blog Autopilot: daily long-form horizon gap-fill — 05:00 UTC, an hour ahead of the social
 # gap-fill above so the two heavy top-ups don't contend for the same Neon compute window.

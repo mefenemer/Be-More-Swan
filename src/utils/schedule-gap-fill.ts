@@ -5,7 +5,7 @@
 // each carrying target_publish_date so process-content-jobs stamps the draft at the right time.
 //
 // Shared by:
-//   • draft-horizon-fill.ts        (daily cron — keeps every active SMM assistant's queue topped up)
+//   • draft-horizon-fill.ts        (hourly cron — keeps every active SMM assistant's queue topped up)
 //   • set-draft-horizon.ts         (horizon expanded — fill the newly-opened window immediately)
 
 import { and, eq, gte, lte, desc, sql, inArray, isNull, ne } from 'drizzle-orm';
@@ -223,7 +223,8 @@ async function orgHasAvailableManualAsset(db: Db, orgId: number): Promise<boolea
 
 /**
  * Nudge the user to upload media when the Empty-Library Draft Fallback skipped their slots.
- * Deduped to at most once per 3 days per assistant so the daily cron doesn't nag an empty-library org.
+ * Deduped to at most once per 3 days per assistant. That dedupe is load-bearing now the cron is
+ * HOURLY rather than daily — without it an empty-library org would be nagged 24 times a day.
  */
 async function notifyEmptyLibrarySkip(db: Db, assistant: GapFillAssistant): Promise<void> {
     const [recent] = await db
