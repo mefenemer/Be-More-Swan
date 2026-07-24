@@ -18,11 +18,11 @@
 
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { contentAssets, scheduledPosts, scheduledPostAssets } from '../../db/schema';
+import { contentAssets, organisations, scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { renderBrandCard, normalizeCardLayout, MAX_HEADLINE_CHARS, type CardVariant } from '../../src/lib/brand-card';
 import { persistBufferToR2, r2IsConfigured } from '../../src/lib/media-persist';
-import { normalizeBrandKit, type BrandKit } from '../../src/utils/brand-kit';
+import { normalizeBrandKit, resolveCardEditorKit, type BrandKit } from '../../src/utils/brand-kit';
 import type { AspectRatio } from '../../src/lib/fal-gateway';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -76,10 +76,19 @@ export default withLambda(async (event) => {
     if (!asset) return json(404, { error: 'This post does not have a branded text card to edit.' });
 
     // Seed from what this card was LAST rendered with, so reopening the editor shows the user's own
-    // edits rather than resetting to the org default. Cards drafted before render_params existed
-    // fall back to the stored prompt (the headline) over a default kit.
+    // edits rather than resetting to the org default.
     const stored = (asset.renderParams ?? {}) as StoredRenderParams;
-    const baseKit = normalizeBrandKit(stored.kit);
+
+    // Cards drafted before render_params existed carry no kit — see resolveCardEditorKit for why
+    // the org's own kit, not the neutral default, is what those must fall back to. The org row is
+    // fetched only in that case: the common path already knows everything from the asset.
+    let org: { name: string | null; brandKit: unknown } | undefined;
+    if (!stored.kit) {
+        [org] = await db
+            .select({ name: organisations.name, brandKit: organisations.brandKit })
+            .from(organisations).where(eq(organisations.id, ctx.organisationId)).limit(1);
+    }
+    const { kit: baseKit, orgName } = resolveCardEditorKit(stored.kit, org?.brandKit, org?.name);
     const baseHeadline = stored.headline ?? asset.prompt ?? '';
     const baseVariant: CardVariant = stored.variant === 'bold' ? 'bold' : 'light';
 
@@ -99,7 +108,7 @@ export default withLambda(async (event) => {
 
     let card;
     try {
-        card = await renderBrandCard({ headline, kit, aspectRatio, variant, layout });
+        card = await renderBrandCard({ headline, kit, aspectRatio, variant, layout, orgName });
     } catch (err) {
         console.error('[edit-brand-card] render failed:', err instanceof Error ? err.message : err);
         return json(500, { error: 'Could not render that card.' });

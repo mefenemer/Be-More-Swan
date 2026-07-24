@@ -17,7 +17,7 @@
 
 import assert from 'node:assert';
 import {
-    normalizeBrandKit, normalizeHex, contrastRatio, readableInkOn,
+    normalizeBrandKit, normalizeHex, contrastRatio, readableInkOn, resolveCardEditorKit,
     DEFAULT_BRAND_KIT, BE_MORE_SWAN_BRAND_KIT, MIN_DISPLAY_CONTRAST,
 } from '../src/utils/brand-kit';
 import {
@@ -319,6 +319,66 @@ test('a longest-allowed headline still renders on the tightest ratio', async () 
 
 test('an empty headline is refused rather than rendering a blank card', async () => {
     await assert.rejects(() => renderBrandCard({ headline: '   ', kit: DEFAULT_BRAND_KIT }));
+});
+
+// ── Which kit the review-time editor opens with ───────────────────────────────────────────────
+// Found on PROD: both of org 37's brand cards predate render_params, so the editor had nothing
+// stored to seed from. The neutral default would have previewed a pink card in monochrome with no
+// name and no website, then baked that over the real card on save.
+
+test('a card with no stored kit falls back to the ORG kit, not the neutral default', () => {
+    const orgKit = {
+        source: 'manual', wordmark: 'BE MORE SWAN', website: 'bemoreswan.com',
+        primaryColor: '#ff007f', backgroundColor: '#fdfcf9', textColor: '#1f1e1b', logoUrl: null,
+    };
+    for (const missing of [null, undefined]) {
+        const { kit } = resolveCardEditorKit(missing, orgKit, 'Be More Swan');
+        assert.equal(kit.primaryColor, '#ff007f', 'the org accent was lost to the neutral default');
+        assert.equal(kit.wordmark, 'BE MORE SWAN');
+        assert.equal(kit.website, 'bemoreswan.com');
+        assert.notEqual(kit.primaryColor, DEFAULT_BRAND_KIT.primaryColor);
+    }
+});
+
+test('a stored kit always wins, and never picks up the org name behind the user', () => {
+    const storedKit = { source: 'manual', primaryColor: '#0000ff', wordmark: null, website: null };
+    const orgKit = { source: 'manual', primaryColor: '#ff007f', wordmark: 'BE MORE SWAN' };
+    const { kit, orgName } = resolveCardEditorKit(storedKit, orgKit, 'Be More Swan');
+    assert.equal(kit.primaryColor, '#0000ff', 'the org kit overrode a kit the card had recorded');
+    // A card that recorded its own kit has already said what it should show; injecting the org
+    // name would make an eyebrow appear on a card the user had deliberately left without one.
+    assert.equal(orgName, null);
+});
+
+test('org name rides alongside the kit rather than being baked into it as a wordmark', () => {
+    const { kit, orgName } = resolveCardEditorKit(null, { primaryColor: '#ff007f' }, '  Be More Swan  ');
+    assert.equal(kit.wordmark, null, 'a derived name must not become a stored wordmark');
+    assert.equal(orgName, 'Be More Swan', 'and must be trimmed for the renderer');
+    for (const blank of [null, undefined, '   ']) {
+        assert.equal(resolveCardEditorKit(null, {}, blank).orgName, null);
+    }
+});
+
+test('an org with no kit either still lands on the neutral default, never a borrowed brand', () => {
+    const { kit } = resolveCardEditorKit(null, null, null);
+    assert.deepEqual(kit, DEFAULT_BRAND_KIT);
+    assert.notEqual(kit.primaryColor, BE_MORE_SWAN_BRAND_KIT.primaryColor);
+});
+
+test('the org-kit fallback actually renders a branded card, not a blank one', async () => {
+    const orgKit = {
+        source: 'manual', wordmark: null, website: 'bemoreswan.com',
+        primaryColor: '#ff007f', backgroundColor: '#fdfcf9', textColor: '#1f1e1b',
+    };
+    const { kit, orgName } = resolveCardEditorKit(undefined, orgKit, 'Be More Swan');
+    const card = await renderBrandCard({ headline: 'Reopened from a pre-render_params card', kit, orgName });
+    // Both elements must be placeable — under the old fallback both reported unavailable, which
+    // is what disabled the toggles and dropped the furniture off the card.
+    assert.equal(card.elements.wordmark.available, true, 'the org name did not reach the eyebrow');
+    assert.equal(card.elements.website.available, true, 'the website was lost');
+
+    const neutral = await renderBrandCard({ headline: 'Reopened from a pre-render_params card', kit: DEFAULT_BRAND_KIT });
+    assert.notDeepEqual(card.png, neutral.png, 'the fallback rendered the same as the neutral default');
 });
 
 // ── Element visibility and placement ──────────────────────────────────────────────────────────

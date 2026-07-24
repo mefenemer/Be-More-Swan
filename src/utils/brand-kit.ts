@@ -140,6 +140,37 @@ export function normalizeBrandKit(raw: unknown): BrandKit {
     };
 }
 
+/**
+ * Which kit the review-time card editor should open with.
+ *
+ * A card stores the kit it was rendered with, so reopening shows the user's own edits. Cards
+ * drafted before render_params existed have none — and seeding those from normalizeBrandKit(null)
+ * would hand the editor DEFAULT_BRAND_KIT: near-black on white, no wordmark, no website. A branded
+ * card would preview in monochrome with BOTH element toggles disabled as "nothing saved", and the
+ * first save would bake that over a perfectly good card.
+ *
+ * The org's own kit is the right fallback. This is not the borrowed-brand case the neutral default
+ * exists to prevent — it is the same workspace that drew the card. Only when the org has no kit
+ * either does neutral apply.
+ *
+ * `orgName` is returned for the renderer's eyebrow fallback rather than written into the kit as a
+ * wordmark: the drafting path passes it the same way, and baking a derived name into the STORED
+ * kit would make a wordmark the user never chose permanent from the first save onwards. It is
+ * returned only when the stored kit was absent — a card that recorded its own kit already says
+ * everything about what it should show.
+ */
+export function resolveCardEditorKit(
+    storedKit: unknown,
+    orgBrandKit: unknown,
+    orgName?: string | null,
+): { kit: BrandKit; orgName: string | null } {
+    if (storedKit) return { kit: normalizeBrandKit(storedKit), orgName: null };
+    return {
+        kit: normalizeBrandKit(orgBrandKit),
+        orgName: typeof orgName === 'string' && orgName.trim() ? orgName.trim() : null,
+    };
+}
+
 /** A stored timestamp, or null. Garbage in a date field must not become an Invalid Date downstream. */
 function cleanIso(raw: unknown): string | null {
     if (typeof raw !== 'string') return null;
