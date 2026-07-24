@@ -276,18 +276,10 @@ window.showComplianceModals = function showComplianceModals(force) {
     <div id="gp-mode-write" class="hidden">
       <div class="mb-4">
         <label class="block text-xs font-semibold text-gray-700 mb-1.5">Platforms</label>
-        <div id="gpw-platforms" class="flex flex-wrap gap-2">
-          <button type="button" class="gpw-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="instagram" onclick="gpwTogglePlatform(this)">Instagram</button>
-          <button type="button" class="gpw-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="facebook" onclick="gpwTogglePlatform(this)">Facebook</button>
-          <button type="button" class="gpw-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="linkedin" onclick="gpwTogglePlatform(this)">LinkedIn</button>
-          <button type="button" class="gpw-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="x" onclick="gpwTogglePlatform(this)">X</button>
-          <!-- Threads and YouTube publish through publish-social-posts exactly as LinkedIn and X do,
-               and PLATFORM_FORMATS has always listed all six — but these two had no chip, so they
-               were unreachable from Create Post. The char limits and the "needs a video" gate below
-               were already written for them and simply never ran. -->
-          <button type="button" class="gpw-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="threads" onclick="gpwTogglePlatform(this)">Threads</button>
-          <button type="button" class="gpw-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="youtube" onclick="gpwTogglePlatform(this)">YouTube</button>
-        </div>
+        <!-- Chips are GENERATED from _GP_PLATFORMS (see gpRenderPlatformChips) rather than written
+             out here. Two hand-maintained lists had already drifted to four platforms each while the
+             publishers, PLATFORM_FORMATS and the char-limit tables all carried six. -->
+        <div id="gpw-platforms" class="flex flex-wrap gap-2"></div>
         <p class="text-xs text-gray-400 mt-1">Pick one or more — a separate draft is created for each.</p>
       </div>
       <div class="mb-4">
@@ -388,12 +380,8 @@ window.showComplianceModals = function showComplianceModals(force) {
     <!-- Platform selector -->
     <div class="mb-4">
       <label class="block text-xs font-semibold text-gray-700 mb-1.5">Platforms</label>
-      <div id="gen-post-platforms" class="flex flex-wrap gap-2">
-        <button type="button" class="gen-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="instagram" onclick="gpSelectPlatform(this)">Instagram</button>
-        <button type="button" class="gen-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="facebook" onclick="gpSelectPlatform(this)">Facebook</button>
-        <button type="button" class="gen-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="linkedin" onclick="gpSelectPlatform(this)">LinkedIn</button>
-        <button type="button" class="gen-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="x" onclick="gpSelectPlatform(this)">X</button>
-      </div>
+      <!-- Generated — see the note on #gpw-platforms. -->
+      <div id="gen-post-platforms" class="flex flex-wrap gap-2"></div>
       <p id="gen-post-platform-hint" class="text-xs text-gray-400 mt-1.5">Tap more than one to cross-post the same idea.</p>
     </div>
     <!-- Context prompt -->
@@ -7607,12 +7595,18 @@ function gpChooseMode(mode) {
     document.getElementById('gp-mode-write')?.classList.toggle('hidden', mode !== 'write');
     document.getElementById('gp-mode-ai')?.classList.toggle('hidden', mode !== 'ai');
 
+    // Build both pickers here: capacity (and therefore which platforms are connected) has loaded by
+    // now, and this runs for either mode, so neither row can be left empty.
+    gpRenderPlatformChips();
+
     if (mode === 'ai') {
         gpUpdateConnectedPlatforms(_gpCap?.connectedPlatforms || []);
         // Default to the first connected platform (falling back to Instagram) so we never preselect
-        // a chip the user can't actually publish to.
+        // a chip the user can't actually publish to. Ordered by _GP_PLATFORMS rather than a second
+        // hardcoded list — that one still said four platforms and would have skipped a workspace
+        // connected only to Threads or YouTube.
         const connected = gpConnectedPlatforms();
-        const preferred = ['instagram', 'facebook', 'linkedin', 'x'].find(p => connected.some(s => s.includes(p)));
+        const preferred = _GP_PLATFORMS.map(p => p.id).find(p => connected.some(s => s.includes(p)));
         gpSelectPlatformByValue(preferred || 'instagram');
     }
 }
@@ -7696,6 +7690,50 @@ function closeGeneratePostSheet() {
 // (approval connect-gates, preview, character limits) still expect a single platform. Those
 // operate on the resulting draft, which is per-platform anyway.
 let _gpSelectedPlatforms = ['instagram'];
+
+// ── The platform list, in ONE place ─────────────────────────────────────────────────────────────
+// Mirrors SocialPlatform / PLATFORM_FORMATS in src/config/platform-formats.ts, which this static
+// page cannot import. Threads and YouTube publish through publish-social-posts exactly as LinkedIn
+// and X do, and the char-limit tables here already covered all six — but the two chip rows were
+// hand-written HTML and had each drifted to four, so those platforms were simply unreachable when
+// creating a post. Both rows are now generated from this array: adding a seventh platform means
+// touching one line, and it cannot appear in one picker and not the other.
+const _GP_PLATFORMS = [
+    { id: 'instagram', label: 'Instagram' },
+    { id: 'facebook',  label: 'Facebook'  },
+    { id: 'linkedin',  label: 'LinkedIn'  },
+    { id: 'x',         label: 'X'         },
+    { id: 'threads',   label: 'Threads'   },
+    { id: 'youtube',   label: 'YouTube'   },
+];
+
+const _GP_CHIP_CLASS = 'px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer';
+
+// Fill both platform pickers. CONNECTED platforms come first so the ones you can actually publish to
+// are the ones under the cursor; the rest stay selectable (drafting ahead of connecting is
+// legitimate, and approve-post is the real gate — it returns PLATFORM_NOT_CONNECTED with a prompt).
+// Safe before capacity has loaded: with nothing known yet every platform simply renders unsorted,
+// and gpUpdateConnectedPlatforms adds the green dots on top afterwards.
+function gpRenderPlatformChips() {
+    const connected = (typeof gpConnectedPlatforms === 'function' ? gpConnectedPlatforms() : []) || [];
+    const isConnected = (id) => connected.some(s => String(s).toLowerCase().includes(id));
+    const ordered = [..._GP_PLATFORMS].sort((a, b) => (isConnected(b.id) ? 1 : 0) - (isConnected(a.id) ? 1 : 0));
+    const rows = [
+        { el: document.getElementById('gpw-platforms'),      cls: 'gpw-platform-btn', fn: 'gpwTogglePlatform' },
+        { el: document.getElementById('gen-post-platforms'), cls: 'gen-platform-btn', fn: 'gpSelectPlatform'  },
+    ];
+    for (const row of rows) {
+        if (!row.el) continue;
+        row.el.innerHTML = ordered.map(p => `<button type="button" class="${row.cls} ${_GP_CHIP_CLASS}"`
+            + ` data-platform="${p.id}" title="${isConnected(p.id) ? 'Connected' : 'Not connected yet — you can still draft for it'}"`
+            + ` onclick="${row.fn}(this)">${p.label}</button>`).join('');
+    }
+    // Rebuilding the markup discards the selected styling, so re-apply it from state — otherwise
+    // re-opening the sheet mid-session would show chips as unselected while _gpwSelectedPlatforms
+    // still held them, and the counter chips would disagree with the picker.
+    document.querySelectorAll('.gpw-platform-btn').forEach(b => gpwSetChipState(b, _gpwSelectedPlatforms.includes(b.dataset.platform)));
+    if (typeof gpRenderPlatformSelection === 'function') gpRenderPlatformSelection();
+}
 
 function gpRenderPlatformSelection() {
     document.querySelectorAll('.gen-platform-btn').forEach(b => {
