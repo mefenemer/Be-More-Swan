@@ -175,7 +175,7 @@ export default withLambda(async () => {
                 // is never charged, and the retry re-holds on its next attempt).
                 if (metered) {
                     try {
-                        await settleXHold(db, { orgId: post.organisation_id, amount: xCost, success: result.ok, hasLink: xPostHasLink(text), userId: post.user_id });
+                        await settleXHold(db, { orgId: post.organisation_id, amount: xCost, success: result.ok, hasLink: xPostHasLink(text), userId: post.user_id, assistantId: post.assistant_id });
                     } catch (e) {
                         console.warn(`[publish-social-posts] X credit settle failed for post ${post.id}:`, (e as Error)?.message || e);
                     }

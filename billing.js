@@ -39,8 +39,8 @@
 
             _render(_subscriptions, paymentHistory || [], invoicesData.invoices || [], _billingInfo, storage || null);
 
-            // Live AI-credit balance (non-blocking — never fails the billing render)
-            _loadAiCreditBalance();
+            // Live usage & credits (non-blocking — never fails the billing render)
+            _loadUsageSummary();
 
             // If navigated here via notification deep-link
             if (window.location.hash === '#invoice-history') {
@@ -57,42 +57,85 @@
         }
     };
 
-    // ── Live AI-credit balance ────────────────────────────────────
-    async function _loadAiCreditBalance() {
+    // ── Live usage & credits ──────────────────────────────────────
+    // One call feeds the media-credits card, the X-allowance card, and the per-assistant table.
+    async function _loadUsageSummary() {
         const valueEl = document.getElementById('ai-credit-balance-value');
-        const heldEl  = document.getElementById('ai-credit-held-note');
         if (!valueEl) return;
+        const plural = (n, w) => `${Number(n).toLocaleString()} ${w}${Number(n) === 1 ? '' : 's'}`;
         try {
-            const res = await fetch('/.netlify/functions/get-ai-credit-balance');
+            const res = await fetch('/.netlify/functions/get-usage-summary');
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            const { balance, held, monthlyCredits } = await res.json();
-            const bal = Number(balance) || 0;
-            valueEl.textContent = `${bal.toLocaleString()} credit${bal === 1 ? '' : 's'} available`;
+            const { media, x, byAssistant } = await res.json();
 
+            // AI media credits
+            const bal = Number(media?.balance) || 0;
+            valueEl.textContent = `${plural(bal, 'credit')} available`;
             const monthlyEl = document.getElementById('ai-credit-monthly-note');
-            const monthlyNum = Number(monthlyCredits) || 0;
+            const monthlyNum = Number(media?.monthly) || 0;
             if (monthlyEl) {
-                if (monthlyNum > 0) {
-                    monthlyEl.textContent = `Your plan includes ${monthlyNum.toLocaleString()} credit${monthlyNum === 1 ? '' : 's'} each month.`;
-                    monthlyEl.classList.remove('hidden');
-                } else {
-                    monthlyEl.classList.add('hidden');
-                }
+                monthlyEl.textContent = monthlyNum > 0 ? `Your plan includes ${plural(monthlyNum, 'credit')} each month.` : '';
+                monthlyEl.classList.toggle('hidden', monthlyNum <= 0);
+            }
+            const heldEl = document.getElementById('ai-credit-held-note');
+            const heldNum = Number(media?.held) || 0;
+            if (heldEl) {
+                heldEl.textContent = heldNum > 0 ? `${plural(heldNum, 'credit')} reserved by in-progress generations.` : '';
+                heldEl.classList.toggle('hidden', heldNum <= 0);
             }
 
-            const heldNum = Number(held) || 0;
-            if (heldEl) {
-                if (heldNum > 0) {
-                    heldEl.textContent = `${heldNum.toLocaleString()} credit${heldNum === 1 ? '' : 's'} reserved by in-progress generations.`;
-                    heldEl.classList.remove('hidden');
-                } else {
-                    heldEl.classList.add('hidden');
-                }
-            }
+            // X posting allowance
+            _renderXUsage(x);
+
+            // Per-assistant breakdown
+            _renderUsageByAssistant(Array.isArray(byAssistant) ? byAssistant : []);
         } catch (e) {
-            console.warn('[billing] Unable to load AI credit balance:', e);
+            console.warn('[billing] Unable to load usage summary:', e);
             valueEl.textContent = 'Balance unavailable';
+            const xEl = document.getElementById('x-usage-value');
+            if (xEl) xEl.textContent = 'Unavailable';
         }
+    }
+
+    function _renderXUsage(x) {
+        const valueEl = document.getElementById('x-usage-value');
+        if (!valueEl || !x) return;
+        const used = Number(x.used) || 0;
+        const allowance = Number(x.allowance) || 0;
+        const bonus = Number(x.bonus) || 0;
+        const remaining = Number(x.remaining) || 0;
+        const cap = allowance + bonus;
+        valueEl.textContent = allowance > 0 || bonus > 0
+            ? `${remaining.toLocaleString()} of ${cap.toLocaleString()} left`
+            : 'Not on your plan';
+        const bar = document.getElementById('x-usage-bar');
+        if (bar) {
+            const pct = cap > 0 ? Math.min(100, Math.round((used / cap) * 100)) : 0;
+            bar.style.width = `${pct}%`;
+            // Near-exhaustion turns the bar red so a user about to have posts paused can see it.
+            bar.classList.toggle('bg-red-500', cap > 0 && remaining <= Math.max(1, cap * 0.1));
+            bar.classList.toggle('bg-gray-700', !(cap > 0 && remaining <= Math.max(1, cap * 0.1)));
+        }
+        const bonusEl = document.getElementById('x-usage-bonus-note');
+        if (bonusEl) {
+            bonusEl.textContent = bonus > 0 ? `Includes ${bonus.toLocaleString()} purchased booster credit${bonus === 1 ? '' : 's'} (carried over).` : '';
+            bonusEl.classList.toggle('hidden', bonus <= 0);
+        }
+    }
+
+    function _renderUsageByAssistant(rows) {
+        const section = document.getElementById('usage-by-assistant');
+        const tbody = document.getElementById('usage-by-assistant-rows');
+        if (!section || !tbody) return;
+        const active = rows.filter(r => (Number(r.media) || 0) + (Number(r.x) || 0) > 0);
+        if (active.length === 0) { section.classList.add('hidden'); return; }
+        tbody.innerHTML = active.map(r => `
+            <tr>
+              <td class="px-5 py-2.5 font-semibold ${r.assistantId == null ? 'text-gray-400 italic' : 'text-gray-900'}">${_esc(r.name)}</td>
+              <td class="px-5 py-2.5 text-right text-gray-700">${(Number(r.media) || 0).toLocaleString()}</td>
+              <td class="px-5 py-2.5 text-right text-gray-700">${(Number(r.x) || 0).toLocaleString()}</td>
+            </tr>`).join('');
+        section.classList.remove('hidden');
     }
 
     // ── Card Modal ────────────────────────────────────────────────

@@ -309,15 +309,18 @@ export async function holdXCredits(db: Db, params: { orgId: number; amount: numb
  *   success=false → refund (x_used -= amount); a failed post is never charged (mirrors settleHold).
  */
 export async function settleXHold(db: Db, params: {
-    orgId: number; amount: number; success: boolean; hasLink: boolean; userId?: number | null;
+    orgId: number; amount: number; success: boolean; hasLink: boolean;
+    userId?: number | null; assistantId?: number | null;
 }): Promise<void> {
     if (params.success) {
         // balance_after / job_id are image/video concepts — leave them null for X debits so the
         // ledger column semantics stay clean; the reason + delta + timestamp are the X audit trail.
+        // assistant_id is stamped here (X debits have no job to attribute through) so the Billing
+        // per-assistant breakdown can split X spend by the assistant that made the post.
         await db.execute(sql`
-            INSERT INTO ai_credit_ledger (organisation_id, user_id, delta, reason, balance_after)
+            INSERT INTO ai_credit_ledger (organisation_id, user_id, delta, reason, assistant_id, balance_after)
             VALUES (${params.orgId}, ${params.userId ?? null}, ${-params.amount},
-                    ${params.hasLink ? 'x_post_link' : 'x_post_text'}, NULL)
+                    ${params.hasLink ? 'x_post_link' : 'x_post_text'}, ${params.assistantId ?? null}, NULL)
         `);
     } else {
         await db.execute(sql`

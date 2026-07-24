@@ -2835,13 +2835,18 @@ export const aiCreditLedger = pgTable("ai_credit_ledger", {
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
   userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
   delta: integer("delta").notNull(),                               // +grant/+adjustment, -debit
-  reason: text("reason").notNull(),                                // monthly_grant|image_generation|video_generation|admin_adjustment
+  reason: text("reason").notNull(),                                // monthly_grant|image_generation|video_generation|x_post_text|x_post_link|admin_adjustment
   jobId: integer("job_id"),                                        // FK to mediaGenerationJobs.id (nullable)
+  // Per-assistant attribution (Billing "Usage & Credits"). Set on X-post debits, which carry no
+  // job_id; media debits are attributed via job_id → mediaGenerationJobs.assistantId instead.
+  // Nullable — genuinely manual (user-initiated) spend has no assistant.
+  assistantId: integer("assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
   balanceAfter: integer("balance_after"),
   isAutonomous: boolean("is_autonomous").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
   index("ai_credit_ledger_org_created_idx").on(t.organisationId, t.createdAt),
+  index("ai_credit_ledger_assistant_idx").on(t.organisationId, t.assistantId, t.createdAt),
 ]);
 
 // Epic 1, US1/US2: one row per media generation request (image or video). Images complete
