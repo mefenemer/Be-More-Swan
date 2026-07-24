@@ -3,7 +3,8 @@
 // POST { postId, preview: true, ...edits } → { dataUrl, renderParams }   renders, saves nothing
 // POST { postId, ...edits }                → { assetId, imageUrl, renderParams }  re-renders + saves
 //   edits: { headline?, variant?, primaryColor?, backgroundColor?, textColor?, fontFamily?,
-//            wordmark?, website?, logoUrl? }
+//            wordmark?, website?, logoUrl?,
+//            layout?: { wordmark: {show,align,y}, website: {show,align,y} } }
 //   Auth: aura_session cookie; the post must belong to the caller's organisation.
 //
 // WHY SERVER-SIDE: the published image has to be the image the user approved. The existing text
@@ -19,7 +20,7 @@ import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { contentAssets, scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
-import { renderBrandCard, MAX_HEADLINE_CHARS, type CardVariant } from '../../src/lib/brand-card';
+import { renderBrandCard, normalizeCardLayout, MAX_HEADLINE_CHARS, type CardVariant } from '../../src/lib/brand-card';
 import { persistBufferToR2, r2IsConfigured } from '../../src/lib/media-persist';
 import { normalizeBrandKit, type BrandKit } from '../../src/utils/brand-kit';
 import type { AspectRatio } from '../../src/lib/fal-gateway';
@@ -31,7 +32,7 @@ const json = (statusCode: number, body: unknown) => ({
 
 const KIT_FIELDS = ['primaryColor', 'backgroundColor', 'textColor', 'fontFamily', 'wordmark', 'website', 'logoUrl'] as const;
 
-interface StoredRenderParams { kind?: string; headline?: string; variant?: CardVariant; kit?: unknown }
+interface StoredRenderParams { kind?: string; headline?: string; variant?: CardVariant; kit?: unknown; layout?: unknown }
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method Not Allowed' });
@@ -92,19 +93,30 @@ export default withLambda(async (event) => {
     if (!headline) return json(400, { error: 'A card needs some wording.' });
     const variant: CardVariant = body.variant === 'bold' || body.variant === 'light' ? body.variant : baseVariant;
     const aspectRatio = (asset.aspectRatio || '1:1') as AspectRatio;
+    // Placement/visibility of the company name and website. Absent from the request = keep what the
+    // card already had, so a client that only sends colours never quietly resets the layout.
+    const layout = normalizeCardLayout(body.layout ?? stored.layout);
 
     let card;
     try {
-        card = await renderBrandCard({ headline, kit, aspectRatio, variant });
+        card = await renderBrandCard({ headline, kit, aspectRatio, variant, layout });
     } catch (err) {
         console.error('[edit-brand-card] render failed:', err instanceof Error ? err.message : err);
         return json(500, { error: 'Could not render that card.' });
     }
 
-    const renderParams = { kind: 'brand_card', headline: card.headline, variant: card.variant, kit };
+    const renderParams = { kind: 'brand_card', headline: card.headline, variant: card.variant, kit, layout: card.layout };
 
     if (body.preview === true) {
-        return json(200, { dataUrl: `data:image/png;base64,${card.png.toString('base64')}`, renderParams });
+        // `elements` carries the drawn geometry (and which elements the org has anything to draw
+        // for). The editor puts its drag handles on those exact boxes rather than re-deriving the
+        // padding maths in the browser, where it would drift the moment either side changed.
+        return json(200, {
+            dataUrl: `data:image/png;base64,${card.png.toString('base64')}`,
+            renderParams,
+            elements: card.elements,
+            canvas: { width: card.width, height: card.height },
+        });
     }
 
     if (!r2IsConfigured()) return json(503, { error: 'Media storage is not configured, so the card cannot be saved.' });

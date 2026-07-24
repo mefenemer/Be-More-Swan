@@ -185,7 +185,9 @@ export async function renderAndPersistBrandCard(db: Db, params: {
         // Everything the review-time editor needs to reopen and re-render this exact card. The kit
         // is stored WHOLE rather than as a reference to the org's: the org kit can change later,
         // and re-rendering a card the user already approved must not silently restyle it.
-        renderParams: { kind: 'brand_card', headline: card.headline, variant: card.variant, kit: params.kit },
+        // `layout` rides along so the review-time editor seeds its toggles and drag handles from
+        // what this card was actually drawn with, not from the defaults.
+        renderParams: { kind: 'brand_card', headline: card.headline, variant: card.variant, kit: params.kit, layout: card.layout },
         status: 'pending',
     }).returning({ id: contentAssets.id });
 

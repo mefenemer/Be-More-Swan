@@ -611,7 +611,7 @@ window.showComplianceModals = function showComplianceModals(force) {
       <div id="post-review-cardedit" class="hidden mt-4 rounded-xl border border-gray-200 overflow-hidden bg-white">
         <button type="button" id="pce-toggle"
           class="w-full flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-100 cursor-pointer hover:bg-gray-100 transition">
-          <span class="text-xs font-bold text-gray-600">Branded card — edit wording, colours &amp; font</span>
+          <span class="text-xs font-bold text-gray-600">Branded card — edit wording, colours, font &amp; layout</span>
           <svg id="pce-chevron" class="w-4 h-4 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
         </button>
         <div id="pce-panel" class="hidden p-3 space-y-3">
@@ -651,7 +651,30 @@ window.showComplianceModals = function showComplianceModals(force) {
               class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none">
           </div>
 
-          <img id="pce-preview" alt="Preview of the branded card" class="w-full rounded-lg border border-gray-200 bg-gray-50 aspect-square object-cover">
+          <!-- Show/hide is per-element and independent of placement: wanting the website off a card
+               says nothing about where the company name should sit. -->
+          <div>
+            <span class="block text-xs font-bold text-gray-600 mb-1">Show on the card</span>
+            <div class="flex flex-wrap items-center gap-4">
+              <label class="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-700 cursor-pointer">
+                <input type="checkbox" id="pce-show-wordmark" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer">
+                Company name
+              </label>
+              <label class="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-700 cursor-pointer">
+                <input type="checkbox" id="pce-show-website" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer">
+                Website
+              </label>
+            </div>
+            <p id="pce-place-hint" class="text-[11px] text-gray-400 mt-1">Drag either one on the preview to move it.</p>
+          </div>
+
+          <!-- The stage wraps the render so the drag handles can be positioned as a percentage of
+               the image box. The img is left to size itself — a fixed aspect-square would crop a
+               4:5 or 9:16 card, and every handle would then point at the wrong place. -->
+          <div id="pce-stage" class="relative w-full select-none" style="touch-action: none;">
+            <img id="pce-preview" alt="Preview of the branded card" class="block w-full rounded-lg border border-gray-200 bg-gray-50">
+            <div id="pce-handles" class="absolute inset-0"></div>
+          </div>
 
           <div class="flex items-center gap-2">
             <button type="button" id="pce-save"
@@ -5635,9 +5658,33 @@ function rqReviewSwitchPlatform(id) {
 //
 // Scope is deliberately this ONE post: the org-wide default lives on Business Information → Brand
 // style, and tuning a single card must never silently restyle every future post.
-const _pceState = { postId: null, base: null, busy: false, token: 0 };
+//
+// Layout (which of the company name / website show, and where they sit) is held in _pceState.layout
+// and drawn as drag handles over the preview. The handles are placed from the geometry the SERVER
+// reports having drawn — never re-derived here — so the box you grab is the text you see.
+const _pceState = { postId: null, base: null, busy: false, token: 0, layout: null, geo: null };
+
+const _PCE_ELEMENTS = { wordmark: 'Company name', website: 'Website' };
 
 function _pceEl(id) { return document.getElementById(id); }
+
+function _pceDefaultLayout() {
+    return { wordmark: { show: true, align: 'left', y: 0 }, website: { show: true, align: 'left', y: 1 } };
+}
+
+// Tolerant of a card stored before layout existed, and of a half-written one.
+function _pceNormalizeLayout(raw) {
+    const base = _pceDefaultLayout();
+    const src = raw && typeof raw === 'object' ? raw : {};
+    for (const key of Object.keys(base)) {
+        const o = src[key] && typeof src[key] === 'object' ? src[key] : {};
+        if (typeof o.show === 'boolean') base[key].show = o.show;
+        if (o.align === 'left' || o.align === 'center' || o.align === 'right') base[key].align = o.align;
+        const y = Number(o.y);
+        if (Number.isFinite(y)) base[key].y = Math.min(1, Math.max(0, y));
+    }
+    return base;
+}
 
 function _pceSetMsg(text, tone) {
     const m = _pceEl('pce-msg');
@@ -5655,6 +5702,7 @@ function _pceValues() {
         backgroundColor: _pceEl('pce-backgroundColor')?.value || '',
         textColor: _pceEl('pce-textColor')?.value || '',
         fontFamily: _pceEl('pce-fontFamily')?.value?.trim() || '',
+        layout: _pceState.layout || _pceDefaultLayout(),
     };
 }
 
@@ -5676,6 +5724,73 @@ function _pceFill(v) {
     }
     if (_pceEl('pce-fontFamily')) _pceEl('pce-fontFamily').value = v.fontFamily ?? '';
     _pcePaintVariant(v.variant || 'light');
+    _pceState.layout = _pceNormalizeLayout(v.layout);
+    _pcePaintShowToggles();
+    _pcePaintHandles();
+}
+
+function _pceJustify(align) {
+    return align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start';
+}
+
+function _pcePaintShowToggles() {
+    const layout = _pceState.layout || _pceDefaultLayout();
+    const missing = [];
+    for (const key of Object.keys(_PCE_ELEMENTS)) {
+        const box = _pceEl('pce-show-' + key);
+        if (!box) continue;
+        box.checked = !!layout[key].show;
+        // Nothing to draw (no wordmark/org name, no website saved) — offering a live toggle there
+        // would be a control that does nothing. Only known once a preview has come back.
+        const available = _pceState.geo ? !!_pceState.geo.elements?.[key]?.available : true;
+        box.disabled = !available;
+        box.parentElement?.classList.toggle('opacity-40', !available);
+        if (!available) missing.push(_PCE_ELEMENTS[key].toLowerCase());
+    }
+    const hint = _pceEl('pce-place-hint');
+    if (hint) {
+        hint.textContent = missing.length
+            ? `Drag either one on the preview to move it. No ${missing.join(' or ')} saved — add one in Business Information → Brand style.`
+            : 'Drag either one on the preview to move it.';
+    }
+}
+
+// Draw a grab handle over each element the server actually rendered. The handle spans the safe-area
+// rail it can move along, and the chip inside sits at its current alignment.
+function _pcePaintHandles() {
+    const layer = _pceEl('pce-handles');
+    if (!layer) return;
+    layer.innerHTML = '';
+    const geo = _pceState.geo;
+    const layout = _pceState.layout;
+    if (!geo || !layout) return;
+
+    for (const [key, label] of Object.entries(_PCE_ELEMENTS)) {
+        const el = geo.elements?.[key];
+        if (!el || !el.shown || !el.box) continue;
+        const b = el.box;
+        const topFrac = b.top / geo.canvas.height;
+        const h = document.createElement('div');
+        h.className = 'pce-handle absolute flex items-start rounded border border-dashed cursor-grab';
+        h.dataset.key = key;
+        // Colour comes from the brand token rather than a border-emerald-* class: the compiled
+        // stylesheet only carries the utilities the markup already used, and rebuilding it churns
+        // unrelated selectors across the whole app.
+        h.style.borderColor = 'var(--color-emerald-700)';
+        h.style.left = (b.left / geo.canvas.width * 100) + '%';
+        h.style.width = (b.width / geo.canvas.width * 100) + '%';
+        h.style.top = (topFrac * 100) + '%';
+        h.style.height = (b.height / geo.canvas.height * 100) + '%';
+        // A 34px band on a 1080px card is ~12px on screen — too thin to grab reliably.
+        h.style.minHeight = '20px';
+        h.style.justifyContent = _pceJustify(layout[key].align);
+        // The label sits outside the band so it never covers the very text being placed — above it
+        // normally, below when the band is already near the top of the card and there is no room.
+        const chipOutside = topFrac < 0.12 ? 'margin-top: 1.15rem;' : 'margin-top: -1.15rem;';
+        h.innerHTML = `<span class="px-1 text-[10px] font-bold text-emerald-700 bg-white/90 rounded pointer-events-none whitespace-nowrap"
+            style="${chipOutside}">${label}</span>`;
+        layer.appendChild(h);
+    }
 }
 
 async function _pceRefreshPreview() {
@@ -5692,10 +5807,76 @@ async function _pceRefreshPreview() {
         if (token !== _pceState.token) return;   // superseded by a newer edit
         const img = _pceEl('pce-preview');
         if (img) img.src = data.dataUrl;
+        if (data.elements && data.canvas) {
+            _pceState.geo = { elements: data.elements, canvas: data.canvas };
+            // Re-seat the handles on what was actually drawn. This is also what corrects a drag
+            // that ran past the safe area: the server clamped it, so the handle returns to the
+            // furthest the text can legibly go rather than lying about where it landed.
+            _pcePaintShowToggles();
+            _pcePaintHandles();
+        }
         _pceSetMsg('');
     } catch (e) {
         if (token === _pceState.token) _pceSetMsg(e.message, 'error');
     }
+}
+
+// ── Dragging an element to a new spot ────────────────────────────────────────
+// Vertical is free; horizontal snaps to the rail's left/centre/right thirds. That mirrors the
+// renderer, which anchors rather than free-positions x so text can never overhang the card edge.
+let _pceDrag = null;
+
+function _pceAlignFromX(clientX, rect) {
+    const f = (clientX - rect.left) / Math.max(1, rect.width);
+    return f < 0.34 ? 'left' : f < 0.67 ? 'center' : 'right';
+}
+
+function _pceDragStart(ev) {
+    const handle = ev.target.closest?.('.pce-handle');
+    if (!handle || ev.button > 0) return;
+    if (!_pceEl('pce-stage')) return;
+    _pceDrag = {
+        key: handle.dataset.key,
+        handle,
+        // Grab offset, so the handle doesn't jump its own height under the cursor on first move.
+        grabDy: ev.clientY - handle.getBoundingClientRect().top,
+    };
+    // Capture keeps the move/up stream on the handle even when the cursor outruns a 20px band.
+    // It is an optimisation, not a requirement — the listeners sit on the layer, which the cursor
+    // stays over — so a browser that refuses it must not take the whole drag down with it.
+    try { handle.setPointerCapture?.(ev.pointerId); } catch { /* drag still works without it */ }
+    handle.style.borderStyle = 'solid';   // a filled highlight would hide the text being placed
+    ev.preventDefault();
+}
+
+function _pceDragMove(ev) {
+    if (!_pceDrag) return;
+    const { handle, grabDy } = _pceDrag;
+    // Measured per move, not cached at grab time: the modal can scroll mid-drag, and a stale rect
+    // would silently offset every position by however far it moved.
+    const stageRect = _pceEl('pce-stage').getBoundingClientRect();
+    const maxTop = Math.max(0, stageRect.height - handle.offsetHeight);
+    const top = Math.min(Math.max(ev.clientY - grabDy - stageRect.top, 0), maxTop);
+    handle.style.top = (top / stageRect.height * 100) + '%';
+    const align = _pceAlignFromX(ev.clientX, stageRect);
+    handle.style.justifyContent = _pceJustify(align);
+    _pceDrag.y = top / stageRect.height;
+    _pceDrag.align = align;
+    ev.preventDefault();
+}
+
+function _pceDragEnd() {
+    if (!_pceDrag) return;
+    const { key, handle, y, align } = _pceDrag;
+    handle.style.borderStyle = 'dashed';
+    _pceDrag = null;
+    // A click with no movement leaves y/align undefined — nothing to commit, and re-rendering on
+    // every stray click would put a server render behind each one.
+    if (y === undefined && align === undefined) return;
+    const layout = _pceState.layout || (_pceState.layout = _pceDefaultLayout());
+    if (y !== undefined) layout[key].y = y;
+    if (align !== undefined) layout[key].align = align;
+    _pceRefreshPreview();
 }
 
 let _pceDebounce;
@@ -5712,6 +5893,7 @@ function _pceSyncForPost(post) {
         wrap.classList.add('hidden');
         wrap.style.display = 'none';   // `hidden` loses to a display set inline elsewhere
         _pceState.postId = null;
+        _pceState.geo = null;
         return;
     }
     wrap.classList.remove('hidden');
@@ -5719,6 +5901,13 @@ function _pceSyncForPost(post) {
 
     const rp = card.renderParams || {};
     const kit = rp.kit || {};
+    // Geometry belongs to whichever card was last previewed — drop it, or this post's handles get
+    // drawn on the previous post's boxes until the first render comes back.
+    if (_pceState.postId !== post.id) {
+        _pceState.geo = null;
+        const img = _pceEl('pce-preview');
+        if (img) img.removeAttribute('src');
+    }
     _pceState.postId = post.id;
     _pceState.base = {
         headline: rp.headline || card.headline || '',
@@ -5727,6 +5916,7 @@ function _pceSyncForPost(post) {
         backgroundColor: kit.backgroundColor || '#ffffff',
         textColor: kit.textColor || '#1f1e1b',
         fontFamily: kit.fontFamily || '',
+        layout: _pceNormalizeLayout(rp.layout),
     };
     _pceFill(_pceState.base);
     _pceSetMsg('');
@@ -5755,6 +5945,26 @@ function _pceSyncForPost(post) {
         for (const id of ['pce-headline', 'pce-primaryColor', 'pce-backgroundColor', 'pce-textColor', 'pce-fontFamily']) {
             _pceEl(id)?.addEventListener('input', _pceSchedulePreview);
         }
+        for (const key of Object.keys(_PCE_ELEMENTS)) {
+            _pceEl('pce-show-' + key)?.addEventListener('change', (ev) => {
+                if (!_pceState.layout) _pceState.layout = _pceDefaultLayout();
+                _pceState.layout[key].show = ev.target.checked;
+                // Hiding removes the handle straight away rather than after the render lands, so
+                // the checkbox never looks like it did nothing for half a second.
+                if (_pceState.geo?.elements?.[key]) _pceState.geo.elements[key].shown = ev.target.checked;
+                _pcePaintHandles();
+                _pceRefreshPreview();
+            });
+        }
+        // Drag is delegated from the layer: handles are rebuilt on every render, so per-handle
+        // listeners would have to be re-bound each time.
+        _pceEl('pce-handles')?.addEventListener('pointerdown', _pceDragStart);
+        _pceEl('pce-handles')?.addEventListener('pointermove', _pceDragMove);
+        _pceEl('pce-handles')?.addEventListener('pointerup', _pceDragEnd);
+        // Pointer capture normally keeps the stream on the handle, but a cancelled gesture
+        // (scroll takeover, window blur) would otherwise leave _pceDrag stuck and the next click
+        // interpreted as a drop.
+        _pceEl('pce-handles')?.addEventListener('pointercancel', _pceDragEnd);
         _pceEl('pce-revert')?.addEventListener('click', () => {
             if (!_pceState.base) return;
             _pceFill(_pceState.base);

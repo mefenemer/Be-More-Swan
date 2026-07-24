@@ -27,6 +27,62 @@ import type { AspectRatio } from './fal-gateway';
 
 export type CardVariant = 'light' | 'bold';
 
+export type CardAlign = 'left' | 'center' | 'right';
+
+/**
+ * Where one piece of the card's furniture sits, and whether it shows at all.
+ *
+ * Vertical is free (`y`), horizontal snaps to three anchors (`align`). That split is deliberate: a
+ * freely-positioned x would need the rendered TEXT WIDTH to clamp against, and satori only knows
+ * that after it has laid the card out — so a right-dragged wordmark could print off the edge, and
+ * the first anyone would know is a published post. Anchoring to the safe-area rail instead makes
+ * overhang impossible by construction, while dragging still feels free in the axis that matters
+ * (how far down the card the line sits).
+ */
+export interface CardElementLayout {
+    show: boolean;
+    align: CardAlign;
+    /** Top edge as a fraction of canvas height, clamped into the safe area at render time — so 0
+     *  and 1 mean "as high/low as this can legibly go", never off the card. */
+    y: number;
+}
+
+/** The two elements a reviewer can show, hide and place: the company name and the website. */
+export interface CardLayout {
+    wordmark: CardElementLayout;
+    website: CardElementLayout;
+}
+
+/** Reproduces the original fixed layout: name top-left, website bottom-left, both shown. */
+export const DEFAULT_CARD_LAYOUT: CardLayout = {
+    wordmark: { show: true, align: 'left', y: 0 },
+    website: { show: true, align: 'left', y: 1 },
+};
+
+function normalizeCardElement(raw: unknown, fallback: CardElementLayout): CardElementLayout {
+    const o = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+    const align = o.align === 'left' || o.align === 'center' || o.align === 'right' ? o.align : fallback.align;
+    const y = Number(o.y);
+    return {
+        show: typeof o.show === 'boolean' ? o.show : fallback.show,
+        align,
+        y: Number.isFinite(y) ? Math.min(1, Math.max(0, y)) : fallback.y,
+    };
+}
+
+/**
+ * Coerce anything — a stored render_params blob, a request body, undefined — into a usable layout.
+ * Like normalizeBrandKit, this is the ONLY gate: the values reach a renderer that has no opinion
+ * about nonsense, so an out-of-range y or a junk align must be corrected here or not at all.
+ */
+export function normalizeCardLayout(raw: unknown): CardLayout {
+    const o = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+    return {
+        wordmark: normalizeCardElement(o.wordmark, DEFAULT_CARD_LAYOUT.wordmark),
+        website: normalizeCardElement(o.website, DEFAULT_CARD_LAYOUT.website),
+    };
+}
+
 /** Rendered pixel size per slot ratio. 1080-wide is every platform's native upload width. */
 const DIMENSIONS: Record<AspectRatio, { width: number; height: number }> = {
     '1:1': { width: 1080, height: 1080 },
@@ -141,12 +197,31 @@ async function inlineLogo(url: string): Promise<string | null> {
     } catch { return null; }
 }
 
+/** Where an element was actually drawn, in canvas pixels. */
+export interface CardElementBox { left: number; top: number; width: number; height: number }
+
+/**
+ * What became of one placeable element. `available` is false when the org has nothing to draw (no
+ * wordmark/org name, no website) — which the editor needs kept distinct from "the user hid it", or
+ * it would offer a toggle that silently does nothing.
+ */
+export interface CardElementRender {
+    available: boolean;
+    shown: boolean;
+    box: CardElementBox | null;
+}
+
 export interface BrandCardResult {
     png: Buffer;
     width: number;
     height: number;
     variant: CardVariant;
     headline: string;
+    /** The layout actually used, post-normalisation — what the caller should store. */
+    layout: CardLayout;
+    /** Drawn geometry, so the editor can put its drag handles exactly where the render put the
+     *  text instead of re-deriving the same padding maths in the browser and drifting from it. */
+    elements: { wordmark: CardElementRender; website: CardElementRender };
 }
 
 /**
@@ -162,6 +237,9 @@ export async function renderBrandCard(opts: {
     seed?: number;
     /** Eyebrow fallback when the kit has no wordmark — the org name. */
     orgName?: string | null;
+    /** Per-card visibility/placement of the company name and website. Omitted = the original fixed
+     *  layout, so every existing caller renders exactly as it did. */
+    layout?: unknown;
 }): Promise<BrandCardResult> {
     const headline = opts.headline.trim();
     if (!headline) throw new Error('Brand card needs a headline.');
@@ -173,6 +251,7 @@ export async function renderBrandCard(opts: {
 
     const pad = Math.round(width * 0.083);
     const eyebrowText = (opts.kit.wordmark || opts.orgName || '').trim().toUpperCase().slice(0, 32);
+    const layout = normalizeCardLayout(opts.layout);
 
     // The org's own display font when we can serve it, the bundled family otherwise. Both are
     // fetched together — a slow logo host shouldn't serialise behind a slow font CDN.
@@ -189,41 +268,76 @@ export async function renderBrandCard(opts: {
     // esbuild without a JSX runtime configured, and one renderer is not worth a build-config change.
     const el = (style: Record<string, unknown>, children: unknown) => ({ type: 'div', props: { style, children } });
 
-    const header = logoSrc
-        ? { type: 'img', props: { src: logoSrc, style: { height: Math.round(pad * 0.62), objectFit: 'contain' } } }
-        : eyebrowText
-            ? el({
-                display: 'flex', fontSize: Math.round(width * 0.024), fontWeight: 800,
-                letterSpacing: Math.round(width * 0.004), color: palette.eyebrow,
-            }, eyebrowText)
-            : el({ display: 'flex' }, '');
+    // The furniture is positioned absolutely rather than flowed, because the reviewer can now drag
+    // it: a flex column can express "top, middle, bottom" and nothing in between. The headline
+    // keeps the full safe area and stays optically centred, which is where space-between put it
+    // anyway when the name and website were still pinned to the edges.
+    const rail = width - pad * 2;
+    const logoHeight = Math.round(pad * 0.62);
+    const eyebrowSize = Math.round(width * 0.024);
+    const websiteSize = Math.round(width * 0.026);
 
-    const footer = opts.kit.website
-        ? el({ display: 'flex', fontSize: Math.round(width * 0.026), fontWeight: 400, color: palette.footer, opacity: 0.75 }, opts.kit.website)
-        : el({ display: 'flex' }, '');
+    const wordmarkAvailable = !!(logoSrc || eyebrowText);
+    const websiteAvailable = !!opts.kit.website;
+    const wordmarkHeight = logoSrc ? logoHeight : Math.round(eyebrowSize * 1.3);
+    const websiteHeight = Math.round(websiteSize * 1.3);
+
+    /** Clamp an element's top edge into the safe area, so no `y` can push it off the canvas. */
+    const topFor = (y: number, elHeight: number) =>
+        Math.round(Math.min(Math.max(y * height, pad), Math.max(pad, height - pad - elHeight)));
+
+    const justify = (align: CardAlign) =>
+        align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start';
+
+    /** One full-width rail at `top`; the child anchors left/centre/right inside it. */
+    const placed = (top: number, elHeight: number, align: CardAlign, child: unknown) => el({
+        position: 'absolute', left: pad, top, width: rail, height: elHeight,
+        display: 'flex', alignItems: 'center', justifyContent: justify(align),
+    }, child);
+
+    const children: unknown[] = [
+        el({
+            position: 'absolute', left: pad, top: pad, width: rail, height: height - pad * 2,
+            display: 'flex', flexDirection: 'column', justifyContent: 'center',
+            fontSize: headlineFontSize(headline.length, width),
+            lineHeight: 1.14, fontWeight: 800, color: palette.headline,
+            // Long single words (a URL-ish product name) would otherwise print past the edge.
+            overflow: 'hidden',
+        }, headline),
+    ];
+
+    const elements: BrandCardResult['elements'] = {
+        wordmark: { available: wordmarkAvailable, shown: false, box: null },
+        website: { available: websiteAvailable, shown: false, box: null },
+    };
+
+    if (wordmarkAvailable && layout.wordmark.show) {
+        const top = topFor(layout.wordmark.y, wordmarkHeight);
+        children.push(placed(top, wordmarkHeight, layout.wordmark.align, logoSrc
+            ? { type: 'img', props: { src: logoSrc, style: { height: logoHeight, objectFit: 'contain' } } }
+            : el({
+                display: 'flex', fontSize: eyebrowSize, fontWeight: 800,
+                letterSpacing: Math.round(width * 0.004), color: palette.eyebrow,
+            }, eyebrowText)));
+        elements.wordmark = { available: true, shown: true, box: { left: pad, top, width: rail, height: wordmarkHeight } };
+    }
+
+    if (websiteAvailable && layout.website.show) {
+        const top = topFor(layout.website.y, websiteHeight);
+        children.push(placed(top, websiteHeight, layout.website.align, el({
+            display: 'flex', fontSize: websiteSize, fontWeight: 400, color: palette.footer, opacity: 0.75,
+        }, opts.kit.website)));
+        elements.website = { available: true, shown: true, box: { left: pad, top, width: rail, height: websiteHeight } };
+    }
 
     const svg = await satori(
-        el(
-            {
-                display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
-                width: '100%', height: '100%', padding: pad, backgroundColor: palette.background,
-                fontFamily,
-            },
-            [
-                header,
-                el({
-                    display: 'flex', flexDirection: 'column',
-                    fontSize: headlineFontSize(headline.length, width),
-                    lineHeight: 1.14, fontWeight: 800, color: palette.headline,
-                    // Long single words (a URL-ish product name) would otherwise print past the edge.
-                    overflow: 'hidden',
-                }, headline),
-                footer,
-            ],
-        ),
+        el({
+            display: 'flex', position: 'relative',
+            width: '100%', height: '100%', backgroundColor: palette.background, fontFamily,
+        }, children),
         { width, height, fonts },
     );
 
     const png = Buffer.from(new Resvg(svg, { fitTo: { mode: 'width', value: width } }).render().asPng());
-    return { png, width, height, variant, headline };
+    return { png, width, height, variant, headline, layout, elements };
 }

@@ -22,7 +22,7 @@ import {
 } from '../src/utils/brand-kit';
 import {
     headlineFromCaption, pickVariant, resolveCardPalette, headlineFontSize,
-    renderBrandCard, MAX_HEADLINE_CHARS,
+    renderBrandCard, normalizeCardLayout, MAX_HEADLINE_CHARS, DEFAULT_CARD_LAYOUT,
 } from '../src/lib/brand-card';
 import { pickFaceUrl } from '../src/lib/brand-card-webfont';
 import { rotateSources, resolveMediaForPost } from '../src/utils/media-resolver';
@@ -319,6 +319,108 @@ test('a longest-allowed headline still renders on the tightest ratio', async () 
 
 test('an empty headline is refused rather than rendering a blank card', async () => {
     await assert.rejects(() => renderBrandCard({ headline: '   ', kit: DEFAULT_BRAND_KIT }));
+});
+
+// ── Element visibility and placement ──────────────────────────────────────────────────────────
+// The reviewer can now hide and drag the company name and the website independently. The values
+// arrive from a browser and are stored as JSON, so the ONLY thing standing between a junk `y` and
+// a card with its wordmark printed off the canvas is normalizeCardLayout and the render clamp.
+
+test('a missing, partial or junk layout falls back to the original fixed placement', () => {
+    for (const raw of [null, undefined, 'nonsense', 42, {}, { wordmark: 'left' }]) {
+        assert.deepEqual(normalizeCardLayout(raw), DEFAULT_CARD_LAYOUT, `bad fallback for ${JSON.stringify(raw)}`);
+    }
+    // A half-specified element keeps the default for the fields it left out.
+    assert.deepEqual(
+        normalizeCardLayout({ website: { align: 'right' } }).website,
+        { show: true, align: 'right', y: 1 },
+    );
+});
+
+test('out-of-range and junk placement values are corrected, never passed through', () => {
+    const l = normalizeCardLayout({
+        wordmark: { show: 'yes', align: 'middle', y: 9 },
+        website: { show: false, align: 'center', y: -4 },
+    });
+    assert.equal(l.wordmark.show, true, 'a non-boolean show must fall back, not coerce');
+    assert.equal(l.wordmark.align, 'left', 'an unknown align must fall back');
+    assert.equal(l.wordmark.y, 1, 'y clamps to 0..1');
+    assert.equal(l.website.show, false);
+    assert.equal(l.website.y, 0);
+});
+
+test('hiding an element takes it off the card, and says so in the reported geometry', async () => {
+    const args = { headline: 'Hire the role, not the tool', kit: BE_MORE_SWAN_BRAND_KIT, seed: 2 } as const;
+    const shown = await renderBrandCard(args);
+    const hidden = await renderBrandCard({
+        ...args,
+        layout: { wordmark: { show: false, align: 'left', y: 0 }, website: { show: false, align: 'left', y: 1 } },
+    });
+    assert.ok(shown.elements.wordmark.shown && shown.elements.website.shown);
+    assert.equal(hidden.elements.wordmark.shown, false);
+    assert.equal(hidden.elements.website.box, null, 'a hidden element has no box to drag');
+    // Still "available" — the org HAS a website, the user just hid it. The editor needs that
+    // distinction or it would disable a toggle the user had only just switched off.
+    assert.equal(hidden.elements.website.available, true);
+    assert.notDeepEqual(shown.png, hidden.png, 'hiding both elements changed nothing on the canvas');
+});
+
+test('an org with nothing to draw reports unavailable rather than an empty box', async () => {
+    const card = await renderBrandCard({
+        headline: 'No furniture here', kit: { ...DEFAULT_BRAND_KIT, wordmark: null, website: null },
+    });
+    assert.equal(card.elements.wordmark.available, false);
+    assert.equal(card.elements.website.available, false);
+    assert.equal(card.elements.wordmark.box, null);
+});
+
+test('a dragged element stays inside the safe area on every ratio', async () => {
+    for (const ratio of ['1:1', '4:5', '9:16', '16:9'] as const) {
+        const card = await renderBrandCard({
+            headline: 'Placement must never print off the edge',
+            kit: BE_MORE_SWAN_BRAND_KIT, aspectRatio: ratio,
+            // Deliberately past both ends: this is what a drag to the very edge sends.
+            layout: { wordmark: { show: true, align: 'right', y: 5 }, website: { show: true, align: 'center', y: -5 } },
+        });
+        const pad = Math.round(card.width * 0.083);
+        for (const key of ['wordmark', 'website'] as const) {
+            const box = card.elements[key].box!;
+            assert.ok(box.top >= pad, `${ratio} ${key} top ${box.top} is above the safe area`);
+            assert.ok(box.top + box.height <= card.height - pad,
+                `${ratio} ${key} bottom ${box.top + box.height} runs past the safe area`);
+            assert.equal(box.left + box.width, card.width - pad, `${ratio} ${key} rail is not the safe width`);
+        }
+    }
+});
+
+test('placement actually moves the pixels, and the same placement re-renders identically', async () => {
+    const args = { headline: 'Where this sits is the whole point', kit: BE_MORE_SWAN_BRAND_KIT, seed: 4 } as const;
+    const top = { wordmark: { show: true, align: 'left', y: 0 }, website: { show: true, align: 'left', y: 1 } };
+    const swapped = { wordmark: { show: true, align: 'right', y: 1 }, website: { show: true, align: 'center', y: 0 } };
+    const [a, b, again] = await Promise.all([
+        renderBrandCard({ ...args, layout: top }),
+        renderBrandCard({ ...args, layout: swapped }),
+        renderBrandCard({ ...args, layout: swapped }),
+    ]);
+    assert.notDeepEqual(a.png, b.png, 'moving both elements produced an identical card');
+    assert.deepEqual(b.png, again.png, 'the same layout must re-render byte-identically');
+    assert.ok(b.elements.wordmark.box!.top > a.elements.wordmark.box!.top, 'the name did not move down');
+    // The layout the caller gets back is the normalized one — that is what gets stored.
+    assert.deepEqual(b.layout, swapped);
+});
+
+test('the default layout reproduces the original top-left/bottom-left card', async () => {
+    const args = { headline: 'Nothing changes for a card nobody has edited', kit: BE_MORE_SWAN_BRAND_KIT, seed: 3 } as const;
+    const implicit = await renderBrandCard(args);
+    const explicit = await renderBrandCard({ ...args, layout: DEFAULT_CARD_LAYOUT });
+    assert.deepEqual(implicit.png, explicit.png);
+    assert.deepEqual(implicit.layout, DEFAULT_CARD_LAYOUT);
+    const pad = Math.round(implicit.width * 0.083);
+    assert.equal(implicit.elements.wordmark.box!.top, pad, 'the name should sit at the top of the safe area');
+    assert.equal(
+        implicit.elements.website.box!.top + implicit.elements.website.box!.height,
+        implicit.height - pad, 'the website should sit at the bottom of the safe area',
+    );
 });
 
 // Sequential, and wrapped in a main(): tsx transpiles these to CJS, where top-level await is a
