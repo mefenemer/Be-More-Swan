@@ -161,6 +161,12 @@ export default withLambda(async (event) => {
         triggerType,
         platform: primaryPlatform,
         platforms: platforms.length > 1 ? platforms : null,
+        // Cross-post identity for the Review Queue. Without this the fan-out below produces one
+        // scheduled_posts row per platform with crosspost_group_id NULL, and _rqGroupKey() in
+        // workspace.html falls back to `id:<post id>` — so an on-demand post to four platforms
+        // rendered as FOUR separate review cards while every other route (Autopilot, gap-fill,
+        // manual, chat) collapsed correctly. This was the only job creator that omitted it.
+        crosspostGroupId: platforms.length > 1 ? randomUUID() : null,
     });
 
     await createNotification(db, triggerType === 'on_demand' ? 'post_generation_queued_on_demand' : 'post_generation_queued', {
