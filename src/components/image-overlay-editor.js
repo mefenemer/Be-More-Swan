@@ -457,6 +457,10 @@
           id: o.id, text: o.text, x: o.x, y: o.y,
           fontFamily: o.fontFamily, fontSizePct: o.fontSizePct, color: o.color,
           boxStroke: o.boxStroke, boxFill: o.boxFill, boxOpacity: o.boxOpacity,
+          // Pass through video timing (startS/endS) untouched — the editor doesn't manage it, but it
+          // must not drop it, or editing a box's text/style would wipe when it appears on the video.
+          ...(o.startS != null ? { startS: o.startS } : {}),
+          ...(o.endS != null ? { endS: o.endS } : {}),
         }));
       close(clean);
     });

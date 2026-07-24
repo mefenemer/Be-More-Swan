@@ -610,6 +610,9 @@ window.showComplianceModals = function showComplianceModals(force) {
                platform at once. -->
           <div id="post-review-tabs" class="hidden mb-4"></div>
           <div id="post-review-body"></div>
+          <!-- Video timeline: one track per text overlay (Phase 4). Shown only for a video post with
+               a running editor; _rqRenderTimeline fills it. Drag a segment's ends to time the text. -->
+          <div id="post-review-timeline" class="hidden mt-3 max-w-md mx-auto"></div>
         </div>
         <!-- The inspector. Every control that changes how this post looks lives here, and WHICH
              controls you see is decided by what is selected on the canvas — never by hunting for
@@ -742,11 +745,31 @@ window.showComplianceModals = function showComplianceModals(force) {
               <p class="pce-avail-note text-[11px] text-gray-400 mt-3">Drag it up or down on the card to place it.</p>
             </div>
 
-            <!-- ── Text on the image. Draggable, styled text boxes baked into the published picture on
-                 approval. The boxes render live on the canvas; the detailed styling opens the editor. ── -->
+            <!-- ── Text on the image/video. Draggable, styled text boxes baked into the published media
+                 on approval (browser bake for a photo, Remotion render for video). Boxes render live on
+                 the canvas; detailed styling opens the editor; on video, each box is also timed. ── -->
             <div class="pce-insp hidden" data-insp="overlays">
-              <p class="text-xs font-bold text-gray-600 mb-1">Text on the image</p>
+              <p id="insp-overlay-title" class="text-xs font-bold text-gray-600 mb-1">Text on the image</p>
               <p id="insp-overlay-summary" class="text-[11px] text-gray-400 mb-3">No text on the image yet.</p>
+
+              <!-- Timing for the selected box. Video only — shown by _pceRefreshOverlayTiming. -->
+              <div id="insp-overlay-timing" class="hidden mb-3 rounded-lg border border-gray-200 p-2.5">
+                <p class="text-[11px] font-bold text-gray-600 mb-2 truncate">When: <span id="insp-overlay-timing-label" class="font-semibold text-gray-500"></span></p>
+                <div class="grid grid-cols-2 gap-2">
+                  <label class="block">
+                    <span class="block text-[10px] font-bold text-gray-500 mb-0.5">Start (s)</span>
+                    <input id="insp-overlay-start" type="number" min="0" step="0.1"
+                      class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-600">
+                  </label>
+                  <label class="block">
+                    <span class="block text-[10px] font-bold text-gray-500 mb-0.5">End (s)</span>
+                    <input id="insp-overlay-end" type="number" min="0" step="0.1"
+                      class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-600">
+                  </label>
+                </div>
+                <p class="text-[10px] text-gray-400 mt-1.5">Leave a field blank for the whole clip. Or drag the ends on the timeline below the video.</p>
+              </div>
+
               <div class="flex flex-wrap items-center gap-2">
                 <button type="button" onclick="_pceOpenOverlayEditor(_rqReviewPostId)"
                   class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer">Add or edit text</button>
@@ -754,7 +777,7 @@ window.showComplianceModals = function showComplianceModals(force) {
                   class="hidden text-xs font-semibold text-gray-500 hover:text-red-600 transition cursor-pointer">Remove all text</button>
               </div>
               <span id="insp-overlay-msg" class="block mt-2 text-xs font-semibold text-gray-500"></span>
-              <p class="text-[11px] text-gray-400 mt-3">Click a text box on the image to jump back here. It's baked into the picture when you approve.</p>
+              <p id="insp-overlay-hint" class="text-[11px] text-gray-400 mt-3">Click a text box on the image to jump back here. It's baked into the picture when you approve.</p>
             </div>
 
           </div>
@@ -5211,18 +5234,20 @@ function renderPlatformMockup(post) {
     // The media sits in a positioned host so an editor can mount a selection/drag layer directly
     // ON the mock-up. This is what makes the preview the canvas rather than a picture of one —
     // there is no second preview anywhere to disagree with it.
-    // Text overlays render as a live layer ON the image (not baked into the thumbnail), so the post
-    // shows its real overlaid text and each box stays clickable. Cards and videos carry no overlay
-    // layer (the card is its own typography; video can't bake). While overlays are present the image
-    // is shown UNCROPPED (h-auto, not object-cover): the layer is inset-0 over the media host, so its
-    // percentage geometry only agrees with the editor and the bake when the box IS the whole image.
-    const overlayCapable = !isVideo && !!post.thumbnailUrl && !post.brandCard;
+    // Text overlays render as a live layer ON the media (not baked into the thumbnail), so the post
+    // shows its real overlaid text and each box stays clickable — for BOTH photos and video (Phase 4:
+    // video overlays are timed and baked server-side by Remotion; photos still bake in the browser).
+    // Only a brand card carries no overlay layer — the card is its own typography. While overlays are
+    // present the media is shown UNCROPPED (h-auto, not object-cover): the layer is inset-0 over the
+    // media host, so its percentage geometry only agrees with the editor and the render when the box
+    // IS the whole frame.
+    const overlayCapable = !!post.thumbnailUrl && !post.brandCard;
     const hasOverlays = overlayCapable && Array.isArray(post.overlays) && post.overlays.length > 0;
-    const imgClass = hasOverlays ? 'w-full h-auto block' : 'w-full max-h-[400px] object-cover';
+    const mediaClass = hasOverlays ? 'w-full h-auto block' : 'w-full max-h-[400px] object-cover';
     const mediaInner = post.thumbnailUrl
         ? (isVideo
-            ? `<video src="${post.thumbnailUrl}" muted controls class="w-full max-h-[400px] object-cover bg-black"></video>`
-            : `<img data-media-img alt="" src="${post.thumbnailUrl}" class="${imgClass}">`)
+            ? `<video data-media-video src="${post.thumbnailUrl}" muted controls playsinline class="${mediaClass} bg-black"></video>`
+            : `<img data-media-img alt="" src="${post.thumbnailUrl}" class="${mediaClass}">`)
         : `<div class="w-full py-16 bg-gray-100 flex items-center justify-center text-gray-400 text-sm">No media attached</div>`;
     // Click-through layer: clicking bare image still selects the picture; each overlay box opts back
     // into pointer events. Present whenever a post could carry overlays so _rqRenderCanvasOverlays
@@ -5268,28 +5293,74 @@ function renderPlatformMockup(post) {
     return `<div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden max-w-md mx-auto" style="border-top:3px solid ${meta.accent}">${body}</div>`;
 }
 
-// Paint a post's saved text overlays as a live layer on the mock-up canvas. Called after the mock-up
-// is in the DOM (the layer must be laid out to size text against the image height), again when the
-// image loads, and on resize. Clicking any overlay selects the "Text on image" inspector layer.
-// A no-op for posts with no overlay layer (cards, videos, text-only) or before the editor loads.
+// Which overlay's timing the inspector + timeline are editing (video only). Null = none selected.
+let _pceSelectedOverlayId = null;
+
+// Is an overlay visible at time t (seconds)? Half-open [startS, endS); absent bounds = always (which
+// is exactly how a still image treats every overlay). Mirrors overlayVisibleAt in
+// src/lib/overlay-geometry.ts — kept inline because workspace.html is not bundled.
+function _rqOverlayVisibleAt(ov, t) {
+    const start = ov.startS == null ? -Infinity : ov.startS;
+    const end = ov.endS == null ? Infinity : ov.endS;
+    return t >= start && t < end;
+}
+
+// Show/hide the painted overlay nodes for the video's current time, without repainting (cheap enough
+// to run on every timeupdate). Also nudges the timeline playhead.
+function _rqApplyOverlayTimes(video, layer, post) {
+    const t = video.currentTime || 0;
+    const byId = {};
+    for (const o of (post && post.overlays) || []) if (o && o.id) byId[o.id] = o;
+    for (const n of layer.querySelectorAll('.ioe-ov')) {
+        const ov = byId[n.dataset.id];
+        n.style.display = ov && !_rqOverlayVisibleAt(ov, t) ? 'none' : '';
+    }
+    const head = document.querySelector('#post-review-timeline [data-playhead]');
+    const dur = video.duration;
+    if (head && dur && isFinite(dur)) head.style.left = (Math.min(1, t / dur) * 100) + '%';
+}
+
+// Paint a post's saved text overlays as a live layer on the mock-up canvas, and (for video) drive the
+// timeline. Called after the mock-up is in the DOM (the layer must be laid out to size text against
+// the media height), again when the media's dimensions arrive, and on resize. Clicking an overlay
+// selects it + the "Text on image/video" inspector layer. A no-op for posts with no overlay layer
+// (cards, text-only) or before the editor script loads.
 let _rqOverlayResizeBound = false;
 function _rqRenderCanvasOverlays(post) {
     const body = document.getElementById('post-review-body');
     const layer = body && body.querySelector('[data-overlay-layer]');
-    if (!layer || !window.ImageOverlayEditor) return;
-    const img = body.querySelector('[data-media-img]');
+    if (!layer || !window.ImageOverlayEditor) { _rqHideTimeline(); return; }
+    const media = body.querySelector('[data-media-img], [data-media-video]');
+    const isVideo = !!media && media.tagName === 'VIDEO';
     const overlays = (post && post.overlays) || [];
     const paint = () => {
         if (!document.body.contains(layer)) return;   // the mock-up was replaced out from under us
-        const nodes = window.ImageOverlayEditor.render(layer, overlays, { refEl: img || undefined });
+        const nodes = window.ImageOverlayEditor.render(layer, overlays, { refEl: media || undefined });
         for (const n of nodes) {
-            n.addEventListener('click', (ev) => { ev.stopPropagation(); _pceSelect('overlays'); });
+            n.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                _pceSelectedOverlayId = n.dataset.id || null;
+                _pceSelect('overlays');
+                if (isVideo) _rqRenderTimeline(post);
+            });
+            if (n.dataset.id && n.dataset.id === _pceSelectedOverlayId) n.style.outline = '2px dashed #ec4899';
         }
+        if (isVideo) _rqApplyOverlayTimes(media, layer, post);
     };
     paint();
-    // On first render the image may not be laid out yet (zero height) — repaint once it loads, or the
-    // text sizes against nothing and never appears.
-    if (img && !(img.complete && img.naturalWidth)) img.addEventListener('load', paint, { once: true });
+    // On first render the media may not be laid out yet (zero height) — repaint once its dimensions
+    // arrive, or the text sizes against nothing and never appears.
+    if (media && media.tagName === 'IMG' && !(media.complete && media.naturalWidth)) media.addEventListener('load', paint, { once: true });
+    if (media && media.tagName === 'VIDEO') {
+        if (!media.videoHeight) media.addEventListener('loadedmetadata', () => { paint(); _rqRenderTimeline(post); }, { once: true });
+        // Bind the time toggle once per media element (elements are fresh on each mock-up render).
+        if (!media._rqTimed) {
+            media._rqTimed = true;
+            media.addEventListener('timeupdate', () => _rqApplyOverlayTimes(media, layer, _rqPostCache[_rqReviewPostId] || post));
+        }
+    }
+    if (isVideo) _rqRenderTimeline(post); else _rqHideTimeline();
+    _rqBindTimeline();
     // One resize listener for the modal's lifetime; it always repaints the post on screen now.
     if (!_rqOverlayResizeBound) {
         _rqOverlayResizeBound = true;
@@ -5298,6 +5369,156 @@ function _rqRenderCanvasOverlays(post) {
             if (p) _rqRenderCanvasOverlays(p);
         });
     }
+}
+
+function _rqHideTimeline() {
+    const el = document.getElementById('post-review-timeline');
+    if (el) { el.classList.add('hidden'); el.innerHTML = ''; }
+}
+
+// A sensible clip length even before/without real metadata, so the timeline is usable immediately.
+function _rqVideoDuration() {
+    const v = document.querySelector('#post-review-body [data-media-video]');
+    const d = v && v.duration;
+    return d && isFinite(d) && d > 0 ? d : 15;
+}
+
+// The video timeline: one track per text overlay, each a draggable segment over a 0→duration axis,
+// with a shared playhead. Drag a segment's ends to time the text; drag its body to shift it; click it
+// to select it. Segment edits update the cache live and persist on release (_rqPersistOverlays).
+function _rqRenderTimeline(post) {
+    const host = document.getElementById('post-review-timeline');
+    if (!host) return;
+    const overlays = (post && post.overlays) || [];
+    if (!overlays.length) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+    const dur = _rqVideoDuration();
+    const fmt = (s) => `${(Math.round(s * 10) / 10)}s`;
+    const rows = overlays.map((ov, i) => {
+        const start = ov.startS == null ? 0 : Math.max(0, Math.min(dur, ov.startS));
+        const end = ov.endS == null ? dur : Math.max(start, Math.min(dur, ov.endS));
+        const leftPct = (start / dur) * 100;
+        const widthPct = Math.max(2, ((end - start) / dur) * 100);
+        const sel = ov.id && ov.id === _pceSelectedOverlayId;
+        const label = _rqEsc((ov.text || 'Text').split('\n')[0].slice(0, 22));
+        return `
+          <div class="flex items-center gap-2" data-tl-row="${_rqEsc(ov.id || String(i))}">
+            <span class="w-16 shrink-0 truncate text-[10px] font-semibold text-gray-500" title="${label}">${label}</span>
+            <div class="relative flex-1 h-6 rounded bg-gray-100" data-tl-track>
+              <div class="absolute inset-y-0 rounded ${sel ? 'bg-pink-500' : 'bg-pink-300'} cursor-grab flex items-center justify-between"
+                   style="left:${leftPct}%;width:${widthPct}%" data-tl-seg="${_rqEsc(ov.id || String(i))}" title="${fmt(start)} – ${fmt(end)}">
+                <span class="w-1.5 h-full rounded-l bg-pink-700/60 cursor-ew-resize" data-tl-edge="start"></span>
+                <span class="w-1.5 h-full rounded-r bg-pink-700/60 cursor-ew-resize" data-tl-edge="end"></span>
+              </div>
+            </div>
+          </div>`;
+    }).join('');
+    host.innerHTML = `
+      <div class="rounded-xl border border-gray-200 bg-white p-2.5">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-[11px] font-bold text-gray-600">Timeline</span>
+          <span class="text-[10px] text-gray-400">${fmt(dur)}</span>
+        </div>
+        <div class="relative space-y-1.5" data-tl-body>
+          ${rows}
+          <div class="absolute top-0 bottom-0 w-px bg-gray-800 pointer-events-none" style="left:0" data-playhead></div>
+        </div>
+      </div>`;
+    host.classList.remove('hidden');
+    // Keep the playhead in step with the current frame the moment the timeline (re)renders.
+    const v = document.querySelector('#post-review-body [data-media-video]');
+    if (v) { const head = host.querySelector('[data-playhead]'); if (head && v.duration && isFinite(v.duration)) head.style.left = (Math.min(1, (v.currentTime || 0) / v.duration) * 100) + '%'; }
+}
+
+// Persist the current cache overlays for a post (used by timeline drags + the Start/End inputs).
+async function _rqPersistOverlays(postId) {
+    const post = _rqPostCache[postId];
+    if (!post) return;
+    try {
+        await fetch('/.netlify/functions/save-post-overlays', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId, overlays: post.overlays || [] }),
+        });
+    } catch { /* a dropped save is recoverable — the next edit re-sends the whole set */ }
+}
+
+// Find the cache overlay a timeline segment stands for (by id, falling back to index).
+function _rqTimelineOverlay(key) {
+    const overlays = (_rqPostCache[_rqReviewPostId] || {}).overlays || [];
+    return overlays.find((o) => o && o.id === key) || overlays[Number(key)] || null;
+}
+
+// Timeline drag: bound ONCE to the stable #post-review-timeline container (its innerHTML is replaced
+// each render, but the element persists). Pointer capture is on the container, and the move handler
+// mutates ONLY the dragged segment's inline style — it does NOT re-render the timeline mid-drag,
+// which would destroy the very node being held (the Phase 1 lesson). Full re-render + save happen on
+// release.
+let _rqTimelineBound = false;
+let _rqTlDrag = null;
+function _rqBindTimeline() {
+    if (_rqTimelineBound) return;
+    const host = document.getElementById('post-review-timeline');
+    if (!host) return;
+    _rqTimelineBound = true;
+    const fmt = (s) => `${(Math.round(s * 10) / 10)}s`;
+
+    host.addEventListener('pointerdown', (ev) => {
+        const seg = ev.target.closest('[data-tl-seg]');
+        if (!seg) return;
+        const id = seg.getAttribute('data-tl-seg');
+        const edge = ev.target.closest('[data-tl-edge]');
+        const ov = _rqTimelineOverlay(id);
+        if (!ov) return;
+        const dur = _rqVideoDuration();
+        _pceSelectedOverlayId = ov.id || id;
+        _pceSelect('overlays');
+        _rqTlDrag = {
+            seg, track: seg.closest('[data-tl-track]'), ov, dur,
+            mode: edge ? edge.getAttribute('data-tl-edge') : 'move',
+            startX: ev.clientX,
+            s0: ov.startS == null ? 0 : ov.startS,
+            e0: ov.endS == null ? dur : ov.endS,
+        };
+        host.setPointerCapture(ev.pointerId);
+        ev.preventDefault();
+    });
+
+    host.addEventListener('pointermove', (ev) => {
+        const d = _rqTlDrag;
+        if (!d) return;
+        const rect = d.track.getBoundingClientRect();
+        const dur = d.dur;
+        const at = Math.max(0, Math.min(dur, ((ev.clientX - rect.left) / rect.width) * dur));
+        if (d.mode === 'start') {
+            d.ov.startS = Math.max(0, Math.min(at, (d.ov.endS == null ? dur : d.ov.endS) - 0.1));
+        } else if (d.mode === 'end') {
+            d.ov.endS = Math.min(dur, Math.max(at, (d.ov.startS == null ? 0 : d.ov.startS) + 0.1));
+        } else {
+            const delta = ((ev.clientX - d.startX) / rect.width) * dur;
+            const len = d.e0 - d.s0;
+            const ns = Math.max(0, Math.min(dur - len, d.s0 + delta));
+            d.ov.startS = ns; d.ov.endS = ns + len;
+        }
+        const start = d.ov.startS == null ? 0 : d.ov.startS;
+        const end = d.ov.endS == null ? dur : d.ov.endS;
+        d.seg.style.left = (start / dur * 100) + '%';
+        d.seg.style.width = Math.max(2, (end - start) / dur * 100) + '%';
+        d.seg.title = `${fmt(start)} – ${fmt(end)}`;
+        // Positions don't change with timing — only which boxes are visible now — so re-toggle rather
+        // than repaint the whole canvas.
+        const media = document.querySelector('#post-review-body [data-media-video]');
+        const layer = document.querySelector('#post-review-body [data-overlay-layer]');
+        if (media && layer) _rqApplyOverlayTimes(media, layer, _rqPostCache[_rqReviewPostId]);
+        _pceRefreshOverlayTiming();
+    });
+
+    const end = () => {
+        if (!_rqTlDrag) return;
+        _rqTlDrag = null;
+        _rqRenderTimeline(_rqPostCache[_rqReviewPostId]);
+        _rqPersistOverlays(_rqReviewPostId);
+    };
+    host.addEventListener('pointerup', end);
+    host.addEventListener('pointercancel', end);
 }
 
 async function openPostReview(postId) {
@@ -5906,21 +6127,81 @@ function _pceOverlayCount(post) {
         ? post.overlays.filter((o) => o && String(o.text || '').trim()).length : 0;
 }
 
+// Is the post being reviewed a video? Overlays behave the same for both, but the wording and the
+// timeline/timing only apply to video.
+function _pcePostIsVideo(post) {
+    post = post || (_rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null);
+    return !!post && (post.mediaType === 'video' || /video|reel/i.test(post.postFormat || ''));
+}
+
 // The picture layer's jump button doubles as the overlay count, so you can see there is text on the
-// image without leaving the picture.
+// media without leaving the picture.
 function _pceRefreshOverlayJump() {
     const label = _pceEl('insp-overlay-jump-label');
     if (!label) return;
+    const noun = _pcePostIsVideo() ? 'video' : 'image';
     const n = _pceOverlayCount(_rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null);
-    label.textContent = n ? `Text on the image (${n})` : 'Add text on the image';
+    label.textContent = n ? `Text on the ${noun} (${n})` : `Add text on the ${noun}`;
 }
 
-// The overlays inspector: summary line and whether "Remove all" is offered, seeded from the cache.
+// The overlays inspector: title/summary wording, "Remove all" visibility, and (video) the per-box
+// timing controls — all seeded from the cache.
 function _pceRefreshOverlayInspector() {
-    const n = _pceOverlayCount(_rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null);
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const isVideo = _pcePostIsVideo(post);
+    const noun = isVideo ? 'video' : 'image';
+    const n = _pceOverlayCount(post);
+    const title = _pceEl('insp-overlay-title');
+    if (title) title.textContent = `Text on the ${noun}`;
     const summary = _pceEl('insp-overlay-summary');
-    if (summary) summary.textContent = n ? `${n} text box${n > 1 ? 'es' : ''} on the image.` : 'No text on the image yet.';
+    if (summary) summary.textContent = n ? `${n} text box${n > 1 ? 'es' : ''} on the ${noun}.` : `No text on the ${noun} yet.`;
+    const hint = _pceEl('insp-overlay-hint');
+    if (hint) hint.textContent = isVideo
+        ? 'Click a text box or a timeline segment to time it. Burned into the published video on approval.'
+        : "Click a text box on the image to jump back here. It's baked into the picture when you approve.";
     _pceEl('insp-overlay-clear')?.classList.toggle('hidden', !n);
+    _pceRefreshOverlayTiming();
+}
+
+// The per-box Start/End controls. Shown only for a video with a box selected; seeded from that box
+// and wired (once) to write straight to the cache, repaint the canvas + timeline, and persist.
+let _pceOverlayTimingBound = false;
+function _pceRefreshOverlayTiming() {
+    const wrap = _pceEl('insp-overlay-timing');
+    if (!wrap) return;
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const isVideo = _pcePostIsVideo(post);
+    const overlays = (post && post.overlays) || [];
+    const ov = _pceSelectedOverlayId ? overlays.find((o) => o && o.id === _pceSelectedOverlayId) : null;
+    if (!isVideo || !ov) { wrap.classList.add('hidden'); return; }
+    wrap.classList.remove('hidden');
+    const lbl = _pceEl('insp-overlay-timing-label');
+    if (lbl) lbl.textContent = (ov.text || 'Text').split('\n')[0].slice(0, 30);
+    const startEl = _pceEl('insp-overlay-start');
+    const endEl = _pceEl('insp-overlay-end');
+    if (startEl) startEl.value = ov.startS == null ? '' : (Math.round(ov.startS * 10) / 10);
+    if (endEl) endEl.value = ov.endS == null ? '' : (Math.round(ov.endS * 10) / 10);
+    if (!_pceOverlayTimingBound) {
+        _pceOverlayTimingBound = true;
+        const commit = (persist) => {
+            const p = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+            const cur = p && (p.overlays || []).find((o) => o && o.id === _pceSelectedOverlayId);
+            if (!cur) return;
+            const dur = _rqVideoDuration();
+            const s = _pceEl('insp-overlay-start').value;
+            const e = _pceEl('insp-overlay-end').value;
+            cur.startS = s === '' ? undefined : Math.max(0, Math.min(dur, Number(s) || 0));
+            cur.endS = e === '' ? undefined : Math.max(0, Math.min(dur, Number(e) || 0));
+            if (cur.startS != null && cur.endS != null && cur.endS <= cur.startS) cur.endS = undefined;
+            _rqRenderTimeline(p);
+            _rqRenderCanvasOverlays(p);
+            if (persist) _rqPersistOverlays(_rqReviewPostId);
+        };
+        _pceEl('insp-overlay-start').addEventListener('input', () => commit(false));
+        _pceEl('insp-overlay-end').addEventListener('input', () => commit(false));
+        _pceEl('insp-overlay-start').addEventListener('change', () => commit(true));
+        _pceEl('insp-overlay-end').addEventListener('change', () => commit(true));
+    }
 }
 
 function _pceSetOverlayMsg(text, kind) {
@@ -6259,15 +6540,23 @@ function _pceSyncForPost(post) {
     // Phase 3), and stripping its object-cover crop would change the mock-up for no gain.
     const hasCard = !!card && _pceMountCanvas();
 
-    // Which layers this post actually has. Selection can never land on one that is absent. A photo
-    // gains a "Text on image" layer; a card does not (its typography is the card's own).
-    const overlayCapable = !hasCard && post.mediaType !== 'video' && !!post.thumbnailUrl;
+    // Which layers this post actually has. Selection can never land on one that is absent. A photo OR
+    // video gains a "Text on image/video" layer; a card does not (its typography is the card's own).
+    const overlayCapable = !hasCard && !!post.thumbnailUrl;
+    const isVideo = _pcePostIsVideo(post);
     _pceLayers = hasCard
         ? ['media', 'caption', 'wordmark', 'website']
         : (overlayCapable ? ['media', 'caption', 'overlays'] : ['media', 'caption']);
     _pceEl('insp-media-card')?.classList.toggle('hidden', !hasCard);
     _pceEl('insp-media-generic')?.classList.toggle('hidden', hasCard);
-    _PCE_INSP_TITLES.media.title = hasCard ? 'Branded card' : 'Picture';
+    _PCE_INSP_TITLES.media.title = hasCard ? 'Branded card' : (isVideo ? 'Video' : 'Picture');
+    _PCE_INSP_TITLES.overlays.title = isVideo ? 'Text on video' : 'Text on image';
+    // Selecting a box drives the per-box timing controls; default to the first box so the timing
+    // panel has something to show the moment you open the overlays layer on a video.
+    const firstOverlay = (post.overlays || []).find((o) => o && o.id);
+    if (!_pceSelectedOverlayId || !(post.overlays || []).some((o) => o && o.id === _pceSelectedOverlayId)) {
+        _pceSelectedOverlayId = firstOverlay ? firstOverlay.id : null;
+    }
 
     _pceFillCaption(post);
 

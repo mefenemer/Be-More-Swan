@@ -28,6 +28,11 @@ interface Overlay {
     boxStroke?: string | null;
     boxFill?: string | null;
     boxOpacity?: number;
+    // Video only: seconds the box appears / disappears. Absent = the whole clip (how an image
+    // treats every overlay). The frontend clamps endS to the clip duration; here we only enforce
+    // that they are non-negative and that endS is after startS.
+    startS?: number;
+    endS?: number;
 }
 
 function sanitise(raw: unknown): Overlay[] | null {
@@ -39,6 +44,13 @@ function sanitise(raw: unknown): Overlay[] | null {
         const ov = o as Record<string, unknown>;
         const text = typeof ov.text === 'string' ? ov.text.slice(0, MAX_TEXT_LEN) : '';
         const clamp01 = (n: unknown) => Math.min(1, Math.max(0, Number(n) || 0));
+        // A non-negative finite time, or undefined. endS is dropped when it isn't strictly after
+        // startS, so a zero-length or inverted range degrades to "always visible" rather than a box
+        // that never shows.
+        const time = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined);
+        const startS = time(ov.startS);
+        let endS = time(ov.endS);
+        if (startS != null && endS != null && endS <= startS) endS = undefined;
         out.push({
             id: typeof ov.id === 'string' ? ov.id.slice(0, 64) : undefined,
             text,
@@ -50,6 +62,8 @@ function sanitise(raw: unknown): Overlay[] | null {
             boxStroke: typeof ov.boxStroke === 'string' ? ov.boxStroke.slice(0, 32) : null,
             boxFill: typeof ov.boxFill === 'string' ? ov.boxFill.slice(0, 32) : null,
             boxOpacity: Math.min(1, Math.max(0, Number(ov.boxOpacity ?? 1))),
+            ...(startS != null ? { startS } : {}),
+            ...(endS != null ? { endS } : {}),
         });
     }
     return out;
