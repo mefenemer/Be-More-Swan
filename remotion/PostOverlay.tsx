@@ -7,8 +7,10 @@
 // Remotion Lambda publishes.
 //
 // Font fidelity note: the editor offers OS fonts (Arial, Impact, Georgia…). Lambda's headless Chrome
-// must have matching faces or it substitutes — the one place render and preview can diverge. See the
-// deploy runbook (docs/remotion-render.md) for embedding faces; flagged, not yet solved.
+// must have matching faces or it substitutes SILENTLY — the one place render and preview can still
+// diverge, and it moves the box as well as the letterforms because the box is sized by the rendered
+// text. Local renders on a Mac cannot catch it (macOS has the real fonts). See "Fonts" in
+// docs/remotion-render.md for the recommended fix; flagged, not yet solved.
 
 import React from 'react';
 import { AbsoluteFill, OffthreadVideo, Sequence, useVideoConfig } from 'remotion';

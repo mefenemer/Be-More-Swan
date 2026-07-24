@@ -5,13 +5,20 @@
 // env-var config + a `remotionConfigured()` guard, so the rest of the app never imports the Remotion
 // SDK directly and the worker stays unit-testable by swapping this module.
 //
-// Config (set in Stage 6 deploy; see docs/remotion-render.md):
+// Config — the deploy procedure is docs/remotion-render.md:
 //   REMOTION_LAMBDA_FUNCTION_NAME  the deployed render function
 //   REMOTION_SERVE_URL             the deployed composition bundle (S3 site URL)
-//   REMOTION_REGION                AWS region, e.g. us-east-1
+//   REMOTION_REGION                AWS region, e.g. eu-west-2
 //   REMOTION_AWS_ACCESS_KEY_ID / REMOTION_AWS_SECRET_ACCESS_KEY   read by the SDK itself
 // When any is missing, remotionConfigured() is false and the caller degrades gracefully rather than
 // throwing 500s at reviewers.
+//
+// The REMOTION_-prefixed credential names are NOT interchangeable with the bare AWS_ ones here. This
+// runs on Netlify, i.e. on AWS Lambda, where the runtime already injects AWS_ACCESS_KEY_ID /
+// AWS_SECRET_ACCESS_KEY for Netlify's OWN execution role. Remotion's resolver order is
+// REMOTION_AWS_PROFILE → REMOTION_AWS_* → AWS_PROFILE → AWS_*, so checking only the bare names would
+// let a misconfigured environment sail past this guard and authenticate as Netlify, failing deep
+// inside the render with an opaque permissions error instead of a clean "not configured".
 
 import { renderMediaOnLambda, getRenderProgress, type AwsRegion } from '@remotion/lambda/client';
 import type { Overlay } from './overlay-geometry';
@@ -51,7 +58,13 @@ export async function startRender(input: RenderInput): Promise<StartedRender> {
         inputProps: input as unknown as Record<string, unknown>,
         codec: 'h264',
         imageFormat: 'jpeg',
+        // 'public' because the worker copies the output with a plain fetch() — a private object would
+        // need signing that persistRemoteMediaToR2 does not do. The URL is unguessable (random render
+        // id) and short-lived: deleteAfter puts an S3 lifecycle rule on the object so a customer's
+        // clip cannot sit in Remotion's bucket indefinitely. The worker copies it into R2 within
+        // minutes, so a day is already generous.
         privacy: 'public',
+        deleteAfter: '1-day',
         maxRetries: 1,
         downloadBehavior: { type: 'play-in-browser' },
     });
