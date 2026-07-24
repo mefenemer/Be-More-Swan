@@ -2,9 +2,14 @@
 //
 // GET                        → { brandKit, websiteUrl }
 // POST { action: 'extract' } → re-derive the kit from the org's website (organisations.website_url)
+// POST { action: 'preview' } → render a sample card as a data URL, WITHOUT saving anything
 // PATCH { ...fields }        → set fields by hand; marks the kit 'manual', which permanently stops
 //                              automatic extraction from overwriting it
 //   Auth: aura_session cookie; the kit is always the CALLER's own organisation.
+//
+// The preview action renders through the SAME renderBrandCard the drafting job uses, rather than
+// letting the settings page mock a card in CSS. A mock drifts the moment padding or type sizing
+// changes, and the whole point of the screen is to answer "what will my posts actually look like".
 //
 // Extraction also happens lazily from the drafting path the first time a card is rendered, so this
 // endpoint is the manual override rather than the only way in: it exists so a user can fix a bad
@@ -15,8 +20,12 @@ import { getDb } from '../../db/client';
 import { organisations } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { extractBrandKitFromWebsite } from '../../src/lib/brand-extract-fetch';
+import { renderBrandCard, MAX_HEADLINE_CHARS } from '../../src/lib/brand-card';
 import { normalizeBrandKit, normalizeHex, cleanFontFamily, type BrandKit } from '../../src/utils/brand-kit';
 import { withLambda } from '@netlify/aws-lambda-compat';
+
+/** Stand-in line for the settings preview — real enough to show wrapping at a typical length. */
+const PREVIEW_HEADLINE = 'You did not start a business to become an ops manager';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -39,9 +48,32 @@ export default withLambda(async (event) => {
     }
 
     if (event.httpMethod === 'POST') {
-        let body: { action?: string };
+        let body: { action?: string; overrides?: Record<string, unknown>; headline?: string; variant?: unknown };
         try { body = JSON.parse(event.body || '{}'); }
         catch { return json(400, { error: 'Invalid JSON.' }); }
+
+        // Preview: render, return, save nothing. `overrides` lets the settings page show unsaved
+        // edits — normalizeBrandKit is still the gate, so an override cannot smuggle in a
+        // javascript: logo or an unusable font name.
+        if (body.action === 'preview') {
+            const kit = normalizeBrandKit({ ...stored, ...(body.overrides ?? {}) });
+            const headline = String(body.headline ?? '').trim() || PREVIEW_HEADLINE;
+            const variant = body.variant === 'bold' || body.variant === 'light' ? body.variant : undefined;
+            try {
+                const card = await renderBrandCard({
+                    headline: headline.slice(0, MAX_HEADLINE_CHARS),
+                    kit, aspectRatio: '1:1', variant, seed: 0, orgName: org.name,
+                });
+                return json(200, {
+                    dataUrl: `data:image/png;base64,${card.png.toString('base64')}`,
+                    variant: card.variant, headline: card.headline, brandKit: kit,
+                });
+            } catch (err) {
+                console.error('[brand-kit] preview render failed:', err instanceof Error ? err.message : err);
+                return json(500, { error: 'Could not render a preview of that style.' });
+            }
+        }
+
         if (body.action !== 'extract') return json(400, { error: 'Unknown action.' });
 
         if (!org.websiteUrl?.trim()) {

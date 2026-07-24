@@ -679,6 +679,109 @@
 
   <!-- ══ Brand Assets ═══════════════════════════════════════════════════════ -->
   <div class="bizinfo-tab-panel hidden" data-panel="assets">
+
+  <!-- ── Brand style (what the assistant paints branded text cards with) ──── -->
+  <div class="mb-4">
+    <h2 class="text-lg font-extrabold text-gray-900">Brand style</h2>
+    <p class="text-sm text-gray-500 mt-0.5">The colours and type your assistant uses when it makes a branded text card instead of using a photo. The preview is rendered by the same code that makes your posts.</p>
+  </div>
+
+  <section class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6 mb-8">
+    <div class="flex flex-wrap items-center gap-3 mb-5">
+      <span id="brandkit-source" class="text-xs font-bold px-2.5 py-1 rounded-full bg-gray-100 text-gray-600">Loading…</span>
+      <button type="button" id="brandkit-extract"
+        class="text-xs font-bold px-3 py-1.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition cursor-pointer">
+        Read colours from my website
+      </button>
+      <span id="brandkit-msg" class="text-xs font-semibold text-gray-500"></span>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <!-- Controls -->
+      <div class="space-y-4">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div>
+            <label for="bk-primaryColor" class="block text-sm font-bold text-gray-700 mb-1">Accent</label>
+            <div class="flex items-center gap-2">
+              <input type="color" id="bk-primaryColor" class="h-10 w-12 rounded border border-gray-300 cursor-pointer bg-white p-1">
+              <input type="text" id="bk-primaryColor-hex" maxlength="7" spellcheck="false"
+                class="w-full px-2 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none font-mono">
+            </div>
+          </div>
+          <div>
+            <label for="bk-backgroundColor" class="block text-sm font-bold text-gray-700 mb-1">Background</label>
+            <div class="flex items-center gap-2">
+              <input type="color" id="bk-backgroundColor" class="h-10 w-12 rounded border border-gray-300 cursor-pointer bg-white p-1">
+              <input type="text" id="bk-backgroundColor-hex" maxlength="7" spellcheck="false"
+                class="w-full px-2 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none font-mono">
+            </div>
+          </div>
+          <div>
+            <label for="bk-textColor" class="block text-sm font-bold text-gray-700 mb-1">Text</label>
+            <div class="flex items-center gap-2">
+              <input type="color" id="bk-textColor" class="h-10 w-12 rounded border border-gray-300 cursor-pointer bg-white p-1">
+              <input type="text" id="bk-textColor-hex" maxlength="7" spellcheck="false"
+                class="w-full px-2 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none font-mono">
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label for="bk-wordmark" class="block text-sm font-bold text-gray-700 mb-1">Wordmark</label>
+            <input type="text" id="bk-wordmark" maxlength="32" placeholder="Your business name"
+              class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none">
+            <p class="text-xs text-gray-400 mt-1">Small line at the top of the card.</p>
+          </div>
+          <div>
+            <label for="bk-website" class="block text-sm font-bold text-gray-700 mb-1">Footer line</label>
+            <input type="text" id="bk-website" maxlength="64" placeholder="yourbusiness.com"
+              class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none">
+          </div>
+          <div>
+            <label for="bk-fontFamily" class="block text-sm font-bold text-gray-700 mb-1">Font</label>
+            <input type="text" id="bk-fontFamily" maxlength="48" placeholder="Plus Jakarta Sans" spellcheck="false"
+              class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none">
+            <p class="text-xs text-gray-400 mt-1">Any <a href="https://fonts.google.com" target="_blank" rel="noopener" class="text-emerald-700 font-semibold hover:underline">Google Font</a> name. Leave blank for our default.</p>
+          </div>
+          <div>
+            <label for="bk-logoUrl" class="block text-sm font-bold text-gray-700 mb-1">Logo URL (optional)</label>
+            <input type="url" id="bk-logoUrl" placeholder="https://yourbusiness.com/logo.png"
+              class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none">
+            <p class="text-xs text-gray-400 mt-1">PNG or JPG. Replaces the wordmark — check it reads on both card styles.</p>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-3 pt-1">
+          <button type="button" id="brandkit-save"
+            class="px-5 py-2.5 rounded-lg bg-emerald-600 text-white text-sm font-bold hover:bg-emerald-700 transition cursor-pointer">
+            Save brand style
+          </button>
+          <button type="button" id="brandkit-reset"
+            class="text-sm font-semibold text-gray-500 hover:text-gray-700 transition cursor-pointer">Undo changes</button>
+        </div>
+      </div>
+
+      <!-- Live preview: rendered server-side by the real card renderer. -->
+      <div>
+        <p class="text-sm font-bold text-gray-700 mb-2">Preview</p>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <img id="brandkit-preview-light" alt="Preview of a branded text card on a light background"
+              class="w-full rounded-xl border border-gray-200 bg-gray-50 aspect-square object-cover">
+            <p class="text-xs text-gray-400 mt-1 text-center">Light</p>
+          </div>
+          <div>
+            <img id="brandkit-preview-bold" alt="Preview of a branded text card on your accent colour"
+              class="w-full rounded-xl border border-gray-200 bg-gray-50 aspect-square object-cover">
+            <p class="text-xs text-gray-400 mt-1 text-center">Bold</p>
+          </div>
+        </div>
+        <p class="text-xs text-gray-400 mt-3">Posts alternate between these two so your feed doesn't look repetitive. If a colour would be unreadable, the card flips to dark or light type automatically.</p>
+      </div>
+    </div>
+  </section>
+
   <!-- ── Brand assets ─────────────────────────────────────────────────────── -->
   <div class="mb-4">
     <h2 class="text-lg font-extrabold text-gray-900">Brand assets</h2>
@@ -751,6 +854,185 @@
     </div>
 
   </div>
+
+  <!-- ── Brand style controller ───────────────────────────────────────────── -->
+  <script>
+  (function () {
+    const FIELDS = ['primaryColor', 'backgroundColor', 'textColor', 'wordmark', 'website', 'fontFamily', 'logoUrl'];
+    const COLOURS = ['primaryColor', 'backgroundColor', 'textColor'];
+    const el = (id) => document.getElementById(id);
+    const msg = el('brandkit-msg');
+    let saved = null;          // last persisted kit, for Undo
+    let previewToken = 0;      // guards against an older preview landing after a newer one
+
+    const setMsg = (text, tone) => {
+      if (!msg) return;
+      msg.textContent = text || '';
+      msg.className = 'text-xs font-semibold ' +
+        (tone === 'error' ? 'text-red-600' : tone === 'ok' ? 'text-emerald-700' : 'text-gray-500');
+    };
+
+    // Read the form, not the stored kit — the preview must show what the user is currently editing.
+    const formValues = () => {
+      const out = {};
+      for (const f of FIELDS) out[f] = (el('bk-' + f)?.value ?? '').trim();
+      return out;
+    };
+
+    const fill = (kit) => {
+      for (const f of FIELDS) {
+        const input = el('bk-' + f);
+        if (input) input.value = kit[f] ?? '';
+        if (COLOURS.includes(f)) {
+          const hex = el('bk-' + f + '-hex');
+          if (hex) hex.value = kit[f] ?? '';
+        }
+      }
+    };
+
+    const describeSource = (kit) => {
+      const when = kit.extractedAt ? new Date(kit.extractedAt).toLocaleDateString() : null;
+      if (kit.source === 'manual') return ['Set by you', 'bg-emerald-50 text-emerald-700'];
+      if (kit.source === 'website') return ['Read from your website' + (when ? ' on ' + when : ''), 'bg-blue-50 text-blue-700'];
+      return ['Not set yet — using a neutral default', 'bg-amber-50 text-amber-700'];
+    };
+
+    const paintSource = (kit) => {
+      const badge = el('brandkit-source');
+      if (!badge) return;
+      const [text, cls] = describeSource(kit);
+      badge.textContent = text;
+      badge.className = 'text-xs font-bold px-2.5 py-1 rounded-full ' + cls;
+    };
+
+    // Both polarities in parallel — they are independent renders and waiting serially doubles the
+    // time the user stares at a stale image.
+    async function refreshPreview() {
+      const token = ++previewToken;
+      const overrides = formValues();
+      const shots = ['light', 'bold'].map(async (variant) => {
+        const res = await fetch('/.netlify/functions/brand-kit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'preview', variant, overrides }),
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Preview failed.');
+        return { variant, data: (await res.json()).dataUrl };
+      });
+      try {
+        const results = await Promise.all(shots);
+        if (token !== previewToken) return;   // a newer edit already superseded this render
+        for (const r of results) {
+          const img = el('brandkit-preview-' + r.variant);
+          if (img) img.src = r.data;
+        }
+      } catch (e) {
+        if (token === previewToken) setMsg(e.message, 'error');
+      }
+    }
+
+    let debounce;
+    const schedulePreview = () => { clearTimeout(debounce); debounce = setTimeout(refreshPreview, 400); };
+
+    // Keep the swatch and the hex box in step, in both directions.
+    for (const f of COLOURS) {
+      const picker = el('bk-' + f);
+      const hex = el('bk-' + f + '-hex');
+      picker?.addEventListener('input', () => { if (hex) hex.value = picker.value; schedulePreview(); });
+      hex?.addEventListener('input', () => {
+        if (/^#[0-9a-fA-F]{6}$/.test(hex.value.trim()) && picker) picker.value = hex.value.trim();
+        schedulePreview();
+      });
+    }
+    for (const f of FIELDS) {
+      if (COLOURS.includes(f)) continue;
+      el('bk-' + f)?.addEventListener('input', schedulePreview);
+    }
+
+    async function load() {
+      try {
+        const res = await fetch('/.netlify/functions/brand-kit');
+        if (!res.ok) throw new Error('Could not load your brand style.');
+        const data = await res.json();
+        saved = data.brandKit;
+        fill(saved);
+        paintSource(saved);
+        setMsg('');
+        refreshPreview();
+      } catch (e) {
+        setMsg(e.message, 'error');
+      }
+    }
+
+    el('brandkit-save')?.addEventListener('click', async () => {
+      const btn = el('brandkit-save');
+      btn.disabled = true;
+      setMsg('Saving…');
+      try {
+        const res = await fetch('/.netlify/functions/brand-kit', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formValues()),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not save.');
+        saved = data.brandKit;
+        fill(saved);
+        paintSource(saved);
+        setMsg('Saved. New posts will use this style.', 'ok');
+      } catch (e) {
+        setMsg(e.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    el('brandkit-reset')?.addEventListener('click', () => {
+      if (!saved) return;
+      fill(saved);
+      setMsg('');
+      refreshPreview();
+    });
+
+    el('brandkit-extract')?.addEventListener('click', async () => {
+      const btn = el('brandkit-extract');
+      btn.disabled = true;
+      setMsg('Reading your website…');
+      try {
+        const res = await fetch('/.netlify/functions/brand-kit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'extract' }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not read that site.');
+        saved = data.brandKit;
+        fill(saved);
+        paintSource(saved);
+        // `extracted:false` is a normal outcome (a monochrome site has no accent to find), so the
+        // server's message is shown as information rather than as a failure.
+        setMsg(data.message, data.extracted ? 'ok' : null);
+        refreshPreview();
+      } catch (e) {
+        setMsg(e.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    // The Brand Assets panel starts hidden; rendering previews for a tab nobody has opened wastes
+    // two renders per page load. Load on first reveal instead.
+    const panel = document.querySelector('.bizinfo-tab-panel[data-panel="assets"]');
+    let loaded = false;
+    const maybeLoad = () => {
+      if (loaded || !panel || panel.classList.contains('hidden')) return;
+      loaded = true;
+      load();
+    };
+    new MutationObserver(maybeLoad).observe(panel, { attributes: true, attributeFilter: ['class'] });
+    maybeLoad();
+  })();
+  </script>
   </div><!-- /panel: assets -->
 
   <!-- ── Tab switching (mirrors Account Settings) ─────────────────────────── -->
