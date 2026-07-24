@@ -129,6 +129,56 @@
     }
   }
 
+  // ── Style a DOM node as an overlay, sized against a reference height (px) ─────
+  // Shared by the interactive editor preview and the read-only canvas renderer, so a text box
+  // looks the same wherever it is drawn — and the same as the bake, which uses the ratios above.
+  // Defaults are applied defensively here because the read-only renderer receives raw stored
+  // overlays that were never merged with DEFAULTS (the editor's state always is).
+  function styleOverlayNode(node, ov, refHeightPx) {
+    const fontSize = clamp(ov.fontSizePct == null ? DEFAULTS.fontSizePct : ov.fontSizePct, 0.005, 0.5) * refHeightPx;
+    node.style.left = (clamp(ov.x, 0, 1) * 100) + '%';
+    node.style.top = (clamp(ov.y, 0, 1) * 100) + '%';
+    node.style.fontFamily = ov.fontFamily || DEFAULTS.fontFamily;
+    node.style.fontSize = fontSize + 'px';
+    node.style.color = ov.color || DEFAULTS.color;
+    node.style.padding = (fontSize * PAD_RATIO) + 'px';
+    node.style.borderRadius = (fontSize * RADIUS_RATIO) + 'px';
+    node.style.border = ov.boxStroke ? `${Math.max(1, fontSize * BORDER_RATIO)}px solid ${ov.boxStroke}` : 'none';
+    node.style.background = ov.boxFill ? hexToRgba(ov.boxFill, ov.boxOpacity == null ? 1 : ov.boxOpacity) : 'transparent';
+    node.textContent = ov.text || ' ';
+  }
+
+  // ── Public: paint read-only overlay nodes over an image, for a live preview ───
+  // Used on the Review-Queue canvas so the post shows its real overlaid text without baking a flat
+  // image first. `container` must be a positioned element covering the image; `refEl` (default: the
+  // container's own <img>) supplies the pixel height that fontSizePct is measured against. Returns
+  // the created nodes, each tagged data-id, so the caller can wire click/drag — this only paints.
+  // Safe to call repeatedly; it removes the nodes it made. Returns [] if the image is not laid out
+  // yet, so the caller should re-run on the image's load event and on resize.
+  function render(container, overlays, opts) {
+    opts = opts || {};
+    ensureStyles();
+    container.querySelectorAll('.ioe-ov').forEach((n) => n.remove());
+    const refEl = opts.refEl || container.querySelector('img') || container;
+    const h = refEl.getBoundingClientRect().height;
+    if (!h) return [];
+    const nodes = [];
+    for (const ov of (overlays || [])) {
+      if (!ov || !String(ov.text || '').trim()) continue;
+      const node = document.createElement('div');
+      node.className = 'ioe-ov';
+      node.dataset.id = ov.id || '';
+      node.style.cursor = opts.cursor || 'pointer';
+      // The layer that hosts these is click-through so the bare image stays selectable; each text
+      // box opts itself back in so it can be clicked to select the overlays layer.
+      node.style.pointerEvents = 'auto';
+      styleOverlayNode(node, ov, h);
+      container.appendChild(node);
+      nodes.push(node);
+    }
+    return nodes;
+  }
+
   // ── Public: bake overlays into the image at native resolution ────────────────
   async function bake(imageUrl, overlays) {
     const img = await loadImage(imageUrl);
@@ -251,20 +301,7 @@
         const node = document.createElement('div');
         node.className = 'ioe-ov' + (ov.id === selectedId ? ' sel' : '');
         node.dataset.id = ov.id;
-        const fontSize = clamp(ov.fontSizePct, 0.005, 0.5) * h;
-        const pad = fontSize * PAD_RATIO;
-        const border = Math.max(1, fontSize * BORDER_RATIO);
-        const radius = fontSize * RADIUS_RATIO;
-        node.style.left = (ov.x * 100) + '%';
-        node.style.top = (ov.y * 100) + '%';
-        node.style.fontFamily = ov.fontFamily;
-        node.style.fontSize = fontSize + 'px';
-        node.style.color = ov.color;
-        node.style.padding = pad + 'px';
-        node.style.borderRadius = radius + 'px';
-        node.style.border = ov.boxStroke ? `${border}px solid ${ov.boxStroke}` : 'none';
-        node.style.background = ov.boxFill ? hexToRgba(ov.boxFill, ov.boxOpacity) : 'transparent';
-        node.textContent = ov.text || ' ';
+        styleOverlayNode(node, ov, h);
         stage.appendChild(node);
         attachDrag(node, ov);
       }
@@ -431,5 +468,5 @@
     window.addEventListener('resize', renderOverlays);
   }
 
-  window.ImageOverlayEditor = { open, bake };
+  window.ImageOverlayEditor = { open, bake, render };
 })();

@@ -58,6 +58,7 @@ export default withLambda(async (event) => {
                 publishedAt: scheduledPosts.publishedAt,
                 platformPostUrl: scheduledPosts.platformPostUrl,
                 disclosureFooterDisabled: scheduledPosts.disclosureFooterDisabled,
+                imageOverlays: scheduledPosts.imageOverlays,
                 assistantName: aiAssistants.name,
                 // When this draft was generated from a user-suggested idea, surface the original
                 // idea text on the card so the reviewer can see what it was built from (closes the
@@ -111,7 +112,7 @@ export default withLambda(async (event) => {
         // Best-effort per draft — a resolution failure must never blank out the list.
         const ARCHIVE_RETENTION_DAYS = 30;
         const now = Date.now();
-        const withThumbs = await Promise.all(drafts.map(async ({ contentAssetIds, ...d }) => {
+        const withThumbs = await Promise.all(drafts.map(async ({ contentAssetIds, imageOverlays, ...d }) => {
             let thumbnailUrl: string | null = null;
             try { thumbnailUrl = (await resolvePostImage(db, contentAssetIds))?.url ?? null; } catch { /* ignore */ }
             // Archive countdown: rejected posts are kept 30 days from rejectedAt, then auto-deleted.
@@ -136,7 +137,10 @@ export default withLambda(async (event) => {
             // editor shows the copy, and an edit-and-save persists the repair.
             // brandCard non-null ⇒ the review UI offers "Edit card" for this draft.
             return { ...d, caption: displayCaption(d.caption), thumbnailUrl, archiveDeletesAt, daysRemaining, failureMessage,
-                brandCard: brandCards.get(d.id) ?? null };
+                brandCard: brandCards.get(d.id) ?? null,
+                // The saved text-overlay design, so the Review canvas can paint it live on open without
+                // a per-post get-post-image round trip. Normalised to an array the client renders directly.
+                overlays: Array.isArray(imageOverlays) ? imageOverlays : [] };
         }));
 
         // Workspace-wide footer state — drives whether the per-post "include disclosure footer"

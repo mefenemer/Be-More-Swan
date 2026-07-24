@@ -445,11 +445,8 @@ window.showComplianceModals = function showComplianceModals(force) {
           <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
           <span id="gp-ai-gen-label">Generate with AI</span>
         </button>
-        <!-- Text overlays — shown by gpAiShowThumb only when an IMAGE is attached (see gpAiAddText). -->
-        <button type="button" id="gp-ai-text-btn" onclick="gpAiAddText()" class="hidden px-2.5 py-1 text-xs font-semibold border border-pink-300 text-pink-700 hover:bg-pink-50 rounded-lg transition cursor-pointer items-center gap-1">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7V5a1 1 0 011-1h14a1 1 0 011 1v2M9 20h6M12 4v16"/></svg>
-          <span id="gp-ai-text-label">Add text</span>
-        </button>
+        <!-- Text overlays moved to the "Text on image" inspector layer in the Review Queue (Phase 3);
+             the old inline "Add text" button here is retired to keep a single entry point. -->
       </div>
       <p id="gp-ai-media-status" class="hidden text-xs"></p>
       <!-- Stock search box (shown by "Find a photo"/"Find a video"). Pre-filled with the post's own
@@ -652,6 +649,11 @@ window.showComplianceModals = function showComplianceModals(force) {
                 <p class="text-xs font-bold text-gray-600 mb-1">Picture</p>
                 <p class="text-[11px] text-gray-400 mb-2">Upload your own, search stock, or generate one.</p>
                 <div id="post-review-media-host"></div>
+                <button type="button" id="insp-overlay-jump" onclick="_pceSelect('overlays')"
+                  class="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold border border-pink-300 text-pink-700 hover:bg-pink-50 rounded-lg transition cursor-pointer">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7V5a1 1 0 011-1h14a1 1 0 011 1v2M9 20h6M12 4v16"/></svg>
+                  <span id="insp-overlay-jump-label">Text on the image</span>
+                </button>
               </div>
 
               <!-- Media that IS a branded card: the card's own parameters. -->
@@ -738,6 +740,21 @@ window.showComplianceModals = function showComplianceModals(force) {
                 </div>
               </div>
               <p class="pce-avail-note text-[11px] text-gray-400 mt-3">Drag it up or down on the card to place it.</p>
+            </div>
+
+            <!-- ── Text on the image. Draggable, styled text boxes baked into the published picture on
+                 approval. The boxes render live on the canvas; the detailed styling opens the editor. ── -->
+            <div class="pce-insp hidden" data-insp="overlays">
+              <p class="text-xs font-bold text-gray-600 mb-1">Text on the image</p>
+              <p id="insp-overlay-summary" class="text-[11px] text-gray-400 mb-3">No text on the image yet.</p>
+              <div class="flex flex-wrap items-center gap-2">
+                <button type="button" onclick="_pceOpenOverlayEditor(_rqReviewPostId)"
+                  class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer">Add or edit text</button>
+                <button type="button" id="insp-overlay-clear" onclick="_pceClearOverlays()"
+                  class="hidden text-xs font-semibold text-gray-500 hover:text-red-600 transition cursor-pointer">Remove all text</button>
+              </div>
+              <span id="insp-overlay-msg" class="block mt-2 text-xs font-semibold text-gray-500"></span>
+              <p class="text-[11px] text-gray-400 mt-3">Click a text box on the image to jump back here. It's baked into the picture when you approve.</p>
             </div>
 
           </div>
@@ -5194,12 +5211,26 @@ function renderPlatformMockup(post) {
     // The media sits in a positioned host so an editor can mount a selection/drag layer directly
     // ON the mock-up. This is what makes the preview the canvas rather than a picture of one —
     // there is no second preview anywhere to disagree with it.
+    // Text overlays render as a live layer ON the image (not baked into the thumbnail), so the post
+    // shows its real overlaid text and each box stays clickable. Cards and videos carry no overlay
+    // layer (the card is its own typography; video can't bake). While overlays are present the image
+    // is shown UNCROPPED (h-auto, not object-cover): the layer is inset-0 over the media host, so its
+    // percentage geometry only agrees with the editor and the bake when the box IS the whole image.
+    const overlayCapable = !isVideo && !!post.thumbnailUrl && !post.brandCard;
+    const hasOverlays = overlayCapable && Array.isArray(post.overlays) && post.overlays.length > 0;
+    const imgClass = hasOverlays ? 'w-full h-auto block' : 'w-full max-h-[400px] object-cover';
     const mediaInner = post.thumbnailUrl
         ? (isVideo
             ? `<video src="${post.thumbnailUrl}" muted controls class="w-full max-h-[400px] object-cover bg-black"></video>`
-            : `<img data-media-img alt="" src="${post.thumbnailUrl}" class="w-full max-h-[400px] object-cover">`)
+            : `<img data-media-img alt="" src="${post.thumbnailUrl}" class="${imgClass}">`)
         : `<div class="w-full py-16 bg-gray-100 flex items-center justify-center text-gray-400 text-sm">No media attached</div>`;
-    const media = `<div class="relative" data-media-host>${mediaInner}</div>`;
+    // Click-through layer: clicking bare image still selects the picture; each overlay box opts back
+    // into pointer events. Present whenever a post could carry overlays so _rqRenderCanvasOverlays
+    // always has somewhere to paint (harmlessly empty when there are none).
+    const overlayLayer = overlayCapable
+        ? '<div class="absolute inset-0 overflow-hidden pointer-events-none" data-overlay-layer></div>'
+        : '';
+    const media = `<div class="relative" data-media-host>${mediaInner}${overlayLayer}</div>`;
 
     const caption  = post.caption ? `<p class="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">${_rqEsc(post.caption)}</p>` : '';
     const hashtags = post.hashtags ? `<p class="text-sm text-blue-600 mt-1.5">${_rqEsc(post.hashtags)}</p>` : '';
@@ -5235,6 +5266,38 @@ function renderPlatformMockup(post) {
         : `${header}${captionBlock('px-3.5 pb-3')}${media}${footer}`;
 
     return `<div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden max-w-md mx-auto" style="border-top:3px solid ${meta.accent}">${body}</div>`;
+}
+
+// Paint a post's saved text overlays as a live layer on the mock-up canvas. Called after the mock-up
+// is in the DOM (the layer must be laid out to size text against the image height), again when the
+// image loads, and on resize. Clicking any overlay selects the "Text on image" inspector layer.
+// A no-op for posts with no overlay layer (cards, videos, text-only) or before the editor loads.
+let _rqOverlayResizeBound = false;
+function _rqRenderCanvasOverlays(post) {
+    const body = document.getElementById('post-review-body');
+    const layer = body && body.querySelector('[data-overlay-layer]');
+    if (!layer || !window.ImageOverlayEditor) return;
+    const img = body.querySelector('[data-media-img]');
+    const overlays = (post && post.overlays) || [];
+    const paint = () => {
+        if (!document.body.contains(layer)) return;   // the mock-up was replaced out from under us
+        const nodes = window.ImageOverlayEditor.render(layer, overlays, { refEl: img || undefined });
+        for (const n of nodes) {
+            n.addEventListener('click', (ev) => { ev.stopPropagation(); _pceSelect('overlays'); });
+        }
+    };
+    paint();
+    // On first render the image may not be laid out yet (zero height) — repaint once it loads, or the
+    // text sizes against nothing and never appears.
+    if (img && !(img.complete && img.naturalWidth)) img.addEventListener('load', paint, { once: true });
+    // One resize listener for the modal's lifetime; it always repaints the post on screen now.
+    if (!_rqOverlayResizeBound) {
+        _rqOverlayResizeBound = true;
+        window.addEventListener('resize', () => {
+            const p = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+            if (p) _rqRenderCanvasOverlays(p);
+        });
+    }
 }
 
 async function openPostReview(postId) {
@@ -5722,6 +5785,7 @@ const _PCE_ELEMENTS = { wordmark: 'Company name', website: 'Website' };
 const _PCE_INSP_TITLES = {
     media:    { title: 'Picture',      kind: 'Media' },
     caption:  { title: 'Caption',      kind: 'Text' },
+    overlays: { title: 'Text on image', kind: 'Text' },
     wordmark: { title: 'Company name', kind: 'Element' },
     website:  { title: 'Website',      kind: 'Element' },
 };
@@ -5809,7 +5873,9 @@ function _pceSelect(key, repaintHandles = true) {
     // rather than duplicated — and only when the picture layer is actually being looked at.
     if (key === 'media' && !_pceEl('insp-media-generic')?.classList.contains('hidden')) {
         _inspMountMediaPanel();
+        _pceRefreshOverlayJump();
     }
+    if (key === 'overlays') _pceRefreshOverlayInspector();
 }
 
 // Mount the shared Work-with-AI media panel inside the inspector's picture section, pointed at the
@@ -5829,6 +5895,61 @@ function _inspMountMediaPanel() {
     gpAiSetMediaType(post.mediaType === 'video' ? 'video' : 'image');
     document.getElementById('gp-ai-media-thumb')?.classList.add('hidden');
     gpAiShowThumb(post.thumbnailUrl, post.mediaType);
+}
+
+// ── "Text on image" layer ────────────────────────────────────────────────────
+// The overlay data lives on the post cache (post.overlays); the canvas paints it (_rqRenderCanvasOverlays)
+// and this inspector describes and edits it. Blank boxes are never counted — the editor drops them on
+// save, but a stale cache could still hold one.
+function _pceOverlayCount(post) {
+    return post && Array.isArray(post.overlays)
+        ? post.overlays.filter((o) => o && String(o.text || '').trim()).length : 0;
+}
+
+// The picture layer's jump button doubles as the overlay count, so you can see there is text on the
+// image without leaving the picture.
+function _pceRefreshOverlayJump() {
+    const label = _pceEl('insp-overlay-jump-label');
+    if (!label) return;
+    const n = _pceOverlayCount(_rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null);
+    label.textContent = n ? `Text on the image (${n})` : 'Add text on the image';
+}
+
+// The overlays inspector: summary line and whether "Remove all" is offered, seeded from the cache.
+function _pceRefreshOverlayInspector() {
+    const n = _pceOverlayCount(_rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null);
+    const summary = _pceEl('insp-overlay-summary');
+    if (summary) summary.textContent = n ? `${n} text box${n > 1 ? 'es' : ''} on the image.` : 'No text on the image yet.';
+    _pceEl('insp-overlay-clear')?.classList.toggle('hidden', !n);
+}
+
+function _pceSetOverlayMsg(text, kind) {
+    const el = _pceEl('insp-overlay-msg');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'block mt-2 text-xs font-semibold '
+        + (kind === 'error' ? 'text-red-600' : kind === 'ok' ? 'text-emerald-700' : 'text-gray-500');
+}
+
+// Remove every overlay: persist an empty set, then repaint the canvas and land back on this layer.
+async function _pceClearOverlays() {
+    const postId = _rqReviewPostId;
+    if (!postId) return;
+    _pceSetOverlayMsg('Removing…');
+    try {
+        const res = await fetch('/.netlify/functions/save-post-overlays', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId, overlays: [] }),
+        });
+        if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Could not remove the text.'); }
+        if (_rqPostCache[postId]) _rqPostCache[postId].overlays = [];
+        _gpOverlayCountByPost[postId] = 0;
+        _rqReviewRenderActive();
+        _pceSelect('overlays');
+        _pceSetOverlayMsg('Text removed.', 'ok');
+    } catch (err) {
+        _pceSetOverlayMsg(err.message || 'Could not remove the text.', 'error');
+    }
 }
 
 // Alignment segmented control for the selected element.
@@ -6138,8 +6259,12 @@ function _pceSyncForPost(post) {
     // Phase 3), and stripping its object-cover crop would change the mock-up for no gain.
     const hasCard = !!card && _pceMountCanvas();
 
-    // Which layers this post actually has. Selection can never land on one that is absent.
-    _pceLayers = hasCard ? ['media', 'caption', 'wordmark', 'website'] : ['media', 'caption'];
+    // Which layers this post actually has. Selection can never land on one that is absent. A photo
+    // gains a "Text on image" layer; a card does not (its typography is the card's own).
+    const overlayCapable = !hasCard && post.mediaType !== 'video' && !!post.thumbnailUrl;
+    _pceLayers = hasCard
+        ? ['media', 'caption', 'wordmark', 'website']
+        : (overlayCapable ? ['media', 'caption', 'overlays'] : ['media', 'caption']);
     _pceEl('insp-media-card')?.classList.toggle('hidden', !hasCard);
     _pceEl('insp-media-generic')?.classList.toggle('hidden', hasCard);
     _PCE_INSP_TITLES.media.title = hasCard ? 'Branded card' : 'Picture';
@@ -6304,6 +6429,7 @@ function _rqReviewRenderActive() {
 
     document.getElementById('post-review-body').innerHTML = renderPlatformMockup(post);
     _pceSyncForPost(post);
+    _rqRenderCanvasOverlays(post);
 
     // Reset the Regenerate panel to a clean state — the modal DOM is reused across posts, so a
     // prior in-flight "Regenerating…" button/feedback must not carry over to the next open.
@@ -6674,7 +6800,7 @@ async function rqReviewToggleDisclosure(included) {
             if (_rqPostCache[id]) { _rqPostCache[id].caption = d.caption; _rqPostCache[id].disclosureFooterDisabled = d.disabled; }
         }
         const active = _rqPostCache[_rqReviewPostId];
-        if (active) document.getElementById('post-review-body').innerHTML = renderPlatformMockup(active);
+        if (active) { document.getElementById('post-review-body').innerHTML = renderPlatformMockup(active); _rqRenderCanvasOverlays(active); }
     } catch (e) {
         if (cb) cb.checked = !included;   // revert the switch on failure
         if (window.showToast) window.showToast(e.message || 'Could not update the footer.');
@@ -8045,16 +8171,6 @@ function gpAiShowThumb(url, type) {
     document.getElementById('gp-ai-own')?.classList.add('hidden');
     gpAiMediaBusy(false);
 
-    // Text overlays apply to images only. Toggle the "Add text" button and refresh its count.
-    // (Set style.display too — the `hidden` class loses to the button's inline-flex layout.)
-    const textBtn = document.getElementById('gp-ai-text-btn');
-    if (textBtn) {
-        const showText = !!url && !isVideo;
-        textBtn.classList.toggle('hidden', !showText);
-        textBtn.style.display = showText ? 'inline-flex' : 'none';
-        if (showText) gpAiRefreshOverlayCount();
-    }
-
     // If the panel is currently driving a Review-Queue draft, mirror the new media into that modal's
     // cache + mock-up so the preview updates and the Instagram approve-guard clears immediately.
     if (url && _rqReviewPostId != null && _gpCurrentPostId === _rqReviewPostId && _rqPostCache[_rqReviewPostId]) {
@@ -8068,8 +8184,13 @@ function gpAiShowThumb(url, type) {
             p.mediaMissing = false;
             document.getElementById('post-review-media-alert')?.classList.add('hidden');
         }
+        // Swapping the picture strips its text overlays server-side (attach-draft-media without
+        // keepOverlays) — they were placed on the old image. Mirror that in the cache so the canvas
+        // doesn't keep painting stale boxes over a picture they were never positioned against.
+        p.overlays = [];
+        _gpOverlayCountByPost[_rqReviewPostId] = 0;
         const body = document.getElementById('post-review-body');
-        if (body) body.innerHTML = renderPlatformMockup(p);
+        if (body) { body.innerHTML = renderPlatformMockup(p); _rqRenderCanvasOverlays(p); }
     }
 }
 
@@ -8077,76 +8198,53 @@ function gpAiShowThumb(url, type) {
 // The user authors draggable, styled text boxes over the image; the design is stored as data
 // (save-post-overlays) and FLATTENED into the published image at approval time (see
 // gpApplyOverlaysBeforeApprove). Baking runs in the browser so emoji and every font render exactly
-// as designed — no server-side image library involved.
-let _gpOverlayCountByPost = {};   // postId → number of saved overlays (for the button label)
+// as designed — no server-side image library involved. In the Review Queue these paint as a live
+// layer on the canvas (_rqRenderCanvasOverlays) and are edited from the "Text on image" layer.
+let _gpOverlayCountByPost = {};   // postId → number of saved overlays (for the inspector label)
 
-function gpAiRefreshOverlayCount() {
-    const label = document.getElementById('gp-ai-text-label');
-    if (!label) return;
-    const n = _gpOverlayCountByPost[_gpCurrentPostId] || 0;
-    label.textContent = n > 0 ? `Text (${n})` : 'Add text';
-}
-
-async function gpAiAddText() {
-    if (!_gpCurrentPostId) return;
-    if (!window.ImageOverlayEditor) { gpAiMediaStatus('Text editor could not load. Please refresh.', 'error'); return; }
-    const postId = _gpCurrentPostId;
-    gpAiMediaBusy(true);
-    gpAiMediaStatus('Opening the text editor…');
+// Open the text-overlay editor for a post, save the result, and reflect it on the live canvas.
+// This is the single entry point for the "Text on image" layer (the old gp-ai-text-btn is retired).
+// The STORED image stays clean — overlays live as data and paint as a live layer on the mock-up; the
+// flat bake happens only at approval (gpApplyOverlaysBeforeApprove). Keeping the base clean is what
+// lets a re-edit start from the original picture instead of compositing onto an already-baked one.
+async function _pceOpenOverlayEditor(postId) {
+    if (!postId) return;
+    if (!window.ImageOverlayEditor) { _pceSetOverlayMsg('Text editor could not load. Please refresh.', 'error'); return; }
+    _pceSetOverlayMsg('Opening the text editor…');
     let base;
     try {
         const res = await fetch(`/.netlify/functions/get-post-image?postId=${encodeURIComponent(postId)}`);
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.error || 'Could not load the image.');
-        }
+        if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Could not load the image.'); }
         base = await res.json();   // { dataUrl, assetId, overlays }
     } catch (err) {
-        gpAiMediaBusy(false);
-        gpAiMediaStatus(err.message || 'Could not load the image.', 'error');
+        _pceSetOverlayMsg(err.message || 'Could not load the image.', 'error');
         return;
     }
-    gpAiMediaBusy(false);
-    gpAiMediaStatus('');
-
+    _pceSetOverlayMsg('');
+    // Prefer the cache's overlays (what the user is looking at) over the server copy, which can lag a
+    // just-saved edit by a request.
+    const cached = _rqPostCache[postId] && _rqPostCache[postId].overlays;
     window.ImageOverlayEditor.open({
         imageUrl: base.dataUrl,
-        overlays: base.overlays || [],
+        overlays: (cached && cached.length ? cached : base.overlays) || [],
         onDone: async (overlays) => {
-            if (overlays == null) return;   // cancelled
-            gpAiMediaBusy(true);
-            gpAiMediaStatus('Saving your text…');
+            if (overlays == null) return;   // cancelled — leave everything as it was
+            _pceSetOverlayMsg('Saving your text…');
             try {
                 const res = await fetch('/.netlify/functions/save-post-overlays', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ postId, overlays, baseAssetId: base.assetId }),
                 });
-                if (!res.ok) {
-                    const err = await res.json().catch(() => ({}));
-                    throw new Error(err.error || 'Could not save your text.');
-                }
+                if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Could not save your text.'); }
+                if (_rqPostCache[postId]) _rqPostCache[postId].overlays = overlays;
                 _gpOverlayCountByPost[postId] = overlays.length;
-                gpAiRefreshOverlayCount();
-                // Show a flattened PREVIEW in the thumbnail so the user sees the result immediately.
-                // The stored image stays clean — the real bake+attach happens on approval.
-                try {
-                    const blob = await window.ImageOverlayEditor.bake(base.dataUrl, overlays);
-                    const previewUrl = URL.createObjectURL(blob);
-                    const img = document.getElementById('gp-ai-media-thumb-img');
-                    if (img) { img.src = previewUrl; img.classList.remove('hidden'); }
-                    // Mirror the preview into the Review-Queue mock-up if this panel drives a draft.
-                    if (_rqReviewPostId != null && postId === _rqReviewPostId && _rqPostCache[_rqReviewPostId]) {
-                        _rqPostCache[_rqReviewPostId].thumbnailUrl = previewUrl;
-                        const body = document.getElementById('post-review-body');
-                        if (body) body.innerHTML = renderPlatformMockup(_rqPostCache[_rqReviewPostId]);
-                    }
-                } catch { /* preview only — non-fatal */ }
-                gpAiMediaStatus(overlays.length ? `${overlays.length} text overlay${overlays.length > 1 ? 's' : ''} saved. It will be applied to the published image on approval.` : 'Text overlays cleared.', 'success');
+                // Repaint the canvas + inspector for the post on screen, then land back on this layer.
+                if (postId === _rqReviewPostId) { _rqReviewRenderActive(); _pceSelect('overlays'); }
+                _pceSetOverlayMsg(overlays.length
+                    ? `${overlays.length} text box${overlays.length > 1 ? 'es' : ''} on the image — baked into the published picture on approval.`
+                    : 'Text removed.', 'ok');
             } catch (err) {
-                gpAiMediaStatus(err.message || 'Could not save your text.', 'error');
-            } finally {
-                gpAiMediaBusy(false);
+                _pceSetOverlayMsg(err.message || 'Could not save your text.', 'error');
             }
         },
     });
