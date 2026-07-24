@@ -25,7 +25,7 @@ import {
     renderBrandCard, MAX_HEADLINE_CHARS,
 } from '../src/lib/brand-card';
 import { pickFaceUrl } from '../src/lib/brand-card-webfont';
-import { rotateSources } from '../src/utils/media-resolver';
+import { rotateSources, resolveMediaForPost } from '../src/utils/media-resolver';
 import { normalizeMediaSources, DEFAULT_ORDER } from '../src/utils/media-sources';
 
 let passed = 0;
@@ -202,6 +202,44 @@ test('rotation alternates stock and brand_card so neither starves', () => {
 test('rotation is a no-op unless BOTH sources are enabled', () => {
     assert.deepEqual(rotateSources(['manual', 'stock', 'ai'], 3), ['manual', 'stock', 'ai']);
     assert.deepEqual(rotateSources(['manual', 'brand_card'], 3), ['manual', 'brand_card']);
+});
+
+// The resolver is where the drafting job actually reaches a card, so the wiring is worth asserting
+// end-to-end rather than trusting that a new branch in a for-loop is hooked up. No DB or network:
+// with only brand_card enabled the other branches are never entered.
+const noDb = null as never;
+
+test('the resolver reaches the brand-card renderer and reports the right source', async () => {
+    let called = 0;
+    const r = await resolveMediaForPost(noDb, {
+        assistant: { mediaSources: ['brand_card'] },
+        orgId: 1, userId: 1, context: 'anything', mediaType: 'image',
+        renderBrandCard: async () => { called++; return 4242; },
+    });
+    assert.deepEqual(r, { ok: true, assetId: 4242, source: 'brand_card' });
+    assert.equal(called, 1);
+});
+
+test('a failed card render falls through instead of failing the post', async () => {
+    const r = await resolveMediaForPost(noDb, {
+        assistant: { mediaSources: ['brand_card'] },
+        orgId: 1, userId: 1, context: 'anything', mediaType: 'image',
+        // What an unconfigured R2 or a missing headline actually does.
+        renderBrandCard: async () => { throw new Error('brand_card_requires_r2'); },
+    });
+    assert.equal(r.ok, false);
+    assert.equal((r as { lastError?: string }).lastError, 'brand_card_requires_r2');
+});
+
+test('video slots skip brand cards entirely — there is no typographic video', async () => {
+    let called = 0;
+    const r = await resolveMediaForPost(noDb, {
+        assistant: { mediaSources: ['brand_card'] },
+        orgId: 1, userId: 1, context: 'anything', mediaType: 'video',
+        renderBrandCard: async () => { called++; return 1; },
+    });
+    assert.equal(called, 0, 'a still card was offered for a video slot');
+    assert.equal(r.ok, false);
 });
 
 // ── Web font selection ────────────────────────────────────────────────────────────────────────

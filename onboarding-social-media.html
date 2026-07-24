@@ -497,6 +497,7 @@
                 <option>Text Only (No visuals needed)</option>
                 <option>Generate AI Images &amp; Video (Flux + Hailuo)</option>
                 <option>Use Free Stock Photos &amp; Videos (Pexels)</option>
+                <option>Branded Text Cards + Free Stock Photos (mixed)</option>
                 <option>I will provide my own ready-to-post assets</option>
               </select>
             </div>
@@ -1595,17 +1596,25 @@
     const getConsent = (id) => document.getElementById(id)?.checked || false;
 
     // Map the chosen Visual Strategy onto the per-assistant Media Source priority list
-    // (Manual/Stock/AI — see src/utils/media-sources.ts). Order = priority, with graceful
-    // fallback for the auto-sourcing choices. NOTE: the resolver treats an empty list as
+    // (Manual/Stock/Brand Card/AI — see src/utils/media-sources.ts). Order = priority, with
+    // graceful fallback for the auto-sourcing choices. NOTE: the resolver treats an empty list as
     // "use the default matrix" (which includes AI), so Text Only maps to manual-only — no
     // auto AI/stock sourcing; posts stay text-only unless the org has its own library assets.
+    //
+    // Every branch writes an EXPLICIT list, so a source added to DEFAULT_ORDER later never reaches
+    // an assistant set up here. That is why 'Branded Text Cards' is its own option rather than a
+    // silent addition to the stock branch: a user who chose "Free Stock Photos" should keep
+    // getting photos, not a feed half made of typography they never asked for.
     const mediaSources = (() => {
       const v = document.getElementById('val_visuals')?.value || '';
       if (v.includes('Text Only')) return ['manual'];               // no auto-sourcing
       if (v.includes('Generate AI')) return ['ai', 'stock', 'manual']; // AI first, fall back
+      // Brand cards and stock ALTERNATE per post when both are on (see rotateSources), so this
+      // yields roughly half typography, half photography.
+      if (v.includes('Branded Text Cards')) return ['brand_card', 'stock', 'manual'];
       if (v.includes('Free Stock')) return ['stock', 'manual'];     // Pexels, then own library
       if (v.includes('provide my own')) return ['manual'];          // own library only
-      return ['manual', 'stock', 'ai'];                             // safe default matrix
+      return ['manual', 'stock', 'brand_card', 'ai'];               // mirrors DEFAULT_ORDER
     })();
 
     const hourlyRateRaw = parseFloat(document.getElementById('val_hourly_rate')?.value);

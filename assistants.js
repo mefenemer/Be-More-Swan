@@ -4909,13 +4909,17 @@ let _autonomousMediaCap = 20;
 let _planMonthlyCredits = 0;           // org's plan-included monthly AI credit allowance (issue #64)
 
 // Media Source Selection — ordered list of enabled sources (priority = order). Default matrix.
-let _mediaSources = ['manual', 'stock', 'ai'];
+// Keep both lists in step with DEFAULT_ORDER / MEDIA_SOURCE_LABELS in src/utils/media-sources.ts:
+// a source missing from _ALL_MEDIA_SOURCES is not just hidden, it is stripped by
+// _normalizeMediaSources on load and silently removed the next time this panel saves.
+let _mediaSources = ['manual', 'stock', 'brand_card', 'ai'];
 const _MEDIA_SOURCE_META = {
-    manual: { label: 'Manual Upload', desc: 'Pick from your uploaded content library.' },
-    stock:  { label: 'AI Stock Search', desc: 'Search Pexels for a relevant photo or video.' },
-    ai:     { label: 'AI Generation', desc: 'Generate a fresh image on demand.' },
+    manual:     { label: 'Manual Upload', desc: 'Pick from your uploaded content library.' },
+    stock:      { label: 'AI Stock Search', desc: 'Search Pexels for a relevant photo or video.' },
+    brand_card: { label: 'Branded Text Card', desc: 'Set the post\'s key line as type in your brand colours. Free, and alternates with stock photos so your feed mixes both.' },
+    ai:         { label: 'AI Generation', desc: 'Generate a fresh image on demand.' },
 };
-const _ALL_MEDIA_SOURCES = ['manual', 'stock', 'ai'];
+const _ALL_MEDIA_SOURCES = ['manual', 'stock', 'brand_card', 'ai'];
 
 const _GOAL_STATUS_META = {
     pending:            { label: 'Pending',        dot: 'bg-gray-300',    text: 'text-gray-500'   },
