@@ -586,7 +586,9 @@ window.showComplianceModals = function showComplianceModals(force) {
 
 <!-- Review Queue: post review modal — clickable card opens a per-platform mock-up + actions -->
 <div id="post-review-modal" class="hidden fixed inset-0 z-[90] items-center justify-center p-4 bg-gray-900/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="post-review-title">
-  <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[92vh] flex flex-col overflow-hidden">
+  <!-- Widens to max-w-4xl only when this post has an inspector to show (see _pceSetStageWide), so a
+       plain text post keeps the narrow reading column it has always had. -->
+  <div id="post-review-panel" class="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[92vh] flex flex-col overflow-hidden">
     <!-- Header -->
     <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100 shrink-0">
       <div>
@@ -600,95 +602,115 @@ window.showComplianceModals = function showComplianceModals(force) {
     <!-- Body: platform mock-up -->
     <div class="flex-1 overflow-y-auto bg-gray-50 px-4 py-5">
       <div id="post-review-media-alert" class="hidden mb-4 text-xs rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-red-700"></div>
-      <!-- Platform tab bar: one tab per platform this post is going out on. Shown only when the post
-           spans 2+ platforms (grouped by assistant + publish slot). Switching a tab previews and
-           edits that platform's copy; the footer's Approve/Reject act on every platform at once. -->
-      <div id="post-review-tabs" class="hidden mb-4"></div>
-      <div id="post-review-body"></div>
-      <!-- Branded text card editor. Shown only when this post's image IS a rendered card (the
-           whole image is type, so "edit the image" means re-rendering it). Changes are scoped to
-           this post — the org-wide default lives on Business Information → Brand style. -->
-      <div id="post-review-cardedit" class="hidden mt-4 rounded-xl border border-gray-200 overflow-hidden bg-white">
-        <button type="button" id="pce-toggle"
-          class="w-full flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-100 cursor-pointer hover:bg-gray-100 transition">
-          <span class="text-xs font-bold text-gray-600">Branded card — edit wording, colours, font &amp; layout</span>
-          <svg id="pce-chevron" class="w-4 h-4 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
-        </button>
-        <div id="pce-panel" class="hidden p-3 space-y-3">
-          <div>
-            <label for="pce-headline" class="block text-xs font-bold text-gray-600 mb-1">Wording on the card</label>
-            <textarea id="pce-headline" rows="2" maxlength="120"
-              class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none resize-none"></textarea>
-            <p class="text-[11px] text-gray-400 mt-1">This is the card only — it doesn't change the caption.</p>
+      <!-- Stage: the post canvas on the left, one selection-driven inspector on the right. The
+           inspector is the ONLY place edits live — what you select on the canvas decides what it
+           shows. Stacks on narrow screens. -->
+      <div class="flex flex-col lg:flex-row gap-5 items-start">
+        <div class="flex-1 min-w-0 w-full">
+          <!-- Platform tab bar: one tab per platform this post is going out on. Shown only when the
+               post spans 2+ platforms (grouped by assistant + publish slot). Switching a tab
+               previews and edits that platform's copy; the footer's Approve/Reject act on every
+               platform at once. -->
+          <div id="post-review-tabs" class="hidden mb-4"></div>
+          <div id="post-review-body"></div>
+        </div>
+        <!-- The inspector. Every control that changes how this post looks lives here, and WHICH
+             controls you see is decided by what is selected on the canvas — never by hunting for
+             the right button. Sections are all present in the DOM and shown one at a time, so an
+             input keeps its value while you select something else. -->
+        <aside id="post-review-inspector" class="hidden w-full lg:w-72 shrink-0 rounded-xl border border-gray-200 bg-white overflow-hidden">
+          <div class="px-3 py-2 bg-gray-50 border-b border-gray-100 flex items-center justify-between gap-2">
+            <span id="pce-insp-title" class="text-xs font-bold text-gray-600">Branded card</span>
+            <span id="pce-insp-kind" class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Media</span>
           </div>
 
-          <div>
-            <span class="block text-xs font-bold text-gray-600 mb-1">Style</span>
-            <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden">
-              <button type="button" data-variant="light" class="pce-variant px-3 py-1.5 text-xs font-bold cursor-pointer transition">Light</button>
-              <button type="button" data-variant="bold" class="pce-variant px-3 py-1.5 text-xs font-bold cursor-pointer transition border-l border-gray-300">Bold</button>
-            </div>
-          </div>
+          <div class="p-3 space-y-3">
+            <!-- ── Media: the card itself ───────────────────────────────── -->
+            <div class="pce-insp" data-insp="media">
+              <div>
+                <label for="pce-headline" class="block text-xs font-bold text-gray-600 mb-1">Wording on the card</label>
+                <textarea id="pce-headline" rows="3" maxlength="120"
+                  class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none resize-none"></textarea>
+                <p class="text-[11px] text-gray-400 mt-1">This is the card only — it doesn't change the caption.</p>
+              </div>
 
-          <div class="grid grid-cols-3 gap-2">
-            <div>
-              <label for="pce-primaryColor" class="block text-xs font-bold text-gray-600 mb-1">Accent</label>
-              <input type="color" id="pce-primaryColor" class="h-9 w-full rounded border border-gray-300 cursor-pointer bg-white p-1">
-            </div>
-            <div>
-              <label for="pce-backgroundColor" class="block text-xs font-bold text-gray-600 mb-1">Background</label>
-              <input type="color" id="pce-backgroundColor" class="h-9 w-full rounded border border-gray-300 cursor-pointer bg-white p-1">
-            </div>
-            <div>
-              <label for="pce-textColor" class="block text-xs font-bold text-gray-600 mb-1">Text</label>
-              <input type="color" id="pce-textColor" class="h-9 w-full rounded border border-gray-300 cursor-pointer bg-white p-1">
-            </div>
-          </div>
+              <div class="mt-3">
+                <span class="block text-xs font-bold text-gray-600 mb-1">Style</span>
+                <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden">
+                  <button type="button" data-variant="light" class="pce-variant px-3 py-1.5 text-xs font-bold cursor-pointer transition">Light</button>
+                  <button type="button" data-variant="bold" class="pce-variant px-3 py-1.5 text-xs font-bold cursor-pointer transition border-l border-gray-300">Bold</button>
+                </div>
+              </div>
 
-          <div>
-            <label for="pce-fontFamily" class="block text-xs font-bold text-gray-600 mb-1">Font</label>
-            <input type="text" id="pce-fontFamily" maxlength="48" spellcheck="false" placeholder="Plus Jakarta Sans"
-              class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none">
-          </div>
+              <div class="grid grid-cols-3 gap-2 mt-3">
+                <div>
+                  <label for="pce-primaryColor" class="block text-xs font-bold text-gray-600 mb-1">Accent</label>
+                  <input type="color" id="pce-primaryColor" class="h-9 w-full rounded border border-gray-300 cursor-pointer bg-white p-1">
+                </div>
+                <div>
+                  <label for="pce-backgroundColor" class="block text-xs font-bold text-gray-600 mb-1">Background</label>
+                  <input type="color" id="pce-backgroundColor" class="h-9 w-full rounded border border-gray-300 cursor-pointer bg-white p-1">
+                </div>
+                <div>
+                  <label for="pce-textColor" class="block text-xs font-bold text-gray-600 mb-1">Text</label>
+                  <input type="color" id="pce-textColor" class="h-9 w-full rounded border border-gray-300 cursor-pointer bg-white p-1">
+                </div>
+              </div>
 
-          <!-- Show/hide is per-element and independent of placement: wanting the website off a card
-               says nothing about where the company name should sit. -->
-          <div>
-            <span class="block text-xs font-bold text-gray-600 mb-1">Show on the card</span>
-            <div class="flex flex-wrap items-center gap-4">
+              <div class="mt-3">
+                <label for="pce-fontFamily" class="block text-xs font-bold text-gray-600 mb-1">Font</label>
+                <input type="text" id="pce-fontFamily" maxlength="48" spellcheck="false" placeholder="Plus Jakarta Sans"
+                  class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none">
+              </div>
+
+              <p class="text-[11px] text-gray-400 mt-3">Click the company name or the web address on the card to place them.</p>
+            </div>
+
+            <!-- ── The two placeable elements. Identical controls, because they are the same
+                 kind of thing — which is the whole reason they share one inspector. ── -->
+            <div class="pce-insp hidden" data-insp="wordmark">
               <label class="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-700 cursor-pointer">
                 <input type="checkbox" id="pce-show-wordmark" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer">
-                Company name
+                Show on the card
               </label>
+              <div class="mt-3">
+                <span class="block text-xs font-bold text-gray-600 mb-1">Alignment</span>
+                <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden" data-align-for="wordmark">
+                  <button type="button" data-align="left" class="pce-align px-2.5 py-1.5 text-xs font-bold cursor-pointer transition">Left</button>
+                  <button type="button" data-align="center" class="pce-align px-2.5 py-1.5 text-xs font-bold cursor-pointer transition border-l border-gray-300">Centre</button>
+                  <button type="button" data-align="right" class="pce-align px-2.5 py-1.5 text-xs font-bold cursor-pointer transition border-l border-gray-300">Right</button>
+                </div>
+              </div>
+              <p class="pce-avail-note text-[11px] text-gray-400 mt-3">Drag it up or down on the card to place it.</p>
+            </div>
+
+            <div class="pce-insp hidden" data-insp="website">
               <label class="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-700 cursor-pointer">
                 <input type="checkbox" id="pce-show-website" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer">
-                Website
+                Show on the card
               </label>
+              <div class="mt-3">
+                <span class="block text-xs font-bold text-gray-600 mb-1">Alignment</span>
+                <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden" data-align-for="website">
+                  <button type="button" data-align="left" class="pce-align px-2.5 py-1.5 text-xs font-bold cursor-pointer transition">Left</button>
+                  <button type="button" data-align="center" class="pce-align px-2.5 py-1.5 text-xs font-bold cursor-pointer transition border-l border-gray-300">Centre</button>
+                  <button type="button" data-align="right" class="pce-align px-2.5 py-1.5 text-xs font-bold cursor-pointer transition border-l border-gray-300">Right</button>
+                </div>
+              </div>
+              <p class="pce-avail-note text-[11px] text-gray-400 mt-3">Drag it up or down on the card to place it.</p>
             </div>
-            <p id="pce-place-hint" class="text-[11px] text-gray-400 mt-1">Drag either one on the preview to move it.</p>
-          </div>
 
-          <!-- The stage wraps the render so the drag handles can be positioned as a percentage of
-               the image box. The img is left to size itself — a fixed aspect-square would crop a
-               4:5 or 9:16 card, and every handle would then point at the wrong place. -->
-          <div id="pce-stage" class="relative w-full select-none" style="touch-action: none;">
-            <img id="pce-preview" alt="Preview of the branded card" class="block w-full rounded-lg border border-gray-200 bg-gray-50">
-            <div id="pce-handles" class="absolute inset-0"></div>
+            <div class="pt-1 border-t border-gray-100 flex flex-wrap items-center gap-2">
+              <button type="button" id="pce-save"
+                class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer">Save card</button>
+              <button type="button" id="pce-revert"
+                class="text-xs font-semibold text-gray-500 hover:text-gray-700 transition cursor-pointer">Undo changes</button>
+              <button type="button" id="pce-resetkit"
+                class="text-xs font-semibold text-gray-500 hover:text-gray-700 transition cursor-pointer">Reset to my brand style</button>
+              <span id="pce-msg" class="text-xs font-semibold text-gray-500"></span>
+            </div>
           </div>
-
-          <div class="flex items-center gap-2">
-            <button type="button" id="pce-save"
-              class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer">Save card</button>
-            <button type="button" id="pce-revert"
-              class="text-xs font-semibold text-gray-500 hover:text-gray-700 transition cursor-pointer">Undo changes</button>
-            <!-- A card's own style normally wins, so changing Brand Assets never restyles work
-                 already reviewed. This is the deliberate way back for a card whose stored style is
-                 wrong or simply out of date. -->
-            <button type="button" id="pce-resetkit"
-              class="text-xs font-semibold text-gray-500 hover:text-gray-700 transition cursor-pointer">Reset to my brand style</button>
-            <span id="pce-msg" class="text-xs font-semibold text-gray-500"></span>
-          </div>
-        </div>
+        </aside>
       </div>
       <!-- Quality review (The Quality Reviewer, plan-gated). This panel existed ONLY in the
            calendar, so the Review Queue — where people actually approve — showed no warnings, no
@@ -5162,11 +5184,15 @@ function renderPlatformMockup(post) {
     const brand = post.assistantName || 'Your Brand';
     const initial = (brand.trim()[0] || 'B').toUpperCase();
     const isVideo = post.mediaType === 'video' || /video|reel/i.test(post.postFormat || '');
-    const media = post.thumbnailUrl
+    // The media sits in a positioned host so an editor can mount a selection/drag layer directly
+    // ON the mock-up. This is what makes the preview the canvas rather than a picture of one —
+    // there is no second preview anywhere to disagree with it.
+    const mediaInner = post.thumbnailUrl
         ? (isVideo
             ? `<video src="${post.thumbnailUrl}" muted controls class="w-full max-h-[400px] object-cover bg-black"></video>`
-            : `<img src="${post.thumbnailUrl}" alt="" class="w-full max-h-[400px] object-cover">`)
+            : `<img data-media-img alt="" src="${post.thumbnailUrl}" class="w-full max-h-[400px] object-cover">`)
         : `<div class="w-full py-16 bg-gray-100 flex items-center justify-center text-gray-400 text-sm">No media attached</div>`;
+    const media = `<div class="relative" data-media-host>${mediaInner}</div>`;
 
     const caption  = post.caption ? `<p class="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">${_rqEsc(post.caption)}</p>` : '';
     const hashtags = post.hashtags ? `<p class="text-sm text-blue-600 mt-1.5">${_rqEsc(post.hashtags)}</p>` : '';
@@ -5680,6 +5706,80 @@ const _PCE_KIT_FIELDS = ['primaryColor', 'backgroundColor', 'textColor', 'fontFa
 
 const _PCE_ELEMENTS = { wordmark: 'Company name', website: 'Website' };
 
+// What the inspector calls each selectable layer. 'media' is the card itself.
+const _PCE_INSP_TITLES = {
+    media:    { title: 'Branded card', kind: 'Media' },
+    wordmark: { title: 'Company name', kind: 'Element' },
+    website:  { title: 'Website',      kind: 'Element' },
+};
+
+// Which layer the inspector is showing. Selection drives the panel — nothing else does.
+let _pceSelection = 'media';
+
+// Mount the editing canvas ONTO the platform mock-up: the card image in the mock-up becomes the
+// live preview, and the drag handles overlay it there. Returns false when this post's mock-up has
+// no image to edit (no media yet), so the caller can hide the inspector rather than show controls
+// pointing at nothing.
+function _pceMountCanvas() {
+    const host = document.querySelector('#post-review-body [data-media-host]');
+    const img = host && host.querySelector('img[data-media-img]');
+    if (!host || !img) return false;
+
+    // The mock-up crops with object-cover to keep the feed preview tidy. A cropped image would put
+    // every handle in the wrong place, so for a card the image is shown whole instead.
+    img.classList.remove('max-h-[400px]', 'object-cover');
+    img.classList.add('block');
+    img.id = 'pce-preview';
+    host.id = 'pce-stage';
+    host.classList.add('select-none');
+    host.style.touchAction = 'none';
+
+    let layer = host.querySelector('#pce-handles');
+    if (!layer) {
+        layer = document.createElement('div');
+        layer.id = 'pce-handles';
+        layer.className = 'absolute inset-0';
+        host.appendChild(layer);
+    }
+    // Clicking the card itself (not a handle) selects the media layer.
+    host.addEventListener('click', (ev) => {
+        if (ev.target.closest('.pce-handle')) return;
+        _pceSelect('media');
+    });
+    return true;
+}
+
+// Show exactly one inspector section, and mark the matching handle as selected.
+//
+// `repaintHandles` is false when selecting from a pointerdown on a handle: repainting rebuilds the
+// layer, which would destroy the very node the drag is holding, and the gesture would die on its
+// first move.
+function _pceSelect(key, repaintHandles = true) {
+    if (!_PCE_INSP_TITLES[key]) return;
+    _pceSelection = key;
+    for (const sec of document.querySelectorAll('.pce-insp')) {
+        sec.classList.toggle('hidden', sec.dataset.insp !== key);
+    }
+    const label = _PCE_INSP_TITLES[key];
+    if (_pceEl('pce-insp-title')) _pceEl('pce-insp-title').textContent = label.title;
+    if (_pceEl('pce-insp-kind')) _pceEl('pce-insp-kind').textContent = label.kind;
+    _pcePaintAlign(key);
+    if (repaintHandles) _pcePaintHandles();
+}
+
+// Alignment segmented control for the selected element.
+function _pcePaintAlign(key) {
+    const group = document.querySelector(`[data-align-for="${key}"]`);
+    if (!group || !_pceState.layout || !_pceState.layout[key]) return;
+    const current = _pceState.layout[key].align;
+    for (const btn of group.querySelectorAll('.pce-align')) {
+        const on = btn.dataset.align === current;
+        btn.className = 'pce-align px-2.5 py-1.5 text-xs font-bold cursor-pointer transition'
+            + (btn.dataset.align !== 'left' ? ' border-l border-gray-300' : '')
+            + (on ? ' bg-emerald-600 text-white' : ' bg-white text-gray-600 hover:bg-gray-50');
+    }
+}
+
 function _pceEl(id) { return document.getElementById(id); }
 
 function _pceDefaultLayout() {
@@ -5704,6 +5804,7 @@ function _pceSetMsg(text, tone) {
     const m = _pceEl('pce-msg');
     if (!m) return;
     m.textContent = text || '';
+    m.dataset.tone = text ? (tone || 'info') : '';
     m.className = 'text-xs font-semibold ' +
         (tone === 'error' ? 'text-red-600' : tone === 'ok' ? 'text-emerald-700' : 'text-gray-500');
 }
@@ -5762,6 +5863,7 @@ function _pceFill(v) {
     _pcePaintVariant(v.variant || 'light');
     _pceState.layout = _pceNormalizeLayout(v.layout);
     _pcePaintShowToggles();
+    _pcePaintAlign(_pceSelection);
     _pcePaintHandles();
 }
 
@@ -5782,12 +5884,15 @@ function _pcePaintShowToggles() {
         box.disabled = !available;
         box.parentElement?.classList.toggle('opacity-40', !available);
         if (!available) missing.push(_PCE_ELEMENTS[key].toLowerCase());
-    }
-    const hint = _pceEl('pce-place-hint');
-    if (hint) {
-        hint.textContent = missing.length
-            ? `Drag either one on the preview to move it. No ${missing.join(' or ')} saved — add one in Business Information → Brand style.`
-            : 'Drag either one on the preview to move it.';
+
+        // The explanation belongs in the section for the element it is about, not in one shared
+        // line that has to name which element it means.
+        const note = document.querySelector(`.pce-insp[data-insp="${key}"] .pce-avail-note`);
+        if (note) {
+            note.textContent = available
+                ? 'Drag it up or down on the card to place it.'
+                : `No ${_PCE_ELEMENTS[key].toLowerCase()} saved — add one in Business Information → Brand Assets.`;
+        }
     }
 }
 
@@ -5820,6 +5925,12 @@ function _pcePaintHandles() {
         // A 34px band on a 1080px card is ~12px on screen — too thin to grab reliably.
         h.style.minHeight = '20px';
         h.style.justifyContent = _pceJustify(layout[key].align);
+        // The selected element reads as selected on the canvas, not only in the inspector — the
+        // two are one control surface, so they must never disagree about what is being edited.
+        if (_pceSelection === key) {
+            h.style.borderStyle = 'solid';
+            h.style.backgroundColor = 'color-mix(in srgb, var(--color-emerald-700) 12%, transparent)';
+        }
         // The label sits outside the band so it never covers the very text being placed — above it
         // normally, below when the band is already near the top of the card and there is no room.
         const chipOutside = topFrac < 0.12 ? 'margin-top: 1.15rem;' : 'margin-top: -1.15rem;';
@@ -5854,10 +5965,21 @@ async function _pceRefreshPreview() {
             // that ran past the safe area: the server clamped it, so the handle returns to the
             // furthest the text can legibly go rather than lying about where it landed.
             _pcePaintShowToggles();
+            // Every path that can change alignment — dragging, the segmented control, undo,
+            // reset — lands here, so repainting it once here is what keeps the inspector and the
+            // canvas from disagreeing about the same property.
+            _pcePaintAlign(_pceSelection);
             _pcePaintHandles();
         }
-        // "Save card" is still required — the reset only changes what the preview shows.
-        _pceSetMsg(wasReset ? 'Back to your brand style — save to keep it.' : '', wasReset ? 'ok' : '');
+        if (wasReset) {
+            // "Save card" is still required — the reset only changes what the preview shows.
+            _pceSetMsg('Back to your brand style — save to keep it.', 'ok');
+        } else if (_pceEl('pce-msg')?.dataset.tone === 'error') {
+            // A successful render clears a stale error, and ONLY that. Saving re-renders the modal,
+            // which starts a preview; blanket-clearing here wiped the "Card updated." confirmation
+            // a second after it appeared.
+            _pceSetMsg('');
+        }
     } catch (e) {
         if (token === _pceState.token) _pceSetMsg(e.message, 'error');
     }
@@ -5877,6 +5999,8 @@ function _pceDragStart(ev) {
     const handle = ev.target.closest?.('.pce-handle');
     if (!handle || ev.button > 0) return;
     if (!_pceEl('pce-stage')) return;
+    // Grabbing an element is also selecting it — the inspector follows without a separate click.
+    _pceSelect(handle.dataset.key, false);
     _pceDrag = {
         key: handle.dataset.key,
         handle,
@@ -5913,8 +6037,9 @@ function _pceDragEnd() {
     handle.style.borderStyle = 'dashed';
     _pceDrag = null;
     // A click with no movement leaves y/align undefined — nothing to commit, and re-rendering on
-    // every stray click would put a server render behind each one.
-    if (y === undefined && align === undefined) return;
+    // every stray click would put a server render behind each one. It was still a selection
+    // though, so repaint to show it.
+    if (y === undefined && align === undefined) { _pcePaintHandles(); return; }
     const layout = _pceState.layout || (_pceState.layout = _pceDefaultLayout());
     if (y !== undefined) layout[key].y = y;
     if (align !== undefined) layout[key].align = align;
@@ -5927,19 +6052,24 @@ function _pceSchedulePreview() { clearTimeout(_pceDebounce); _pceDebounce = setT
 // Seed the editor from THIS card's stored render params, so reopening shows the user's own edits
 // rather than resetting to the org default.
 function _pceSyncForPost(post) {
-    const wrap = _pceEl('post-review-cardedit');
+    const wrap = _pceEl('post-review-inspector');
     if (!wrap) return;
     const card = post && post.brandCard;
     const editable = !!card && ['pending_approval', 'draft', 'in_review', 'approved', 'scheduled'].includes(post.status);
-    if (!editable) {
+    // Mounting must come first: without an image in the mock-up there is no canvas to edit on, and
+    // an inspector full of controls pointing at nothing is worse than no inspector.
+    const mounted = editable && _pceMountCanvas();
+    if (!mounted) {
         wrap.classList.add('hidden');
         wrap.style.display = 'none';   // `hidden` loses to a display set inline elsewhere
+        _pceSetStageWide(false);
         _pceState.postId = null;
         _pceState.geo = null;
         return;
     }
     wrap.classList.remove('hidden');
     wrap.style.display = '';
+    _pceSetStageWide(true);
 
     const rp = card.renderParams || {};
     const kit = rp.kit || {};
@@ -5968,25 +6098,35 @@ function _pceSyncForPost(post) {
     };
     _pceFill(_pceState.base);
     _pceSetMsg('');
+    // Every post opens on the card itself. Selection is per-open, not remembered: carrying the last
+    // post's selection over would show element controls for a card you have not looked at yet.
+    _pceSelect('media');
+    // The canvas IS the preview now, so it has to be rendered to be looked at — there is no
+    // separate thumbnail standing in for it while a panel stays closed.
+    _pceRefreshPreview();
+}
 
-    // Collapse on every open: the panel is secondary to reading the post, and a previously-expanded
-    // panel would push the caption off-screen for the next post reviewed.
-    _pceEl('pce-panel')?.classList.add('hidden');
-    if (_pceEl('pce-chevron')) _pceEl('pce-chevron').style.transform = '';
+// The two-column stage only earns the extra width when there is an inspector beside the canvas.
+function _pceSetStageWide(wide) {
+    const panel = _pceEl('post-review-panel');
+    if (!panel) return;
+    panel.classList.toggle('max-w-lg', !wide);
+    panel.classList.toggle('max-w-4xl', wide);
 }
 
 (function _pceBind() {
     const onReady = () => {
-        _pceEl('pce-toggle')?.addEventListener('click', () => {
-            const panel = _pceEl('pce-panel');
-            if (!panel) return;
-            const opening = panel.classList.contains('hidden');
-            panel.classList.toggle('hidden', !opening);
-            if (_pceEl('pce-chevron')) _pceEl('pce-chevron').style.transform = opening ? 'rotate(180deg)' : '';
-            // Render lazily: a review queue where every open cost a server render would be slow for
-            // the majority of reviewers who never touch the card.
-            if (opening && !_pceEl('pce-preview')?.src) _pceRefreshPreview();
-        });
+        // Alignment is now settable directly, not only by dragging — the same property, reachable
+        // whichever way you think about it.
+        for (const btn of document.querySelectorAll('.pce-align')) {
+            btn.addEventListener('click', () => {
+                const key = btn.closest('[data-align-for]')?.dataset.alignFor;
+                if (!key || !_pceState.layout?.[key]) return;
+                _pceState.layout[key].align = btn.dataset.align;
+                _pcePaintAlign(key);
+                _pceRefreshPreview();
+            });
+        }
         for (const btn of document.querySelectorAll('.pce-variant')) {
             btn.addEventListener('click', () => { _pcePaintVariant(btn.dataset.variant); _pceSchedulePreview(); });
         }
@@ -6004,15 +6144,18 @@ function _pceSyncForPost(post) {
                 _pceRefreshPreview();
             });
         }
-        // Drag is delegated from the layer: handles are rebuilt on every render, so per-handle
-        // listeners would have to be re-bound each time.
-        _pceEl('pce-handles')?.addEventListener('pointerdown', _pceDragStart);
-        _pceEl('pce-handles')?.addEventListener('pointermove', _pceDragMove);
-        _pceEl('pce-handles')?.addEventListener('pointerup', _pceDragEnd);
+        // Delegated from post-review-body, which survives every re-render. The handle layer does
+        // NOT: it is mounted onto the mock-up, whose innerHTML is replaced each time the modal
+        // renders, so listeners bound to the layer itself would silently stop firing after the
+        // first platform switch.
+        const canvasRoot = _pceEl('post-review-body');
+        canvasRoot?.addEventListener('pointerdown', _pceDragStart);
+        canvasRoot?.addEventListener('pointermove', _pceDragMove);
+        canvasRoot?.addEventListener('pointerup', _pceDragEnd);
         // Pointer capture normally keeps the stream on the handle, but a cancelled gesture
         // (scroll takeover, window blur) would otherwise leave _pceDrag stuck and the next click
         // interpreted as a drop.
-        _pceEl('pce-handles')?.addEventListener('pointercancel', _pceDragEnd);
+        canvasRoot?.addEventListener('pointercancel', _pceDragEnd);
         _pceEl('pce-revert')?.addEventListener('click', () => {
             if (!_pceState.base) return;
             _pceFill(_pceState.base);
@@ -6051,8 +6194,12 @@ function _pceSyncForPost(post) {
                 } catch { /* the save already succeeded — a stale thumbnail is not worth an error */ }
                 // Re-render reseeds the editor from the newly-saved params (so Undo now reverts to
                 // what was saved) and clears the status line — hence confirming AFTER it, not before.
+                // Re-rendering remounts the canvas and reseeds the inspector, so the selection is
+                // restored explicitly — otherwise saving while placing the website would drop you
+                // back to the card's own controls.
+                const wasSelected = _pceSelection;
                 _rqReviewRenderActive();
-                _pceEl('pce-panel')?.classList.remove('hidden');
+                _pceSelect(wasSelected);
                 _pceSetMsg('Card updated.', 'ok');
             } catch (e) {
                 _pceSetMsg(e.message, 'error');
