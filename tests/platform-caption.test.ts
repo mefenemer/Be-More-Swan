@@ -83,4 +83,34 @@ check('empty/absent hashtags and footer never crash', () => {
     assert.equal(r2.caption, LONG);
 });
 
+check('leaked trailing hashtags in the caption body are stripped, footer stays last (LinkedIn)', () => {
+    // Reproduces the prod post-3 defect: the model appended a hashtag block (with a typo) to the
+    // caption itself, in addition to the hashtags field.
+    const leaky = `${LONG}\n\n#BeMorSwan #HireDontLearn #FounderLife`;
+    const r = fitForPlatform({ platform: 'linkedin', longCaption: leaky, hashtagsRaw: HASHTAGS, footer: FOOTER });
+    assert.ok(!r.caption.includes('#BeMorSwan'), 'misspelled leaked hashtag survived in the caption');
+    assert.ok(!r.caption.includes('#HireDontLearn'), 'leaked hashtag left in caption body');
+    assert.ok(r.caption.trimEnd().endsWith(FOOTER), 'footer is not last — hashtags stranded it');
+});
+
+check('leaked hashtags are stripped on X too, and the post still fits 280', () => {
+    const leakyShort = `${SHORT} #BeMorSwan #HireDontLearn`;
+    const r = fitForPlatform({ platform: 'x', longCaption: LONG, shortCaption: leakyShort, hashtagsRaw: HASHTAGS, footer: FOOTER });
+    assert.ok(!r.caption.includes('#BeMorSwan'), 'leaked tag survived on X caption');
+    assert.ok(r.caption.includes(FOOTER), 'footer missing on X');
+    assert.ok(assembled(r).length <= 280, `assembled length ${assembled(r).length} > 280`);
+});
+
+check('when the hashtags field is empty, leaked trailing tags are recovered into it', () => {
+    const leaky = `${LONG}\n\n#BeMoreSwan #FounderLife`;
+    const r = fitForPlatform({ platform: 'linkedin', longCaption: leaky, hashtagsRaw: '', footer: FOOTER });
+    assert.ok(r.hashtags.includes('#BeMoreSwan'), 'leaked tags not recovered when field was empty');
+    assert.ok(!r.caption.includes('#BeMoreSwan'), 'recovered tags should not also remain in the body');
+});
+
+check('a caption with NO trailing hashtags is left untouched', () => {
+    const r = fitForPlatform({ platform: 'linkedin', longCaption: LONG, hashtagsRaw: HASHTAGS, footer: FOOTER });
+    assert.ok(r.caption.startsWith(LONG.slice(0, 40)), 'body altered when it had no trailing hashtags');
+});
+
 console.log(`\n${passed} checks passed`);

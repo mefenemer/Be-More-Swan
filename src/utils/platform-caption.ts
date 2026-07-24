@@ -39,6 +39,24 @@ const ACRONYM_CASE: Record<string, string> = {
     diy: 'DIY', faq: 'FAQ', uk: 'UK', usa: 'USA', us: 'US',
 };
 
+// The model is asked to keep hashtags in the separate "hashtags" field, but it intermittently
+// appends a block of them to the END of the caption anyway — sometimes misspelled (e.g. "#BeMorSwan").
+// Left in place they duplicate the hashtags field, push our disclosure footer out of last position,
+// and bypass normalizeHashtags entirely (so a brand typo ships). Strip a trailing run of hashtags
+// (and surrounding whitespace) from the body before the footer is appended. Only a TRAILING block is
+// removed, so a hashtag used mid-sentence is left untouched.
+const TRAILING_HASHTAGS_RE = /(?:\s*#[\p{L}\p{N}_]+)+\s*$/u;
+export function stripTrailingHashtags(caption: string | null | undefined): string {
+    return String(caption ?? '').replace(TRAILING_HASHTAGS_RE, '').replace(/\s+$/, '');
+}
+
+/** The trailing hashtag block the model leaked into a caption (or '' if none). Used only as a
+ *  fallback source of tags when the dedicated hashtags field came back empty. */
+export function trailingHashtagBlock(caption: string | null | undefined): string {
+    const m = String(caption ?? '').match(TRAILING_HASHTAGS_RE);
+    return m ? m[0].trim() : '';
+}
+
 /** De-dupe (case-insensitive), acronym-case, and cap a raw hashtag string for one platform. */
 export function normalizeHashtags(raw: string | null | undefined, platform: string | null | undefined): string {
     if (!raw) return '';
@@ -95,9 +113,13 @@ export interface FitInput {
  * platform's character limit with the footer intact.
  */
 export function fitForPlatform(input: FitInput): { caption: string; hashtags: string } {
-    const { platform, longCaption, footer } = input;
+    const { platform, footer } = input;
     const credit = input.creditSuffix ?? '';
-    const hashtags = normalizeHashtags(input.hashtagsRaw, platform);
+    // Pull any trailing hashtag block the model leaked into the caption body — hashtags belong only in
+    // the separate field (normalized below), and leaving them in the body strands the footer and ships
+    // typos. Fall back to those leaked tags for the hashtags field only if the field itself is empty.
+    const longCaption = stripTrailingHashtags(input.longCaption);
+    const hashtags = normalizeHashtags(input.hashtagsRaw || trailingHashtagBlock(input.longCaption), platform);
 
     if (!isShortForm(platform)) {
         return { caption: appendFooter(longCaption, footer) + credit, hashtags };
@@ -109,7 +131,7 @@ export function fitForPlatform(input: FitInput): { caption: string; hashtags: st
     const tagLen = hashtags ? hashtags.length + 2 : 0;
     const bodyBudget = Math.max(40, limit - footerLen - credit.length - tagLen);
 
-    let body = (input.shortCaption?.trim() || deriveShort(longCaption, bodyBudget));
+    let body = stripTrailingHashtags(input.shortCaption?.trim() || deriveShort(longCaption, bodyBudget));
     if (body.length > bodyBudget) body = deriveShort(body, bodyBudget);
 
     let caption = appendFooter(body, footer) + credit;
