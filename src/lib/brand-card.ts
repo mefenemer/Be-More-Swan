@@ -18,6 +18,7 @@
 import satori from 'satori';
 import { Resvg } from '@resvg/resvg-js';
 import { brandCardFonts, BRAND_CARD_FONT_FAMILY } from './brand-card-fonts';
+import { loadWebFont } from './brand-card-webfont';
 import {
     contrastRatio, readableInkOn, MIN_DISPLAY_CONTRAST,
     type BrandKit,
@@ -172,7 +173,17 @@ export async function renderBrandCard(opts: {
 
     const pad = Math.round(width * 0.083);
     const eyebrowText = (opts.kit.wordmark || opts.orgName || '').trim().toUpperCase().slice(0, 32);
-    const logoSrc = opts.kit.logoUrl ? await inlineLogo(opts.kit.logoUrl) : null;
+
+    // The org's own display font when we can serve it, the bundled family otherwise. Both are
+    // fetched together — a slow logo host shouldn't serialise behind a slow font CDN.
+    const [logoSrc, webFont] = await Promise.all([
+        opts.kit.logoUrl ? inlineLogo(opts.kit.logoUrl) : Promise.resolve(null),
+        loadWebFont(opts.kit.fontFamily),
+    ]);
+    // The bundled family stays registered as a fallback so a glyph missing from the web font
+    // (a curly quote, an accent) still draws instead of becoming a blank box.
+    const fonts = webFont ? [...webFont, ...brandCardFonts] : brandCardFonts;
+    const fontFamily = webFont ? `${webFont[0].name}, ${BRAND_CARD_FONT_FAMILY}` : BRAND_CARD_FONT_FAMILY;
 
     // Built as plain satori element objects rather than JSX: these functions are compiled by
     // esbuild without a JSX runtime configured, and one renderer is not worth a build-config change.
@@ -196,7 +207,7 @@ export async function renderBrandCard(opts: {
             {
                 display: 'flex', flexDirection: 'column', justifyContent: 'space-between',
                 width: '100%', height: '100%', padding: pad, backgroundColor: palette.background,
-                fontFamily: BRAND_CARD_FONT_FAMILY,
+                fontFamily,
             },
             [
                 header,
@@ -210,7 +221,7 @@ export async function renderBrandCard(opts: {
                 footer,
             ],
         ),
-        { width, height, fonts: brandCardFonts },
+        { width, height, fonts },
     );
 
     const png = Buffer.from(new Resvg(svg, { fitTo: { mode: 'width', value: width } }).render().asPng());

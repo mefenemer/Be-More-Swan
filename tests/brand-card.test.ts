@@ -24,6 +24,7 @@ import {
     headlineFromCaption, pickVariant, resolveCardPalette, headlineFontSize,
     renderBrandCard, MAX_HEADLINE_CHARS,
 } from '../src/lib/brand-card';
+import { pickFaceUrl } from '../src/lib/brand-card-webfont';
 import { rotateSources } from '../src/utils/media-resolver';
 import { normalizeMediaSources, DEFAULT_ORDER } from '../src/utils/media-sources';
 
@@ -201,6 +202,44 @@ test('rotation alternates stock and brand_card so neither starves', () => {
 test('rotation is a no-op unless BOTH sources are enabled', () => {
     assert.deepEqual(rotateSources(['manual', 'stock', 'ai'], 3), ['manual', 'stock', 'ai']);
     assert.deepEqual(rotateSources(['manual', 'brand_card'], 3), ['manual', 'brand_card']);
+});
+
+// ── Web font selection ────────────────────────────────────────────────────────────────────────
+// Real Google Fonts CSS: one @font-face per script subset per weight, each labelled by a comment.
+
+const GF_CSS = `/* devanagari */
+@font-face { font-family: 'Poppins'; font-style: normal; font-weight: 400;
+  src: url(https://fonts.gstatic.com/s/poppins/v24/devanagari-400.woff) format('woff'); }
+/* latin-ext */
+@font-face { font-family: 'Poppins'; font-style: normal; font-weight: 400;
+  src: url(https://fonts.gstatic.com/s/poppins/v24/latinext-400.woff) format('woff'); }
+/* latin */
+@font-face { font-family: 'Poppins'; font-style: normal; font-weight: 400;
+  src: url(https://fonts.gstatic.com/s/poppins/v24/latin-400.woff) format('woff'); }
+/* devanagari */
+@font-face { font-family: 'Poppins'; font-style: normal; font-weight: 700;
+  src: url(https://fonts.gstatic.com/s/poppins/v24/devanagari-700.woff) format('woff'); }
+/* latin */
+@font-face { font-family: 'Poppins'; font-style: normal; font-weight: 700;
+  src: url(https://fonts.gstatic.com/s/poppins/v24/latin-700.woff) format('woff'); }`;
+
+test('the latin subset is chosen at the requested weight, not the first url in the file', () => {
+    // The bug this guards: taking the first/last url() picked a Devanagari subset, which contains
+    // none of the glyphs a caption needs — every card would have rendered blank.
+    assert.equal(pickFaceUrl(GF_CSS, 400), 'https://fonts.gstatic.com/s/poppins/v24/latin-400.woff');
+    assert.equal(pickFaceUrl(GF_CSS, 700), 'https://fonts.gstatic.com/s/poppins/v24/latin-700.woff');
+});
+
+test('woff is accepted — Google serves it for static families even to an ancient user-agent', () => {
+    assert.ok(pickFaceUrl(GF_CSS, 400)!.endsWith('.woff'));
+    const ttf = "@font-face { font-weight: 400; src: url(https://fonts.gstatic.com/a/x.ttf) format('truetype'); }";
+    assert.equal(pickFaceUrl(ttf, 400), 'https://fonts.gstatic.com/a/x.ttf');
+});
+
+test('a family with no subset comments and no matching weight still resolves', () => {
+    const plain = "@font-face { font-family: 'X'; font-weight: 500; src: url(https://fonts.gstatic.com/a/only.woff); }";
+    assert.equal(pickFaceUrl(plain, 400), 'https://fonts.gstatic.com/a/only.woff');
+    assert.equal(pickFaceUrl('', 400), null);
 });
 
 // ── The renderer itself ───────────────────────────────────────────────────────────────────────

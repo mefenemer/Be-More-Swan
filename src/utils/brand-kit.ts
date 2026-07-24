@@ -33,9 +33,26 @@ export interface BrandKit {
     logoUrl: string | null;
     /** Footer line — usually the website host. */
     website: string | null;
-    /** Where the colours came from. 'website' marks a Phase 2 extraction so the UI can say so. */
+    /**
+     * Display family name, when the org's site uses one we can actually serve (see
+     * src/lib/brand-card-webfont.ts). Null = render in the bundled family. Never trusted as a
+     * string that reaches a URL: the loader re-validates it against a strict charset.
+     */
+    fontFamily: string | null;
+    /** Where the colours came from. 'website' marks an extraction so the UI can say so. */
     source: 'default' | 'manual' | 'website';
+    /** ISO timestamp of the last successful website extraction. */
+    extractedAt: string | null;
+    /**
+     * ISO timestamp of the last extraction ATTEMPT, successful or not. Load-bearing: without it a
+     * site that 404s, blocks bots or has no usable colours would be re-fetched on every single
+     * post forever. See EXTRACT_RETRY_DAYS.
+     */
+    lastExtractAttemptAt: string | null;
 }
+
+/** How long to wait before re-attempting extraction for an org that yielded nothing usable. */
+export const EXTRACT_RETRY_DAYS = 14;
 
 /**
  * Neutral monochrome. Chosen so an org that has configured nothing still gets a publishable,
@@ -49,7 +66,10 @@ export const DEFAULT_BRAND_KIT: BrandKit = {
     wordmark: null,
     logoUrl: null,
     website: null,
+    fontFamily: null,
     source: 'default',
+    extractedAt: null,
+    lastExtractAttemptAt: null,
 };
 
 /** Be More Swan's own palette, from input.css. Seeded onto the BMS org by db/brand-kit.sql. */
@@ -60,10 +80,27 @@ export const BE_MORE_SWAN_BRAND_KIT: BrandKit = {
     wordmark: 'BE MORE SWAN',
     logoUrl: null,
     website: 'bemoreswan.com',
+    fontFamily: 'Plus Jakarta Sans',
     source: 'manual',
+    extractedAt: null,
+    lastExtractAttemptAt: null,
 };
 
 const MAX_WORDMARK = 32;
+
+/**
+ * Font family names accepted into a kit. Deliberately strict: this string is interpolated into a
+ * fonts.googleapis.com URL by the web-font loader, so anything that could carry a path, host or
+ * query fragment must never survive normalization. Letters, digits and single spaces only.
+ */
+const FONT_FAMILY_RE = /^[A-Za-z0-9]+(?: [A-Za-z0-9]+)*$/;
+
+/** A family name safe to put in a font URL, or null. */
+export function cleanFontFamily(raw: unknown): string | null {
+    if (typeof raw !== 'string') return null;
+    const v = raw.trim().replace(/^["']|["']$/g, '').replace(/\s+/g, ' ');
+    return v.length >= 2 && v.length <= 48 && FONT_FAMILY_RE.test(v) ? v : null;
+}
 
 /** Trim a free-text field to something that fits on a card, or null. */
 function cleanText(raw: unknown, max: number): string | null {
@@ -96,8 +133,33 @@ export function normalizeBrandKit(raw: unknown): BrandKit {
         wordmark: cleanText(r.wordmark, MAX_WORDMARK),
         logoUrl: cleanUrl(r.logoUrl),
         website: cleanText(r.website, 64),
+        fontFamily: cleanFontFamily(r.fontFamily),
         source,
+        extractedAt: cleanIso(r.extractedAt),
+        lastExtractAttemptAt: cleanIso(r.lastExtractAttemptAt),
     };
+}
+
+/** A stored timestamp, or null. Garbage in a date field must not become an Invalid Date downstream. */
+function cleanIso(raw: unknown): string | null {
+    if (typeof raw !== 'string') return null;
+    const t = Date.parse(raw);
+    return Number.isNaN(t) ? null : new Date(t).toISOString();
+}
+
+/**
+ * Whether it is worth trying (or re-trying) a website extraction for this kit.
+ *
+ * False for a kit a human set up ('manual') — an automated guess must never overwrite a deliberate
+ * choice — and false for a recent attempt, successful or not. The failed-attempt case is the one
+ * that matters: extraction runs lazily from the drafting path, so without the backoff an org whose
+ * site blocks us would pay a fetch on every post it ever generates.
+ */
+export function shouldExtractBrandKit(kit: BrandKit, now = new Date()): boolean {
+    if (kit.source === 'manual') return false;
+    if (!kit.lastExtractAttemptAt) return true;
+    const ageMs = now.getTime() - Date.parse(kit.lastExtractAttemptAt);
+    return ageMs >= EXTRACT_RETRY_DAYS * 24 * 60 * 60 * 1000;
 }
 
 // ── Contrast ──────────────────────────────────────────────────────────────────────────────────
@@ -114,6 +176,17 @@ export function relativeLuminance(hex: string): number {
         return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
     };
     return 0.2126 * channel(0) + 0.7152 * channel(1) + 0.0722 * channel(2);
+}
+
+/** HSL saturation, 0…1. Used to tell a brand accent apart from a grey/canvas/ink colour. */
+export function saturation(hex: string): number {
+    const h = normalizeHex(hex) ?? '#000000';
+    const [r, g, b] = [0, 1, 2].map((i) => parseInt(h.slice(1 + i * 2, 3 + i * 2), 16) / 255);
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    if (max === min) return 0;
+    const l = (max + min) / 2;
+    return l > 0.5 ? (max - min) / (2 - max - min) : (max - min) / (max + min);
 }
 
 /** WCAG contrast ratio between two colours, 1:1 … 21:1. */

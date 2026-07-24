@@ -21,7 +21,7 @@ import { resolveMediaForPost } from '../../src/utils/media-resolver';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
 import { generateAndPersistImage, renderAndPersistBrandCard } from '../../src/lib/media-persist';
 import { headlineFromCaption, MAX_HEADLINE_CHARS } from '../../src/lib/brand-card';
-import { normalizeBrandKit } from '../../src/utils/brand-kit';
+import { resolveBrandKitForOrg } from '../../src/lib/brand-extract-fetch';
 import { FalContentPolicyError } from '../../src/lib/fal-gateway';
 import { resolveDisclosureFooter } from '../../src/utils/disclosure-footer';
 import { fitForPlatform, isShortForm, type BrandHashtags } from '../../src/utils/platform-caption';
@@ -605,12 +605,18 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                     const headline = (generated.cardHeadline || '').trim() || headlineFromCaption(rawCaption) || '';
                     if (!headline) throw new Error('no_card_headline');
 
-                    const [org] = await db.select({ name: organisations.name, brandKit: organisations.brandKit })
-                        .from(organisations).where(eq(organisations.id, job.organisation_id)).limit(1);
+                    // Derives the kit from the org's own website the first time a card is needed
+                    // (and persists it), so a client who never filled in a brand form still gets
+                    // their own colours. Falls back to the neutral default and never throws.
+                    const [kit, [org]] = await Promise.all([
+                        resolveBrandKitForOrg(db, job.organisation_id, now),
+                        db.select({ name: organisations.name })
+                            .from(organisations).where(eq(organisations.id, job.organisation_id)).limit(1),
+                    ]);
 
                     return renderAndPersistBrandCard(db, {
                         orgId: job.organisation_id, userId: job.user_id,
-                        headline, kit: normalizeBrandKit(org?.brandKit), aspectRatio: aspect,
+                        headline, kit, aspectRatio: aspect,
                         // Post id seeds the light/bold polarity, so consecutive posts alternate and a
                         // retry of THIS post re-renders the same card.
                         seed: post.id, orgName: org?.name ?? null,

@@ -25,6 +25,7 @@
     "test:gsc-decay": "tsx tests/gsc-decay.test.ts",
     "test:c2pa-sign": "tsx tests/c2pa-sign.test.ts",
     "test:brand-card": "tsx tests/brand-card.test.ts",
+    "test:brand-extract": "tsx tests/brand-extract.test.ts",
     "db:push": "drizzle-kit push",
     "db:seed": "npx tsx seed/cli.ts",
     "db:seed:sandbox": "npx tsx seed/cli.ts --sandbox",
