@@ -8543,8 +8543,74 @@ async function _pceOpenOverlayEditor(postId) {
 // and a no-op when the post has none. Throws on failure so the approve flow surfaces the error rather
 // than silently publishing the un-overlaid image. Composites onto the CLEAN base returned by
 // get-post-image (the pinned pre-bake original), so calling it twice never double-bakes.
+//
+// The single choke point for BOTH media types: a video hands off to the server-side Remotion render
+// (gpQueueVideoRender) and returns, a photo bakes here in the browser. Every approve/publish path
+// calls this one function, so neither kind of post can reach the publish queue without its text.
+// The base clip's real pixel size and length, for the render request. Best-effort and ADVISORY: the
+// composition measures the source video itself inside the renderer (remotion/Root.tsx) and only falls
+// back to these numbers, so a miss here costs nothing. We send them anyway because they are free when
+// the post is the one on screen — its <video> has already loaded metadata — and content_assets stores
+// no duration at all, which makes them the only record of the clip's length on the queued job.
+async function _gpVideoMetaFor(postId) {
+    const onScreen = (typeof _rqReviewPostId !== 'undefined' && _rqReviewPostId === postId)
+        ? document.querySelector('#post-review-body [data-media-video]') : null;
+    const read = (v) => (v && v.videoWidth && isFinite(v.duration) && v.duration > 0)
+        ? { width: v.videoWidth, height: v.videoHeight, durationS: v.duration } : null;
+    const live = read(onScreen);
+    if (live) return live;
+
+    // Not on screen (bulk approve from a list) — load just the metadata off-screen.
+    const url = (typeof _rqPostCache !== 'undefined' && _rqPostCache[postId] && _rqPostCache[postId].thumbnailUrl) || null;
+    if (!url) return {};
+    return new Promise((resolve) => {
+        const v = document.createElement('video');
+        v.preload = 'metadata';
+        v.muted = true;
+        let settled = false;
+        const done = (result) => { if (settled) return; settled = true; clearTimeout(timer); v.removeAttribute('src'); resolve(result); };
+        const timer = setTimeout(() => done({}), 8000);
+        v.addEventListener('loadedmetadata', () => done(read(v) || {}), { once: true });
+        v.addEventListener('error', () => done({}), { once: true });
+        v.src = url;
+    });
+}
+
+// Queue the SERVER-side render of a video post's timed text overlays and report whether one started.
+//
+// A browser has no video encoder, so unlike a photo — which flattens locally via
+// ImageOverlayEditor.bake — a video's overlays are burned in by Remotion Lambda. Returns true when a
+// render was queued: the caller must then stop, because the post now carries render_status 'pending'
+// and every publisher holds it back until the overlaid clip is attached (approval itself is
+// unaffected and stays instant). Returns false when the server says this post is not a video, which
+// is the caller's cue to fall through to the photo bake.
+//
+// trigger-post-render is the AUTHORITY on which path applies — the client's mediaType hint only
+// decides whether it is worth reading the clip's metadata first, never which branch runs. A photo
+// mis-hinted as video costs one wasted metadata read; a video mis-hinted as photo would publish with
+// no text on it at all, so the server gets the final say every time.
+async function gpQueueVideoRender(postId) {
+    const cached = (typeof _rqPostCache !== 'undefined' && _rqPostCache[postId]) || null;
+    const looksVideo = !!cached && (cached.mediaType === 'video' || /video|reel/i.test(cached.postFormat || ''));
+    const meta = looksVideo ? await _gpVideoMetaFor(postId) : {};
+
+    const res = await fetch('/.netlify/functions/trigger-post-render', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ postId, ...meta }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (res.status === 200 && d.skipped) return false;   // not a video (or no text) — bake path
+    if (res.ok || res.status === 202) return true;
+    // Fail-closed, exactly as the photo bake does: refusing the approval is the only way to guarantee
+    // the clip never publishes without the text the reviewer put on it.
+    throw new Error(d.error || 'Could not start the video render for your text overlays.');
+}
+
 async function gpApplyOverlaysBeforeApprove(postId) {
     if (!postId || !window.ImageOverlayEditor) return;
+    // Video posts render server-side; only a photo continues to the browser bake below.
+    if (await gpQueueVideoRender(postId)) return;
     const res = await fetch(`/.netlify/functions/get-post-image?postId=${encodeURIComponent(postId)}`);
     if (!res.ok) {
         // No image (text-only post) → nothing to overlay. Only a real image is an error.

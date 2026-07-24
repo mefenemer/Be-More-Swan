@@ -97,6 +97,10 @@ export default withLambda(async () => {
            AND platform IN ('linkedin','x','threads','youtube')
            AND publish_date <= now()
            AND (retry_at IS NULL OR retry_at <= now())
+           -- Video text-overlay render gate (Phase 4). NULL = nothing to render, 'done' = the
+           -- overlaid clip is attached. 'pending'/'rendering' hold the post back so it can never
+           -- publish without its text; 'failed' holds it back too, for the reviewer to resolve.
+           AND (render_status IS NULL OR render_status = 'done')
          ORDER BY publish_date
          LIMIT ${BATCH}
          FOR UPDATE SKIP LOCKED`

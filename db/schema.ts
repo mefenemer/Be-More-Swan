@@ -1798,6 +1798,11 @@ export const scheduledPosts = pgTable("scheduled_posts", {
   // re-edit composites onto the original, not an already-flattened one.
   imageOverlays: jsonb("image_overlays"),
   overlayBaseAssetId: integer("overlay_base_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
+  // Phase 4 video overlays: gates publishing while a video's timed text is being rendered by Remotion
+  // Lambda. null = nothing to render (photo, or video with no overlays); 'pending'|'rendering' = a
+  // render is in flight (publish must wait); 'done' = the overlaid video is attached; 'failed' = the
+  // render errored (surfaced to the reviewer). See db/post-render-jobs.sql.
+  renderStatus: text("render_status"),
   // Per-post opt-out for the EU AI Act Art. 50 disclosure footer. The footer is on by default (org
   // setting); a reviewer can strip it from this single post. See db/post-disclosure-footer-optout.sql
   // + toggle-post-disclosure.ts.
@@ -2888,6 +2893,33 @@ export const mediaGenerationJobs = pgTable("media_generation_jobs", {
 }, (t) => [
   index("media_generation_jobs_org_idx").on(t.organisationId),
   index("media_generation_jobs_status_idx").on(t.status),
+]);
+
+// Phase 4: one row per Remotion Lambda render of a video post's timed text overlays.
+// Canonical DDL: db/post-render-jobs.sql (apply manually as owner — no db:push).
+// Rendering is asynchronous (distributed across Lambda), so it is a job: trigger renderMediaOnLambda
+// → poll getRenderProgress → download the S3 output to R2 → attach to the post → publish gate clears.
+export const postRenderJobs = pgTable("post_render_jobs", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  postId: integer("post_id").notNull().references(() => scheduledPosts.id, { onDelete: "cascade" }),
+  userId: integer("user_id").references(() => users.id, { onDelete: "set null" }),
+  status: text("status").notNull().default("queued"),              // 'queued' | 'rendering' | 'completed' | 'failed'
+  // { width, height, fps, durationInFrames } — the frame metadata for the composition. Snapshotted at
+  // trigger time because the video's duration isn't stored on content_assets (the client reads it off
+  // the <video>); overlays + the presigned videoSrc are re-derived fresh on each render attempt.
+  renderInput: jsonb("render_input"),
+  renderId: text("render_id"),                                     // Remotion Lambda render id (with bucket, identifies the render)
+  bucketName: text("bucket_name"),                                 // Remotion's S3 bucket for this render's output/progress
+  region: text("region"),                                          // AWS region the render ran in
+  outputAssetId: integer("output_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),  // the rendered video, persisted to R2
+  errorMessage: text("error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("post_render_jobs_org_idx").on(t.organisationId),
+  index("post_render_jobs_post_idx").on(t.postId),
+  index("post_render_jobs_status_idx").on(t.status),
 ]);
 
 // Canva connector, US3: one row per design being imported into the Content Library.

@@ -60,6 +60,8 @@ export default withLambda(async () => {
            AND platform = 'facebook'
            AND publish_date <= now()
            AND (retry_at IS NULL OR retry_at <= now())
+           -- Video text-overlay render gate (Phase 4) — see publish-social-posts for the rationale.
+           AND (render_status IS NULL OR render_status = 'done')
          ORDER BY publish_date
          LIMIT ${BATCH}
          FOR UPDATE SKIP LOCKED`

@@ -5,6 +5,7 @@
 
 import React from 'react';
 import { Composition } from 'remotion';
+import { getVideoMetadata } from '@remotion/media-utils';
 import { PostOverlay, type PostOverlayProps } from './PostOverlay';
 
 const DEFAULT_PROPS: PostOverlayProps = {
@@ -27,12 +28,37 @@ export const RemotionRoot: React.FC = () => {
             width={DEFAULT_PROPS.width!}
             height={DEFAULT_PROPS.height!}
             defaultProps={DEFAULT_PROPS}
-            calculateMetadata={({ props }) => ({
-                width: props.width ?? 1080,
-                height: props.height ?? 1920,
-                fps: props.fps ?? 30,
-                durationInFrames: props.durationInFrames ?? 150,
-            })}
+            // The SOURCE CLIP is the authority on size and length; the inputProps are the fallback.
+            // This runs inside the renderer (a real browser), so it can measure the video the way the
+            // reviewer's browser did. It matters because the props come from the client's <video>
+            // element and content_assets stores no duration at all — a stale or defaulted number
+            // would silently truncate the render, publishing a clip that stops mid-sentence.
+            // Measured dimensions also mean the base video is never letterboxed into a frame of the
+            // wrong aspect ratio, and the fractional overlay geometry lands identically at any size.
+            calculateMetadata={async ({ props }) => {
+                const fps = props.fps ?? 30;
+                let width = props.width ?? 1080;
+                let height = props.height ?? 1920;
+                let seconds = (props.durationInFrames ?? 150) / fps;
+                try {
+                    const meta = await getVideoMetadata(props.videoSrc);
+                    if (meta.width > 0 && meta.height > 0) { width = meta.width; height = meta.height; }
+                    if (Number.isFinite(meta.durationInSeconds) && meta.durationInSeconds > 0) seconds = meta.durationInSeconds;
+                } catch {
+                    // Unreadable source (expired URL, odd container) — the render will fail on its own
+                    // terms with a clearer error than a metadata exception here would give.
+                }
+                // h264 chroma subsampling requires even dimensions; an odd one fails the encode at the
+                // very end of an otherwise successful render.
+                const even = (n: number) => { const r = Math.round(n); return r % 2 === 0 ? r : r + 1; };
+                return {
+                    width: even(width),
+                    height: even(height),
+                    fps,
+                    // Round UP: a half-frame of tail is better than clipping the last frame off.
+                    durationInFrames: Math.max(1, Math.ceil(seconds * fps)),
+                };
+            }}
         />
     );
 };
