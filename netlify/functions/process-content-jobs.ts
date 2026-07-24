@@ -39,6 +39,11 @@ const AI_IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
 
 const BACKOFF_SECS = [10, 30, 90];
 
+// Blueprint COMPLIANCE keys withheld from the system prompt. These carry the literal disclosure
+// text, which the code appends itself after generation — putting it in front of the model only
+// teaches it to write a second copy into the caption.
+const DISCLOSURE_PROMPT_BLOCKLIST = new Set(['disclosureText', 'orgFooterText', 'orgFooterEnabled']);
+
 const SOCIAL_PLATFORMS = ['instagram', 'facebook', 'linkedin', 'x'];
 
 // Scheduled/conversion jobs (draft-horizon-fill.ts, schedule-conversion-posts.ts) never set
@@ -390,7 +395,17 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         for (const [key, sec] of Object.entries(sections)) {
             systemPrompt += `\n--- ${key.toUpperCase()} ---\n`;
             for (const [k, v] of Object.entries(sec.content || {})) {
-                if (v != null) systemPrompt += `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}\n`;
+                if (v == null) continue;
+                // Never show the model the disclosure strings. They are appended DETERMINISTICALLY
+                // in code (see resolveDisclosureFooter above), so the model has no use for them —
+                // but the blueprint dumps every section verbatim, so it was reading its own
+                // workspace footer and per-assistant disclosure and helpfully writing them into the
+                // caption body. The result was up to three disclosures on one post: two echoed, one
+                // appended. Withholding the text is the only fix that stops it at the source;
+                // stripDisclosureEchoes() in platform-caption.ts cleans up what still slips through
+                // (and covers blueprints compiled before this change).
+                if (DISCLOSURE_PROMPT_BLOCKLIST.has(k)) continue;
+                systemPrompt += `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}\n`;
             }
         }
 

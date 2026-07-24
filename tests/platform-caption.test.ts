@@ -9,7 +9,8 @@
 // logic — no DB required.
 
 import assert from 'node:assert';
-import { fitForPlatform, isShortForm, normalizeHashtags, platformTextLimit } from '../src/utils/platform-caption';
+import { fitForPlatform, isShortForm, normalizeHashtags, platformTextLimit, stripDisclosureEchoes } from '../src/utils/platform-caption';
+import { resolveWorkspaceFooterDefault } from '../src/utils/disclosure-footer';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -145,6 +146,67 @@ check('brand enforcement respects the X cap (2)', () => {
 check('fitForPlatform threads the brand config through to the hashtags', () => {
     const r = fitForPlatform({ platform: 'linkedin', longCaption: LONG, shortCaption: SHORT, hashtagsRaw: '#HireDontLearn #FounderLife', footer: FOOTER, brand: BRAND });
     assert.ok(r.hashtags.includes('#HireNotLearn') && !r.hashtags.includes('#HireDontLearn'), 'brand not applied via fitForPlatform');
+});
+
+// ── Duplicate AI disclosures ──────────────────────────────────────────────────────────────────
+// A real prod post shipped THREE disclosures, each worded differently:
+//   "Composed with Marvin, my Be More Swan AI Digital Employee."
+//   "*Some content on this account is created with the help of Be More Swan AI.*"
+//   "Composed with Marvin, my Be More Swan AI Digital Assistant. What's yours called 😉?"
+// The blueprint's COMPLIANCE section was dumped into the system prompt verbatim, so the model read
+// the workspace footer and the per-assistant disclosure and wrote its own copies into the body;
+// the code then appended the real one. process-content-jobs now withholds those keys, and this is
+// the second line of defence for blueprints compiled before that change.
+
+check('echoed disclosure lines are stripped so only the real footer survives', () => {
+    const leaked = 'Your best people are doing your worst jobs.\n\n'
+        + 'Composed with Marvin, my Be More Swan AI Digital Employee.\n'
+        + '*Some content on this account is created with the help of Be More Swan AI.*';
+    const r = fitForPlatform({ platform: 'linkedin', longCaption: leaked, hashtagsRaw: '', footer: FOOTER });
+    assert.equal((r.caption.match(/Digital Employee/g) || []).length, 0, 'echoed disclosure survived');
+    assert.equal((r.caption.match(/Some content on this account/g) || []).length, 0, 'echoed org footer survived');
+    assert.equal((r.caption.match(new RegExp(FOOTER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g')) || []).length, 1, 'the real footer must appear exactly once');
+    assert.ok(r.caption.startsWith('Your best people are doing your worst jobs.'), 'body was damaged');
+});
+
+check('a disclosure hidden behind a leaked hashtag block is still removed', () => {
+    // The two leaks interleave; one pass of each would strand whichever came first.
+    const leaked = 'Real body line.\n\nComposed with Marvin, our AI assistant.\n\n#BeMoreSwan #FounderLife';
+    const r = fitForPlatform({ platform: 'linkedin', longCaption: leaked, hashtagsRaw: '', footer: FOOTER });
+    assert.ok(!r.caption.includes('Composed with Marvin, our AI assistant'), 'disclosure behind hashtags survived');
+    assert.ok(r.caption.startsWith('Real body line.'), 'body was damaged');
+    assert.ok(r.hashtags.includes('#BeMoreSwan'), 'leaked tags should still feed the hashtags field');
+});
+
+check('the various phrasings a model reaches for are all caught', () => {
+    for (const line of [
+        'AI-generated content.',
+        'This post was created with AI.',
+        'Written with the help of AI.',
+        '*Some content on this account is created with the help of Be More Swan AI.*',
+        '> Composed with Ava, our Digital Assistant.',
+    ]) {
+        assert.equal(stripDisclosureEchoes(`Body text here.\n\n${line}`), 'Body text here.', `not stripped: ${line}`);
+    }
+});
+
+check('a post that legitimately discusses AI keeps its body intact', () => {
+    // Shape-based matching earns its keep only if it does not eat real content.
+    for (const body of [
+        'We built our whole onboarding with AI and it halved the work.',
+        'AI-generated images are banned in our brand guidelines — here is why.',
+        'Three things AI still cannot do for your business.',
+    ]) {
+        assert.equal(stripDisclosureEchoes(body), body, `false positive on: ${body}`);
+    }
+});
+
+check('the workspace default footer says "our", not "my"', () => {
+    // It goes out on a BUSINESS account — the assistant belongs to the company, not the reviewer.
+    const resolved = resolveWorkspaceFooterDefault('Marvin');
+    assert.ok(resolved.includes('our Be More Swan AI Digital Assistant'), `wrong possessive: ${resolved}`);
+    assert.ok(!/\bmy Be More Swan\b/.test(resolved), `still says "my": ${resolved}`);
+    assert.ok(resolved.startsWith('Composed with Marvin,'), 'assistant name not substituted');
 });
 
 console.log(`\n${passed} checks passed`);

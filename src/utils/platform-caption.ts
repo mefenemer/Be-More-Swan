@@ -57,6 +57,90 @@ export function trailingHashtagBlock(caption: string | null | undefined): string
     return m ? m[0].trim() : '';
 }
 
+// The same leak, one field over. The blueprint's COMPLIANCE section used to be dumped into the
+// system prompt verbatim, disclosure strings and all, so the model wrote its own copy of the
+// workspace footer (and the per-assistant disclosure) into the caption body — and then the code
+// appended the real one, producing up to three disclosures on a single post, each worded slightly
+// differently. process-content-jobs now withholds those keys from the prompt, but that alone is
+// not enough: blueprints compiled BEFORE that change still carry the text, and a model steeped in
+// this phrasing will occasionally produce a near-miss on its own.
+//
+// So the body is also cleaned. Matching is deliberately SHAPE-based rather than exact-text: the
+// echoes are never verbatim (that is the whole problem — "Digital Employee" vs "Digital Assistant"),
+// so an equality check would catch none of them. Only TRAILING lines are considered, and only ones
+// that read unmistakably as an AI disclosure, so a post that legitimately talks about AI in its body
+// is untouched.
+// Disclosures are short standalone lines, so anything longer is prose that happens to mention AI.
+const MAX_DISCLOSURE_LINE = 160;
+const FURNITURE = '^\\s*[*_>\\s]*';                            // markdown emphasis / quote markers
+const TAIL = '[\\s*_.!]*$';
+
+// STRONG — phrasings distinctive enough to match as a PREFIX, because they reliably continue into
+// the rest of the disclosure ("Composed with Marvin, my Be More Swan AI Digital Assistant…").
+const DISCLOSURE_STRONG_RE = new RegExp(
+    FURNITURE +
+    '(?:' +
+        'composed\\s+with\\b' +
+        '|(?:some\\s+)?content\\s+on\\s+this\\s+account\\b' +
+        '|(?:this|the)\\s+(?:post|message|content|caption)\\s+(?:was|is)\\s+(?:\\w+\\s+){0,3}?(?:with|using|by)\\s+ai\\b' +
+    ')',
+    'i',
+);
+
+// WEAK — phrasings that are ALSO ordinary English, so the whole line must be the disclosure and
+// nothing else. "AI-generated content." is a label; "AI-generated images are banned in our brand
+// guidelines — here is why." is a post, and an earlier prefix-match ate its last line.
+const DISCLOSURE_WEAK_RE = new RegExp(
+    FURNITURE +
+    '(?:' +
+        'ai[-\\s]?(?:generated|assisted)(?:\\s+content)?' +
+        '|(?:written|created|drafted|generated|made|produced)\\s+(?:with|using|by)\\s+(?:the\\s+help\\s+of\\s+)?ai(?:\\s+assistance)?' +
+    ')' +
+    TAIL,
+    'i',
+);
+
+function isDisclosureLine(line: string): boolean {
+    if (line.length > MAX_DISCLOSURE_LINE) return false;
+    return DISCLOSURE_STRONG_RE.test(line) || DISCLOSURE_WEAK_RE.test(line);
+}
+
+/**
+ * Remove model-echoed AI-disclosure lines from the END of a caption body.
+ *
+ * Runs before the canonical footer is appended, so the post ends with exactly one disclosure — the
+ * legally-controlled one the workspace configured. Stops at the first trailing line that is NOT a
+ * disclosure, so only the tail is ever touched.
+ */
+export function stripDisclosureEchoes(caption: string | null | undefined): string {
+    const lines = String(caption ?? '').split('\n');
+    while (lines.length) {
+        const last = lines[lines.length - 1];
+        if (!last.trim()) { lines.pop(); continue; }            // trailing blank
+        if (!isDisclosureLine(last)) break;                     // real content — stop here
+        lines.pop();
+    }
+    return lines.join('\n').replace(/\s+$/, '');
+}
+
+/**
+ * Clean the tail of a generated body: leaked hashtag blocks and echoed disclosures, in whatever
+ * order the model emitted them.
+ *
+ * Alternating to a fixed point rather than running each once, because the two interleave — a model
+ * that writes "…body / #Tags / Composed with Marvin…" hides the hashtags behind the disclosure, and
+ * a single pass of each would leave one of them stranded in the caption.
+ */
+export function cleanGeneratedBody(caption: string | null | undefined): string {
+    let out = String(caption ?? '');
+    for (let i = 0; i < 4; i++) {                               // bounded; converges in 1–2 in practice
+        const next = stripDisclosureEchoes(stripTrailingHashtags(out));
+        if (next === out) break;
+        out = next;
+    }
+    return out;
+}
+
 // Per-brand hashtag governance (stored on the assistant). `canonical` tags are always included and
 // spelled exactly as given; `aliases` map a lowercased variant to its canonical spelling so the
 // account's own tags stop drifting between posts (e.g. #HireDontLearn → #HireNotLearn,
@@ -153,7 +237,9 @@ export function fitForPlatform(input: FitInput): { caption: string; hashtags: st
     // Pull any trailing hashtag block the model leaked into the caption body — hashtags belong only in
     // the separate field (normalized below), and leaving them in the body strands the footer and ships
     // typos. Fall back to those leaked tags for the hashtags field only if the field itself is empty.
-    const longCaption = stripTrailingHashtags(input.longCaption);
+    // …and any AI-disclosure line the model echoed out of its own prompt: the real footer is
+    // appended below, and shipping both is the "three disclosures on one post" bug.
+    const longCaption = cleanGeneratedBody(input.longCaption);
     const hashtags = normalizeHashtags(input.hashtagsRaw || trailingHashtagBlock(input.longCaption), platform, input.brand);
 
     if (!isShortForm(platform)) {
@@ -166,7 +252,7 @@ export function fitForPlatform(input: FitInput): { caption: string; hashtags: st
     const tagLen = hashtags ? hashtags.length + 2 : 0;
     const bodyBudget = Math.max(40, limit - footerLen - credit.length - tagLen);
 
-    let body = stripTrailingHashtags(input.shortCaption?.trim() || deriveShort(longCaption, bodyBudget));
+    let body = cleanGeneratedBody(input.shortCaption?.trim() || deriveShort(longCaption, bodyBudget));
     if (body.length > bodyBudget) body = deriveShort(body, bodyBudget);
 
     let caption = appendFooter(body, footer) + credit;
