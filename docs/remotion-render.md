@@ -269,6 +269,21 @@ Courier New, Gelasio for Georgia) so widths are identical, and accepting a visua
 (Anton for Impact, Comic Neue for Comic Sans MS). Until that lands, treat step 5's font check as
 mandatory on first deploy and narrow the editor's list if the substitution is unacceptable.
 
+### R2 needs a CORS rule, or the overlay editor loses its backdrop
+
+To place text on a video the editor needs a still to drag onto, and only a browser can decode one out
+of a clip (a photo's backdrop comes from the server as a data URL, but a clip can be 500 MB — far past
+the response cap that makes that trick work). So `_pceCaptureVideoFrame` draws a frame from a `<video>`
+onto a canvas and reads it back with `toDataURL`.
+
+That requires the video element to load `crossOrigin="anonymous"` and the presigned R2 GET to answer
+with CORS headers. Without them the canvas is tainted, `toDataURL` throws, and the editor falls back
+to a plain outline at the clip's aspect ratio — text can still be placed (the geometry is fractional,
+and the canvas behind shows the boxes on the real video) but the reviewer is positioning blind.
+
+Fix: allow `GET` from the app's origins on the R2 bucket's CORS policy. Nothing else in the app
+depends on it — every other R2 read is server-side — which is why it has not come up before.
+
 ### Render output privacy
 
 `startRender` uses `privacy: 'public'` because the worker copies the output with a plain `fetch()`.

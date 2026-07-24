@@ -8534,6 +8534,68 @@ let _gpOverlayCountByPost = {};   // postId → number of saved overlays (for th
 // The STORED image stays clean — overlays live as data and paint as a live layer on the mock-up; the
 // flat bake happens only at approval (gpApplyOverlaysBeforeApprove). Keeping the base clean is what
 // lets a re-edit start from the original picture instead of compositing onto an already-baked one.
+// Grab a still frame from a clip to use as the editor's backdrop.
+//
+// The editor is a drag surface: it needs a picture. A photo post gets one from the server as a data
+// URL, but a clip can be 500 MB, so the frame has to be taken here, where there is already a decoder.
+//
+// It is ONLY a backdrop. Unlike a photo — whose overlays really are composited into the bytes the
+// editor is showing — a video's text is burned in by Remotion from the ORIGINAL clip, so this frame
+// is never published and never composited. That is what makes the fallback below acceptable.
+//
+// `seekTo` prefers whatever moment the reviewer has the canvas paused on, so text is positioned
+// against the frame they were actually looking at.
+function _pceCaptureVideoFrame(mediaUrl, seekTo) {
+    return new Promise((resolve) => {
+        const v = document.createElement('video');
+        // Required for a clean canvas: without it, drawing a cross-origin frame taints the canvas and
+        // toDataURL throws. It also means R2 must answer the presigned GET with CORS headers — if it
+        // does not, the video errors here and we fall back rather than breaking the editor.
+        v.crossOrigin = 'anonymous';
+        v.muted = true;
+        v.playsInline = true;
+        v.preload = 'auto';
+        let settled = false;
+        const done = (r) => { if (settled) return; settled = true; clearTimeout(timer); v.removeAttribute('src'); resolve(r); };
+        const timer = setTimeout(() => done(null), 10000);
+        const grab = () => {
+            try {
+                const c = document.createElement('canvas');
+                c.width = v.videoWidth; c.height = v.videoHeight;
+                if (!c.width || !c.height) return done(null);
+                c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+                done({ dataUrl: c.toDataURL('image/png'), width: c.width, height: c.height });
+            } catch {
+                done(null);   // tainted canvas (no CORS on the bucket) — the caller degrades
+            }
+        };
+        v.addEventListener('error', () => done(null), { once: true });
+        v.addEventListener('loadeddata', () => {
+            const t = (typeof seekTo === 'number' && isFinite(seekTo) && seekTo > 0) ? Math.min(seekTo, (v.duration || 0) - 0.05) : 0;
+            if (t > 0) { v.addEventListener('seeked', grab, { once: true }); v.currentTime = t; }
+            else grab();
+        }, { once: true });
+        v.src = mediaUrl;
+    });
+}
+
+// A plain backdrop at the clip's aspect ratio, for when the real frame can't be captured. Text can
+// still be placed accurately — overlay geometry is fractional, and the canvas behind the editor shows
+// the boxes on the actual video — so this degrades the reference, not the result.
+function _pcePlaceholderBackdrop(width, height) {
+    const c = document.createElement('canvas');
+    c.width = Math.max(2, Math.round(width || 1080));
+    c.height = Math.max(2, Math.round(height || 1920));
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = '#111827';
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.font = `${Math.round(c.height * 0.035)}px Arial, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.fillText('Video frame unavailable — position text here', c.width / 2, c.height / 2);
+    return c.toDataURL('image/png');
+}
+
 async function _pceOpenOverlayEditor(postId) {
     if (!postId) return;
     if (!window.ImageOverlayEditor) { _pceSetOverlayMsg('Text editor could not load. Please refresh.', 'error'); return; }
@@ -8542,17 +8604,32 @@ async function _pceOpenOverlayEditor(postId) {
     try {
         const res = await fetch(`/.netlify/functions/get-post-image?postId=${encodeURIComponent(postId)}`);
         if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Could not load the image.'); }
-        base = await res.json();   // { dataUrl, assetId, overlays }
+        base = await res.json();   // photo: { dataUrl, assetId, overlays } | video: { isVideo, mediaUrl, … }
     } catch (err) {
         _pceSetOverlayMsg(err.message || 'Could not load the image.', 'error');
         return;
     }
-    _pceSetOverlayMsg('');
+
+    // Video posts have no image to hand back, so build the backdrop here from a frame of the clip.
+    let backdrop = base.dataUrl;
+    if (base.isVideo) {
+        _pceSetOverlayMsg('Grabbing a frame from your video…');
+        const onCanvas = document.querySelector('#post-review-body [data-media-video]');
+        const frame = await _pceCaptureVideoFrame(base.mediaUrl, onCanvas && onCanvas.currentTime).catch(() => null);
+        if (frame) {
+            backdrop = frame.dataUrl;
+        } else {
+            backdrop = _pcePlaceholderBackdrop(
+                onCanvas && onCanvas.videoWidth, onCanvas && onCanvas.videoHeight);
+            _pceSetOverlayMsg('Could not read a frame from this clip — position your text on the outline instead.', 'error');
+        }
+    }
+    if (!base.isVideo) _pceSetOverlayMsg('');
     // Prefer the cache's overlays (what the user is looking at) over the server copy, which can lag a
     // just-saved edit by a request.
     const cached = _rqPostCache[postId] && _rqPostCache[postId].overlays;
     window.ImageOverlayEditor.open({
-        imageUrl: base.dataUrl,
+        imageUrl: backdrop,
         overlays: (cached && cached.length ? cached : base.overlays) || [],
         onDone: async (overlays) => {
             if (overlays == null) return;   // cancelled — leave everything as it was
@@ -8568,7 +8645,9 @@ async function _pceOpenOverlayEditor(postId) {
                 // Repaint the canvas + inspector for the post on screen, then land back on this layer.
                 if (postId === _rqReviewPostId) { _rqReviewRenderActive(); _pceSelect('overlays'); }
                 _pceSetOverlayMsg(overlays.length
-                    ? `${overlays.length} text box${overlays.length > 1 ? 'es' : ''} on the image — baked into the published picture on approval.`
+                    ? `${overlays.length} text box${overlays.length > 1 ? 'es' : ''} on the ${base.isVideo ? 'video' : 'image'} — ${base.isVideo
+                        ? 'rendered into the published clip on approval. Time each box on the timeline.'
+                        : 'baked into the published picture on approval.'}`
                     : 'Text removed.', 'ok');
             } catch (err) {
                 _pceSetOverlayMsg(err.message || 'Could not save your text.', 'error');
