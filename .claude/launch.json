@@ -2,6 +2,16 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-posteditor-p2",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/eb48c9e0-8b5a-41b1-864d-55de6fe5e47e/scratchpad/harness/server.ts"
+      ],
+      "port": 4211,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-find-photo",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

@@ -626,7 +626,36 @@ window.showComplianceModals = function showComplianceModals(force) {
 
           <div class="p-3 space-y-3">
             <!-- ── Media: the card itself ───────────────────────────────── -->
+            <!-- ── Caption. Always present: every post has words, whatever its media is. ── -->
+            <div class="pce-insp hidden" data-insp="caption">
+              <label for="post-review-caption" class="block text-xs font-bold text-gray-600 mb-1">Caption</label>
+              <textarea id="post-review-caption" rows="6"
+                class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-600"></textarea>
+              <label for="post-review-hashtags" class="block text-xs font-bold text-gray-600 mb-1 mt-3">Hashtags</label>
+              <input id="post-review-hashtags" type="text"
+                class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-600">
+              <label id="post-review-amend-all" class="hidden items-center gap-2 text-xs font-semibold text-gray-600 cursor-pointer select-none mt-3">
+                <input id="post-review-amend-all-cb" type="checkbox" checked class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600">
+                <span id="post-review-amend-all-label">Apply to all platforms</span>
+              </label>
+              <div class="mt-3 flex flex-wrap items-center gap-2">
+                <button type="button" onclick="rqReviewSaveAmend()"
+                  class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer">Save caption</button>
+                <span id="post-review-amend-msg" class="text-xs font-semibold text-gray-500"></span>
+              </div>
+            </div>
+
             <div class="pce-insp" data-insp="media">
+              <!-- Media that is NOT a branded card: choosing what the picture is. The shared
+                   sourcing panel is mounted here on demand (see _inspMountMediaPanel). -->
+              <div id="insp-media-generic" class="hidden">
+                <p class="text-xs font-bold text-gray-600 mb-1">Picture</p>
+                <p class="text-[11px] text-gray-400 mb-2">Upload your own, search stock, or generate one.</p>
+                <div id="post-review-media-host"></div>
+              </div>
+
+              <!-- Media that IS a branded card: the card's own parameters. -->
+              <div id="insp-media-card">
               <div>
                 <label for="pce-headline" class="block text-xs font-bold text-gray-600 mb-1">Wording on the card</label>
                 <textarea id="pce-headline" rows="3" maxlength="120"
@@ -664,6 +693,17 @@ window.showComplianceModals = function showComplianceModals(force) {
               </div>
 
               <p class="text-[11px] text-gray-400 mt-3">Click the company name or the web address on the card to place them.</p>
+
+              <div class="pt-3 mt-3 border-t border-gray-100 flex flex-wrap items-center gap-2">
+                <button type="button" id="pce-save"
+                  class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer">Save card</button>
+                <button type="button" id="pce-revert"
+                  class="text-xs font-semibold text-gray-500 hover:text-gray-700 transition cursor-pointer">Undo changes</button>
+                <button type="button" id="pce-resetkit"
+                  class="text-xs font-semibold text-gray-500 hover:text-gray-700 transition cursor-pointer">Reset to my brand style</button>
+                <span id="pce-msg" class="text-xs font-semibold text-gray-500"></span>
+              </div>
+              </div>
             </div>
 
             <!-- ── The two placeable elements. Identical controls, because they are the same
@@ -700,15 +740,6 @@ window.showComplianceModals = function showComplianceModals(force) {
               <p class="pce-avail-note text-[11px] text-gray-400 mt-3">Drag it up or down on the card to place it.</p>
             </div>
 
-            <div class="pt-1 border-t border-gray-100 flex flex-wrap items-center gap-2">
-              <button type="button" id="pce-save"
-                class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer">Save card</button>
-              <button type="button" id="pce-revert"
-                class="text-xs font-semibold text-gray-500 hover:text-gray-700 transition cursor-pointer">Undo changes</button>
-              <button type="button" id="pce-resetkit"
-                class="text-xs font-semibold text-gray-500 hover:text-gray-700 transition cursor-pointer">Reset to my brand style</button>
-              <span id="pce-msg" class="text-xs font-semibold text-gray-500"></span>
-            </div>
           </div>
         </aside>
       </div>
@@ -780,20 +811,6 @@ window.showComplianceModals = function showComplianceModals(force) {
     </div>
     <!-- Footer: actions -->
     <div id="post-review-actions" class="border-t border-gray-100 p-4 space-y-3 shrink-0">
-      <div id="post-review-amend" class="hidden space-y-2">
-        <label class="block text-xs font-semibold text-gray-600">Edit caption</label>
-        <textarea id="post-review-caption" rows="4" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-300"></textarea>
-        <label class="block text-xs font-semibold text-gray-600">Hashtags</label>
-        <input id="post-review-hashtags" type="text" class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-300">
-        <label id="post-review-amend-all" class="hidden items-center gap-2 text-xs font-semibold text-gray-600 cursor-pointer select-none">
-          <input id="post-review-amend-all-cb" type="checkbox" checked class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-300">
-          <span id="post-review-amend-all-label">Apply to all platforms</span>
-        </label>
-        <div class="flex gap-2">
-          <button onclick="rqReviewSaveAmend()" class="flex-1 py-2.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg cursor-pointer">Save changes</button>
-          <button onclick="rqReviewToggle()" class="py-2.5 px-4 text-xs font-bold text-gray-500 hover:bg-gray-50 rounded-lg cursor-pointer">Cancel</button>
-        </div>
-      </div>
       <div id="post-review-changes" class="hidden space-y-2">
         <label class="block text-xs font-semibold text-gray-600">What should I change?</label>
         <textarea id="post-review-feedback" rows="3" maxlength="500" placeholder="e.g. Make it punchier, drop the emojis, and mention our summer sale." class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300"></textarea>
@@ -812,14 +829,6 @@ window.showComplianceModals = function showComplianceModals(force) {
           <button id="post-review-reject-btn" onclick="rqReviewReject()" class="flex-1 py-2.5 text-xs font-bold bg-red-600 hover:bg-red-700 text-white rounded-lg cursor-pointer">Reject &amp; archive</button>
           <button onclick="rqReviewToggle()" class="py-2.5 px-4 text-xs font-bold text-gray-500 hover:bg-gray-50 rounded-lg cursor-pointer">Cancel</button>
         </div>
-      </div>
-      <!-- Add / change media: relocates the shared Work-with-AI media panel into this modal -->
-      <div id="post-review-media" class="hidden space-y-2">
-        <div class="flex items-center justify-between">
-          <label class="block text-xs font-semibold text-gray-600">Add or change media</label>
-          <button onclick="rqReviewMediaDone()" class="py-1.5 px-3 text-xs font-bold text-gray-500 hover:bg-gray-50 rounded-lg cursor-pointer">Done</button>
-        </div>
-        <div id="post-review-media-host"></div>
       </div>
       <!-- Reschedule panel: natural-language instruction OR explicit datetime picker -->
       <div id="post-review-reschedule" class="hidden space-y-2.5">
@@ -861,12 +870,10 @@ window.showComplianceModals = function showComplianceModals(force) {
       </label>
       <div id="post-review-buttons" class="grid grid-cols-2 gap-2">
         <button id="post-review-approve-btn" onclick="rqReviewApprove()" class="col-span-2 py-3 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600">Approve — let the assistant pick a time</button>
-        <button onclick="rqReviewAddMedia()" class="col-span-2 py-2.5 text-xs font-bold border border-emerald-300 text-emerald-700 hover:bg-emerald-50 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5">
-          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-          Add or change image
-        </button>
-        <button onclick="rqReviewToggle('amend')" class="py-2.5 text-xs font-bold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer">Amend myself</button>
-        <button onclick="rqReviewToggle('changes')" class="py-2.5 text-xs font-bold border border-violet-300 text-violet-700 hover:bg-violet-50 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5">
+        <!-- "Add or change image" and "Amend myself" are gone: the picture and the caption are both
+             edited by clicking them on the post itself. What is left here are the actions that act
+             on the whole post rather than on one part of it. -->
+        <button onclick="rqReviewToggle('changes')" class="col-span-2 py-2.5 text-xs font-bold border border-violet-300 text-violet-700 hover:bg-violet-50 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5">
           <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
           Regenerate
         </button>
@@ -5218,9 +5225,14 @@ function renderPlatformMockup(post) {
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>
       </div>`;
 
+    // The caption block is a selectable region too, so clicking the words you want to change is
+    // how you get to the words — not a drawer in the footer.
+    const captionBlock = (cls) =>
+        `<div class="${cls}" data-caption-host>${caption}${hashtags}${link}</div>`;
+
     const body = meta.mediaFirst
-        ? `${header}${media}<div class="px-3.5 py-3">${caption}${hashtags}${link}</div>${footer}`
-        : `${header}<div class="px-3.5 pb-3">${caption}${hashtags}${link}</div>${media}${footer}`;
+        ? `${header}${media}${captionBlock('px-3.5 py-3')}${footer}`
+        : `${header}${captionBlock('px-3.5 pb-3')}${media}${footer}`;
 
     return `<div class="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden max-w-md mx-auto" style="border-top:3px solid ${meta.accent}">${body}</div>`;
 }
@@ -5706,15 +5718,39 @@ const _PCE_KIT_FIELDS = ['primaryColor', 'backgroundColor', 'textColor', 'fontFa
 
 const _PCE_ELEMENTS = { wordmark: 'Company name', website: 'Website' };
 
-// What the inspector calls each selectable layer. 'media' is the card itself.
+// What the inspector calls each selectable layer. `media` is titled by what the media actually is.
 const _PCE_INSP_TITLES = {
-    media:    { title: 'Branded card', kind: 'Media' },
+    media:    { title: 'Picture',      kind: 'Media' },
+    caption:  { title: 'Caption',      kind: 'Text' },
     wordmark: { title: 'Company name', kind: 'Element' },
     website:  { title: 'Website',      kind: 'Element' },
 };
 
 // Which layer the inspector is showing. Selection drives the panel — nothing else does.
 let _pceSelection = 'media';
+// The layers THIS post has. A photo post has no company-name element to select, and selection must
+// never land somewhere the post cannot go.
+let _pceLayers = [];
+
+// Seed the caption controls from the post. Kept separate from the card seeding because a caption
+// exists on every post, card or not.
+function _pceFillCaption(post) {
+    if (_pceEl('post-review-caption')) _pceEl('post-review-caption').value = post.caption || '';
+    if (_pceEl('post-review-hashtags')) _pceEl('post-review-hashtags').value = post.hashtags || '';
+    // "Apply to all platforms" only means anything when there is more than one.
+    const all = _pceEl('post-review-amend-all');
+    const multi = _rqReviewGroupIds.length > 1;
+    if (all) {
+        all.classList.toggle('hidden', !multi);
+        all.classList.toggle('inline-flex', multi);
+        const cb = _pceEl('post-review-amend-all-cb');
+        if (cb) cb.checked = true;   // an edit defaults to the whole group, never one platform
+        const label = _pceEl('post-review-amend-all-label');
+        if (label) label.textContent = `Apply to all ${_rqReviewGroupIds.length} platforms`;
+    }
+    const msg = _pceEl('post-review-amend-msg');
+    if (msg) { msg.textContent = ''; msg.className = 'text-xs font-semibold text-gray-500'; }
+}
 
 // Mount the editing canvas ONTO the platform mock-up: the card image in the mock-up becomes the
 // live preview, and the drag handles overlay it there. Returns false when this post's mock-up has
@@ -5741,12 +5777,15 @@ function _pceMountCanvas() {
         layer.className = 'absolute inset-0';
         host.appendChild(layer);
     }
-    // Clicking the card itself (not a handle) selects the media layer.
-    host.addEventListener('click', (ev) => {
-        if (ev.target.closest('.pce-handle')) return;
-        _pceSelect('media');
-    });
     return true;
+}
+
+// Clicking the post selects the layer you clicked. Delegated from post-review-body, which survives
+// every re-render — the mock-up inside it does not.
+function _pceCanvasClick(ev) {
+    if (ev.target.closest('.pce-handle')) return;   // handles select themselves on pointerdown
+    if (ev.target.closest('[data-caption-host]')) { _pceSelect('caption'); return; }
+    if (ev.target.closest('[data-media-host]')) { _pceSelect('media'); }
 }
 
 // Show exactly one inspector section, and mark the matching handle as selected.
@@ -5756,6 +5795,7 @@ function _pceMountCanvas() {
 // first move.
 function _pceSelect(key, repaintHandles = true) {
     if (!_PCE_INSP_TITLES[key]) return;
+    if (_pceLayers.length && !_pceLayers.includes(key)) return;
     _pceSelection = key;
     for (const sec of document.querySelectorAll('.pce-insp')) {
         sec.classList.toggle('hidden', sec.dataset.insp !== key);
@@ -5765,6 +5805,30 @@ function _pceSelect(key, repaintHandles = true) {
     if (_pceEl('pce-insp-kind')) _pceEl('pce-insp-kind').textContent = label.kind;
     _pcePaintAlign(key);
     if (repaintHandles) _pcePaintHandles();
+    // The sourcing panel is shared with the generate-post sheet, so it is moved here on demand
+    // rather than duplicated — and only when the picture layer is actually being looked at.
+    if (key === 'media' && !_pceEl('insp-media-generic')?.classList.contains('hidden')) {
+        _inspMountMediaPanel();
+    }
+}
+
+// Mount the shared Work-with-AI media panel inside the inspector's picture section, pointed at the
+// post being reviewed. _rqRestoreMediaPanel puts it back when the modal closes or the post changes.
+function _inspMountMediaPanel() {
+    const id = _rqReviewPostId;
+    const post = id != null ? _rqPostCache[id] : null;
+    const panel = document.getElementById('gp-ai-media');
+    const host = _pceEl('post-review-media-host');
+    if (!post || !panel || !host) return;
+    if (!_gpAiMediaHome) _gpAiMediaHome = { parent: panel.parentNode, next: panel.nextSibling };
+    if (panel.parentNode === host) return;   // already here — remounting would reset the flow
+    _gpCurrentPostId = id;
+    _gpAiMediaPrompt = '';
+    host.appendChild(panel);
+    panel.classList.remove('hidden');
+    gpAiSetMediaType(post.mediaType === 'video' ? 'video' : 'image');
+    document.getElementById('gp-ai-media-thumb')?.classList.add('hidden');
+    gpAiShowThumb(post.thumbnailUrl, post.mediaType);
 }
 
 // Alignment segmented control for the selected element.
@@ -6054,22 +6118,40 @@ function _pceSchedulePreview() { clearTimeout(_pceDebounce); _pceDebounce = setT
 function _pceSyncForPost(post) {
     const wrap = _pceEl('post-review-inspector');
     if (!wrap) return;
-    const card = post && post.brandCard;
-    const editable = !!card && ['pending_approval', 'draft', 'in_review', 'approved', 'scheduled'].includes(post.status);
-    // Mounting must come first: without an image in the mock-up there is no canvas to edit on, and
-    // an inspector full of controls pointing at nothing is worse than no inspector.
-    const mounted = editable && _pceMountCanvas();
-    if (!mounted) {
+    const editable = !!post && ['pending_approval', 'draft', 'in_review', 'approved', 'scheduled'].includes(post.status);
+    if (!editable) {
         wrap.classList.add('hidden');
         wrap.style.display = 'none';   // `hidden` loses to a display set inline elsewhere
         _pceSetStageWide(false);
+        _rqRestoreMediaPanel();
         _pceState.postId = null;
         _pceState.geo = null;
+        _pceLayers = [];
         return;
     }
     wrap.classList.remove('hidden');
     wrap.style.display = '';
     _pceSetStageWide(true);
+
+    const card = post.brandCard;
+    // Only a card is mounted as an editable canvas. A photo has nothing to drag yet (that is
+    // Phase 3), and stripping its object-cover crop would change the mock-up for no gain.
+    const hasCard = !!card && _pceMountCanvas();
+
+    // Which layers this post actually has. Selection can never land on one that is absent.
+    _pceLayers = hasCard ? ['media', 'caption', 'wordmark', 'website'] : ['media', 'caption'];
+    _pceEl('insp-media-card')?.classList.toggle('hidden', !hasCard);
+    _pceEl('insp-media-generic')?.classList.toggle('hidden', hasCard);
+    _PCE_INSP_TITLES.media.title = hasCard ? 'Branded card' : 'Picture';
+
+    _pceFillCaption(post);
+
+    if (!hasCard) {
+        _pceState.postId = null;
+        _pceState.geo = null;
+        _pceSelect('caption');
+        return;
+    }
 
     const rp = card.renderParams || {};
     const kit = rp.kit || {};
@@ -6149,6 +6231,7 @@ function _pceSetStageWide(wide) {
         // renders, so listeners bound to the layer itself would silently stop firing after the
         // first platform switch.
         const canvasRoot = _pceEl('post-review-body');
+        canvasRoot?.addEventListener('click', _pceCanvasClick);
         canvasRoot?.addEventListener('pointerdown', _pceDragStart);
         canvasRoot?.addEventListener('pointermove', _pceDragMove);
         canvasRoot?.addEventListener('pointerup', _pceDragEnd);
@@ -6264,16 +6347,10 @@ function _rqReviewRenderActive() {
             : (multi ? `${prefix} — let the assistant pick times` : 'Approve — let the assistant pick a time');
     }
 
-    // "Amend myself": show the "apply to all platforms" option only when there's more than one.
-    const amendAll = document.getElementById('post-review-amend-all');
-    if (amendAll) {
-        amendAll.classList.toggle('hidden', !multi);
-        amendAll.classList.toggle('flex', multi);
-        const cb = document.getElementById('post-review-amend-all-cb');
-        if (cb) cb.checked = true;
-        const lbl = document.getElementById('post-review-amend-all-label');
-        if (lbl) lbl.textContent = `Apply to all ${groupSize} platforms`;
-    }
+    // The "apply to all platforms" control is seeded by _pceFillCaption, which owns the caption
+    // section now. It used to be done here too, with a different display class — two owners for
+    // one control, quietly disagreeing.
+
     // Reject button reads "all" for a group.
     const rejectBtn = document.getElementById('post-review-reject-btn');
     if (rejectBtn) rejectBtn.textContent = multi ? `Reject all ${groupSize} & archive` : 'Reject & archive';
@@ -6401,41 +6478,18 @@ function _rqRestoreMediaPanel() {
     }
 }
 
+// Sourcing media is now "select the picture" — there is no separate place to go, so both of these
+// just point the inspector at the picture layer and let it mount the shared panel.
 function rqReviewAddMedia() {
-    const id = _rqReviewPostId;
-    const post = id != null ? _rqPostCache[id] : null;
-    const panel = document.getElementById('gp-ai-media');
-    const host = document.getElementById('post-review-media-host');
-    if (!post || !panel || !host) return;
-    // Capture the panel's true home once so we can always put it back.
-    if (!_gpAiMediaHome) _gpAiMediaHome = { parent: panel.parentNode, next: panel.nextSibling };
-    // Point the shared media flow at this draft, then mount the panel here.
-    _gpCurrentPostId = id;
-    _gpAiMediaPrompt = '';
-    host.appendChild(panel);
-    panel.classList.remove('hidden');
-    gpAiSetMediaType('image');
-    document.getElementById('gp-ai-media-thumb')?.classList.add('hidden');
-    gpAiShowThumb(post.thumbnailUrl, post.mediaType);   // surfaces the current image, if any
-    rqReviewToggle('media');
+    _pceSelect('media');
+    _pceEl('post-review-inspector')?.scrollIntoView({ block: 'nearest' });
 }
 
-function rqReviewMediaDone() {
-    _rqRestoreMediaPanel();
-    rqReviewToggle();
-    // Issue #55: sourcing new media (own/stock/AI) resolves the "media deleted" flag server-side —
-    // reflect that immediately rather than waiting for the next full list refresh.
-    const id = _rqReviewPostId;
-    const post = id != null ? _rqPostCache[id] : null;
-    if (post && post.mediaMissing) {
-        post.mediaMissing = false;
-        document.getElementById('post-review-media-alert')?.classList.add('hidden');
-    }
-}
-
-// Show one inline form (amend/changes/reject/media/reschedule) and hide the primary buttons; no arg → buttons.
+// Show one inline form (changes/reject/reschedule) and hide the primary buttons; no arg → buttons.
 function rqReviewToggle(which) {
-    ['amend', 'changes', 'reject', 'media', 'reschedule'].forEach(k => document.getElementById('post-review-' + k).classList.add('hidden'));
+    // 'amend' and 'media' were retired in Phase 2 — the caption and the picture are edited in the
+    // inspector now. Guarded rather than assumed: this list outlived two of its own entries once.
+    ['changes', 'reject', 'reschedule'].forEach(k => document.getElementById('post-review-' + k)?.classList.add('hidden'));
     const buttons = document.getElementById('post-review-buttons');
     if (which) {
         if (which === 'reschedule') {
@@ -6648,9 +6702,16 @@ async function rqReviewSaveAmend() {
             // Update the cache so the edit is visible immediately (re-rendered below for the active tab).
             if (_rqPostCache[tid]) { _rqPostCache[tid].caption = caption; _rqPostCache[tid].hashtags = hashtags; }
         }
-        document.getElementById('post-review-body').innerHTML = renderPlatformMockup(_rqPostCache[id]);
-        rqReviewToggle();
-        if (window.showToast) window.showToast(applyAll ? `Changes saved to all ${targetIds.length} platforms.` : 'Changes saved.');
+        // Re-render through the normal path, not by writing innerHTML here: the canvas is mounted
+        // onto the mock-up, so replacing it directly would strip the handle layer and leave the
+        // inspector pointing at an element that no longer exists.
+        _rqReviewRenderActive();
+        _pceSelect('caption');
+        const msg = document.getElementById('post-review-amend-msg');
+        if (msg) {
+            msg.textContent = applyAll ? `Saved to all ${targetIds.length} platforms.` : 'Caption saved.';
+            msg.className = 'text-xs font-semibold text-emerald-700';
+        }
     } catch { alert('Network error — please try again.'); }
 }
 
@@ -8000,6 +8061,13 @@ function gpAiShowThumb(url, type) {
         const p = _rqPostCache[_rqReviewPostId];
         p.thumbnailUrl = url;
         p.mediaType = (type ? type === 'video' : /\.mp4(\?|$)/i.test(url)) ? 'video' : 'image';
+        // Issue #55: actually sourcing media resolves the "media deleted" flag server-side. This is
+        // the moment it happens now that the picture is edited in the inspector — there is no longer
+        // a "Done" button to hang the clear on (see the retired rqReviewMediaDone).
+        if (p.mediaMissing) {
+            p.mediaMissing = false;
+            document.getElementById('post-review-media-alert')?.classList.add('hidden');
+        }
         const body = document.getElementById('post-review-body');
         if (body) body.innerHTML = renderPlatformMockup(p);
     }
