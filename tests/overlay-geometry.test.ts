@@ -13,7 +13,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import {
     PAD_RATIO, LINE_HEIGHT, BORDER_RATIO, RADIUS_RATIO,
-    OVERLAY_DEFAULTS, overlayBoxStyle, overlayVisibleAt, hexToRgba,
+    OVERLAY_DEFAULTS, overlayBoxStyle, overlayVisibleAt, overlayFrameRange, hexToRgba,
 } from '../src/lib/overlay-geometry';
 
 let passed = 0;
@@ -103,6 +103,25 @@ check('overlayVisibleAt treats absent bounds as "always"', () => {
     assert.equal(overlayVisibleAt({ endS: 4 }, 4), false);
 });
 
+check('overlayFrameRange maps seconds to a Sequence window, clamped inside the clip', () => {
+    // 30fps, 150-frame (5s) clip.
+    // Whole clip when unbounded.
+    assert.deepEqual(overlayFrameRange({}, 30, 150), { from: 0, durationInFrames: 150 });
+    // [1s, 3s) → frames 30..90 → from 30, length 60.
+    assert.deepEqual(overlayFrameRange({ startS: 1, endS: 3 }, 30, 150), { from: 30, durationInFrames: 60 });
+    // Only a start: runs to the end of the clip.
+    assert.deepEqual(overlayFrameRange({ startS: 2 }, 30, 150), { from: 60, durationInFrames: 90 });
+    // Only an end: from frame 0.
+    assert.deepEqual(overlayFrameRange({ endS: 2 }, 30, 150), { from: 0, durationInFrames: 60 });
+    // endS past the clip is clamped to the clip (the box is timed longer than the video is).
+    assert.deepEqual(overlayFrameRange({ startS: 4, endS: 99 }, 30, 150), { from: 120, durationInFrames: 30 });
+    // A start at/after the very end still yields a visible 1-frame window rather than vanishing.
+    const r = overlayFrameRange({ startS: 10 }, 30, 150);
+    assert.ok(r.from <= 149 && r.durationInFrames >= 1, `degenerate window: ${JSON.stringify(r)}`);
+    // Rounds to the nearest frame (0.05s at 30fps ≈ 1.5 → 2).
+    assert.equal(overlayFrameRange({ startS: 0.05 }, 30, 150).from, 2);
+});
+
 check('hexToRgba parses hex and falls back to opaque black on junk', () => {
     assert.equal(hexToRgba('#ff007f', 0.5), 'rgba(255,0,127,0.5)');
     assert.equal(hexToRgba('ff007f', 1), 'rgba(255,0,127,1)');
@@ -110,4 +129,4 @@ check('hexToRgba parses hex and falls back to opaque black on junk', () => {
     assert.equal(hexToRgba(null, 1), 'rgba(0,0,0,1)');
 });
 
-console.log(`\n${passed}/7 passed`);
+console.log(`\n${passed}/8 passed`);

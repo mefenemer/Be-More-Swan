@@ -331,10 +331,14 @@ export async function renderBrandCard(opts: {
     }
 
     const svg = await satori(
+        // satori accepts this lightweight VNode at runtime (its own JSX shape). Since @remotion pulled
+        // @types/react into the tree, satori's `ReactNode` param now resolves to React's strict node
+        // type, which this hand-built element doesn't structurally match — assert satori's own
+        // parameter type rather than reshape a working call.
         el({
             display: 'flex', position: 'relative',
             width: '100%', height: '100%', backgroundColor: palette.background, fontFamily,
-        }, children),
+        }, children) as unknown as Parameters<typeof satori>[0],
         { width, height, fonts },
     );
 

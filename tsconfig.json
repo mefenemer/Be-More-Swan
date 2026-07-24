@@ -14,6 +14,8 @@
   ],
   "exclude": [
     "node_modules",
-    "netlify/edge-functions"
+    "netlify/edge-functions",
+    "remotion",
+    "remotion.config.ts"
   ]
 }

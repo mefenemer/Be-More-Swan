@@ -87,3 +87,16 @@ export function overlayVisibleAt(ov: Pick<Overlay, 'startS' | 'endS'>, t: number
     const end = ov.endS == null ? Infinity : ov.endS;
     return t >= start && t < end;
 }
+
+// The <Sequence> frame window for an overlay on a `durationInFrames`-long clip at `fps`. The
+// server-side twin of overlayVisibleAt: the half-open [startS, endS) seconds become a from-frame and
+// a length, clamped inside the clip so a box timed past the end still renders (Sequence would
+// otherwise silently drop it). Absent start = frame 0; absent end = the whole clip.
+export function overlayFrameRange(
+    ov: Pick<Overlay, 'startS' | 'endS'>, fps: number, durationInFrames: number,
+): { from: number; durationInFrames: number } {
+    const from = Math.max(0, Math.min(durationInFrames - 1, ov.startS == null ? 0 : Math.round(ov.startS * fps)));
+    const toExclusive = ov.endS == null ? durationInFrames : Math.round(ov.endS * fps);
+    const frames = Math.max(1, Math.min(durationInFrames, toExclusive) - from);
+    return { from, durationInFrames: frames };
+}
