@@ -52,7 +52,7 @@ actually covers it rather than to production only.
 
 | Var | Value | Notes |
 |---|---|---|
-| `REMOTION_REGION` | `eu-west-2` | Must match the region the function **and** site were deployed to. `npx remotion lambda regions` lists the supported set. |
+| `REMOTION_REGION` | `eu-west-2` | **Ours, not the CLI's** — see the warning in step 1b. Must match the region the function **and** site were actually deployed to. `npx remotion lambda regions` lists the supported set. |
 | `REMOTION_LAMBDA_FUNCTION_NAME` | printed by `remotion:deploy-fn` | Same value in both contexts. Changes on every Remotion version upgrade — see [Upgrading Remotion](#upgrading-remotion). |
 | `REMOTION_SERVE_URL` | printed by the deploy-site script | **Differs per context** — the `-staging` URL on staging, the `-prod` URL on production. Getting these crossed is the one way to make a staging composition render production posts. |
 | `REMOTION_AWS_ACCESS_KEY_ID` | the IAM user's key | |
@@ -81,9 +81,11 @@ compromised key becoming an unbounded bill on an account that now runs compute.
 2. **Never create root access keys.** If the account already has any, delete them.
 3. **Set a billing alarm.** Billing → *Budgets* → a monthly cost budget with an email alert (£20 is a
    sensible tripwire; real usage should be pennies). A runaway render loop is the failure this catches.
-4. Confirm the console's region selector reads **Europe (London) eu-west-2** before clicking through
-   any of the steps below — a resource created in the wrong region is invisible to the CLI and the
-   commonest cause of "it deployed but nothing works".
+4. Set the console's region selector to **Europe (London) eu-west-2**. A brand-new account defaults
+   elsewhere (Stockholm, in our case). This does not affect the IAM steps below — IAM is global and
+   correctly shows "Global" — nor the deploy, which takes its region from the `--region` flag in the
+   npm scripts. It decides which region's resources the console *shows you*, so with it set wrong the
+   function and bucket appear not to exist after a perfectly successful deploy.
 
 ### 1. Create the IAM role, then the IAM user
 
@@ -123,10 +125,20 @@ Then every command below can use the profile, which Remotion resolves at the *hi
 
 ```bash
 export REMOTION_AWS_PROFILE=bemoreswan-remotion
-export REMOTION_REGION=eu-west-2
 ```
 
 The raw key and secret are still needed later for Netlify (step 4) — Netlify has no profile support.
+
+> **`REMOTION_REGION` and `REMOTION_AWS_REGION` are two different variables, and the trap is silent.**
+> `REMOTION_REGION` is *ours* — invented for `src/lib/remotion-lambda.ts` and read only by the running
+> app. The Remotion **CLI** does not know it exists: it reads `REMOTION_AWS_REGION` (or `--region`),
+> and with neither set it **defaults to `us-east-1` and says nothing**. Setting only `REMOTION_REGION`
+> and running a deploy therefore builds everything in Virginia while every screen you look at says
+> London — the exact data-residency mistake choosing eu-west-2 was meant to avoid.
+>
+> Guard rail: `--region=eu-west-2` is baked into every `remotion:*` script in `package.json`, so the
+> region cannot be forgotten. Any *ad hoc* `npx remotion lambda …` command must pass `--region`
+> itself. `npm run remotion:fn-ls` is a safe read-only way to confirm which region you are talking to.
 
 ### 2. Deploy the render function
 
