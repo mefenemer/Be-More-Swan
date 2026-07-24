@@ -3,18 +3,18 @@
 // Meta's Graph media-container API (image_url / video_url) requires a publicly reachable
 // URL that returns the raw image/video bytes. Our assets live as either a private R2 object
 // (storageKey → presigned URL) or a hotlinked Pexels CDN URL (externalUrl). This function
-// resolves a scheduled post's first image asset and 302-redirects to that fetchable URL;
-// both a presigned R2 URL and a Pexels CDN URL satisfy Meta's public-reachability requirement
-// and return raw bytes. A redirect (rather than streaming) avoids Netlify's response payload
-// limit, which raw image/video bytes would routinely exceed.
+// resolves a scheduled post's first image asset — or its video, for a Reel — and 302-redirects to
+// that fetchable URL; both a presigned R2 URL and a Pexels CDN URL satisfy Meta's public-reachability
+// requirement and return raw bytes. A redirect (rather than streaming) avoids Netlify's response
+// payload limit, which raw image/video bytes would routinely exceed.
 //
-// GET ?postId=<id>  → 302 to the resolved media URL (or 404 if the post has no image asset).
+// GET ?postId=<id>  → 302 to the resolved media URL (or 404 if the post has no visual media).
 
 import { Handler } from '@netlify/functions';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, scheduledPostAssets } from '../../db/schema';
-import { resolvePostImage } from '../../src/utils/social-publish';
+import { resolvePostImage, resolvePostVideo } from '../../src/utils/social-publish';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -50,8 +50,14 @@ export default withLambda(async (event) => {
         // De-dupe while preserving order (junction takes precedence).
         const uniqueIds = [...new Set(ids)];
 
-        const image = await resolvePostImage(db, uniqueIds);
-        if (!image) return { statusCode: 404, body: 'No image asset attached to this post.' };
+        // Image first, then video. publish-instagram points BOTH image_url and video_url at this
+        // one endpoint, so a REELS post resolved only images here and Meta fetched a 404 — the
+        // publish half of the same "Instagram is image-only" assumption that approve-post carried.
+        // resolvePostVideo presigns for an hour rather than ten minutes, which a video needs:
+        // Meta downloads the whole file, and a large clip outlives a short URL mid-transfer.
+        const image = await resolvePostImage(db, uniqueIds)
+            ?? await resolvePostVideo(db, uniqueIds);
+        if (!image) return { statusCode: 404, body: 'No image or video asset attached to this post.' };
 
         // 302 to the fetchable URL (presigned R2 or Pexels CDN). Meta follows the redirect
         // and fetches the raw bytes from there.

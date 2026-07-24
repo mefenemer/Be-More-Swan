@@ -281,6 +281,12 @@ window.showComplianceModals = function showComplianceModals(force) {
           <button type="button" class="gpw-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="facebook" onclick="gpwTogglePlatform(this)">Facebook</button>
           <button type="button" class="gpw-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="linkedin" onclick="gpwTogglePlatform(this)">LinkedIn</button>
           <button type="button" class="gpw-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="x" onclick="gpwTogglePlatform(this)">X</button>
+          <!-- Threads and YouTube publish through publish-social-posts exactly as LinkedIn and X do,
+               and PLATFORM_FORMATS has always listed all six — but these two had no chip, so they
+               were unreachable from Create Post. The char limits and the "needs a video" gate below
+               were already written for them and simply never ran. -->
+          <button type="button" class="gpw-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="threads" onclick="gpwTogglePlatform(this)">Threads</button>
+          <button type="button" class="gpw-platform-btn px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer" data-platform="youtube" onclick="gpwTogglePlatform(this)">YouTube</button>
         </div>
         <p class="text-xs text-gray-400 mt-1">Pick one or more — a separate draft is created for each.</p>
       </div>
@@ -8006,6 +8012,33 @@ function gpSetPanelStatus(id, msg, type) {
     el.textContent = msg;
 }
 
+// Measure a file's pixel dimensions before upload. The twin of _probeDimensions in my-content.js —
+// kept in step with it, because an asset uploaded from Create Post and the same asset uploaded from
+// My Content must end up with the same row. Without this, width/height are NULL and every preview
+// falls back to "we couldn't read this asset's dimensions", which reads as a defect on a perfectly
+// good file. Best-effort: a failed or slow probe resolves null rather than holding up the upload.
+function _gpProbeDimensions(file, assetType) {
+    return new Promise((resolve) => {
+        if (!file || (assetType !== 'image' && assetType !== 'video')) return resolve(null);
+        const url = URL.createObjectURL(file);
+        const done = (dims) => { URL.revokeObjectURL(url); resolve(dims); };
+        const timer = setTimeout(() => done(null), 5000);
+        const finish = (w, h) => { clearTimeout(timer); done(w > 0 && h > 0 ? { width: w, height: h } : null); };
+        if (assetType === 'image') {
+            const img = new Image();
+            img.onload = () => finish(img.naturalWidth, img.naturalHeight);
+            img.onerror = () => finish(0, 0);
+            img.src = url;
+        } else {
+            const vid = document.createElement('video');
+            vid.preload = 'metadata';
+            vid.onloadedmetadata = () => finish(vid.videoWidth, vid.videoHeight);
+            vid.onerror = () => finish(0, 0);
+            vid.src = url;
+        }
+    });
+}
+
 // ── Shared: upload a new file straight into the content library (issue #184 — lets Create Post
 // upload/browse/search/generate media inline, without a trip to a separate My Content page). ─────
 async function gpUploadContentAsset(file) {
@@ -8024,10 +8057,15 @@ async function gpUploadContentAsset(file) {
         if (!putRes.ok) throw new Error('Upload failed.');
     }
     const assetType = file.type.startsWith('video/') ? 'video' : 'image';
+    const dims = await _gpProbeDimensions(file, assetType).catch(() => null);
     const createRes = await fetch('/.netlify/functions/content-assets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: file.name, assetType, mimeType: file.type, fileSize: file.size, storageKey, storageUrl }),
+        body: JSON.stringify({
+            name: file.name, assetType, mimeType: file.type, fileSize: file.size,
+            width: dims?.width ?? null, height: dims?.height ?? null,
+            storageKey, storageUrl,
+        }),
     });
     if (!createRes.ok) throw new Error('File uploaded but could not be saved. Please try again.');
     const { asset, rejected } = await createRes.json();

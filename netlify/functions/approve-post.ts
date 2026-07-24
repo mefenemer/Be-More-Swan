@@ -15,7 +15,7 @@ import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
 import { aiAssistants, auditLogs, contentRules, postIdeaSuggestions, scheduledPosts, systemConnections } from '../../db/schema';
 import { recordPostedAssets } from '../../src/utils/pexels';
-import { resolvePostImage } from '../../src/utils/social-publish';
+import { resolvePostImage, resolvePostVideo } from '../../src/utils/social-publish';
 import { resolvePostingSchedule, computeScheduleSlots, intervalHoursFor } from '../../src/config/posting-cadence';
 import { readCachedReview, openWarnings } from '../../src/utils/post-quality-review';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -235,12 +235,18 @@ export default withLambda(async (event) => {
         };
     }
 
-    // Instagram cannot publish a text-only post — an image is mandatory. Enforce server-side so a draft
-    // can't be approved/scheduled/published for Instagram without one (the client guards this too).
+    // Instagram cannot publish a text-only post — it needs MEDIA. Enforce server-side so a draft
+    // can't be approved/scheduled/published for Instagram without any (the client guards this too).
+    //
+    // Video counts. publish-instagram has always built a REELS container from a video post
+    // (media_type REELS + video_url), so demanding an image specifically rejected posts the
+    // publisher was perfectly capable of sending — which is what blocked approving any Instagram
+    // video, including the Phase 4 text-overlay renders.
     if (post.platform === 'instagram') {
-        const image = await resolvePostImage(db, post.contentAssetIds).catch(() => null);
-        if (!image) {
-            return { statusCode: 400, body: JSON.stringify({ error: 'Instagram requires an image. Add one to this post before approving.' }) };
+        const media = await resolvePostImage(db, post.contentAssetIds).catch(() => null)
+            ?? await resolvePostVideo(db, post.contentAssetIds).catch(() => null);
+        if (!media) {
+            return { statusCode: 400, body: JSON.stringify({ error: 'Instagram requires an image or a video. Add media to this post before approving.' }) };
         }
     }
 

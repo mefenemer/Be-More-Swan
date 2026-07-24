@@ -143,8 +143,17 @@
            warning.level === 'warn' ? '⚠' : 'ⓘ'} ${_escHtml(warning.text)}</div>`
       : '';
     if (src) {
+      // A video asset MUST render as <video>. This used to emit <img> for everything, so every
+      // video post previewed as a blank black box — the preview silently stopped being a preview
+      // for exactly the posts whose framing matters most.
+      const isVideo = (asset.assetType || '').toLowerCase() === 'video'
+        || /^video\//i.test(asset.mimeType || '');
+      const media = isVideo
+        ? `<video src="${_escHtml(src)}" muted playsinline controls preload="metadata"
+             style="width:100%;height:100%;object-fit:cover;background:#000;"></video>`
+        : `<img src="${_escHtml(src)}" alt="post media" style="width:100%;height:100%;object-fit:cover;">`;
       return `<div style="position:relative;width:100%;${aspectClass}overflow:hidden;background:#000;border-radius:4px;">
-        <img src="${_escHtml(src)}" alt="post media" style="width:100%;height:100%;object-fit:cover;">
+        ${media}
         ${warnBanner}
       </div>`;
     }
