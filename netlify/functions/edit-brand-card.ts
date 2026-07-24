@@ -4,7 +4,8 @@
 // POST { postId, ...edits }                → { assetId, imageUrl, renderParams }  re-renders + saves
 //   edits: { headline?, variant?, primaryColor?, backgroundColor?, textColor?, fontFamily?,
 //            wordmark?, website?, logoUrl?,
-//            layout?: { wordmark: {show,align,y}, website: {show,align,y} } }
+//            layout?: { wordmark: {show,align,y}, website: {show,align,y} },
+//            resetKit?: true   // discard this card's stored style, re-resolve from Brand Assets }
 //   Auth: aura_session cookie; the post must belong to the caller's organisation.
 //
 // WHY SERVER-SIDE: the published image has to be the image the user approved. The existing text
@@ -79,21 +80,35 @@ export default withLambda(async (event) => {
     // edits rather than resetting to the org default.
     const stored = (asset.renderParams ?? {}) as StoredRenderParams;
 
+    // `resetKit` deliberately discards what the card recorded and re-resolves from the org's
+    // current Brand style. A card's own kit is normally authoritative — changing Brand Assets must
+    // not silently restyle work already reviewed — but that same rule strands a card whose stored
+    // kit is wrong (anything saved while the editor was inventing monochrome), with no way back to
+    // the brand short of deleting the post. This is the way back, and it is explicit.
+    const resetKit = body.resetKit === true;
+
     // Cards drafted before render_params existed carry no kit — see resolveCardEditorKit for why
     // the org's own kit, not the neutral default, is what those must fall back to. The org row is
-    // fetched only in that case: the common path already knows everything from the asset.
+    // fetched only when it is actually needed; the common path knows everything from the asset.
     let org: { name: string | null; brandKit: unknown } | undefined;
-    if (!stored.kit) {
+    if (!stored.kit || resetKit) {
         [org] = await db
             .select({ name: organisations.name, brandKit: organisations.brandKit })
             .from(organisations).where(eq(organisations.id, ctx.organisationId)).limit(1);
     }
-    const { kit: baseKit, orgName } = resolveCardEditorKit(stored.kit, org?.brandKit, org?.name);
+    const { kit: baseKit, orgName } = resolveCardEditorKit(
+        resetKit ? null : stored.kit, org?.brandKit, org?.name,
+    );
     const baseHeadline = stored.headline ?? asset.prompt ?? '';
     const baseVariant: CardVariant = stored.variant === 'bold' ? 'bold' : 'light';
 
+    // On a reset, per-card style overrides are exactly what is being discarded — so they are
+    // ignored even if the client sends them. Enforcing that here and not only in the browser is
+    // the point: the original bug WAS a client that sent colours it should not have.
     const overrides: Record<string, unknown> = {};
-    for (const f of KIT_FIELDS) if (body[f] !== undefined) overrides[f] = body[f] === '' ? null : body[f];
+    if (!resetKit) {
+        for (const f of KIT_FIELDS) if (body[f] !== undefined) overrides[f] = body[f] === '' ? null : body[f];
+    }
     // normalizeBrandKit is the only gate on stored style — it rejects non-hex colours, font names
     // that could escape into a URL, and non-http logo URLs.
     const kit: BrandKit = normalizeBrandKit({ ...baseKit, ...overrides, source: 'manual' });

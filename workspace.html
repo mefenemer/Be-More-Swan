@@ -681,6 +681,11 @@ window.showComplianceModals = function showComplianceModals(force) {
               class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer">Save card</button>
             <button type="button" id="pce-revert"
               class="text-xs font-semibold text-gray-500 hover:text-gray-700 transition cursor-pointer">Undo changes</button>
+            <!-- A card's own style normally wins, so changing Brand Assets never restyles work
+                 already reviewed. This is the deliberate way back for a card whose stored style is
+                 wrong or simply out of date. -->
+            <button type="button" id="pce-resetkit"
+              class="text-xs font-semibold text-gray-500 hover:text-gray-700 transition cursor-pointer">Reset to my brand style</button>
             <span id="pce-msg" class="text-xs font-semibold text-gray-500"></span>
           </div>
         </div>
@@ -5662,7 +5667,16 @@ function rqReviewSwitchPlatform(id) {
 // Layout (which of the company name / website show, and where they sit) is held in _pceState.layout
 // and drawn as drag handles over the preview. The handles are placed from the geometry the SERVER
 // reports having drawn — never re-derived here — so the box you grab is the text you see.
-const _pceState = { postId: null, base: null, busy: false, token: 0, layout: null, geo: null };
+//
+// `kitSeeded` guards a trap this panel already fell into once. A card drafted before render_params
+// existed stores no kit, and the editor used to invent one client-side (#1f1e1b on #ffffff) to fill
+// the colour inputs — then sent those invented values as overrides on the very first preview. The
+// server's "fall back to the org's brand kit" resolution was overwritten by monochrome before it
+// could ever be seen, so a pink card opened grey and saving baked it. Until the server has told us
+// what this card's kit actually IS, we send no colours at all and let it decide.
+const _pceState = { postId: null, base: null, busy: false, token: 0, layout: null, geo: null, kitSeeded: false };
+
+const _PCE_KIT_FIELDS = ['primaryColor', 'backgroundColor', 'textColor', 'fontFamily'];
 
 const _PCE_ELEMENTS = { wordmark: 'Company name', website: 'Website' };
 
@@ -5695,15 +5709,37 @@ function _pceSetMsg(text, tone) {
 }
 
 function _pceValues() {
-    return {
+    const v = {
         headline: _pceEl('pce-headline')?.value ?? '',
         variant: _pceEl('pce-headline')?.dataset.variant || 'light',
-        primaryColor: _pceEl('pce-primaryColor')?.value || '',
-        backgroundColor: _pceEl('pce-backgroundColor')?.value || '',
-        textColor: _pceEl('pce-textColor')?.value || '',
-        fontFamily: _pceEl('pce-fontFamily')?.value?.trim() || '',
         layout: _pceState.layout || _pceDefaultLayout(),
     };
+    // Colours only once we know what this card's kit really is — see _pceState.kitSeeded. Sending
+    // the inputs' pre-seed contents would override the server's resolution with a guess.
+    if (_pceState.kitSeeded) {
+        v.primaryColor = _pceEl('pce-primaryColor')?.value || '';
+        v.backgroundColor = _pceEl('pce-backgroundColor')?.value || '';
+        v.textColor = _pceEl('pce-textColor')?.value || '';
+        v.fontFamily = _pceEl('pce-fontFamily')?.value?.trim() || '';
+    }
+    if (_pceState.resetKit) v.resetKit = true;
+    return v;
+}
+
+// Adopt the kit the server resolved for this card as the editor's starting point: fill the inputs,
+// and make it what "Undo changes" reverts to. Only runs while unseeded, so it can never clobber an
+// edit the user has already made.
+function _pceAdoptServerKit(kit) {
+    if (!kit || _pceState.kitSeeded) return;
+    for (const f of _PCE_KIT_FIELDS) {
+        const el = _pceEl('pce-' + f);
+        if (!el) continue;
+        const val = kit[f] ?? '';
+        if (f === 'fontFamily') el.value = val;
+        else if (val) el.value = val;
+        if (_pceState.base) _pceState.base[f] = val;
+    }
+    _pceState.kitSeeded = true;
 }
 
 function _pcePaintVariant(variant) {
@@ -5807,6 +5843,11 @@ async function _pceRefreshPreview() {
         if (token !== _pceState.token) return;   // superseded by a newer edit
         const img = _pceEl('pce-preview');
         if (img) img.src = data.dataUrl;
+        _pceAdoptServerKit(data.renderParams?.kit);
+        // One-shot. Left set, it would keep discarding the per-card style on every later preview
+        // and on save — so the next colour the user picked would be silently thrown away.
+        const wasReset = _pceState.resetKit;
+        _pceState.resetKit = false;
         if (data.elements && data.canvas) {
             _pceState.geo = { elements: data.elements, canvas: data.canvas };
             // Re-seat the handles on what was actually drawn. This is also what corrects a drag
@@ -5815,7 +5856,8 @@ async function _pceRefreshPreview() {
             _pcePaintShowToggles();
             _pcePaintHandles();
         }
-        _pceSetMsg('');
+        // "Save card" is still required — the reset only changes what the preview shows.
+        _pceSetMsg(wasReset ? 'Back to your brand style — save to keep it.' : '', wasReset ? 'ok' : '');
     } catch (e) {
         if (token === _pceState.token) _pceSetMsg(e.message, 'error');
     }
@@ -5909,12 +5951,18 @@ function _pceSyncForPost(post) {
         if (img) img.removeAttribute('src');
     }
     _pceState.postId = post.id;
+    // A card that recorded its own kit seeds from it directly. One that did not (drafted before
+    // render_params existed) stays UNSEEDED: the server resolves it from the org's brand kit and
+    // the first preview response fills these in. Inventing colours here is what previously turned
+    // a branded card grey — see _pceState.kitSeeded.
+    _pceState.kitSeeded = !!rp.kit;
+    _pceState.resetKit = false;   // never carry one post's reset into the next
     _pceState.base = {
         headline: rp.headline || card.headline || '',
         variant: rp.variant === 'bold' ? 'bold' : 'light',
-        primaryColor: kit.primaryColor || '#1f1e1b',
-        backgroundColor: kit.backgroundColor || '#ffffff',
-        textColor: kit.textColor || '#1f1e1b',
+        primaryColor: kit.primaryColor || '',
+        backgroundColor: kit.backgroundColor || '',
+        textColor: kit.textColor || '',
         fontFamily: kit.fontFamily || '',
         layout: _pceNormalizeLayout(rp.layout),
     };
@@ -5969,6 +6017,15 @@ function _pceSyncForPost(post) {
             if (!_pceState.base) return;
             _pceFill(_pceState.base);
             _pceSetMsg('');
+            _pceRefreshPreview();
+        });
+        _pceEl('pce-resetkit')?.addEventListener('click', () => {
+            if (!_pceState.postId) return;
+            // Unseed so no invented or stale colour rides along with the request, and let the
+            // response re-seed the inputs from whatever Brand Assets currently says.
+            _pceState.kitSeeded = false;
+            _pceState.resetKit = true;
+            _pceSetMsg('Reading your brand style…');
             _pceRefreshPreview();
         });
         _pceEl('pce-save')?.addEventListener('click', async () => {
