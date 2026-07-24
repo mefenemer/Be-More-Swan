@@ -6145,8 +6145,11 @@ function _pcePostIsVideo(post) {
 function _pceRefreshOverlayJump() {
     const label = _pceEl('insp-overlay-jump-label');
     if (!label) return;
-    const noun = _pcePostIsVideo() ? 'video' : 'image';
-    const n = _pceOverlayCount(_rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null);
+    // _pcePostIsVideo takes the post — called bare it reads `undefined` and returns false, so the
+    // button said "image" on every video post no matter what.
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const noun = _pcePostIsVideo(post) ? 'video' : 'image';
+    const n = _pceOverlayCount(post);
     label.textContent = n ? `Text on the ${noun} (${n})` : `Add text on the ${noun}`;
 }
 
@@ -7094,8 +7097,10 @@ async function rqReviewToggleDisclosure(included) {
             if (!res.ok) throw new Error(d.error || 'Could not update the footer.');
             if (_rqPostCache[id]) { _rqPostCache[id].caption = d.caption; _rqPostCache[id].disclosureFooterDisabled = d.disabled; }
         }
-        const active = _rqPostCache[_rqReviewPostId];
-        if (active) { document.getElementById('post-review-body').innerHTML = renderPlatformMockup(active); _rqRenderCanvasOverlays(active); }
+        // Same rule as the media-attach path: never write the mock-up straight into the modal body.
+        // This one only changes the caption so it cannot change the layer set, but on a brand-card
+        // post the direct write still strips the mounted handle layer and orphans the inspector.
+        if (_rqPostCache[_rqReviewPostId]) _rqReviewRenderActive();
     } catch (e) {
         if (cb) cb.checked = !included;   // revert the switch on failure
         if (window.showToast) window.showToast(e.message || 'Could not update the footer.');
@@ -8516,8 +8521,19 @@ function gpAiShowThumb(url, type) {
         // doesn't keep painting stale boxes over a picture they were never positioned against.
         p.overlays = [];
         _gpOverlayCountByPost[_rqReviewPostId] = 0;
-        const body = document.getElementById('post-review-body');
-        if (body) { body.innerHTML = renderPlatformMockup(p); _rqRenderCanvasOverlays(p); }
+        // Route through _rqReviewRenderActive, NOT a direct innerHTML write. Attaching media changes
+        // which LAYERS the post has — a post with no media has no 'overlays' layer — and only
+        // _pceSyncForPost recomputes _pceLayers and the inspector titles. Writing the mock-up
+        // directly repainted the canvas (so the video appeared) while leaving the inspector
+        // convinced the post was still media-less: the header stayed "Picture", the jump button
+        // stayed "Add text on the image", and clicking it hit the `!_pceLayers.includes(key)` guard
+        // in _pceSelect and did nothing at all. Attaching a video and then adding text to it is the
+        // ordinary path, so this made video overlays unreachable in normal use.
+        _rqReviewRenderActive();
+        // A full sync lands on the caption layer, which would throw the user off the picture panel
+        // the instant they attached media to it. Put them back on the layer they were using — now
+        // with 'overlays' present, so "Add text on the video" actually goes somewhere.
+        _pceSelect('media');
     }
 }
 
