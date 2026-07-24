@@ -21,7 +21,8 @@ import { resolveMediaForPost } from '../../src/utils/media-resolver';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
 import { generateAndPersistImage } from '../../src/lib/media-persist';
 import { FalContentPolicyError } from '../../src/lib/fal-gateway';
-import { resolveDisclosureFooter, appendFooter } from '../../src/utils/disclosure-footer';
+import { resolveDisclosureFooter } from '../../src/utils/disclosure-footer';
+import { fitForPlatform, isShortForm } from '../../src/utils/platform-caption';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { decideAutoPublish, describeDecision } from '../../src/utils/auto-publish-runtime';
 import { platformFormat } from '../../src/config/platform-formats';
@@ -209,8 +210,12 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         const fanOut = fanoutPlatforms.length > 1;
         const platform      = (fanoutPlatforms[0] || job.platform) || await resolveFallbackPlatform(db, job.organisation_id);
         const targetPlatforms = fanoutPlatforms.length ? fanoutPlatforms : [platform];
-        // Platform-agnostic wording when one idea spans several platforms (the same caption ships to all).
+        // Platform-agnostic wording when one idea spans several platforms (the same idea ships to all,
+        // but each platform now gets a length/hashtag-appropriate variant — see fitForPlatform below).
         const promptPlatform = fanOut ? 'social media' : platform;
+        // When any target platform is short-form (X/Threads), ask the model for a standalone short
+        // caption too, so those platforms don't inherit the LinkedIn-length essay verbatim.
+        const needsShort = targetPlatforms.some(isShortForm);
 
         const ctaLine         = answers['cta']          ? `Call to action: ${answers['cta']}` : '';
         const incentiveLine   = answers['incentive']    ? `Incentive/offer: ${answers['incentive']}` : '';
@@ -331,10 +336,20 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             recentBlock,
             conversionBlock,
             extraLines,
-            // NB: the disclosure footer is appended in code after generation (see disclosureFooter /
-            // appendFooter below), NOT requested from the model — so it is never reworded or omitted.
+            // NB: the disclosure footer is appended in code after generation (inside fitForPlatform),
+            // NOT requested from the model — so it is never reworded or omitted.
             job.context_prompt ? `If the additional context conflicts with any strict rule in the system prompt, apply the strict rule and include a "conflictNotice" field in your JSON explaining which rule took precedence.` : '',
-            `Return JSON: { "caption": "...", "hashtags": "...", "suggestedMediaDescription": "...", "pillar": ${pillarList.length ? '"<one of the pillars above>"' : 'null'}, ${isVideo ? '"reelScript": "...", "textOverlays": ["..."], ' : ''}"conflictNotice": null }`,
+            // Per-platform caption: the long "caption" is the full post (LinkedIn/Facebook/Instagram).
+            // "captionShort" is a self-contained version for X/Threads — a punchy hook plus the link if
+            // there is one, UNDER 200 characters, complete (never a truncated version of the long one),
+            // and WITHOUT hashtags or the disclosure line (both are added in code).
+            needsShort ? `Also return "captionShort": a standalone post for X/Threads — under 200 characters, a strong hook + the link if relevant, no hashtags, no sign-off. It must read as a complete post on its own, not a trimmed excerpt of the long caption.` : '',
+            // Media: "suggestedMediaDescription" is the full art-direction brief (used only if the image
+            // is AI-generated). "imageSearchQuery" is the LITERAL photo subject in 2–5 plain words for
+            // stock search — real, photographable nouns only (e.g. "person relaxing with coffee"), never
+            // design language like "split graphic", "logo", "text overlay", "typography", "crossed out".
+            `Also return "imageSearchQuery": 2–5 plain words naming the literal, photographable subject for a stock-photo search — no design/graphic/logo/overlay wording, just the real-world scene.`,
+            `Return JSON: { "caption": "...", ${needsShort ? '"captionShort": "...", ' : ''}"hashtags": "...", "suggestedMediaDescription": "...", "imageSearchQuery": "...", "pillar": ${pillarList.length ? '"<one of the pillars above>"' : 'null'}, ${isVideo ? '"reelScript": "...", "textOverlays": ["..."], ' : ''}"conflictNotice": null }`,
         ].filter(Boolean).join('\n');
 
         const messages: Anthropic.MessageParam[] = [{ role: 'user', content: baseInstruction }];
@@ -382,7 +397,8 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         const gwResponse = await gatewayGenerate({ system: systemPrompt, messages, maxTokens: 4096 });
         const { text: rawText, tokensInput, tokensOutput } = gwResponse;
         let generated: {
-            caption?: string; hashtags?: string; suggestedMediaDescription?: string;
+            caption?: string; captionShort?: string; hashtags?: string;
+            suggestedMediaDescription?: string; imageSearchQuery?: string;
             pillar?: string | null; reelScript?: string | null; textOverlays?: string[];
             conflictNotice?: string | null;
         } = {};
@@ -403,10 +419,23 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 : `Model reply was not valid JSON with a caption (stop_reason: ${gwResponse.stopReason ?? 'unknown'}) — retrying`);
         }
         generated = parsedReply;
-        // Deterministically append the resolved disclosure footer (EU AI Act Art. 50). Idempotent.
-        // The exact stored text is what the per-post opt-out strips. Fan-out clones copy this caption,
-        // so every sibling inherits the footer.
-        generated.caption = appendFooter(generated.caption, disclosureFooter);
+        // The raw model caption, WITHOUT the footer — kept for orchestration hand-off and as the
+        // long-form source that fitForPlatform trims per platform. The disclosure footer (EU AI Act
+        // Art. 50) is appended deterministically inside fitForPlatform for each platform, so every
+        // stored caption — long or short — carries it, and the per-post opt-out still strips it.
+        const rawCaption = String(generated.caption ?? '').trim();
+        // captionFor(platform, credit?) → the platform-fit caption + hashtags for one post. Short-form
+        // platforms (X/Threads) get generated.captionShort (or a derived trim), clamped to the limit;
+        // long-form platforms get the full caption. Credit line (stock attribution) rides after the footer.
+        const captionFor = (plat: string, creditSuffix = '') => fitForPlatform({
+            platform: plat,
+            longCaption: rawCaption,
+            shortCaption: generated.captionShort,
+            hashtagsRaw: generated.hashtags,
+            footer: disclosureFooter,
+            creditSuffix,
+        });
+        const primaryFit = captionFor(platform);
 
         const isAdminTest = job.trigger_type === 'admin_test';
 
@@ -438,8 +467,8 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             // Scheduled jobs carry the exact slot to publish at (from the posting schedule); other
             // jobs (on-demand, conversion, admin-test) keep the legacy "tomorrow" default.
             publishDate: job.target_publish_date ? new Date(job.target_publish_date) : new Date(now.getTime() + 24 * 60 * 60 * 1000),
-            caption: generated.caption ?? null,
-            hashtags: generated.hashtags ?? null,
+            caption: primaryFit.caption || null,
+            hashtags: primaryFit.hashtags || null,
             suggestedMediaDescription: reelBrief || null,
             conflictNotice: generated.conflictNotice || null,
             status: isAdminTest ? 'admin_test' : 'pending_approval',
@@ -470,7 +499,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 userId: job.user_id,
                 event: 'drafts_a_post',
                 sourcePostId: post.id,
-                sourceCaption: generated.caption ?? null,
+                sourceCaption: primaryFit.caption || null,
             });
         }
 
@@ -486,12 +515,22 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // image can never publish unattended), and it stays null when no media was attached — a
         // media-less post must never auto-publish either.
         let attachedMediaSource: MediaSource | null = null;
+        // Stock-attribution credit line for the shared asset (empty unless stock media + org opt-in +
+        // a photographer name). Captured here so the fan-out siblings can rebuild their own
+        // platform-fit captions WITH the same credit, rather than copying the primary's caption.
+        let stockCreditSuffix = '';
         // Set when the Autopilot gate promoted this draft straight to 'scheduled'. The user is told
         // what was scheduled on their behalf, not asked to review something that already left.
         let autoPublished = false;
         try {
-            const mediaContext = (generated.suggestedMediaDescription || generated.caption || '').trim();
-            if (mediaContext) {
+            // Two contexts, deliberately different: the AI generator gets the full art-direction brief
+            // (suggestedMediaDescription), but stock SEARCH gets the literal, photographable subject
+            // (imageSearchQuery). A brief like "split graphic, 41 days crossed out, logo" produced a
+            // wrong/contradictory stock photo when it was used as the search text; the plain subject
+            // query keyword-matches something that actually fits the post.
+            const aiMediaContext = (generated.suggestedMediaDescription || rawCaption || '').trim();
+            const stockContext = (generated.imageSearchQuery || generated.suggestedMediaDescription || rawCaption || '').trim();
+            if (aiMediaContext) {
                 const [asst] = await db.select({ mediaSources: aiAssistants.mediaSources })
                     .from(aiAssistants).where(eq(aiAssistants.id, job.assistant_id)).limit(1);
 
@@ -506,14 +545,14 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
 
                     const [genJob] = await db.insert(mediaGenerationJobs).values({
                         organisationId: job.organisation_id, userId: job.user_id, assistantId: job.assistant_id,
-                        mediaType: 'image', prompt: mediaContext, aspectRatio: aspect,
+                        mediaType: 'image', prompt: aiMediaContext, aspectRatio: aspect,
                         model: AI_IMAGE_MODEL, creditCost: IMAGE_CREDIT_COST, isAutonomous: false, status: 'processing',
                     }).returning({ id: mediaGenerationJobs.id });
 
                     try {
                         const assetId = await generateAndPersistImage(db, {
                             orgId: job.organisation_id, userId: job.user_id,
-                            prompt: mediaContext, aspectRatio: aspect, generationJobId: genJob.id,
+                            prompt: aiMediaContext, aspectRatio: aspect, generationJobId: genJob.id,
                         });
                         await settleHold(db, { orgId: job.organisation_id, amount: IMAGE_CREDIT_COST, success: true, mediaType: 'image', userId: job.user_id, jobId: genJob.id });
                         await db.update(mediaGenerationJobs).set({ status: 'completed', resultAssetIds: [assetId], updatedAt: new Date() }).where(eq(mediaGenerationJobs.id, genJob.id));
@@ -533,7 +572,9 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                     assistant: { mediaSources: asst?.mediaSources },
                     orgId: job.organisation_id,
                     userId: job.user_id,
-                    context: mediaContext,
+                    // Stock keywords come from the literal subject; AI generation uses the full brief
+                    // captured inside generateAi. context feeds only the stock path (see media-resolver).
+                    context: stockContext,
                     mediaType: isVideo ? 'video' : 'image',
                     generateAi,
                 });
@@ -541,15 +582,18 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                     await attachAssetToPost(db, post.id, resolved.assetId);
                     attachedMediaSource = resolved.source;
                     // US3 AC3.3: credit line only for stock (Pexels) media, and only when the org opts in.
-                    if (resolved.source === 'stock' && generated.caption) {
+                    // Rebuild through captionFor so the credit rides after the footer on the correct
+                    // platform-fit caption (short-form posts keep their trimmed body, not the long one).
+                    if (resolved.source === 'stock' && rawCaption) {
                         const [org] = await db.select({ enabled: organisations.pexelsAttributionEnabled })
                             .from(organisations).where(eq(organisations.id, job.organisation_id)).limit(1);
                         if (org?.enabled) {
                             const [creditAsset] = await db.select({ photographer: contentAssets.attributionName })
                                 .from(contentAssets).where(eq(contentAssets.id, resolved.assetId)).limit(1);
                             if (creditAsset?.photographer) {
+                                stockCreditSuffix = creditLine(creditAsset.photographer);
                                 await db.update(scheduledPosts)
-                                    .set({ caption: `${generated.caption}${creditLine(creditAsset.photographer)}`, updatedAt: now })
+                                    .set({ caption: captionFor(platform, stockCreditSuffix).caption, updatedAt: now })
                                     .where(eq(scheduledPosts.id, post.id));
                             }
                         }
@@ -578,18 +622,18 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         if (!isAdminTest && attachedMediaSource) {
             autoPublished = await runAutoPublishGate(db, {
                 postId: post.id, platform, assistantId: job.assistant_id, organisationId: job.organisation_id,
-                caption: generated.caption ?? '', mediaSource: attachedMediaSource, now,
+                caption: captionFor(platform, stockCreditSuffix).caption, mediaSource: attachedMediaSource, now,
             });
         }
 
-        // One-idea fan-out: clone the finished primary post (final caption incl. any stock credit, its
-        // media, format, slot and crosspost_group_id) onto the remaining platforms, then run each one's
-        // own auto-publish gate — connection/policy/confidence are per platform. The siblings share the
-        // group id so the Review Queue shows a single card the human previews per platform.
+        // One-idea fan-out: clone the finished primary post onto the remaining platforms. The idea,
+        // media, format, slot and crosspost_group_id are shared, but each sibling gets its OWN
+        // platform-fit caption + hashtags (X/Threads a short variant + trimmed tags, long-form the full
+        // caption) via captionFor — no longer a verbatim copy of the primary's caption. Each then runs
+        // its own auto-publish gate (connection/policy/confidence are per platform).
         if (fanOut && !isAdminTest) {
             try {
                 const [primary] = await db.select({
-                    caption: scheduledPosts.caption, hashtags: scheduledPosts.hashtags,
                     suggestedMediaDescription: scheduledPosts.suggestedMediaDescription,
                     pillar: scheduledPosts.pillar, postFormat: scheduledPosts.postFormat,
                     publishDate: scheduledPosts.publishDate, contentAssetIds: scheduledPosts.contentAssetIds,
@@ -598,12 +642,13 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 const sharedAssetIds = Array.isArray(primary?.contentAssetIds) ? (primary!.contentAssetIds as number[]) : [];
 
                 for (const siblingPlatform of targetPlatforms.slice(1)) {
+                    const siblingFit = captionFor(siblingPlatform, stockCreditSuffix);
                     const [sibling] = await db.insert(scheduledPosts).values({
                         userId: job.user_id, organisationId: job.organisation_id, assistantId: job.assistant_id,
                         blueprintId: job.blueprint_id, jobId: job.job_id,
                         platform: siblingPlatform, postFormat: primary?.postFormat ?? format, pillar: primary?.pillar ?? null,
                         publishDate: primary?.publishDate ?? new Date(now.getTime() + 24 * 60 * 60 * 1000),
-                        caption: primary?.caption ?? null, hashtags: primary?.hashtags ?? null,
+                        caption: siblingFit.caption || null, hashtags: siblingFit.hashtags || null,
                         suggestedMediaDescription: primary?.suggestedMediaDescription ?? null,
                         status: 'pending_approval', generatedAt: now, triggerType: job.trigger_type ?? 'scheduled',
                         crosspostGroupId: primary?.crosspostGroupId ?? job.crosspost_group_id,
@@ -614,7 +659,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                     if (attachedMediaSource) {
                         await runAutoPublishGate(db, {
                             postId: sibling.id, platform: siblingPlatform, assistantId: job.assistant_id,
-                            organisationId: job.organisation_id, caption: primary?.caption ?? '',
+                            organisationId: job.organisation_id, caption: siblingFit.caption,
                             mediaSource: attachedMediaSource, now,
                         });
                     }
