@@ -1681,6 +1681,10 @@ export const contentAssets = pgTable("content_assets", {
   // the "My AI Uploads" library (US3) — prompt memory + the originating generation job.
   prompt: text("prompt"),                                   // original generation prompt (US3 AC: prompt memory)
   aspectRatio: text("aspect_ratio"),                        // '1:1' | '16:9' | '9:16' | '4:5'
+  // Everything needed to re-render this asset from scratch. Only branded text cards use it today:
+  // { kind:'brand_card', headline, variant, kit } — the flattened PNG records none of that, so
+  // without it the review-time card editor could not reopen a user's own edits. db/brand-card-render-params.sql.
+  renderParams: jsonb("render_params"),
   generationJobId: integer("generation_job_id"),            // FK to media_generation_jobs.id (nullable)
 
   createdAt: timestamp("created_at").defaultNow().notNull(),

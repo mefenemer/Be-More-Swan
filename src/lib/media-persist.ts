@@ -182,6 +182,10 @@ export async function renderAndPersistBrandCard(db: Db, params: {
         prompt: card.headline,
         aspectRatio: params.aspectRatio,
         width: card.width, height: card.height,
+        // Everything the review-time editor needs to reopen and re-render this exact card. The kit
+        // is stored WHOLE rather than as a reference to the org's: the org kit can change later,
+        // and re-rendering a card the user already approved must not silently restyle it.
+        renderParams: { kind: 'brand_card', headline: card.headline, variant: card.variant, kit: params.kit },
         status: 'pending',
     }).returning({ id: contentAssets.id });
 

@@ -4,7 +4,7 @@
 import { Handler } from '@netlify/functions';
 import { eq, and, desc, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts, aiAssistants, postIdeaSuggestions, organisations } from '../../db/schema';
+import { scheduledPosts, aiAssistants, postIdeaSuggestions, organisations, scheduledPostAssets, contentAssets } from '../../db/schema';
 import { resolvePostImage } from '../../src/utils/social-publish';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -80,6 +80,33 @@ export default withLambda(async (event) => {
             .orderBy(desc(scheduledPosts.generatedAt))
             .limit(50);
 
+        // Which of these drafts carry an editable branded text card. One query for the whole page
+        // rather than one per draft — this only drives whether an "Edit card" button appears, and
+        // it must not cost 50 round-trips to find out.
+        const brandCards = new Map<number, { assetId: number; headline: string | null; renderParams: unknown }>();
+        if (drafts.length) {
+            try {
+                const rows = await db
+                    .select({
+                        postId: scheduledPostAssets.scheduledPostId,
+                        assetId: contentAssets.id,
+                        headline: contentAssets.prompt,
+                        renderParams: contentAssets.renderParams,
+                    })
+                    .from(scheduledPostAssets)
+                    .innerJoin(contentAssets, eq(contentAssets.id, scheduledPostAssets.contentAssetId))
+                    .where(and(
+                        inArray(scheduledPostAssets.scheduledPostId, drafts.map((d) => d.id)),
+                        eq(contentAssets.provider, 'brand_card'),
+                    ));
+                for (const r of rows) brandCards.set(r.postId, { assetId: r.assetId, headline: r.headline, renderParams: r.renderParams });
+            } catch (err) {
+                // A missing render_params column (migration not yet applied) must degrade to "no
+                // edit button", never to an empty review queue.
+                console.warn('[get-social-drafts] brand-card lookup skipped:', err instanceof Error ? err.message : err);
+            }
+        }
+
         // Resolve a preview thumbnail for the first attached image (presigned R2 or external URL).
         // Best-effort per draft — a resolution failure must never blank out the list.
         const ARCHIVE_RETENTION_DAYS = 30;
@@ -107,7 +134,9 @@ export default withLambda(async (event) => {
             }
             // Older rows can hold a raw model reply (fenced JSON) in `caption` — unwrap it so the
             // editor shows the copy, and an edit-and-save persists the repair.
-            return { ...d, caption: displayCaption(d.caption), thumbnailUrl, archiveDeletesAt, daysRemaining, failureMessage };
+            // brandCard non-null ⇒ the review UI offers "Edit card" for this draft.
+            return { ...d, caption: displayCaption(d.caption), thumbnailUrl, archiveDeletesAt, daysRemaining, failureMessage,
+                brandCard: brandCards.get(d.id) ?? null };
         }));
 
         // Workspace-wide footer state — drives whether the per-post "include disclosure footer"

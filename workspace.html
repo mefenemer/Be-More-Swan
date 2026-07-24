@@ -605,6 +605,63 @@ window.showComplianceModals = function showComplianceModals(force) {
            edits that platform's copy; the footer's Approve/Reject act on every platform at once. -->
       <div id="post-review-tabs" class="hidden mb-4"></div>
       <div id="post-review-body"></div>
+      <!-- Branded text card editor. Shown only when this post's image IS a rendered card (the
+           whole image is type, so "edit the image" means re-rendering it). Changes are scoped to
+           this post — the org-wide default lives on Business Information → Brand style. -->
+      <div id="post-review-cardedit" class="hidden mt-4 rounded-xl border border-gray-200 overflow-hidden bg-white">
+        <button type="button" id="pce-toggle"
+          class="w-full flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-100 cursor-pointer hover:bg-gray-100 transition">
+          <span class="text-xs font-bold text-gray-600">Branded card — edit wording, colours &amp; font</span>
+          <svg id="pce-chevron" class="w-4 h-4 text-gray-400 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+        </button>
+        <div id="pce-panel" class="hidden p-3 space-y-3">
+          <div>
+            <label for="pce-headline" class="block text-xs font-bold text-gray-600 mb-1">Wording on the card</label>
+            <textarea id="pce-headline" rows="2" maxlength="120"
+              class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none resize-none"></textarea>
+            <p class="text-[11px] text-gray-400 mt-1">This is the card only — it doesn't change the caption.</p>
+          </div>
+
+          <div>
+            <span class="block text-xs font-bold text-gray-600 mb-1">Style</span>
+            <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden">
+              <button type="button" data-variant="light" class="pce-variant px-3 py-1.5 text-xs font-bold cursor-pointer transition">Light</button>
+              <button type="button" data-variant="bold" class="pce-variant px-3 py-1.5 text-xs font-bold cursor-pointer transition border-l border-gray-300">Bold</button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2">
+            <div>
+              <label for="pce-primaryColor" class="block text-xs font-bold text-gray-600 mb-1">Accent</label>
+              <input type="color" id="pce-primaryColor" class="h-9 w-full rounded border border-gray-300 cursor-pointer bg-white p-1">
+            </div>
+            <div>
+              <label for="pce-backgroundColor" class="block text-xs font-bold text-gray-600 mb-1">Background</label>
+              <input type="color" id="pce-backgroundColor" class="h-9 w-full rounded border border-gray-300 cursor-pointer bg-white p-1">
+            </div>
+            <div>
+              <label for="pce-textColor" class="block text-xs font-bold text-gray-600 mb-1">Text</label>
+              <input type="color" id="pce-textColor" class="h-9 w-full rounded border border-gray-300 cursor-pointer bg-white p-1">
+            </div>
+          </div>
+
+          <div>
+            <label for="pce-fontFamily" class="block text-xs font-bold text-gray-600 mb-1">Font</label>
+            <input type="text" id="pce-fontFamily" maxlength="48" spellcheck="false" placeholder="Plus Jakarta Sans"
+              class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none">
+          </div>
+
+          <img id="pce-preview" alt="Preview of the branded card" class="w-full rounded-lg border border-gray-200 bg-gray-50 aspect-square object-cover">
+
+          <div class="flex items-center gap-2">
+            <button type="button" id="pce-save"
+              class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer">Save card</button>
+            <button type="button" id="pce-revert"
+              class="text-xs font-semibold text-gray-500 hover:text-gray-700 transition cursor-pointer">Undo changes</button>
+            <span id="pce-msg" class="text-xs font-semibold text-gray-500"></span>
+          </div>
+        </div>
+      </div>
       <!-- Quality review (The Quality Reviewer, plan-gated). This panel existed ONLY in the
            calendar, so the Review Queue — where people actually approve — showed no warnings, no
            suggestions and no score. Populated by _rqLoadQualityReview(). -->
@@ -5570,6 +5627,178 @@ function rqReviewSwitchPlatform(id) {
 // Render the modal for the active platform (_rqReviewPostId). Approve/Reject/connection-gating are
 // group-wide; caption/media/regenerate edits target the active platform (with an "apply to all"
 // option on amend). Split out of openPostReview so switching a tab re-renders in place.
+// ── Branded text card editor (Review Queue) ──────────────────────────────────
+// The image on a brand-card post IS the render, so "edit the image" means re-rendering it. Every
+// preview and the final save go through the SERVER's renderBrandCard — the same code that drafted
+// the card — so what the reviewer approves is byte-for-byte what publishes. Nothing here is baked
+// in the browser.
+//
+// Scope is deliberately this ONE post: the org-wide default lives on Business Information → Brand
+// style, and tuning a single card must never silently restyle every future post.
+const _pceState = { postId: null, base: null, busy: false, token: 0 };
+
+function _pceEl(id) { return document.getElementById(id); }
+
+function _pceSetMsg(text, tone) {
+    const m = _pceEl('pce-msg');
+    if (!m) return;
+    m.textContent = text || '';
+    m.className = 'text-xs font-semibold ' +
+        (tone === 'error' ? 'text-red-600' : tone === 'ok' ? 'text-emerald-700' : 'text-gray-500');
+}
+
+function _pceValues() {
+    return {
+        headline: _pceEl('pce-headline')?.value ?? '',
+        variant: _pceEl('pce-headline')?.dataset.variant || 'light',
+        primaryColor: _pceEl('pce-primaryColor')?.value || '',
+        backgroundColor: _pceEl('pce-backgroundColor')?.value || '',
+        textColor: _pceEl('pce-textColor')?.value || '',
+        fontFamily: _pceEl('pce-fontFamily')?.value?.trim() || '',
+    };
+}
+
+function _pcePaintVariant(variant) {
+    const store = _pceEl('pce-headline');
+    if (store) store.dataset.variant = variant;
+    for (const btn of document.querySelectorAll('.pce-variant')) {
+        const on = btn.dataset.variant === variant;
+        btn.className = 'pce-variant px-3 py-1.5 text-xs font-bold cursor-pointer transition'
+            + (btn.dataset.variant === 'bold' ? ' border-l border-gray-300' : '')
+            + (on ? ' bg-emerald-600 text-white' : ' bg-white text-gray-600 hover:bg-gray-50');
+    }
+}
+
+function _pceFill(v) {
+    if (_pceEl('pce-headline')) _pceEl('pce-headline').value = v.headline ?? '';
+    for (const f of ['primaryColor', 'backgroundColor', 'textColor']) {
+        if (_pceEl('pce-' + f) && v[f]) _pceEl('pce-' + f).value = v[f];
+    }
+    if (_pceEl('pce-fontFamily')) _pceEl('pce-fontFamily').value = v.fontFamily ?? '';
+    _pcePaintVariant(v.variant || 'light');
+}
+
+async function _pceRefreshPreview() {
+    const postId = _pceState.postId;
+    if (!postId) return;
+    const token = ++_pceState.token;
+    try {
+        const res = await fetch('/.netlify/functions/edit-brand-card', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId, preview: true, ..._pceValues() }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not render that card.');
+        if (token !== _pceState.token) return;   // superseded by a newer edit
+        const img = _pceEl('pce-preview');
+        if (img) img.src = data.dataUrl;
+        _pceSetMsg('');
+    } catch (e) {
+        if (token === _pceState.token) _pceSetMsg(e.message, 'error');
+    }
+}
+
+let _pceDebounce;
+function _pceSchedulePreview() { clearTimeout(_pceDebounce); _pceDebounce = setTimeout(_pceRefreshPreview, 400); }
+
+// Seed the editor from THIS card's stored render params, so reopening shows the user's own edits
+// rather than resetting to the org default.
+function _pceSyncForPost(post) {
+    const wrap = _pceEl('post-review-cardedit');
+    if (!wrap) return;
+    const card = post && post.brandCard;
+    const editable = !!card && ['pending_approval', 'draft', 'in_review', 'approved', 'scheduled'].includes(post.status);
+    if (!editable) {
+        wrap.classList.add('hidden');
+        wrap.style.display = 'none';   // `hidden` loses to a display set inline elsewhere
+        _pceState.postId = null;
+        return;
+    }
+    wrap.classList.remove('hidden');
+    wrap.style.display = '';
+
+    const rp = card.renderParams || {};
+    const kit = rp.kit || {};
+    _pceState.postId = post.id;
+    _pceState.base = {
+        headline: rp.headline || card.headline || '',
+        variant: rp.variant === 'bold' ? 'bold' : 'light',
+        primaryColor: kit.primaryColor || '#1f1e1b',
+        backgroundColor: kit.backgroundColor || '#ffffff',
+        textColor: kit.textColor || '#1f1e1b',
+        fontFamily: kit.fontFamily || '',
+    };
+    _pceFill(_pceState.base);
+    _pceSetMsg('');
+
+    // Collapse on every open: the panel is secondary to reading the post, and a previously-expanded
+    // panel would push the caption off-screen for the next post reviewed.
+    _pceEl('pce-panel')?.classList.add('hidden');
+    if (_pceEl('pce-chevron')) _pceEl('pce-chevron').style.transform = '';
+}
+
+(function _pceBind() {
+    const onReady = () => {
+        _pceEl('pce-toggle')?.addEventListener('click', () => {
+            const panel = _pceEl('pce-panel');
+            if (!panel) return;
+            const opening = panel.classList.contains('hidden');
+            panel.classList.toggle('hidden', !opening);
+            if (_pceEl('pce-chevron')) _pceEl('pce-chevron').style.transform = opening ? 'rotate(180deg)' : '';
+            // Render lazily: a review queue where every open cost a server render would be slow for
+            // the majority of reviewers who never touch the card.
+            if (opening && !_pceEl('pce-preview')?.src) _pceRefreshPreview();
+        });
+        for (const btn of document.querySelectorAll('.pce-variant')) {
+            btn.addEventListener('click', () => { _pcePaintVariant(btn.dataset.variant); _pceSchedulePreview(); });
+        }
+        for (const id of ['pce-headline', 'pce-primaryColor', 'pce-backgroundColor', 'pce-textColor', 'pce-fontFamily']) {
+            _pceEl(id)?.addEventListener('input', _pceSchedulePreview);
+        }
+        _pceEl('pce-revert')?.addEventListener('click', () => {
+            if (!_pceState.base) return;
+            _pceFill(_pceState.base);
+            _pceSetMsg('');
+            _pceRefreshPreview();
+        });
+        _pceEl('pce-save')?.addEventListener('click', async () => {
+            if (_pceState.busy || !_pceState.postId) return;
+            _pceState.busy = true;
+            const btn = _pceEl('pce-save');
+            btn.disabled = true;
+            _pceSetMsg('Saving…');
+            try {
+                const res = await fetch('/.netlify/functions/edit-brand-card', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ postId: _pceState.postId, ..._pceValues() }),
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || 'Could not save the card.');
+                // The mock-up above still shows the OLD image, and its thumbnail is a presigned URL
+                // for a storage key that no longer holds this card — so refetch (same path
+                // openPostReview uses to warm the cache) and re-render, or the reviewer would
+                // approve while looking at what the card used to be.
+                try {
+                    const list = await fetch('/.netlify/functions/get-social-drafts?status=pending_approval');
+                    if (list.ok) rqGroupSocialDrafts((await list.json()).drafts || []);
+                } catch { /* the save already succeeded — a stale thumbnail is not worth an error */ }
+                // Re-render reseeds the editor from the newly-saved params (so Undo now reverts to
+                // what was saved) and clears the status line — hence confirming AFTER it, not before.
+                _rqReviewRenderActive();
+                _pceEl('pce-panel')?.classList.remove('hidden');
+                _pceSetMsg('Card updated.', 'ok');
+            } catch (e) {
+                _pceSetMsg(e.message, 'error');
+            } finally {
+                _pceState.busy = false;
+                btn.disabled = false;
+            }
+        });
+    };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', onReady);
+    else onReady();
+})();
+
 function _rqReviewRenderActive() {
     const post = _rqPostCache[_rqReviewPostId];
     if (!post) return;
@@ -5577,6 +5806,7 @@ function _rqReviewRenderActive() {
     const multi = groupSize > 1;
 
     document.getElementById('post-review-body').innerHTML = renderPlatformMockup(post);
+    _pceSyncForPost(post);
 
     // Reset the Regenerate panel to a clean state — the modal DOM is reused across posts, so a
     // prior in-flight "Regenerating…" button/feedback must not carry over to the next open.

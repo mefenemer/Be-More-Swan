@@ -1,0 +1,23 @@
+-- Per-asset render parameters, so a branded text card can be re-rendered exactly.
+--
+-- A brand card is generated from the org's brand kit plus a headline, then flattened to a PNG. The
+-- PNG alone is not editable: nothing in it records which colour was the accent, which polarity was
+-- chosen, or what the headline was before it was wrapped. Without this column the review-time card
+-- editor could only ever seed itself from the CURRENT org kit, so a user who tuned one post's
+-- colours would find their tweaks gone the moment they reopened it — and a re-render would silently
+-- revert them.
+--
+-- Shape (written by src/lib/media-persist.ts, read by netlify/functions/edit-brand-card.ts):
+--   { "kind": "brand_card", "headline": "...", "variant": "light" | "bold",
+--     "kit": { ...the BrandKit actually used for this render... } }
+--
+-- Deliberately the whole kit, not a diff against the org's: the org kit can change afterwards, and
+-- a card must stay reproducible from its own row. NULL for every other asset type. Idempotent.
+--
+-- APPLY THIS FILE (Neon SQL editor / psql as the owner) — do NOT use `drizzle-kit push`.
+-- RLS policies live in raw SQL (db/rls/) and are invisible to Drizzle, so a push can
+-- propose DISABLE ROW LEVEL SECURITY / DROP POLICY on RLS-enabled tables. This plain
+-- ALTER TABLE cannot touch RLS; the new column inherits the table's grants + row
+-- policies automatically. Canonical column definition lives in db/schema.ts.
+
+ALTER TABLE content_assets ADD COLUMN IF NOT EXISTS render_params jsonb;
