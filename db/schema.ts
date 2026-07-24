@@ -53,6 +53,11 @@ export const organisations = pgTable('organisations', {
   domainVerified: boolean('domain_verified').notNull().default(false),
   allowDomainJoin: boolean('allow_domain_join').notNull().default(false),
   websiteUrl: text('website_url'),
+  // Visual brand identity — colours, wordmark, logo — used to render branded text cards
+  // (src/lib/brand-card.ts). Prose brand context lives in businessDescription/targetAudience and
+  // the assistant's onboardingContext; this is the half a renderer needs. Shape + defaults in
+  // src/utils/brand-kit.ts, never read raw. db/brand-kit.sql.
+  brandKit: jsonb('brand_kit'),
   socialLinks: text('social_links'),
   // Per-platform social handles/URLs captured on Business Information, keyed by
   // lowercase platform slug ({ instagram, facebook, linkedin, x, tiktok, ... }).

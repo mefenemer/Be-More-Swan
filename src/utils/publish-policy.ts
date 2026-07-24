@@ -59,8 +59,14 @@ export type PublishPolicy = Record<string, PublishMode>;
 /** Status the drafter writes. 'scheduled' is what publish-social-posts.ts picks up. */
 export type DraftStatus = 'scheduled' | 'pending_approval';
 
-/** Where the post's media came from — mirrors resolveMediaForPost()'s `source`. */
-export type MediaSource = 'manual' | 'stock' | 'ai';
+/**
+ * Where the post's media came from. Re-exported from the model that defines it rather than
+ * re-declared: this was a hand-copied duplicate, and adding a fourth source to media-sources.ts
+ * left the copy stale — the gate would have type-errored on a value the resolver can return.
+ * media-sources.ts imports nothing, so pulling it in here cannot cycle.
+ */
+export type { MediaSource } from './media-sources';
+import type { MediaSource } from './media-sources';
 
 /** Why the draft landed where it did — surfaced in generationReason and useful when debugging a queue. */
 export type GateReason =

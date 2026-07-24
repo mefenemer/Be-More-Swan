@@ -19,7 +19,9 @@ import { CONTENT_QUALITY_STANDARDS } from '../../src/constants/content-quality';
 import { creditLine } from '../../src/utils/pexels';
 import { resolveMediaForPost } from '../../src/utils/media-resolver';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
-import { generateAndPersistImage } from '../../src/lib/media-persist';
+import { generateAndPersistImage, renderAndPersistBrandCard } from '../../src/lib/media-persist';
+import { headlineFromCaption, MAX_HEADLINE_CHARS } from '../../src/lib/brand-card';
+import { normalizeBrandKit } from '../../src/utils/brand-kit';
 import { FalContentPolicyError } from '../../src/lib/fal-gateway';
 import { resolveDisclosureFooter } from '../../src/utils/disclosure-footer';
 import { fitForPlatform, isShortForm, type BrandHashtags } from '../../src/utils/platform-caption';
@@ -370,7 +372,12 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             // stock search — real, photographable nouns only (e.g. "person relaxing with coffee"), never
             // design language like "split graphic", "logo", "text overlay", "typography", "crossed out".
             `Also return "imageSearchQuery": 2–5 plain words naming the literal, photographable subject for a stock-photo search — no design/graphic/logo/overlay wording, just the real-world scene.`,
-            `Return JSON: { "caption": "...", ${needsShort ? '"captionShort": "...", ' : ''}"hashtags": "...", "suggestedMediaDescription": "...", "imageSearchQuery": "...", "pillar": ${pillarList.length ? '"<one of the pillars above>"' : 'null'}, ${isVideo ? '"reelScript": "...", "textOverlays": ["..."], ' : ''}"conflictNotice": null }`,
+            // Brand-card headline. A card is TYPOGRAPHY, so unlike the two media fields above this
+            // one is the words themselves, not a description of a picture. Asked for on every image
+            // post because the source is chosen after generation (see the media block) — and if it
+            // comes back missing, headlineFromCaption() salvages one from the caption.
+            isVideo ? '' : `Also return "cardHeadline": the post's single sharpest line, written to stand alone as large type on a plain branded card — under ${MAX_HEADLINE_CHARS} characters, no hashtags, no emoji, no link, no quotation marks, no trailing full stop.`,
+            `Return JSON: { "caption": "...", ${needsShort ? '"captionShort": "...", ' : ''}"hashtags": "...", "suggestedMediaDescription": "...", "imageSearchQuery": "...", ${isVideo ? '' : '"cardHeadline": "...", '}"pillar": ${pillarList.length ? '"<one of the pillars above>"' : 'null'}, ${isVideo ? '"reelScript": "...", "textOverlays": ["..."], ' : ''}"conflictNotice": null }`,
         ].filter(Boolean).join('\n');
 
         const messages: Anthropic.MessageParam[] = [{ role: 'user', content: baseInstruction }];
@@ -419,7 +426,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         const { text: rawText, tokensInput, tokensOutput } = gwResponse;
         let generated: {
             caption?: string; captionShort?: string; hashtags?: string;
-            suggestedMediaDescription?: string; imageSearchQuery?: string;
+            suggestedMediaDescription?: string; imageSearchQuery?: string; cardHeadline?: string;
             pillar?: string | null; reelScript?: string | null; textOverlays?: string[];
             conflictNotice?: string | null;
         } = {};
@@ -590,6 +597,26 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                     }
                 };
 
+                // Brand card: the org's own typography instead of a photograph. Free (no AI credits,
+                // no provider call) and deterministic, so unlike generateAi there is nothing to hold
+                // or refund — the only way it fails is a missing headline or unconfigured R2, both of
+                // which throw and drop through to the next source.
+                const renderCard = async (): Promise<number> => {
+                    const headline = (generated.cardHeadline || '').trim() || headlineFromCaption(rawCaption) || '';
+                    if (!headline) throw new Error('no_card_headline');
+
+                    const [org] = await db.select({ name: organisations.name, brandKit: organisations.brandKit })
+                        .from(organisations).where(eq(organisations.id, job.organisation_id)).limit(1);
+
+                    return renderAndPersistBrandCard(db, {
+                        orgId: job.organisation_id, userId: job.user_id,
+                        headline, kit: normalizeBrandKit(org?.brandKit), aspectRatio: aspect,
+                        // Post id seeds the light/bold polarity, so consecutive posts alternate and a
+                        // retry of THIS post re-renders the same card.
+                        seed: post.id, orgName: org?.name ?? null,
+                    });
+                };
+
                 const resolved = await resolveMediaForPost(db, {
                     assistant: { mediaSources: asst?.mediaSources },
                     orgId: job.organisation_id,
@@ -599,6 +626,10 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                     context: stockContext,
                     mediaType: isVideo ? 'video' : 'image',
                     generateAi,
+                    renderBrandCard: renderCard,
+                    // Alternates stock ↔ brand_card when both are enabled, so the feed mixes photos
+                    // and cards rather than the higher-priority source winning every single time.
+                    rotationKey: post.id,
                 });
                 if (resolved.ok) {
                     await attachAssetToPost(db, post.id, resolved.assetId);

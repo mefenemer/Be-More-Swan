@@ -27,16 +27,41 @@ export interface ResolveArgs {
     // Injected AI generator so the resolver stays free of credit-ledger / Fal specifics. Returns a
     // new content_assets id, or throws when AI generation failed. Omit to treat 'ai' as unavailable.
     generateAi?: () => Promise<number>;
+    // Injected brand-card renderer, same contract as generateAi. Kept out of the resolver for the
+    // same reason: this module knows about SOURCE PRIORITY, not about satori, R2 or brand kits.
+    // Omit to treat 'brand_card' as unavailable.
+    renderBrandCard?: () => Promise<number>;
+    // Stable per-post number (the post id) used to alternate stock ↔ brand_card. Same value in ⇒
+    // same source out, so a retried job re-resolves the same way and a test can assert the choice.
+    rotationKey?: number;
 }
 
 export type ResolvedMedia =
     | { ok: true; assetId: number; source: MediaSource }
     | { ok: false; exhausted: true; tried: MediaSource[]; lastError?: string };
 
+/**
+ * Swap the relative priority of 'stock' and 'brand_card' on odd rotation keys.
+ *
+ * Both sources almost always succeed, so a fixed priority order means the lower one NEVER runs —
+ * an assistant with both enabled would post nothing but photos (or nothing but cards) forever.
+ * Alternating by post id is what turns "both enabled" into the mixed feed it reads as. Every other
+ * source keeps its position; only these two trade places.
+ */
+export function rotateSources(order: MediaSource[], rotationKey: number): MediaSource[] {
+    const i = order.indexOf('stock');
+    const j = order.indexOf('brand_card');
+    if (i === -1 || j === -1) return order;
+    if (Math.abs(Math.trunc(rotationKey)) % 2 === 0) return order;
+    const out = [...order];
+    [out[i], out[j]] = [out[j], out[i]];
+    return out;
+}
+
 export async function resolveMediaForPost(db: Db, args: ResolveArgs): Promise<ResolvedMedia> {
-    const { orgId, userId, context, generateAi } = args;
+    const { orgId, userId, context, generateAi, renderBrandCard } = args;
     const mediaType = args.mediaType ?? 'image';
-    const order = normalizeMediaSources(args.assistant?.mediaSources);
+    const order = rotateSources(normalizeMediaSources(args.assistant?.mediaSources), args.rotationKey ?? 0);
 
     const tried: MediaSource[] = [];
     let lastError: string | undefined;
@@ -50,6 +75,12 @@ export async function resolveMediaForPost(db: Db, args: ResolveArgs): Promise<Re
             } else if (source === 'stock') {
                 const id = await pickStockAsset(db, { orgId, userId, context, mediaType });
                 if (id != null) return { ok: true, assetId: id, source };
+            } else if (source === 'brand_card') {
+                // Typography only — there is no video equivalent of a card, and a still image in a
+                // video slot would fail the platform upload.
+                if (mediaType !== 'image' || !renderBrandCard) continue;
+                const id = await renderBrandCard();
+                return { ok: true, assetId: id, source };
             } else if (source === 'ai') {
                 // AI video generation is async (generate-ai-video) and out of this synchronous path;
                 // only image AI generation is resolved inline.

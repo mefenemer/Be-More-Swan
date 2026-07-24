@@ -1,17 +1,22 @@
 // src/lib/media-persist.ts
 // Durable media persistence for the Content Library.
 //
-// Two exports:
+// Exports:
 //   persistRemoteMediaToR2 — download a remote URL into R2 and hand back the key (the shared
 //     primitive; used wherever a provider hands us a URL that expires).
+//   persistBufferToR2 — same, for bytes we produced ourselves rather than fetched.
 //   generateAndPersistImage — generate ONE image with Flux 2 and persist it as a content_asset
 //     (provider 'fal'). Used by the autonomous suggestions cron (US5), where there is no human
 //     "pick a variation" step. Credit accounting is the CALLER's responsibility.
+//   renderAndPersistBrandCard — render a typographic brand card and persist it (provider
+//     'brand_card'). Costs no AI credits — nothing is generated, only drawn.
 
 import crypto from 'crypto';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
 import { contentAssets } from '../../db/schema';
 import { generateImages, falConfigured, type AspectRatio } from './fal-gateway';
+import { renderBrandCard, type CardVariant } from './brand-card';
+import type { BrandKit } from '../utils/brand-kit';
 import type { getDb } from '../../db/client';
 
 type Db = ReturnType<typeof getDb>;
@@ -58,14 +63,30 @@ export async function persistRemoteMediaToR2(params: {
 }): Promise<{ storageKey: string; fileSize: number }> {
     const res = await fetch(params.url);
     if (!res.ok) throw new Error(`Could not download ${params.label || 'media'} (${res.status}).`);
-    const bytes = Buffer.from(await res.arrayBuffer());
+    return persistBufferToR2({ ...params, bytes: Buffer.from(await res.arrayBuffer()) });
+}
+
+/**
+ * Store bytes we already hold in R2 under the org's content/ prefix.
+ *
+ * Same destination and key shape as persistRemoteMediaToR2, minus the download — for media the
+ * platform RENDERS rather than fetches (brand cards today). Callers must check r2IsConfigured():
+ * without R2 there is nowhere to put bytes that have no URL of their own, and unlike a provider
+ * URL there is no fallback to fall back to.
+ */
+export async function persistBufferToR2(params: {
+    orgId: number;
+    bytes: Buffer;
+    contentType: string;
+    folder?: string;
+}): Promise<{ storageKey: string; fileSize: number }> {
     const storageKey = `content/org-${params.orgId}/${params.folder || 'generated'}/${crypto.randomUUID()}.${extFromMime(params.contentType)}`;
     const s3 = new S3Client({
         region: 'auto', endpoint: R2_ENDPOINT,
         credentials: { accessKeyId: R2_ACCESS_KEY_ID!, secretAccessKey: R2_SECRET_ACCESS_KEY! },
     });
-    await s3.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: storageKey, Body: bytes, ContentType: params.contentType }));
-    return { storageKey, fileSize: bytes.byteLength };
+    await s3.send(new PutObjectCommand({ Bucket: R2_BUCKET, Key: storageKey, Body: params.bytes, ContentType: params.contentType }));
+    return { storageKey, fileSize: params.bytes.byteLength };
 }
 
 /**
@@ -110,6 +131,57 @@ export async function generateAndPersistImage(db: Db, params: {
         width: image.width || null,
         height: image.height || null,
         generationJobId: params.generationJobId ?? null,
+        status: 'pending',
+    }).returning({ id: contentAssets.id });
+
+    return asset.id;
+}
+
+/**
+ * Render a brand card for a post and store it as a content_asset (provider 'brand_card').
+ * Returns the new asset id.
+ *
+ * Throws when R2 is unconfigured: a card exists only as bytes we just made, so with nowhere to put
+ * them there is no asset to point a post at. The resolver treats the throw as "source produced
+ * nothing" and moves to the next one, which is the right outcome — never a post with a dead image.
+ */
+export async function renderAndPersistBrandCard(db: Db, params: {
+    orgId: number;
+    userId: number;
+    headline: string;
+    kit: BrandKit;
+    aspectRatio: AspectRatio;
+    /** Post id — alternates the card's polarity and keeps a re-render identical. */
+    seed?: number;
+    variant?: CardVariant;
+    orgName?: string | null;
+}): Promise<number> {
+    if (!r2Configured) throw new Error('brand_card_requires_r2');
+
+    const card = await renderBrandCard({
+        headline: params.headline,
+        kit: params.kit,
+        aspectRatio: params.aspectRatio,
+        variant: params.variant,
+        seed: params.seed,
+        orgName: params.orgName,
+    });
+
+    const { storageKey, fileSize } = await persistBufferToR2({
+        orgId: params.orgId, bytes: card.png, contentType: 'image/png', folder: 'brand-cards',
+    });
+
+    const [asset] = await db.insert(contentAssets).values({
+        userId: params.userId, organisationId: params.orgId,
+        name: `Brand card — ${card.headline.slice(0, 60)}`,
+        assetType: 'image', mimeType: 'image/png',
+        fileSize, storageKey, externalUrl: null,
+        provider: 'brand_card',
+        // The headline IS the prompt here: it is the whole input the image was derived from, so
+        // storing it makes the card reproducible from the row alone.
+        prompt: card.headline,
+        aspectRatio: params.aspectRatio,
+        width: card.width, height: card.height,
         status: 'pending',
     }).returning({ id: contentAssets.id });
 
