@@ -113,4 +113,38 @@ check('a caption with NO trailing hashtags is left untouched', () => {
     assert.ok(r.caption.startsWith(LONG.slice(0, 40)), 'body altered when it had no trailing hashtags');
 });
 
+const BRAND = { canonical: ['BeMoreSwan', 'HireNotLearn'], aliases: { hiredontlearn: 'HireNotLearn', saasfatigue: 'SaaSFatigue' } };
+
+check('canonical brand tags are forced in first, spelled exactly', () => {
+    const out = normalizeHashtags('#FounderLife #WorkSmarter', 'linkedin', BRAND).split(/\s+/);
+    assert.equal(out[0], '#BeMoreSwan');
+    assert.equal(out[1], '#HireNotLearn');
+    assert.ok(out.includes('#FounderLife'));
+});
+
+check('variant hashtags are rewritten to their canonical spelling', () => {
+    const out = normalizeHashtags('#HireDontLearn #SaasFatigue #FounderLife', 'linkedin', BRAND);
+    assert.ok(out.includes('#HireNotLearn'), 'HireDontLearn not rewritten to HireNotLearn');
+    assert.ok(out.includes('#SaaSFatigue'), 'SaasFatigue not re-cased to SaaSFatigue');
+    assert.ok(!/HireDontLearn/i.test(out) || out.split('HireNotLearn').length === 2, 'variant survived');
+    assert.ok(!out.includes('#HireDontLearn'), 'raw variant still present');
+});
+
+check('a canonical tag the model already emitted is not duplicated', () => {
+    const out = normalizeHashtags('#bemoreswan #HireDontLearn', 'linkedin', BRAND).split(/\s+/);
+    assert.equal(out.filter(t => t.toLowerCase() === '#bemoreswan').length, 1);
+    assert.equal(out.filter(t => t === '#HireNotLearn').length, 1);
+});
+
+check('brand enforcement respects the X cap (2)', () => {
+    const out = normalizeHashtags('#FounderLife #WorkSmarter #Growth', 'x', BRAND).split(/\s+/).filter(Boolean);
+    assert.ok(out.length <= 2, `X exceeded 2 tags: ${out.join(' ')}`);
+    assert.equal(out[0], '#BeMoreSwan'); // brand tags win the limited slots
+});
+
+check('fitForPlatform threads the brand config through to the hashtags', () => {
+    const r = fitForPlatform({ platform: 'linkedin', longCaption: LONG, shortCaption: SHORT, hashtagsRaw: '#HireDontLearn #FounderLife', footer: FOOTER, brand: BRAND });
+    assert.ok(r.hashtags.includes('#HireNotLearn') && !r.hashtags.includes('#HireDontLearn'), 'brand not applied via fitForPlatform');
+});
+
 console.log(`\n${passed} checks passed`);

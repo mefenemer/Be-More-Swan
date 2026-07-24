@@ -57,19 +57,53 @@ export function trailingHashtagBlock(caption: string | null | undefined): string
     return m ? m[0].trim() : '';
 }
 
-/** De-dupe (case-insensitive), acronym-case, and cap a raw hashtag string for one platform. */
-export function normalizeHashtags(raw: string | null | undefined, platform: string | null | undefined): string {
-    if (!raw) return '';
+// Per-brand hashtag governance (stored on the assistant). `canonical` tags are always included and
+// spelled exactly as given; `aliases` map a lowercased variant to its canonical spelling so the
+// account's own tags stop drifting between posts (e.g. #HireDontLearn → #HireNotLearn,
+// #SaasFatigue → #SaaSFatigue). Both optional — with neither, normalization is generic hygiene only.
+export interface BrandHashtags {
+    canonical?: string[];
+    aliases?: Record<string, string>;
+}
+
+const bareTag = (t: string) => t.replace(/^#+/, '').trim();
+
+/**
+ * De-dupe (case-insensitive), acronym-case, cap per platform, and — when a brand config is supplied —
+ * force the brand's canonical tags in first (correctly spelled) and rewrite known variants to their
+ * canonical form. Generic (no brand) behaviour is unchanged.
+ */
+export function normalizeHashtags(
+    raw: string | null | undefined,
+    platform: string | null | undefined,
+    brand?: BrandHashtags,
+): string {
+    const canonical = (brand?.canonical ?? []).map(bareTag).filter(Boolean);
+    const canonByKey = new Map(canonical.map(c => [c.toLowerCase(), c]));
+    const aliasByKey = new Map(
+        Object.entries(brand?.aliases ?? {}).map(([k, v]) => [bareTag(k).toLowerCase(), bareTag(v)]),
+    );
+    const resolve = (tag: string): string => {
+        const key = tag.toLowerCase();
+        return aliasByKey.get(key) ?? canonByKey.get(key) ?? ACRONYM_CASE[key] ?? tag;
+    };
+
     const seen = new Set<string>();
     const out: string[] = [];
-    for (const token of String(raw).split(/[\s,]+/)) {
-        const tag = token.replace(/^#+/, '').trim();
-        if (!tag) continue;
-        const key = tag.toLowerCase();
-        if (seen.has(key)) continue;
+    const push = (token: string) => {
+        const tag = bareTag(token);
+        if (!tag) return;
+        const resolved = resolve(tag);
+        const key = resolved.toLowerCase();
+        if (seen.has(key)) return;
         seen.add(key);
-        out.push('#' + (ACRONYM_CASE[key] ?? tag));
-    }
+        out.push('#' + resolved);
+    };
+
+    // Brand tags first (always present + canonical spelling), then the model's own tags.
+    for (const c of canonical) push(c);
+    for (const token of String(raw ?? '').split(/[\s,]+/)) push(token);
+
     return out.slice(0, hashtagCap(platform)).join(' ');
 }
 
@@ -105,6 +139,7 @@ export interface FitInput {
     hashtagsRaw?: string | null;
     footer: string | null;            // disclosure footer — legal, never dropped
     creditSuffix?: string;            // e.g. Pexels photographer credit, appended after the footer
+    brand?: BrandHashtags;            // per-assistant canonical hashtags / aliases (optional)
 }
 
 /**
@@ -119,7 +154,7 @@ export function fitForPlatform(input: FitInput): { caption: string; hashtags: st
     // the separate field (normalized below), and leaving them in the body strands the footer and ships
     // typos. Fall back to those leaked tags for the hashtags field only if the field itself is empty.
     const longCaption = stripTrailingHashtags(input.longCaption);
-    const hashtags = normalizeHashtags(input.hashtagsRaw || trailingHashtagBlock(input.longCaption), platform);
+    const hashtags = normalizeHashtags(input.hashtagsRaw || trailingHashtagBlock(input.longCaption), platform, input.brand);
 
     if (!isShortForm(platform)) {
         return { caption: appendFooter(longCaption, footer) + credit, hashtags };

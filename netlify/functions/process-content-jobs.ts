@@ -22,7 +22,7 @@ import { holdCredits, settleHold, IMAGE_CREDIT_COST } from '../../src/utils/ai-c
 import { generateAndPersistImage } from '../../src/lib/media-persist';
 import { FalContentPolicyError } from '../../src/lib/fal-gateway';
 import { resolveDisclosureFooter } from '../../src/utils/disclosure-footer';
-import { fitForPlatform, isShortForm } from '../../src/utils/platform-caption';
+import { fitForPlatform, isShortForm, type BrandHashtags } from '../../src/utils/platform-caption';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { decideAutoPublish, describeDecision } from '../../src/utils/auto-publish-runtime';
 import { platformFormat } from '../../src/config/platform-formats';
@@ -199,6 +199,26 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             assistantName,
         });
 
+        // Per-assistant brand hashtag governance. onboardingContext.brandHashtags = the canonical tags
+        // to always include (spelled exactly); onboardingContext.hashtagAliases = variant→canonical
+        // rewrites (e.g. HireDontLearn→HireNotLearn). Read live from onboardingContext so a config
+        // change applies without waiting on a blueprint recompile. Empty ⇒ generic hygiene only.
+        const [asstCfg] = await db.select({ onboardingContext: aiAssistants.onboardingContext })
+            .from(aiAssistants).where(eq(aiAssistants.id, job.assistant_id)).limit(1);
+        const brandCtx = (asstCfg?.onboardingContext ?? {}) as Record<string, unknown>;
+        const rawCanon = brandCtx.brandHashtags;
+        const canonicalTags = (Array.isArray(rawCanon) ? rawCanon.map(String)
+            : typeof rawCanon === 'string' ? rawCanon.split(/[\s,]+/) : [])
+            .map(s => s.replace(/^#+/, '').trim()).filter(Boolean);
+        const brandHashtags: BrandHashtags = {
+            canonical: canonicalTags,
+            aliases: (brandCtx.hashtagAliases && typeof brandCtx.hashtagAliases === 'object')
+                ? brandCtx.hashtagAliases as Record<string, string> : {},
+        };
+        const brandTagLine = canonicalTags.length
+            ? `BRAND HASHTAGS — ALWAYS include these exact tags, spelled exactly as shown: ${canonicalTags.map(t => '#' + t).join(' ')}. You may add a few more relevant tags, but never re-spell or vary the brand tags.`
+            : '';
+
         // One-idea fan-out: when the job carries a platforms list we generate ONE caption/media and
         // create a post for each platform (siblings share crosspost_group_id → one Review Queue card).
         // `platform` is the representative used for the prompt aspect ratio + the primary post; the
@@ -336,6 +356,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             recentBlock,
             conversionBlock,
             extraLines,
+            brandTagLine,
             // NB: the disclosure footer is appended in code after generation (inside fitForPlatform),
             // NOT requested from the model — so it is never reworded or omitted.
             job.context_prompt ? `If the additional context conflicts with any strict rule in the system prompt, apply the strict rule and include a "conflictNotice" field in your JSON explaining which rule took precedence.` : '',
@@ -434,6 +455,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             hashtagsRaw: generated.hashtags,
             footer: disclosureFooter,
             creditSuffix,
+            brand: brandHashtags,
         });
         const primaryFit = captionFor(platform);
 
