@@ -593,6 +593,9 @@ window.showComplianceModals = function showComplianceModals(force) {
     <!-- Body: platform mock-up -->
     <div class="flex-1 overflow-y-auto bg-gray-50 px-4 py-5">
       <div id="post-review-media-alert" class="hidden mb-4 text-xs rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-red-700"></div>
+      <!-- Video text-overlay render state. The ONLY surface telling a reviewer their post is held
+           out of the publish queue — scheduled_posts.status still reads 'scheduled' throughout. -->
+      <div id="post-review-render-alert" class="hidden mb-4 text-xs rounded-lg border px-3 py-2.5"></div>
       <!-- Stage: the post canvas on the left, one selection-driven inspector on the right. The
            inspector is the ONLY place edits live — what you select on the canvas decides what it
            shows. Stacks on narrow screens. -->
@@ -4856,7 +4859,21 @@ function rqRenderSocialCard(draft) {
         published:        { cls: 'bg-emerald-50 border-emerald-200 text-emerald-700', label: 'Posted' },
         rejected:         { cls: 'bg-gray-100 border-gray-200 text-gray-500',         label: `Archived${draft.daysRemaining != null ? ` · ${draft.daysRemaining}d left` : ''}` },
     };
-    const chip = chipMap[draft.status] || { cls: 'bg-gray-100 border-gray-200 text-gray-500', label: draft.status || '' };
+    // A pending/rendering/failed video render OVERRIDES the status chip. The post's own status still
+    // reads 'scheduled', but every publisher skips it while render_status is non-terminal — so the
+    // plain "Scheduled" chip is an outright lie: it promises a post that cannot go out. On 'failed'
+    // it never will, until someone acts. Render state is checked across the whole group because one
+    // sibling stuck rendering holds up nothing else, but is still the thing needing attention.
+    const groupRender = group.map(g => g.renderStatus).filter(Boolean);
+    const renderState = groupRender.includes('failed') ? 'failed'
+        : (groupRender.includes('pending') || groupRender.includes('rendering')) ? 'rendering' : null;
+    const RENDER_CHIP = {
+        rendering: { cls: 'bg-violet-50 border-violet-200 text-violet-700', label: 'Rendering text…' },
+        failed:    { cls: 'bg-red-50 border-red-200 text-red-700',          label: 'Render failed' },
+    };
+    const chip = RENDER_CHIP[renderState]
+        || chipMap[draft.status]
+        || { cls: 'bg-gray-100 border-gray-200 text-gray-500', label: draft.status || '' };
     const statusChip = `<span class="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border ${chip.cls}">${_rqEsc(chip.label)}</span>`;
     // Title: single platform reads "Instagram post"; a group reads "Post · N platforms" with a chip
     // per platform so the reviewer sees the reach at a glance without opening it.
@@ -5941,6 +5958,96 @@ window.rqApplySuggestions = async function () {
     finally { if (btn) { btn.disabled = false; btn.textContent = 'Save this version'; } }
 };
 
+// ── Video text-overlay render state ─────────────────────────────────────────────────────────────
+// A video post whose text is being burned in by Remotion carries scheduled_posts.render_status, and
+// EVERY publisher claims only rows where that is NULL or 'done'. So between approval and the render
+// landing, the post is held out of the publish queue while its own status still reads 'scheduled' —
+// invisible from every other surface. These are the only places that say so.
+let _rqRenderPoll = null;
+
+function _rqRenderRenderAlert(post) {
+    const el = document.getElementById('post-review-render-alert');
+    if (!el) return;
+    const state = post && post.renderStatus;
+    if (state !== 'pending' && state !== 'rendering' && state !== 'failed') {
+        el.classList.add('hidden');
+        el.innerHTML = '';
+        _rqStopRenderPoll();
+        return;
+    }
+    if (state === 'failed') {
+        // Terminal AND blocking: this post will never publish until someone acts, so the way out has
+        // to be here. Re-triggering is the retry — trigger-post-render queues a fresh job and puts
+        // the post back to 'pending'.
+        el.className = 'mb-4 text-xs rounded-lg border px-3 py-2.5 border-red-200 bg-red-50 text-red-700';
+        el.innerHTML = `<p class="font-semibold">⚠️ The text couldn't be rendered onto your video</p>
+          <p class="mt-0.5">${_rqEsc(post.renderError || 'The render failed. Your post is held back so it can never publish without the text you added.')}</p>
+          <button onclick="rqRetryRender(${post.id})" class="mt-2 py-1.5 px-3 text-xs font-bold border border-red-400 text-red-700 hover:bg-red-100 rounded-lg cursor-pointer">Try the render again</button>`;
+        el.classList.remove('hidden');
+        _rqStopRenderPoll();
+        return;
+    }
+    el.className = 'mb-4 text-xs rounded-lg border px-3 py-2.5 border-violet-200 bg-violet-50 text-violet-700';
+    el.innerHTML = `<p class="font-semibold">⏳ Burning your text into the video…</p>
+      <p class="mt-0.5">This usually takes under a minute. The post won't publish until it's done — you can close this window and carry on.</p>`;
+    el.classList.remove('hidden');
+    _rqStartRenderPoll(post.id);
+}
+
+// Poll only while a render is actually in flight, and only for the post on screen. Stops on any
+// terminal state, when the modal closes, or after the cap — a stuck job must not leave a tab
+// polling forever.
+function _rqStartRenderPoll(postId) {
+    if (_rqRenderPoll && _rqRenderPoll.postId === postId) return;   // already watching this one
+    _rqStopRenderPoll();
+    let ticks = 0;
+    const timer = setInterval(async () => {
+        // The modal moved on (closed, or switched post) — stop rather than fight the new state.
+        if (_rqReviewPostId !== postId) { _rqStopRenderPoll(); return; }
+        if (++ticks > 60) { _rqStopRenderPoll(); return; }           // ~5 min at 5s
+        try {
+            const res = await fetch(`/.netlify/functions/get-social-drafts?status=scheduled`);
+            if (!res.ok) return;
+            const fresh = ((await res.json()).drafts || []).find(d => d.id === postId);
+            if (!fresh || fresh.renderStatus === 'pending' || fresh.renderStatus === 'rendering') return;
+            // Landed. Refresh the cached post so the canvas picks up the RENDERED clip, not the
+            // original — the worker swapped the attached asset.
+            if (_rqPostCache[postId]) Object.assign(_rqPostCache[postId], fresh);
+            if (_rqReviewPostId === postId) _rqReviewRenderActive();
+            _rqStopRenderPoll();
+        } catch { /* transient — the next tick retries */ }
+    }, 5000);
+    _rqRenderPoll = { postId, timer };
+}
+
+function _rqStopRenderPoll() {
+    if (_rqRenderPoll) { clearInterval(_rqRenderPoll.timer); _rqRenderPoll = null; }
+}
+
+async function rqRetryRender(postId) {
+    const el = document.getElementById('post-review-render-alert');
+    if (el) el.innerHTML = '<p class="font-semibold">Starting the render again…</p>';
+    try {
+        const res = await fetch('/.netlify/functions/trigger-post-render', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok && res.status !== 202) throw new Error(d.error || 'Could not start the render.');
+        const post = _rqPostCache[postId];
+        if (post) {
+            // `skipped` means there was nothing to render after all (the video or the text is gone),
+            // and the server has already cleared the gate — so the post is publishable now.
+            post.renderStatus = d.skipped ? null : 'pending';
+            post.renderError = null;
+            _rqRenderRenderAlert(post);
+        }
+    } catch (err) {
+        if (el) el.innerHTML = `<p class="font-semibold">⚠️ ${_rqEsc(err.message || 'Could not start the render.')}</p>
+          <button onclick="rqRetryRender(${postId})" class="mt-2 py-1.5 px-3 text-xs font-bold border border-red-400 text-red-700 hover:bg-red-100 rounded-lg cursor-pointer">Try again</button>`;
+    }
+}
+
 // The platform tab bar. Hidden for a single-platform post; one tab per platform otherwise. A red dot
 // flags a platform that still needs an image before it can be approved.
 function _rqReviewRenderTabs() {
@@ -6736,6 +6843,8 @@ function _rqReviewRenderActive() {
         mediaAlert.classList.add('hidden');
     }
 
+    _rqRenderRenderAlert(post);
+
     const when = post.publishDate ? new Date(post.publishDate).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : null;
     document.getElementById('post-review-sub').textContent =
         `${(post.assistantName || 'Assistant')}${multi ? ` · ${groupSize} platforms` : ''}${when ? ' · planned for ' + when : ''}`;
@@ -6837,6 +6946,7 @@ function _rqReviewMissingPlatforms() {
 
 function closePostReview() {
     _rqRestoreMediaPanel();   // hand the shared media panel back to the generate-post sheet
+    _rqStopRenderPoll();      // nothing to update once the modal is gone
     const modal = document.getElementById('post-review-modal');
     modal.classList.add('hidden');
     modal.classList.remove('flex');

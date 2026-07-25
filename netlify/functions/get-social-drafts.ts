@@ -4,7 +4,7 @@
 import { Handler } from '@netlify/functions';
 import { eq, and, desc, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts, aiAssistants, postIdeaSuggestions, organisations, scheduledPostAssets, contentAssets } from '../../db/schema';
+import { scheduledPosts, aiAssistants, postIdeaSuggestions, organisations, scheduledPostAssets, contentAssets, postRenderJobs } from '../../db/schema';
 import { resolvePostImage } from '../../src/utils/social-publish';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -59,6 +59,11 @@ export default withLambda(async (event) => {
                 platformPostUrl: scheduledPosts.platformPostUrl,
                 disclosureFooterDisabled: scheduledPosts.disclosureFooterDisabled,
                 imageOverlays: scheduledPosts.imageOverlays,
+                // Phase 4 video overlay render state. Every publisher claims only rows where this is
+                // NULL or 'done', so a post stuck at 'pending'/'rendering'/'failed' will NEVER go out
+                // — and without it on the card the reviewer has no way to see that. It is the one
+                // post state that is invisible from the outside: status still reads 'scheduled'.
+                renderStatus: scheduledPosts.renderStatus,
                 assistantName: aiAssistants.name,
                 // When this draft was generated from a user-suggested idea, surface the original
                 // idea text on the card so the reviewer can see what it was built from (closes the
@@ -80,6 +85,29 @@ export default withLambda(async (event) => {
             ))
             .orderBy(desc(scheduledPosts.generatedAt))
             .limit(50);
+
+        // Why a failed video render failed. Only for the drafts actually in that state, in one query
+        // — "the render failed" alone tells a reviewer nothing they can act on, and this is a dead
+        // end for the post until someone does. Best-effort: no message just means a bare warning.
+        const renderErrors = new Map<number, string>();
+        const failedRenderIds = drafts.filter(d => d.renderStatus === 'failed').map(d => d.id);
+        if (failedRenderIds.length) {
+            try {
+                const rows = await db
+                    .select({ postId: postRenderJobs.postId, errorMessage: postRenderJobs.errorMessage, createdAt: postRenderJobs.createdAt })
+                    .from(postRenderJobs)
+                    .where(inArray(postRenderJobs.postId, failedRenderIds))
+                    .orderBy(desc(postRenderJobs.createdAt));
+                // Newest first, so the first row per post wins — a retried post has several.
+                for (const r of rows) {
+                    if (r.errorMessage && !renderErrors.has(r.postId)) renderErrors.set(r.postId, r.errorMessage);
+                }
+            } catch (err) {
+                // db/post-render-jobs.sql not applied in this environment — degrade to a bare
+                // warning rather than emptying the review queue.
+                console.warn('[get-social-drafts] render-error lookup skipped:', err instanceof Error ? err.message : err);
+            }
+        }
 
         // Which of these drafts carry an editable branded text card. One query for the whole page
         // rather than one per draft — this only drives whether an "Edit card" button appears, and
@@ -137,6 +165,8 @@ export default withLambda(async (event) => {
             // editor shows the copy, and an edit-and-save persists the repair.
             // brandCard non-null ⇒ the review UI offers "Edit card" for this draft.
             return { ...d, caption: displayCaption(d.caption), thumbnailUrl, archiveDeletesAt, daysRemaining, failureMessage,
+                // Why the video render failed, when it did — null in every other state.
+                renderError: d.renderStatus === 'failed' ? (renderErrors.get(d.id) ?? null) : null,
                 brandCard: brandCards.get(d.id) ?? null,
                 // The saved text-overlay design, so the Review canvas can paint it live on open without
                 // a per-post get-post-image round trip. Normalised to an array the client renders directly.
