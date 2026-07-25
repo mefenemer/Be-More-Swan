@@ -20,7 +20,7 @@ import { getDb } from '../../db/client';
 import { contentAssets, postRenderJobs, scheduledPosts } from '../../db/schema';
 import { presignR2Get } from '../../src/utils/social-publish';
 import { persistRemoteMediaToR2, r2IsConfigured } from '../../src/lib/media-persist';
-import { attachRenderedVideo, frameMeta, frameMetaFromJson, renderableOverlays, resolveOverlayVideoBase } from '../../src/lib/post-render';
+import { attachRenderedVideo, frameMeta, frameMetaFromJson, renderableOverlays, resolveAudioTracks, resolveOverlayVideoBase } from '../../src/lib/post-render';
 import { remotionConfigured, renderProgress, startRender, type StartedRender } from '../../src/lib/remotion-lambda';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -81,19 +81,24 @@ export default withLambda(async (event: HandlerEvent) => {
         // Re-derived, not taken from the job: the overlay design may have been edited after queueing,
         // and the presigned source URL has to be minted fresh because they expire.
         const [post] = await db
-            .select({ id: scheduledPosts.id, imageOverlays: scheduledPosts.imageOverlays })
+            .select({ id: scheduledPosts.id, imageOverlays: scheduledPosts.imageOverlays, audioOverlays: scheduledPosts.audioOverlays })
             .from(scheduledPosts)
             .where(eq(scheduledPosts.id, job.postId))
             .limit(1);
         if (!post) { await fail('The post no longer exists.'); return { statusCode: 200, body: 'No post' }; }
 
         const overlays = renderableOverlays(post.imageOverlays);
+        const audio = await resolveAudioTracks(db, post.audioOverlays, job.organisationId, presignR2Get);
         const base = await resolveOverlayVideoBase(db, job.postId, job.organisationId);
-        if (!base) { await fail('The post no longer has a video to render.'); return { statusCode: 200, body: 'No video' }; }
+        if (!base) { await fail('The post no longer has media to render.'); return { statusCode: 200, body: 'No media' }; }
 
-        // The text was removed while the job was queued. Nothing to burn in — clear the gate and let
-        // the original clip publish rather than failing a post that is perfectly publishable.
-        if (!overlays.length) {
+        // Both were removed while the job was queued. Nothing to burn in — clear the gate and let
+        // the original media publish rather than failing a post that is perfectly publishable.
+        //
+        // Audio counts here as much as text: a photo post with a voice note is ONLY publishable as a
+        // render, so if the voice note goes away the post reverts to an ordinary photo and needs no
+        // render at all.
+        if (!overlays.length && !audio.length) {
             await db.update(postRenderJobs)
                 .set({ status: 'completed', updatedAt: new Date() })
                 .where(eq(postRenderJobs.id, jobId));
@@ -103,7 +108,7 @@ export default withLambda(async (event: HandlerEvent) => {
             return { statusCode: 200, body: 'No overlays left' };
         }
 
-        const videoSrc = base.storageKey
+        const mediaSrc = base.storageKey
             ? await presignR2Get(base.storageKey, SOURCE_URL_TTL_SEC)
             : base.externalUrl!;
 
@@ -111,7 +116,15 @@ export default withLambda(async (event: HandlerEvent) => {
         // recompute is the fallback for a row written before render_input existed.
         const meta = frameMetaFromJson(job.renderInput) ?? frameMeta({}, base);
 
-        const started: StartedRender = await startRender({ videoSrc, overlays, ...meta });
+        // A still goes in as imageSrc, not videoSrc — the composition branches on which is set, and
+        // its calculateMetadata takes the LENGTH from the audio when there is no video to measure.
+        const started: StartedRender = await startRender({
+            videoSrc: base.kind === 'video' ? mediaSrc : '',
+            ...(base.kind === 'image' ? { imageSrc: mediaSrc } : {}),
+            audio,
+            overlays,
+            ...meta,
+        });
         await db.update(postRenderJobs)
             .set({ renderId: started.renderId, bucketName: started.bucketName, region: started.region, updatedAt: new Date() })
             .where(eq(postRenderJobs.id, jobId));

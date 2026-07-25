@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { Composition } from 'remotion';
-import { getVideoMetadata } from '@remotion/media-utils';
+import { getAudioDurationInSeconds, getImageDimensions, getVideoMetadata } from '@remotion/media-utils';
 import { PostOverlay, type PostOverlayProps } from './PostOverlay';
 
 const DEFAULT_PROPS: PostOverlayProps = {
@@ -41,13 +41,39 @@ export const RemotionRoot: React.FC = () => {
                 let height = props.height ?? 1920;
                 let seconds = (props.durationInFrames ?? 150) / fps;
                 try {
-                    const meta = await getVideoMetadata(props.videoSrc);
-                    if (meta.width > 0 && meta.height > 0) { width = meta.width; height = meta.height; }
-                    if (Number.isFinite(meta.durationInSeconds) && meta.durationInSeconds > 0) seconds = meta.durationInSeconds;
+                    if (props.videoSrc) {
+                        const meta = await getVideoMetadata(props.videoSrc);
+                        if (meta.width > 0 && meta.height > 0) { width = meta.width; height = meta.height; }
+                        if (Number.isFinite(meta.durationInSeconds) && meta.durationInSeconds > 0) seconds = meta.durationInSeconds;
+                    } else if (props.imageSrc) {
+                        // A STILL has no duration of its own, so the piece is exactly as long as its
+                        // audio — this is the "voice note over a photo" case, and without it the
+                        // render would fall back to a default length and cut the speech off.
+                        const dims = await getImageDimensions(props.imageSrc);
+                        if (dims.width > 0 && dims.height > 0) { width = dims.width; height = dims.height; }
+                        seconds = 0;   // resolved from the audio below; a still contributes nothing
+                    }
                 } catch {
                     // Unreadable source (expired URL, odd container) — the render will fail on its own
                     // terms with a clearer error than a metadata exception here would give.
                 }
+
+                // Audio can outlast its backdrop: a 30s voice note over a 10s clip, or over a still
+                // that has no length at all. Measure every track's real end and extend to fit, or the
+                // render stops mid-sentence. Bounded clips are trusted as-is; unbounded ones have to
+                // be measured, since "no end" means "until the audio runs out".
+                for (const track of (props.audio ?? [])) {
+                    if (!track?.src) continue;
+                    const start = track.startS ?? 0;
+                    if (track.endS != null) { seconds = Math.max(seconds, track.endS); continue; }
+                    try {
+                        const dur = await getAudioDurationInSeconds(track.src);
+                        if (Number.isFinite(dur) && dur > 0) seconds = Math.max(seconds, start + dur);
+                    } catch { /* unreadable clip — the others still set the length */ }
+                }
+                // Everything failed to measure (all sources unreadable). A zero-length composition is
+                // a hard Remotion error, so fall back to the caller's snapshot.
+                if (!(seconds > 0)) seconds = (props.durationInFrames ?? 150) / fps;
                 // h264 chroma subsampling requires even dimensions; an odd one fails the encode at the
                 // very end of an otherwise successful render.
                 const even = (n: number) => { const r = Math.round(n); return r % 2 === 0 ? r : r + 1; };

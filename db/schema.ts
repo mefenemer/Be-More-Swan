@@ -1805,6 +1805,12 @@ export const scheduledPosts = pgTable("scheduled_posts", {
   // re-edit composites onto the original, not an already-flattened one.
   imageOverlays: jsonb("image_overlays"),
   overlayBaseAssetId: integer("overlay_base_asset_id").references(() => contentAssets.id, { onDelete: "set null" }),
+  // Timed audio on the post — voice notes and sound, modelled exactly like imageOverlays above:
+  // [{ id, assetId, startS?, endS?, volume, fadeInS, fadeOutS }], absent bounds meaning the whole
+  // post. Any audio at all forces a server-side render (a still with sound is not a post any
+  // platform accepts, so an image + audio has to become an mp4). See src/lib/audio-overlays.ts and
+  // db/post-audio-overlays.sql.
+  audioOverlays: jsonb("audio_overlays"),
   // Phase 4 video overlays: gates publishing while a video's timed text is being rendered by Remotion
   // Lambda. null = nothing to render (photo, or video with no overlays); 'pending'|'rendering' = a
   // render is in flight (publish must wait); 'done' = the overlaid video is attached; 'failed' = the

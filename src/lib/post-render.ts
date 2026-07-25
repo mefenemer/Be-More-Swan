@@ -11,10 +11,11 @@
 // presigned URL is minted (they expire) and a late overlay edit is picked up rather than rendering
 // a stale design.
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { contentAssets, scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import type { Overlay } from './overlay-geometry';
+import { renderableAudio } from './audio-overlays';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -25,6 +26,12 @@ export interface VideoBase {
     mimeType: string;
     width: number | null;
     height: number | null;
+    /**
+     * 'video' is the original case. 'image' exists because AUDIO made stills renderable: no platform
+     * accepts a photo with sound, so an image + voice note has to be rendered together into an mp4.
+     * The caller must branch — a still goes to the composition as imageSrc, not videoSrc.
+     */
+    kind: 'video' | 'image';
 }
 
 // Overlays worth rendering: a box with no text is invisible, and rendering for zero visible boxes
@@ -83,18 +90,78 @@ export async function resolveOverlayVideoBase(db: Db, postId: number, orgId: num
         .from(contentAssets)
         .where(and(eq(contentAssets.id, assetId), eq(contentAssets.organisationId, orgId)))
         .limit(1);
-    if (!asset || (asset.assetType ?? '').toLowerCase() !== 'video') return null;
+    const type = (asset?.assetType ?? '').toLowerCase();
+    if (!asset || (type !== 'video' && type !== 'image')) return null;
     if (!asset.storageKey && !asset.externalUrl) return null;
 
     return {
         assetId: asset.id,
         storageKey: asset.storageKey,
         externalUrl: asset.externalUrl,
-        mimeType: asset.mimeType || 'video/mp4',
+        mimeType: asset.mimeType || (type === 'video' ? 'video/mp4' : 'image/jpeg'),
         width: asset.width,
         height: asset.height,
+        kind: type === 'video' ? 'video' : 'image',
     };
 }
+
+/** An audio clip resolved to something Lambda can fetch. */
+export interface ResolvedAudio {
+    id: string;
+    src: string;
+    startS?: number;
+    endS?: number;
+    volume: number;
+    fadeInS?: number;
+    fadeOutS?: number;
+}
+
+/**
+ * Turn the stored audio arrangement into fetchable tracks for the composition.
+ *
+ * Scoped to the org on purpose, even though save-post-audio already checked: the renderer runs with
+ * full R2 credentials and no tenant context, so this is the last place a cross-tenant asset id could
+ * be caught before its bytes are fetched and published. Clips whose asset has vanished are dropped
+ * rather than failing the render — losing one voice note beats losing the whole post.
+ *
+ * The 1-hour presign matches the video source: Lambda streams these across the render, and a
+ * 10-minute URL can expire mid-encode.
+ */
+export async function resolveAudioTracks(
+    db: Db, raw: unknown, orgId: number,
+    presign: (key: string, ttl: number) => Promise<string>,
+): Promise<ResolvedAudio[]> {
+    const overlays = renderableAudio(raw);
+    if (!overlays.length) return [];
+
+    const ids = [...new Set(overlays.map(a => a.assetId))];
+    const rows = await db
+        .select({ id: contentAssets.id, assetType: contentAssets.assetType, storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl })
+        .from(contentAssets)
+        .where(and(inArray(contentAssets.id, ids), eq(contentAssets.organisationId, orgId)));
+    const byId = new Map(rows.filter(r => (r.assetType ?? '').toLowerCase() === 'audio').map(r => [r.id, r]));
+
+    const out: ResolvedAudio[] = [];
+    for (const a of overlays) {
+        const asset = byId.get(a.assetId);
+        if (!asset) continue;
+        let src: string | null = null;
+        if (asset.storageKey) { try { src = await presign(asset.storageKey, AUDIO_URL_TTL_SEC); } catch { /* fall through */ } }
+        if (!src) src = asset.externalUrl ?? null;
+        if (!src) continue;
+        out.push({
+            id: a.id, src,
+            volume: a.volume == null ? 1 : a.volume,
+            ...(a.startS != null ? { startS: a.startS } : {}),
+            ...(a.endS != null ? { endS: a.endS } : {}),
+            ...(a.fadeInS != null ? { fadeInS: a.fadeInS } : {}),
+            ...(a.fadeOutS != null ? { fadeOutS: a.fadeOutS } : {}),
+        });
+    }
+    return out;
+}
+
+const AUDIO_URL_TTL_SEC = 3600;
 
 // Frame metadata for the composition. Defaults exist because none of it is guaranteed: content_assets
 // stores width/height only for some providers and never a duration, and the client's numbers come off

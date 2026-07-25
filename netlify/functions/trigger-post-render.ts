@@ -27,6 +27,7 @@ import { postRenderJobs, scheduledPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { frameMeta, renderableOverlays, resolveOverlayVideoBase } from '../../src/lib/post-render';
+import { needsVideoRender, renderableAudio } from '../../src/lib/audio-overlays';
 import { remotionConfigured } from '../../src/lib/remotion-lambda';
 import { r2IsConfigured } from '../../src/lib/media-persist';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -77,25 +78,31 @@ export default withLambda(async (event) => {
 
     // Ownership + the stored overlay design.
     const [post] = await db
-        .select({ id: scheduledPosts.id, imageOverlays: scheduledPosts.imageOverlays })
+        .select({ id: scheduledPosts.id, imageOverlays: scheduledPosts.imageOverlays, audioOverlays: scheduledPosts.audioOverlays })
         .from(scheduledPosts)
         .where(and(eq(scheduledPosts.id, postId), eq(scheduledPosts.organisationId, orgId)))
         .limit(1);
     if (!post) return json(404, { error: 'Post not found.' });
 
     const overlays = renderableOverlays(post.imageOverlays);
+    const audioCount = renderableAudio(post.audioOverlays).length;
     const base = await resolveOverlayVideoBase(db, postId, orgId);
 
-    // Not a video post → the caller bakes in the browser instead. Clear any stale gate so a post
-    // whose media was swapped from video to photo can still publish.
+    // No media at all → nothing to render onto. Clear any stale gate so the post can still publish.
     if (!base) {
         await db.update(scheduledPosts).set({ renderStatus: null, updatedAt: new Date() }).where(eq(scheduledPosts.id, postId));
-        return json(200, { skipped: 'not_video' });
+        return json(200, { skipped: 'no_media' });
     }
-    // A video with no text needs no render at all — publish the original clip.
-    if (!overlays.length) {
+
+    // Does this actually need a render? Text alone only forces one on a VIDEO — a photo's text bakes
+    // in the browser, which is faster, free, and font-perfect. Audio forces one either way, and on a
+    // photo it forces a render that turns the still into an mp4, because no platform accepts an image
+    // with sound.
+    if (!needsVideoRender({ hasVideo: base.kind === 'video', textOverlays: overlays.length, audioOverlays: audioCount })) {
         await db.update(scheduledPosts).set({ renderStatus: null, updatedAt: new Date() }).where(eq(scheduledPosts.id, postId));
-        return json(200, { skipped: 'no_overlays' });
+        // 'not_video' keeps the existing contract with gpQueueVideoRender: a photo whose text still
+        // bakes in the browser must fall through to that path, not stop here.
+        return json(200, { skipped: base.kind === 'video' ? 'no_overlays' : 'not_video' });
     }
 
     // Refuse BEFORE gating the post. Setting render_status with no renderer behind it would strand

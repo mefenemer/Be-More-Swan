@@ -21,7 +21,7 @@ function check(name: string, fn: () => void): void {
 
 const base = (over: Partial<VideoBase> = {}): VideoBase => ({
     assetId: 1, storageKey: 'content/org-1/x.mp4', externalUrl: null,
-    mimeType: 'video/mp4', width: 720, height: 1280, ...over,
+    mimeType: 'video/mp4', width: 720, height: 1280, kind: 'video', ...over,
 });
 
 check('renderableOverlays keeps only boxes with real text', () => {

@@ -36,7 +36,12 @@ export function remotionConfigured(): boolean {
 // The composition's inputProps — must match remotion/PostOverlay.tsx PostOverlayProps. Size/fps/length
 // are the base clip's real values; calculateMetadata reads them so one composition serves any ratio.
 export interface RenderInput {
-    videoSrc: string;   // a fetchable URL for the base clip (a presigned R2 GET URL in practice)
+    videoSrc: string;   // a fetchable URL for the base clip (a presigned R2 GET URL in practice).
+                        // Empty when the post is a STILL — imageSrc carries it instead.
+    /** A still backdrop. Set instead of videoSrc for a photo + audio post, which has to become an mp4. */
+    imageSrc?: string;
+    /** Timed audio — voice notes and sound. Already resolved to fetchable URLs. */
+    audio?: Array<{ id: string; src: string; startS?: number; endS?: number; volume: number; fadeInS?: number; fadeOutS?: number }>;
     overlays: Overlay[];
     width: number;
     height: number;
