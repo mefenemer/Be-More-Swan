@@ -616,6 +616,16 @@ window.showComplianceModals = function showComplianceModals(force) {
              the right button. Sections are all present in the DOM and shown one at a time, so an
              input keeps its value while you select something else. -->
         <aside id="post-review-inspector" class="hidden w-full lg:w-72 shrink-0 rounded-xl border border-gray-200 bg-white overflow-hidden">
+          <!-- ── Layers ────────────────────────────────────────────────────────────────────────
+               Every editable part of THIS post, listed. Selection already drove the whole editor —
+               it was just invisible, so the only way to find a layer was to guess where to click on
+               the canvas, and a layer that was absent looked identical to one that was there but
+               unresponsive. (That is exactly how "Add text on the image" came to silently do
+               nothing on video posts for an hour.) Built by _pceRenderLayers from _pceLayers. -->
+          <div class="px-3 py-2 border-b border-gray-100">
+            <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Layers</p>
+            <div id="pce-layer-list" class="space-y-0.5"></div>
+          </div>
           <div class="px-3 py-2 bg-gray-50 border-b border-gray-100 flex items-center justify-between gap-2">
             <span id="pce-insp-title" class="text-xs font-bold text-gray-600">Branded card</span>
             <span id="pce-insp-kind" class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Media</span>
@@ -6198,6 +6208,82 @@ function _pceSelect(key, repaintHandles = true) {
         _pceRefreshOverlayJump();
     }
     if (key === 'overlays') _pceRefreshOverlayInspector();
+    _pceRenderLayers();
+}
+
+// ── The Layers list ─────────────────────────────────────────────────────────────────────────────
+// One row per editable part of the post on screen, built from _pceLayers — the same array
+// _pceSelect gates on, so the list cannot claim a layer that selection would refuse.
+//
+// Ordered front-to-back like every layer stack: text sits on the media, so it is listed above it.
+// The subtitle is what makes the list worth having over a row of tabs — "no text yet" vs "3 boxes"
+// answers the question you opened the panel to ask, without selecting anything.
+const _PCE_LAYER_ORDER = ['overlays', 'wordmark', 'website', 'caption', 'media'];
+const _PCE_LAYER_ICON = {
+    media:    '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.6-4.6a2 2 0 012.8 0L16 16m-2-2 1.6-1.6a2 2 0 012.8 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>',
+    caption:  '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h10"/></svg>',
+    overlays: '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 5h14M12 5v14"/></svg>',
+    wordmark: '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M9 13h.01M9 17h.01M15 9h.01M15 13h.01M15 17h.01"/></svg>',
+    website:  '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0zM3.6 9h16.8M3.6 15h16.8M12 3a15 15 0 010 18 15 15 0 010-18z"/></svg>',
+};
+
+// What each layer says about itself right now. Deliberately concrete — a count or the actual value,
+// not a restatement of the layer's own name.
+function _pceLayerSubtitle(key, post) {
+    switch (key) {
+        case 'media': {
+            // The row TITLE already names the type — _pceSyncForPost sets _PCE_INSP_TITLES.media
+            // to Picture/Video/Branded card per post — so repeating it here would render "Video /
+            // Video". Report the media's STATE instead, which is the part you cannot see from the
+            // title, and which is where the problems live.
+            if (!post || !post.thumbnailUrl) return 'Nothing attached';
+            if (post.mediaMissing) return 'Deleted — needs replacing';
+            if (post.renderStatus === 'pending' || post.renderStatus === 'rendering') return 'Rendering text…';
+            if (post.renderStatus === 'failed') return 'Render failed';
+            return 'Ready';
+        }
+        case 'caption': {
+            const n = (post && post.caption ? String(post.caption) : '').trim().length;
+            return n ? `${n} character${n === 1 ? '' : 's'}` : 'Empty';
+        }
+        case 'overlays': {
+            const n = _pceOverlayCount(post);
+            if (!n) return 'No text yet';
+            const timed = (post.overlays || []).filter(o => o && (o.startS != null || o.endS != null)).length;
+            return `${n} box${n === 1 ? '' : 'es'}${timed ? ` · ${timed} timed` : ''}`;
+        }
+        // Both are card elements the user can hide, so whether they are actually ON the card is the
+        // fact worth showing — and the one thing the canvas can't tell you when the answer is "no".
+        case 'wordmark':
+        case 'website': {
+            const layout = (_pceState && _pceState.layout) || _pceDefaultLayout();
+            return (layout[key] || {}).show === false ? 'Hidden on the card' : 'Shown on the card';
+        }
+        default: return '';
+    }
+}
+
+function _pceRenderLayers() {
+    const host = document.getElementById('pce-layer-list');
+    if (!host) return;
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    // No post, or a post with nothing editable — hide the whole block rather than show an empty
+    // heading. _pceLayers is [] until _pceSyncForPost has run.
+    if (!post || !_pceLayers.length) { host.innerHTML = ''; host.parentElement?.classList.add('hidden'); return; }
+    host.parentElement?.classList.remove('hidden');
+    const rows = _PCE_LAYER_ORDER.filter(k => _pceLayers.includes(k));
+    host.innerHTML = rows.map(key => {
+        const on = key === _pceSelection;
+        return `<button type="button" onclick="_pceSelect('${key}')"
+          class="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left transition cursor-pointer ${
+            on ? 'bg-emerald-50 border border-emerald-200' : 'border border-transparent hover:bg-gray-50'}">
+          <span class="${on ? 'text-emerald-600' : 'text-gray-400'} shrink-0">${_PCE_LAYER_ICON[key] || ''}</span>
+          <span class="min-w-0 flex-1">
+            <span class="block text-xs font-bold truncate ${on ? 'text-emerald-800' : 'text-gray-700'}">${_rqEsc(_PCE_INSP_TITLES[key].title)}</span>
+            <span class="block text-[10px] truncate ${on ? 'text-emerald-600' : 'text-gray-400'}">${_rqEsc(_pceLayerSubtitle(key, post))}</span>
+          </span>
+        </button>`;
+    }).join('');
 }
 
 // Mount the shared Work-with-AI media panel inside the inspector's picture section, pointed at the
@@ -6633,6 +6719,9 @@ function _pceSyncForPost(post) {
         _pceState.postId = null;
         _pceState.geo = null;
         _pceLayers = [];
+        // The other two exits repaint the list via _pceSelect; this one has no selection to make,
+        // so clear it here or a re-shown inspector would list the PREVIOUS post's layers.
+        _pceRenderLayers();
         return;
     }
     wrap.classList.remove('hidden');
