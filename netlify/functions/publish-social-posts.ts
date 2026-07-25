@@ -14,7 +14,7 @@ import { inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, rateLimitStates, publishCronLog } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
-import { resolvePostImage, resolveSocialCredentials, publishX, publishLinkedIn, publishThreads, type DriverResult } from '../../src/utils/social-publish';
+import { resolvePostMedia, hasAttachedMedia, resolveSocialCredentials, publishX, publishLinkedIn, publishThreads, type DriverResult } from '../../src/utils/social-publish';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { fireOrchestrations } from '../../src/utils/orchestration';
@@ -144,8 +144,19 @@ export default withLambda(async () => {
             const text = [post.caption, post.hashtags].filter(Boolean).join('\n\n').trim();
             if (!text) throw new Error('Post has no text to publish.');
 
-            // Attached image (best-effort — text-only if absent/unresolvable).
-            const image = await resolvePostImage(db, post.content_asset_ids).catch(() => null);
+            // Either kind: a post that gained sound is an mp4 now, and resolvePostImage would skip it.
+            const image = await resolvePostMedia(db, post.content_asset_ids).catch(() => null);
+            // No media attached = a genuine text post. Media attached that we cannot resolve = a
+            // post that would go out stripped of the picture the user approved, recorded as a
+            // success. Only the second is a failure, and it has to BE one — see hasAttachedMedia.
+            if (!image && hasAttachedMedia(post.content_asset_ids)) {
+                await handleFailure(db, post, {
+                    httpStatus: null,
+                    errorMessage: 'This post has media attached but it could not be loaded, so it was not published. Re-attach the media and try again.',
+                    isRetryable: true,
+                }, now);
+                return;
+            }
 
             // Explicit per-platform dispatch. This was `if (x) … else → LinkedIn`; a catch-all
             // else silently publishes every newly-claimed platform to LinkedIn, so each platform

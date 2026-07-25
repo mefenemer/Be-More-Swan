@@ -26,6 +26,7 @@ import { persistBufferToR2, r2IsConfigured } from '../../src/lib/media-persist';
 import { normalizeBrandKit, resolveCardEditorKit, type BrandKit } from '../../src/utils/brand-kit';
 import type { AspectRatio } from '../../src/lib/fal-gateway';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { platformFormat } from '../../src/config/platform-formats';
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -53,7 +54,10 @@ export default withLambda(async (event) => {
     // lookup through the junction (rather than trusting an assetId from the client) is what stops
     // one workspace re-rendering another's media.
     const [post] = await db
-        .select({ id: scheduledPosts.id, status: scheduledPosts.status })
+        .select({
+            id: scheduledPosts.id, status: scheduledPosts.status, platform: scheduledPosts.platform,
+            contentAssetIds: scheduledPosts.contentAssetIds,
+        })
         .from(scheduledPosts)
         .where(and(eq(scheduledPosts.id, postId), eq(scheduledPosts.organisationId, ctx.organisationId)))
         .limit(1);
@@ -65,7 +69,7 @@ export default withLambda(async (event) => {
         return json(409, { error: 'This post has already been published, so its image can no longer be changed.' });
     }
 
-    const [asset] = await db
+    const [existing] = await db
         .select({
             id: contentAssets.id, provider: contentAssets.provider, prompt: contentAssets.prompt,
             aspectRatio: contentAssets.aspectRatio, renderParams: contentAssets.renderParams,
@@ -74,7 +78,27 @@ export default withLambda(async (event) => {
         .innerJoin(scheduledPostAssets, eq(scheduledPostAssets.contentAssetId, contentAssets.id))
         .where(and(eq(scheduledPostAssets.scheduledPostId, postId), eq(contentAssets.provider, 'brand_card')))
         .limit(1);
-    if (!asset) return json(404, { error: 'This post does not have a branded text card to edit.' });
+
+    // ── Creating a card, not just editing one ───────────────────────────────────────────────────
+    // Until now a branded card could only exist if an autonomous drafter had made one: this endpoint
+    // refused any post without one, and no other surface could produce one. So "make me a text card"
+    // was a thing the product did on its own but the user could not ask for — the editor could
+    // restyle a card it would never let you create.
+    //
+    // A card being created has no stored style and no asset row yet; everything below treats it as a
+    // card whose stored params are empty, which is exactly the path a pre-render_params card already
+    // takes. The aspect ratio comes from the post's platform, since there is no asset to inherit one
+    // from and a 1:1 card on a Reel would be letterboxed.
+    const creating = !existing && body.create === true;
+    if (!existing && !creating) return json(404, { error: 'This post does not have a branded text card to edit.' });
+
+    const asset = existing ?? {
+        id: 0,
+        provider: 'brand_card',
+        prompt: '',
+        aspectRatio: platformFormat(post.platform ?? 'instagram').aspectRatio as string,
+        renderParams: null as unknown,
+    };
 
     // Seed from what this card was LAST rendered with, so reopening the editor shows the user's own
     // edits rather than resetting to the org default.
@@ -153,6 +177,42 @@ export default withLambda(async (event) => {
     } catch (err) {
         console.error('[edit-brand-card] R2 write failed:', err instanceof Error ? err.message : err);
         return json(502, { error: 'Could not save the new card. Please try again.' });
+    }
+
+    if (creating) {
+        // A brand new card: insert the asset, then attach it to the post BOTH ways. The junction is
+        // the source of truth for new queries, but publish-social-posts.ts still reads media from
+        // the legacy contentAssetIds column — writing only one of them produces a card that shows in
+        // the editor and then publishes as a post with no image at all.
+        const [made] = await db.insert(contentAssets).values({
+            userId: ctx.userId,
+            organisationId: ctx.organisationId,
+            name: `Brand card — ${card.headline.slice(0, 60)}`,
+            assetType: 'image',
+            mimeType: 'image/png',
+            provider: 'brand_card',
+            prompt: card.headline,
+            aspectRatio: asset.aspectRatio,
+            storageKey: stored2.storageKey,
+            fileSize: stored2.fileSize,
+            width: card.width,
+            height: card.height,
+            renderParams,
+            status: 'scheduled',
+        }).returning({ id: contentAssets.id });
+
+        await db.insert(scheduledPostAssets)
+            .values({ scheduledPostId: postId, contentAssetId: made.id, position: 0 })
+            .onConflictDoNothing();
+
+        // Replace rather than append: a card IS the post's picture, so leaving the previous media in
+        // the array would publish that instead — the array's first entry is what resolvePostImage
+        // hands to the publisher.
+        await db.update(scheduledPosts)
+            .set({ contentAssetIds: [made.id], postFormat: 'image', updatedAt: new Date() })
+            .where(eq(scheduledPosts.id, postId));
+
+        return json(200, { assetId: made.id, renderParams, storageKey: stored2.storageKey, created: true });
     }
 
     // Update the EXISTING asset row rather than inserting a new one: the post's junction row and its

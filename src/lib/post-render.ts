@@ -216,7 +216,29 @@ export async function attachRenderedVideo(db: Db, postId: number, assetId: numbe
     await db.insert(scheduledPostAssets)
         .values({ scheduledPostId: postId, contentAssetId: assetId, position: 0 })
         .onConflictDoNothing();
+
+    // post_format has to move with the media. It did not, and that was a silent publish bug:
+    // publish-instagram.ts decides IMAGE vs REELS purely from post_format, so a photo post that
+    // gained a voice note (and was therefore rendered into an mp4) was still described as an
+    // 'image' — Instagram was handed media_type: 'IMAGE' pointing at an mp4 and rejected it, while
+    // the reviewer saw nothing wrong. A post that IS a video must say so.
+    //
+    // A format that is already video-ish is left alone: 'reel' is more specific than 'video' and
+    // overwriting it would flatten a Reel into a plain video post.
+    const [current] = await db
+        .select({ postFormat: scheduledPosts.postFormat })
+        .from(scheduledPosts)
+        .where(eq(scheduledPosts.id, postId))
+        .limit(1);
+    const alreadyVideo = ['reel', 'video', 'short'].includes((current?.postFormat ?? '').toLowerCase());
+
     await db.update(scheduledPosts)
-        .set({ contentAssetIds: [assetId], mediaMissing: false, mediaMissingNote: null, updatedAt: new Date() })
+        .set({
+            contentAssetIds: [assetId],
+            mediaMissing: false,
+            mediaMissingNote: null,
+            ...(alreadyVideo ? {} : { postFormat: 'video' }),
+            updatedAt: new Date(),
+        })
         .where(eq(scheduledPosts.id, postId));
 }

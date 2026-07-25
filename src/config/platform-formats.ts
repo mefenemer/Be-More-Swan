@@ -28,25 +28,52 @@ export interface PlatformFormat {
      * failure, so the composer and the publisher both branch on this rather than assuming image.
      */
     mediaKind: 'image' | 'video';
+    /**
+     * Can our publisher actually send a VIDEO to this platform?
+     *
+     * A statement about our DRIVERS, not about the network. It is currently true everywhere, but it
+     * is kept as a flag rather than deleted because the thing it guards is severe: while the four
+     * non-Meta drivers were image-only, a post whose media was a video reached them as null and
+     * published as a bare caption — the user's work silently discarded, recorded as a success.
+     *
+     * approve-post refuses a post that would publish as a video where this is false, so a driver
+     * that has to be pulled (an API change, a revoked product) degrades to an honest refusal rather
+     * than back to silent stripping.
+     */
+    canPublishVideo: boolean;
     /** Human label for notifications / UI. */
     label: string;
 }
 
 export const PLATFORM_FORMATS: Record<SocialPlatform, PlatformFormat> = {
-    instagram: { aspectRatio: '4:5',  charLimit: 2200,  defaultPostFormat: 'image', mediaMandatory: true,  mediaKind: 'image', label: 'Instagram' },
-    facebook:  { aspectRatio: '1:1',  charLimit: 63206, defaultPostFormat: 'image', mediaMandatory: false, mediaKind: 'image', label: 'Facebook' },
-    linkedin:  { aspectRatio: '1:1',  charLimit: 3000,  defaultPostFormat: 'image', mediaMandatory: false, mediaKind: 'image', label: 'LinkedIn' },
-    x:         { aspectRatio: '16:9', charLimit: 280,   defaultPostFormat: 'image', mediaMandatory: false, mediaKind: 'image', label: 'X (Twitter)' },
+    // canPublishVideo mirrors the DRIVERS: Instagram REELS, Facebook /videos, LinkedIn's
+    // feedshare-video recipe, X's chunked upload, Threads VIDEO containers, YouTube resumable.
+    instagram: { aspectRatio: '4:5',  charLimit: 2200,  defaultPostFormat: 'image', mediaMandatory: true,  mediaKind: 'image', canPublishVideo: true,  label: 'Instagram' },
+    facebook:  { aspectRatio: '1:1',  charLimit: 63206, defaultPostFormat: 'image', mediaMandatory: false, mediaKind: 'image', canPublishVideo: true,  label: 'Facebook' },
+    linkedin:  { aspectRatio: '1:1',  charLimit: 3000,  defaultPostFormat: 'image', mediaMandatory: false, mediaKind: 'image', canPublishVideo: true,  label: 'LinkedIn' },
+    x:         { aspectRatio: '16:9', charLimit: 280,   defaultPostFormat: 'image', mediaMandatory: false, mediaKind: 'image', canPublishVideo: true,  label: 'X (Twitter)' },
     // Threads is text-first: an image is optional and the feed is conversational, so the drafter
     // should not assume media. 500 chars is the hard API limit (THREADS_TEXT_MAX in social-publish).
-    threads:   { aspectRatio: '1:1',  charLimit: 500,   defaultPostFormat: 'text',  mediaMandatory: false, mediaKind: 'image', label: 'Threads' },
+    threads:   { aspectRatio: '1:1',  charLimit: 500,   defaultPostFormat: 'text',  mediaMandatory: false, mediaKind: 'image', canPublishVideo: true,  label: 'Threads' },
     // YouTube is video-only — there is no text-only post, so a draft without a video asset can
     // never publish. charLimit is the DESCRIPTION limit (5000); the title is derived from the
     // caption's first line and capped separately at YOUTUBE_TITLE_MAX. Deliberately absent from
     // AUTONOMOUS_DRAFT_PLATFORMS: every drafter produces stills, so autonomous YouTube drafts
     // would be unpublishable by construction.
-    youtube:   { aspectRatio: '16:9', charLimit: 5000,  defaultPostFormat: 'video', mediaMandatory: true,  mediaKind: 'video', label: 'YouTube' },
+    youtube:   { aspectRatio: '16:9', charLimit: 5000,  defaultPostFormat: 'video', mediaMandatory: true,  mediaKind: 'video', canPublishVideo: true,  label: 'YouTube' },
 };
+
+/**
+ * Every platform we can draft and publish for. THE list — import it rather than writing another
+ * one out by hand.
+ *
+ * This exists because two separate hand-written copies (`ALLOWED_PLATFORMS` in generate-post.ts and
+ * `VALID_PLATFORMS` in create-manual-post.ts) were never updated when Threads and YouTube shipped.
+ * The composer offered all six, so picking Threads or YouTube alone failed with "No recognised
+ * platform selected", and picking them ALONGSIDE Instagram silently dropped them — a post the user
+ * asked for that simply never existed, with no error to explain it.
+ */
+export const SOCIAL_PLATFORMS: SocialPlatform[] = Object.keys(PLATFORM_FORMATS) as SocialPlatform[];
 
 /** Format for a platform, tolerating unknown/legacy keys (e.g. 'twitter' → 'x'). Falls back to Instagram. */
 export function platformFormat(platform: string): PlatformFormat {

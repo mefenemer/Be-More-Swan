@@ -18,8 +18,11 @@ import {
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { SOCIAL_PLATFORMS, platformFormat } from '../../src/config/platform-formats';
 
-const VALID_PLATFORMS = ['instagram', 'facebook', 'linkedin', 'x'];
+// The canonical list, not a local copy — the copy that used to live here predated Threads and
+// YouTube, so "Write your own" rejected both with "Unsupported platform" while offering them.
+const VALID_PLATFORMS: string[] = SOCIAL_PLATFORMS;
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -53,10 +56,15 @@ export default withLambda(async (event) => {
     const invalid = platforms.filter(p => !VALID_PLATFORMS.includes(p));
     if (invalid.length) return { statusCode: 400, body: JSON.stringify({ error: `Unsupported platform: ${invalid.join(', ')}.` }) };
 
-    // Instagram cannot publish a text-only post — an image is mandatory. Other platforms may post
-    // without media (the client prompts but allows it). Enforce the Instagram rule server-side too.
-    if (platforms.includes('instagram') && contentAssetIds.length === 0) {
-        return { statusCode: 400, body: JSON.stringify({ error: 'Instagram requires an image. Add one from My Content before adding to the queue.' }) };
+    // Some platforms cannot publish a text-only post at all. Driven by PLATFORM_FORMATS rather than
+    // naming Instagram, because YouTube has the same rule and a stricter one: it needs a VIDEO, and
+    // a YouTube draft carrying only a still is unpublishable by construction — better refused here
+    // than discovered at publish time.
+    const needsMedia = platforms.filter(p => platformFormat(p).mediaMandatory);
+    if (needsMedia.length && contentAssetIds.length === 0) {
+        const which = needsMedia.map(p => platformFormat(p).label).join(' and ');
+        const kind = needsMedia.every(p => platformFormat(p).mediaKind === 'video') ? 'a video' : 'an image';
+        return { statusCode: 400, body: JSON.stringify({ error: `${which} requires ${kind}. Add one from My Content before adding to the queue.` }) };
     }
 
     // Verify the assistant belongs to this org.

@@ -5,7 +5,7 @@ import { Handler } from '@netlify/functions';
 import { eq, and, desc, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, aiAssistants, postIdeaSuggestions, organisations, scheduledPostAssets, contentAssets, postRenderJobs } from '../../db/schema';
-import { resolvePostImage } from '../../src/utils/social-publish';
+import { resolvePostImage, presignR2Get } from '../../src/utils/social-publish';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { displayCaption } from '../../src/utils/model-json';
@@ -59,6 +59,7 @@ export default withLambda(async (event) => {
                 platformPostUrl: scheduledPosts.platformPostUrl,
                 disclosureFooterDisabled: scheduledPosts.disclosureFooterDisabled,
                 imageOverlays: scheduledPosts.imageOverlays,
+                audioOverlays: scheduledPosts.audioOverlays,
                 // Phase 4 video overlay render state. Every publisher claims only rows where this is
                 // NULL or 'done', so a post stuck at 'pending'/'rendering'/'failed' will NEVER go out
                 // — and without it on the card the reviewer has no way to see that. It is the one
@@ -139,11 +140,50 @@ export default withLambda(async (event) => {
             }
         }
 
+        // ── Audio clips on these drafts ──────────────────────────────────────────────────────────
+        // The saved arrangement is just asset ids and times; the editor needs something it can PLAY
+        // and a name to put on the track. Resolved for the whole page in one query + one presign per
+        // distinct asset, not per clip: the same voice note is usually on several platform siblings,
+        // and presigning it once per sibling would be three signatures for one file.
+        //
+        // Best-effort throughout. A clip whose asset has been deleted is dropped rather than handed
+        // to the editor as an unplayable row — the arrangement it came from is still on the post, and
+        // save-post-audio would reject the dead id anyway.
+        const audioAssets = new Map<number, { name: string; url: string | null }>();
+        if (drafts.length) {
+            const audioIds = [...new Set(
+                drafts.flatMap(d => (Array.isArray(d.audioOverlays) ? d.audioOverlays as Array<{ assetId?: unknown }> : []))
+                    .map(a => Number(a?.assetId))
+                    .filter(id => Number.isInteger(id) && id > 0),
+            )];
+            if (audioIds.length) {
+                try {
+                    const rows = await db
+                        .select({
+                            id: contentAssets.id, name: contentAssets.name, assetType: contentAssets.assetType,
+                            storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl,
+                        })
+                        .from(contentAssets)
+                        .where(and(inArray(contentAssets.id, audioIds), eq(contentAssets.organisationId, organisationId)));
+                    for (const r of rows) {
+                        if ((r.assetType ?? '').toLowerCase() !== 'audio') continue;
+                        let url: string | null = null;
+                        if (r.storageKey) { try { url = await presignR2Get(r.storageKey, 3600); } catch { /* fall through */ } }
+                        audioAssets.set(r.id, { name: r.name, url: url ?? r.externalUrl ?? null });
+                    }
+                } catch (err) {
+                    // audio_overlays column not applied in this environment — degrade to "no audio",
+                    // never to an empty review queue.
+                    console.warn('[get-social-drafts] audio lookup skipped:', err instanceof Error ? err.message : err);
+                }
+            }
+        }
+
         // Resolve a preview thumbnail for the first attached image (presigned R2 or external URL).
         // Best-effort per draft — a resolution failure must never blank out the list.
         const ARCHIVE_RETENTION_DAYS = 30;
         const now = Date.now();
-        const withThumbs = await Promise.all(drafts.map(async ({ contentAssetIds, imageOverlays, ...d }) => {
+        const withThumbs = await Promise.all(drafts.map(async ({ contentAssetIds, imageOverlays, audioOverlays, ...d }) => {
             let thumbnailUrl: string | null = null;
             try { thumbnailUrl = (await resolvePostImage(db, contentAssetIds))?.url ?? null; } catch { /* ignore */ }
             // Archive countdown: rejected posts are kept 30 days from rejectedAt, then auto-deleted.
@@ -173,7 +213,15 @@ export default withLambda(async (event) => {
                 brandCard: brandCards.get(d.id) ?? null,
                 // The saved text-overlay design, so the Review canvas can paint it live on open without
                 // a per-post get-post-image round trip. Normalised to an array the client renders directly.
-                overlays: Array.isArray(imageOverlays) ? imageOverlays : [] };
+                overlays: Array.isArray(imageOverlays) ? imageOverlays : [],
+                // The saved audio arrangement, each clip carrying a playable url + name so the
+                // editor can draw its track and let the reviewer hear it without another round trip.
+                audio: (Array.isArray(audioOverlays) ? audioOverlays as Array<Record<string, unknown>> : [])
+                    .map(a => {
+                        const asset = audioAssets.get(Number(a?.assetId));
+                        return asset ? { ...a, url: asset.url, name: asset.name } : null;
+                    })
+                    .filter(Boolean) };
         }));
 
         // Workspace-wide footer state — drives whether the per-post "include disclosure footer"

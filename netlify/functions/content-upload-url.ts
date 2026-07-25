@@ -19,7 +19,7 @@ const R2_ACCESS_KEY_ID     = process.env.R2_ACCESS_KEY_ID;
 const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
 const R2_BUCKET   = process.env.R2_BUCKET_NAME;
 
-const ALLOWED_MIME_TYPES = new Set([
+export const ALLOWED_MIME_TYPES = new Set([
     'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
     'video/mp4', 'video/quicktime', 'video/webm', 'video/mpeg',
     // Blog body audio (plan §4 Phase 2) — upload-only: there is no stock provider for audio and no
@@ -29,6 +29,15 @@ const ALLOWED_MIME_TYPES = new Set([
 ]);
 
 const MAX_FILE_SIZE = 500 * 1024 * 1024; // 500 MB
+
+// A media type can carry parameters — MediaRecorder reports exactly `audio/webm;codecs=opus` for a
+// voice note recorded in Chrome or Firefox. The allow-list holds bare types, so an exact-match test
+// rejects every browser recording while accepting the identical file uploaded from disk. Compare on
+// the essence (type/subtype, lower-cased) and let the parameters through untouched.
+export const baseMime = (m: string) => String(m).split(';')[0].trim().toLowerCase();
+
+/** Would this upload be accepted? Exported so the rule can be tested without a signed request. */
+export const isAllowedUploadType = (m: string) => ALLOWED_MIME_TYPES.has(baseMime(m));
 
 function getR2Client(): S3Client {
     return new S3Client({
@@ -62,7 +71,7 @@ export default withLambda(async (event) => {
         if (!fileName || !mimeType) {
             return { statusCode: 400, body: JSON.stringify({ error: 'fileName and mimeType are required.' }) };
         }
-        if (!ALLOWED_MIME_TYPES.has(mimeType)) {
+        if (!isAllowedUploadType(mimeType)) {
             return { statusCode: 400, body: JSON.stringify({ error: `File type not allowed: ${mimeType}` }) };
         }
         if (fileSize && fileSize > MAX_FILE_SIZE) {

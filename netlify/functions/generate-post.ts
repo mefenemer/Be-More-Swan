@@ -13,6 +13,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { assembleBlueprint } from '../../src/utils/blueprint';
 import { triggerContentDrain } from '../../src/utils/trigger-drain';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { SOCIAL_PLATFORMS } from '../../src/config/platform-formats';
 
 
 export default withLambda(async (event) => {
@@ -72,9 +73,11 @@ export default withLambda(async (event) => {
     // process-content-jobs already does for scheduled jobs via the job's `platforms` array. Stored
     // only when it names 2+ targets — a single-platform job stays on the legacy `platform` column
     // so nothing downstream has to special-case a one-element array.
-    const ALLOWED_PLATFORMS = ['instagram', 'facebook', 'linkedin', 'x'];
+    // SOCIAL_PLATFORMS, not a local list: the local one was written before Threads and YouTube
+    // shipped and was never updated, so those two were filtered out of a request the composer had
+    // happily offered — silently when other platforms were selected too.
     const platforms = Array.isArray(body.platforms)
-        ? [...new Set(body.platforms.filter(p => typeof p === 'string' && ALLOWED_PLATFORMS.includes(p)))]
+        ? [...new Set(body.platforms.filter((p): p is string => typeof p === 'string' && (SOCIAL_PLATFORMS as string[]).includes(p)))]
         : [];
     if (Array.isArray(body.platforms) && body.platforms.length > 0 && platforms.length === 0) {
         return { statusCode: 400, body: JSON.stringify({ error: 'No recognised platform selected.' }) };

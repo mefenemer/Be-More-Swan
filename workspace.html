@@ -345,6 +345,15 @@ window.showComplianceModals = function showComplianceModals(force) {
            they choose here whether the assistant schedules it, they pick a time, or it posts now. -->
       <div id="gpw-schedule-actions" class="hidden">
         <p class="text-sm font-semibold text-gray-800 mb-2">Your post is ready. How should it go out?</p>
+        <!-- The way into the editor from creation. Everything that shapes how a post LOOKS — its
+             format, media, text on the image, sound — lives in the editor, and until now creating a
+             post dropped you at a scheduling question with no route there short of finding the
+             draft again in the Review Queue. -->
+        <button onclick="gpwOpenInEditor()"
+          class="w-full mb-2 py-2.5 border border-gray-300 text-gray-700 hover:bg-gray-50 text-sm font-bold rounded-xl transition cursor-pointer inline-flex items-center justify-center gap-1.5">
+          <svg class="w-4 h-4 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+          Open in the editor
+        </button>
         <div class="flex flex-col gap-2">
           <button onclick="gpwSchedule('approve')" class="w-full py-2.5 border border-emerald-600 text-emerald-700 hover:bg-emerald-50 text-sm font-bold rounded-xl transition cursor-pointer inline-flex items-center justify-center gap-1.5">
             <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
@@ -640,12 +649,80 @@ window.showComplianceModals = function showComplianceModals(force) {
           </div>
         </aside>
 
-        <!-- ── MIDDLE: the canvas ────────────────────────────────────────────────────────────── -->
+        <!-- ── MIDDLE: the canvas, and everything about WHEN ──────────────────────────────────
+             The stage strip below the canvas holds the layer list, the timeline and the timing
+             controls, in that order. All three used to be split between here and the right pane,
+             which meant timing a caption to appear at 4s required looking at the video in one
+             column and dragging in another — the two things you must compare were never side by
+             side. Layers, their tracks and their start/end now sit directly under the media they
+             belong to; the right pane keeps only what a layer LOOKS like. -->
         <div class="flex-1 min-w-0 w-full">
           <div id="post-review-body"></div>
-          <!-- Video timeline: one track per text overlay (Phase 4). Shown only for a video post with
-               a running editor; _rqRenderTimeline fills it. Drag a segment's ends to time the text. -->
-          <div id="post-review-timeline" class="hidden mt-3 max-w-md mx-auto"></div>
+
+          <div id="pce-stage-strip" class="hidden mt-3 max-w-md mx-auto rounded-xl border border-gray-200 bg-white overflow-hidden">
+            <!-- Every editable part of THIS post, listed. Selection already drove the whole editor —
+                 it was just invisible, so the only way to find a layer was to guess where to click
+                 on the canvas, and a layer that was absent looked identical to one that was there
+                 but unresponsive. (That is exactly how "Add text on the image" came to silently do
+                 nothing on video posts for an hour.) Built by _pceRenderLayers from _pceLayers. -->
+            <div class="px-2.5 py-2">
+              <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Layers</p>
+              <div id="pce-layer-list" class="space-y-0.5"></div>
+            </div>
+
+            <!-- One track per timed thing — text on video (pink), sound (indigo) — over a shared
+                 0→duration axis with a playhead. Drag an end to re-time it, drag the body to move
+                 it. Filled by _rqRenderTimeline; hidden when nothing on this post has timing. -->
+            <div id="post-review-timeline" class="hidden px-2.5 pb-2"></div>
+
+            <!-- Timing for whatever is selected, immediately under its own track. Exactly one of
+                 these is ever visible — _pceRefreshStageTiming enforces that, since each panel only
+                 knows how to hide ITSELF and the previous selection's controls would otherwise stay
+                 on screen pointing at something you are no longer editing. -->
+            <div id="pce-stage-timing" class="border-t border-gray-100 px-2.5 py-2 hidden">
+
+              <!-- Text on video: when this box is on screen. -->
+              <div id="insp-overlay-timing" class="hidden">
+                <p class="text-[11px] font-bold text-gray-600 mb-2 truncate">When: <span id="insp-overlay-timing-label" class="font-semibold text-gray-500"></span></p>
+                <div class="grid grid-cols-2 gap-2">
+                  <label class="block">
+                    <span class="block text-[10px] font-bold text-gray-500 mb-0.5">Start (s)</span>
+                    <input id="insp-overlay-start" type="number" min="0" step="0.1"
+                      class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-600">
+                  </label>
+                  <label class="block">
+                    <span class="block text-[10px] font-bold text-gray-500 mb-0.5">End (s)</span>
+                    <input id="insp-overlay-end" type="number" min="0" step="0.1"
+                      class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-600">
+                  </label>
+                </div>
+                <p class="text-[10px] text-gray-400 mt-1.5">Leave a field blank for the whole clip. Or drag the ends on the track above.</p>
+              </div>
+
+              <!-- Sound: when this clip plays, and how loud. -->
+              <div id="insp-audio-timing" class="hidden">
+                <p class="text-[11px] font-bold text-gray-600 mb-2 truncate">When: <span id="insp-audio-timing-label" class="font-semibold text-gray-500"></span></p>
+                <div class="grid grid-cols-2 gap-2">
+                  <label class="block">
+                    <span class="block text-[10px] font-bold text-gray-500 mb-0.5">Start (s)</span>
+                    <input id="insp-audio-start" type="number" min="0" step="0.1"
+                      class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-600">
+                  </label>
+                  <label class="block">
+                    <span class="block text-[10px] font-bold text-gray-500 mb-0.5">End (s)</span>
+                    <input id="insp-audio-end" type="number" min="0" step="0.1"
+                      class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-600">
+                  </label>
+                </div>
+                <label class="block mt-2">
+                  <span class="block text-[10px] font-bold text-gray-500 mb-0.5">Volume — <span id="insp-audio-vol-label">100%</span></span>
+                  <input id="insp-audio-volume" type="range" min="0" max="100" step="5" value="100" class="w-full cursor-pointer accent-emerald-600">
+                </label>
+                <p class="text-[10px] text-gray-400 mt-1.5">Leave both times blank to play across the whole post. Or drag the clip on the track above.</p>
+              </div>
+
+            </div>
+          </div>
         </div>
         <!-- The inspector. Every control that changes how this post looks lives here, and WHICH
              controls you see is decided by what is selected on the canvas — never by hunting for
@@ -659,16 +736,9 @@ window.showComplianceModals = function showComplianceModals(force) {
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
             </button>
           </div>
-          <!-- ── Layers ────────────────────────────────────────────────────────────────────────
-               Every editable part of THIS post, listed. Selection already drove the whole editor —
-               it was just invisible, so the only way to find a layer was to guess where to click on
-               the canvas, and a layer that was absent looked identical to one that was there but
-               unresponsive. (That is exactly how "Add text on the image" came to silently do
-               nothing on video posts for an hour.) Built by _pceRenderLayers from _pceLayers. -->
-          <div class="px-3 py-2 border-b border-gray-100">
-            <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Layers</p>
-            <div id="pce-layer-list" class="space-y-0.5"></div>
-          </div>
+          <!-- The layer list used to sit here. It lives under the canvas now (#pce-stage-strip):
+               a layer's position and duration are things you judge against the media, not against
+               a column of colour pickers. -->
           <div class="px-3 py-2 bg-gray-50 border-b border-gray-100 flex items-center justify-between gap-2">
             <span id="pce-insp-title" class="text-xs font-bold text-gray-600">Branded card</span>
             <span id="pce-insp-kind" class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Media</span>
@@ -713,6 +783,15 @@ window.showComplianceModals = function showComplianceModals(force) {
                   <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7V5a1 1 0 011-1h14a1 1 0 011 1v2M9 20h6M12 4v16"/></svg>
                   <span id="insp-overlay-jump-label">Text on the image</span>
                 </button>
+                <!-- The fourth media source. Until now a branded card was something only an
+                     autonomous drafter could produce — the editor could restyle one but there was
+                     no way to ask for one, which is why nobody could find how to make one. -->
+                <button type="button" id="insp-make-card" onclick="_pceCreateBrandCard()"
+                  class="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 5h16v14H4z M8 10h8M8 14h5"/></svg>
+                  <span>Make a branded card</span>
+                </button>
+                <span id="insp-make-card-msg" class="block mt-1.5 text-[11px] font-semibold text-gray-500"></span>
               </div>
 
               <!-- Media that IS a branded card: the card's own parameters. -->
@@ -808,23 +887,7 @@ window.showComplianceModals = function showComplianceModals(force) {
               <p id="insp-overlay-title" class="text-xs font-bold text-gray-600 mb-1">Text on the image</p>
               <p id="insp-overlay-summary" class="text-[11px] text-gray-400 mb-3">No text on the image yet.</p>
 
-              <!-- Timing for the selected box. Video only — shown by _pceRefreshOverlayTiming. -->
-              <div id="insp-overlay-timing" class="hidden mb-3 rounded-lg border border-gray-200 p-2.5">
-                <p class="text-[11px] font-bold text-gray-600 mb-2 truncate">When: <span id="insp-overlay-timing-label" class="font-semibold text-gray-500"></span></p>
-                <div class="grid grid-cols-2 gap-2">
-                  <label class="block">
-                    <span class="block text-[10px] font-bold text-gray-500 mb-0.5">Start (s)</span>
-                    <input id="insp-overlay-start" type="number" min="0" step="0.1"
-                      class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-600">
-                  </label>
-                  <label class="block">
-                    <span class="block text-[10px] font-bold text-gray-500 mb-0.5">End (s)</span>
-                    <input id="insp-overlay-end" type="number" min="0" step="0.1"
-                      class="w-full text-sm border border-gray-300 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-emerald-600">
-                  </label>
-                </div>
-                <p class="text-[10px] text-gray-400 mt-1.5">Leave a field blank for the whole clip. Or drag the ends on the timeline below the video.</p>
-              </div>
+              <!-- Timing moved to the stage strip under the canvas — see #pce-stage-timing. -->
 
               <div class="flex flex-wrap items-center gap-2">
                 <button type="button" onclick="_pceOpenOverlayEditor(_rqReviewPostId)"
@@ -834,6 +897,44 @@ window.showComplianceModals = function showComplianceModals(force) {
               </div>
               <span id="insp-overlay-msg" class="block mt-2 text-xs font-semibold text-gray-500"></span>
               <p id="insp-overlay-hint" class="text-[11px] text-gray-400 mt-3">Click a text box on the image to jump back here. It's baked into the picture when you approve.</p>
+            </div>
+
+            <!-- ── Sound. Voice notes and audio clips, placed exactly like text: a clip with no
+                 start/end is the whole post, one with bounds plays only in that window. Recorded in
+                 the browser or uploaded, stored in R2, and mixed in by the Remotion render on
+                 approval — the browser never mixes audio into a file. ── -->
+            <div class="pce-insp hidden" data-insp="audio">
+              <p class="text-xs font-bold text-gray-600 mb-1">Sound</p>
+              <p id="insp-audio-summary" class="text-[11px] text-gray-400 mb-3">No sound on this post yet.</p>
+
+              <!-- The consequence that surprises people: a photo with sound is not a format any
+                   platform has, so approving one publishes a VIDEO. Said here, before they commit,
+                   rather than at approval. Shown by _pceRefreshAudioInspector for non-video posts. -->
+              <p id="insp-audio-becomes-video" class="hidden mb-3 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-2 text-[11px] font-semibold text-amber-800">
+                No network accepts a still image with sound — approving this will publish it as a video instead.
+              </p>
+
+              <div class="flex flex-wrap items-center gap-2">
+                <button type="button" id="insp-audio-record" onclick="_pceRecordAudio()"
+                  class="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer">
+                  <span class="w-2 h-2 rounded-full bg-white"></span> Record a voice note
+                </button>
+                <button type="button" onclick="document.getElementById('insp-audio-file').click()"
+                  class="px-3 py-2 rounded-lg border border-gray-300 text-gray-700 text-xs font-bold hover:bg-gray-50 transition cursor-pointer">Upload audio</button>
+                <input type="file" id="insp-audio-file" accept="audio/mpeg,audio/mp4,audio/wav,audio/webm,audio/ogg,.mp3,.m4a,.wav,.webm,.ogg"
+                  class="hidden" onchange="_pceAddAudioFile(this.files && this.files[0]); this.value='';">
+              </div>
+
+              <!-- One row per clip. Selecting a row drives both the timing panel below and the
+                   highlighted track on the timeline — the same selection model the text boxes use. -->
+              <div id="insp-audio-list" class="mt-3 space-y-1"></div>
+
+              <!-- Timing + level moved to the stage strip under the canvas — see #pce-stage-timing.
+                   It sits directly beneath the clip's own track there, which is the thing you are
+                   actually adjusting against. -->
+
+              <span id="insp-audio-msg" class="block mt-2 text-xs font-semibold text-gray-500"></span>
+              <p class="text-[11px] text-gray-400 mt-3">Sound is mixed into the published video when you approve — the preview here plays it back so you can time it.</p>
             </div>
 
           </div>
@@ -4575,8 +4676,18 @@ function formatCurrency(amount, currency) {
 <script src="/assistants.js?v=20260703-detail-rq-refresh"></script>
 <script src="/help.js"></script>
 <script src="/my-content.js"></script>
+<!-- Platform facts (labels, char limits, media rules, video capability) generated from
+     src/config/platform-formats.ts by `npm run gen:constants`. This page cannot import from src/,
+     and every constant that was retyped into it by hand eventually drifted — dropping platforms
+     from posts, or letting drafts through that the server then refused. Loaded FIRST so every
+     module below can read window.PlatformConstants. -->
+<script src="/src/generated/platform-constants.js"></script>
 <script src="/src/components/platform-post-preview.js"></script>
 <script src="/src/components/image-overlay-editor.js"></script>
+<!-- Browser voice-note capture for the post editor's Sound layer. Capture only: it hands back a
+     File and never touches R2 or a post. (Not speech-recognition.js, which is the opposite — that
+     one keeps the words and throws away the audio.) -->
+<script src="/src/components/audio-recorder.js"></script>
 <script src="/src/components/confidence-badge.js"></script>
 <!-- Canva design picker — shared by the Create Post sheet's media section and the Blog Studio's
      feature/inline image pickers. Imports land in content_assets, so both hosts just refresh
@@ -5456,10 +5567,20 @@ function _rqRenderCanvasOverlays(post) {
         // Bind the time toggle once per media element (elements are fresh on each mock-up render).
         if (!media._rqTimed) {
             media._rqTimed = true;
-            media.addEventListener('timeupdate', () => _rqApplyOverlayTimes(media, layer, _rqPostCache[_rqReviewPostId] || post));
+            media.addEventListener('timeupdate', () => {
+                _rqApplyOverlayTimes(media, layer, _rqPostCache[_rqReviewPostId] || post);
+                _pceSyncAudioPreview(media);
+            });
+            // Sound has to follow the transport, not just the clock: without these a paused video
+            // keeps talking, and a scrub leaves the voice note where it was.
+            for (const ev of ['play', 'pause', 'seeked', 'ended']) {
+                media.addEventListener(ev, () => _pceSyncAudioPreview(media));
+            }
         }
     }
-    if (isVideo) _rqRenderTimeline(post); else _rqHideTimeline();
+    // The timeline is no longer video-only: a still with a voice note has a length and a clip to
+    // place on it. _rqRenderTimeline decides what rows there are (text is timed on video only).
+    _rqRenderTimeline(post);
     _rqBindTimeline();
     // One resize listener for the modal's lifetime; it always repaints the post on screen now.
     if (!_rqOverlayResizeBound) {
@@ -5483,43 +5604,98 @@ function _rqVideoDuration() {
     return d && isFinite(d) && d > 0 ? d : 15;
 }
 
-// The video timeline: one track per text overlay, each a draggable segment over a 0→duration axis,
-// with a shared playhead. Drag a segment's ends to time the text; drag its body to shift it; click it
-// to select it. Segment edits update the cache live and persist on release (_rqPersistOverlays).
+// How long the finished piece will be — the axis every track is drawn against.
+//
+// It is NOT the video's duration, because audio can outlast its backdrop: a 30s voice note over a 10s
+// clip renders 30s, and over a still (which has no length at all) the audio IS the length. This
+// mirrors calculateMetadata in remotion/Root.tsx exactly; if the two disagree, the reviewer times a
+// clip against an axis the renderer does not share, and the published video cuts off mid-sentence.
+function _rqTimelineDuration(post) {
+    post = post || (_rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null);
+    const hasVideo = !!document.querySelector('#post-review-body [data-media-video]');
+    // A still contributes no length of its own — start from zero and let the audio set it.
+    let dur = hasVideo ? _rqVideoDuration() : 0;
+    for (const a of _pceAudioClips(post)) {
+        const start = a.startS == null ? 0 : a.startS;
+        // A bounded clip states its own end; an unbounded one runs for its natural length, which we
+        // only know once the browser has read the file's metadata (_pceAudioDurations).
+        const end = a.endS != null ? a.endS : start + (_pceAudioDurations[a.assetId] || 0);
+        dur = Math.max(dur, end);
+    }
+    return dur > 0.5 ? dur : 15;   // nothing measurable yet — a usable axis beats a collapsed one
+}
+
+// The timeline: one track per timed thing, each a draggable segment over a 0→duration axis, with a
+// shared playhead. Drag a segment's ends to time it; drag its body to shift it; click it to select it.
+// Segment edits update the cache live and persist on release.
+//
+// Two kinds of track share it, because they are the same decision — "when does this happen":
+//   text  (pink)   — video only. On a still every box is baked in at once, so it has no timing.
+//   audio (indigo) — any post with media. A voice note over a photo is exactly this case, which is
+//                    why the timeline is no longer hidden on non-video posts.
+// The `kind` on each segment is what routes a drag to the right collection and the right save.
+//
+// Segment fills are inline colours, not classes: the compiled stylesheet only carries utilities the
+// markup already used, and bg-pink-300 was never among them — the unselected segments had been
+// drawing with no fill at all.
+const _RQ_TL_COLOURS = {
+    text:  { on: '#ec4899', off: '#f9a8d4', edge: 'rgba(157,23,77,.6)' },
+    audio: { on: '#6366f1', off: '#a5b4fc', edge: 'rgba(55,48,163,.6)' },
+};
 function _rqRenderTimeline(post) {
     const host = document.getElementById('post-review-timeline');
     if (!host) return;
-    const overlays = (post && post.overlays) || [];
-    if (!overlays.length) { host.classList.add('hidden'); host.innerHTML = ''; return; }
-    const dur = _rqVideoDuration();
+    const isVideo = !!document.querySelector('#post-review-body [data-media-video]');
+    const overlays = isVideo ? ((post && post.overlays) || []) : [];
+    const clips = _pceAudioClips(post);
+    if (!overlays.length && !clips.length) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+    const dur = _rqTimelineDuration(post);
     const fmt = (s) => `${(Math.round(s * 10) / 10)}s`;
-    const rows = overlays.map((ov, i) => {
-        const start = ov.startS == null ? 0 : Math.max(0, Math.min(dur, ov.startS));
-        const end = ov.endS == null ? dur : Math.max(start, Math.min(dur, ov.endS));
+
+    const row = (kind, key, label, item, selected) => {
+        const start = item.startS == null ? 0 : Math.max(0, Math.min(dur, item.startS));
+        const end = item.endS == null ? dur : Math.max(start, Math.min(dur, item.endS));
         const leftPct = (start / dur) * 100;
         const widthPct = Math.max(2, ((end - start) / dur) * 100);
-        const sel = ov.id && ov.id === _pceSelectedOverlayId;
-        const label = _rqEsc((ov.text || 'Text').split('\n')[0].slice(0, 22));
+        const c = _RQ_TL_COLOURS[kind];
+        const esc = _rqEsc(label);
         return `
-          <div class="flex items-center gap-2" data-tl-row="${_rqEsc(ov.id || String(i))}">
-            <span class="w-16 shrink-0 truncate text-[10px] font-semibold text-gray-500" title="${label}">${label}</span>
+          <div class="flex items-center gap-2" data-tl-row="${_rqEsc(key)}">
+            <span class="w-16 shrink-0 truncate text-[10px] font-semibold text-gray-500" title="${esc}">${esc}</span>
             <div class="relative flex-1 h-6 rounded bg-gray-100" data-tl-track>
-              <div class="absolute inset-y-0 rounded ${sel ? 'bg-pink-500' : 'bg-pink-300'} cursor-grab flex items-center justify-between"
-                   style="left:${leftPct}%;width:${widthPct}%" data-tl-seg="${_rqEsc(ov.id || String(i))}" title="${fmt(start)} – ${fmt(end)}">
-                <span class="w-1.5 h-full rounded-l bg-pink-700/60 cursor-ew-resize" data-tl-edge="start"></span>
-                <span class="w-1.5 h-full rounded-r bg-pink-700/60 cursor-ew-resize" data-tl-edge="end"></span>
+              <div class="absolute inset-y-0 rounded cursor-grab flex items-center justify-between"
+                   style="left:${leftPct}%;width:${widthPct}%;background:${selected ? c.on : c.off}"
+                   data-tl-seg="${_rqEsc(key)}" data-tl-kind="${kind}" title="${fmt(start)} – ${fmt(end)}">
+                <span class="w-1.5 h-full rounded-l cursor-ew-resize" style="background:${c.edge}" data-tl-edge="start"></span>
+                <span class="w-1.5 h-full rounded-r cursor-ew-resize" style="background:${c.edge}" data-tl-edge="end"></span>
               </div>
             </div>
           </div>`;
-    }).join('');
+    };
+
+    const textRows = overlays.map((ov, i) => row(
+        'text', ov.id || String(i), (ov.text || 'Text').split('\n')[0].slice(0, 22), ov,
+        !!(ov.id && ov.id === _pceSelectedOverlayId),
+    )).join('');
+    // Drawn from the clip's EFFECTIVE range, not its stored one: an unbounded clip runs for its own
+    // natural length, and drawing it across the whole axis would claim a six-second voice note covers
+    // a ten-second video.
+    const audioRows = clips.map((a, i) => row(
+        'audio', a.id || `a${i}`, _pceAudioLabel(a).slice(0, 22), _pceAudioDrawRange(a),
+        !!(a.id && a.id === _pceSelectedAudioId),
+    )).join('');
+
+    // No border or background of its own: it sits inside #pce-stage-strip, which already has both,
+    // and nesting one bordered card in another made the tracks look like a separate widget rather
+    // than part of the layer list directly above them.
     host.innerHTML = `
-      <div class="rounded-xl border border-gray-200 bg-white p-2.5">
+      <div class="pt-1">
         <div class="flex items-center justify-between mb-1.5">
-          <span class="text-[11px] font-bold text-gray-600">Timeline</span>
+          <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Timeline</span>
           <span class="text-[10px] text-gray-400">${fmt(dur)}</span>
         </div>
         <div class="relative space-y-1.5" data-tl-body>
-          ${rows}
+          ${textRows}${audioRows}
           <div class="absolute top-0 bottom-0 w-px bg-gray-800 pointer-events-none" style="left:0" data-playhead></div>
         </div>
       </div>`;
@@ -5541,9 +5717,13 @@ async function _rqPersistOverlays(postId) {
     } catch { /* a dropped save is recoverable — the next edit re-sends the whole set */ }
 }
 
-// Find the cache overlay a timeline segment stands for (by id, falling back to index).
-function _rqTimelineOverlay(key) {
-    const overlays = (_rqPostCache[_rqReviewPostId] || {}).overlays || [];
+// Find the cache item a timeline segment stands for (by id, falling back to index for text, whose
+// older overlays predate ids). `kind` decides which collection is searched — the two are separate
+// arrays with separate save endpoints, and mixing them up would move the wrong thing.
+function _rqTimelineItem(kind, key) {
+    const post = _rqPostCache[_rqReviewPostId] || {};
+    if (kind === 'audio') return _pceAudioClips(post).find((a) => a && a.id === key) || null;
+    const overlays = post.overlays || [];
     return overlays.find((o) => o && o.id === key) || overlays[Number(key)] || null;
 }
 
@@ -5565,18 +5745,25 @@ function _rqBindTimeline() {
         const seg = ev.target.closest('[data-tl-seg]');
         if (!seg) return;
         const id = seg.getAttribute('data-tl-seg');
+        const kind = seg.getAttribute('data-tl-kind') || 'text';
         const edge = ev.target.closest('[data-tl-edge]');
-        const ov = _rqTimelineOverlay(id);
+        const ov = _rqTimelineItem(kind, id);
         if (!ov) return;
-        const dur = _rqVideoDuration();
-        _pceSelectedOverlayId = ov.id || id;
-        _pceSelect('overlays');
+        const dur = _rqTimelineDuration();
+        // Grabbing a track selects it, and selection drives which inspector you land in — grabbing a
+        // voice note must not open the text panel.
+        if (kind === 'audio') { _pceSelectedAudioId = ov.id || id; _pceSelect('audio'); }
+        else { _pceSelectedOverlayId = ov.id || id; _pceSelect('overlays'); }
+        // Seed from what is DRAWN, not from what is stored. An unbounded audio clip is stored with no
+        // end but occupies its own natural length on screen; seeding e0 from the axis would stretch a
+        // six-second voice note to the length of the video the moment you nudged it.
+        const seed = kind === 'audio' ? _pceAudioDrawRange(ov) : ov;
         _rqTlDrag = {
-            seg, track: seg.closest('[data-tl-track]'), ov, dur,
+            seg, track: seg.closest('[data-tl-track]'), ov, dur, kind,
             mode: edge ? edge.getAttribute('data-tl-edge') : 'move',
             startX: ev.clientX,
-            s0: ov.startS == null ? 0 : ov.startS,
-            e0: ov.endS == null ? dur : ov.endS,
+            s0: seed.startS == null ? 0 : seed.startS,
+            e0: seed.endS == null ? dur : seed.endS,
         };
         host.setPointerCapture(ev.pointerId);
         ev.preventDefault();
@@ -5589,7 +5776,9 @@ function _rqBindTimeline() {
         const dur = d.dur;
         const at = Math.max(0, Math.min(dur, ((ev.clientX - rect.left) / rect.width) * dur));
         if (d.mode === 'start') {
-            d.ov.startS = Math.max(0, Math.min(at, (d.ov.endS == null ? dur : d.ov.endS) - 0.1));
+            // Clamp against the end as DRAWN (d.e0), not the axis — an unbounded clip has a real end
+            // on screen even though it has none in the store.
+            d.ov.startS = Math.max(0, Math.min(at, (d.ov.endS == null ? d.e0 : d.ov.endS) - 0.1));
         } else if (d.mode === 'end') {
             d.ov.endS = Math.min(dur, Math.max(at, (d.ov.startS == null ? 0 : d.ov.startS) + 0.1));
         } else {
@@ -5603,6 +5792,7 @@ function _rqBindTimeline() {
         d.seg.style.left = (start / dur * 100) + '%';
         d.seg.style.width = Math.max(2, (end - start) / dur * 100) + '%';
         d.seg.title = `${fmt(start)} – ${fmt(end)}`;
+        if (d.kind === 'audio') { _pceRefreshAudioTiming(); return; }
         // Positions don't change with timing — only which boxes are visible now — so re-toggle rather
         // than repaint the whole canvas.
         const media = document.querySelector('#post-review-body [data-media-video]');
@@ -5613,9 +5803,11 @@ function _rqBindTimeline() {
 
     const end = () => {
         if (!_rqTlDrag) return;
+        const { kind } = _rqTlDrag;
         _rqTlDrag = null;
         _rqRenderTimeline(_rqPostCache[_rqReviewPostId]);
-        _rqPersistOverlays(_rqReviewPostId);
+        if (kind === 'audio') { _pceRenderAudioList(); _pcePersistAudio(_rqReviewPostId); }
+        else _rqPersistOverlays(_rqReviewPostId);
     };
     host.addEventListener('pointerup', end);
     host.addEventListener('pointercancel', end);
@@ -5626,14 +5818,22 @@ async function openPostReview(postId) {
     // it (e.g. the dashboard's "Requires your attention" list) can invoke this on a cold cache —
     // fall back to fetching the pending drafts once so the modal still has data to show. Running the
     // result through rqGroupSocialDrafts also populates the sibling-membership map used below.
+    // The fallback only asked for pending_approval, but the editor is open to approved and scheduled
+    // posts too (see the `editable` list in _pceSyncForPost) — so opening one of those from a cold
+    // cache found nothing and the click did NOTHING AT ALL, with no modal and no message. Ask for
+    // the status the caller actually wants before giving up.
     if (!_rqPostCache[postId]) {
-        try {
-            const res = await fetch('/.netlify/functions/get-social-drafts?status=pending_approval');
-            if (res.ok) rqGroupSocialDrafts((await res.json()).drafts || []);
-        } catch { /* handled by the !post check below */ }
+        for (const status of ['pending_approval', 'scheduled', 'approved']) {
+            try {
+                const res = await fetch(`/.netlify/functions/get-social-drafts?status=${status}`);
+                if (res.ok) rqGroupSocialDrafts((await res.json()).drafts || []);
+            } catch { /* try the next status; the !post check below is the real handler */ }
+            if (_rqPostCache[postId]) break;
+        }
     }
     const post = _rqPostCache[postId];
-    if (!post) return;
+    // Never fail silently: a dead click is indistinguishable from a broken button.
+    if (!post) { window.showToast?.('That post couldn’t be opened — try refreshing the page.', { icon: '⚠️' }); return; }
     _rqRestoreMediaPanel();   // ensure the shared media panel is home before (re)opening
 
     // Establish the sibling group (this post's per-platform siblings) and open on the clicked platform.
@@ -6197,6 +6397,7 @@ const _PCE_INSP_TITLES = {
     media:    { title: 'Picture',      kind: 'Media' },
     caption:  { title: 'Caption',      kind: 'Text' },
     overlays: { title: 'Text on image', kind: 'Text' },
+    audio:    { title: 'Sound',        kind: 'Audio' },
     wordmark: { title: 'Company name', kind: 'Element' },
     website:  { title: 'Website',      kind: 'Element' },
 };
@@ -6288,6 +6489,8 @@ function _pceSelect(key, repaintHandles = true) {
         _pceRenderMediaProps();
     }
     if (key === 'overlays') _pceRefreshOverlayInspector();
+    if (key === 'audio') _pceRefreshAudioInspector();
+    _pceRefreshStageTiming();
     _pceRenderLayers();
 }
 
@@ -6396,13 +6599,22 @@ function _pceRenderFormats() {
     if (!host) return;
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
     if (!post) { host.innerHTML = ''; return; }
-    const formats = _pceFormatsFor(post.platform);
+    const all = _pceFormatsFor(post.platform);
     const active = _pceActiveFormat(post);
+    // Only formats we can actually publish. Listing the rest turned a 4-item panel into a 9-item one
+    // where most rows did nothing but carry a SOON badge — clutter that made the two or three real
+    // choices harder to find, on every single post.
+    //
+    // The one exception is the format this post is ALREADY on: a draft sitting on a carousel must
+    // still show what it is, or the panel would quietly claim it were something else. That row keeps
+    // its badge, so an unpublishable choice made earlier is still visible and still explained.
+    const formats = all.filter(f => f.a === 'live' || (active && f.k === active.k));
+    const hiddenCount = all.length - formats.length;
     host.innerHTML = formats.map(f => {
         const on = active && f.k === active.k;
         const usable = f.a === 'live';
-        // Unavailable formats stay CLICKABLE — you can plan a carousel before we can publish one,
-        // and the editor lays itself out for it. Approval is what refuses (approve-post's
+        // A not-yet-publishable format is only ever on screen as the post's CURRENT one, and it stays
+        // clickable so you can move off it. Approval is what refuses (approve-post's
         // FORMAT_NOT_SCHEDULABLE), so choosing one can never produce a post that fails later.
         const tone = on ? 'bg-emerald-50 border-emerald-300'
             : usable ? 'border-gray-200 hover:bg-gray-50' : 'border-gray-100 bg-gray-50/60 hover:bg-gray-100';
@@ -6416,7 +6628,10 @@ function _pceRenderFormats() {
           </span>
           <span class="block text-[10px] truncate ${on ? 'text-emerald-600' : 'text-gray-400'}">${_rqEsc(f.d)}</span>
         </button>`;
-    }).join('');
+    }).join('')
+    // One quiet line rather than a row each. Saying nothing at all would imply this platform simply
+    // has no other formats, which isn't true — but it doesn't earn nine list items either.
+    + (hiddenCount ? `<p class="pt-1 text-[10px] text-gray-300">${hiddenCount} more format${hiddenCount === 1 ? '' : 's'} we can’t publish yet</p>` : '');
     _pceRenderFormatRules(post, active);
 }
 
@@ -6476,11 +6691,12 @@ async function _pceChooseFormat(key) {
 // Ordered front-to-back like every layer stack: text sits on the media, so it is listed above it.
 // The subtitle is what makes the list worth having over a row of tabs — "no text yet" vs "3 boxes"
 // answers the question you opened the panel to ask, without selecting anything.
-const _PCE_LAYER_ORDER = ['overlays', 'wordmark', 'website', 'caption', 'media'];
+const _PCE_LAYER_ORDER = ['overlays', 'audio', 'wordmark', 'website', 'caption', 'media'];
 const _PCE_LAYER_ICON = {
     media:    '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.6-4.6a2 2 0 012.8 0L16 16m-2-2 1.6-1.6a2 2 0 012.8 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>',
     caption:  '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h10"/></svg>',
     overlays: '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 5h14M12 5v14"/></svg>',
+    audio:    '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15a3 3 0 003-3V6a3 3 0 00-6 0v6a3 3 0 003 3zM19 11a7 7 0 01-14 0M12 18v3"/></svg>',
     wordmark: '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 21h18M5 21V7l7-4 7 4v14M9 9h.01M9 13h.01M9 17h.01M15 9h.01M15 13h.01M15 17h.01"/></svg>',
     website:  '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0zM3.6 9h16.8M3.6 15h16.8M12 3a15 15 0 010 18 15 15 0 010-18z"/></svg>',
 };
@@ -6510,6 +6726,12 @@ function _pceLayerSubtitle(key, post) {
             const timed = (post.overlays || []).filter(o => o && (o.startS != null || o.endS != null)).length;
             return `${n} box${n === 1 ? '' : 'es'}${timed ? ` · ${timed} timed` : ''}`;
         }
+        case 'audio': {
+            const clips = _pceAudioClips(post);
+            if (!clips.length) return 'Silent';
+            const timed = clips.filter(a => a.startS != null || a.endS != null).length;
+            return `${clips.length} clip${clips.length === 1 ? '' : 's'}${timed ? ` · ${timed} timed` : ''}`;
+        }
         // Both are card elements the user can hide, so whether they are actually ON the card is the
         // fact worth showing — and the one thing the canvas can't tell you when the answer is "no".
         case 'wordmark':
@@ -6524,11 +6746,12 @@ function _pceLayerSubtitle(key, post) {
 function _pceRenderLayers() {
     const host = document.getElementById('pce-layer-list');
     if (!host) return;
+    const strip = document.getElementById('pce-stage-strip');
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
-    // No post, or a post with nothing editable — hide the whole block rather than show an empty
+    // No post, or a post with nothing editable — hide the whole strip rather than show an empty
     // heading. _pceLayers is [] until _pceSyncForPost has run.
-    if (!post || !_pceLayers.length) { host.innerHTML = ''; host.parentElement?.classList.add('hidden'); return; }
-    host.parentElement?.classList.remove('hidden');
+    if (!post || !_pceLayers.length) { host.innerHTML = ''; strip?.classList.add('hidden'); return; }
+    strip?.classList.remove('hidden');
     const rows = _PCE_LAYER_ORDER.filter(k => _pceLayers.includes(k));
     host.innerHTML = rows.map(key => {
         const on = key === _pceSelection;
@@ -6682,8 +6905,9 @@ function _pceRefreshOverlayTiming() {
     const isVideo = _pcePostIsVideo(post);
     const overlays = (post && post.overlays) || [];
     const ov = _pceSelectedOverlayId ? overlays.find((o) => o && o.id === _pceSelectedOverlayId) : null;
-    if (!isVideo || !ov) { wrap.classList.add('hidden'); return; }
+    if (!isVideo || !ov) { wrap.classList.add('hidden'); _pceSyncStageTimingBox(); return; }
     wrap.classList.remove('hidden');
+    _pceSyncStageTimingBox();
     const lbl = _pceEl('insp-overlay-timing-label');
     if (lbl) lbl.textContent = (ov.text || 'Text').split('\n')[0].slice(0, 30);
     const startEl = _pceEl('insp-overlay-start');
@@ -6713,6 +6937,79 @@ function _pceRefreshOverlayTiming() {
     }
 }
 
+// Make a branded text card for this post — the media source that had no way in.
+//
+// The wording is seeded from the caption's first line rather than asked for in a dialog: it is
+// almost always the sentence you would have typed, and the card's own "Wording on the card" field is
+// on screen the moment this returns, so editing it is one click rather than a prompt you cannot see
+// the result of. A post with no caption yet gets a placeholder for the same reason — the server
+// refuses an empty card, and refusing the click would be a worse answer than giving you something
+// to edit.
+async function _pceCreateBrandCard() {
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    const msg = _pceEl('insp-make-card-msg');
+    const say = (t, kind) => { if (msg) { msg.textContent = t || ''; msg.className = 'block mt-1.5 text-[11px] font-semibold ' + (kind === 'error' ? 'text-red-600' : kind === 'ok' ? 'text-emerald-700' : 'text-gray-500'); } };
+    if (!post) return;
+    const seed = String(post.caption || '').split('\n').map(s => s.trim()).filter(Boolean)[0] || 'Your headline here';
+    const btn = _pceEl('insp-make-card');
+    if (btn) btn.disabled = true;
+    say('Making the card…');
+    try {
+        const res = await fetch('/.netlify/functions/edit-brand-card', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId, create: true, headline: seed.slice(0, 120) }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || 'Could not make a card.');
+        // The card is now this post's picture, but the mock-up is still showing whatever was there
+        // before and has no URL for the new image. Refetch the drafts — the same path openPostReview
+        // uses to warm the cache — so the thumbnail is a real presigned URL before we re-render.
+        try {
+            const list = await fetch('/.netlify/functions/get-social-drafts?status=pending_approval');
+            if (list.ok) rqGroupSocialDrafts((await list.json()).drafts || []);
+        } catch { /* the card exists; a stale thumbnail is not worth failing the whole action */ }
+        _rqReviewRenderActive();
+        // Land on the card's own controls: the next thing anyone does is change the wording.
+        _pceSelect('media');
+        _pceSetMsg('Card created — edit the wording below.', 'ok');
+    } catch (err) {
+        say(err.message || 'Could not make a card.', 'error');
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+}
+
+// Show the timing controls for whatever is selected, and only those.
+//
+// Each panel knows how to hide itself when its own subject is absent, but nothing knew to hide it
+// when the SELECTION moved elsewhere — so selecting the picture left the sound clip's start/end
+// sitting under the timeline, editing a clip you were no longer looking at. Now that both panels
+// share one strip, exactly one of them can be on screen, and this is what decides which.
+function _pceRefreshStageTiming() {
+    const wrap = document.getElementById('pce-stage-timing');
+    if (!wrap) return;
+    // Refresh the panel that matches the selection; hide the other outright.
+    if (_pceSelection === 'overlays') { _pceEl('insp-audio-timing')?.classList.add('hidden'); _pceRefreshOverlayTiming(); }
+    else if (_pceSelection === 'audio') { _pceEl('insp-overlay-timing')?.classList.add('hidden'); _pceRefreshAudioTiming(); }
+    else {
+        _pceEl('insp-overlay-timing')?.classList.add('hidden');
+        _pceEl('insp-audio-timing')?.classList.add('hidden');
+    }
+    _pceSyncStageTimingBox();
+}
+
+// The container carries the border and padding, so it must follow its contents — an empty bordered
+// box under the timeline reads as a control that failed to load. Called by both timing panels too,
+// since either can hide itself (no box selected, no clip selected) without the selection changing.
+function _pceSyncStageTimingBox() {
+    const wrap = document.getElementById('pce-stage-timing');
+    if (!wrap) return;
+    const anyVisible = ['insp-overlay-timing', 'insp-audio-timing']
+        .some(id => _pceEl(id) && !_pceEl(id).classList.contains('hidden'));
+    wrap.classList.toggle('hidden', !anyVisible);
+}
+
 function _pceSetOverlayMsg(text, kind) {
     const el = _pceEl('insp-overlay-msg');
     if (!el) return;
@@ -6739,6 +7036,367 @@ async function _pceClearOverlays() {
         _pceSetOverlayMsg('Text removed.', 'ok');
     } catch (err) {
         _pceSetOverlayMsg(err.message || 'Could not remove the text.', 'error');
+    }
+}
+
+// ── Sound: voice notes and audio clips ──────────────────────────────────────────────────────────
+//
+// The same model as the text overlays, deliberately: a clip with no start/end is the whole post, one
+// with bounds plays only in that window. That is why "audio over the whole post" and "audio at 4
+// seconds" are not two features here — they are one array, one timeline, one save.
+//
+// Nothing is mixed in the browser. The clip is stored in R2 and combined with the media by the
+// Remotion render on approval, which is what keeps this preview and the published file in step.
+//
+// Clip ids are generated HERE, never taken from anything a model wrote, because the list rows carry
+// them into onclick handlers — see the review panel's rule about model output in attributes. (In
+// practice the rows use array indices, which are safer still.)
+
+// Platforms whose PUBLISHER can send a video. Mirrors canPublishVideo in
+// src/config/platform-formats.ts — workspace.html isn't bundled, so it cannot import it, and
+// tests/platform-allowlist.test.ts asserts the two lists stay identical.
+//
+// It is about our drivers, not the networks: publishFacebook/publishX/publishLinkedIn/publishThreads
+// all take an image or nothing, so a video post reaches them as null and goes out as a bare caption.
+// (Both of these now come straight from window.PlatformConstants — see the generated file.)
+
+// Which clip the inspector and the timeline are editing. Null = none selected.
+let _pceSelectedAudioId = null;
+// assetId → natural length in seconds, measured once per asset by the browser. content_assets stores
+// no duration, and the timeline cannot draw "plays until it ends" without one.
+const _pceAudioDurations = {};
+// clip id → HTMLAudioElement used for preview only. Never uploaded, never rendered.
+const _pceAudioPreviewEls = {};
+
+function _pceAudioClips(post) {
+    post = post || (_rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null);
+    return post && Array.isArray(post.audio) ? post.audio.filter((a) => a && a.assetId) : [];
+}
+
+const _pceAudioLabel = (a) => String((a && (a.label || a.name)) || 'Voice note');
+
+const _pceFmtS = (s) => `${Math.round(s * 10) / 10}s`;
+
+function _pceSetAudioMsg(text, kind) {
+    const el = _pceEl('insp-audio-msg');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'block mt-2 text-xs font-semibold '
+        + (kind === 'error' ? 'text-red-600' : kind === 'ok' ? 'text-emerald-700' : 'text-gray-500');
+}
+
+// What a clip occupies on the timeline. An unbounded clip is NOT the whole axis — it runs from its
+// start for its own natural length, and drawing it full-width would tell a reviewer a three-second
+// note covers a thirty-second video. Until the length is measured we have nothing honest to draw, so
+// endS stays absent and the segment spans the axis; the measurement corrects it a moment later.
+function _pceAudioDrawRange(a) {
+    const startS = a.startS == null ? 0 : a.startS;
+    if (a.endS != null) return { startS: a.startS, endS: a.endS };
+    const natural = _pceAudioDurations[a.assetId];
+    return { startS: a.startS, endS: natural ? startS + natural : undefined };
+}
+
+// Measure any clip whose length we don't know yet, then repaint — the axis itself depends on these.
+async function _pceMeasureAudio(post) {
+    const unknown = _pceAudioClips(post).filter((a) => a.url && _pceAudioDurations[a.assetId] == null);
+    if (!unknown.length) return;
+    await Promise.all(unknown.map((a) => new Promise((resolve) => {
+        const el = new Audio();
+        el.preload = 'metadata';
+        const done = (d) => { _pceAudioDurations[a.assetId] = d; resolve(d); };
+        el.onloadedmetadata = () => done(isFinite(el.duration) && el.duration > 0 ? el.duration : 0);
+        el.onerror = () => done(0);   // unreadable clip — the others still set the axis
+        el.src = a.url;
+    })));
+    if (_rqReviewPostId != null) {
+        _rqRenderTimeline(_rqPostCache[_rqReviewPostId]);
+        _pceRenderAudioList();
+    }
+}
+
+function _pceRefreshAudioInspector() {
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const clips = _pceAudioClips(post);
+    const summary = _pceEl('insp-audio-summary');
+    if (summary) {
+        summary.textContent = clips.length
+            ? `${clips.length} clip${clips.length === 1 ? '' : 's'} on this post.`
+            : 'No sound on this post yet. Record a voice note or upload a clip.';
+    }
+    // The photo → video consequence, stated only when it actually applies — and, when this platform
+    // has no video driver, stated as the blocking problem it actually is. approve-post refuses that
+    // combination (VIDEO_NOT_PUBLISHABLE); finding out here beats finding out at approval.
+    const becomes = _pceEl('insp-audio-becomes-video');
+    if (becomes) {
+        const stillPost = clips.length && !_pcePostIsVideo(post);
+        const plat = String((post && post.platform) || '').toLowerCase();
+        const canVideo = !plat || window.PlatformConstants.canPublishVideo(plat);
+        becomes.classList.toggle('hidden', !clips.length || (!stillPost && canVideo));
+        if (!canVideo) {
+            becomes.textContent = `Sound has to be rendered in, so this publishes as a video — and we can’t send video to ${window.PlatformConstants.label(plat)} yet. Remove the sound, or post this one to Instagram or YouTube.`;
+            becomes.className = 'mb-3 rounded-lg bg-red-50 border border-red-200 px-2.5 py-2 text-[11px] font-semibold text-red-800';
+        } else {
+            becomes.textContent = 'No network accepts a still image with sound — approving this will publish it as a video instead.';
+            becomes.className = 'mb-3 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-2 text-[11px] font-semibold text-amber-800';
+        }
+    }
+    // A browser with no MediaRecorder can still upload — say so on the button rather than letting it
+    // fail on click.
+    const recBtn = _pceEl('insp-audio-record');
+    if (recBtn && window.AudioRecorder && !window.AudioRecorder.supported()) {
+        recBtn.disabled = true;
+        recBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        recBtn.title = 'This browser can’t record — upload a clip instead.';
+    }
+    _pceRenderAudioList();
+    _pceRefreshAudioTiming();
+    _pceMeasureAudio(post);
+}
+
+// One row per clip. Rows address clips by INDEX, not by id: the index is an integer we generate, so
+// nothing user- or model-supplied ever reaches an attribute.
+function _pceRenderAudioList() {
+    const host = _pceEl('insp-audio-list');
+    if (!host) return;
+    const clips = _pceAudioClips();
+    if (!clips.length) { host.innerHTML = ''; return; }
+    host.innerHTML = clips.map((a, i) => {
+        const sel = a.id && a.id === _pceSelectedAudioId;
+        const natural = _pceAudioDurations[a.assetId];
+        const when = (a.startS == null && a.endS == null)
+            ? (natural ? `Whole post · ${_pceFmtS(natural)}` : 'Whole post')
+            : `${_pceFmtS(a.startS == null ? 0 : a.startS)} – ${a.endS == null ? 'end' : _pceFmtS(a.endS)}`;
+        const playing = _pceAudioPreviewEls[a.id] && !_pceAudioPreviewEls[a.id].paused;
+        return `
+          <div class="flex items-center gap-1.5 px-2 py-1.5 rounded-lg border ${sel ? 'border-indigo-200 bg-indigo-50' : 'border-gray-200'}">
+            <button type="button" onclick="_pcePlayAudioClip(${i})" title="${playing ? 'Stop' : 'Play this clip'}"
+              class="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-white cursor-pointer" style="background:#6366f1">
+              ${playing
+                ? '<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><rect x="5" y="4" width="3.5" height="12" rx="1"/><rect x="11.5" y="4" width="3.5" height="12" rx="1"/></svg>'
+                : '<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M6 4.5v11l9-5.5z"/></svg>'}
+            </button>
+            <button type="button" onclick="_pceSelectAudio(${i})" class="min-w-0 flex-1 text-left cursor-pointer">
+              <span class="block text-[11px] font-bold truncate ${sel ? 'text-indigo-800' : 'text-gray-700'}">${_rqEsc(_pceAudioLabel(a))}</span>
+              <span class="block text-[10px] ${sel ? 'text-indigo-600' : 'text-gray-400'}">${_rqEsc(when)}</span>
+            </button>
+            <button type="button" onclick="_pceRemoveAudio(${i})" title="Remove this clip"
+              class="shrink-0 text-gray-400 hover:text-red-600 transition cursor-pointer text-sm font-bold px-1">&times;</button>
+          </div>`;
+    }).join('');
+}
+
+function _pceSelectAudio(index) {
+    const clips = _pceAudioClips();
+    const clip = clips[index];
+    if (!clip) return;
+    _pceSelectedAudioId = clip.id || null;
+    _pceRenderAudioList();
+    _pceRefreshAudioTiming();
+    _rqRenderTimeline(_rqPostCache[_rqReviewPostId]);
+}
+
+// Start / End / Volume for the selected clip. Mirrors _pceRefreshOverlayTiming deliberately — the
+// two panels are the same decision about different material, and should not read as different ideas.
+let _pceAudioTimingBound = false;
+function _pceRefreshAudioTiming() {
+    const wrap = _pceEl('insp-audio-timing');
+    if (!wrap) return;
+    const clip = _pceAudioClips().find((a) => a.id && a.id === _pceSelectedAudioId);
+    if (!clip) { wrap.classList.add('hidden'); _pceSyncStageTimingBox(); return; }
+    wrap.classList.remove('hidden');
+    _pceSyncStageTimingBox();
+    const lbl = _pceEl('insp-audio-timing-label');
+    if (lbl) lbl.textContent = _pceAudioLabel(clip).slice(0, 30);
+    const startEl = _pceEl('insp-audio-start');
+    const endEl = _pceEl('insp-audio-end');
+    const volEl = _pceEl('insp-audio-volume');
+    if (startEl) startEl.value = clip.startS == null ? '' : Math.round(clip.startS * 10) / 10;
+    if (endEl) endEl.value = clip.endS == null ? '' : Math.round(clip.endS * 10) / 10;
+    if (volEl) volEl.value = Math.round((clip.volume == null ? 1 : clip.volume) * 100);
+    const volLbl = _pceEl('insp-audio-vol-label');
+    if (volLbl) volLbl.textContent = `${Math.round((clip.volume == null ? 1 : clip.volume) * 100)}%`;
+
+    if (!_pceAudioTimingBound) {
+        _pceAudioTimingBound = true;
+        const commit = (persist) => {
+            const cur = _pceAudioClips().find((a) => a.id && a.id === _pceSelectedAudioId);
+            if (!cur) return;
+            const s = _pceEl('insp-audio-start').value;
+            const e = _pceEl('insp-audio-end').value;
+            // No clamp to the current axis: a clip may legitimately run past the video's end, and the
+            // render extends to fit it (see _rqTimelineDuration). Clamping here would silently cut
+            // the very voice note the reviewer is trying to fit.
+            cur.startS = s === '' ? undefined : Math.max(0, Number(s) || 0);
+            cur.endS = e === '' ? undefined : Math.max(0, Number(e) || 0);
+            if (cur.startS != null && cur.endS != null && cur.endS <= cur.startS) cur.endS = undefined;
+            const vol = Number(_pceEl('insp-audio-volume').value);
+            cur.volume = Math.min(1, Math.max(0, (isFinite(vol) ? vol : 100) / 100));
+            const volLbl2 = _pceEl('insp-audio-vol-label');
+            if (volLbl2) volLbl2.textContent = `${Math.round(cur.volume * 100)}%`;
+            const el = _pceAudioPreviewEls[cur.id];
+            if (el) el.volume = cur.volume;   // hear the level change while dragging the slider
+            _rqRenderTimeline(_rqPostCache[_rqReviewPostId]);
+            _pceRenderAudioList();
+            if (persist) _pcePersistAudio(_rqReviewPostId);
+        };
+        for (const id of ['insp-audio-start', 'insp-audio-end', 'insp-audio-volume']) {
+            _pceEl(id)?.addEventListener('input', () => commit(false));
+            _pceEl(id)?.addEventListener('change', () => commit(true));
+        }
+    }
+}
+
+// ── Adding a clip ───────────────────────────────────────────────────────────────────────────────
+
+function _pceRecordAudio() {
+    if (!window.AudioRecorder) {
+        _pceSetAudioMsg('The recorder didn’t load. Upload a clip instead.', 'error');
+        return;
+    }
+    // The recorder captures only — storing it is this caller's job, which is why it hands back a File.
+    window.AudioRecorder.open({ onDone: (file) => { if (file) _pceAddAudioFile(file); } });
+}
+
+async function _pceAddAudioFile(file) {
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    if (!file || !post) return;
+    if (!Array.isArray(post.audio)) post.audio = [];
+    if (post.audio.length >= 10) {
+        _pceSetAudioMsg('That’s the most sound a post can carry (10 clips).', 'error');
+        return;
+    }
+    _pceSetAudioMsg('Uploading…');
+    try {
+        const asset = await gpUploadContentAsset(file);
+        const clip = {
+            id: `a${asset.id}_${Date.now().toString(36)}`,
+            assetId: asset.id,
+            label: String(file.name || 'Voice note').replace(/\.[a-z0-9]+$/i, '').slice(0, 120),
+            volume: 1,
+            // Play it back from the local file rather than waiting on a signed URL — the bytes are
+            // already here, and the next load resolves a real one from the server.
+            url: URL.createObjectURL(file),
+            name: asset.name,
+        };
+        post.audio.push(clip);
+        _pceSelectedAudioId = clip.id;
+        await _pceMeasureAudio(post);
+        _pceRefreshAudioInspector();
+        _rqRenderTimeline(post);
+        _pceRenderLayers();
+        await _pcePersistAudio(postId);
+    } catch (err) {
+        _pceSetAudioMsg(err.message || 'Could not add that clip.', 'error');
+    }
+}
+
+async function _pceRemoveAudio(index) {
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    const clips = _pceAudioClips(post);
+    const clip = clips[index];
+    if (!post || !clip) return;
+    const el = _pceAudioPreviewEls[clip.id];
+    if (el) { el.pause(); delete _pceAudioPreviewEls[clip.id]; }
+    post.audio = clips.filter((a) => a !== clip);
+    if (_pceSelectedAudioId === clip.id) _pceSelectedAudioId = null;
+    _pceRefreshAudioInspector();
+    _rqRenderTimeline(post);
+    _pceRenderLayers();
+    await _pcePersistAudio(postId);
+}
+
+// Save the arrangement. `url`/`name` are editor-only decorations (a signed URL and the asset's file
+// name) and are stripped rather than posted back — the server resolves both from the asset itself,
+// and a presigned URL has no business in a stored design.
+async function _pcePersistAudio(postId) {
+    const post = _rqPostCache[postId];
+    if (!post) return;
+    const payload = _pceAudioClips(post).map(({ url, name, ...rest }) => rest);
+    try {
+        const res = await fetch('/.netlify/functions/save-post-audio', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId, audio: payload }),
+        });
+        if (!res.ok) {
+            const e = await res.json().catch(() => ({}));
+            throw new Error(e.error || 'Could not save the sound.');
+        }
+        // The response also carries `needsRender`, which is deliberately NOT used to drive the
+        // "this will publish as a video" warning: that warning is about a PHOTO gaining sound, and
+        // needsRender is true for a video with sound too. The client already knows which case it is.
+        _pceSetAudioMsg(payload.length ? 'Sound saved.' : 'Sound removed.', 'ok');
+    } catch (err) {
+        // Unlike a dropped overlay save, this one is worth reporting: the clip has been uploaded and
+        // is sitting in the editor looking saved.
+        _pceSetAudioMsg(err.message || 'Could not save the sound.', 'error');
+    }
+}
+
+// ── Preview playback ────────────────────────────────────────────────────────────────────────────
+// Hearing it is the whole point of timing it. Preview plays the clips against the video's own
+// transport; the published mix is Remotion's, and this only has to be close enough to place a note.
+
+function _pceAudioPreviewEl(clip) {
+    if (!clip || !clip.url) return null;
+    let el = _pceAudioPreviewEls[clip.id];
+    if (!el) {
+        el = new Audio(clip.url);
+        el.preload = 'metadata';
+        // Repaint the row's play/stop button when a clip finishes on its own.
+        el.addEventListener('ended', () => _pceRenderAudioList());
+        _pceAudioPreviewEls[clip.id] = el;
+    }
+    el.volume = Math.min(1, Math.max(0, clip.volume == null ? 1 : clip.volume));
+    return el;
+}
+
+// Follow the video: start clips whose window covers the playhead, stop the rest. Re-seeks only on a
+// real drift (a scrub), because nudging currentTime on every timeupdate stutters the audio.
+function _pceSyncAudioPreview(video) {
+    if (!video) return;
+    const clips = _pceAudioClips();
+    if (!clips.length) return;
+    const t = video.currentTime || 0;
+    for (const clip of clips) {
+        const el = _pceAudioPreviewEl(clip);
+        if (!el) continue;
+        const start = clip.startS == null ? 0 : clip.startS;
+        const end = clip.endS == null ? Infinity : clip.endS;
+        const active = !video.paused && !video.ended && t >= start && t < end;
+        if (active) {
+            const want = Math.max(0, t - start);
+            if (el.paused) { try { el.currentTime = want; } catch { /* not seekable yet */ } el.play().catch(() => {}); }
+            else if (Math.abs(el.currentTime - want) > 0.35) { try { el.currentTime = want; } catch { /* ignore */ } }
+        } else if (!el.paused) {
+            el.pause();
+        }
+    }
+}
+
+// Play one clip on its own, from the list. A still post has no transport to follow, so this is the
+// only way to hear a voice note before approving it.
+function _pcePlayAudioClip(index) {
+    const clip = _pceAudioClips()[index];
+    if (!clip) return;
+    const el = _pceAudioPreviewEl(clip);
+    if (!el) { _pceSetAudioMsg('That clip isn’t available to play yet.', 'error'); return; }
+    const wasPlaying = !el.paused;
+    _pceStopAudioPreview();
+    if (!wasPlaying) {
+        try { el.currentTime = 0; } catch { /* not seekable yet */ }
+        el.play().catch(() => _pceSetAudioMsg('The browser blocked playback — click the clip again.', 'error'));
+    }
+    _pceRenderAudioList();
+}
+
+// Silence everything. Called when a clip is played solo, and whenever the modal closes or moves to
+// another post — otherwise a voice note keeps talking over a post nobody is looking at.
+function _pceStopAudioPreview() {
+    for (const id of Object.keys(_pceAudioPreviewEls)) {
+        const el = _pceAudioPreviewEls[id];
+        if (el && !el.paused) el.pause();
     }
 }
 
@@ -7061,11 +7719,20 @@ function _pceSyncForPost(post) {
     // video gains a "Text on image/video" layer; a card does not (its typography is the card's own).
     const overlayCapable = !hasCard && !!post.thumbnailUrl;
     const isVideo = _pcePostIsVideo(post);
+    // Sound needs something to play OVER. Any media will do — including a branded card, whose text is
+    // the card's own but which can still carry a voice note (it becomes a video, same as a photo).
+    // A post with no media at all has nothing to render, so it gets no Sound layer.
+    const audioCapable = !!post.thumbnailUrl;
     _pceLayers = hasCard
         ? ['media', 'caption', 'wordmark', 'website']
         : (overlayCapable ? ['media', 'caption', 'overlays'] : ['media', 'caption']);
+    if (audioCapable) _pceLayers.push('audio');
     _pceEl('insp-media-card')?.classList.toggle('hidden', !hasCard);
     _pceEl('insp-media-generic')?.classList.toggle('hidden', hasCard);
+    // A branded card is a still. Offering to make one on a Reel or a YouTube video would replace the
+    // post's video with a picture it cannot publish, so the offer isn't made.
+    _pceEl('insp-make-card')?.classList.toggle('hidden', isVideo);
+    _pceEl('insp-make-card-msg')?.classList.toggle('hidden', isVideo);
     _PCE_INSP_TITLES.media.title = hasCard ? 'Branded card' : (isVideo ? 'Video' : 'Picture');
     _PCE_INSP_TITLES.overlays.title = isVideo ? 'Text on video' : 'Text on image';
     // Selecting a box drives the per-box timing controls; default to the first box so the timing
@@ -7074,6 +7741,13 @@ function _pceSyncForPost(post) {
     if (!_pceSelectedOverlayId || !(post.overlays || []).some((o) => o && o.id === _pceSelectedOverlayId)) {
         _pceSelectedOverlayId = firstOverlay ? firstOverlay.id : null;
     }
+    // Same for sound: a selection carried over from the previous post would point the timing panel at
+    // a clip this post does not have.
+    const clips = _pceAudioClips(post);
+    if (!_pceSelectedAudioId || !clips.some((a) => a.id === _pceSelectedAudioId)) {
+        _pceSelectedAudioId = clips.length ? clips[0].id : null;
+    }
+    _pceMeasureAudio(post);
 
     _pceFillCaption(post);
 
@@ -7233,6 +7907,10 @@ function _rqReviewRenderActive() {
     const groupSize = _rqReviewGroupIds.length;
     const multi = groupSize > 1;
 
+    // Whatever was playing belongs to the post being replaced — including read-only ones, which is
+    // why this sits here rather than on the editable path inside _pceSyncForPost.
+    _pceStopAudioPreview();
+
     document.getElementById('post-review-body').innerHTML = renderPlatformMockup(post);
     _pceSyncForPost(post);
     _rqRenderCanvasOverlays(post);
@@ -7360,6 +8038,7 @@ function _rqReviewMissingPlatforms() {
 function closePostReview() {
     _rqRestoreMediaPanel();   // hand the shared media panel back to the generate-post sheet
     _rqStopRenderPoll();      // nothing to update once the modal is gone
+    _pceStopAudioPreview();   // a closed modal must not keep talking
     const modal = document.getElementById('post-review-modal');
     modal.classList.add('hidden');
     modal.classList.remove('flex');
@@ -8221,14 +8900,10 @@ let _gpSelectedPlatforms = ['instagram'];
 // hand-written HTML and had each drifted to four, so those platforms were simply unreachable when
 // creating a post. Both rows are now generated from this array: adding a seventh platform means
 // touching one line, and it cannot appear in one picker and not the other.
-const _GP_PLATFORMS = [
-    { id: 'instagram', label: 'Instagram' },
-    { id: 'facebook',  label: 'Facebook'  },
-    { id: 'linkedin',  label: 'LinkedIn'  },
-    { id: 'x',         label: 'X'         },
-    { id: 'threads',   label: 'Threads'   },
-    { id: 'youtube',   label: 'YouTube'   },
-];
+// The platforms the pickers offer. Generated from src/config/platform-formats.ts — this used to be a
+// hand-written list, and the server's own hand-written lists disagreed with it, which is how Threads
+// and YouTube came to be silently dropped from posts the composer had happily accepted.
+const _GP_PLATFORMS = window.PlatformConstants.all.map(p => ({ id: p.id, label: p.label }));
 
 const _GP_CHIP_CLASS = 'px-3 py-1.5 text-sm rounded-lg border border-gray-300 text-gray-700 hover:border-emerald-600 hover:text-emerald-700 transition cursor-pointer';
 
@@ -8622,8 +9297,11 @@ async function gpUploadContentAsset(file) {
         const putRes = await fetch(uploadUrl, { method: 'PUT', headers: { 'Content-Type': file.type }, body: file });
         if (!putRes.ok) throw new Error('Upload failed.');
     }
-    const assetType = file.type.startsWith('video/') ? 'video' : 'image';
-    const dims = await _gpProbeDimensions(file, assetType).catch(() => null);
+    // A voice note is neither a picture nor a video, and calling it an image would file it into the
+    // library's image grid and hand the renderer something it cannot draw.
+    const assetType = file.type.startsWith('video/') ? 'video'
+        : file.type.startsWith('audio/') ? 'audio' : 'image';
+    const dims = assetType === 'audio' ? null : await _gpProbeDimensions(file, assetType).catch(() => null);
     const createRes = await fetch('/.netlify/functions/content-assets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -8640,6 +9318,20 @@ async function gpUploadContentAsset(file) {
 }
 
 // ── Mode 1: Write it yourself (no AI) ───────────────────────────────────────────────────────────
+// Close the create sheet and open the just-created draft in the post editor.
+//
+// A stepping stone, not the finished shape: creating and editing are still two surfaces. It exists
+// because the gap was total — a post created here could only be styled by hunting it down in the
+// Review Queue afterwards, so in practice nobody found the editor from the create flow at all.
+async function gpwOpenInEditor() {
+    const first = (_gpwCreatedPosts || [])[0];
+    if (!first) return;
+    closeGeneratePostSheet();
+    // The queue may not have this draft cached yet — openPostReview warms the cache itself when it
+    // misses, so handing it the id is enough.
+    await openPostReview(first.id);
+}
+
 function gpwTogglePlatform(btn) {
     const p = btn.dataset.platform;
     const i = _gpwSelectedPlatforms.indexOf(p);
@@ -8649,10 +9341,10 @@ function gpwTogglePlatform(btn) {
 }
 
 // ── Per-platform limits (mirrors CHAR_LIMITS in platform-post-preview.js) ────────────────────────
-const _GPW_CHAR_LIMITS = { instagram: 2200, facebook: 63206, linkedin: 3000, x: 280, twitter: 280, threads: 500, youtube: 5000 };
-// Display names for the counter chips. Only needed where naive capitalisation is wrong
-// ('Youtube', 'X'); anything absent falls back to capitalising the service name.
-const _GPW_PLATFORM_LABELS = { x: 'X', twitter: 'X', youtube: 'YouTube', linkedin: 'LinkedIn' };
+// Per-platform caption caps and display names now come from window.PlatformConstants (generated from
+// src/config/platform-formats.ts) instead of the hand-written maps that used to sit here.
+// `charLimit()` and `label()` both resolve legacy 'twitter' → 'x' themselves.
+const _gpwLabel = (p) => window.PlatformConstants.label(p);
 
 // Re-render the constraint-driven layer for Write-your-own: a counter chip per selected platform
 // plus a live, publish-accurate preview. Called on every platform / caption / hashtag / media change,
@@ -8678,19 +9370,20 @@ function gpwRefreshDynamic() {
         meta.classList.remove('hidden');
         const hasVideo = assets.some(a => a?.assetType === 'video');
         meta.innerHTML = platforms.map(p => {
-            const limit = _GPW_CHAR_LIMITS[p] || null;
-            // Media requirements differ by KIND, not just presence: Instagram needs an image and
-            // YouTube needs a video, and attaching the wrong one is a publish failure. Mirrors
-            // mediaMandatory + mediaKind in src/config/platform-formats.ts.
-            const needsImg = p === 'instagram' && !assets.length;
-            const needsVideo = p === 'youtube' && !hasVideo;
+            const limit = window.PlatformConstants.charLimit(p);
+            // Media requirements differ by KIND, not just presence: some platforms need an image and
+            // some need a video, and attaching the wrong one is a publish failure. Read from the
+            // generated constants so naming a platform here can't fall out of step with the server.
+            const spec = window.PlatformConstants.get(p);
+            const needsImg = !!spec && spec.mediaMandatory && spec.mediaKind === 'image' && !assets.length;
+            const needsVideo = !!spec && spec.mediaMandatory && spec.mediaKind === 'video' && !hasVideo;
             let cls = 'border-gray-200 text-gray-600 bg-gray-50';
             let detail = limit ? `${combinedLen}/${limit}` : `${combinedLen} chars`;
             if (limit && combinedLen > limit) cls = 'border-red-300 text-red-700 bg-red-50 font-semibold';
             else if (limit && combinedLen > limit * 0.9) cls = 'border-amber-300 text-amber-700 bg-amber-50';
             else if (needsVideo) { cls = 'border-red-300 text-red-700 bg-red-50 font-semibold'; detail = 'needs a video'; }
             else if (needsImg) { cls = 'border-amber-300 text-amber-700 bg-amber-50'; detail = 'needs an image'; }
-            const name = _GPW_PLATFORM_LABELS[p] || (p.charAt(0).toUpperCase() + p.slice(1));
+            const name = _gpwLabel(p);
             return `<span class="inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg border ${cls}">${name} · ${detail}</span>`;
         }).join('');
     }
@@ -8818,7 +9511,10 @@ async function gpwSubmit() {
 
     // Hard block any platform whose character limit the combined text exceeds (matches the live counter).
     const combinedLen = (caption + (hashtags ? '\n\n' + hashtags : '')).length;
-    const over = _gpwSelectedPlatforms.filter(p => _GPW_CHAR_LIMITS[p] && combinedLen > _GPW_CHAR_LIMITS[p]);
+    const over = _gpwSelectedPlatforms.filter(p => {
+        const limit = window.PlatformConstants.charLimit(p);
+        return limit && combinedLen > limit;
+    });
     if (over.length) {
         const names = over.map(p => p === 'x' ? 'X' : p.charAt(0).toUpperCase() + p.slice(1));
         gpSetPanelStatus('gpw-status', `Too long for ${names.join(', ')} — trim the text or deselect ${over.length > 1 ? 'those platforms' : 'that platform'}.`, 'error');
@@ -8832,8 +9528,15 @@ async function gpwSubmit() {
             const picker = document.getElementById('gpw-media-picker');
             if (picker?.classList.contains('hidden')) gpwToggleMediaPicker();
         };
-        if (_gpwSelectedPlatforms.includes('instagram')) {
-            gpSetPanelStatus('gpw-status', 'Instagram requires an image. Add one from My Content before scheduling.', 'error');
+        // Platforms that cannot publish without media. Instagram was the only one named here, which
+        // was fine while it was the only one offered — YouTube is now selectable and needs a VIDEO,
+        // so without this the composer waved it through to a server 400 it had all the information
+        // to prevent. Driven by the generated constants, so it can never name a stale set again.
+        const _blocked = window.PlatformConstants.mediaMandatory(_gpwSelectedPlatforms);
+        if (_blocked.length) {
+            const which = _blocked.map(p => p.label).join(' and ');
+            const kind = _blocked.every(p => p.mediaKind === 'video') ? 'a video' : 'an image';
+            gpSetPanelStatus('gpw-status', `${which} requires ${kind}. Add one from My Content before scheduling.`, 'error');
             openMediaPicker();
             return;
         }

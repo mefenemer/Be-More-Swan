@@ -81,6 +81,42 @@ export async function resolvePostImage(db: any, contentAssetIds: unknown): Promi
     return null;
 }
 
+/**
+ * Did this post have media attached that we then failed to resolve?
+ *
+ * The publishers all did `resolvePostImage(...).catch(() => null)` and treated null as "text-only".
+ * That conflates two very different situations: a post the user wrote as text (fine) and a post
+ * whose picture we could not fetch (not fine — publishing it bare silently discards their work).
+ * Only the second is a failure, and this is what tells them apart.
+ */
+/**
+ * Is this attachment a video?
+ *
+ * Derived from the mime type rather than carried as a separate field, so every driver can branch on
+ * it without changing a single signature — and so an asset can never claim to be one kind while
+ * carrying bytes of the other.
+ */
+export const isVideoMedia = (m: { mimeType?: string } | null | undefined): boolean =>
+    !!m && String(m.mimeType || '').toLowerCase().startsWith('video/');
+
+/**
+ * The post's attachment, whichever kind it is: first image OR video.
+ *
+ * resolvePostImage skips anything that isn't an image, which was correct while the drivers were
+ * image-only but became a silent data-loss bug the moment a post could BE a video (sound on a photo
+ * renders to mp4). Publishers should resolve with this and let the driver branch on the mime type.
+ */
+export async function resolvePostMedia(db: any, contentAssetIds: unknown): Promise<PostImage | null> {
+    const image = await resolvePostImage(db, contentAssetIds);
+    if (image) return image;
+    const video = await resolvePostVideo(db, contentAssetIds);
+    return video ? { url: video.url, mimeType: video.mimeType } : null;
+}
+
+export function hasAttachedMedia(contentAssetIds: unknown): boolean {
+    return Array.isArray(contentAssetIds) && contentAssetIds.map(Number).filter(Number.isFinite).length > 0;
+}
+
 export interface PostVideo { url: string; mimeType: string; }
 
 // First VIDEO asset attached to the post → a fetchable URL (presigned R2 or external).
@@ -289,9 +325,35 @@ export { isDriverRetryable };
 // endpoint is superseded by /2/media/upload on api.x.com; we use the v2 endpoint and fall back to a
 // text-only tweet if media upload fails (best-effort media has always been the behaviour). Host
 // canonicalised to api.x.com (api.twitter.com still resolves, but x.com is the documented host).
+/**
+ * The result for "we had media for this post and could not send it".
+ *
+ * This used to be swallowed — both X and LinkedIn caught an upload failure and published the caption
+ * on its own. That is the worst possible outcome: the post looks successful in the queue, goes out
+ * stripped of the picture the user designed, and nothing anywhere records that it happened. Failing
+ * is recoverable (the post stays in the queue and can be retried); a bare caption on a live feed is
+ * not.
+ *
+ * Deliberately NOT retryable-by-default at the driver level — the caller classifies that — but it
+ * always carries the underlying reason so the Review Queue can show something actionable.
+ */
+function mediaDropped(platform: string, err?: unknown): DriverResult {
+    const detail = err instanceof Error ? err.message : typeof err === 'string' ? err : null;
+    return {
+        ok: false,
+        status: null,
+        error: `The media could not be uploaded to ${platform}, so the post was not sent`
+            + (detail ? `: ${detail}` : '. Try again, or replace the media.'),
+    };
+}
+
 export async function publishX(text: string, token: string, image: PostImage | null): Promise<DriverResult> {
     let mediaId: string | null = null;
-    if (image) { try { mediaId = await uploadXMedia(image, token); } catch { /* text-only on media failure */ } }
+    if (image) {
+        try { mediaId = await uploadXMedia(image, token); }
+        catch (err) { return mediaDropped('X', err); }
+        if (!mediaId) return mediaDropped('X');
+    }
 
     const body: Record<string, unknown> = { text: text.slice(0, X_MAX) };
     if (mediaId) body.media = { media_ids: [mediaId] };
@@ -306,8 +368,14 @@ export async function publishX(text: string, token: string, image: PostImage | n
     return { ok: false, status: res.status, error: data?.detail || data?.title || `X API error (${res.status})` };
 }
 
-// Upload media to X via the v2 endpoint (multipart form-data). Returns the media id or null (→ text-only).
+// Upload media to X via the v2 endpoint (multipart form-data). Returns the media id or null, which
+// the caller turns into a media-dropped failure.
+//
+// Images go up in a single request. VIDEO cannot: X requires the chunked INIT → APPEND* → FINALIZE
+// sequence and then a processing wait, so it takes the separate path below.
 async function uploadXMedia(image: PostImage, token: string): Promise<string | null> {
+    if (isVideoMedia(image)) return uploadXVideo(image, token);
+
     const bytes = await fetchImageBytes(image.url);
     const form = new FormData();
     form.append('media', new Blob([bytes], { type: image.mimeType || 'image/jpeg' }));
@@ -320,6 +388,78 @@ async function uploadXMedia(image: PostImage, token: string): Promise<string | n
     const data: any = await res.json().catch(() => ({}));
     // v2 returns { data: { id } }; tolerate the legacy media_id_string shape too.
     return res.ok ? (data?.data?.id ?? data?.media_id_string ?? null) : null;
+}
+
+/** X's chunked video upload: 5 MB segments, which is comfortably under its per-request ceiling. */
+export const X_VIDEO_CHUNK_BYTES = 5 * 1024 * 1024;
+export const X_VIDEO_MAX_POLLS = 20;
+export const X_VIDEO_POLL_MS = 3000;
+
+/**
+ * INIT → APPEND (per chunk) → FINALIZE → wait for transcoding.
+ *
+ * Throws with X's own message on failure so publishX can surface WHY the media was dropped rather
+ * than a bare "could not upload" — a rejected codec and an expired token need different actions from
+ * the user, and only the platform's text distinguishes them.
+ */
+async function uploadXVideo(video: PostImage, token: string): Promise<string | null> {
+    // A view, not a copy — subarray() below then slices without duplicating the whole file per chunk.
+    const bytes = new Uint8Array(await fetchImageBytes(video.url));
+    const auth = { Authorization: `Bearer ${token}` };
+    const fail = (stage: string, data: any, status: number): never => {
+        throw new Error(data?.detail || data?.title || data?.errors?.[0]?.message || `X ${stage} failed (${status})`);
+    };
+
+    // INIT — declare the total size up front; X allocates the media id here.
+    const initRes = await fetch('https://api.x.com/2/media/upload/initialize', {
+        method: 'POST',
+        headers: { ...auth, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            total_bytes: bytes.length,
+            media_type: video.mimeType || 'video/mp4',
+            media_category: 'tweet_video',
+        }),
+    });
+    const initData: any = await initRes.json().catch(() => ({}));
+    const mediaId = initData?.data?.id ?? initData?.media_id_string ?? null;
+    if (!initRes.ok || !mediaId) fail('upload initialize', initData, initRes.status);
+
+    // APPEND — one request per chunk, in order. Never hold more than a chunk in a request body.
+    for (let offset = 0, segment = 0; offset < bytes.length; offset += X_VIDEO_CHUNK_BYTES, segment++) {
+        const slice = bytes.subarray(offset, Math.min(offset + X_VIDEO_CHUNK_BYTES, bytes.length));
+        const form = new FormData();
+        form.append('media', new Blob([slice], { type: video.mimeType || 'video/mp4' }));
+        form.append('segment_index', String(segment));
+        const appendRes = await fetch(`https://api.x.com/2/media/upload/${encodeURIComponent(mediaId)}/append`, {
+            method: 'POST', headers: auth, body: form,
+        });
+        if (!appendRes.ok) fail(`upload append (segment ${segment})`, await appendRes.json().catch(() => ({})), appendRes.status);
+    }
+
+    // FINALIZE — X may answer with a processing_info telling us to wait before the id is usable.
+    const finRes = await fetch(`https://api.x.com/2/media/upload/${encodeURIComponent(mediaId)}/finalize`, {
+        method: 'POST', headers: auth,
+    });
+    const finData: any = await finRes.json().catch(() => ({}));
+    if (!finRes.ok) fail('upload finalize', finData, finRes.status);
+
+    let info = finData?.data?.processing_info ?? finData?.processing_info ?? null;
+    for (let poll = 0; info && info.state && info.state !== 'succeeded' && poll < X_VIDEO_MAX_POLLS; poll++) {
+        if (info.state === 'failed') {
+            throw new Error(info?.error?.message || 'X could not process the video.');
+        }
+        await sleep(Math.max(X_VIDEO_POLL_MS, (info.check_after_secs ?? 0) * 1000));
+        const statusRes = await fetch(
+            `https://api.x.com/2/media/upload?command=STATUS&media_id=${encodeURIComponent(mediaId)}`,
+            { headers: auth },
+        );
+        const statusData: any = await statusRes.json().catch(() => ({}));
+        info = statusData?.data?.processing_info ?? statusData?.processing_info ?? null;
+    }
+    if (info && info.state && info.state !== 'succeeded') {
+        throw new Error('X is still processing the video. It will be retried shortly.');
+    }
+    return String(mediaId);
 }
 
 // Read the authenticated X user (read-only preflight for the harness).
@@ -341,11 +481,17 @@ export async function publishLinkedIn(text: string, token: string, authorId: str
     const author = authorId.startsWith('urn:') ? authorId : `urn:li:person:${authorId}`;
 
     let assetUrn: string | null = null;
-    if (image) { try { assetUrn = await uploadLinkedInImage(image, token, author); } catch { /* text-only on media failure */ } }
+    if (image) {
+        try { assetUrn = await uploadLinkedInImage(image, token, author); }
+        catch (err) { return mediaDropped('LinkedIn', err); }
+        if (!assetUrn) return mediaDropped('LinkedIn');
+    }
 
     const shareContent: Record<string, unknown> = {
         shareCommentary: { text },
-        shareMediaCategory: assetUrn ? 'IMAGE' : 'NONE',
+        // The category must match what was actually uploaded — a video registered under the video
+        // recipe but declared IMAGE here is rejected by LinkedIn.
+        shareMediaCategory: assetUrn ? (isVideoMedia(image) ? 'VIDEO' : 'IMAGE') : 'NONE',
     };
     if (assetUrn) shareContent.media = [{ status: 'READY', media: assetUrn }];
 
@@ -367,14 +513,21 @@ export async function publishLinkedIn(text: string, token: string, authorId: str
     return { ok: false, status: res.status, error: data?.message || `LinkedIn API error (${res.status})` };
 }
 
-// registerUpload → PUT bytes → return the asset URN (or null → text-only).
+// registerUpload → PUT bytes → return the asset URN (or null, which the caller turns into a
+// media-dropped failure rather than a bare text post).
+//
+// Video uses the identical mechanism with a different RECIPE — feedshare-video instead of
+// feedshare-image — which is why one function serves both rather than two near-copies.
 async function uploadLinkedInImage(image: PostImage, token: string, owner: string): Promise<string | null> {
+    const recipe = isVideoMedia(image)
+        ? 'urn:li:digitalmediaRecipe:feedshare-video'
+        : 'urn:li:digitalmediaRecipe:feedshare-image';
     const reg = await fetch('https://api.linkedin.com/v2/assets?action=registerUpload', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}`, 'X-Restli-Protocol-Version': '2.0.0' },
         body: JSON.stringify({
             registerUploadRequest: {
-                recipes: ['urn:li:digitalmediaRecipe:feedshare-image'],
+                recipes: [recipe],
                 owner,
                 serviceRelationships: [{ relationshipType: 'OWNER', identifier: 'urn:li:userGeneratedContent' }],
             },
@@ -418,6 +571,37 @@ export async function resolveLinkedInAuthor(token: string): Promise<{ ok: true; 
 
 export const THREADS_TEXT_MAX = 500;
 
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
+/** How long to wait for a Threads video container to transcode, and how often to ask. */
+export const THREADS_VIDEO_POLL_MS = 3000;
+export const THREADS_VIDEO_MAX_POLLS = 20;   // ~60s — past that the tick gives the post back
+
+/**
+ * Poll a Threads media container until it is publishable.
+ *
+ * Threads reports `status` as IN_PROGRESS → FINISHED (or ERROR/EXPIRED). Publishing before FINISHED
+ * is rejected, so this is not optional for video. Returns a DriverResult so the caller can hand the
+ * failure straight back with the platform's own error text.
+ */
+async function awaitThreadsContainer(containerId: string, token: string): Promise<DriverResult> {
+    for (let attempt = 0; attempt < THREADS_VIDEO_MAX_POLLS; attempt++) {
+        const res = await fetch(
+            `https://graph.threads.net/v1.0/${encodeURIComponent(containerId)}?fields=status,error_message`,
+            { headers: { Authorization: `Bearer ${token}` } },
+        );
+        const data: any = await res.json().catch(() => ({}));
+        const status = String(data?.status || '').toUpperCase();
+        if (status === 'FINISHED') return { ok: true, id: containerId };
+        if (status === 'ERROR' || status === 'EXPIRED') {
+            return { ok: false, status: null, error: data?.error_message || `Threads could not process the video (${status}).` };
+        }
+        await sleep(THREADS_VIDEO_POLL_MS);
+    }
+    // Retryable by nature: the container may still finish, and the post is safer left in the queue.
+    return { ok: false, status: 503, error: 'Threads is still processing the video. It will be retried shortly.' };
+}
+
 export async function publishThreads(
     text: string,
     token: string,
@@ -431,14 +615,26 @@ export async function publishThreads(
     const body = text.slice(0, THREADS_TEXT_MAX);
 
     // 1. Create the container.
-    const containerParams = new URLSearchParams({ media_type: image ? 'IMAGE' : 'TEXT', text: body });
-    if (image) containerParams.set('image_url', image.url);
+    const video = isVideoMedia(image);
+    const containerParams = new URLSearchParams({
+        media_type: video ? 'VIDEO' : image ? 'IMAGE' : 'TEXT',
+        text: body,
+    });
+    if (image) containerParams.set(video ? 'video_url' : 'image_url', image.url);
     const containerRes = await fetch(`https://graph.threads.net/v1.0/${uid}/threads`, {
         method: 'POST', headers: authHeaders, body: containerParams,
     });
     const containerData: any = await containerRes.json().catch(() => ({}));
     if (!containerRes.ok || !containerData?.id) {
         return { ok: false, status: containerRes.status, error: containerData?.error?.message || `Threads container error (${containerRes.status})` };
+    }
+
+    // 1a. A VIDEO container is not ready the instant it is created — Threads transcodes first, and
+    // publishing an IN_PROGRESS container fails. Images are ready immediately, so only video pays
+    // this cost. Bounded: if it hasn't finished by the end, report that rather than hanging the tick.
+    if (video) {
+        const ready = await awaitThreadsContainer(String(containerData.id), token);
+        if (!ready.ok) return ready;
     }
 
     // 2. Publish it.
@@ -839,12 +1035,19 @@ export async function publishYouTube(
 // ── Facebook (Graph API) ──────────────────────────────────────────────────────────────────────────
 // Image → /{pageId}/photos (caption becomes the post text); text/link → /{pageId}/feed.
 export async function publishFacebook(pageId: string, pageToken: string, text: string, image: PostImage | null): Promise<DriverResult> {
-    const endpoint = image
-        ? `https://graph.facebook.com/${FB_GRAPH_VERSION}/${pageId}/photos`
-        : `https://graph.facebook.com/${FB_GRAPH_VERSION}/${pageId}/feed`;
-    const body: Record<string, string> = image
-        ? { url: image.url, caption: text, access_token: pageToken }
-        : { message: text, access_token: pageToken };
+    // Three endpoints, one per kind of post. /videos takes a remote file_url exactly as /photos takes
+    // `url`, so a video costs no extra round trip — Facebook fetches the presigned R2 object itself.
+    const video = isVideoMedia(image);
+    const endpoint = video
+        ? `https://graph.facebook.com/${FB_GRAPH_VERSION}/${pageId}/videos`
+        : image
+            ? `https://graph.facebook.com/${FB_GRAPH_VERSION}/${pageId}/photos`
+            : `https://graph.facebook.com/${FB_GRAPH_VERSION}/${pageId}/feed`;
+    const body: Record<string, string> = video
+        ? { file_url: image!.url, description: text, access_token: pageToken }
+        : image
+            ? { url: image.url, caption: text, access_token: pageToken }
+            : { message: text, access_token: pageToken };
 
     const res = await fetch(endpoint, {
         method: 'POST',

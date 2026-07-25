@@ -18,6 +18,8 @@ import { recordPostedAssets } from '../../src/utils/pexels';
 import { resolvePostImage, resolvePostVideo } from '../../src/utils/social-publish';
 import { resolvePostingSchedule, computeScheduleSlots, intervalHoursFor } from '../../src/config/posting-cadence';
 import { formatBlockedReason } from '../../src/config/post-formats';
+import { platformFormat } from '../../src/config/platform-formats';
+import { needsVideoRender, renderableAudio } from '../../src/lib/audio-overlays';
 import { readCachedReview, openWarnings } from '../../src/utils/post-quality-review';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -249,6 +251,32 @@ export default withLambda(async (event) => {
                 error: formatBlock,
                 code: 'FORMAT_NOT_SCHEDULABLE',
                 formatKey: (post as any).formatKey,
+            }),
+        };
+    }
+
+    // Will this post go out as a VIDEO, and can this platform's driver actually send one?
+    //
+    // Sound makes this reachable in a way it never was before: audio on a photo is rendered into an
+    // mp4 at approval (needsVideoRender), so a post that looked like a picture publishes as a video.
+    // publishFacebook/publishX/publishLinkedIn/publishThreads all take an image or nothing, and
+    // resolvePostImage skips a video asset — so the post went out as a bare caption with the media
+    // silently dropped and no failure recorded anywhere. Refusing here is the difference between
+    // "we can't do that yet" and a post the user thinks succeeded.
+    const willBeVideo = needsVideoRender({
+        hasVideo: (await resolvePostVideo(db, post.contentAssetIds).catch(() => null)) !== null,
+        textOverlays: 0,   // text alone never CHANGES the media kind — it burns into what is there
+        audioOverlays: renderableAudio((post as any).audioOverlays).length,
+    });
+    if (willBeVideo && post.platform && !platformFormat(post.platform).canPublishVideo) {
+        const label = platformFormat(post.platform).label;
+        return {
+            statusCode: 422,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                error: `This post will publish as a video (sound has to be rendered in), and we can’t send video to ${label} yet. Remove the sound, or send this one to Instagram or YouTube.`,
+                code: 'VIDEO_NOT_PUBLISHABLE',
+                platform: post.platform,
             }),
         };
     }
