@@ -656,8 +656,14 @@ window.showComplianceModals = function showComplianceModals(force) {
               <!-- Media that is NOT a branded card: choosing what the picture is. The shared
                    sourcing panel is mounted here on demand (see _inspMountMediaPanel). -->
               <div id="insp-media-generic" class="hidden">
-                <p class="text-xs font-bold text-gray-600 mb-1">Picture</p>
+                <!-- No "Picture" heading here: the inspector header above already names the media
+                     per post (_pceSyncForPost sets it to Picture/Video/Branded card) and the Type
+                     row below states it too. The heading was static, so on a video post it said
+                     "Picture" directly under a header saying "Video". -->
                 <p class="text-[11px] text-gray-400 mb-2">Upload your own, search stock, or generate one.</p>
+                <!-- Measured off the media element on the canvas, not read from content_assets —
+                     see _pceRenderMediaProps. Hidden until there is something to report. -->
+                <dl id="insp-media-props" class="hidden mb-3 grid grid-cols-2 gap-x-2 gap-y-1.5 rounded-lg bg-gray-50 border border-gray-100 px-2.5 py-2"></dl>
                 <div id="post-review-media-host"></div>
                 <button type="button" id="insp-overlay-jump" onclick="_pceSelect('overlays')"
                   class="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold border border-pink-300 text-pink-700 hover:bg-pink-50 rounded-lg transition cursor-pointer">
@@ -6206,6 +6212,7 @@ function _pceSelect(key, repaintHandles = true) {
     if (key === 'media' && !_pceEl('insp-media-generic')?.classList.contains('hidden')) {
         _inspMountMediaPanel();
         _pceRefreshOverlayJump();
+        _pceRenderMediaProps();
     }
     if (key === 'overlays') _pceRefreshOverlayInspector();
     _pceRenderLayers();
@@ -6319,6 +6326,67 @@ function _pceOverlayCount(post) {
 function _pcePostIsVideo(post) {
     post = post || (_rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null);
     return !!post && (post.mediaType === 'video' || /video|reel/i.test(post.postFormat || ''));
+}
+
+// ── Media properties (resolution / aspect / duration) ───────────────────────────────────────────
+// MEASURED off the media element already on the canvas, not read from content_assets. Three reasons,
+// and they all matter:
+//   1. content_assets has no duration column at all — the client is the only thing that knows.
+//   2. width/height are NULL on every asset uploaded before the probe existed, and on anything the
+//      probe failed to read. Those are precisely the assets showing "we couldn't read this asset's
+//      dimensions" in the preview, so reading the stored value would report nothing exactly when
+//      the user most wants an answer.
+//   3. The element is the ground truth for what will actually be published.
+// Best-effort by construction: no media, or metadata not loaded yet, simply shows nothing.
+function _pceMediaMetrics(el) {
+    if (!el) return null;
+    if (el.tagName === 'VIDEO') {
+        if (!el.videoWidth || !el.videoHeight) return null;
+        const d = Number.isFinite(el.duration) && el.duration > 0 ? el.duration : null;
+        return { w: el.videoWidth, h: el.videoHeight, durationS: d, kind: 'Video' };
+    }
+    if (!el.naturalWidth || !el.naturalHeight) return null;
+    return { w: el.naturalWidth, h: el.naturalHeight, durationS: null, kind: 'Picture' };
+}
+
+function _pceFmtDuration(s) {
+    const total = Math.round(s);
+    const m = Math.floor(total / 60);
+    return `${m}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function _pceRenderMediaProps() {
+    const dl = document.getElementById('insp-media-props');
+    if (!dl) return;
+    const hide = () => { dl.classList.add('hidden'); dl.innerHTML = ''; };
+    const media = document.querySelector('#post-review-body [data-media-img], #post-review-body [data-media-video]');
+    if (!media) return hide();
+
+    const m = _pceMediaMetrics(media);
+    if (!m) {
+        // Metadata hasn't arrived yet. Bind ONCE per element (they are recreated on every mock-up
+        // render, so the flag rides the element and cannot leak across posts) and fill in on arrival.
+        if (!media._pcePropsBound) {
+            media._pcePropsBound = true;
+            const ev = media.tagName === 'VIDEO' ? 'loadedmetadata' : 'load';
+            media.addEventListener(ev, () => _pceRenderMediaProps(), { once: true });
+        }
+        return hide();
+    }
+
+    const ratio = (window.PlatformPostPreview && window.PlatformPostPreview.ratioLabel)
+        ? window.PlatformPostPreview.ratioLabel(m.w / m.h) : null;
+    const rows = [
+        ['Type', m.kind],
+        ['Resolution', `${m.w} × ${m.h}`],
+        ...(ratio ? [['Aspect', ratio]] : []),
+        ...(m.durationS != null ? [['Duration', _pceFmtDuration(m.durationS)]] : []),
+    ];
+    dl.innerHTML = rows.map(([k, v]) => `<div class="min-w-0">
+        <dt class="text-[9px] font-bold uppercase tracking-wider text-gray-400">${_rqEsc(k)}</dt>
+        <dd class="text-[11px] font-semibold text-gray-700 truncate">${_rqEsc(v)}</dd>
+      </div>`).join('');
+    dl.classList.remove('hidden');
 }
 
 // The picture layer's jump button doubles as the overlay count, so you can see there is text on the

@@ -400,5 +400,9 @@
     };
   }
 
-  window.PlatformPostPreview = { render };
+  // ratioLabel is exported so the post editor's media panel can name an aspect ratio the same way
+  // this component's mismatch warning does. Exported rather than copied: two implementations would
+  // eventually disagree, and then the inspector would call a clip 9:16 while the preview warned it
+  // was not — the same drift the overlay-geometry test exists to prevent.
+  window.PlatformPostPreview = { render, ratioLabel: _ratioLabel };
 })();
