@@ -1783,6 +1783,13 @@ export const scheduledPosts = pgTable("scheduled_posts", {
   // Publishing logistics
   platform: text("platform").notNull(),         // facebook|instagram|linkedin|x
   postFormat: text("post_format").notNull(),     // text|image|carousel|reel|story|thread|video
+  // The chosen POST FORMAT from src/config/post-formats.ts — 'ig_reel', 'li_document', 'x_poll'…
+  // Deliberately a NEW column rather than reusing post_format above: that one is a loose media
+  // descriptor several publishers already branch on (publish-instagram tests it for 'reel'|'video'),
+  // so overloading it with 29 new values would change behaviour everywhere it is read. NULL means a
+  // legacy post from before the catalogue — those stay schedulable and publish exactly as they did.
+  // See db/post-format-key.sql.
+  formatKey: text("format_key"),
   publishDate: timestamp("publish_date").notNull(),
   publishedAt: timestamp("published_at"),
   platformPostId: text("platform_post_id"),      // external ID after publish

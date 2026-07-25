@@ -17,6 +17,7 @@ import { aiAssistants, auditLogs, contentRules, postIdeaSuggestions, scheduledPo
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { resolvePostImage, resolvePostVideo } from '../../src/utils/social-publish';
 import { resolvePostingSchedule, computeScheduleSlots, intervalHoursFor } from '../../src/config/posting-cadence';
+import { formatBlockedReason } from '../../src/config/post-formats';
 import { readCachedReview, openWarnings } from '../../src/utils/post-quality-review';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -231,6 +232,23 @@ export default withLambda(async (event) => {
                 code: 'COMPLIANCE_WARNINGS',
                 warnings: unresolved,
                 message: 'This post has unresolved compliance warnings. Review them, then confirm you want to approve anyway.',
+            }),
+        };
+    }
+
+    // A format we cannot actually publish must never enter the queue. The picker deliberately shows
+    // every format the platform offers — including ones we haven't built and ones that can never be
+    // a scheduled post (a Space, a Live, a DM broadcast) — so this is the gate that stops an
+    // approved post from failing later. Legacy posts carry no format_key and are never blocked.
+    const formatBlock = formatBlockedReason((post as any).formatKey);
+    if (formatBlock) {
+        return {
+            statusCode: 422,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                error: formatBlock,
+                code: 'FORMAT_NOT_SCHEDULABLE',
+                formatKey: (post as any).formatKey,
             }),
         };
     }

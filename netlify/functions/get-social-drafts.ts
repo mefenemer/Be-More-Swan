@@ -64,6 +64,9 @@ export default withLambda(async (event) => {
                 // — and without it on the card the reviewer has no way to see that. It is the one
                 // post state that is invisible from the outside: status still reads 'scheduled'.
                 renderStatus: scheduledPosts.renderStatus,
+                // The chosen post format ('ig_reel', 'x_poll'…). Drives the editor's whole layout —
+                // aspect ratio, media kind, slide count, character cap. See src/config/post-formats.ts.
+                formatKey: scheduledPosts.formatKey,
                 assistantName: aiAssistants.name,
                 // When this draft was generated from a user-suggested idea, surface the original
                 // idea text on the card so the reviewer can see what it was built from (closes the

@@ -599,13 +599,49 @@ window.showComplianceModals = function showComplianceModals(force) {
       <!-- Stage: the post canvas on the left, one selection-driven inspector on the right. The
            inspector is the ONLY place edits live — what you select on the canvas decides what it
            shows. Stacks on narrow screens. -->
-      <div class="flex flex-col lg:flex-row gap-5 items-start">
+      <!-- Three panes. The split is by QUESTION, not by feature:
+             LEFT   — what is this post?      platform, format, and the rules that format imposes
+             MIDDLE — what does it look like? the canvas, and the video timeline
+             RIGHT  — what is selected?       layers, and the properties of the selected layer
+           Both sides collapse to a slim re-open tab so the canvas can have the width. They stack on
+           narrow screens, where collapsing is meaningless and the toggles are hidden. -->
+      <div class="flex flex-col lg:flex-row gap-4 items-start">
+
+        <!-- Slim re-open tab, shown only while the left pane is collapsed. -->
+        <button type="button" id="pce-left-reopen" onclick="_pceTogglePane('left')" title="Show post setup"
+          class="hidden lg:flex shrink-0 flex-col items-center gap-1 px-1.5 py-3 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 transition cursor-pointer">
+          <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+          <span class="text-[9px] font-bold uppercase tracking-wider text-gray-400" style="writing-mode:vertical-rl">Setup</span>
+        </button>
+
+        <!-- ── LEFT: what this post is ───────────────────────────────────────────────────────── -->
+        <aside id="pce-left" class="hidden w-full lg:w-64 shrink-0 rounded-xl border border-gray-200 bg-white overflow-hidden">
+          <div class="px-3 py-2 bg-gray-50 border-b border-gray-100 flex items-center justify-between gap-2">
+            <span class="text-xs font-bold text-gray-600">Post setup</span>
+            <button type="button" onclick="_pceTogglePane('left')" title="Hide"
+              class="hidden lg:block text-gray-300 hover:text-gray-600 transition cursor-pointer">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+            </button>
+          </div>
+          <div class="p-3 space-y-3">
+            <!-- Platform tab bar: one tab per platform this post is going out on. Shown only when
+                 the post spans 2+ platforms (grouped by assistant + publish slot). Switching a tab
+                 previews and edits that platform's copy; the footer's Approve/Reject act on every
+                 platform at once. -->
+            <div id="post-review-tabs" class="hidden"></div>
+            <!-- Format picker + the chosen format's rules. Built by _pceRenderFormats from
+                 src/config/post-formats.ts, mirrored into _PCE_FORMATS below. -->
+            <div>
+              <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Format</p>
+              <div id="pce-format-list" class="space-y-1"></div>
+            </div>
+            <div id="pce-format-rules" class="hidden rounded-lg bg-gray-50 border border-gray-100 px-2.5 py-2 space-y-1"></div>
+            <div id="pce-format-blocked" class="hidden rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800"></div>
+          </div>
+        </aside>
+
+        <!-- ── MIDDLE: the canvas ────────────────────────────────────────────────────────────── -->
         <div class="flex-1 min-w-0 w-full">
-          <!-- Platform tab bar: one tab per platform this post is going out on. Shown only when the
-               post spans 2+ platforms (grouped by assistant + publish slot). Switching a tab
-               previews and edits that platform's copy; the footer's Approve/Reject act on every
-               platform at once. -->
-          <div id="post-review-tabs" class="hidden mb-4"></div>
           <div id="post-review-body"></div>
           <!-- Video timeline: one track per text overlay (Phase 4). Shown only for a video post with
                a running editor; _rqRenderTimeline fills it. Drag a segment's ends to time the text. -->
@@ -616,6 +652,13 @@ window.showComplianceModals = function showComplianceModals(force) {
              the right button. Sections are all present in the DOM and shown one at a time, so an
              input keeps its value while you select something else. -->
         <aside id="post-review-inspector" class="hidden w-full lg:w-72 shrink-0 rounded-xl border border-gray-200 bg-white overflow-hidden">
+          <div class="px-3 py-2 bg-gray-50 border-b border-gray-100 flex items-center justify-between gap-2">
+            <span class="text-xs font-bold text-gray-600">Design</span>
+            <button type="button" onclick="_pceTogglePane('right')" title="Hide"
+              class="hidden lg:block text-gray-300 hover:text-gray-600 transition cursor-pointer">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+            </button>
+          </div>
           <!-- ── Layers ────────────────────────────────────────────────────────────────────────
                Every editable part of THIS post, listed. Selection already drove the whole editor —
                it was just invisible, so the only way to find a layer was to guess where to click on
@@ -795,6 +838,13 @@ window.showComplianceModals = function showComplianceModals(force) {
 
           </div>
         </aside>
+
+        <!-- Slim re-open tab, shown only while the right pane is collapsed. -->
+        <button type="button" id="pce-right-reopen" onclick="_pceTogglePane('right')" title="Show design panel"
+          class="hidden lg:flex shrink-0 flex-col items-center gap-1 px-1.5 py-3 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 transition cursor-pointer">
+          <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
+          <span class="text-[9px] font-bold uppercase tracking-wider text-gray-400" style="writing-mode:vertical-rl">Design</span>
+        </button>
       </div>
       <!-- Quality review (The Quality Reviewer, plan-gated). This panel existed ONLY in the
            calendar, so the Review Queue — where people actually approve — showed no warnings, no
@@ -5238,6 +5288,14 @@ function rqGoConnect(assistantId) {
 // Backstop for the server's 422 PLATFORM_NOT_CONNECTED (approve-post): offer to jump to Connections.
 // Returns true when the response was that error (i.e. it has been handled).
 function rqHandleNotConnected(status, d, assistantId) {
+    // The format gate shares this seam because every approve path already routes 422s through here,
+    // and a post in an unpublishable format must be refused exactly as loudly as a disconnected
+    // platform — both mean "approving this would queue something that cannot go out".
+    if (status === 422 && d?.code === 'FORMAT_NOT_SCHEDULABLE') {
+        const fmt = (typeof _pceFormat === 'function' && _pceFormat(d.formatKey)) || null;
+        alert(`${fmt ? `“${fmt.n}” can’t be scheduled yet.\n\n` : ''}${d.error || 'This post format isn’t supported yet.'}\n\nPick a different format in Post setup to approve this post.`);
+        return true;
+    }
     if (status !== 422 || d?.code !== 'PLATFORM_NOT_CONNECTED') return false;
     const label = rqPlatformLabel(d.platform);
     if (confirm(`${d.error || `Connect your ${label} account before this post can be scheduled or published.`}\n\nGo to Connections now?`)) {
@@ -5270,7 +5328,20 @@ function renderPlatformMockup(post) {
     // IS the whole frame.
     const overlayCapable = !!post.thumbnailUrl && !post.brandCard;
     const hasOverlays = overlayCapable && Array.isArray(post.overlays) && post.overlays.length > 0;
-    const mediaClass = hasOverlays ? 'w-full h-auto block' : 'w-full max-h-[400px] object-cover';
+    // Frame the canvas to the CHOSEN FORMAT's ratio — a Reel previews 9:16, a feed post 4:5 — so the
+    // mock-up shows the crop the platform will actually apply.
+    //
+    // Only when there are NO overlays. An overlay-bearing post must stay uncropped (see above): the
+    // overlay layer is inset-0 over the media host and its geometry is a FRACTION of that box, so
+    // cropping the media inside a fixed-ratio frame would move every text box away from where it was
+    // dragged — and away from where Remotion bakes it. The WYSIWYG contract outranks the preview
+    // fidelity, so with text on the media the true frame wins.
+    const _fmtRatio = { '9:16': 'aspect-[9/16]', '4:5': 'aspect-[4/5]', '1:1': 'aspect-square', '16:9': 'aspect-video', '1.91:1': 'aspect-[1.91/1]' };
+    const _fmt = (typeof _pceActiveFormat === 'function') ? _pceActiveFormat(post) : null;
+    const frameClass = (!hasOverlays && _fmt && _fmtRatio[_fmt.ar]) ? _fmtRatio[_fmt.ar] : '';
+    const mediaClass = hasOverlays
+        ? 'w-full h-auto block'
+        : (frameClass ? 'w-full h-full object-cover' : 'w-full max-h-[400px] object-cover');
     const mediaInner = post.thumbnailUrl
         ? (isVideo
             ? `<video data-media-video src="${post.thumbnailUrl}" muted controls playsinline class="${mediaClass} bg-black"></video>`
@@ -5282,7 +5353,9 @@ function renderPlatformMockup(post) {
     const overlayLayer = overlayCapable
         ? '<div class="absolute inset-0 overflow-hidden pointer-events-none" data-overlay-layer></div>'
         : '';
-    const media = `<div class="relative" data-media-host>${mediaInner}${overlayLayer}</div>`;
+    // The ratio lives on the HOST, not the media, so the overlay layer (inset-0 on this host) shares
+    // exactly the same box as the media it sits over — the whole basis of the overlay geometry.
+    const media = `<div class="relative ${frameClass} ${frameClass ? 'bg-black overflow-hidden' : ''}" data-media-host>${mediaInner}${overlayLayer}</div>`;
 
     const caption  = post.caption ? `<p class="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">${_rqEsc(post.caption)}</p>` : '';
     const hashtags = post.hashtags ? `<p class="text-sm text-blue-600 mt-1.5">${_rqEsc(post.hashtags)}</p>` : '';
@@ -6218,6 +6291,184 @@ function _pceSelect(key, repaintHandles = true) {
     _pceRenderLayers();
 }
 
+// ── Panes ───────────────────────────────────────────────────────────────────────────────────────
+// Left = what this post IS, right = what is SELECTED, canvas in the middle. Either side collapses to
+// a slim re-open tab so the canvas can have the width. The choice is remembered for the session
+// (not persisted — a preference this cheap to re-set is not worth a settings round trip).
+// Collapsing is desktop-only: below lg the panes stack, where "collapse" means nothing.
+const _pceCollapsed = { left: false, right: false };
+
+// `hidden` alone is not enough here — a display set inline elsewhere wins over the class, which is a
+// trap this modal has hit before. Set both, exactly as _pceSyncForPost does for the inspector.
+function _pceShowLeftPane(on) {
+    const el = document.getElementById('pce-left');
+    if (!el) return;
+    el.classList.toggle('hidden', !on);
+    el.style.display = on ? '' : 'none';
+    // A collapsed pane must not leave its re-open tab floating on a post that has no panes at all.
+    const tab = document.getElementById('pce-left-reopen');
+    if (tab && !on) tab.classList.add('lg:hidden');
+}
+
+function _pceApplyPanes() {
+    for (const side of ['left', 'right']) {
+        const pane = document.getElementById(side === 'left' ? 'pce-left' : 'post-review-inspector');
+        const tab = document.getElementById(`pce-${side}-reopen`);
+        if (!pane || !tab) continue;
+        const off = _pceCollapsed[side];
+        // The panes are shown/hidden by their own logic too (the inspector hides entirely for a
+        // non-editable post), so only touch the lg-and-up display here — never the `hidden` class,
+        // which those other rules own.
+        pane.classList.toggle('lg:hidden', off);
+        tab.classList.toggle('lg:flex', off);
+        tab.classList.toggle('lg:hidden', !off);
+    }
+}
+
+function _pceTogglePane(side) {
+    _pceCollapsed[side] = !_pceCollapsed[side];
+    _pceApplyPanes();
+    // The canvas just changed width, so overlay boxes sized against it must be repainted or the
+    // text sits where the OLD frame was — the same reason there is a window resize listener.
+    const p = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (p) _rqRenderCanvasOverlays(p);
+}
+
+// ── Post formats ────────────────────────────────────────────────────────────────────────────────
+// Mirrors src/config/post-formats.ts, which this static page cannot import. The SERVER is
+// authoritative — approve-post refuses an unschedulable format and save-post-format validates the
+// platform — so a drift here costs a wrong label, never a bad post reaching the queue.
+//
+// availability: 'live' publishes today · 'planned' is a real format we haven't built the publish
+// path for · 'blocked' can never be a scheduled post (real-time broadcast, DMs, or another
+// product's surface). Unavailable formats are deliberately SHOWN: seeing that Instagram has
+// Carousels and Stories, and why they're greyed, beats a picker that pretends they don't exist.
+const _PCE_FORMATS = [
+    { k: 'ig_feed', p: 'instagram', n: 'Feed post', d: 'A single image in the main feed.', m: 'image', ar: '4:5', max: 1, cl: 2200, a: 'live' },
+    { k: 'ig_reel', p: 'instagram', n: 'Reel', d: 'Full-screen vertical video.', m: 'video', ar: '9:16', max: 1, cl: 2200, a: 'live' },
+    { k: 'ig_carousel', p: 'instagram', n: 'Carousel', d: 'Up to 20 swipeable slides.', m: 'mixed', ar: '4:5', max: 20, cl: 2200, a: 'planned', why: 'Carousels need multi-image publishing, which we haven’t built yet.' },
+    { k: 'ig_story', p: 'instagram', n: 'Story', d: 'Vertical, gone in 24 hours.', m: 'mixed', ar: '9:16', max: 1, cl: 0, a: 'planned', why: 'Stories publish through a different Instagram endpoint we haven’t connected yet.' },
+    { k: 'ig_broadcast', p: 'instagram', n: 'Broadcast channel', d: 'One-to-many message into follower DMs.', m: 'none', ar: '', max: 1, cl: 2200, a: 'blocked', why: 'Broadcast channels are direct messaging, not feed posts — they can’t be scheduled as a post.' },
+    { k: 'ig_live', p: 'instagram', n: 'Live', d: 'Real-time video broadcast.', m: 'none', ar: '9:16', max: 0, cl: 0, a: 'blocked', why: 'Going live happens in the moment — there is nothing to draft or schedule here.' },
+
+    { k: 'fb_feed', p: 'facebook', n: 'Feed post', d: 'Text, a link, an image or a video.', m: 'image', ar: '1:1', max: 1, cl: 63206, a: 'live' },
+    { k: 'fb_reel', p: 'facebook', n: 'Reel', d: 'Vertical short-form video.', m: 'video', ar: '9:16', max: 1, cl: 63206, a: 'planned', why: 'Facebook Reels use a separate video endpoint we haven’t connected yet.' },
+    { k: 'fb_story', p: 'facebook', n: 'Story', d: 'Vertical, gone in 24 hours.', m: 'mixed', ar: '9:16', max: 1, cl: 0, a: 'planned', why: 'Stories publish through a different Facebook endpoint we haven’t connected yet.' },
+    { k: 'fb_group', p: 'facebook', n: 'Group post', d: 'Posted into a community group feed.', m: 'image', ar: '1:1', max: 1, cl: 63206, a: 'planned', why: 'Posting to a group needs group selection and permissions the Facebook connection doesn’t request yet.' },
+    { k: 'fb_live', p: 'facebook', n: 'Live', d: 'Real-time video broadcast.', m: 'none', ar: '', max: 0, cl: 0, a: 'blocked', why: 'Going live happens in the moment — there is nothing to draft or schedule here.' },
+
+    { k: 'th_text', p: 'threads', n: 'Text post', d: 'Short conversational update.', m: 'image', ar: '1:1', max: 1, cl: 500, a: 'live' },
+    { k: 'th_carousel', p: 'threads', n: 'Carousel', d: 'Up to 20 swipeable items.', m: 'mixed', ar: '1:1', max: 20, cl: 500, a: 'planned', why: 'Carousels need multi-image publishing, which we haven’t built yet.' },
+    { k: 'th_voice', p: 'threads', n: 'Voice note', d: 'A playable audio recording.', m: 'audio', ar: '', max: 1, cl: 500, a: 'planned', why: 'We have no audio upload path yet — the content library handles images and video only.' },
+    { k: 'th_poll', p: 'threads', n: 'Poll', d: 'Interactive vote, up to four options.', m: 'none', ar: '', max: 0, cl: 500, a: 'planned', why: 'Polls need their own options editor and a different API call — not built yet.' },
+
+    { k: 'li_feed', p: 'linkedin', n: 'Feed post', d: 'Text, an image, or an outbound link.', m: 'image', ar: '1:1', max: 1, cl: 3000, a: 'live' },
+    { k: 'li_video', p: 'linkedin', n: 'Native video', d: 'Video straight to the feed.', m: 'video', ar: '16:9', max: 1, cl: 3000, a: 'live' },
+    { k: 'li_document', p: 'linkedin', n: 'Document carousel', d: 'A PDF that reads as swipeable slides.', m: 'document', ar: '', max: 1, cl: 3000, a: 'planned', why: 'Needs PDF upload and LinkedIn’s document endpoint; the library doesn’t accept documents yet.' },
+    { k: 'li_article', p: 'linkedin', n: 'Article / newsletter', d: 'Long-form writing with subscribers.', m: 'none', ar: '', max: 1, cl: 110000, a: 'blocked', why: 'Long-form belongs to the Blog Writer — draft it there and publish to LinkedIn from its destinations.' },
+    { k: 'li_audio', p: 'linkedin', n: 'Audio event / Live', d: 'Drop-in audio room or live stream.', m: 'none', ar: '', max: 0, cl: 0, a: 'blocked', why: 'A live event is not a post — it can’t be drafted and queued like one.' },
+
+    { k: 'x_text', p: 'x', n: 'Post', d: 'Short-form text, and thread starters.', m: 'image', ar: '16:9', max: 1, cl: 280, a: 'live' },
+    { k: 'x_video', p: 'x', n: 'Native video', d: 'Video straight into the feed.', m: 'video', ar: '16:9', max: 1, cl: 280, a: 'live' },
+    { k: 'x_images', p: 'x', n: 'Image grid', d: 'Up to four images in one grid.', m: 'image', ar: '16:9', max: 4, cl: 280, a: 'planned', why: 'The grid needs multi-image publishing, which we haven’t built yet.' },
+    { k: 'x_poll', p: 'x', n: 'Poll', d: 'Interactive vote, up to four options.', m: 'none', ar: '', max: 0, cl: 280, a: 'planned', why: 'Polls need their own options editor and a different API call — not built yet.' },
+    { k: 'x_space', p: 'x', n: 'Space', d: 'Live drop-in audio broadcast.', m: 'none', ar: '', max: 0, cl: 0, a: 'blocked', why: 'A Space is a live event, not a post — there is nothing to draft or queue.' },
+
+    { k: 'yt_vod', p: 'youtube', n: 'Video', d: 'Horizontal video, found through search.', m: 'video', ar: '16:9', max: 1, cl: 5000, a: 'live' },
+    { k: 'yt_short', p: 'youtube', n: 'Short', d: 'Vertical video under 60 seconds.', m: 'video', ar: '9:16', max: 1, cl: 5000, a: 'live' },
+    { k: 'yt_community', p: 'youtube', n: 'Community post', d: 'Text, image or poll for subscribers.', m: 'image', ar: '1:1', max: 1, cl: 5000, a: 'planned', why: 'The Community tab is a separate YouTube API surface we haven’t connected yet.' },
+    { k: 'yt_live', p: 'youtube', n: 'Live', d: 'Real-time stream.', m: 'none', ar: '', max: 0, cl: 0, a: 'blocked', why: 'Streaming happens in the moment — there is nothing to draft or schedule here.' },
+];
+
+const _pceFormat = (key) => _PCE_FORMATS.find(f => f.k === key) || null;
+const _pceFormatsFor = (platform) => _PCE_FORMATS.filter(f => f.p === (platform === 'twitter' ? 'x' : platform));
+
+// The format a post is being written for: its saved formatKey, else the platform's first live one.
+function _pceActiveFormat(post) {
+    if (!post) return null;
+    return _pceFormat(post.formatKey) || _pceFormatsFor(post.platform).find(f => f.a === 'live') || null;
+}
+
+const _PCE_MEDIA_WORD = { image: 'Image', video: 'Video', mixed: 'Images or video', audio: 'Audio', document: 'PDF', none: 'No media' };
+
+function _pceRenderFormats() {
+    const host = document.getElementById('pce-format-list');
+    if (!host) return;
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (!post) { host.innerHTML = ''; return; }
+    const formats = _pceFormatsFor(post.platform);
+    const active = _pceActiveFormat(post);
+    host.innerHTML = formats.map(f => {
+        const on = active && f.k === active.k;
+        const usable = f.a === 'live';
+        // Unavailable formats stay CLICKABLE — you can plan a carousel before we can publish one,
+        // and the editor lays itself out for it. Approval is what refuses (approve-post's
+        // FORMAT_NOT_SCHEDULABLE), so choosing one can never produce a post that fails later.
+        const tone = on ? 'bg-emerald-50 border-emerald-300'
+            : usable ? 'border-gray-200 hover:bg-gray-50' : 'border-gray-100 bg-gray-50/60 hover:bg-gray-100';
+        const badge = usable ? ''
+            : `<span class="shrink-0 text-[9px] font-bold px-1 py-0.5 rounded ${f.a === 'planned' ? 'bg-amber-100 text-amber-700' : 'bg-gray-200 text-gray-500'}">${f.a === 'planned' ? 'SOON' : 'N/A'}</span>`;
+        return `<button type="button" onclick="_pceChooseFormat('${f.k}')"
+          class="w-full text-left px-2 py-1.5 rounded-lg border transition cursor-pointer ${tone}">
+          <span class="flex items-center gap-1.5">
+            <span class="flex-1 min-w-0 text-xs font-bold truncate ${on ? 'text-emerald-800' : usable ? 'text-gray-700' : 'text-gray-500'}">${_rqEsc(f.n)}</span>
+            ${badge}
+          </span>
+          <span class="block text-[10px] truncate ${on ? 'text-emerald-600' : 'text-gray-400'}">${_rqEsc(f.d)}</span>
+        </button>`;
+    }).join('');
+    _pceRenderFormatRules(post, active);
+}
+
+// The chosen format's actual constraints, and — when it can't publish — why not.
+function _pceRenderFormatRules(post, fmt) {
+    const rules = document.getElementById('pce-format-rules');
+    const blocked = document.getElementById('pce-format-blocked');
+    if (!rules || !blocked) return;
+    if (!fmt) { rules.classList.add('hidden'); blocked.classList.add('hidden'); return; }
+
+    const rows = [
+        ['Media', _PCE_MEDIA_WORD[fmt.m] || '—'],
+        ...(fmt.ar ? [['Best ratio', fmt.ar]] : []),
+        ...(fmt.max > 1 ? [['Slides', `up to ${fmt.max}`]] : []),
+        ...(fmt.cl ? [['Caption', `${fmt.cl.toLocaleString()} chars`]] : []),
+    ];
+    rules.innerHTML = rows.map(([k, v]) =>
+        `<div class="flex items-baseline justify-between gap-2">
+           <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">${_rqEsc(k)}</span>
+           <span class="text-[11px] font-semibold text-gray-700 text-right">${_rqEsc(v)}</span>
+         </div>`).join('');
+    rules.classList.remove('hidden');
+
+    if (fmt.a === 'live') { blocked.classList.add('hidden'); blocked.innerHTML = ''; return; }
+    blocked.innerHTML = `<p class="font-bold mb-0.5">${fmt.a === 'planned' ? 'Not available yet' : 'Can’t be scheduled'}</p>
+      <p>${_rqEsc(fmt.why || '')}</p>
+      <p class="mt-1 text-amber-700/80">You can design it now, but approving is blocked until it’s supported.</p>`;
+    blocked.classList.remove('hidden');
+}
+
+async function _pceChooseFormat(key) {
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    if (!post) return;
+    const prev = post.formatKey ?? null;
+    post.formatKey = key;                 // optimistic: the picker must feel instant
+    _pceRenderFormats();
+    _rqReviewRenderActive();              // the canvas re-frames to the format's aspect ratio
+    try {
+        const res = await fetch('/.netlify/functions/save-post-format', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId, formatKey: key }),
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Could not save the format.');
+    } catch (err) {
+        post.formatKey = prev;            // put the picker back where it was rather than lie
+        _pceRenderFormats();
+        _rqReviewRenderActive();
+        if (window.showToast) window.showToast(err.message || 'Could not save the format.');
+    }
+}
+
 // ── The Layers list ─────────────────────────────────────────────────────────────────────────────
 // One row per editable part of the post on screen, built from _pceLayers — the same array
 // _pceSelect gates on, so the list cannot claim a layer that selection would refuse.
@@ -6790,10 +7041,15 @@ function _pceSyncForPost(post) {
         // The other two exits repaint the list via _pceSelect; this one has no selection to make,
         // so clear it here or a re-shown inspector would list the PREVIOUS post's layers.
         _pceRenderLayers();
+        _pceShowLeftPane(false);
         return;
     }
     wrap.classList.remove('hidden');
     wrap.style.display = '';
+    // Left pane tracks the inspector: both are for editing, and a read-only post gets neither.
+    _pceShowLeftPane(true);
+    _pceRenderFormats();
+    _pceApplyPanes();
     _pceSetStageWide(true);
 
     const card = post.brandCard;
