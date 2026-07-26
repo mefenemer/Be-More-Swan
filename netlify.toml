@@ -269,6 +269,19 @@ node_bundler = "esbuild"
 [functions.generate-ai-image]
   timeout = 26
 
+# Assistant chat. One turn is: resolve the tenant, read the assistant + org + history, persist
+# the user's message, call Claude, then persist the reply and any Data Hub records — and on the
+# FIRST turn of a conversation it also creates the session and often wakes a suspended Neon
+# compute (see the autosuspend note above). That does not reliably fit in Netlify's default 10s,
+# and being killed mid-call produces a raw 502 with no JSON body — which the chat UI could only
+# report as "Something went wrong", since the orchestrator's own failure path never ran.
+#
+# Reported from "Talk it through in chat" in the post editor, which is the worst case by
+# construction: it opens a brand-new session and sends a "write me a post" prompt immediately,
+# so the whole cold path is inside one budget. Same remedy as generate-ai-image above.
+[functions.chat-orchestrator]
+  timeout = 26
+
 # US-SMM-3.2.2: Nightly Meta/Instagram token refresh — 02:00 UTC every day
 [functions.refresh-meta-tokens]
   schedule = "0 2 * * *"
