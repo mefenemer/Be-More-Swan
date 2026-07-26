@@ -381,18 +381,45 @@ function configuredPlatforms(onboardingContext: unknown): string[] {
 
 type SocialPostDraft = { platforms: string[]; caption: string; hashtags: string | null };
 
-function socialPostDraftFromUiElement(uiElement: unknown): SocialPostDraft | null {
+/**
+ * `forcePlatform` — the platform of the post the user is EDITING (see draftTarget). When set, the
+ * model's own platforms array is ignored in favour of the one fact we know authoritatively: which
+ * platform that row is for. It also side-steps SOCIAL_PLATFORMS above being narrower than the
+ * platform catalogue (no threads/youtube), which would otherwise reject a perfectly good caption
+ * for a Threads post and leave the user with prose and no offer.
+ */
+function socialPostDraftFromUiElement(uiElement: unknown, forcePlatform: string | null = null): SocialPostDraft | null {
     if (!uiElement || typeof uiElement !== 'object') return null;
     const ui = uiElement as Record<string, unknown>;
     if (ui.type !== 'social_post_draft') return null;
     const caption = typeof ui.caption === 'string' ? ui.caption.trim() : '';
     if (!caption) return null;
-    const platforms = Array.isArray(ui.platforms)
+    const platforms = forcePlatform ? [forcePlatform] : (Array.isArray(ui.platforms)
         ? [...new Set(ui.platforms.filter((p): p is string => typeof p === 'string' && SOCIAL_PLATFORMS.includes(p)))]
-        : [];
+        : []);
     if (platforms.length === 0) return null;
     const hashtags = typeof ui.hashtags === 'string' && ui.hashtags.trim() ? ui.hashtags.trim() : null;
     return { platforms, caption, hashtags };
+}
+
+// ── Drafting INTO a post the user already has open ────────────────────────────
+// "Talk it through in chat" from the post editor used to be a dead end in both directions: the
+// assistant's caption could only be copied out by hand, while the orchestrator quietly saved it as
+// one NEW pending_approval post per configured platform — so asking for help with the post in front
+// of you forked it into others and left the original untouched.
+//
+// With a target, nothing is persisted and nothing is promised. The caption comes back in the
+// uiElement, the client offers a button that writes it into that post, and pressing it is the
+// user's decision.
+const EDITABLE_POST_STATUSES = ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled'];
+
+/** Appended AFTER the role prompt, so it overrides the "saved for real" paragraph in it. */
+function draftTargetPromptBlock(platform: string | null): string {
+    return [
+        `IMPORTANT — this conversation is about a ${platform ? `${platform} post` : 'post'} the user already has open in the post editor. This OVERRIDES anything above about drafted posts being saved automatically.`,
+        `Nothing you draft in this conversation is saved anywhere. Under your reply the user is shown a button that puts your caption into the post they are editing, and only they can press it.`,
+        `So: still return the post draft object exactly as specified whenever you have enough to write finished copy${platform ? `, with "platforms": ["${platform}"] — that is this post's platform, so never draft for another one` : ''}. But do NOT say you have saved, drafted or scheduled it, do NOT suggest a posting time, and do NOT mention a link to review or approve it — none of that happens here. Keep "reply" to one short sentence offering the caption.`,
+    ].join('\n\n');
 }
 
 /**
@@ -943,6 +970,11 @@ export default withLambda(async (event) => {
         /** Data Hub rows to work on this turn — injected as context, exempt from the
          *  message char cap (this is how "process my uploaded lead list" fits). */
         recordIds?: number[];
+        /** The post the user is editing, when this conversation was opened FROM the post
+         *  editor ("Talk it through in chat"). Changes what a drafted post means: the
+         *  caption is offered to that post instead of being saved as a new one. See
+         *  draftTarget below. */
+        forPostId?: number;
     };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
@@ -1009,8 +1041,10 @@ export default withLambda(async (event) => {
         session = created;
     }
 
-    // ── Retrieve state: assistant instance + roleKey + org business identity + prior turns ──
-    const [[assistantRow], [orgRow]] = await Promise.all([
+    // ── Retrieve state: assistant instance + roleKey + org business identity + the post being
+    //    edited (when there is one) + prior turns ──
+    const forPostId = Number(body.forPostId);
+    const [[assistantRow], [orgRow], [targetRow]] = await Promise.all([
         db
             .select({
                 id: aiAssistants.id,
@@ -1029,8 +1063,25 @@ export default withLambda(async (event) => {
             .from(organisations)
             .where(eq(organisations.id, orgId))
             .limit(1),
+        // Tenant-scoped by the same where clause as everything else here: a post id from the client
+        // can only ever resolve to this org's own row.
+        Number.isInteger(forPostId)
+            ? db
+                .select({ id: scheduledPosts.id, status: scheduledPosts.status, platform: scheduledPosts.platform })
+                .from(scheduledPosts)
+                .where(and(eq(scheduledPosts.id, forPostId), eq(scheduledPosts.organisationId, orgId)))
+                .limit(1)
+            : Promise.resolve([]),
     ]);
     if (!assistantRow) return json(404, { error: 'Assistant not found in this organisation.' });
+
+    // A target that isn't ours, or has gone past editing (approved and published while the chat was
+    // open), degrades to ordinary behaviour rather than failing the turn: the conversation stays
+    // usable, the draft is saved as a new post, and its review link says where it went. Failing here
+    // would kill the conversation over a post the user may have stopped caring about.
+    const draftTarget = targetRow && EDITABLE_POST_STATUSES.includes(targetRow.status ?? '')
+        ? { id: targetRow.id, platform: targetRow.platform ?? null }
+        : null;
 
     // Every route's prompt is grounded in this — the business the assistant actually works
     // for, not the Be More Swan platform that runs it (issue #199).
@@ -1061,15 +1112,18 @@ export default withLambda(async (event) => {
         ? await retrieveKnowledgeBase(db, orgId, session.aiAssistantId, message)
         : null;
 
+    const rolePrompt = route.buildRolePrompt({
+        assistantName: assistantRow.name,
+        jobRole: assistantRow.jobRole,
+        baseSystemPrompt: assistantRow.systemPrompt,
+        onboardingContext: assistantRow.onboardingContext,
+        business,
+        knowledgeBase,
+    });
     const system = buildSystemPrompt(
-        route.buildRolePrompt({
-            assistantName: assistantRow.name,
-            jobRole: assistantRow.jobRole,
-            baseSystemPrompt: assistantRow.systemPrompt,
-            onboardingContext: assistantRow.onboardingContext,
-            business,
-            knowledgeBase,
-        }),
+        // Appended last so it wins: the SMM role prompt states that every draft is saved and linked,
+        // which is exactly what must NOT happen when the user is editing a post already.
+        draftTarget ? `${rolePrompt}\n\n${draftTargetPromptBlock(draftTarget.platform)}` : rolePrompt,
         assistantRow.onboardingContext,
     );
 
@@ -1235,8 +1289,13 @@ export default withLambda(async (event) => {
         // Social post drafts land in scheduled_posts, not assistant_records, so they get
         // their own persistence path — but the same "tell the transcript where it went"
         // treatment, pointing straight at the drafted post rather than just the tab.
-        const socialDraft = socialPostDraftFromUiElement(uiElement);
-        if (socialDraft) {
+        const socialDraft = socialPostDraftFromUiElement(uiElement, draftTarget?.platform ?? null);
+        if (socialDraft && draftTarget) {
+            // Drafting INTO an open post: persist nothing and link nowhere. The id rides on the
+            // uiElement so the card knows which post the offer belongs to — and still knows after
+            // the transcript is reloaded from uiElementJson, when the client's own target is gone.
+            (uiElement as Record<string, unknown>).forPostId = draftTarget.id;
+        } else if (socialDraft) {
             const createdPosts = await persistSocialPostDraft(
                 db, orgId, userId, session.aiAssistantId, assistantRow.name, assistantRow.onboardingContext, socialDraft,
             );

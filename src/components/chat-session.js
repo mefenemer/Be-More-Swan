@@ -278,6 +278,14 @@
           ? { chatSessionId, message }
           : { aiAssistantId: assistantId, message };
         if (opts && opts.approvedHandoff) body.approvedHandoff = opts.approvedHandoff;
+        // The post the user has open in the editor, when this chat was opened from there
+        // (window.ChatDraftTarget, set by whoever opened it). Sent on EVERY turn, not just the
+        // first: "make it punchier" is still about that post, and the orchestrator needs to know
+        // on each turn that a drafted caption must be offered rather than saved as a new post.
+        const draftTarget = window.ChatDraftTarget;
+        if (draftTarget && Number.isInteger(Number(draftTarget.postId))) {
+          body.forPostId = Number(draftTarget.postId);
+        }
 
         const res = await fetch(ORCHESTRATOR_URL, {
           method: 'POST',

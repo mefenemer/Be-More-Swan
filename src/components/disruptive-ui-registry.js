@@ -981,6 +981,108 @@
   // Alias for callers/routes that use the PascalCase component name as the type key.
   register('SocialPublishCard', renderSocialPublishCard);
 
+  // ── Built-in: Social Post Draft Card ────────────────────────────────────────
+  // Renderer for the social_media_manager route's wire shape (chat-orchestrator.ts):
+  // { type: 'social_post_draft', platforms: [...], caption, hashtags, forPostId? }
+  //
+  // Two situations, one card:
+  //
+  //   No forPostId — the orchestrator already saved this as a new post, and appendMessage's
+  //   hubLink renders "review & approve" underneath. The card just shows the copy, so the
+  //   caption is legible instead of buried in prose.
+  //
+  //   forPostId — the chat was opened FROM the post editor about a post the user is editing, and
+  //   NOTHING was saved. The card is where the offer is made: press the button and the caption is
+  //   written into that post. It is a button and not a "yes" typed into the chat because the
+  //   caption is already a structured field here — reading intent back out of prose would be the
+  //   one step in this flow that could get it wrong.
+  //
+  // The target itself (which post, and how to write to it) belongs to whoever opened the chat, not
+  // to this registry: window.ChatDraftTarget = { postId, apply({caption, hashtags}), done() }.
+  function socialPlatformLabel(p) {
+    const key = String(p || '').trim().toLowerCase();
+    return SOCIAL_SCHEDULED_PLATFORMS[key] || (key ? key.charAt(0).toUpperCase() + key.slice(1) : '');
+  }
+
+  function renderSocialPostDraftCard(ui, esc) {
+    const caption = typeof ui.caption === 'string' ? ui.caption.trim() : '';
+    if (!caption) return null;                     // nothing drafted — fall back to text-only
+    const hashtags = typeof ui.hashtags === 'string' ? ui.hashtags.trim() : '';
+    const labels = (Array.isArray(ui.platforms) ? ui.platforms : []).map(socialPlatformLabel).filter(Boolean);
+
+    // The offer stands only while the editor that opened this chat is still pointed at this post.
+    // A reloaded transcript has the forPostId but no live target, so it shows the copy alone.
+    const target = window.ChatDraftTarget;
+    const canApply = !!(target && typeof target.apply === 'function'
+      && (ui.forPostId == null || Number(ui.forPostId) === Number(target.postId)));
+
+    const el = document.createElement('div');
+    el.className = 'bg-white border border-gray-200 rounded-xl shadow-sm p-4 max-w-md space-y-2';
+    el.innerHTML = `
+      <div class="flex items-center justify-between gap-3">
+        <p class="text-[11px] font-bold text-emerald-700 tracking-wider uppercase">Suggested caption</p>
+        ${labels.length ? `<span class="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-gray-50 text-gray-600 border-gray-200 shrink-0">${esc(labels.join(' · '))}</span>` : ''}
+      </div>
+      <p class="text-sm text-gray-800 whitespace-pre-line">${esc(caption)}</p>
+      ${hashtags ? `<p class="text-xs font-semibold text-emerald-700">${esc(hashtags)}</p>` : ''}
+      ${canApply ? `
+      <div class="pt-2.5 mt-1 border-t border-gray-100 space-y-2" data-offer>
+        <p class="text-xs text-gray-500" data-offer-status>Want me to put this in the post you're editing?</p>
+        <div class="flex items-center gap-2">
+          <button type="button" data-apply-draft
+            class="px-3 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">
+            Yes, add it to my draft
+          </button>
+          <button type="button" data-dismiss-draft
+            class="px-3 py-2 border border-gray-300 text-gray-600 hover:bg-gray-50 text-xs font-bold rounded-lg transition">
+            No thanks
+          </button>
+        </div>
+      </div>` : ''}
+    `;
+
+    if (!canApply) return el;
+
+    const offer = el.querySelector('[data-offer]');
+    const status = el.querySelector('[data-offer-status]');
+    el.addEventListener('click', async (e) => {
+      if (e.target.closest('[data-dismiss-draft]')) {
+        // The copy stays on screen — only the question goes away. Asking again would make "no"
+        // feel unheard, and the user can still ask for another version in the conversation.
+        offer.remove();
+        return;
+      }
+      const button = e.target.closest('[data-apply-draft]');
+      if (!button || button.disabled) return;
+
+      button.disabled = true;
+      button.textContent = 'Adding…';
+      status.className = 'text-xs text-gray-500';
+      try {
+        await window.ChatDraftTarget.apply({ caption, hashtags: hashtags || null });
+        offer.innerHTML = `
+          <p class="text-xs font-bold text-emerald-700">✓ Added to your draft</p>
+          <button type="button" data-back-to-draft
+            class="mt-2 px-3 py-2 border border-emerald-300 text-emerald-700 hover:bg-emerald-50 text-xs font-bold rounded-lg transition">
+            Back to the post
+          </button>`;
+        offer.querySelector('[data-back-to-draft]').addEventListener('click', () => {
+          try { window.ChatDraftTarget?.done?.(); } catch { /* the chat is already closing */ }
+        });
+      } catch (err) {
+        button.disabled = false;
+        button.textContent = 'Try again';
+        status.textContent = (err && err.message) || 'Could not add that to your draft.';
+        status.className = 'text-xs font-semibold text-red-600';
+      }
+    });
+
+    return el;
+  }
+
+  register('social_post_draft', renderSocialPostDraftCard);
+  register('SocialPostDraftCard', renderSocialPostDraftCard);
+
   // ── Built-in: Upgrade Required Card (paywall) ───────────────────────────────
   // Renderer for the orchestrator's 403 over-limit wire shape (chat-orchestrator.ts):
   // { type: 'upgrade_required', reason }

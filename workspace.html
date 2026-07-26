@@ -8792,6 +8792,11 @@ window.openAssistantChatModal = function(assistantId, assistantName, assistantRo
     const root = document.getElementById('chat-modal-root');
     if (!modal || !root || !window.ChatSession) return;
 
+    // Every chat starts with NO draft target; the post editor sets one immediately after opening
+    // (askSwanAboutDraft). Cleared here as well as on close so a target can never survive into an
+    // unrelated conversation and offer to write someone else's caption into an old post.
+    window.ChatDraftTarget = null;
+
     document.getElementById('chat-modal-title').textContent = assistantName || 'Your assistant';
     document.getElementById('chat-modal-role').textContent = assistantRole || 'Digital Assistant';
 
@@ -8812,6 +8817,7 @@ window.closeAssistantChatModal = function() {
     const modal = document.getElementById('chat-modal');
     if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
     if (_chatModalSession) { _chatModalSession.destroy(); _chatModalSession = null; }
+    window.ChatDraftTarget = null;
 };
 
 // ── Add / change media from the review modal ────────────────────────────────────────────────────
@@ -10488,8 +10494,7 @@ async function _gpwApplyScheduleAction(action, rescheduleAt) {
 // ── Ask Swan to improve ─────────────────────────────────────────────────────────────────────────
 // Hand the current write-your-own draft to the assistant in the in-SPA chat modal, asking it to
 // suggest improvements. The chat modal (openAssistantChatModal) exposes the mounted ChatSession via
-// _chatModalSession, so once it's open we seed the conversation with the draft. The composer stays
-// open underneath — the user copies the assistant's suggestions back into their post.
+// _chatModalSession, so once it's open we seed the conversation with the draft.
 /**
  * Open the assistant in chat about the draft in front of you.
  *
@@ -10500,13 +10505,21 @@ async function _gpwApplyScheduleAction(action, rescheduleAt) {
  * With no caption yet, it asks the assistant to WRITE one; with a caption, to improve it. That
  * distinction is the whole point of the button on an empty box: "ask Swan to improve" a blank post
  * is a question with no answer.
+ *
+ * `draftTarget` — pass one when the chat is about a post that already EXISTS, and the assistant's
+ * caption should be offerable straight into it. It becomes window.ChatDraftTarget, which the chat
+ * sends on every turn (so the orchestrator offers the caption instead of saving a new post) and
+ * which the Suggested-caption card calls when the user accepts. Without it, chat behaves as before:
+ * a drafted post is saved as a new one and linked to.
  */
-async function askSwanAboutDraft({ assistantId, caption, hashtags, platforms, onError }) {
+async function askSwanAboutDraft({ assistantId, caption, hashtags, platforms, onError, draftTarget }) {
     if (!assistantId) { onError?.('Pick an assistant first.'); return; }
     if (typeof window.openAssistantChatModal !== 'function') return;
 
     const meta = await gpResolveAssistantMeta(assistantId);
     window.openAssistantChatModal(assistantId, meta.name, meta.role, meta.roleKey);
+    // AFTER opening: openAssistantChatModal clears any previous target by design.
+    if (draftTarget) window.ChatDraftTarget = draftTarget;
 
     const label = p => window.PlatformConstants.label(p);
     const platformLine = platforms?.length ? `for ${platforms.map(label).join(', ')} ` : '';
@@ -10549,7 +10562,40 @@ async function _pceAskSwanCaption() {
             const el = _pceEl('post-review-amend-msg');
             if (el) { el.textContent = m; el.className = 'text-xs font-semibold text-red-600'; }
         },
+        // The whole point of opening chat from the editor: whatever the assistant writes can go
+        // straight into THIS post, on the user's say-so, instead of being copied out by hand.
+        draftTarget: {
+            postId: post.id,
+            apply: _pceApplyChatCaption,
+            done: () => window.closeAssistantChatModal?.(),
+        },
     });
+}
+
+/**
+ * Write a caption the assistant offered in chat into the post being edited.
+ *
+ * Goes through the inspector's own fields and rqReviewSaveAmend rather than PATCHing directly, so
+ * this is the same single write path as typing the caption yourself — including "apply to all
+ * platforms" on a cross-post, the cache update and the re-render. Throws on failure so the card can
+ * say so and offer a retry.
+ */
+async function _pceApplyChatCaption({ caption, hashtags }) {
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (!post) throw new Error('That post is no longer open.');
+    const box = _pceEl('post-review-caption');
+    const tags = _pceEl('post-review-hashtags');
+    if (!box) throw new Error('The caption field isn’t available.');
+    box.value = caption;
+    // Only overwrite hashtags when the assistant actually supplied some — a caption-only suggestion
+    // must not silently wipe the ones already on the post.
+    if (tags && hashtags) tags.value = hashtags;
+    await rqReviewSaveAmend();
+    // rqReviewSaveAmend reports its own failures in the panel rather than throwing, so confirm the
+    // write landed by asking the cache — the card must never claim success for a save that didn't.
+    if ((_rqPostCache[_rqReviewPostId]?.caption || '') !== caption) {
+        throw new Error('Could not save that to your draft — please try again.');
+    }
 }
 
 // Resolve an assistant's display name / role / roleKey for opening the chat modal. Cached per id so

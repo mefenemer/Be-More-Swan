@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-chat-draft",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4215",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/374988f3-d967-4bfe-a0b4-ed2a53b98f63/scratchpad/harness4"
+      ],
+      "port": 4215,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-review-modal",
       "runtimeExecutable": "python3",
       "runtimeArgs": [
