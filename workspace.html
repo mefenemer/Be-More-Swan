@@ -7345,9 +7345,13 @@ function _pceRenderFormats() {
     // its badge, so an unpublishable choice made earlier is still visible and still explained.
     const formats = all.filter(f => f.a === 'live' || (active && f.k === active.k));
     const hiddenCount = all.length - formats.length;
+    // Rows say whether they fit what is already attached, so choosing a format is not a guess
+    // followed by a refusal at approval.
+    const kind = _pceMediaKindOf(post);
     host.innerHTML = formats.map(f => {
         const on = active && f.k === active.k;
         const usable = f.a === 'live';
+        const fits = _pceFormatAccepts(f, kind);
         // A not-yet-publishable format is only ever on screen as the post's CURRENT one, and it stays
         // clickable so you can move off it. Approval is what refuses (approve-post's
         // FORMAT_NOT_SCHEDULABLE), so choosing one can never produce a post that fails later.
@@ -7355,13 +7359,19 @@ function _pceRenderFormats() {
             : usable ? 'border-gray-200 hover:bg-gray-50' : 'border-gray-100 bg-gray-50/60 hover:bg-gray-100';
         const badge = usable ? ''
             : `<span class="shrink-0 text-[9px] font-bold px-1 py-0.5 rounded ${f.a === 'planned' ? 'bg-amber-100 text-amber-700' : 'bg-gray-200 text-gray-500'}">${f.a === 'planned' ? 'SOON' : 'N/A'}</span>`;
+        // Still clickable when it doesn't fit — you may be about to change the media — but it says so
+        // in place of its description, which is the line you would otherwise read as encouragement.
+        const misfit = !fits
+            ? `<span class="shrink-0 text-[9px] font-bold px-1 py-0.5 rounded bg-red-100 text-red-700">NEEDS ${kind === 'video' ? 'AN IMAGE' : 'A VIDEO'}</span>`
+            : '';
         return `<button type="button" onclick="_pceChooseFormat('${f.k}')"
           class="w-full text-left px-2 py-1.5 rounded-lg border transition cursor-pointer ${tone}">
           <span class="flex items-center gap-1.5">
             <span class="flex-1 min-w-0 text-xs font-bold truncate ${on ? 'text-emerald-800' : usable ? 'text-gray-700' : 'text-gray-500'}">${_rqEsc(f.n)}</span>
-            ${badge}
+            ${misfit}${badge}
           </span>
-          <span class="block text-[10px] truncate ${on ? 'text-emerald-600' : 'text-gray-400'}">${_rqEsc(f.d)}</span>
+          <span class="block text-[10px] truncate ${on ? 'text-emerald-600' : 'text-gray-400'}">${
+            fits ? _rqEsc(f.d) : `Your ${kind === 'video' ? 'video' : 'image'} can't go out in this format`}</span>
         </button>`;
     }).join('')
     // One quiet line rather than a row each. Saying nothing at all would imply this platform simply
@@ -7371,6 +7381,72 @@ function _pceRenderFormats() {
 }
 
 // The chosen format's actual constraints, and — when it can't publish — why not.
+// ── Format ↔ media agreement ────────────────────────────────────────────────────────────────────
+// The format says what the post IS (a Feed post takes one image; a Reel takes one video) and the
+// media panel says what is ON it, and the two used to be strangers: you could attach a video to a
+// Feed post and nothing said a word until approval refused it, by which point the picker and the
+// panel were in different panes and neither admitted to the problem.
+//
+// One set of rules, read by three places — the picker's rows, the rules table, and the moment media
+// is attached. Nothing here ever deletes media or blocks an edit: it moves the format to fit what
+// you chose, or says plainly why it can't.
+
+/** What is actually attached: 'video', 'image', or null when the post has no media yet. */
+function _pceMediaKindOf(post) {
+    if (!post) return null;
+    const slides = _pceSlides(post);
+    if (slides.length) return slides.some(s => s.kind === 'video') ? 'video' : 'image';
+    if (!post.thumbnailUrl) return null;
+    return post.mediaType === 'video' ? 'video' : 'image';
+}
+
+/** Can this format carry that kind of media? 'mixed' takes either; 'none' takes neither. */
+function _pceFormatAccepts(fmt, kind) {
+    if (!fmt || !kind) return true;          // nothing attached yet — every format is still open
+    if (fmt.m === 'mixed') return true;
+    return fmt.m === kind;
+}
+
+/**
+ * The format this platform should be on for a single piece of media of this kind: live, accepts the
+ * kind, and doesn't demand more items than there are (a Carousel needs 2, so it is not the answer
+ * for one video). Narrowest first, so a Feed post wins over a Carousel for a single image.
+ */
+function _pceBestFormatForMedia(platform, kind, count = 1) {
+    return _pceFormatsFor(platform)
+        .filter(f => f.a === 'live' && _pceFormatAccepts(f, kind) && (f.min || 0) <= count && (f.max || 1) >= count)
+        .sort((a, b) => (a.max || 1) - (b.max || 1))[0] || null;
+}
+
+/**
+ * Called after media is attached: keep the format honest about what is now on the post.
+ *
+ * Switches when there is a format that fits, says so when there isn't. Deliberately NOT silent —
+ * a Reel is a different post from a feed post, and the user should read that it happened.
+ */
+async function _pceReconcileFormatToMedia(post) {
+    if (!post) return;
+    const kind = _pceMediaKindOf(post);
+    const fmt = _pceActiveFormat(post);
+    if (!kind || _pceFormatAccepts(fmt, kind)) return;
+
+    const count = Math.max(1, _pceSlides(post).length);
+    const target = _pceBestFormatForMedia(post.platform, kind, count);
+    const noun = kind === 'video' ? 'video' : 'image';
+    const a = kind === 'video' ? 'a video' : 'an image';
+    if (!target) {
+        window.showToast?.(`${window.PlatformConstants.label(post.platform)} has no format we can publish ${a} in yet — this post won't pass approval as it stands.`, { icon: '⚠️', duration: 6000 });
+        _pceRenderFormats();     // repaint so the rules table shows the mismatch
+        return;
+    }
+    await _pceChooseFormat(target.k);
+    window.showToast?.(`Switched to ${target.n} — that's the format this ${noun} can go out in.`);
+    // _pceChooseFormat re-renders, and a full sync lands a non-card post on the Caption layer. This
+    // only ever runs immediately after media was attached, so put the user back where they were —
+    // the same reason gpAiShowThumb re-selects 'media' after its own re-render.
+    _pceSelect('media');
+}
+
 function _pceRenderFormatRules(post, fmt) {
     const rules = document.getElementById('pce-format-rules');
     const blocked = document.getElementById('pce-format-blocked');
@@ -7383,12 +7459,36 @@ function _pceRenderFormatRules(post, fmt) {
         ...(fmt.max > 1 ? [['Slides', `up to ${fmt.max}`]] : []),
         ...(fmt.cl ? [['Caption', `${fmt.cl.toLocaleString()} chars`]] : []),
     ];
+    // What is attached, next to what the format takes — the two facts that have to agree, in the one
+    // place that states the format's terms. Said here while it is fixable, not at approval.
+    const kind = _pceMediaKindOf(post);
+    const mismatch = kind && !_pceFormatAccepts(fmt, kind);
     rules.innerHTML = rows.map(([k, v]) =>
         `<div class="flex items-baseline justify-between gap-2">
            <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">${_rqEsc(k)}</span>
            <span class="text-[11px] font-semibold text-gray-700 text-right">${_rqEsc(v)}</span>
-         </div>`).join('');
+         </div>`).join('')
+        + (kind
+            ? `<div class="flex items-baseline justify-between gap-2">
+                 <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">On this post</span>
+                 <span class="text-[11px] font-semibold text-right ${mismatch ? 'text-red-600' : 'text-gray-700'}">${kind === 'video' ? 'A video' : 'An image'}</span>
+               </div>`
+            : '');
     rules.classList.remove('hidden');
+
+    if (mismatch) {
+        const a = kind === 'video' ? 'a video' : 'an image';
+        const target = _pceBestFormatForMedia(post.platform, kind, Math.max(1, _pceSlides(post).length));
+        const takes = { image: 'an image', video: 'a video', mixed: 'images or video', none: 'no media' }[fmt.m] || 'other media';
+        blocked.innerHTML = `<p class="font-bold mb-0.5">This format can't carry ${_rqEsc(a)}</p>
+          <p>${_rqEsc(fmt.n)} takes ${_rqEsc(takes)}. Approving would be refused.</p>
+          ${target
+            ? `<button type="button" onclick="_pceChooseFormat('${target.k}')"
+                 class="mt-1.5 px-2.5 py-1 rounded-lg border border-amber-300 bg-white text-amber-800 text-[11px] font-bold hover:bg-amber-100 transition cursor-pointer">Switch to ${_rqEsc(target.n)}</button>`
+            : `<p class="mt-1 text-amber-700/80">No format we can publish yet takes ${_rqEsc(a)} on ${_rqEsc(window.PlatformConstants.label(post.platform))} — swap the media instead.</p>`}`;
+        blocked.classList.remove('hidden');
+        return;
+    }
 
     if (fmt.a === 'live') { blocked.classList.add('hidden'); blocked.innerHTML = ''; return; }
     blocked.innerHTML = `<p class="font-bold mb-0.5">${fmt.a === 'planned' ? 'Not available yet' : 'Can’t be scheduled'}</p>
@@ -10775,6 +10875,10 @@ function gpAiShowThumb(url, type) {
         // the instant they attached media to it. Put them back on the layer they were using — now
         // with 'overlays' present, so "Add text on the video" actually goes somewhere.
         _pceSelect('media');
+        // The format may now describe a post this media cannot go out in — attaching a video to a
+        // Feed post used to be accepted in silence and refused at approval. Not awaited: this is a
+        // sync function, and the attach itself has already landed.
+        _pceReconcileFormatToMedia(p);
     }
 }
 
