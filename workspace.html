@@ -653,18 +653,35 @@ window.showComplianceModals = function showComplianceModals(force) {
               <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Format</p>
               <div id="pce-format-list" class="space-y-1"></div>
             </div>
-            <!-- Drafting with the assistant, in the editor rather than on a separate screen. -->
+            <!-- ── Draft with AI ─────────────────────────────────────────────────────────────
+                 The assistant drafts INTO the editor. This used to be a separate screen you were
+                 sent to and came back from, which is the whole reason creating and editing felt
+                 like two products.
+                 The job itself is unchanged (generate-post → content_generation_jobs → the drafter),
+                 because it is the same engine Autopilot uses and forking it for one caller would be
+                 two drafting paths to keep in step. What changed is where you wait: the editor polls
+                 and then opens the finished post, so you never leave. -->
             <div class="pt-3 border-t border-gray-100">
               <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Draft with AI</p>
-              <button type="button" onclick="_pceAskSwanCaption()"
-                class="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 text-xs font-bold transition cursor-pointer">
+              <div class="relative">
+                <textarea id="pce-ai-context" rows="3" maxlength="500"
+                  placeholder="What's it about? e.g. our summer sale ends Sunday — or leave blank and let your assistant choose."
+                  class="w-full text-xs border border-gray-300 rounded-lg px-2.5 py-2 pr-8 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-600"></textarea>
+                <button type="button" id="pce-ai-mic" onclick="gpStartVoice('pce-ai-context')" title="Dictate"
+                  class="absolute bottom-2 right-2 text-gray-400 hover:text-emerald-600 transition cursor-pointer">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15a3 3 0 003-3V6a3 3 0 00-6 0v6a3 3 0 003 3zM19 11a7 7 0 01-14 0M12 18v3"/></svg>
+                </button>
+              </div>
+              <button type="button" id="pce-ai-go" onclick="_pceDraftWithAI()"
+                class="mt-1.5 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 text-xs font-bold transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
                 <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain">
-                <span>Ask Swan to write it</span>
+                <span id="pce-ai-go-label">Draft it for me</span>
               </button>
-              <button type="button" onclick="openLegacyGeneratePostSheet()"
+              <button type="button" onclick="_pceAskSwanCaption()"
                 class="mt-1.5 w-full px-3 py-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 text-xs font-bold transition cursor-pointer">
-                Generate a post with media
+                Talk it through in chat
               </button>
+              <p id="pce-ai-msg" class="text-[10px] text-gray-400 mt-1.5">Writes the caption and sources the picture.</p>
             </div>
             <div id="pce-format-rules" class="hidden rounded-lg bg-gray-50 border border-gray-100 px-2.5 py-2 space-y-1"></div>
             <div id="pce-format-blocked" class="hidden rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800"></div>
@@ -6531,6 +6548,121 @@ function _pceRenderPlatformPicker() {
     }).join('');
 }
 
+// ── Draft with AI, without leaving the editor ───────────────────────────────────────────────────
+// The generation JOB is the shared one (generate-post → content_generation_jobs → the drafter that
+// Autopilot also uses). It creates a NEW post rather than filling this one, which is why this waits
+// for the result and then opens it, discarding the blank draft it replaces. Forking the drafter so
+// it could write into an existing row would mean two drafting paths to keep in step forever — a much
+// larger bet than "wait here instead of on another screen".
+
+let _pceAiPoll = null;          // { timer, jobId, forPostId } while a draft is being generated
+
+function _pceSetAiMsg(text, kind) {
+    const el = _pceEl('pce-ai-msg');
+    if (!el) return;
+    el.textContent = text || 'Writes the caption and sources the picture.';
+    el.className = 'text-[10px] mt-1.5 '
+        + (kind === 'error' ? 'text-red-600 font-semibold' : kind === 'ok' ? 'text-emerald-700 font-semibold' : 'text-gray-400');
+}
+
+/**
+ * Is this post an untouched blank draft — the empty row "Create Post" made?
+ *
+ * Only such a post is discarded when AI drafting produces its replacement. Anything the user has
+ * actually put work into (words, media, a design) is left alone, because losing that silently would
+ * be far worse than leaving one spare draft behind.
+ */
+function _pceIsBlankDraft(post) {
+    if (!post || post.status !== 'draft') return false;
+    return !String(post.caption || '').trim()
+        && !String(post.hashtags || '').trim()
+        && !post.thumbnailUrl
+        && !(post.overlays || []).length
+        && !(post.audio || []).length;
+}
+
+function _pceStopAiPoll() {
+    if (_pceAiPoll?.timer) clearInterval(_pceAiPoll.timer);
+    _pceAiPoll = null;
+    const btn = _pceEl('pce-ai-go');
+    const label = _pceEl('pce-ai-go-label');
+    if (btn) btn.disabled = false;
+    if (label) label.textContent = 'Draft it for me';
+}
+
+async function _pceDraftWithAI() {
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    if (!post) return;
+    if (_pceAiPoll) return;                       // already running for this editor
+
+    const assistantId = post.assistantId || window._currentAssistantId || _gpCurrentAssistantId || null;
+    if (!assistantId) { _pceSetAiMsg('This post has no assistant to draft with.', 'error'); return; }
+
+    // Draft for every platform this post spans, so the assistant fans one idea out the same way
+    // Autopilot does rather than writing for the tab that happens to be open.
+    const platforms = [...new Set(_rqReviewGroupIds.map(id => _rqPostCache[id]?.platform).filter(Boolean))];
+    if (post.platform && !platforms.includes(post.platform)) platforms.push(post.platform);
+
+    const contextPrompt = (_pceEl('pce-ai-context')?.value || '').trim();
+    const btn = _pceEl('pce-ai-go');
+    const label = _pceEl('pce-ai-go-label');
+    if (btn) btn.disabled = true;
+    if (label) label.textContent = 'Drafting…';
+    _pceSetAiMsg('Your assistant is writing it — this usually takes 30–60 seconds.');
+
+    try {
+        const res = await fetch('/.netlify/functions/generate-post', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                assistantId,
+                platform: platforms[0] || post.platform,
+                platforms,
+                triggerType: 'on_demand',
+                contextPrompt: contextPrompt || undefined,
+            }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || 'Could not start the draft.');
+        _pceAiPoll = { jobId: d.jobId, forPostId: postId, timer: null };
+        _pceAiPoll.timer = setInterval(_pcePollAiDraft, 4000);
+    } catch (err) {
+        _pceStopAiPoll();
+        _pceSetAiMsg(err.message || 'Could not start the draft.', 'error');
+    }
+}
+
+async function _pcePollAiDraft() {
+    const poll = _pceAiPoll;
+    if (!poll?.jobId) return;
+    // The user closed the modal or moved to another post — stop rather than yanking them back to a
+    // post they navigated away from.
+    if (_rqReviewPostId !== poll.forPostId) { _pceStopAiPoll(); return; }
+
+    try {
+        const res = await fetch(`/.netlify/functions/generate-post?jobId=${poll.jobId}`);
+        if (!res.ok) return;                       // transient — the next tick retries
+        const { status, resultPostId, errorMessage } = await res.json();
+
+        if (status === 'completed' && resultPostId) {
+            const blankId = _pceIsBlankDraft(_rqPostCache[poll.forPostId]) ? poll.forPostId : null;
+            _pceStopAiPoll();
+            // Retire the empty row this replaces. Soft-cancel, not a hard delete: 'cancelled' is in
+            // no Review Queue column, so it disappears without destroying anything recoverable.
+            if (blankId != null) {
+                try { await fetch(`/.netlify/functions/scheduled-posts?id=${blankId}`, { method: 'DELETE' }); }
+                catch { /* a spare empty draft is not worth failing the good outcome for */ }
+            }
+            window.showToast?.('Your assistant drafted it.', { icon: '✅' });
+            await openPostReview(resultPostId);
+            _pceSetAiMsg('Drafted. Edit anything you like.', 'ok');
+        } else if (status === 'failed') {
+            _pceStopAiPoll();
+            _pceSetAiMsg(errorMessage || 'The draft failed. Try again.', 'error');
+        }
+    } catch { /* poll silently; the next tick retries */ }
+}
+
 let _pcePlatformBusy = false;
 function _pceSetPlatformMsg(text, kind) {
     const el = document.getElementById('pce-platform-msg');
@@ -7694,6 +7826,13 @@ function _pceSyncForPost(post) {
     // Left pane tracks the inspector: both are for editing, and a read-only post gets neither.
     _pceShowLeftPane(true);
     _pceRenderPlatformPicker();
+    // The AI prompt is about the post you were looking at, so it does not follow you to another one.
+    // Skipped while a draft is in flight for THIS post — that run owns the panel until it finishes.
+    if (!_pceAiPoll) {
+        const ctx = _pceEl('pce-ai-context');
+        if (ctx) ctx.value = '';
+        _pceSetAiMsg('');
+    }
     _pceRenderFormats();
     _pceApplyPanes();
     _pceSetStageWide(true);
@@ -8033,6 +8172,9 @@ function closePostReview() {
     _rqRestoreMediaPanel();   // hand the shared media panel back to the generate-post sheet
     _rqStopRenderPoll();      // nothing to update once the modal is gone
     _pceStopAudioPreview();   // a closed modal must not keep talking
+    // The draft may still land, but nobody is waiting for it here — reopening it over a closed
+    // modal would be the editor grabbing the screen back.
+    _pceStopAiPoll();
     const modal = document.getElementById('post-review-modal');
     modal.classList.add('hidden');
     modal.classList.remove('flex');
@@ -8708,44 +8850,6 @@ async function openGeneratePostSheet() {
     }
 }
 
-/**
- * The previous Create Post sheet, still reachable from the editor's "Generate a post with media".
- *
- * Kept because it owns something the editor does not yet do: the background generation JOB, which
- * writes the caption AND sources or generates the image. That is a different, heavier thing than
- * asking the assistant in chat, and dropping it would have been a regression dressed up as tidying.
- */
-async function openLegacyGeneratePostSheet() {
-    // A previous generation is still running in the background (sheet was closed while waiting) —
-    // don't clobber its poll interval, or it'll finish with nowhere to report the result.
-    if (_gpPollInterval && _gpCurrentJobId) {
-        window.showToast?.("Your assistant is still working on your last post — we'll let you know when it's ready.", { icon: '⏳' });
-        return;
-    }
-
-    _gpCurrentAssistantId = window._currentAssistantId || null;
-    _gpCurrentJobId = null;
-    _gpCurrentPostId = null;
-    clearInterval(_gpPollInterval);
-
-    // Reset every mode's in-progress state, then land on "Write it yourself" (no upfront chooser).
-    gpBackToChooser();
-    gpChooseMode('write');
-
-    // Cache capacity (connected-platform dots + AI limit) so mode panels can use it without refetch.
-    _gpCap = await window.checkCapacity().catch(() => null);
-
-    document.getElementById('gen-post-backdrop')?.classList.remove('hidden');
-    document.getElementById('gen-post-sheet')?.classList.remove('hidden');
-
-    // Resolve an assistant up front (shared by all three modes).
-    await gpPopulateAssistants();
-
-    // Drafting never requires a connected account — every mode and platform stays available.
-    // The connection is asked for at the point a post is approved/scheduled for its platform
-    // (see gpApplyApprovalConnectGate + the review modal's gate).
-}
-
 // Lowercase service names of the org's active social connections (e.g. ['instagram','x']).
 function gpConnectedPlatforms() {
     return (_gpCap?.connectedPlatforms || []).map(s => String(s).toLowerCase());
@@ -9250,6 +9354,9 @@ function gpRejectPost() {
 const GP_VOICE_FIELDS = {
     'gen-post-context': { mic: 'gen-post-mic-btn', count: 'gen-post-ctx-count' },
     'gpw-caption':      { mic: 'gpw-mic-btn' },
+    // The editor's own "Draft with AI" box. Without an entry here the fallback would light up the
+    // OLD sheet's mic button — a recording indicator on a screen the user isn't looking at.
+    'pce-ai-context':   { mic: 'pce-ai-mic' },
 };
 function gpStartVoice(targetId = 'gen-post-context') {
     const cfg = GP_VOICE_FIELDS[targetId] || { mic: 'gen-post-mic-btn' };
