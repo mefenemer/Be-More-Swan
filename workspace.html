@@ -655,7 +655,10 @@ window.showComplianceModals = function showComplianceModals(force) {
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
             </button>
           </div>
-          <div class="p-3 space-y-3">
+          <!-- Given an id so the rail can move this whole block into its first step rather than
+               rebuilding it: _pceRenderPlatformPicker and _pceRenderFormats keep writing into the
+               same nodes wherever they happen to be parented. -->
+          <div id="pce-setup-body" class="p-3 space-y-3">
             <!-- The platform TAB BAR used to sit here, directly above these chips: two rows of
                  platform pills in a 256px column, which read as the same control twice. It is not
                  setup — it chooses which platform's copy you are looking at — so it now sits above
@@ -682,6 +685,22 @@ window.showComplianceModals = function showComplianceModals(force) {
             <div id="pce-format-rules" class="hidden rounded-lg bg-gray-50 border border-gray-100 px-2.5 py-2 space-y-1"></div>
             <div id="pce-format-blocked" class="hidden rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800"></div>
           </div>
+        </aside>
+
+        <!-- ── LEFT (converged layout): the step rail ─────────────────────────────────────────
+             Replaces BOTH side panes. Every decision that does not need the post on screen while
+             you make it lives here as a collapsed step; the post itself carries the words; the
+             timeline under the media carries anything with a duration. There is no right pane.
+
+             The panels are deliberately EMPTY in the markup. Each one is a mount point, and the
+             existing control blocks are MOVED into it on open and put back on close — the same
+             trick _inspMountMediaPanel already uses for the sourcing panel. That is what makes
+             this refactor survivable: _pceRenderPlatformPicker, _pceRenderFormats, the overlay
+             and audio inspectors and the reschedule panel all keep working untouched, because
+             they are the same nodes, just re-parented. See _railMount / _railRestoreAll. -->
+        <aside id="pce-rail" class="hidden w-full lg:w-60 shrink-0 space-y-1.5">
+          <p class="text-[9px] font-bold uppercase tracking-wider text-gray-400 px-0.5 pb-0.5">Post setup</p>
+          <div id="pce-rail-steps" class="space-y-1.5"></div>
         </aside>
 
         <!-- ── MIDDLE: the canvas, and everything about WHEN ──────────────────────────────────
@@ -933,8 +952,11 @@ window.showComplianceModals = function showComplianceModals(force) {
               <!-- ── The link. Its own block because it is not part of the words: it is appended as
                    its own paragraph at publish time (src/utils/post-link.ts → composePostText), and
                    the echo below shows the exact line every platform will receive rather than
-                   asking anyone to imagine it. Saved by the same button as the caption. -->
-              <div class="mt-3 pt-3 border-t border-gray-100">
+                   asking anyone to imagine it. Saved by the same button as the caption.
+                   In the converged layout the rail moves this whole block into its own step — the
+                   link is set once and never judged against the post, so it does not belong beside
+                   the words. Same nodes either way, so _pceRefreshLinkMeta is untouched. -->
+              <div id="pce-link-block" class="mt-3 pt-3 border-t border-gray-100">
                 <label for="post-review-link-url" class="block text-xs font-bold text-gray-600 mb-1">Link</label>
                 <input id="post-review-link-url" type="url" inputmode="url" spellcheck="false"
                   placeholder="example.com/your-page" oninput="_pceRefreshLinkMeta()" onblur="_pceTidyLinkField()"
@@ -6879,6 +6901,197 @@ function _pceSelect(key, repaintHandles = true) {
     _pceRenderLayers();
 }
 
+// ── The step rail (converged layout) ────────────────────────────────────────────────────────────
+//
+// One collapsed row per decision, in the order they get made. It replaces BOTH side panes: the
+// left one had been eroded to two controls already, and the right one lost its reason to exist
+// once the caption moved into the post and text/sound moved in here.
+//
+// The panels are mount points, not copies. Each step names an EXISTING block by id and RE-PARENTS
+// it on open, putting it back on close — the same trick _inspMountMediaPanel uses for the sourcing
+// panel. Nothing about _pceRenderPlatformPicker, _pceRenderFormats, _pceRefreshLinkMeta or the
+// reschedule panel changes: they are the same nodes, writing to the same ids, just somewhere else
+// in the tree. A rebuild-instead-of-move would have meant a second copy of every one of those.
+//
+// Flagged so both layouts can live on staging at once: ?rail=1 / ?rail=0 pins it, and the choice
+// sticks for the session. Default OFF until the remaining steps are wired.
+let _railOn = false;
+try {
+    const q = new URLSearchParams(location.search).get('rail');
+    if (q === '1' || q === '0') sessionStorage.setItem('bms_rail', q);
+    _railOn = sessionStorage.getItem('bms_rail') === '1';
+} catch { /* private mode: stay on the old layout */ }
+
+let _railOpen = null;                 // key of the one open step, or null
+const _railHomes = new Map();         // node id → where it came from, so it can go back
+
+// Steps in the order the work happens. `mount` is the id of the block this step borrows.
+const _RAIL = [
+    { key: 'setup', title: 'Platforms & format',    mount: 'pce-setup-body' },
+    { key: 'link',  title: 'Link & call to action', mount: 'pce-link-block' },
+    { key: 'media', title: 'Media',                 mount: 'gp-ai-media' },
+    { key: 'when',  title: 'Schedule & publish',    mount: 'post-review-reschedule' },
+];
+
+const _RAIL_ICON = {
+    setup: '<path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>',
+    link:  '<path stroke-linecap="round" stroke-linejoin="round" d="M13.8 10.2a4 4 0 010 5.7l-3 3a4 4 0 01-5.6-5.7l1.5-1.5m9.6.7a4 4 0 010-5.7l3-3a4 4 0 015.7 5.7l-1.5 1.5"/>',
+    media: '<path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.6-4.6a2 2 0 012.8 0L16 16m-2-2 1.6-1.6a2 2 0 012.8 0L20 14M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>',
+    when:  '<path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3M4 11h16M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>',
+};
+
+/** What each step says about itself while closed. Concrete state, never a restatement of the title. */
+function _railSub(key, post) {
+    switch (key) {
+        case 'setup': {
+            const n = _rqReviewGroupIds.length || 1;
+            const fmt = _pceActiveFormat ? _pceActiveFormat(post) : null;
+            return `${n} platform${n === 1 ? '' : 's'}${fmt ? ' · ' + fmt.n : ''}`;
+        }
+        case 'link': {
+            const url = _pceNormaliseLink(post && post.linkUrl);
+            if (!url) return 'None';
+            let host = url;
+            try { host = new URL(url).hostname.replace(/^www\./, ''); } catch { /* show it raw */ }
+            return post.ctaText ? `${host} · ${post.ctaText}` : host;
+        }
+        case 'media': {
+            if (!post || !post.thumbnailUrl) return 'Nothing attached';
+            if (post.mediaMissing) return 'Deleted — needs replacing';
+            if (post.renderStatus === 'pending' || post.renderStatus === 'rendering') return 'Rendering text…';
+            if (post.renderStatus === 'failed') return 'Render failed';
+            return _pcePostIsVideo(post) ? 'Video · ready' : 'Photo · ready';
+        }
+        case 'when': {
+            if (!post || !post.publishDate) return 'Not scheduled';
+            const d = new Date(post.publishDate);
+            if (isNaN(d)) return 'Not scheduled';
+            return d.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+        }
+        default: return '';
+    }
+}
+
+/**
+ * Move a block into a step's panel, remembering where it came from.
+ *
+ * Blocks like the reschedule panel are `hidden` by default and revealed by their own toggle. Inside
+ * a rail step the STEP owns that decision, so the hidden state is stripped on the way in and put
+ * back on the way out — otherwise opening the step would show an empty panel.
+ */
+function _railMount(id, host) {
+    const node = document.getElementById(id);
+    if (!node || !host || node.parentNode === host) return;
+    if (!_railHomes.has(id)) {
+        _railHomes.set(id, {
+            parent: node.parentNode,
+            next: node.nextSibling,
+            hidden: node.classList.contains('hidden'),
+            display: node.style.display,
+        });
+    }
+    node.classList.remove('hidden');
+    node.style.display = '';
+    host.appendChild(node);
+}
+
+/** Put every borrowed block back exactly where it was. Called on close, post change and modal close. */
+function _railRestoreAll() {
+    for (const [id, home] of _railHomes) {
+        const node = document.getElementById(id);
+        if (!node) continue;
+        if (home.hidden) node.classList.add('hidden');
+        node.style.display = home.display || '';
+        if (home.next && home.next.parentNode === home.parent) home.parent.insertBefore(node, home.next);
+        else home.parent.appendChild(node);
+    }
+    _railHomes.clear();
+}
+
+function _railToggle(key) {
+    _railOpen = _railOpen === key ? null : key;
+    _railRender();
+}
+
+/**
+ * Put the editor into whichever layout is in force.
+ *
+ * The rail does not sit ALONGSIDE the two panes, it replaces them — so this hides both, and their
+ * collapse tabs with them, before painting the rail. Both `hidden` and the inline display are set:
+ * these elements are shown by several different code paths, and a class alone loses to a display
+ * set inline elsewhere (the trap _pceShowLeftPane already documents).
+ */
+function _railApplyLayout() {
+    const left = document.getElementById('pce-left');
+    const insp = document.getElementById('post-review-inspector');
+    const strip = document.getElementById('pce-layers-block');
+    if (!_railOn) {
+        _railRestoreAll();
+        document.getElementById('pce-rail')?.classList.add('hidden');
+        strip?.classList.remove('hidden');
+        return;
+    }
+    for (const el of [left, insp]) {
+        if (!el) continue;
+        el.classList.add('hidden');
+        el.style.display = 'none';
+    }
+    // Their re-open tabs would otherwise float beside a pane that no longer exists.
+    for (const id of ['pce-left-reopen', 'pce-right-reopen']) {
+        const t = document.getElementById(id);
+        if (t) { t.classList.add('hidden'); t.classList.remove('lg:flex'); }
+    }
+    // The layer list is the rail's job now. The timeline below it is NOT — a duration can only be
+    // judged against the clip, so it stays under the media.
+    strip?.classList.add('hidden');
+    _railRender();
+}
+
+/** Paint the rail for the post on screen. Cheap enough to call on every state change. */
+function _railRender() {
+    const wrap = document.getElementById('pce-rail');
+    const host = document.getElementById('pce-rail-steps');
+    if (!wrap || !host) return;
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (!_railOn || !post) { wrap.classList.add('hidden'); wrap.style.display = 'none'; return; }
+    wrap.classList.remove('hidden');
+    wrap.style.display = '';
+
+    // Anything currently borrowed goes home before the panels are rebuilt — innerHTML on the host
+    // would otherwise DESTROY the borrowed nodes, taking #pce-platform-list and friends with them.
+    _railRestoreAll();
+
+    host.innerHTML = _RAIL.map((s, i) => {
+        const on = s.key === _railOpen;
+        return `<div class="rounded-xl border ${on ? 'border-emerald-300' : 'border-gray-200'} bg-white overflow-hidden">
+          <button type="button" onclick="_railToggle('${s.key}')" aria-expanded="${on}"
+            class="w-full flex items-center gap-2.5 px-2.5 py-2 text-left hover:bg-gray-50 transition cursor-pointer">
+            <span class="w-[18px] h-[18px] shrink-0 rounded-md flex items-center justify-center text-[10px] font-bold ${
+              on ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-500'}">${i + 1}</span>
+            <span class="min-w-0 flex-1">
+              <span class="block text-xs font-bold truncate ${on ? 'text-emerald-800' : 'text-gray-700'}">${_rqEsc(s.title)}</span>
+              <span class="block text-[10px] truncate ${on ? 'text-emerald-600' : 'text-gray-400'}">${_rqEsc(_railSub(s.key, post))}</span>
+            </span>
+            <svg class="w-3 h-3 shrink-0 ${on ? 'text-emerald-600 rotate-90' : 'text-gray-300'} transition-transform" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+          </button>
+          <div id="rail-panel-${s.key}" class="${on ? '' : 'hidden'} border-t border-gray-100 px-2.5 py-2.5"></div>
+        </div>`;
+    }).join('');
+
+    if (_railOpen) {
+        const step = _RAIL.find(s => s.key === _railOpen);
+        const panel = document.getElementById(`rail-panel-${_railOpen}`);
+        if (step && panel) {
+            // The sourcing panel acts on whatever _gpCurrentPostId says, and it is shared with the
+            // generate-post sheet — so point it at this post before it is shown. Deliberately NOT
+            // via _inspMountMediaPanel: that would re-parent it into the old inspector's host and
+            // leave _railHomes recording a home the converged layout no longer has.
+            if (step.mount === 'gp-ai-media') { _gpCurrentPostId = _rqReviewPostId; _gpAiMediaPrompt = ''; }
+            _railMount(step.mount, panel);
+        }
+    }
+}
+
 // ── Panes ───────────────────────────────────────────────────────────────────────────────────────
 // Left = what this post IS, right = what is SELECTED, canvas in the middle. Either side collapses to
 // a slim re-open tab so the canvas can have the width. The choice is remembered for the session
@@ -8695,12 +8908,21 @@ function _pceSyncForPost(post) {
         // so clear it here or a re-shown inspector would list the PREVIOUS post's layers.
         _pceRenderLayers();
         _pceShowLeftPane(false);
+        // A published post has nothing to decide, so the rail goes with the panes — and everything
+        // it borrowed goes home first, or those blocks would be destroyed with the next repaint.
+        _railRestoreAll();
+        _railOpen = null;
+        document.getElementById('pce-rail')?.classList.add('hidden');
         return;
     }
     wrap.classList.remove('hidden');
     wrap.style.display = '';
     // Left pane tracks the inspector: both are for editing, and a read-only post gets neither.
     _pceShowLeftPane(true);
+    // …unless the rail is on, in which case it replaces both. Applied after the two lines above
+    // rather than instead of them, so every other branch in this function can keep assuming the
+    // old layout and only one place has to know about the new one.
+    _railApplyLayout();
     _pceRenderPlatformPicker();
     _pceRenderSlides();
     // The drafting status line is about the post you were looking at, so it does not follow you to
@@ -9107,6 +9329,12 @@ window.closeAssistantChatModal = function() {
 let _gpAiMediaHome = null;   // { parent, next } — the panel's original spot in the generate-post sheet
 
 function _rqRestoreMediaPanel() {
+    // The rail borrows blocks too, and this is already the chokepoint every close/post-change path
+    // calls to put shared panels back. Doing it here means the rail cannot strand a borrowed node
+    // in a panel that is about to be thrown away — which would delete the block for the whole
+    // session, not just this post.
+    _railRestoreAll();
+    _railOpen = null;
     const panel = document.getElementById('gp-ai-media');
     if (panel && _gpAiMediaHome && panel.parentNode !== _gpAiMediaHome.parent) {
         _gpAiMediaHome.parent.insertBefore(panel, _gpAiMediaHome.next);
@@ -9123,6 +9351,16 @@ function rqReviewAddMedia() {
 
 // Show one inline form (changes/reject/reschedule) and hide the primary buttons; no arg → buttons.
 function rqReviewToggle(which) {
+    // With the rail on, the reschedule panel is not in the footer any more — the rail has borrowed
+    // it into "Schedule & publish". Toggling `hidden` on a node the rail is showing would either do
+    // nothing visible or blank an open step, so the footer link opens the STEP instead. Without
+    // this, "Change the time" silently does nothing in the converged layout.
+    if (_railOn && which === 'reschedule') {
+        _railOpen = 'when';
+        _railRender();
+        document.getElementById('pce-rail')?.scrollIntoView({ block: 'nearest' });
+        return;
+    }
     // 'amend' and 'media' were retired in Phase 2 — the caption and the picture are edited in the
     // inspector now. Guarded rather than assumed: this list outlived two of its own entries once.
     ['changes', 'reject', 'reschedule', 'approved'].forEach(k => document.getElementById('post-review-' + k)?.classList.add('hidden'));

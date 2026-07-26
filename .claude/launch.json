@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-rail",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4217",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/22b0ed2d-c89b-44f1-bbe3-c2ca7ab55521/scratchpad/railharness"
+      ],
+      "port": 4217,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-post-link",
       "runtimeExecutable": "python3",
       "runtimeArgs": [
