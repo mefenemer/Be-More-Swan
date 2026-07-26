@@ -656,11 +656,10 @@ window.showComplianceModals = function showComplianceModals(force) {
             </button>
           </div>
           <div class="p-3 space-y-3">
-            <!-- Platform tab bar: one tab per platform this post is going out on. Shown only when
-                 the post spans 2+ platforms (grouped by assistant + publish slot). Switching a tab
-                 previews and edits that platform's copy; the footer's Approve/Reject act on every
-                 platform at once. -->
-            <div id="post-review-tabs" class="hidden"></div>
+            <!-- The platform TAB BAR used to sit here, directly above these chips: two rows of
+                 platform pills in a 256px column, which read as the same control twice. It is not
+                 setup — it chooses which platform's copy you are looking at — so it now sits above
+                 the canvas, where "you're viewing the Instagram version" is what it plainly means. -->
             <!-- Which platforms this post goes out on. Editing it genuinely creates and destroys
                  sibling rows (see set-post-platforms.ts) — one post per platform, because each has
                  its own caption, format and media rules. It sits ABOVE Format because the format
@@ -693,6 +692,12 @@ window.showComplianceModals = function showComplianceModals(force) {
              side. Layers, their tracks and their start/end now sit directly under the media they
              belong to; the right pane keeps only what a layer LOOKS like. -->
         <div class="flex-1 min-w-0 w-full">
+          <!-- Platform tab bar: one tab per platform this post is going out on, shown only when it
+               spans 2+ (moved here from the left pane — see the note there). Switching a tab
+               previews and edits THAT platform's copy; the footer's Approve/Reject act on every
+               platform at once. max-w-md so it sits directly over the post card it labels.
+               Built by _rqReviewRenderTabs. -->
+          <div id="post-review-tabs" class="hidden max-w-md mx-auto mb-2"></div>
           <div id="post-review-body"></div>
           <!-- The canvas's own picker — opened by the empty media frame and nothing else. Multiple
                and both kinds, because "add media" on a blank post means one image, several images,
@@ -939,6 +944,14 @@ window.showComplianceModals = function showComplianceModals(force) {
               <!-- Media that is NOT a branded card: choosing what the picture is. The shared
                    sourcing panel is mounted here on demand (see _inspMountMediaPanel). -->
               <div id="insp-media-generic" class="hidden">
+                <!-- Shown only while replacing a card (see _pceSwapCardForMedia): the card is still
+                     on the post until something else is attached, so the way back must stay open. -->
+                <div id="insp-card-swap-note" class="hidden mb-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2">
+                  <p class="text-[11px] font-bold text-amber-800">Replacing the branded card</p>
+                  <p class="text-[11px] text-amber-700 mt-0.5">Pick a picture or video below — the card stays until you do.</p>
+                  <button type="button" onclick="_pceSwapCardForMedia(false)"
+                    class="mt-1.5 text-[11px] font-bold text-amber-800 underline hover:text-amber-900 cursor-pointer">Keep the card instead</button>
+                </div>
                 <!-- No "Picture" heading here: the inspector header above already names the media
                      per post (_pceSyncForPost sets it to Picture/Video/Branded card) and the Type
                      row below states it too. The heading was static, so on a video post it said
@@ -1012,6 +1025,21 @@ window.showComplianceModals = function showComplianceModals(force) {
                 <button type="button" id="pce-resetkit"
                   class="text-xs font-semibold text-gray-500 hover:text-gray-700 transition cursor-pointer">Reset to my brand style</button>
                 <span id="pce-msg" class="text-xs font-semibold text-gray-500"></span>
+              </div>
+              <!-- The way OUT of a branded card. A card is not a kind of post — it is a generated
+                   image asset that happens to carry renderParams (get-social-drafts derives
+                   post.brandCard from it), so attaching any other picture or a video replaces it and
+                   the post simply stops being a card post. That already worked server-side; what was
+                   missing was any control that reached it, because this panel hid the whole sourcing
+                   panel whenever a card was present. "How do I turn this card back into a photo
+                   post?" had no answer. -->
+              <div class="pt-3 mt-3 border-t border-gray-100">
+                <button type="button" onclick="_pceSwapCardForMedia(true)"
+                  class="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.6-4.6a2 2 0 012.8 0L16 16m-2-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                  <span>Use a photo or video instead</span>
+                </button>
+                <p class="text-[11px] text-gray-400 mt-1.5">Whatever you attach replaces the card.</p>
               </div>
               </div>
             </div>
@@ -5319,7 +5347,10 @@ function rqCachePost(p) { if (p && p.id != null) _rqPostCache[p.id] = p; return 
 // the reviewer approves once and previews/edits per platform — WITHOUT ever merging unrelated posts
 // that merely happen to share a publish slot (the old, fragile key). Rows with no group id (legacy or
 // genuinely standalone) key by their own id, so they always render as their own card.
-const _RQ_PLATFORM_ORDER = ['instagram', 'facebook', 'linkedin', 'x'];
+// Catalogue order, from the generated constants — NOT a hand-written list. The hand-written one had
+// four entries, so Threads and YouTube both ranked 99 and sorted to the end of every sibling group
+// (which is why they wrapped onto a second row of the platform tabs, after X).
+const _RQ_PLATFORM_ORDER = window.PlatformConstants.all.map(p => p.id);
 function _rqPlatformRank(p) { const i = _RQ_PLATFORM_ORDER.indexOf(p); return i < 0 ? 99 : i; }
 function _rqGroupKey(p) {
     // Status keeps siblings in the same lifecycle column together (a render pass is single-status, so
@@ -5370,8 +5401,11 @@ function rqResolveGroup(postId) {
 // is asked for at the moment a post is approved/scheduled for its platform. These helpers read the
 // capacity cache warmed at boot; rqEnsurePlatformConnection force-refreshes once before concluding
 // "not connected" so a connection made elsewhere in the session isn't missed.
+// One label source: the generated catalogue. This was its own four-entry map, so every platform
+// added since (Threads, YouTube) rendered as its raw database id — lowercase "youtube" sat in the
+// platform tabs next to a chip reading "YouTube", because the chips already read the catalogue.
 function rqPlatformLabel(p) {
-    return { instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X' }[p] || p;
+    return window.PlatformConstants.label(p) || p;
 }
 
 function rqPlatformConnected(platform) {
@@ -7660,9 +7694,30 @@ function _pceRefreshOverlayTiming() {
 // the result of. A post with no caption yet gets a placeholder for the same reason — the server
 // refuses an empty card, and refusing the click would be a worse answer than giving you something
 // to edit.
+// ── Leaving a branded card ──────────────────────────────────────────────────────────────────────
+// Which post's card is being replaced. A card post shows the card's own controls INSTEAD of the
+// sourcing panel — right for editing a card, a dead end for leaving one, because a card is just an
+// image asset with renderParams and attaching anything else replaces it. This flips the Picture
+// layer over to the sourcing panel without touching the post: the card is still attached, and still
+// on the canvas, until something else is chosen.
+let _pceSwapCardFor = null;
+
+function _pceSwapCardForMedia(on) {
+    const postId = _rqReviewPostId;
+    if (postId == null) return;
+    _pceSwapCardFor = on ? postId : null;
+    // Through the normal render, not by toggling classes here: _pceSyncForPost owns which of the two
+    // media panels is visible, and it is also what mounts the shared sourcing panel into this one.
+    _rqReviewRenderActive();
+    _pceSelect('media');
+}
+
 async function _pceCreateBrandCard() {
     const postId = _rqReviewPostId;
     const post = postId != null ? _rqPostCache[postId] : null;
+    // A card just made is a card to edit, never one to replace — otherwise making one on a post whose
+    // card you had been replacing would open straight back into the sourcing panel.
+    _pceSwapCardFor = null;
     const msg = _pceEl('insp-make-card-msg');
     const say = (t, kind) => { if (msg) { msg.textContent = t || ''; msg.className = 'block mt-1.5 text-[11px] font-semibold ' + (kind === 'error' ? 'text-red-600' : kind === 'ok' ? 'text-emerald-700' : 'text-gray-500'); } };
     if (!post) return;
@@ -8456,12 +8511,19 @@ function _pceSyncForPost(post) {
         ? ['media', 'caption', 'wordmark', 'website']
         : (overlayCapable ? ['media', 'caption', 'overlays'] : ['media', 'caption']);
     if (audioCapable) _pceLayers.push('audio');
-    _pceEl('insp-media-card')?.classList.toggle('hidden', !hasCard);
-    _pceEl('insp-media-generic')?.classList.toggle('hidden', hasCard);
+    // A card post normally shows only the card's own controls. While the user is replacing the card
+    // (_pceSwapCardForMedia) it shows the sourcing panel instead — the card is still attached, so
+    // this is a view swap, not a change to the post. Tracked per post id so the state cannot follow
+    // you to another one.
+    const swappingCard = hasCard && _pceSwapCardFor === post.id;
+    _pceEl('insp-media-card')?.classList.toggle('hidden', !hasCard || swappingCard);
+    _pceEl('insp-media-generic')?.classList.toggle('hidden', hasCard && !swappingCard);
+    _pceEl('insp-card-swap-note')?.classList.toggle('hidden', !swappingCard);
     // A branded card is a still. Offering to make one on a Reel or a YouTube video would replace the
-    // post's video with a picture it cannot publish, so the offer isn't made.
-    _pceEl('insp-make-card')?.classList.toggle('hidden', isVideo);
-    _pceEl('insp-make-card-msg')?.classList.toggle('hidden', isVideo);
+    // post's video with a picture it cannot publish, so the offer isn't made. Nor is it offered while
+    // replacing the card this post already has.
+    _pceEl('insp-make-card')?.classList.toggle('hidden', isVideo || swappingCard);
+    _pceEl('insp-make-card-msg')?.classList.toggle('hidden', isVideo || swappingCard);
     _PCE_INSP_TITLES.media.title = hasCard ? 'Branded card' : (isVideo ? 'Video' : 'Picture');
     _PCE_INSP_TITLES.overlays.title = isVideo ? 'Text on video' : 'Text on image';
     // Selecting a box drives the per-box timing controls; default to the first box so the timing
@@ -10694,6 +10756,12 @@ function gpAiShowThumb(url, type) {
         // doesn't keep painting stale boxes over a picture they were never positioned against.
         p.overlays = [];
         _gpOverlayCountByPost[_rqReviewPostId] = 0;
+        // A branded card lives in the ATTACHED ASSET's renderParams, so attaching anything else has
+        // already replaced it server-side (attach-draft-media rewrites contentAssetIds). The cache
+        // has to say so too, or the inspector keeps offering card wording and colours for a card the
+        // post no longer has — and _pceMountCanvas would hang handles on a plain photo.
+        p.brandCard = null;
+        _pceSwapCardFor = null;
         // Route through _rqReviewRenderActive, NOT a direct innerHTML write. Attaching media changes
         // which LAYERS the post has — a post with no media has no 'overlays' layer — and only
         // _pceSyncForPost recomputes _pceLayers and the inspector titles. Writing the mock-up
