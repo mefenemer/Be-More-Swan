@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-review-modal",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4214",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/374988f3-d967-4bfe-a0b4-ed2a53b98f63/scratchpad/harness3"
+      ],
+      "port": 4214,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-post-canvas",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

@@ -284,7 +284,13 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
-        const data = await res.json().catch(() => ({}));
+        // Read the body as TEXT first. Every failure the orchestrator knows about answers in JSON
+        // with its own `error`; a body that will not parse means the function never got that far —
+        // a crash, a timeout or an auth redirect — and that raw text is the only evidence of which.
+        const raw = await res.text();
+        let data = {};
+        let parsed = true;
+        try { data = raw ? JSON.parse(raw) : {}; } catch { parsed = false; }
 
         // The orchestrator creates the session before the LLM call — keep its id even
         // on failure so a retry continues the same conversation.
@@ -297,7 +303,15 @@
             trackPaywallHit(data.uiElementJson.reason);
             return;
           }
-          showError(data.error || 'Something went wrong — please try again in a moment.');
+          // The bare "Something went wrong" told the user nothing and told us less: it was shown
+          // for a 500, a 504 and a 200-with-the-wrong-shape alike, so a report of it could not be
+          // acted on. Name the status, and put the body in the console for whoever is looking.
+          if (!data.error) {
+            console.error('[ChatSession] orchestrator did not answer', {
+              status: res.status, parsedAsJson: parsed, body: raw.slice(0, 2000),
+            });
+          }
+          showError(data.error || `Something went wrong (HTTP ${res.status}) — please try again in a moment.`);
           return;
         }
         appendMessage(data.message);

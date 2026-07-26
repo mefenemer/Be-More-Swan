@@ -590,14 +590,37 @@ window.showComplianceModals = function showComplianceModals(force) {
        plain text post keeps the narrow reading column it has always had. -->
   <div id="post-review-panel" class="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[92vh] flex flex-col overflow-hidden">
     <!-- Header -->
-    <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100 shrink-0">
-      <div>
+    <div class="flex items-start justify-between gap-3 px-5 py-3 border-b border-gray-100 shrink-0">
+      <div class="min-w-0">
         <h2 id="post-review-title" class="text-base font-extrabold text-gray-900">Review post</h2>
         <p id="post-review-sub" class="text-xs text-gray-500"></p>
       </div>
-      <button onclick="closePostReview()" aria-label="Close" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 cursor-pointer">
-        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-      </button>
+      <div class="flex items-start gap-2 shrink-0">
+        <!-- ── Draft with AI ─────────────────────────────────────────────────────────────────
+             Moved out of the left pane: on a blank post this is the FIRST thing you do, and it
+             was behind a pane that is collapsed by default and titled "Post setup". There is no
+             idea box any more — describing the post is a conversation, and the chat button is
+             where that conversation happens.
+             The job itself is unchanged (generate-post → content_generation_jobs → the drafter),
+             because it is the same engine Autopilot uses. Hidden on posts that can't be edited. -->
+        <div id="pce-ai-actions" class="hidden flex-col items-end gap-1">
+          <div class="flex items-center gap-1.5">
+            <button type="button" id="pce-ai-go" onclick="_pceDraftWithAI()"
+              class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 text-xs font-bold transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+              <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain">
+              <span id="pce-ai-go-label">Draft it for me</span>
+            </button>
+            <button type="button" onclick="_pceAskSwanCaption()"
+              class="px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 text-xs font-bold transition cursor-pointer">
+              Talk it through in chat
+            </button>
+          </div>
+          <p id="pce-ai-msg" class="text-[10px] text-gray-400 text-right"></p>
+        </div>
+        <button onclick="closePostReview()" aria-label="Close" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 cursor-pointer">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+        </button>
+      </div>
     </div>
     <!-- Body: platform mock-up -->
     <div class="flex-1 overflow-y-auto bg-gray-50 px-4 py-5">
@@ -653,36 +676,10 @@ window.showComplianceModals = function showComplianceModals(force) {
               <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Format</p>
               <div id="pce-format-list" class="space-y-1"></div>
             </div>
-            <!-- ── Draft with AI ─────────────────────────────────────────────────────────────
-                 The assistant drafts INTO the editor. This used to be a separate screen you were
-                 sent to and came back from, which is the whole reason creating and editing felt
-                 like two products.
-                 The job itself is unchanged (generate-post → content_generation_jobs → the drafter),
-                 because it is the same engine Autopilot uses and forking it for one caller would be
-                 two drafting paths to keep in step. What changed is where you wait: the editor polls
-                 and then opens the finished post, so you never leave. -->
-            <div class="pt-3 border-t border-gray-100">
-              <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Draft with AI</p>
-              <div class="relative">
-                <textarea id="pce-ai-context" rows="3" maxlength="500"
-                  placeholder="What's it about? e.g. our summer sale ends Sunday — or leave blank and let your assistant choose."
-                  class="w-full text-xs border border-gray-300 rounded-lg px-2.5 py-2 pr-8 resize-none focus:outline-none focus:ring-2 focus:ring-emerald-600"></textarea>
-                <button type="button" id="pce-ai-mic" onclick="gpStartVoice('pce-ai-context')" title="Dictate"
-                  class="absolute bottom-2 right-2 text-gray-400 hover:text-emerald-600 transition cursor-pointer">
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15a3 3 0 003-3V6a3 3 0 00-6 0v6a3 3 0 003 3zM19 11a7 7 0 01-14 0M12 18v3"/></svg>
-                </button>
-              </div>
-              <button type="button" id="pce-ai-go" onclick="_pceDraftWithAI()"
-                class="mt-1.5 w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 text-xs font-bold transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
-                <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain">
-                <span id="pce-ai-go-label">Draft it for me</span>
-              </button>
-              <button type="button" onclick="_pceAskSwanCaption()"
-                class="mt-1.5 w-full px-3 py-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 text-xs font-bold transition cursor-pointer">
-                Talk it through in chat
-              </button>
-              <p id="pce-ai-msg" class="text-[10px] text-gray-400 mt-1.5">Writes the caption and sources the picture.</p>
-            </div>
+            <!-- "Draft with AI" used to live here. It is the first thing you do on a blank post, so
+                 it was the one control that had to be reachable BEFORE you know what this pane is
+                 for — it now sits in the modal header (#pce-ai-actions). Its idea box went with it:
+                 "what's it about" is a conversation, and that conversation is the chat button. -->
             <div id="pce-format-rules" class="hidden rounded-lg bg-gray-50 border border-gray-100 px-2.5 py-2 space-y-1"></div>
             <div id="pce-format-blocked" class="hidden rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800"></div>
           </div>
@@ -808,6 +805,72 @@ window.showComplianceModals = function showComplianceModals(force) {
 
             </div>
           </div>
+            <!-- Quality review (The Quality Reviewer, plan-gated). This panel existed ONLY in the
+                 calendar, so the Review Queue — where people actually approve — showed no warnings, no
+                 suggestions and no score. Populated by _rqLoadQualityReview().
+                 max-w-md mx-auto, matching the canvas above it: it is a verdict on THIS post's copy, and
+                 spanning the full modal made it read as a section about the whole screen. -->
+            <div id="post-review-quality" class="hidden mt-4 max-w-md mx-auto rounded-xl border border-gray-200 overflow-hidden bg-white">
+              <div class="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-100">
+                <p class="text-xs font-bold text-gray-600">Quality review</p>
+                <span id="prq-score" class="hidden text-xs font-extrabold"></span>
+              </div>
+              <div class="p-3 space-y-3">
+                <div id="prq-loading" class="text-xs text-gray-400">Checking this post…</div>
+                <!-- Each warning carries its OWN actions (source it / doesn't apply / reopen). The list
+                     used to be inert text whose only exit was the blanket "approve anyway" confirm, which
+                     is how a compliance control ends up training people to click through it. -->
+                <div id="prq-warnings-wrap" class="hidden">
+                  <p class="text-[11px] font-bold text-red-600 uppercase tracking-wider mb-1.5">Compliance — needs your check</p>
+                  <div id="prq-warnings" class="space-y-2"></div>
+                  <p class="text-[11px] text-gray-500 mt-2">Settle each one, or approve anyway — either way it's recorded.</p>
+                </div>
+                <!-- Suggestions are PULL, not push. Nothing appears here until the button below is
+                     pressed, and then exactly one suggestion appears. Ignore removes it; Accept rewrites
+                     the post. Neither is followed by another suggestion — a fresh one costs another
+                     deliberate press.
+                     Previously three arrived unbidden with every draft, which read as a checklist to work
+                     through before approving, on a post the user may have been perfectly happy with. -->
+                <div id="prq-ask-wrap" class="hidden">
+                  <button type="button" id="prq-ask-btn" onclick="rqAskForSuggestion()"
+                    class="w-full px-3 py-2 text-xs font-bold rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition">
+                    Suggest an improvement
+                  </button>
+                </div>
+                <div id="prq-suggestions-wrap" class="hidden">
+                  <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Suggested improvement</p>
+                  <ul id="prq-suggestions" class="space-y-1.5 text-xs text-gray-600"></ul>
+                  <div id="prq-suggestion-actions" class="flex gap-2 mt-2.5">
+                    <button type="button" id="prq-ignore-btn" onclick="rqIgnoreSuggestions()"
+                      class="flex-1 px-3 py-2 text-xs font-semibold rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition">
+                      Ignore
+                    </button>
+                    <button type="button" id="prq-apply-btn" onclick="rqPreviewSuggestions()"
+                      class="flex-1 px-3 py-2 text-xs font-bold rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 transition">
+                      Accept
+                    </button>
+                  </div>
+                </div>
+                <!-- The proposal is EDITABLE before it is saved, and what gets saved is exactly what is
+                     in this box — the server no longer re-generates on accept. -->
+                <div id="prq-rewrite-wrap" class="hidden">
+                  <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Proposed rewrite — edit anything you like</p>
+                  <div class="rounded-lg border border-gray-200 text-xs overflow-hidden">
+                    <div class="p-2 bg-gray-50 border-b border-gray-100">
+                      <span class="font-bold text-gray-400 text-[10px] uppercase tracking-wider">Current</span>
+                      <p id="prq-rewrite-before" class="mt-1 text-gray-500 whitespace-pre-wrap"></p>
+                    </div>
+                    <textarea id="prq-rewrite-after" rows="7"
+                      class="w-full p-2 text-xs text-gray-800 border-0 focus:ring-0 focus:outline-none resize-y"></textarea>
+                  </div>
+                  <div class="flex gap-2 mt-2">
+                    <button type="button" onclick="rqCancelSuggestions()" class="flex-1 px-3 py-2 text-xs font-semibold rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">Discard</button>
+                    <button type="button" id="prq-save-btn" onclick="rqApplySuggestions()" class="flex-1 px-3 py-2 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Save this version</button>
+                  </div>
+                </div>
+                <div id="prq-clean" class="hidden text-xs text-emerald-700 font-semibold">✓ No compliance issues found.</div>
+              </div>
+            </div>
         </div>
         <!-- The inspector. Every control that changes how this post looks lives here, and WHICH
              controls you see is decided by what is selected on the canvas — never by hunting for
@@ -1054,70 +1117,6 @@ window.showComplianceModals = function showComplianceModals(force) {
           <span class="text-[9px] font-bold uppercase tracking-wider text-gray-400" style="writing-mode:vertical-rl">Design</span>
         </button>
       </div>
-      <!-- Quality review (The Quality Reviewer, plan-gated). This panel existed ONLY in the
-           calendar, so the Review Queue — where people actually approve — showed no warnings, no
-           suggestions and no score. Populated by _rqLoadQualityReview(). -->
-      <div id="post-review-quality" class="hidden mt-4 rounded-xl border border-gray-200 overflow-hidden">
-        <div class="flex items-center justify-between px-3 py-2 bg-gray-50 border-b border-gray-100">
-          <p class="text-xs font-bold text-gray-600">Quality review</p>
-          <span id="prq-score" class="hidden text-xs font-extrabold"></span>
-        </div>
-        <div class="p-3 space-y-3">
-          <div id="prq-loading" class="text-xs text-gray-400">Checking this post…</div>
-          <!-- Each warning carries its OWN actions (source it / doesn't apply / reopen). The list
-               used to be inert text whose only exit was the blanket "approve anyway" confirm, which
-               is how a compliance control ends up training people to click through it. -->
-          <div id="prq-warnings-wrap" class="hidden">
-            <p class="text-[11px] font-bold text-red-600 uppercase tracking-wider mb-1.5">Compliance — needs your check</p>
-            <div id="prq-warnings" class="space-y-2"></div>
-            <p class="text-[11px] text-gray-500 mt-2">Settle each one, or approve anyway — either way it's recorded.</p>
-          </div>
-          <!-- Suggestions are PULL, not push. Nothing appears here until the button below is
-               pressed, and then exactly one suggestion appears. Ignore removes it; Accept rewrites
-               the post. Neither is followed by another suggestion — a fresh one costs another
-               deliberate press.
-               Previously three arrived unbidden with every draft, which read as a checklist to work
-               through before approving, on a post the user may have been perfectly happy with. -->
-          <div id="prq-ask-wrap" class="hidden">
-            <button type="button" id="prq-ask-btn" onclick="rqAskForSuggestion()"
-              class="w-full px-3 py-2 text-xs font-bold rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition">
-              Suggest an improvement
-            </button>
-          </div>
-          <div id="prq-suggestions-wrap" class="hidden">
-            <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Suggested improvement</p>
-            <ul id="prq-suggestions" class="space-y-1.5 text-xs text-gray-600"></ul>
-            <div id="prq-suggestion-actions" class="flex gap-2 mt-2.5">
-              <button type="button" id="prq-ignore-btn" onclick="rqIgnoreSuggestions()"
-                class="flex-1 px-3 py-2 text-xs font-semibold rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 transition">
-                Ignore
-              </button>
-              <button type="button" id="prq-apply-btn" onclick="rqPreviewSuggestions()"
-                class="flex-1 px-3 py-2 text-xs font-bold rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 transition">
-                Accept
-              </button>
-            </div>
-          </div>
-          <!-- The proposal is EDITABLE before it is saved, and what gets saved is exactly what is
-               in this box — the server no longer re-generates on accept. -->
-          <div id="prq-rewrite-wrap" class="hidden">
-            <p class="text-[11px] font-bold text-gray-500 uppercase tracking-wider mb-1.5">Proposed rewrite — edit anything you like</p>
-            <div class="rounded-lg border border-gray-200 text-xs overflow-hidden">
-              <div class="p-2 bg-gray-50 border-b border-gray-100">
-                <span class="font-bold text-gray-400 text-[10px] uppercase tracking-wider">Current</span>
-                <p id="prq-rewrite-before" class="mt-1 text-gray-500 whitespace-pre-wrap"></p>
-              </div>
-              <textarea id="prq-rewrite-after" rows="7"
-                class="w-full p-2 text-xs text-gray-800 border-0 focus:ring-0 focus:outline-none resize-y"></textarea>
-            </div>
-            <div class="flex gap-2 mt-2">
-              <button type="button" onclick="rqCancelSuggestions()" class="flex-1 px-3 py-2 text-xs font-semibold rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">Discard</button>
-              <button type="button" id="prq-save-btn" onclick="rqApplySuggestions()" class="flex-1 px-3 py-2 text-xs font-bold rounded-lg bg-emerald-600 text-white hover:bg-emerald-700">Save this version</button>
-            </div>
-          </div>
-          <div id="prq-clean" class="hidden text-xs text-emerald-700 font-semibold">✓ No compliance issues found.</div>
-        </div>
-      </div>
       <div id="post-review-archive" class="hidden mt-4 text-xs"></div>
     </div>
     <!-- Footer: actions -->
@@ -1190,17 +1189,29 @@ window.showComplianceModals = function showComplianceModals(force) {
         </span>
         <input id="post-review-disclosure-cb" type="checkbox" checked onchange="rqReviewToggleDisclosure(this.checked)" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-300 cursor-pointer">
       </label>
-      <div id="post-review-buttons" class="grid grid-cols-2 gap-2">
-        <button id="post-review-approve-btn" onclick="rqReviewApprove()" class="col-span-2 py-3 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600">Approve — let the assistant pick a time</button>
+      <!-- Two decisions, not four actions. This row was Approve · Regenerate · Reschedule · Reject,
+           which asked the reviewer to choose between a judgement (is this good?) and two edits — so
+           the one question the queue exists to ask was one of four things competing for the eye.
+           Rewriting and re-timing are still here, as quiet links: they are things you do BEFORE you
+           decide, not alternatives to deciding. -->
+      <div id="post-review-buttons" class="space-y-2">
+        <button id="post-review-approve-btn" onclick="rqReviewApprove()" class="w-full py-3 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600">Approve — let the assistant pick a time</button>
+        <button onclick="rqReviewToggle('reject')" class="w-full py-2.5 text-sm font-bold border border-red-300 text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer">Reject</button>
         <!-- "Add or change image" and "Amend myself" are gone: the picture and the caption are both
-             edited by clicking them on the post itself. What is left here are the actions that act
-             on the whole post rather than on one part of it. -->
-        <button onclick="rqReviewToggle('changes')" class="col-span-2 py-2.5 text-xs font-bold border border-violet-300 text-violet-700 hover:bg-violet-50 rounded-lg transition cursor-pointer flex items-center justify-center gap-1.5">
-          <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
-          Regenerate
-        </button>
-        <button onclick="rqReviewToggle('reschedule')" class="py-2.5 text-xs font-bold border border-blue-300 text-blue-700 hover:bg-blue-50 rounded-lg transition cursor-pointer">Reschedule</button>
-        <button onclick="rqReviewToggle('reject')" class="py-2.5 text-xs font-bold border border-red-300 text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer">Reject</button>
+             edited by clicking them on the post itself. -->
+        <div class="flex items-center justify-center gap-2 pt-0.5 text-[11px] text-gray-400">
+          <button onclick="rqReviewToggle('changes')" class="font-semibold underline hover:text-violet-700 transition cursor-pointer">Ask for a rewrite</button>
+          <span>·</span>
+          <button onclick="rqReviewToggle('reschedule')" class="font-semibold underline hover:text-blue-700 transition cursor-pointer">Change the time</button>
+        </div>
+      </div>
+      <!-- What happens AFTER approving, said in the modal rather than in a toast that is gone before
+           it is read. Approving hands the post to the assistant — either to publish at the slot it
+           already proposed, or to pick one — and that is the thing the reviewer wants confirmed. -->
+      <div id="post-review-approved" class="hidden text-center space-y-2">
+        <p class="text-sm font-extrabold text-emerald-700">✓ Approved</p>
+        <p id="post-review-approved-msg" class="text-xs text-gray-600"></p>
+        <button onclick="_rqReviewRefresh()" class="w-full py-2.5 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition cursor-pointer">Done</button>
       </div>
     </div>
   </div>
@@ -5841,7 +5852,7 @@ function _rqBindTimeline() {
     host.addEventListener('pointercancel', end);
 }
 
-async function openPostReview(postId) {
+async function openPostReview(postId, opts = {}) {
     // Cards elsewhere in the Review Queue warm this cache as they render, but callers outside
     // it (e.g. the dashboard's "Requires your attention" list) can invoke this on a cold cache —
     // fall back to fetching the pending drafts once so the modal still has data to show. Running the
@@ -5850,15 +5861,23 @@ async function openPostReview(postId) {
     // posts too (see the `editable` list in _pceSyncForPost) — so opening one of those from a cold
     // cache found nothing and the click did NOTHING AT ALL, with no modal and no message. Ask for
     // the status the caller actually wants before giving up.
-    if (!_rqPostCache[postId]) {
+    // opts.refresh — the CACHE is warm but WRONG. Changing a post's platforms creates and deletes
+    // sibling rows, so both the cache and the sibling-membership map describe a group that no longer
+    // exists; without this the cache check below skipped the refetch entirely and the picker
+    // recomputed its chips from the stale group — "Platforms updated." next to a chip that never lit
+    // up. Refreshing asks for the anchor's OWN status, which is the status its new siblings are
+    // created in (set-post-platforms copies it), so one request rebuilds the whole group.
+    const refresh = !!opts.refresh;
+    if (refresh || !_rqPostCache[postId]) {
         // 'draft' first: a post just created by "Create Post" is in that status and nothing else
         // fetches it, so without this the editor would open on nothing the moment it was created.
-        for (const status of ['draft', 'pending_approval', 'scheduled', 'approved']) {
+        const known = refresh ? _rqPostCache[postId]?.status : null;
+        for (const status of (known ? [known] : ['draft', 'pending_approval', 'scheduled', 'approved'])) {
             try {
                 const res = await fetch(`/.netlify/functions/get-social-drafts?status=${status}`);
                 if (res.ok) rqGroupSocialDrafts((await res.json()).drafts || []);
             } catch { /* try the next status; the !post check below is the real handler */ }
-            if (_rqPostCache[postId]) break;
+            if (!refresh && _rqPostCache[postId]) break;
         }
     }
     const post = _rqPostCache[postId];
@@ -7119,8 +7138,10 @@ let _pceAiPoll = null;          // { timer, jobId, forPostId } while a draft is 
 function _pceSetAiMsg(text, kind) {
     const el = _pceEl('pce-ai-msg');
     if (!el) return;
-    el.textContent = text || 'Writes the caption and sources the picture.';
-    el.className = 'text-[10px] mt-1.5 '
+    // Empty when idle: this line sits under two buttons in the modal header now, where a permanent
+    // "Writes the caption and sources the picture." is a caption on a button that says so itself.
+    el.textContent = text || '';
+    el.className = 'text-[10px] text-right '
         + (kind === 'error' ? 'text-red-600 font-semibold' : kind === 'ok' ? 'text-emerald-700 font-semibold' : 'text-gray-400');
 }
 
@@ -7163,7 +7184,6 @@ async function _pceDraftWithAI() {
     const platforms = [...new Set(_rqReviewGroupIds.map(id => _rqPostCache[id]?.platform).filter(Boolean))];
     if (post.platform && !platforms.includes(post.platform)) platforms.push(post.platform);
 
-    const contextPrompt = (_pceEl('pce-ai-context')?.value || '').trim();
     const btn = _pceEl('pce-ai-go');
     const label = _pceEl('pce-ai-go-label');
     if (btn) btn.disabled = true;
@@ -7178,7 +7198,8 @@ async function _pceDraftWithAI() {
                 platform: platforms[0] || post.platform,
                 platforms,
                 triggerType: 'on_demand',
-                contextPrompt: contextPrompt || undefined,
+                // No contextPrompt: the idea box is gone. "What's it about" is a conversation, and
+                // it happens in chat, where the assistant can ask a question back.
             }),
         });
         const d = await res.json().catch(() => ({}));
@@ -7258,7 +7279,9 @@ async function _pceTogglePostPlatform(platformId) {
         // rather than patch, and reopen on whichever post survived (the one being edited may have
         // been the one just removed).
         _pcePlatformBusy = false;
-        await openPostReview(d.anchorId ?? postId);
+        // refresh: true is load-bearing. Reopening alone re-renders from the cache this call just
+        // invalidated, which is why the chips used to stay exactly as they were.
+        await openPostReview(d.anchorId ?? postId, { refresh: true });
         _pceSetPlatformMsg(
             d.locked?.length
                 ? `${d.locked.map(p => window.PlatformConstants.label(p)).join(', ')} already scheduled — not removed.`
@@ -8380,6 +8403,14 @@ function _pceSyncForPost(post) {
     const wrap = _pceEl('post-review-inspector');
     if (!wrap) return;
     const editable = !!post && ['pending_approval', 'draft', 'in_review', 'approved', 'scheduled'].includes(post.status);
+    // The header's Draft-with-AI pair. It used to hide with the left pane it lived in; now it is in
+    // the header it needs saying explicitly, or a published post would be offered a redraft.
+    // Both classes: the container is flex, and `hidden` alone loses to a display utility.
+    const aiActions = _pceEl('pce-ai-actions');
+    if (aiActions) {
+        aiActions.classList.toggle('hidden', !editable);
+        aiActions.classList.toggle('flex', editable);
+    }
     if (!editable) {
         wrap.classList.add('hidden');
         wrap.style.display = 'none';   // `hidden` loses to a display set inline elsewhere
@@ -8400,13 +8431,10 @@ function _pceSyncForPost(post) {
     _pceShowLeftPane(true);
     _pceRenderPlatformPicker();
     _pceRenderSlides();
-    // The AI prompt is about the post you were looking at, so it does not follow you to another one.
-    // Skipped while a draft is in flight for THIS post — that run owns the panel until it finishes.
-    if (!_pceAiPoll) {
-        const ctx = _pceEl('pce-ai-context');
-        if (ctx) ctx.value = '';
-        _pceSetAiMsg('');
-    }
+    // The drafting status line is about the post you were looking at, so it does not follow you to
+    // another one. Skipped while a draft is in flight for THIS post — that run owns the line until
+    // it finishes.
+    if (!_pceAiPoll) _pceSetAiMsg('');
     _pceRenderFormats();
     _pceApplyPanes();
     _pceSetStageWide(true);
@@ -8654,16 +8682,15 @@ function _rqReviewRenderActive() {
     })() : null;
     const approveBtn = document.getElementById('post-review-approve-btn');
     if (approveBtn) {
-        // "Approve" is the right word for a draft the ASSISTANT wrote — you are passing judgement on
-        // someone else's work. It is the wrong word for one you just wrote yourself in this editor
-        // (status 'draft', reached from Create Post), where the action is simply finishing it. Same
-        // endpoint, same effect; the label reflects whose work it is.
-        const mine = post.status === 'draft';
-        const verb = mine ? 'Schedule' : 'Approve';
-        const prefix = multi ? `${verb} all ${groupSize} platforms` : verb;
+        // One verb, "Approve", whichever of you wrote the draft. It used to read "Schedule" on your
+        // own drafts and "Approve" on the assistant's, which was true to who did the writing but
+        // made the same button in the same place ask two different-looking questions — and the thing
+        // being decided is the same either way: does this go out? What happens NEXT (the assistant
+        // schedules it) is now said on approval instead of predicted on the button.
+        const prefix = multi ? `Approve all ${groupSize} platforms` : 'Approve';
         approveBtn.textContent = whenNumeric
-            ? (multi ? `${prefix} & schedule ${whenNumeric}` : `${verb}${mine ? ' for ' : ' & Confirm Schedule '}${whenNumeric}`)
-            : (multi ? `${prefix} — let the assistant pick times` : `${verb} — let the assistant pick a time`);
+            ? `${prefix} — schedule ${whenNumeric}`
+            : `${prefix} — let the assistant pick ${multi ? 'times' : 'a time'}`;
     }
 
     // The "apply to all platforms" control is seeded by _pceFillCaption, which owns the caption
@@ -8813,7 +8840,7 @@ function rqReviewAddMedia() {
 function rqReviewToggle(which) {
     // 'amend' and 'media' were retired in Phase 2 — the caption and the picture are edited in the
     // inspector now. Guarded rather than assumed: this list outlived two of its own entries once.
-    ['changes', 'reject', 'reschedule'].forEach(k => document.getElementById('post-review-' + k)?.classList.add('hidden'));
+    ['changes', 'reject', 'reschedule', 'approved'].forEach(k => document.getElementById('post-review-' + k)?.classList.add('hidden'));
     const buttons = document.getElementById('post-review-buttons');
     if (which) {
         if (which === 'reschedule') {
@@ -8981,12 +9008,54 @@ async function _rqApproveTargets(targets, action, opts = {}) {
         if (r.handled) return;
         if (!r.ok) { alert(r.error || 'Failed to approve.'); return; }
     }
+    // Say what the assistant is going to do about it, in the modal, and let the user close it. A
+    // toast was the only confirmation before, so "approved" and "what happens next" were both gone
+    // in three seconds — on the one action in the queue that hands work to somebody else.
+    if (_rqShowApprovedPanel(targets, action)) return;
     if (window.showToast) {
         window.showToast(targets.length > 1
             ? `Approved across ${targets.length} platforms.`
             : (r0.confirmation || 'Approved.'));
     }
     _rqReviewRefresh();
+}
+
+/**
+ * Replace the footer's decision row with "✓ Approved — <assistant> will …".
+ *
+ * Returns false when the modal isn't the surface that approved (the queue's own card buttons call
+ * the same path), so that caller keeps its toast.
+ */
+function _rqShowApprovedPanel(targets, action) {
+    const modal = document.getElementById('post-review-modal');
+    const panel = document.getElementById('post-review-approved');
+    const msg = document.getElementById('post-review-approved-msg');
+    if (!modal || !panel || !msg || !modal.classList.contains('flex')) return false;
+
+    const post = targets[0] || {};
+    const who = post.assistantName || 'Your assistant';
+    const where = targets.length > 1 ? ` across all ${targets.length} platforms` : '';
+    const when = post.publishDate
+        ? new Date(post.publishDate).toLocaleString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })
+        : null;
+    msg.textContent = action === 'publish_now'
+        ? `${who} is publishing it now${where}.`
+        : (when
+            // The slot was already proposed and shown as "planned for …"; approving confirms it.
+            ? `${who} will schedule this for ${when}${where}.`
+            : `${who} will pick a time and schedule this for you${where}.`);
+
+    rqReviewToggle();                 // clear any open sub-panel first
+    document.getElementById('post-review-buttons')?.classList.add('hidden');
+    document.getElementById('post-review-connect')?.classList.add('hidden');
+    panel.classList.remove('hidden');
+    // The list behind the modal is now wrong (this post has left the pending queue), so refresh it
+    // WITHOUT closing — the user may dismiss this with the × rather than Done, and a stale card for
+    // a post they just approved is how you end up approving it twice.
+    rqRenderGroups(_rqCurrentStatus);
+    if (typeof refreshPendingBadge === 'function') { try { refreshPendingBadge(); } catch { /* ignore */ } }
+    if (typeof window.detailRqRefresh === 'function') { try { window.detailRqRefresh(); } catch { /* ignore */ } }
+    return true;
 }
 
 async function rqReviewPublishNow() {
@@ -9957,9 +10026,6 @@ function gpRejectPost() {
 const GP_VOICE_FIELDS = {
     'gen-post-context': { mic: 'gen-post-mic-btn', count: 'gen-post-ctx-count' },
     'gpw-caption':      { mic: 'gpw-mic-btn' },
-    // The editor's own "Draft with AI" box. Without an entry here the fallback would light up the
-    // OLD sheet's mic button — a recording indicator on a screen the user isn't looking at.
-    'pce-ai-context':   { mic: 'pce-ai-mic' },
     'post-review-caption': { mic: 'pce-caption-mic', after: () => _pceRefreshCaptionMeta() },
 };
 function gpStartVoice(targetId = 'gen-post-context') {
