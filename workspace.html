@@ -714,6 +714,25 @@ window.showComplianceModals = function showComplianceModals(force) {
               <input type="file" id="pce-slide-file" multiple class="hidden"
                 accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm"
                 onchange="_pceAddSlides(this.files); this.value='';">
+              <!-- Library picker for slides. Adding a slide used to mean uploading a file, so using a
+                   picture the workspace already had meant finding the original and uploading it a
+                   second time — a duplicate asset for the same image. Reads the same content-assets
+                   list the media panel's "Use my own" reads: one library, two entry points. Built by
+                   _pceRenderSlideLibrary; upload stays one click away in the footer. -->
+              <div id="pce-slide-library" class="hidden mt-1.5 rounded-lg border border-gray-200 p-1.5">
+                <div class="flex items-center justify-between mb-1">
+                  <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400">From your library</p>
+                  <button type="button" onclick="_pceCloseSlideLibrary()"
+                    class="text-[10px] text-gray-400 hover:text-gray-700 cursor-pointer">Close</button>
+                </div>
+                <div id="pce-slide-library-grid" class="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto"></div>
+                <div class="flex items-center justify-between gap-2 mt-1.5">
+                  <button type="button" onclick="document.getElementById('pce-slide-file').click()"
+                    class="text-[11px] font-semibold text-gray-500 hover:text-gray-800 underline cursor-pointer">Upload files instead</button>
+                  <button type="button" id="pce-slide-library-add" onclick="_pceAddSlidesFromLibrary()" disabled
+                    class="px-2.5 py-1 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-[11px] font-bold transition cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed">Add</button>
+                </div>
+              </div>
               <p id="pce-slides-msg" class="text-[10px] text-gray-400 mt-1"></p>
             </div>
 
@@ -5816,6 +5835,7 @@ async function openPostReview(postId) {
     // _rqReviewRenderActive: selecting a slide re-renders through that, and resetting there would
     // snap the canvas back to slide 1 the instant you clicked slide 3.
     _pceSlideIndex = 0;
+    _pceCloseSlideLibrary();   // a picker left open on the last post is not about this one
 
     _rqReviewRenderTabs();
     _rqReviewRenderActive();
@@ -6646,7 +6666,7 @@ function _pceRenderSlides() {
     // Offered when the FORMAT can hold more than one — or when the post already does, so a carousel
     // whose format was later changed can still be seen and fixed rather than silently truncated.
     const capable = !!post && !post.brandCard && ((fmt && fmt.max > 1) || slides.length > 1);
-    if (!capable) { wrap.classList.add('hidden'); strip.innerHTML = ''; return; }
+    if (!capable) { wrap.classList.add('hidden'); strip.innerHTML = ''; _pceCloseSlideLibrary(); return; }
     wrap.classList.remove('hidden');
 
     const max = fmt?.max || 20;
@@ -6679,8 +6699,8 @@ function _pceRenderSlides() {
     }).join('');
 
     const addTile = slides.length < max
-        ? `<button type="button" onclick="document.getElementById('pce-slide-file').click()" ${_pceSlidesBusy ? 'disabled' : ''}
-             title="Add slides — you can pick several at once"
+        ? `<button type="button" onclick="_pceOpenSlideLibrary()" ${_pceSlidesBusy ? 'disabled' : ''}
+             title="Add slides — from your library, or upload new ones"
              class="shrink-0 w-14 h-14 rounded-lg border-2 border-dashed border-gray-300 text-gray-400 hover:border-emerald-400 hover:text-emerald-600 transition cursor-pointer flex items-center justify-center text-lg ${_pceSlidesBusy ? 'opacity-50 cursor-not-allowed' : ''}">+</button>`
         : '';
     strip.innerHTML = tiles + addTile;
@@ -6691,6 +6711,11 @@ function _pceRenderSlides() {
     } else if (!_pceSlidesBusy) {
         _pceSetSlidesMsg(slides.length > 1 ? 'Reorder with the arrows. The canvas shows the selected slide.' : '');
     }
+
+    // An open library grid marks what is already a slide, so it has to be redrawn whenever the
+    // slide list changes — otherwise removing slide 2 leaves its library tile greyed out as though
+    // it were still attached.
+    if (!_pceEl('pce-slide-library')?.classList.contains('hidden')) _pceRenderSlideLibrary();
 }
 
 function _pceSelectSlide(i) {
@@ -6716,6 +6741,126 @@ async function _pceRemoveSlide(i) {
     ids.splice(i, 1);
     if (_pceSlideIndex >= ids.length) _pceSlideIndex = Math.max(0, ids.length - 1);
     await _pcePersistSlides(ids);
+}
+
+// ── Adding slides from the library ──────────────────────────────────────────────────────────────
+// Multi-select, because a carousel is built several slides at a time and the alternative is
+// re-opening the picker per slide. The ORDER of the clicks is the order they are appended — the
+// same rule the multi-file upload follows, so both entry points behave the same way.
+
+let _pceSlideLib = [];        // library assets as content-assets returned them
+let _pceSlidePick = [];       // chosen asset ids, in click order
+let _pceSlideLibBusy = false;
+
+function _pceCloseSlideLibrary() {
+    _pceSlidePick = [];
+    _pceSlideLibBusy = false;
+    _pceEl('pce-slide-library')?.classList.add('hidden');
+}
+
+/** The + tile toggles the picker: a second click on it closes what the first opened. */
+async function _pceOpenSlideLibrary() {
+    const panel = _pceEl('pce-slide-library');
+    const grid = _pceEl('pce-slide-library-grid');
+    if (!panel || !grid) return;
+    if (!panel.classList.contains('hidden')) { _pceCloseSlideLibrary(); return; }
+    _pceSlidePick = [];
+    _pceSlideLibBusy = false;
+    panel.classList.remove('hidden');
+    grid.innerHTML = '<p class="text-[11px] text-gray-400 py-3">Loading your media…</p>';
+    _pceRenderSlideLibraryFoot();
+    try {
+        // Re-fetched on every open rather than cached: a file uploaded through the footer's own
+        // upload button is in the library the moment it lands, and a stale list would hide it.
+        const res = await fetch('/.netlify/functions/content-assets');
+        const data = res.ok ? await res.json() : { assets: {} };
+        _pceSlideLib = Object.values(data.assets || {}).flat().filter(a =>
+            ['image', 'video'].includes(String(a.assetType || '').toLowerCase()) && !a.purgedAt);
+        _pceRenderSlideLibrary();
+    } catch {
+        grid.innerHTML = '<p class="text-[11px] text-red-600 py-3">Could not load your library.</p>';
+    }
+}
+
+function _pceRenderSlideLibrary() {
+    const grid = _pceEl('pce-slide-library-grid');
+    if (!grid) return;
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const used = new Set(_pceSlideIds(post));
+
+    if (!_pceSlideLib.length) {
+        grid.innerHTML = '<p class="text-[11px] text-gray-400 py-3">Nothing in your library yet — upload a file instead.</p>';
+        _pceRenderSlideLibraryFoot();
+        return;
+    }
+
+    grid.innerHTML = _pceSlideLib.map(a => {
+        const url = a.storageUrl || a.externalUrl || '';
+        const inPost = used.has(a.id);
+        const at = _pceSlidePick.indexOf(a.id);
+        const inner = String(a.assetType || '').toLowerCase() === 'video'
+            ? `<video src="${_rqEsc(url)}" muted playsinline preload="metadata" class="w-full h-full object-cover bg-black"></video>`
+            : `<img src="${_rqEsc(url)}" alt="" loading="lazy" class="w-full h-full object-cover">`;
+        // Something already on this post is shown but not selectable: set-post-slides de-dupes, so
+        // a click here would appear to do nothing at all.
+        return `<button type="button" ${inPost ? 'disabled' : `onclick="_pceToggleSlidePick(${a.id})"`}
+            title="${_rqEsc(a.name || 'Library item')}${inPost ? ' — already a slide' : ''}"
+            class="relative w-14 h-14 shrink-0 rounded-lg overflow-hidden border-2 bg-gray-100 transition ${
+                at >= 0 ? 'border-emerald-500' : 'border-transparent hover:border-emerald-400'
+            } ${inPost ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}">
+            ${inner}
+            ${at >= 0
+                ? `<span class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-emerald-500 text-white text-[9px] font-bold flex items-center justify-center">${at + 1}</span>`
+                : ''}
+          </button>`;
+    }).join('');
+    _pceRenderSlideLibraryFoot();
+}
+
+/** The Add button counts what is selected, so it says what pressing it will do. */
+function _pceRenderSlideLibraryFoot() {
+    const btn = _pceEl('pce-slide-library-add');
+    if (!btn) return;
+    const n = _pceSlidePick.length;
+    btn.disabled = !n || _pceSlideLibBusy;
+    btn.textContent = _pceSlideLibBusy ? 'Adding…' : (n ? `Add ${n} slide${n === 1 ? '' : 's'}` : 'Add');
+}
+
+function _pceToggleSlidePick(assetId) {
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const at = _pceSlidePick.indexOf(assetId);
+    if (at >= 0) {
+        _pceSlidePick.splice(at, 1);
+    } else {
+        // Refused at selection time, not at Add: the format's ceiling is easier to understand
+        // while you are still choosing than as a rejection of a batch you thought was fine.
+        const fmt = post ? _pceActiveFormat(post) : null;
+        const max = fmt?.max || 20;
+        const room = Math.max(0, max - _pceSlideIds(post).length);
+        if (_pceSlidePick.length >= room) {
+            _pceSetSlidesMsg(`Room for ${room} more slide${room === 1 ? '' : 's'} — ${max} is this format's limit.`, 'error');
+            return;
+        }
+        _pceSlidePick.push(assetId);
+    }
+    _pceRenderSlideLibrary();
+    _pceSetSlidesMsg(_pceSlidePick.length ? 'They are added in the order you pick them.' : '');
+}
+
+async function _pceAddSlidesFromLibrary() {
+    if (!_pceSlidePick.length || _pceSlideLibBusy) return;
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (!post) return;
+    const picked = _pceSlidePick.slice();
+    _pceSlideLibBusy = true;
+    _pceRenderSlideLibraryFoot();
+    await _pcePersistSlides(_pceSlideIds(post).concat(picked));
+    _pceSlideLibBusy = false;
+    // Close only if the save actually took. _pcePersistSlides reports its own failures and leaves
+    // the post untouched, so on failure the picker stays open with the selection intact to retry.
+    const now = new Set(_pceSlideIds(post));
+    if (picked.every(id => now.has(id))) _pceCloseSlideLibrary();
+    else _pceRenderSlideLibrary();
 }
 
 /** Upload one or more files and append them as slides, in the order they were chosen. */
@@ -6744,6 +6889,7 @@ async function _pceAddSlides(fileList) {
         }
         _pceSlidesBusy = false;
         await _pcePersistSlides(ids);
+        _pceCloseSlideLibrary();   // the picker's own upload button led here; its job is done
         // AFTER the save, or its own "Slides updated." would overwrite this and the dropped files
         // would vanish without a word — the user picked 5, got 2, and nothing said so.
         if (files.length > room) {
