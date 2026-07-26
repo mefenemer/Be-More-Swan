@@ -799,10 +799,21 @@ window.showComplianceModals = function showComplianceModals(force) {
                   <span>Ask Swan</span>
                 </button>
               </div>
-              <textarea id="post-review-caption" rows="6"
-                class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-600"></textarea>
+              <div class="relative">
+                <textarea id="post-review-caption" rows="6" maxlength="5000" oninput="_pceRefreshCaptionMeta()"
+                  class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 pr-9 focus:outline-none focus:ring-2 focus:ring-emerald-600"></textarea>
+                <button type="button" id="pce-caption-mic" onclick="gpStartVoice('post-review-caption')" title="Dictate the caption"
+                  class="absolute bottom-2 right-2 text-gray-400 hover:text-emerald-600 transition cursor-pointer">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15a3 3 0 003-3V6a3 3 0 00-6 0v6a3 3 0 003 3zM19 11a7 7 0 01-14 0M12 18v3"/></svg>
+                </button>
+              </div>
+              <!-- Live length against EVERY platform this post goes to. The limits differ by an order
+                   of magnitude (X 280, Facebook 63,206), so one caption written for a cross-post can
+                   be fine on five platforms and rejected by the sixth — which is not something a
+                   static "280 chars" note in the left pane can tell you while you type. -->
+              <div id="pce-caption-meta" class="hidden flex flex-wrap gap-1 mt-1.5"></div>
               <label for="post-review-hashtags" class="block text-xs font-bold text-gray-600 mb-1 mt-3">Hashtags</label>
-              <input id="post-review-hashtags" type="text"
+              <input id="post-review-hashtags" type="text" oninput="_pceRefreshCaptionMeta()"
                 class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-600">
               <label id="post-review-amend-all" class="hidden items-center gap-2 text-xs font-semibold text-gray-600 cursor-pointer select-none mt-3">
                 <input id="post-review-amend-all-cb" type="checkbox" checked class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600">
@@ -1103,6 +1114,17 @@ window.showComplianceModals = function showComplianceModals(force) {
         <div class="flex gap-2">
           <button onclick="rqReviewReschedule()" class="flex-1 py-2.5 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer">Reschedule</button>
           <button onclick="rqReviewToggle()" class="py-2.5 px-4 text-xs font-bold text-gray-500 hover:bg-gray-50 rounded-lg cursor-pointer">Cancel</button>
+        </div>
+        <!-- "Post now" belonged to the old Create Post sheet, and vanished when that sheet stopped
+             being reachable. It only survived in the editor as a fallback offered after a scheduled
+             time had already passed — so "publish this immediately" became something you could only
+             reach by being late. It lives here because this panel is already the answer to "when
+             does this go out". -->
+        <div class="pt-2.5 border-t border-gray-100">
+          <button onclick="rqReviewPublishNow()"
+            class="w-full py-2.5 text-xs font-bold border border-emerald-300 text-emerald-700 hover:bg-emerald-50 rounded-lg transition cursor-pointer">
+            Or post it now
+          </button>
         </div>
       </div>
       <!-- Per-platform connect notice — approving commits the post to the publisher, which needs a
@@ -6351,6 +6373,49 @@ function _pceFillCaption(post) {
     }
     const msg = _pceEl('post-review-amend-msg');
     if (msg) { msg.textContent = ''; msg.className = 'text-xs font-semibold text-gray-500'; }
+    _pceRefreshCaptionMeta();
+}
+
+/**
+ * Live caption length against every platform this post goes out on, plus any missing mandatory media.
+ *
+ * The left pane already names the current format's limit, but statically and for one platform. These
+ * are the two things that actually stop a post publishing, they differ per platform, and on a
+ * cross-post you are writing ONE caption against as many as six different limits at once — so they
+ * belong next to the words, updating as you type.
+ */
+function _pceRefreshCaptionMeta() {
+    const host = _pceEl('pce-caption-meta');
+    if (!host) return;
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (!post) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+
+    const platforms = [...new Set(_rqReviewGroupIds.map(id => _rqPostCache[id]?.platform).filter(Boolean))];
+    if (post.platform && !platforms.includes(post.platform)) platforms.push(post.platform);
+    if (!platforms.length) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+
+    const caption = _pceEl('post-review-caption')?.value || '';
+    const hashtags = _pceEl('post-review-hashtags')?.value || '';
+    // Matches how the publishers join them, so the number counts what is actually sent.
+    const len = (caption + (hashtags ? '\n\n' + hashtags : '')).length;
+    const hasMedia = !!post.thumbnailUrl;
+    const hasVideo = _pcePostIsVideo(post);
+
+    host.innerHTML = platforms.map(p => {
+        const spec = window.PlatformConstants.get(p);
+        if (!spec) return '';
+        let cls = 'border-gray-200 text-gray-500 bg-gray-50';
+        let detail = `${len}/${spec.charLimit}`;
+        if (len > spec.charLimit) cls = 'border-red-300 text-red-700 bg-red-50 font-bold';
+        else if (len > spec.charLimit * 0.9) cls = 'border-amber-300 text-amber-700 bg-amber-50';
+        else if (spec.mediaMandatory && spec.mediaKind === 'video' && !hasVideo) {
+            cls = 'border-red-300 text-red-700 bg-red-50 font-bold'; detail = 'needs a video';
+        } else if (spec.mediaMandatory && !hasMedia) {
+            cls = 'border-amber-300 text-amber-700 bg-amber-50'; detail = 'needs an image';
+        }
+        return `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded border ${cls}">${_rqEsc(spec.label)} · ${detail}</span>`;
+    }).join('');
+    host.classList.remove('hidden');
 }
 
 // Mount the editing canvas ONTO the platform mock-up: the card image in the mock-up becomes the
@@ -8321,6 +8386,35 @@ async function rqReviewApprove() {
     await _rqApproveTargets(targets, 'approve');
 }
 
+/**
+ * Publish immediately, from the reschedule panel.
+ *
+ * Shares every gate with rqReviewApprove — connections, mandatory media, and the compliance/past-
+ * schedule handling inside _rqApproveTargets — because "post now" skips the WAIT, not the CHECKS.
+ * It is also the least reversible action in the editor, so it confirms first: an approve that lands
+ * on the wrong day can be rescheduled, a post that is already live cannot be unpublished.
+ */
+async function rqReviewPublishNow() {
+    const targets = _rqReviewTargets();
+    if (!targets.length) return;
+    for (const pl of [...new Set(targets.map(t => t.platform))]) {
+        if (!(await rqEnsurePlatformConnection(pl))) { rqReviewSetConnectGate(); return; }
+    }
+    const missing = targets.filter(t => {
+        const spec = window.PlatformConstants.get(t.platform);
+        return spec?.mediaMandatory && !t.thumbnailUrl;
+    });
+    if (missing.length) {
+        const which = [...new Set(missing.map(t => window.PlatformConstants.label(t.platform)))].join(' and ');
+        const msg = `${which} needs media before it can be published. Add some to the picture layer first.`;
+        if (window.showToast) window.showToast(msg, { icon: '🖼️', duration: 5000 }); else alert(msg);
+        return;
+    }
+    const where = [...new Set(targets.map(t => window.PlatformConstants.label(t.platform)))].join(', ');
+    if (!confirm(`Publish to ${where} right now?\n\nThis goes out immediately and can't be unpublished from here.`)) return;
+    await _rqApproveTargets(targets, 'publish_now');
+}
+
 // POST one approve/publish action. Returns a small result object rather than throwing so the
 // orchestrator can decide how to handle each outcome across the group.
 async function _rqApproveOne(post, action, opts = {}) {
@@ -9357,6 +9451,7 @@ const GP_VOICE_FIELDS = {
     // The editor's own "Draft with AI" box. Without an entry here the fallback would light up the
     // OLD sheet's mic button — a recording indicator on a screen the user isn't looking at.
     'pce-ai-context':   { mic: 'pce-ai-mic' },
+    'post-review-caption': { mic: 'pce-caption-mic', after: () => _pceRefreshCaptionMeta() },
 };
 function gpStartVoice(targetId = 'gen-post-context') {
     const cfg = GP_VOICE_FIELDS[targetId] || { mic: 'gen-post-mic-btn' };
@@ -9378,6 +9473,11 @@ function gpStartVoice(targetId = 'gen-post-context') {
             field.value = ((field.value ? field.value + ' ' : '') + chunk).slice(0, max);
             const counter = cfg.count && document.getElementById(cfg.count);
             if (counter) counter.textContent = field.value.length;
+            // Setting .value does NOT fire `input`, so anything driven by typing has to be told.
+            // Without this, dictating a caption left the per-platform length chips showing the
+            // length from before you spoke — silently wrong, and wrong in the direction that lets an
+            // over-limit post through.
+            if (cfg.after) cfg.after();
         },
         onEnd: clearMic,
         onError: clearMic,
