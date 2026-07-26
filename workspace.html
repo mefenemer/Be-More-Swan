@@ -970,6 +970,50 @@ window.showComplianceModals = function showComplianceModals(force) {
                 <p id="pce-link-warn" class="hidden mt-1.5 text-[11px] font-semibold text-amber-700"></p>
               </div>
 
+              <!-- ── "Write with <assistant>" — the rail's second step. ────────────────────────
+                   Hidden here and only ever shown by the rail: this is its home, not its place.
+                   (Keeping it in the DOM rather than building it in _railRender means the buttons
+                   are ordinary markup with ordinary onclicks, like everything else in this modal.)
+
+                   Every action routes through the SAME endpoint the free-text "Ask for a rewrite"
+                   box already uses (request-post-changes) with the instruction pre-written. That is
+                   the honest version of a "Change tone" button: no new backend, no new prompt path,
+                   and the discrete actions are simply the sentences people were typing anyway. The
+                   free-text box is mounted below them for anything the five do not cover. -->
+              <div id="pce-write-block" class="hidden">
+                <div class="space-y-1.5">
+                  <button type="button" onclick="_pceAskSwanCaption()"
+                    class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-left hover:bg-emerald-100 transition cursor-pointer">
+                    <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-3.5 h-3.5 object-contain shrink-0">
+                    <span class="text-[11px] font-bold text-emerald-800">Draft from an idea</span>
+                  </button>
+                  <button type="button" onclick="_railRewrite('Rewrite the caption in a warmer, more conversational tone. Keep the same message and length.')"
+                    class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-gray-200 text-left hover:bg-gray-50 transition cursor-pointer">
+                    <svg class="w-3 h-3 text-emerald-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M4 7h16M4 12h10M4 17h7"/></svg>
+                    <span class="text-[11px] font-semibold text-gray-700">Change the tone</span>
+                  </button>
+                  <button type="button" onclick="_railRewrite('Shorten the caption so the whole post — caption, hashtags and link — fits inside 280 characters for X.')"
+                    class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-gray-200 text-left hover:bg-gray-50 transition cursor-pointer">
+                    <svg class="w-3 h-3 text-emerald-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6 4v6a6 6 0 0012 0V4M4 20h16"/></svg>
+                    <span class="text-[11px] font-semibold text-gray-700">Shorten for X</span>
+                  </button>
+                  <button type="button" onclick="_railRewrite('Replace the hashtags with a better set for this post and these platforms. Leave the caption alone.')"
+                    class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-gray-200 text-left hover:bg-gray-50 transition cursor-pointer">
+                    <svg class="w-3 h-3 text-emerald-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6 4L4.5 20M13 4l-1.5 16M3 9h17M2.5 15h17"/></svg>
+                    <span class="text-[11px] font-semibold text-gray-700">Suggest hashtags</span>
+                  </button>
+                  <button type="button" onclick="_railRewrite('Fix any grammar, spelling and flow problems. Do not change the meaning, the tone or the length.')"
+                    class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-gray-200 text-left hover:bg-gray-50 transition cursor-pointer">
+                    <svg class="w-3 h-3 text-emerald-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 11l3 3 8-8M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h9"/></svg>
+                    <span class="text-[11px] font-semibold text-gray-700">Fix grammar &amp; flow</span>
+                  </button>
+                </div>
+                <p class="text-[10px] text-gray-400 mt-2 leading-relaxed">
+                  Whatever comes back lands in the post itself, where you can edit it.
+                </p>
+                <div id="pce-write-freetext" class="mt-2.5 pt-2.5 border-t border-gray-100"></div>
+              </div>
+
               <label id="post-review-amend-all" class="hidden items-center gap-2 text-xs font-semibold text-gray-600 cursor-pointer select-none mt-3">
                 <input id="post-review-amend-all-cb" type="checkbox" checked class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600">
                 <span id="post-review-amend-all-label">Apply to all platforms</span>
@@ -1122,7 +1166,7 @@ window.showComplianceModals = function showComplianceModals(force) {
             <!-- ── Text on the image/video. Draggable, styled text boxes baked into the published media
                  on approval (browser bake for a photo, Remotion render for video). Boxes render live on
                  the canvas; detailed styling opens the editor; on video, each box is also timed. ── -->
-            <div class="pce-insp hidden" data-insp="overlays">
+            <div id="pce-insp-overlays" class="pce-insp hidden" data-insp="overlays">
               <p id="insp-overlay-title" class="text-xs font-bold text-gray-600 mb-1">Text on the image</p>
               <p id="insp-overlay-summary" class="text-[11px] text-gray-400 mb-3">No text on the image yet.</p>
 
@@ -1142,7 +1186,7 @@ window.showComplianceModals = function showComplianceModals(force) {
                  start/end is the whole post, one with bounds plays only in that window. Recorded in
                  the browser or uploaded, stored in R2, and mixed in by the Remotion render on
                  approval — the browser never mixes audio into a file. ── -->
-            <div class="pce-insp hidden" data-insp="audio">
+            <div id="pce-insp-audio" class="pce-insp hidden" data-insp="audio">
               <p class="text-xs font-bold text-gray-600 mb-1">Sound</p>
               <p id="insp-audio-summary" class="text-[11px] text-gray-400 mb-3">No sound on this post yet.</p>
 
@@ -6881,6 +6925,10 @@ function _pceSelect(key, repaintHandles = true) {
     if (_pceLayers.length && !_pceLayers.includes(key)) return;
     _pceSelection = key;
     for (const sec of document.querySelectorAll('.pce-insp')) {
+        // A section the rail has borrowed is shown by the STEP, not by selection. Without this
+        // guard, selecting the picture would add `hidden` to the overlays block while it is sitting
+        // in an open "Text & sound" step — blanking the panel the user is looking at.
+        if (sec.closest('#pce-rail')) continue;
         sec.classList.toggle('hidden', sec.dataset.insp !== key);
     }
     const label = _PCE_INSP_TITLES[key];
@@ -6926,14 +6974,41 @@ let _railOpen = null;                 // key of the one open step, or null
 const _railHomes = new Map();         // node id → where it came from, so it can go back
 
 // Steps in the order the work happens. `mount` is the id of the block this step borrows.
+// `%A` is replaced with the user's own assistant name — this is "Write with Mabel", not "Write
+// with AI". `also` names a second block mounted under the first (text and sound are one step).
 const _RAIL = [
     { key: 'setup', title: 'Platforms & format',    mount: 'pce-setup-body' },
+    { key: 'write', title: 'Write with %A',         mount: 'pce-write-block' },
     { key: 'link',  title: 'Link & call to action', mount: 'pce-link-block' },
     { key: 'media', title: 'Media',                 mount: 'gp-ai-media' },
+    { key: 'text',  title: 'Text & sound',          mount: 'pce-insp-overlays', also: 'pce-insp-audio' },
+    { key: 'check', title: 'Check & improve',       mount: 'post-review-quality' },
     { key: 'when',  title: 'Schedule & publish',    mount: 'post-review-reschedule' },
 ];
 
+/** This post's assistant, by the name its owner gave it. Falls back rather than saying "AI". */
+function _railAssistant(post) {
+    return (post && post.assistantName) || 'your assistant';
+}
+
+/**
+ * Run one of the step's pre-written rewrite instructions.
+ *
+ * Fills the existing feedback box and presses the existing button, so this shares every bit of
+ * rqReviewRequestChanges' behaviour — the in-flight state, the "revising" canvas, the error
+ * handling — instead of a second, subtly different copy of it.
+ */
+function _railRewrite(instruction) {
+    const box = document.getElementById('post-review-feedback');
+    if (!box) return;
+    box.value = instruction;
+    rqReviewRequestChanges();
+}
+
 const _RAIL_ICON = {
+    write: '<path stroke-linecap="round" stroke-linejoin="round" d="M5 3v4M3 5h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5L13 3z"/>',
+    text:  '<path stroke-linecap="round" stroke-linejoin="round" d="M5 5h14M12 5v14"/>',
+    check: '<path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>',
     setup: '<path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>',
     link:  '<path stroke-linecap="round" stroke-linejoin="round" d="M13.8 10.2a4 4 0 010 5.7l-3 3a4 4 0 01-5.6-5.7l1.5-1.5m9.6.7a4 4 0 010-5.7l3-3a4 4 0 015.7 5.7l-1.5 1.5"/>',
     media: '<path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.6-4.6a2 2 0 012.8 0L16 16m-2-2 1.6-1.6a2 2 0 012.8 0L20 14M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>',
@@ -6961,6 +7036,29 @@ function _railSub(key, post) {
             if (post.renderStatus === 'pending' || post.renderStatus === 'rendering') return 'Rendering text…';
             if (post.renderStatus === 'failed') return 'Render failed';
             return _pcePostIsVideo(post) ? 'Video · ready' : 'Photo · ready';
+        }
+        case 'write': {
+            const n = (post && post.caption ? String(post.caption) : '').trim().length;
+            return n ? `${n} character${n === 1 ? '' : 's'} written` : 'Nothing written yet';
+        }
+        case 'text': {
+            // One step, two kinds of thing, so the subtitle counts both — and says which of them
+            // are timed, because that is the part you cannot see from the canvas.
+            const boxes = _pceOverlayCount(post);
+            const clips = _pceAudioClips(post).length;
+            if (!boxes && !clips) return 'Nothing on the media';
+            const parts = [];
+            if (boxes) parts.push(`${boxes} box${boxes === 1 ? '' : 'es'}`);
+            if (clips) parts.push(`${clips} clip${clips === 1 ? '' : 's'}`);
+            return parts.join(' · ');
+        }
+        case 'check': {
+            // Mirrors what the quality panel is currently showing, rather than re-running it: the
+            // review is a paid call and a subtitle must never trigger one.
+            const wrap = document.getElementById('prq-warnings');
+            const n = wrap ? wrap.children.length : 0;
+            if (document.getElementById('prq-loading') && !document.getElementById('prq-loading').classList.contains('hidden')) return 'Checking…';
+            return n ? `${n} thing${n === 1 ? '' : 's'} to look at` : 'Nothing flagged';
         }
         case 'when': {
             if (!post || !post.publishDate) return 'Not scheduled';
@@ -7069,7 +7167,7 @@ function _railRender() {
             <span class="w-[18px] h-[18px] shrink-0 rounded-md flex items-center justify-center text-[10px] font-bold ${
               on ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-500'}">${i + 1}</span>
             <span class="min-w-0 flex-1">
-              <span class="block text-xs font-bold truncate ${on ? 'text-emerald-800' : 'text-gray-700'}">${_rqEsc(s.title)}</span>
+              <span class="block text-xs font-bold truncate ${on ? 'text-emerald-800' : 'text-gray-700'}">${_rqEsc(s.title.replace('%A', _railAssistant(post)))}</span>
               <span class="block text-[10px] truncate ${on ? 'text-emerald-600' : 'text-gray-400'}">${_rqEsc(_railSub(s.key, post))}</span>
             </span>
             <svg class="w-3 h-3 shrink-0 ${on ? 'text-emerald-600 rotate-90' : 'text-gray-300'} transition-transform" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
@@ -7088,6 +7186,19 @@ function _railRender() {
             // leave _railHomes recording a home the converged layout no longer has.
             if (step.mount === 'gp-ai-media') { _gpCurrentPostId = _rqReviewPostId; _gpAiMediaPrompt = ''; }
             _railMount(step.mount, panel);
+            if (step.also) _railMount(step.also, panel);
+            // Both borrowed blocks are populated by the old inspector's refresh functions, which run
+            // off the current selection. Ask for the right one so an open step is never stale.
+            if (step.key === 'text') {
+                _pceRefreshOverlayInspector();
+                _pceRefreshAudioInspector();
+            }
+            // The rewrite box lives in the footer; the step borrows it under the five quick actions
+            // so "something else" is one place, not another panel.
+            if (step.key === 'write') {
+                const slot = document.getElementById('pce-write-freetext');
+                if (slot) _railMount('post-review-changes', slot);
+            }
         }
     }
 }
