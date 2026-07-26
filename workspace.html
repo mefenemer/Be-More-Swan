@@ -697,6 +697,12 @@ window.showComplianceModals = function showComplianceModals(force) {
              belong to; the right pane keeps only what a layer LOOKS like. -->
         <div class="flex-1 min-w-0 w-full">
           <div id="post-review-body"></div>
+          <!-- The canvas's own picker — opened by the empty media frame and nothing else. Multiple
+               and both kinds, because "add media" on a blank post means one image, several images,
+               or a video, and which of those it is decides the post's format (_pceCanvasAttachFiles). -->
+          <input type="file" id="pce-canvas-file" multiple class="hidden"
+            accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm"
+            onchange="_pceCanvasAttachFiles(this.files); this.value='';">
 
           <div id="pce-stage-strip" class="hidden mt-3 max-w-md mx-auto rounded-xl border border-gray-200 bg-white overflow-hidden">
             <!-- ── Slides ────────────────────────────────────────────────────────────────────
@@ -740,8 +746,11 @@ window.showComplianceModals = function showComplianceModals(force) {
                  it was just invisible, so the only way to find a layer was to guess where to click
                  on the canvas, and a layer that was absent looked identical to one that was there
                  but unresponsive. (That is exactly how "Add text on the image" came to silently do
-                 nothing on video posts for an hour.) Built by _pceRenderLayers from _pceLayers. -->
-            <div class="px-2.5 py-2">
+                 nothing on video posts for an hour.) Built by _pceRenderLayers from _pceLayers.
+                 Hidden while the post is still empty: with no media there are exactly two rows,
+                 both of which say "nothing here yet" — an index of absences, beside a canvas that
+                 now offers both things directly. -->
+            <div id="pce-layers-block" class="px-2.5 py-2">
               <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Layers</p>
               <div id="pce-layer-list" class="space-y-0.5"></div>
             </div>
@@ -5442,11 +5451,30 @@ function renderPlatformMockup(post) {
     const _slide = _slides.length > 1 ? _slides[Math.min(_pceSlideIndex, _slides.length - 1)] : null;
     const _mediaUrl = _slide ? _slide.url : post.thumbnailUrl;
     const _slideIsVideo = _slide ? _slide.kind === 'video' : isVideo;
+    // Can this post still be changed? Both empty states below are affordances, and offering to
+    // attach media to a published post would be offering something the server refuses.
+    const editableNow = ['pending_approval', 'draft', 'in_review', 'approved', 'scheduled'].includes(post.status);
+    // "Nothing attached" is the state every new post OPENS in, so the empty frame is the primary way
+    // media gets onto a post — not a label describing its absence next to a black rectangle. It fills
+    // the format's frame (the ratio is still what you see) and takes one file or several; several
+    // become a carousel. See _pceCanvasAttachFiles.
+    const emptyMedia = editableNow
+        // h-full AND py-16: h-full fills the format's frame, and the padding is what keeps it a
+        // media-sized box when the frame has no height of its own — the ratio classes are
+        // arbitrary-value utilities (aspect-[4/5]), so a style.css built before this format existed
+        // simply drops them and the frame collapses to its content.
+        ? `<button type="button" data-media-empty onclick="_pceCanvasPickFiles()"
+             class="w-full h-full py-16 px-4 flex flex-col items-center justify-center gap-1.5 text-center border-2 border-dashed border-gray-300 bg-gray-50 text-gray-400 hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-700 transition cursor-pointer">
+             <svg class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.6-4.6a2 2 0 012.8 0L16 16m-2-2 1.6-1.6a2 2 0 012.8 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+             <span class="text-sm font-bold">Add a photo or a video</span>
+             <span class="text-[11px]">Click to choose files — pick several for a carousel</span>
+           </button>`
+        : `<div class="w-full py-16 bg-gray-100 flex items-center justify-center text-gray-400 text-sm">No media attached</div>`;
     const mediaInner = _mediaUrl
         ? (_slideIsVideo
             ? `<video data-media-video src="${_mediaUrl}" muted controls playsinline class="${mediaClass} bg-black"></video>`
             : `<img data-media-img alt="" src="${_mediaUrl}" class="${mediaClass}">`)
-        : `<div class="w-full py-16 bg-gray-100 flex items-center justify-center text-gray-400 text-sm">No media attached</div>`;
+        : emptyMedia;
     // Click-through layer: clicking bare image still selects the picture; each overlay box opts back
     // into pointer events. Present whenever a post could carry overlays so _rqRenderCanvasOverlays
     // always has somewhere to paint (harmlessly empty when there are none).
@@ -5455,7 +5483,11 @@ function renderPlatformMockup(post) {
         : '';
     // The ratio lives on the HOST, not the media, so the overlay layer (inset-0 on this host) shares
     // exactly the same box as the media it sits over — the whole basis of the overlay geometry.
-    const media = `<div class="relative ${frameClass} ${frameClass ? 'bg-black overflow-hidden' : ''}" data-media-host>${mediaInner}${overlayLayer}</div>`;
+    // Letterboxing is black because that is what a platform does with a clip that doesn't fill the
+    // frame. With NO media there is nothing to letterbox — the black was just a hole in the page —
+    // so the empty frame carries the dropzone's own background instead.
+    const frameBg = frameClass ? (_mediaUrl ? 'bg-black overflow-hidden' : 'overflow-hidden') : '';
+    const media = `<div class="relative ${frameClass} ${frameBg}" data-media-host>${mediaInner}${overlayLayer}</div>`;
 
     const caption  = post.caption ? `<p class="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">${_rqEsc(post.caption)}</p>` : '';
     const hashtags = post.hashtags ? `<p class="text-sm text-blue-600 mt-1.5">${_rqEsc(post.hashtags)}</p>` : '';
@@ -5482,9 +5514,16 @@ function renderPlatformMockup(post) {
       </div>`;
 
     // The caption block is a selectable region too, so clicking the words you want to change is
-    // how you get to the words — not a drawer in the footer.
+    // how you get to the words — not a drawer in the footer. Clicking it opens a textarea IN PLACE
+    // (_pceOpenInlineCaption), and an empty one says so rather than rendering as nothing at all:
+    // a post with no words showed a blank strip, which is indistinguishable from no caption field.
+    const captionEmpty = !caption && !hashtags && !link;
     const captionBlock = (cls) =>
-        `<div class="${cls}" data-caption-host>${caption}${hashtags}${link}</div>`;
+        `<div class="${cls}${editableNow ? ' cursor-text hover:bg-gray-50 transition' : ''}" data-caption-host
+           ${editableNow ? 'title="Click to write the caption"' : ''}>${
+            captionEmpty
+                ? (editableNow ? '<p class="text-sm text-gray-400">Write your caption…</p>' : '')
+                : `${caption}${hashtags}${link}`}</div>`;
 
     const body = meta.mediaFirst
         ? `${header}${media}${captionBlock('px-3.5 py-3')}${footer}`
@@ -6499,8 +6538,145 @@ function _pceMountCanvas() {
 // every re-render — the mock-up inside it does not.
 function _pceCanvasClick(ev) {
     if (ev.target.closest('.pce-handle')) return;   // handles select themselves on pointerdown
-    if (ev.target.closest('[data-caption-host]')) { _pceSelect('caption'); return; }
+    if (ev.target.closest('a')) return;             // a link in the caption is still a link
+    if (ev.target.closest('[data-caption-host]')) {
+        _pceSelect('caption');
+        // Clicks INSIDE the open editor are ordinary text clicks — reopening would move the caret.
+        if (!ev.target.closest('[data-caption-edit]')) _pceOpenInlineCaption();
+        return;
+    }
     if (ev.target.closest('[data-media-host]')) { _pceSelect('media'); }
+}
+
+// ── Typing on the canvas ────────────────────────────────────────────────────────────────────────
+// The inspector has a caption textarea and this makes a second one, but NOT a second write path:
+// both commit through rqReviewSaveAmend. The reason it exists is that the inspector is a pane you
+// can collapse (and is collapsed by default on a narrow window), and "open the right-hand panel
+// first" is not an answer to "where do I type my post?".
+function _pceOpenInlineCaption() {
+    const host = document.querySelector('#post-review-body [data-caption-host]');
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (!host || !post || host.querySelector('[data-caption-edit]')) return;
+    if (!['pending_approval', 'draft', 'in_review', 'approved', 'scheduled'].includes(post.status)) return;
+
+    const ta = document.createElement('textarea');
+    ta.dataset.captionEdit = '1';
+    ta.maxLength = 5000;
+    ta.value = post.caption || '';
+    ta.placeholder = 'Write your caption…';
+    ta.rows = Math.min(12, Math.max(3, String(post.caption || '').split('\n').length + 1));
+    ta.className = 'w-full text-sm border border-emerald-300 rounded-lg px-2.5 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-emerald-600';
+
+    const hint = document.createElement('p');
+    hint.className = 'text-[10px] text-gray-400 mt-1';
+    hint.textContent = 'Click away to save · Esc to cancel';
+
+    host.innerHTML = '';
+    host.appendChild(ta);
+    host.appendChild(hint);
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+
+    // The per-platform length badges hang off the inspector's copy of this field, and they are what
+    // says "too long for X" — so it tracks what is typed here, character for character.
+    ta.addEventListener('input', () => {
+        const box = _pceEl('post-review-caption');
+        if (box) box.value = ta.value;
+        _pceRefreshCaptionMeta();
+    });
+    ta.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape') {
+            ev.stopPropagation();
+            ta.dataset.done = '1';
+            _rqReviewRenderActive();     // discard: re-render restores the post as it is stored
+        } else if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) {
+            ev.preventDefault();
+            _pceCommitInlineCaption(ta);
+        }
+    });
+    // Clicking anywhere else is the ordinary way out of a text box, so it saves rather than losing
+    // what was typed.
+    ta.addEventListener('blur', () => _pceCommitInlineCaption(ta));
+}
+
+async function _pceCommitInlineCaption(ta) {
+    if (ta.dataset.done) return;         // Esc closed it, or a commit is already running
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (!post) return;
+    ta.dataset.done = '1';
+    if (ta.value === (post.caption || '')) { _rqReviewRenderActive(); return; }
+    const box = _pceEl('post-review-caption');
+    if (box) box.value = ta.value;
+    // The inspector's own save: it PATCHes every platform in the group when "apply to all" is on,
+    // updates the cache and re-renders. All three are needed here, and none of them should have a
+    // second implementation.
+    await rqReviewSaveAmend();
+    // The panel's "Caption saved." confirmation may be behind a collapsed pane, and a save with no
+    // acknowledgement anywhere is indistinguishable from one that failed.
+    window.showToast?.('Caption saved.');
+}
+
+// ── Attaching media from the canvas ─────────────────────────────────────────────────────────────
+function _pceCanvasPickFiles() { _pceEl('pce-canvas-file')?.click(); }
+
+/**
+ * Attach whatever the user picked, straight from the empty frame.
+ *
+ * One file is the ordinary single-media path. Several is a carousel — and since a Feed post cannot
+ * hold several, the FORMAT moves to fit the content rather than four of the five pictures being
+ * dropped without a word. Where the platform has no multi-item format at all (LinkedIn, X, YouTube),
+ * that is said out loud instead.
+ */
+async function _pceCanvasAttachFiles(fileList) {
+    const files = Array.from(fileList || []);
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (!files.length || !post) return;
+    if (files.length === 1) return _pceCanvasAttachOne(files[0]);
+
+    const fmt = _pceActiveFormat(post);
+    if (!fmt || fmt.max < files.length) {
+        // The narrowest live format that fits: on Instagram that is the Carousel.
+        const target = _pceFormatsFor(post.platform)
+            .filter(f => f.a === 'live' && f.max >= files.length)
+            .sort((a, b) => a.max - b.max)[0];
+        if (!target) {
+            window.showToast?.(`${fmt ? fmt.n : 'This format'} takes one item — attaching the first of your ${files.length}.`);
+            return _pceCanvasAttachOne(files[0]);
+        }
+        await _pceChooseFormat(target.k);
+        // _pceChooseFormat is optimistic and puts the format back if the save failed, so ask the post
+        // what it is now rather than assuming the switch stuck.
+        const now = _pceActiveFormat(post);
+        if (!now || now.max < files.length) {
+            window.showToast?.('Couldn’t switch format, so only the first file was attached.');
+            return _pceCanvasAttachOne(files[0]);
+        }
+        window.showToast?.(`Switched to ${target.n} to fit ${files.length} items.`);
+    }
+    // The slides adder already uploads in the order they were picked, respects the ceiling and saves
+    // through set-post-slides — the same thing this needs.
+    return _pceAddSlides(files);
+}
+
+/**
+ * One file: the shared media panel's own attach path (upload → attach-draft-media → gpAiShowThumb).
+ * Reused rather than reimplemented because gpAiShowThumb is where the new media is mirrored into
+ * this modal's cache, the "media deleted" flag is cleared, and the previous picture's now-orphaned
+ * text overlays are dropped. A second attach path would have to remember all three.
+ */
+async function _pceCanvasAttachOne(file) {
+    const postId = _rqReviewPostId;
+    if (!file || postId == null) return;
+    _gpCurrentPostId = postId;   // the media panel may never have been opened for this post
+    if (typeof gpAiSetMediaType === 'function') {
+        gpAiSetMediaType(file.type.startsWith('video/') ? 'video' : 'image');
+    }
+    try {
+        const asset = await gpUploadContentAsset(file);
+        await gpAiSelectOwn(asset.id);
+    } catch (err) {
+        window.showToast?.(err.message || 'Could not attach that file.');
+    }
 }
 
 // Show exactly one inspector section, and mark the matching handle as selected.
@@ -7253,6 +7429,20 @@ function _pceRenderLayers() {
     // No post, or a post with nothing editable — hide the whole strip rather than show an empty
     // heading. _pceLayers is [] until _pceSyncForPost has run.
     if (!post || !_pceLayers.length) { host.innerHTML = ''; strip?.classList.add('hidden'); return; }
+
+    // Nothing on the post yet: the only two layers are the two the canvas itself now offers, so the
+    // list would be a heading over "Nothing attached" and "Empty". It comes back the moment there is
+    // media — which is also when the stack becomes real (text on the image, sound).
+    const block = document.getElementById('pce-layers-block');
+    const bare = !post.thumbnailUrl && !_pceSlides(post).length;
+    block?.classList.toggle('hidden', bare);
+    if (bare) {
+        host.innerHTML = '';
+        // The strip also carries the slides adder, which a carousel shows before it has any slides.
+        const slidesShown = !document.getElementById('pce-slides')?.classList.contains('hidden');
+        strip?.classList.toggle('hidden', !slidesShown);
+        return;
+    }
     strip?.classList.remove('hidden');
     const rows = _PCE_LAYER_ORDER.filter(k => _pceLayers.includes(k));
     host.innerHTML = rows.map(key => {
