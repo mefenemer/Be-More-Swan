@@ -26,6 +26,7 @@ import {
     type YouTubeResumeState,
 } from '../../src/utils/social-publish';
 import { recordPostedAssets } from '../../src/utils/pexels';
+import { postLinkLine } from '../../src/utils/post-link';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -67,7 +68,10 @@ export default withLambda(async (event: HandlerEvent) => {
             connectionId: post.connectionId,
         });
 
-        const meta = youtubeMetaFromCaption(post.caption ?? '', post.hashtags ?? '', post.postFormat ?? undefined);
+        const meta = youtubeMetaFromCaption(
+            post.caption ?? '', post.hashtags ?? '', post.postFormat ?? undefined,
+            postLinkLine({ caption: post.caption, linkUrl: post.linkUrl, ctaText: post.ctaText }),
+        );
 
         const outcome = await publishYouTubeResumable(meta, creds.token, video, {
             deadlineMs: Date.now() + UPLOAD_BUDGET_MS,

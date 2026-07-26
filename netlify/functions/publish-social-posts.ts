@@ -19,6 +19,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { holdXCredits, settleXHold, xPostCost, xPostHasLink } from '../../src/utils/ai-credits';
+import { composePostText } from '../../src/utils/post-link';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BATCH = 100;
@@ -35,7 +36,7 @@ type PostRow = {
     id: number; user_id: number; organisation_id: number; caption: string | null;
     hashtags: string | null; connection_id: number | null; attempt_count: number;
     publish_date: string; platform: string; content_asset_ids: unknown;
-    assistant_id: number | null;
+    assistant_id: number | null; link_url: string | null; cta_text: string | null;
 };
 
 const isRetryable = (s: number | null) => s === 429 || (s != null && s >= 500);
@@ -91,7 +92,8 @@ export default withLambda(async () => {
 
     const posts = await db.execute<PostRow>(
         `SELECT id, user_id, organisation_id, caption, hashtags, connection_id,
-                attempt_count, publish_date, platform, content_asset_ids, assistant_id
+                attempt_count, publish_date, platform, content_asset_ids, assistant_id,
+                link_url, cta_text
          FROM scheduled_posts
          WHERE status = 'scheduled'
            AND platform IN ('linkedin','x','threads','youtube')
@@ -141,7 +143,12 @@ export default withLambda(async () => {
             });
             let token = creds.token;
 
-            const text = [post.caption, post.hashtags].filter(Boolean).join('\n\n').trim();
+            // Caption + hashtags + the post's link, in that order. Composed BEFORE the X credit
+            // hold below, which prices the string it is given — see composePostText.
+            const text = composePostText({
+                caption: post.caption, hashtags: post.hashtags,
+                linkUrl: post.link_url, ctaText: post.cta_text,
+            });
             if (!text) throw new Error('Post has no text to publish.');
 
             // EVERY attachment, in slide order — a carousel is the same post with more media, so

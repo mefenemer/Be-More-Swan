@@ -831,15 +831,19 @@ export interface YouTubeMeta {
  * Split a composer caption into a YouTube title + description. The composer has one caption
  * field, so the first non-empty line becomes the title (capped at 100) and the whole caption
  * becomes the description — the same convention creators use when cross-posting.
+ *
+ * `linkLine` is the post's link as the other publishers append it (src/utils/post-link.ts →
+ * postLinkLine). It joins the DESCRIPTION only: a URL in a YouTube title is not a link, just
+ * characters spent against the 100 the title has.
  */
-export function youtubeMetaFromCaption(caption: string, hashtags: string, format?: string): YouTubeMeta {
+export function youtubeMetaFromCaption(caption: string, hashtags: string, format?: string, linkLine?: string | null): YouTubeMeta {
     const text = (caption || '').trim();
     const firstLine = text.split('\n').map(l => l.trim()).find(Boolean) || 'New video';
     let title = firstLine.slice(0, YOUTUBE_TITLE_MAX);
     if (String(format ?? '').toLowerCase() === 'shorts' && !/#shorts/i.test(title)) {
         title = `${title.slice(0, YOUTUBE_TITLE_MAX - 8)} #Shorts`.trim();
     }
-    const description = [text, hashtags].filter(Boolean).join('\n\n').slice(0, YOUTUBE_DESCRIPTION_MAX);
+    const description = [text, hashtags, linkLine].filter(Boolean).join('\n\n').slice(0, YOUTUBE_DESCRIPTION_MAX);
     const tags = (hashtags || '').split(/[\s,]+/).map(t => t.replace(/^#/, '').trim()).filter(Boolean).slice(0, 30);
     return { title, description, tags, format };
 }

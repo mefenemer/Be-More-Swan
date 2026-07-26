@@ -14,6 +14,7 @@ import { createNotification } from '../../src/utils/notify';
 import { getSecret } from '../../src/utils/vault';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { resolvePostMediaList } from '../../src/utils/social-publish';
+import { composePostText } from '../../src/utils/post-link';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BATCH = 100;
@@ -65,11 +66,11 @@ export default withLambda(async () => {
         id: number; user_id: number; organisation_id: number; caption: string | null;
         hashtags: string | null; platform_post_id: string | null; connection_id: number | null;
         attempt_count: number; publish_date: string; post_format: string; assistant_id: number | null;
-        content_asset_ids: unknown;
+        content_asset_ids: unknown; link_url: string | null; cta_text: string | null;
     }>(
         `SELECT id, user_id, organisation_id, caption, hashtags, platform_post_id,
                 connection_id, attempt_count, publish_date, post_format, assistant_id,
-                content_asset_ids
+                content_asset_ids, link_url, cta_text
          FROM scheduled_posts
          WHERE status = 'scheduled'
            AND platform = 'instagram'
@@ -131,8 +132,14 @@ export default withLambda(async () => {
             const igUserId = conn.externalUserId;
             if (!igUserId) throw new Error('No Instagram user ID in connection.');
 
-            // Build caption with hashtags
-            const fullCaption = [post.caption, post.hashtags].filter(Boolean).join('\n\n');
+            // Caption + hashtags + the post's link. Instagram does not make a link in a caption
+            // clickable — it publishes as plain text — but it is still the address the user chose
+            // to put in front of readers, so it is sent rather than silently dropped. The composer
+            // says so at the point the link is typed (PLATFORM_FORMATS.linksClickable).
+            const fullCaption = composePostText({
+                caption: post.caption, hashtags: post.hashtags,
+                linkUrl: post.link_url, ctaText: post.cta_text,
+            });
             const isVideo = ['reel', 'video'].includes(post.post_format?.toLowerCase() ?? '');
             const mediaProxyBase = `${process.env.BASE_URL || 'https://bemoreswan.com'}/.netlify/functions/media-proxy?postId=${post.id}`;
 

@@ -21,6 +21,7 @@ import { scheduledPosts, publishCronLog } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { resolvePostMediaList, hasAttachedMedia, publishFacebook, resolveFacebookPageCredentials, type DriverResult } from '../../src/utils/social-publish';
 import { recordPostedAssets } from '../../src/utils/pexels';
+import { composePostText } from '../../src/utils/post-link';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BATCH = 100;
@@ -34,6 +35,7 @@ type PostRow = {
     id: number; user_id: number; organisation_id: number; caption: string | null;
     hashtags: string | null; connection_id: number | null; attempt_count: number;
     publish_date: string; content_asset_ids: unknown; assistant_id: number | null;
+    link_url: string | null; cta_text: string | null;
 };
 
 const isRetryable = (s: number | null) => s === 429 || (s != null && s >= 500);
@@ -54,7 +56,8 @@ export default withLambda(async () => {
 
     const posts = await db.execute<PostRow>(
         `SELECT id, user_id, organisation_id, caption, hashtags, connection_id,
-                attempt_count, publish_date, content_asset_ids, assistant_id
+                attempt_count, publish_date, content_asset_ids, assistant_id,
+                link_url, cta_text
          FROM scheduled_posts
          WHERE status = 'scheduled'
            AND platform = 'facebook'
@@ -85,7 +88,10 @@ export default withLambda(async () => {
                 connectionId: post.connection_id,
             });
 
-            const text = [post.caption, post.hashtags].filter(Boolean).join('\n\n').trim();
+            const text = composePostText({
+                caption: post.caption, hashtags: post.hashtags,
+                linkUrl: post.link_url, ctaText: post.cta_text,
+            });
             if (!text) throw new Error('Post has no text to publish.');
 
             // EVERY attachment, in slide order: more than one becomes a multi-photo post.

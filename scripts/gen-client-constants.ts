@@ -38,6 +38,7 @@ export function renderClientConstants(): string {
             mediaMandatory: f.mediaMandatory,
             mediaKind: f.mediaKind,
             canPublishVideo: f.canPublishVideo,
+            linksClickable: f.linksClickable,
             defaultPostFormat: f.defaultPostFormat,
         };
     });

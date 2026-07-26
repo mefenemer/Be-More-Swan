@@ -17,6 +17,7 @@ import { resolveAssetDisplayUrl } from '../../src/utils/social-publish';
 import { requireOnboarding } from '../../src/utils/onboarding-guard';
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
+import { normalisePostLink } from '../../src/utils/post-link';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -133,7 +134,8 @@ export default withLambda(async (event) => {
                 publishDate: new Date(publishDate),
                 caption: caption || null,
                 contentAssetIds: contentAssetIds || [],
-                linkUrl: linkUrl || null,
+                // Same rule as PATCH: only a link we would actually publish is stored.
+                linkUrl: normalisePostLink(linkUrl),
                 ctaText: ctaText || null,
                 hashtags: hashtags || null,
                 mentions: mentions || null,
@@ -233,6 +235,19 @@ export default withLambda(async (event) => {
 
             const editableFields = ['caption', 'linkUrl', 'ctaText', 'hashtags', 'mentions', 'utmParams', 'campaign', 'pillar', 'postFormat', 'contentAssetIds'];
             editableFields.forEach(f => { if (body[f] !== undefined) updates[f] = body[f]; });
+
+            // The link is the one editable field that leaves this app: the publishers append it to
+            // the post text, and the composer + calendar render it into an `<a href>`. Store only
+            // what we would publish — an empty string clears it, anything that isn't http(s) is
+            // refused here rather than being kept until publish day and dropped in silence.
+            if (body.linkUrl !== undefined) {
+                const raw = String(body.linkUrl ?? '').trim();
+                const link = raw ? normalisePostLink(raw) : null;
+                if (raw && !link) {
+                    return { statusCode: 400, body: JSON.stringify({ error: 'That link is not a web address we can publish — it needs to look like https://example.com/page.' }) };
+                }
+                updates.linkUrl = link;
+            }
 
             if (body.publishDate) {
                 updates.publishDate = new Date(body.publishDate);

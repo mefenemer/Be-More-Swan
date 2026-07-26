@@ -929,13 +929,32 @@ window.showComplianceModals = function showComplianceModals(force) {
               <label for="post-review-hashtags" class="block text-xs font-bold text-gray-600 mb-1 mt-3">Hashtags</label>
               <input id="post-review-hashtags" type="text" oninput="_pceRefreshCaptionMeta()"
                 class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-600">
+
+              <!-- ── The link. Its own block because it is not part of the words: it is appended as
+                   its own paragraph at publish time (src/utils/post-link.ts → composePostText), and
+                   the echo below shows the exact line every platform will receive rather than
+                   asking anyone to imagine it. Saved by the same button as the caption. -->
+              <div class="mt-3 pt-3 border-t border-gray-100">
+                <label for="post-review-link-url" class="block text-xs font-bold text-gray-600 mb-1">Link</label>
+                <input id="post-review-link-url" type="url" inputmode="url" spellcheck="false"
+                  placeholder="example.com/your-page" oninput="_pceRefreshLinkMeta()" onblur="_pceTidyLinkField()"
+                  class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-600">
+                <label for="post-review-cta" class="block text-xs font-bold text-gray-600 mb-1 mt-2">Call to action <span class="font-semibold text-gray-400">— optional</span></label>
+                <input id="post-review-cta" type="text" maxlength="80" placeholder="Read the full story"
+                  oninput="_pceRefreshLinkMeta()"
+                  class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-600">
+                <p id="pce-link-echo" class="hidden mt-1.5 text-[11px] text-gray-500">Added to the end of your post: <span class="font-semibold text-gray-700"></span></p>
+                <p id="pce-link-error" class="hidden mt-1.5 text-[11px] font-semibold text-red-600"></p>
+                <p id="pce-link-warn" class="hidden mt-1.5 text-[11px] font-semibold text-amber-700"></p>
+              </div>
+
               <label id="post-review-amend-all" class="hidden items-center gap-2 text-xs font-semibold text-gray-600 cursor-pointer select-none mt-3">
                 <input id="post-review-amend-all-cb" type="checkbox" checked class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600">
                 <span id="post-review-amend-all-label">Apply to all platforms</span>
               </label>
               <div class="mt-3 flex flex-wrap items-center gap-2">
                 <button type="button" onclick="rqReviewSaveAmend()"
-                  class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer">Save caption</button>
+                  class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer">Save changes</button>
                 <span id="post-review-amend-msg" class="text-xs font-semibold text-gray-500"></span>
               </div>
             </div>
@@ -5536,8 +5555,15 @@ function renderPlatformMockup(post) {
 
     const caption  = post.caption ? `<p class="text-sm text-gray-800 whitespace-pre-wrap leading-relaxed">${_rqEsc(post.caption)}</p>` : '';
     const hashtags = post.hashtags ? `<p class="text-sm text-blue-600 mt-1.5">${_rqEsc(post.hashtags)}</p>` : '';
+    // href comes from _pceNormaliseLink, not straight from the row: _rqEsc escapes HTML but leaves
+    // a `javascript:` URL working, and this value is user-supplied. A row that fails the check is
+    // still SHOWN — as text, so you can see what is stored and fix it — just never as an anchor.
+    const linkHref = _pceNormaliseLink(post.linkUrl);
+    const linkLabel = post.ctaText || post.linkUrl;
     const link = post.linkUrl
-        ? `<a class="block mt-2 text-xs font-semibold underline truncate" style="color:${meta.accent}" href="${_rqEsc(post.linkUrl)}" target="_blank" rel="noopener">${_rqEsc(post.ctaText || post.linkUrl)}</a>`
+        ? (linkHref
+            ? `<a class="block mt-2 text-xs font-semibold underline truncate" style="color:${meta.accent}" href="${_rqEsc(linkHref)}" target="_blank" rel="noopener">${_rqEsc(linkLabel)}</a>`
+            : `<p class="block mt-2 text-xs font-semibold text-gray-400 truncate">${_rqEsc(linkLabel)}</p>`)
         : '';
 
     const header = `
@@ -6501,6 +6527,9 @@ let _pceLayers = [];
 function _pceFillCaption(post) {
     if (_pceEl('post-review-caption')) _pceEl('post-review-caption').value = post.caption || '';
     if (_pceEl('post-review-hashtags')) _pceEl('post-review-hashtags').value = post.hashtags || '';
+    if (_pceEl('post-review-link-url')) _pceEl('post-review-link-url').value = post.linkUrl || '';
+    if (_pceEl('post-review-cta')) _pceEl('post-review-cta').value = post.ctaText || '';
+    _pceRefreshLinkMeta();
     // "Apply to all platforms" only means anything when there is more than one.
     const all = _pceEl('post-review-amend-all');
     const multi = _rqReviewGroupIds.length > 1;
@@ -6514,6 +6543,91 @@ function _pceFillCaption(post) {
     }
     const msg = _pceEl('post-review-amend-msg');
     if (msg) { msg.textContent = ''; msg.className = 'text-xs font-semibold text-gray-500'; }
+    _pceRefreshCaptionMeta();
+}
+
+// ── The post's link ─────────────────────────────────────────────────────────────────────────────
+// Mirrors src/utils/post-link.ts, which is what the publishers actually run. This page is not
+// bundled so it cannot import it; the two are kept honest by tests/post-link.test.ts asserting the
+// server rules, and by this pair being the ONLY copy on the client.
+
+// A link we are willing to publish, or null. http(s) only — the mock-up renders this into an
+// `<a href>`, so a `javascript:` "URL" would be a script-injection vector, not a broken link.
+function _pceNormaliseLink(raw) {
+    const s = String(raw == null ? '' : raw).trim();
+    if (!s || /\s/.test(s)) return null;
+    // "example.com/offer" is what people type: assume https when there is NO scheme, but never
+    // rewrite one that is present — a bad scheme is rejected, not repaired.
+    const candidate = /^[a-z][a-z0-9+.-]*:/i.test(s) ? s : 'https://' + s;
+    let url;
+    try { url = new URL(candidate); } catch { return null; }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    if (!url.hostname.includes('.')) return null;
+    return candidate;
+}
+
+// The exact line the publishers append, or null when there is nothing to append — including when
+// the caption already carries the URL, which is the common case for a caption written around a link.
+function _pceLinkLine(caption) {
+    const raw = _pceEl('post-review-link-url')?.value || '';
+    const url = _pceNormaliseLink(raw);
+    if (!url) return null;
+    const text = String(caption == null ? '' : caption);
+    if (text.includes(url) || text.includes(raw.trim())) return null;
+    const cta = (_pceEl('post-review-cta')?.value || '').replace(/\s+/g, ' ').trim();
+    return cta ? `${cta} ${url}` : url;
+}
+
+// Typing "example.com" and tabbing away leaves the field saying what will actually be published.
+function _pceTidyLinkField() {
+    const el = _pceEl('post-review-link-url');
+    if (!el || !el.value.trim()) return;
+    const url = _pceNormaliseLink(el.value);
+    if (url) el.value = url;
+    _pceRefreshLinkMeta();
+}
+
+/**
+ * Echo the link exactly as it will be published, and say where it will not be clickable.
+ *
+ * The echo is the point of the block: a link is appended as its own paragraph at publish time, so
+ * without it the only way to find out what goes out is to publish. The Instagram warning is read
+ * from the generated platform constants — Instagram renders caption URLs as plain text, which is
+ * worth knowing BEFORE scheduling a campaign around a link nobody can click.
+ */
+function _pceRefreshLinkMeta() {
+    const echo = _pceEl('pce-link-echo');
+    const err = _pceEl('pce-link-error');
+    const warn = _pceEl('pce-link-warn');
+    if (!echo || !err || !warn) return;
+    const raw = (_pceEl('post-review-link-url')?.value || '').trim();
+    const url = _pceNormaliseLink(raw);
+    const line = _pceLinkLine(_pceEl('post-review-caption')?.value || '');
+
+    echo.classList.toggle('hidden', !line);
+    if (line) echo.querySelector('span').textContent = line;
+
+    // One note under the field, in one of two voices: a refusal (what was typed cannot be
+    // published) or a fact (a valid link the caption already carries, so it is not added twice —
+    // without which the block just looks broken).
+    let note = '';
+    if (raw && !url) note = 'That is not a web address we can publish — it needs to look like https://example.com/page.';
+    else if (url && !line) note = 'Your caption already contains this address, so it will not be added twice.';
+    err.classList.toggle('hidden', !note);
+    err.className = `mt-1.5 text-[11px] font-semibold ${url ? 'text-gray-500' : 'text-red-600'}${note ? '' : ' hidden'}`;
+    err.textContent = note;
+
+    // Every platform this post goes out on, not just the one on screen — the link is saved across
+    // the whole cross-post group.
+    const noClick = [...new Set(_rqReviewGroupIds.map(id => _rqPostCache[id]?.platform).filter(Boolean))]
+        .concat(_rqReviewPostId != null && _rqPostCache[_rqReviewPostId] ? [_rqPostCache[_rqReviewPostId].platform] : [])
+        .filter((p, i, a) => p && a.indexOf(p) === i)
+        .map(p => window.PlatformConstants.get(p))
+        .filter(p => p && p.linksClickable === false);
+    const show = !!url && noClick.length > 0;
+    warn.classList.toggle('hidden', !show);
+    if (show) warn.textContent = `${noClick.map(p => p.label).join(' and ')} shows links in captions as plain text — it will be published, but not clickable.`;
+
     _pceRefreshCaptionMeta();
 }
 
@@ -6537,8 +6651,11 @@ function _pceRefreshCaptionMeta() {
 
     const caption = _pceEl('post-review-caption')?.value || '';
     const hashtags = _pceEl('post-review-hashtags')?.value || '';
-    // Matches how the publishers join them, so the number counts what is actually sent.
-    const len = (caption + (hashtags ? '\n\n' + hashtags : '')).length;
+    // Matches how the publishers join them, so the number counts what is actually sent — the link
+    // included. On X that is the difference between a post and a 403: caption + hashtags can sit
+    // under 280 and go over it the moment the link paragraph is appended.
+    const link = _pceLinkLine(caption);
+    const len = [caption, hashtags, link].filter(Boolean).join('\n\n').length;
     const hasMedia = !!post.thumbnailUrl;
     const hasVideo = _pcePostIsVideo(post);
 
@@ -9281,6 +9398,18 @@ async function rqReviewSaveAmend() {
     if (!id) return;
     const caption = document.getElementById('post-review-caption').value;
     const hashtags = document.getElementById('post-review-hashtags').value;
+    const rawLink = (document.getElementById('post-review-link-url')?.value || '').trim();
+    // Refuse to STORE something no publisher would send. The server drops an unusable link at
+    // publish time either way, but silently — and a link saved now is a link the user believes is
+    // going out in a week's time.
+    const linkUrl = rawLink ? _pceNormaliseLink(rawLink) : '';
+    if (rawLink && !linkUrl) {
+        _pceSelect('caption');
+        _pceRefreshLinkMeta();
+        document.getElementById('post-review-link-url')?.focus();
+        return;
+    }
+    const ctaText = (document.getElementById('post-review-cta')?.value || '').replace(/\s+/g, ' ').trim();
     // "Apply to all platforms" (shared base) vs this platform only (per-platform override).
     const applyAll = _rqReviewGroupIds.length > 1 && document.getElementById('post-review-amend-all-cb')?.checked;
     const targetIds = applyAll ? _rqReviewGroupIds.slice() : [id];
@@ -9288,11 +9417,16 @@ async function rqReviewSaveAmend() {
         for (const tid of targetIds) {
             const res = await fetch(`/.netlify/functions/scheduled-posts?id=${tid}`, {
                 method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ caption, hashtags }),
+                body: JSON.stringify({ caption, hashtags, linkUrl, ctaText }),
             });
             if (!res.ok) { alert('Could not save your changes.'); return; }
             // Update the cache so the edit is visible immediately (re-rendered below for the active tab).
-            if (_rqPostCache[tid]) { _rqPostCache[tid].caption = caption; _rqPostCache[tid].hashtags = hashtags; }
+            if (_rqPostCache[tid]) {
+                _rqPostCache[tid].caption = caption;
+                _rqPostCache[tid].hashtags = hashtags;
+                _rqPostCache[tid].linkUrl = linkUrl || null;
+                _rqPostCache[tid].ctaText = ctaText || null;
+            }
         }
         // Re-render through the normal path, not by writing innerHTML here: the canvas is mounted
         // onto the mock-up, so replacing it directly would strip the handle layer and leave the
@@ -9301,7 +9435,7 @@ async function rqReviewSaveAmend() {
         _pceSelect('caption');
         const msg = document.getElementById('post-review-amend-msg');
         if (msg) {
-            msg.textContent = applyAll ? `Saved to all ${targetIds.length} platforms.` : 'Caption saved.';
+            msg.textContent = applyAll ? `Saved to all ${targetIds.length} platforms.` : 'Saved.';
             msg.className = 'text-xs font-semibold text-emerald-700';
         }
     } catch { alert('Network error — please try again.'); }
