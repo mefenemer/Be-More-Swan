@@ -113,6 +113,57 @@ export async function resolvePostMedia(db: any, contentAssetIds: unknown): Promi
     return video ? { url: video.url, mimeType: video.mimeType } : null;
 }
 
+export interface PostMediaItem { assetId: number; url: string; mimeType: string; kind: 'image' | 'video'; }
+
+/**
+ * EVERY attachment on the post, in slide order — the carousel resolver.
+ *
+ * The single-item resolvers above answer "what is this post's picture", which is the wrong question
+ * for a carousel: a carousel IS its ordering, and slide 3 appearing second is a different post.
+ *
+ * Order comes from the contentAssetIds ARRAY, not from the database. `inArray` gives no ordering
+ * guarantee, so resolving by query alone would hand the publisher a set whose sequence changed
+ * between runs — a bug that would look like flakiness rather than like a missing sort.
+ */
+export async function resolvePostMediaList(db: any, contentAssetIds: unknown): Promise<PostMediaItem[]> {
+    const ids = Array.isArray(contentAssetIds)
+        ? contentAssetIds.map(Number).filter(Number.isFinite)
+        : [];
+    if (!ids.length) return [];
+
+    const rows = await db.select({
+        id:          contentAssets.id,
+        assetType:   contentAssets.assetType,
+        mimeType:    contentAssets.mimeType,
+        storageKey:  contentAssets.storageKey,
+        externalUrl: contentAssets.externalUrl,
+    }).from(contentAssets).where(inArray(contentAssets.id, ids));
+
+    const byId = new Map<number, any>(rows.map((r: any) => [r.id, r]));
+    const out: PostMediaItem[] = [];
+    for (const id of ids) {
+        const r = byId.get(id);
+        if (!r) continue;
+        const type = String(r.assetType ?? '').toLowerCase();
+        if (type !== 'image' && type !== 'video') continue;      // links and audio are not slides
+        let url: string | null = null;
+        if (r.storageKey) {
+            // The longer TTL matches resolvePostVideo: a carousel upload is several round trips and
+            // a 10-minute URL can expire between the first slide and the last.
+            try { url = await presignR2Get(r.storageKey, 3600); } catch { /* fall through */ }
+        }
+        if (!url) url = r.externalUrl ?? null;
+        if (!url) continue;
+        out.push({
+            assetId: r.id,
+            url,
+            mimeType: r.mimeType || (type === 'video' ? 'video/mp4' : 'image/jpeg'),
+            kind: type as 'image' | 'video',
+        });
+    }
+    return out;
+}
+
 export function hasAttachedMedia(contentAssetIds: unknown): boolean {
     return Array.isArray(contentAssetIds) && contentAssetIds.map(Number).filter(Number.isFinite).length > 0;
 }
@@ -347,16 +398,43 @@ function mediaDropped(platform: string, err?: unknown): DriverResult {
     };
 }
 
-export async function publishX(text: string, token: string, image: PostImage | null): Promise<DriverResult> {
-    let mediaId: string | null = null;
-    if (image) {
-        try { mediaId = await uploadXMedia(image, token); }
-        catch (err) { return mediaDropped('X', err); }
-        if (!mediaId) return mediaDropped('X');
+/**
+ * Normalise a driver's media argument to a LIST.
+ *
+ * Every driver now takes either one attachment or many, because a carousel is not a different kind
+ * of post to these APIs — it is the same post with more media ids. Accepting both shapes means the
+ * existing single-media callers did not have to change, which is what kept this from becoming a
+ * six-publisher refactor.
+ */
+function mediaItems(media: PostImage | PostImage[] | null | undefined): PostImage[] {
+    if (!media) return [];
+    return Array.isArray(media) ? media.filter(Boolean) : [media];
+}
+
+/** X allows at most 4 images on a post, and only ONE video (never mixed with images). */
+export const X_MAX_IMAGES = 4;
+
+export async function publishX(text: string, token: string, image: PostImage | PostImage[] | null): Promise<DriverResult> {
+    const items = mediaItems(image);
+    const mediaIds: string[] = [];
+    if (items.length) {
+        // X's rule, enforced before spending uploads: one video alone, or up to four images.
+        const videos = items.filter(isVideoMedia);
+        if (videos.length > 1 || (videos.length === 1 && items.length > 1)) {
+            return { ok: false, status: null, error: 'X accepts either one video or up to four images, not a mix.' };
+        }
+        const capped = videos.length ? items : items.slice(0, X_MAX_IMAGES);
+        for (const item of capped) {
+            let id: string | null = null;
+            try { id = await uploadXMedia(item, token); }
+            catch (err) { return mediaDropped('X', err); }
+            if (!id) return mediaDropped('X');
+            mediaIds.push(id);
+        }
     }
 
     const body: Record<string, unknown> = { text: text.slice(0, X_MAX) };
-    if (mediaId) body.media = { media_ids: [mediaId] };
+    if (mediaIds.length) body.media = { media_ids: mediaIds };
 
     const res = await fetch('https://api.x.com/2/tweets', {
         method: 'POST',
@@ -476,16 +554,26 @@ export async function fetchXIdentity(token: string): Promise<DriverResult> {
 // /rest/posts + /rest/images API, which requires the "Community Management" product and a
 // LinkedIn-Version header — a scope/product change, not a drop-in swap. Left on ugcPosts and flagged
 // for the harness; migration tracked separately.
-export async function publishLinkedIn(text: string, token: string, authorId: string | null, image: PostImage | null): Promise<DriverResult> {
+export async function publishLinkedIn(text: string, token: string, authorId: string | null, media: PostImage | PostImage[] | null): Promise<DriverResult> {
     if (!authorId) return { ok: false, status: null, error: 'No LinkedIn author URN on connection.' };
     const author = authorId.startsWith('urn:') ? authorId : `urn:li:person:${authorId}`;
 
-    let assetUrn: string | null = null;
-    if (image) {
-        try { assetUrn = await uploadLinkedInImage(image, token, author); }
-        catch (err) { return mediaDropped('LinkedIn', err); }
-        if (!assetUrn) return mediaDropped('LinkedIn');
+    const items = mediaItems(media);
+    if (items.length > 1 && items.some(isVideoMedia)) {
+        return { ok: false, status: null, error: 'LinkedIn multi-image posts cannot include a video.' };
     }
+    // Each slide is registered and uploaded separately; ugcPosts then carries them as one media[]
+    // array, which is what LinkedIn renders as a swipeable multi-image post.
+    const assetUrns: string[] = [];
+    for (const item of items) {
+        let urn: string | null = null;
+        try { urn = await uploadLinkedInImage(item, token, author); }
+        catch (err) { return mediaDropped('LinkedIn', err); }
+        if (!urn) return mediaDropped('LinkedIn');
+        assetUrns.push(urn);
+    }
+    const assetUrn = assetUrns[0] ?? null;
+    const image = items[0] ?? null;
 
     const shareContent: Record<string, unknown> = {
         shareCommentary: { text },
@@ -493,7 +581,9 @@ export async function publishLinkedIn(text: string, token: string, authorId: str
         // recipe but declared IMAGE here is rejected by LinkedIn.
         shareMediaCategory: assetUrn ? (isVideoMedia(image) ? 'VIDEO' : 'IMAGE') : 'NONE',
     };
-    if (assetUrn) shareContent.media = [{ status: 'READY', media: assetUrn }];
+    // Every uploaded slide, in order — one entry per asset is what makes it swipeable rather than a
+    // post that silently shows only its first picture.
+    if (assetUrns.length) shareContent.media = assetUrns.map(urn => ({ status: 'READY', media: urn }));
 
     const res = await fetch('https://api.linkedin.com/v2/ugcPosts', {
         method: 'POST',
@@ -606,8 +696,56 @@ export async function publishThreads(
     text: string,
     token: string,
     threadsUserId: string | null,
-    image: PostImage | null,
+    media: PostImage | PostImage[] | null,
 ): Promise<DriverResult> {
+    const items = mediaItems(media);
+
+    // ── Carousel ────────────────────────────────────────────────────────────────────────────────
+    // Threads builds a carousel from CHILD containers: one per slide (is_carousel_item=true, no
+    // text), then a CAROUSEL parent that carries the text and lists the children. Video children
+    // still have to finish transcoding, so each one is awaited before the parent is created —
+    // publishing a parent whose children are not FINISHED fails on Threads' side.
+    if (items.length > 1) {
+        const uid = encodeURIComponent(threadsUserId || 'me');
+        const authHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/x-www-form-urlencoded' };
+        const childIds: string[] = [];
+        for (const item of items) {
+            const isVid = isVideoMedia(item);
+            const params = new URLSearchParams({ media_type: isVid ? 'VIDEO' : 'IMAGE', is_carousel_item: 'true' });
+            params.set(isVid ? 'video_url' : 'image_url', item.url);
+            const res = await fetch(`https://graph.threads.net/v1.0/${uid}/threads`, { method: 'POST', headers: authHeaders, body: params });
+            const data: any = await res.json().catch(() => ({}));
+            if (!res.ok || !data?.id) {
+                return { ok: false, status: res.status, error: data?.error?.message || `Threads carousel item failed (${res.status})` };
+            }
+            if (isVid) {
+                const ready = await awaitThreadsContainer(String(data.id), token);
+                if (!ready.ok) return ready;
+            }
+            childIds.push(String(data.id));
+        }
+
+        const parentParams = new URLSearchParams({
+            media_type: 'CAROUSEL',
+            children: childIds.join(','),
+            text: text.slice(0, THREADS_TEXT_MAX),
+        });
+        const parentRes = await fetch(`https://graph.threads.net/v1.0/${uid}/threads`, { method: 'POST', headers: authHeaders, body: parentParams });
+        const parentData: any = await parentRes.json().catch(() => ({}));
+        if (!parentRes.ok || !parentData?.id) {
+            return { ok: false, status: parentRes.status, error: parentData?.error?.message || `Threads carousel container failed (${parentRes.status})` };
+        }
+        const pubRes = await fetch(`https://graph.threads.net/v1.0/${uid}/threads_publish`, {
+            method: 'POST', headers: authHeaders, body: new URLSearchParams({ creation_id: String(parentData.id) }),
+        });
+        const pubData: any = await pubRes.json().catch(() => ({}));
+        if (!pubRes.ok || !pubData?.id) {
+            return { ok: false, status: pubRes.status, error: pubData?.error?.message || `Threads publish error (${pubRes.status})` };
+        }
+        return { ok: true, id: String(pubData.id) };
+    }
+
+    const image = items[0] ?? null;
     // tenantId carries the Threads user id captured at connect time; 'me' is the documented
     // fallback and resolves to the token's owner.
     const uid = encodeURIComponent(threadsUserId || 'me');
@@ -1034,7 +1172,39 @@ export async function publishYouTube(
 
 // ── Facebook (Graph API) ──────────────────────────────────────────────────────────────────────────
 // Image → /{pageId}/photos (caption becomes the post text); text/link → /{pageId}/feed.
-export async function publishFacebook(pageId: string, pageToken: string, text: string, image: PostImage | null): Promise<DriverResult> {
+export async function publishFacebook(pageId: string, pageToken: string, text: string, media: PostImage | PostImage[] | null): Promise<DriverResult> {
+    const items = mediaItems(media);
+
+    // ── Multi-photo post ────────────────────────────────────────────────────────────────────────
+    // Facebook has no "carousel" endpoint. The equivalent is: upload each photo UNPUBLISHED (so it
+    // never appears on the page as its own post), then create one feed post that attaches them all.
+    // Skipping `published: false` is the classic mistake — it produces N separate photo posts on the
+    // page plus the real one, which no amount of retrying undoes.
+    if (items.length > 1) {
+        const attached: Array<{ media_fbid: string }> = [];
+        for (const item of items) {
+            if (isVideoMedia(item)) return { ok: false, status: null, error: 'Facebook multi-image posts cannot include a video.' };
+            const res = await fetch(`https://graph.facebook.com/${FB_GRAPH_VERSION}/${pageId}/photos`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ url: item.url, published: false, access_token: pageToken }),
+            });
+            const data: any = await res.json().catch(() => ({}));
+            if (!res.ok || !data?.id) {
+                return { ok: false, status: res.status, error: data?.error?.message || `Facebook photo upload failed (${res.status})` };
+            }
+            attached.push({ media_fbid: String(data.id) });
+        }
+        const feedRes = await fetch(`https://graph.facebook.com/${FB_GRAPH_VERSION}/${pageId}/feed`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: text, attached_media: attached, access_token: pageToken }),
+        });
+        const feedData: any = await feedRes.json().catch(() => ({}));
+        const feedId = feedData?.post_id || feedData?.id;
+        if (feedRes.ok && feedId) return { ok: true, id: String(feedId) };
+        return { ok: false, status: feedRes.status, error: feedData?.error?.message || `Facebook API error (${feedRes.status})` };
+    }
+
+    const image = items[0] ?? null;
     // Three endpoints, one per kind of post. /videos takes a remote file_url exactly as /photos takes
     // `url`, so a video costs no extra round trip — Facebook fetches the presigned R2 object itself.
     const video = isVideoMedia(image);

@@ -14,7 +14,7 @@ import { inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, rateLimitStates, publishCronLog } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
-import { resolvePostMedia, hasAttachedMedia, resolveSocialCredentials, publishX, publishLinkedIn, publishThreads, type DriverResult } from '../../src/utils/social-publish';
+import { resolvePostMediaList, hasAttachedMedia, resolveSocialCredentials, publishX, publishLinkedIn, publishThreads, type DriverResult } from '../../src/utils/social-publish';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { fireOrchestrations } from '../../src/utils/orchestration';
@@ -144,8 +144,10 @@ export default withLambda(async () => {
             const text = [post.caption, post.hashtags].filter(Boolean).join('\n\n').trim();
             if (!text) throw new Error('Post has no text to publish.');
 
-            // Either kind: a post that gained sound is an mp4 now, and resolvePostImage would skip it.
-            const image = await resolvePostMedia(db, post.content_asset_ids).catch(() => null);
+            // EVERY attachment, in slide order — a carousel is the same post with more media, so
+            // the drivers take the list and decide what their platform calls that.
+            const items = await resolvePostMediaList(db, post.content_asset_ids).catch(() => []);
+            const image = items.length ? items : null;
             // No media attached = a genuine text post. Media attached that we cannot resolve = a
             // post that would go out stripped of the picture the user approved, recorded as a
             // success. Only the second is a failure, and it has to BE one — see hasAttachedMedia.

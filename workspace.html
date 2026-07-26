@@ -699,6 +699,24 @@ window.showComplianceModals = function showComplianceModals(force) {
           <div id="post-review-body"></div>
 
           <div id="pce-stage-strip" class="hidden mt-3 max-w-md mx-auto rounded-xl border border-gray-200 bg-white overflow-hidden">
+            <!-- ── Slides ────────────────────────────────────────────────────────────────────
+                 A carousel's slides, in order. Shown only for formats that can carry more than
+                 one (and for any post that already does), because offering "add a slide" on a
+                 Reel would be offering something approval will refuse.
+                 Selecting a slide changes what the canvas above shows — the point is to work on
+                 slide 3 while looking at slide 3. Built by _pceRenderSlides. -->
+            <div id="pce-slides" class="hidden px-2.5 pt-2 border-b border-gray-100 pb-2">
+              <div class="flex items-center justify-between mb-1.5">
+                <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Slides</p>
+                <span id="pce-slides-count" class="text-[10px] text-gray-400"></span>
+              </div>
+              <div id="pce-slide-strip" class="flex gap-1.5 overflow-x-auto pb-1"></div>
+              <input type="file" id="pce-slide-file" multiple class="hidden"
+                accept="image/png,image/jpeg,image/gif,image/webp,video/mp4,video/quicktime,video/webm"
+                onchange="_pceAddSlides(this.files); this.value='';">
+              <p id="pce-slides-msg" class="text-[10px] text-gray-400 mt-1"></p>
+            </div>
+
             <!-- Every editable part of THIS post, listed. Selection already drove the whole editor —
                  it was just invisible, so the only way to find a layer was to guess where to click
                  on the canvas, and a layer that was absent looked identical to one that was there
@@ -5398,10 +5416,17 @@ function renderPlatformMockup(post) {
     const mediaClass = hasOverlays
         ? 'w-full h-auto block'
         : (frameClass ? 'w-full h-full object-cover' : 'w-full max-h-[400px] object-cover');
-    const mediaInner = post.thumbnailUrl
-        ? (isVideo
-            ? `<video data-media-video src="${post.thumbnailUrl}" muted controls playsinline class="${mediaClass} bg-black"></video>`
-            : `<img data-media-img alt="" src="${post.thumbnailUrl}" class="${mediaClass}">`)
+    // On a carousel the canvas shows the SELECTED slide, not the first one — the whole point of the
+    // slides strip is to look at slide 3 while you work on slide 3. Falls back to thumbnailUrl for
+    // every single-media post, which is all of them until a second slide is added.
+    const _slides = Array.isArray(post.slides) ? post.slides : [];
+    const _slide = _slides.length > 1 ? _slides[Math.min(_pceSlideIndex, _slides.length - 1)] : null;
+    const _mediaUrl = _slide ? _slide.url : post.thumbnailUrl;
+    const _slideIsVideo = _slide ? _slide.kind === 'video' : isVideo;
+    const mediaInner = _mediaUrl
+        ? (_slideIsVideo
+            ? `<video data-media-video src="${_mediaUrl}" muted controls playsinline class="${mediaClass} bg-black"></video>`
+            : `<img data-media-img alt="" src="${_mediaUrl}" class="${mediaClass}">`)
         : `<div class="w-full py-16 bg-gray-100 flex items-center justify-center text-gray-400 text-sm">No media attached</div>`;
     // Click-through layer: clicking bare image still selects the picture; each overlay box opts back
     // into pointer events. Present whenever a post could carry overlays so _rqRenderCanvasOverlays
@@ -5787,6 +5812,10 @@ async function openPostReview(postId) {
     const group = rqResolveGroup(postId);
     _rqReviewGroupIds = group.map(p => p.id);
     _rqReviewPostId = postId;
+    // Opening a different post starts at its first slide. Deliberately NOT reset in
+    // _rqReviewRenderActive: selecting a slide re-renders through that, and resetting there would
+    // snap the canvas back to slide 1 the instant you clicked slide 3.
+    _pceSlideIndex = 0;
 
     _rqReviewRenderTabs();
     _rqReviewRenderActive();
@@ -6536,42 +6565,10 @@ function _pceTogglePane(side) {
 // path for · 'blocked' can never be a scheduled post (real-time broadcast, DMs, or another
 // product's surface). Unavailable formats are deliberately SHOWN: seeing that Instagram has
 // Carousels and Stories, and why they're greyed, beats a picker that pretends they don't exist.
-const _PCE_FORMATS = [
-    { k: 'ig_feed', p: 'instagram', n: 'Feed post', d: 'A single image in the main feed.', m: 'image', ar: '4:5', max: 1, cl: 2200, a: 'live' },
-    { k: 'ig_reel', p: 'instagram', n: 'Reel', d: 'Full-screen vertical video.', m: 'video', ar: '9:16', max: 1, cl: 2200, a: 'live' },
-    { k: 'ig_carousel', p: 'instagram', n: 'Carousel', d: 'Up to 20 swipeable slides.', m: 'mixed', ar: '4:5', max: 20, cl: 2200, a: 'planned', why: 'Carousels need multi-image publishing, which we haven’t built yet.' },
-    { k: 'ig_story', p: 'instagram', n: 'Story', d: 'Vertical, gone in 24 hours.', m: 'mixed', ar: '9:16', max: 1, cl: 0, a: 'planned', why: 'Stories publish through a different Instagram endpoint we haven’t connected yet.' },
-    { k: 'ig_broadcast', p: 'instagram', n: 'Broadcast channel', d: 'One-to-many message into follower DMs.', m: 'none', ar: '', max: 1, cl: 2200, a: 'blocked', why: 'Broadcast channels are direct messaging, not feed posts — they can’t be scheduled as a post.' },
-    { k: 'ig_live', p: 'instagram', n: 'Live', d: 'Real-time video broadcast.', m: 'none', ar: '9:16', max: 0, cl: 0, a: 'blocked', why: 'Going live happens in the moment — there is nothing to draft or schedule here.' },
-
-    { k: 'fb_feed', p: 'facebook', n: 'Feed post', d: 'Text, a link, an image or a video.', m: 'image', ar: '1:1', max: 1, cl: 63206, a: 'live' },
-    { k: 'fb_reel', p: 'facebook', n: 'Reel', d: 'Vertical short-form video.', m: 'video', ar: '9:16', max: 1, cl: 63206, a: 'planned', why: 'Facebook Reels use a separate video endpoint we haven’t connected yet.' },
-    { k: 'fb_story', p: 'facebook', n: 'Story', d: 'Vertical, gone in 24 hours.', m: 'mixed', ar: '9:16', max: 1, cl: 0, a: 'planned', why: 'Stories publish through a different Facebook endpoint we haven’t connected yet.' },
-    { k: 'fb_group', p: 'facebook', n: 'Group post', d: 'Posted into a community group feed.', m: 'image', ar: '1:1', max: 1, cl: 63206, a: 'planned', why: 'Posting to a group needs group selection and permissions the Facebook connection doesn’t request yet.' },
-    { k: 'fb_live', p: 'facebook', n: 'Live', d: 'Real-time video broadcast.', m: 'none', ar: '', max: 0, cl: 0, a: 'blocked', why: 'Going live happens in the moment — there is nothing to draft or schedule here.' },
-
-    { k: 'th_text', p: 'threads', n: 'Text post', d: 'Short conversational update.', m: 'image', ar: '1:1', max: 1, cl: 500, a: 'live' },
-    { k: 'th_carousel', p: 'threads', n: 'Carousel', d: 'Up to 20 swipeable items.', m: 'mixed', ar: '1:1', max: 20, cl: 500, a: 'planned', why: 'Carousels need multi-image publishing, which we haven’t built yet.' },
-    { k: 'th_voice', p: 'threads', n: 'Voice note', d: 'A playable audio recording.', m: 'audio', ar: '', max: 1, cl: 500, a: 'planned', why: 'We have no audio upload path yet — the content library handles images and video only.' },
-    { k: 'th_poll', p: 'threads', n: 'Poll', d: 'Interactive vote, up to four options.', m: 'none', ar: '', max: 0, cl: 500, a: 'planned', why: 'Polls need their own options editor and a different API call — not built yet.' },
-
-    { k: 'li_feed', p: 'linkedin', n: 'Feed post', d: 'Text, an image, or an outbound link.', m: 'image', ar: '1:1', max: 1, cl: 3000, a: 'live' },
-    { k: 'li_video', p: 'linkedin', n: 'Native video', d: 'Video straight to the feed.', m: 'video', ar: '16:9', max: 1, cl: 3000, a: 'live' },
-    { k: 'li_document', p: 'linkedin', n: 'Document carousel', d: 'A PDF that reads as swipeable slides.', m: 'document', ar: '', max: 1, cl: 3000, a: 'planned', why: 'Needs PDF upload and LinkedIn’s document endpoint; the library doesn’t accept documents yet.' },
-    { k: 'li_article', p: 'linkedin', n: 'Article / newsletter', d: 'Long-form writing with subscribers.', m: 'none', ar: '', max: 1, cl: 110000, a: 'blocked', why: 'Long-form belongs to the Blog Writer — draft it there and publish to LinkedIn from its destinations.' },
-    { k: 'li_audio', p: 'linkedin', n: 'Audio event / Live', d: 'Drop-in audio room or live stream.', m: 'none', ar: '', max: 0, cl: 0, a: 'blocked', why: 'A live event is not a post — it can’t be drafted and queued like one.' },
-
-    { k: 'x_text', p: 'x', n: 'Post', d: 'Short-form text, and thread starters.', m: 'image', ar: '16:9', max: 1, cl: 280, a: 'live' },
-    { k: 'x_video', p: 'x', n: 'Native video', d: 'Video straight into the feed.', m: 'video', ar: '16:9', max: 1, cl: 280, a: 'live' },
-    { k: 'x_images', p: 'x', n: 'Image grid', d: 'Up to four images in one grid.', m: 'image', ar: '16:9', max: 4, cl: 280, a: 'planned', why: 'The grid needs multi-image publishing, which we haven’t built yet.' },
-    { k: 'x_poll', p: 'x', n: 'Poll', d: 'Interactive vote, up to four options.', m: 'none', ar: '', max: 0, cl: 280, a: 'planned', why: 'Polls need their own options editor and a different API call — not built yet.' },
-    { k: 'x_space', p: 'x', n: 'Space', d: 'Live drop-in audio broadcast.', m: 'none', ar: '', max: 0, cl: 0, a: 'blocked', why: 'A Space is a live event, not a post — there is nothing to draft or queue.' },
-
-    { k: 'yt_vod', p: 'youtube', n: 'Video', d: 'Horizontal video, found through search.', m: 'video', ar: '16:9', max: 1, cl: 5000, a: 'live' },
-    { k: 'yt_short', p: 'youtube', n: 'Short', d: 'Vertical video under 60 seconds.', m: 'video', ar: '9:16', max: 1, cl: 5000, a: 'live' },
-    { k: 'yt_community', p: 'youtube', n: 'Community post', d: 'Text, image or poll for subscribers.', m: 'image', ar: '1:1', max: 1, cl: 5000, a: 'planned', why: 'The Community tab is a separate YouTube API surface we haven’t connected yet.' },
-    { k: 'yt_live', p: 'youtube', n: 'Live', d: 'Real-time stream.', m: 'none', ar: '', max: 0, cl: 0, a: 'blocked', why: 'Streaming happens in the moment — there is nothing to draft or schedule here.' },
-];
+// Every post format, generated from src/config/post-formats.ts (npm run gen:constants). This was a
+// hand-written mirror of ~30 records — the same drift class that lost Threads and YouTube from the
+// platform list, and the reason the editor had no minItems to enforce a carousel's 2-slide minimum.
+const _PCE_FORMATS = window.PlatformConstants.formats;
 
 const _pceFormat = (key) => _PCE_FORMATS.find(f => f.k === key) || null;
 const _pceFormatsFor = (platform) => _PCE_FORMATS.filter(f => f.p === (platform === 'twitter' ? 'x' : platform));
@@ -6611,6 +6608,181 @@ function _pceRenderPlatformPicker() {
           ${_rqEsc(p.label)}
         </button>`;
     }).join('');
+}
+
+// ── Slides (carousels) ──────────────────────────────────────────────────────────────────────────
+// A carousel is one post with an ORDERED list of media. Order is the content, not a detail: the same
+// three pictures in a different sequence is a different post, which is why every operation here goes
+// through one "the slides are now this list" call (set-post-slides) rather than separate add/move/
+// remove endpoints that could each leave the junction table and the legacy array disagreeing.
+
+let _pceSlideIndex = 0;        // which slide the canvas is showing
+let _pceSlidesBusy = false;
+
+const _pceSlides = (post) => (post && Array.isArray(post.slides) ? post.slides : []);
+
+/** Slide ids as the server wants them: an ordered array. Falls back to the post's own asset list. */
+function _pceSlideIds(post) {
+    const slides = _pceSlides(post);
+    if (slides.length) return slides.map(s => s.assetId);
+    return Array.isArray(post?.contentAssetIds) ? post.contentAssetIds.slice() : [];
+}
+
+function _pceSetSlidesMsg(text, kind) {
+    const el = _pceEl('pce-slides-msg');
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = 'text-[10px] mt-1 '
+        + (kind === 'error' ? 'text-red-600 font-semibold' : kind === 'ok' ? 'text-emerald-700 font-semibold' : 'text-gray-400');
+}
+
+function _pceRenderSlides() {
+    const wrap = _pceEl('pce-slides');
+    const strip = _pceEl('pce-slide-strip');
+    if (!wrap || !strip) return;
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const fmt = post ? _pceActiveFormat(post) : null;
+    const slides = _pceSlides(post);
+    // Offered when the FORMAT can hold more than one — or when the post already does, so a carousel
+    // whose format was later changed can still be seen and fixed rather than silently truncated.
+    const capable = !!post && !post.brandCard && ((fmt && fmt.max > 1) || slides.length > 1);
+    if (!capable) { wrap.classList.add('hidden'); strip.innerHTML = ''; return; }
+    wrap.classList.remove('hidden');
+
+    const max = fmt?.max || 20;
+    const min = fmt?.min || 1;
+    const count = _pceEl('pce-slides-count');
+    if (count) count.textContent = slides.length ? `${slides.length}/${max}` : '';
+
+    if (_pceSlideIndex >= slides.length) _pceSlideIndex = Math.max(0, slides.length - 1);
+
+    const tiles = slides.map((s, i) => {
+        const on = i === _pceSlideIndex;
+        const inner = s.kind === 'video'
+            ? `<video src="${_rqEsc(s.url)}" muted class="w-full h-full object-cover bg-black"></video>`
+            : `<img src="${_rqEsc(s.url)}" alt="" class="w-full h-full object-cover">`;
+        return `<div class="relative shrink-0" style="width:56px">
+            <button type="button" onclick="_pceSelectSlide(${i})" title="Slide ${i + 1}"
+              class="block w-14 h-14 rounded-lg overflow-hidden border-2 transition cursor-pointer ${on ? 'border-emerald-500' : 'border-transparent hover:border-gray-300'}">
+              ${inner}
+            </button>
+            <span class="absolute top-0.5 left-0.5 px-1 rounded bg-gray-900/70 text-white text-[9px] font-bold">${i + 1}</span>
+            <button type="button" onclick="_pceRemoveSlide(${i})" title="Remove this slide"
+              class="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-white border border-gray-300 text-gray-500 hover:text-red-600 text-[10px] leading-none cursor-pointer">&times;</button>
+            <div class="flex justify-between mt-0.5">
+              <button type="button" onclick="_pceMoveSlide(${i},-1)" ${i === 0 ? 'disabled' : ''} title="Move earlier"
+                class="px-1 text-[10px] text-gray-400 hover:text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer">&#9664;</button>
+              <button type="button" onclick="_pceMoveSlide(${i},1)" ${i === slides.length - 1 ? 'disabled' : ''} title="Move later"
+                class="px-1 text-[10px] text-gray-400 hover:text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer">&#9654;</button>
+            </div>
+          </div>`;
+    }).join('');
+
+    const addTile = slides.length < max
+        ? `<button type="button" onclick="document.getElementById('pce-slide-file').click()" ${_pceSlidesBusy ? 'disabled' : ''}
+             title="Add slides — you can pick several at once"
+             class="shrink-0 w-14 h-14 rounded-lg border-2 border-dashed border-gray-300 text-gray-400 hover:border-emerald-400 hover:text-emerald-600 transition cursor-pointer flex items-center justify-center text-lg ${_pceSlidesBusy ? 'opacity-50 cursor-not-allowed' : ''}">+</button>`
+        : '';
+    strip.innerHTML = tiles + addTile;
+
+    // The minimum is a publish rule, so say it while it is still fixable rather than at approval.
+    if (min > 1 && slides.length < min) {
+        _pceSetSlidesMsg(`${fmt.n} needs at least ${min} slides — add ${min - slides.length} more.`, 'error');
+    } else if (!_pceSlidesBusy) {
+        _pceSetSlidesMsg(slides.length > 1 ? 'Reorder with the arrows. The canvas shows the selected slide.' : '');
+    }
+}
+
+function _pceSelectSlide(i) {
+    _pceSlideIndex = Math.max(0, i);
+    // Re-render the mock-up so the canvas follows the selection, then repaint overlays onto it.
+    _rqReviewRenderActive();
+}
+
+async function _pceMoveSlide(i, dir) {
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const ids = _pceSlideIds(post);
+    const j = i + dir;
+    if (j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    _pceSlideIndex = j;                       // follow the slide you just moved
+    await _pcePersistSlides(ids);
+}
+
+async function _pceRemoveSlide(i) {
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const ids = _pceSlideIds(post);
+    if (i < 0 || i >= ids.length) return;
+    ids.splice(i, 1);
+    if (_pceSlideIndex >= ids.length) _pceSlideIndex = Math.max(0, ids.length - 1);
+    await _pcePersistSlides(ids);
+}
+
+/** Upload one or more files and append them as slides, in the order they were chosen. */
+async function _pceAddSlides(fileList) {
+    const files = Array.from(fileList || []);
+    if (!files.length) return;
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    if (!post) return;
+    const fmt = _pceActiveFormat(post);
+    const max = fmt?.max || 20;
+    const ids = _pceSlideIds(post);
+    const room = max - ids.length;
+    if (room <= 0) { _pceSetSlidesMsg(`That's the most slides this format takes (${max}).`, 'error'); return; }
+
+    _pceSlidesBusy = true;
+    _pceRenderSlides();
+    const take = files.slice(0, room);
+    _pceSetSlidesMsg(`Uploading ${take.length} file${take.length === 1 ? '' : 's'}…`);
+    try {
+        // Sequential, not parallel: the order the user picked them in IS the slide order, and
+        // Promise.all would resolve in whatever order the uploads happened to finish.
+        for (const file of take) {
+            const asset = await gpUploadContentAsset(file);
+            ids.push(asset.id);
+        }
+        _pceSlidesBusy = false;
+        await _pcePersistSlides(ids);
+        // AFTER the save, or its own "Slides updated." would overwrite this and the dropped files
+        // would vanish without a word — the user picked 5, got 2, and nothing said so.
+        if (files.length > room) {
+            _pceSetSlidesMsg(`Added ${room} of ${files.length} — ${max} slides is this format's limit.`, 'error');
+        }
+    } catch (err) {
+        _pceSlidesBusy = false;
+        _pceRenderSlides();
+        _pceSetSlidesMsg(err.message || 'Could not add those slides.', 'error');
+    }
+}
+
+/** The single write path: hand the server the whole ordered list and re-render from what it returns. */
+async function _pcePersistSlides(assetIds) {
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    if (!post) return;
+    _pceSlidesBusy = true;
+    _pceRenderSlides();
+    try {
+        const res = await fetch('/.netlify/functions/set-post-slides', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId, assetIds }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || 'Could not save the slides.');
+        post.slides = d.slides || [];
+        post.contentAssetIds = (d.slides || []).map(s => s.assetId);
+        // The first slide is the post's thumbnail everywhere else (queue cards, siblings), so it has
+        // to move when slide 1 does — otherwise reordering looks like it did nothing in the queue.
+        post.thumbnailUrl = post.slides[0]?.url ?? null;
+        _pceSlidesBusy = false;
+        _rqReviewRenderActive();
+        _pceSetSlidesMsg('Slides updated.', 'ok');
+    } catch (err) {
+        _pceSlidesBusy = false;
+        _pceRenderSlides();
+        _pceSetSlidesMsg(err.message || 'Could not save the slides.', 'error');
+    }
 }
 
 // ── Draft with AI, without leaving the editor ───────────────────────────────────────────────────
@@ -7891,6 +8063,7 @@ function _pceSyncForPost(post) {
     // Left pane tracks the inspector: both are for editing, and a read-only post gets neither.
     _pceShowLeftPane(true);
     _pceRenderPlatformPicker();
+    _pceRenderSlides();
     // The AI prompt is about the post you were looking at, so it does not follow you to another one.
     // Skipped while a draft is in flight for THIS post — that run owns the panel until it finishes.
     if (!_pceAiPoll) {

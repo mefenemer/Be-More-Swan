@@ -19,7 +19,7 @@ import { Handler } from '@netlify/functions';
 import { getDb } from '../../db/client';
 import { scheduledPosts, publishCronLog } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
-import { resolvePostMedia, hasAttachedMedia, publishFacebook, resolveFacebookPageCredentials, type DriverResult } from '../../src/utils/social-publish';
+import { resolvePostMediaList, hasAttachedMedia, publishFacebook, resolveFacebookPageCredentials, type DriverResult } from '../../src/utils/social-publish';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -88,8 +88,9 @@ export default withLambda(async () => {
             const text = [post.caption, post.hashtags].filter(Boolean).join('\n\n').trim();
             if (!text) throw new Error('Post has no text to publish.');
 
-            // Either kind — /videos takes a remote file_url just as /photos takes url.
-            const image = await resolvePostMedia(db, post.content_asset_ids).catch(() => null);
+            // EVERY attachment, in slide order: more than one becomes a multi-photo post.
+            const items = await resolvePostMediaList(db, post.content_asset_ids).catch(() => []);
+            const image = items.length ? items : null;
             // A post with NO media is a legitimate text post. A post whose media we cannot resolve is
             // not — publishing it bare would silently discard the picture the user approved, and the
             // queue would call it a success. Fail instead: the post stays recoverable.

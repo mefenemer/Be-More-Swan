@@ -13,6 +13,7 @@ import {
 import { createNotification } from '../../src/utils/notify';
 import { getSecret } from '../../src/utils/vault';
 import { recordPostedAssets } from '../../src/utils/pexels';
+import { resolvePostMediaList } from '../../src/utils/social-publish';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const BATCH = 100;
@@ -64,9 +65,11 @@ export default withLambda(async () => {
         id: number; user_id: number; organisation_id: number; caption: string | null;
         hashtags: string | null; platform_post_id: string | null; connection_id: number | null;
         attempt_count: number; publish_date: string; post_format: string; assistant_id: number | null;
+        content_asset_ids: unknown;
     }>(
         `SELECT id, user_id, organisation_id, caption, hashtags, platform_post_id,
-                connection_id, attempt_count, publish_date, post_format, assistant_id
+                connection_id, attempt_count, publish_date, post_format, assistant_id,
+                content_asset_ids
          FROM scheduled_posts
          WHERE status = 'scheduled'
            AND platform = 'instagram'
@@ -133,6 +136,102 @@ export default withLambda(async () => {
             const isVideo = ['reel', 'video'].includes(post.post_format?.toLowerCase() ?? '');
             const mediaProxyBase = `${process.env.BASE_URL || 'https://bemoreswan.com'}/.netlify/functions/media-proxy?postId=${post.id}`;
 
+            // ── Carousel? ───────────────────────────────────────────────────────────────────────
+            // Instagram builds one from CHILD containers — one per slide, each flagged
+            // is_carousel_item and carrying NO caption — followed by a CAROUSEL parent that holds
+            // the caption and lists the children. Each child's media is fetched separately by Meta,
+            // which is why media-proxy takes &index=N: without it every child would resolve to
+            // slide 1 and the post would publish successfully as the same picture repeated.
+            const slides = await resolvePostMediaList(db, post.content_asset_ids).catch(() => []);
+            const isCarousel = slides.length > 1;
+
+            let containerId: string;
+
+            if (isCarousel) {
+                // Video SLIDES are deliberately refused for now. Instagram requires each video child
+                // container to reach FINISHED before the parent is assembled, and shipping that
+                // polling untested would fail at publish time — on a post the reviewer had already
+                // approved — rather than here, where it can be said plainly.
+                if (slides.some(s => s.kind === 'video')) {
+                    await handlePublishFailure(db, post, {
+                        errorCode: null,
+                        errorMessage: 'Instagram carousels with video slides aren’t supported yet — use images only, or post the video on its own as a Reel.',
+                        isRetryable: false,
+                    }, now);
+                    failed++;
+                    return;
+                }
+
+                const childIds: string[] = [];
+                let childFailure: FailureReason | null = null;
+
+                for (let i = 0; i < slides.length; i++) {
+                    const slideIsVideo = slides[i].kind === 'video';
+                    const childBody: Record<string, string | boolean> = {
+                        is_carousel_item: true,
+                        access_token: token,
+                    };
+                    if (slideIsVideo) {
+                        childBody.media_type = 'VIDEO';
+                        childBody.video_url = `${mediaProxyBase}&index=${i}`;
+                    } else {
+                        childBody.image_url = `${mediaProxyBase}&index=${i}`;
+                    }
+                    const childRes = await fetch(
+                        `https://graph.facebook.com/${GRAPH_VERSION}/${igUserId}/media`,
+                        { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(childBody) }
+                    );
+                    const childData: { id?: string; error?: { code: number; message: string; error_subcode?: number } } = await childRes.json();
+                    if (!childData.id) {
+                        const err = childData.error;
+                        childFailure = {
+                            errorCode: err?.code ?? null,
+                            errorMessage: `Slide ${i + 1}: ${err?.message ?? 'could not be prepared'}`,
+                            errorSubcode: err?.error_subcode,
+                            isRetryable: isRetryable(err?.code ?? 0),
+                        };
+                        break;
+                    }
+                    childIds.push(childData.id);
+                }
+
+                // One bad slide fails the whole post. A carousel missing a slide is not a lesser
+                // version of what was approved — it is a different post, and the reviewer approved
+                // the one with all of them.
+                if (childFailure) {
+                    await handlePublishFailure(db, post, childFailure, now);
+                    if (!childFailure.isRetryable) failed++;
+                    return;
+                }
+
+                const parentRes = await fetch(
+                    `https://graph.facebook.com/${GRAPH_VERSION}/${igUserId}/media`,
+                    {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            media_type: 'CAROUSEL',
+                            children: childIds.join(','),
+                            caption: fullCaption,
+                            access_token: token,
+                        }),
+                    }
+                );
+                const parentData: { id?: string; error?: { code: number; message: string; error_subcode?: number } } = await parentRes.json();
+                if (!parentData.id) {
+                    const err = parentData.error;
+                    const retryable = isRetryable(err?.code ?? 0);
+                    await handlePublishFailure(db, post, {
+                        errorCode: err?.code ?? null,
+                        errorMessage: err?.message ?? 'Could not assemble the carousel.',
+                        errorSubcode: err?.error_subcode,
+                        isRetryable: retryable,
+                    }, now);
+                    if (!retryable) failed++;
+                    return;
+                }
+                containerId = parentData.id;
+            } else {
+
             // Step 1: create media container (image or video)
             const containerBody: Record<string, string> = {
                 caption: fullCaption,
@@ -161,11 +260,14 @@ export default withLambda(async () => {
                 return;
             }
 
-            const containerId = mediaData.id;
+            containerId = mediaData.id;
+            }
             await db.update(scheduledPosts).set({ containerId, updatedAt: new Date() }).where(eq(scheduledPosts.id, post.id));
 
-            // Video-only: poll container status until FINISHED (or ERROR)
-            if (isVideo) {
+            // Video-only: poll container status until FINISHED (or ERROR).
+            // Never for a carousel: its parent is assembled from children that are already ready, and
+            // status_code is not what a CAROUSEL container reports.
+            if (isVideo && !isCarousel) {
                 const POLL_INTERVAL_MS = 5_000;
                 const POLL_TIMEOUT_MS  = 120_000;
                 const pollStart = Date.now();

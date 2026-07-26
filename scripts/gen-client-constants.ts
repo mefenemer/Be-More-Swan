@@ -21,6 +21,7 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PLATFORM_FORMATS, SOCIAL_PLATFORMS } from '../src/config/platform-formats';
+import { POST_FORMATS } from '../src/config/post-formats';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const OUTPUT_PATH = join(root, 'src', 'generated', 'platform-constants.js');
@@ -43,6 +44,26 @@ export function renderClientConstants(): string {
 
     const rows = platforms.map(p => `    ${JSON.stringify(p)},`).join('\n');
 
+    // The editor's per-format records. Short keys because this list is rendered per keystroke in a
+    // page with no build step — and because the shape predates the generator, so keeping it means
+    // _pceRenderFormats/_pceRenderFormatRules did not have to change.
+    //
+    // `availability` is mapped to the vocabulary workspace.html already branches on: it treats
+    // anything that is neither 'live' nor 'planned' as unschedulable, and called that 'blocked'.
+    const formatRows = POST_FORMATS.map(f => JSON.stringify({
+        k: f.key,
+        p: f.platform,
+        n: f.label,
+        d: f.blurb,
+        m: f.media,
+        ar: f.aspectRatios[0] ?? '',
+        min: f.minItems,
+        max: f.maxItems,
+        cl: f.charLimit,
+        a: f.availability === 'live' ? 'live' : f.availability === 'planned' ? 'planned' : 'blocked',
+        ...(f.unavailableReason ? { why: f.unavailableReason } : {}),
+    })).map(j => `    ${j},`).join('\n');
+
     return `// GENERATED FILE — DO NOT EDIT BY HAND.
 //
 // Written by scripts/gen-client-constants.ts from src/config/platform-formats.ts.
@@ -60,12 +81,20 @@ export function renderClientConstants(): string {
 ${rows}
   ];
 
+  // Every post format, from src/config/post-formats.ts. workspace.html reads this as _PCE_FORMATS.
+  var POST_FORMATS = [
+${formatRows}
+  ];
+
   var byId = {};
   for (var i = 0; i < PLATFORMS.length; i++) byId[PLATFORMS[i].id] = PLATFORMS[i];
 
   window.PlatformConstants = {
     /** Every platform we can draft and publish for, in a stable order. */
     all: PLATFORMS,
+
+    /** Every post format, in catalogue order. Shape matches the editor's _PCE_FORMATS records. */
+    formats: POST_FORMATS,
 
     /** One platform's facts. Tolerates legacy 'twitter'; returns null for anything unknown. */
     get: function (id) {

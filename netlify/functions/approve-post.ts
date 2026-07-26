@@ -17,7 +17,7 @@ import { aiAssistants, auditLogs, contentRules, postIdeaSuggestions, scheduledPo
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { resolvePostImage, resolvePostVideo } from '../../src/utils/social-publish';
 import { resolvePostingSchedule, computeScheduleSlots, intervalHoursFor } from '../../src/config/posting-cadence';
-import { formatBlockedReason } from '../../src/config/post-formats';
+import { formatBlockedReason, postFormatSpec } from '../../src/config/post-formats';
 import { platformFormat } from '../../src/config/platform-formats';
 import { needsVideoRender, renderableAudio } from '../../src/lib/audio-overlays';
 import { readCachedReview, openWarnings } from '../../src/utils/post-quality-review';
@@ -253,6 +253,35 @@ export default withLambda(async (event) => {
                 formatKey: (post as any).formatKey,
             }),
         };
+    }
+
+    // Slide-count bounds for the chosen format. A carousel needs at least two slides to BE a
+    // carousel, and every platform caps how many it takes — both are publish-time rejections, so
+    // catching them here keeps a half-built carousel out of the queue rather than letting it fail
+    // against the API with a message written for developers.
+    const fmtSpec = postFormatSpec((post as any).formatKey);
+    if (fmtSpec) {
+        const slideCount = Array.isArray(post.contentAssetIds) ? (post.contentAssetIds as number[]).length : 0;
+        if (slideCount < fmtSpec.minItems) {
+            return {
+                statusCode: 422,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    error: `${fmtSpec.label} needs at least ${fmtSpec.minItems} ${fmtSpec.minItems === 1 ? 'item' : 'items'} — this post has ${slideCount}.`,
+                    code: 'TOO_FEW_ITEMS',
+                }),
+            };
+        }
+        if (slideCount > fmtSpec.maxItems) {
+            return {
+                statusCode: 422,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    error: `${fmtSpec.label} takes at most ${fmtSpec.maxItems} — this post has ${slideCount}.`,
+                    code: 'TOO_MANY_ITEMS',
+                }),
+            };
+        }
     }
 
     // Will this post go out as a VIDEO, and can this platform's driver actually send one?

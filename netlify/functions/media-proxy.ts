@@ -14,7 +14,7 @@ import { Handler } from '@netlify/functions';
 import { eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, scheduledPostAssets } from '../../db/schema';
-import { resolvePostImage, resolvePostVideo } from '../../src/utils/social-publish';
+import { resolvePostImage, resolvePostVideo, resolvePostMediaList } from '../../src/utils/social-publish';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -49,6 +49,27 @@ export default withLambda(async (event) => {
         ];
         // De-dupe while preserving order (junction takes precedence).
         const uniqueIds = [...new Set(ids)];
+
+        // ── Which attachment? ───────────────────────────────────────────────────────────────────
+        // A carousel needs one fetchable URL PER SLIDE, so the caller names the slide it wants with
+        // &index=N. Meta fetches each child container's media separately, and without this every
+        // child would resolve to slide 1 — a carousel of the same picture repeated, published
+        // successfully, with nothing to indicate anything went wrong.
+        //
+        // Absent index = slide 0, which is exactly the old behaviour for every single-media post.
+        const rawIndex = event.queryStringParameters?.index;
+        if (rawIndex != null && rawIndex !== '') {
+            const index = Number(rawIndex);
+            if (!Number.isInteger(index) || index < 0) return { statusCode: 400, body: 'index must be a non-negative integer.' };
+            const items = await resolvePostMediaList(db, uniqueIds);
+            const item = items[index];
+            if (!item) return { statusCode: 404, body: `No attachment at index ${index}.` };
+            return {
+                statusCode: 302,
+                headers: { Location: item.url, 'Content-Type': item.mimeType, 'Cache-Control': 'no-store' },
+                body: '',
+            };
+        }
 
         // Image first, then video. publish-instagram points BOTH image_url and video_url at this
         // one endpoint, so a REELS post resolved only images here and Meta fetched a 404 — the

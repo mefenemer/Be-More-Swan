@@ -1,14 +1,19 @@
 // tests/post-formats.test.ts
-// The post-format catalogue lives in TWO places that must agree:
+// The post-format catalogue reaches the editor through a GENERATED file:
 //   1. src/config/post-formats.ts   — the server's, and the authority. approve-post refuses an
 //      unschedulable format from here, so this one decides what can actually be queued.
-//   2. _PCE_FORMATS in workspace.html — the editor's picker. workspace.html is a static page that
-//      cannot import a module, so it carries an inline mirror.
+//   2. src/generated/platform-constants.js — written by `npm run gen:constants`, read by
+//      workspace.html as `_PCE_FORMATS = window.PlatformConstants.formats`.
+//
+// It used to be a hand-written inline mirror of ~30 records in workspace.html, and these tests
+// existed to catch it drifting. It drifted anyway in a way no equality check caught: the mirror had
+// no `minItems` at all, so the editor could not enforce a carousel's two-slide minimum. Generating
+// it removes the whole class — what is left to assert is that the generated file is FRESH, and that
+// what it carries still means the same thing on both sides.
 //
 // A drift is not cosmetic. If the picker calls a format available when the server does not, the user
 // designs a whole post and is refused at the last step; if it calls one unavailable when the server
-// would take it, a working format silently disappears from the product. Same failure mode
-// tests/overlay-geometry.test.ts exists to prevent, and the same fix: assert they match.
+// would take it, a working format silently disappears from the product.
 //
 // Run:  npx tsx tests/post-formats.test.ts
 
@@ -24,16 +29,31 @@ function check(name: string, fn: () => void): void {
 
 const WORKSPACE = readFileSync(new URL('../workspace.html', import.meta.url), 'utf8');
 
-// Pull the inline mirror out of the page. Deliberately parsed from source rather than executed —
-// the point is to compare what is WRITTEN there, with no chance of a stub filling anything in.
-function clientFormats(): Array<{ k: string; p: string; a: string; max: number; why?: string }> {
-    const start = WORKSPACE.indexOf('const _PCE_FORMATS = [');
-    assert.ok(start > -1, '_PCE_FORMATS not found in workspace.html');
-    const end = WORKSPACE.indexOf('\n];', start);
-    const body = WORKSPACE.slice(start, end);
-    return [...body.matchAll(/\{ k: '([^']+)', p: '([^']+)',[\s\S]*?max: (\d+),[\s\S]*?a: '([^']+)'(, why: '([^']*)')?/g)]
-        .map(m => ({ k: m[1], p: m[2], max: Number(m[3]), a: m[4], why: m[6] }));
+// The records the browser actually receives, read out of the generated file. Parsed from source
+// rather than executed: the point is to check what is WRITTEN there, with no chance of a stub
+// filling anything in.
+function clientFormats(): Array<{ k: string; p: string; a: string; min: number; max: number; why?: string }> {
+    const js = readFileSync(new URL('../src/generated/platform-constants.js', import.meta.url), 'utf8');
+    const start = js.indexOf('var POST_FORMATS = [');
+    assert.ok(start > -1, 'POST_FORMATS missing from the generated constants — run: npm run gen:constants');
+    const end = js.indexOf('\n  ];', start);
+    return js.slice(start, end)
+        .split('\n')
+        .map(l => l.trim().replace(/,$/, ''))
+        .filter(l => l.startsWith('{'))
+        .map(l => JSON.parse(l));
 }
+
+check('workspace.html reads the generated list instead of carrying its own', () => {
+    assert.ok(
+        /const _PCE_FORMATS = window\.PlatformConstants\.formats;/.test(WORKSPACE),
+        'the editor must read the generated formats',
+    );
+    assert.ok(
+        !/const _PCE_FORMATS = \[/.test(WORKSPACE),
+        'a hand-written _PCE_FORMATS has been reintroduced — that is the drift class this replaced',
+    );
+});
 
 // The client says 'blocked' where the server says 'not_schedulable' — same meaning, shorter to type
 // in a page that repeats it 7 times. Everything else is identical by name.
@@ -58,6 +78,9 @@ check('item limits agree, so the picker cannot promise more slides than the form
     const byKey = new Map(clientFormats().map(f => [f.k, f]));
     for (const spec of POST_FORMATS) {
         assert.equal(byKey.get(spec.key)!.max, spec.maxItems, `${spec.key}: maxItems drifted`);
+        // minItems was absent from the old hand-written mirror entirely, which is why the editor
+        // could not tell anyone a carousel needs two slides until approval refused it.
+        assert.equal(byKey.get(spec.key)!.min, spec.minItems, `${spec.key}: minItems drifted`);
     }
 });
 
@@ -80,7 +103,9 @@ check('formatSchedulable gates on availability, and never blocks a legacy post',
     // future deploy wrote and this one doesn't know.
     assert.equal(formatSchedulable('some_future_format'), true);
     assert.equal(formatSchedulable('ig_feed'), true);
-    assert.equal(formatSchedulable('ig_carousel'), false);
+    // Carousels went live once multi-attachment publishing existed; Stories have not.
+    assert.equal(formatSchedulable('ig_carousel'), true);
+    assert.equal(formatSchedulable('ig_story'), false);
     assert.equal(formatSchedulable('x_space'), false);
 });
 
@@ -119,4 +144,4 @@ check('a mandatory-media format never declares itself media-free', () => {
     }
 });
 
-console.log(`\n${passed}/9 passed`);
+console.log(`\n${passed}/10 passed`);

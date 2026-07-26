@@ -5,7 +5,7 @@ import { Handler } from '@netlify/functions';
 import { eq, and, desc, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, aiAssistants, postIdeaSuggestions, organisations, scheduledPostAssets, contentAssets, postRenderJobs } from '../../db/schema';
-import { resolvePostImage, presignR2Get } from '../../src/utils/social-publish';
+import { resolvePostImage, presignR2Get, resolvePostMediaList } from '../../src/utils/social-publish';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { displayCaption } from '../../src/utils/model-json';
@@ -186,6 +186,18 @@ export default withLambda(async (event) => {
         const withThumbs = await Promise.all(drafts.map(async ({ contentAssetIds, imageOverlays, audioOverlays, ...d }) => {
             let thumbnailUrl: string | null = null;
             try { thumbnailUrl = (await resolvePostImage(db, contentAssetIds))?.url ?? null; } catch { /* ignore */ }
+            // Carousel slides, in order — but ONLY for posts that actually have more than one
+            // attachment. Resolving every draft's full list would presign up to 50 × 20 objects to
+            // populate a queue whose cards show one thumbnail each; the single-media case, which is
+            // almost every post, keeps costing exactly one presign.
+            const slideIds = Array.isArray(contentAssetIds) ? (contentAssetIds as number[]) : [];
+            let slides: Array<{ assetId: number; url: string; kind: string }> = [];
+            if (slideIds.length > 1) {
+                try {
+                    slides = (await resolvePostMediaList(db, slideIds))
+                        .map(s => ({ assetId: s.assetId, url: s.url, kind: s.kind }));
+                } catch { /* a carousel that won't resolve still renders as its thumbnail */ }
+            }
             // Archive countdown: rejected posts are kept 30 days from rejectedAt, then auto-deleted.
             let archiveDeletesAt: string | null = null;
             let daysRemaining: number | null = null;
@@ -213,6 +225,7 @@ export default withLambda(async (event) => {
                 brandCard: brandCards.get(d.id) ?? null,
                 // The saved text-overlay design, so the Review canvas can paint it live on open without
                 // a per-post get-post-image round trip. Normalised to an array the client renders directly.
+                slides,
                 overlays: Array.isArray(imageOverlays) ? imageOverlays : [],
                 // The saved audio arrangement, each clip carrying a playable url + name so the
                 // editor can draw its track and let the reviewer hear it without another round trip.
