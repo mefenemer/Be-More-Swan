@@ -38,6 +38,7 @@ export default withLambda(async (event) => {
         caption?: string;
         hashtags?: string;
         contentAssetIds?: number[];
+        blank?: boolean;
     };
     try { body = JSON.parse(event.body || '{}'); } catch { body = {}; }
 
@@ -49,8 +50,19 @@ export default withLambda(async (event) => {
         ? [...new Set(body.contentAssetIds.filter(n => Number.isInteger(n)))]
         : [];
 
+    // ── Blank mode: an empty post for the editor to open on ─────────────────────────────────────
+    // "Create Post" now opens the three-pane editor rather than a separate composer, and the editor
+    // edits a row — so a row has to exist before there is anything to write. A blank draft therefore
+    // has no caption, no media and no platform commitment yet, and every completeness rule below is
+    // deferred to approval, where it can be answered rather than guessed.
+    //
+    // It lands in 'draft', NOT 'pending_approval'. That is what stops an abandoned blank post
+    // cluttering the Review Queue: RQ_COLUMNS has no draft column, so it is invisible there until
+    // the user actually asks for it to be queued.
+    const blank = body.blank === true;
+
     if (!assistantId) return { statusCode: 400, body: JSON.stringify({ error: 'assistantId is required.' }) };
-    if (!caption) return { statusCode: 400, body: JSON.stringify({ error: 'A caption is required.' }) };
+    if (!blank && !caption) return { statusCode: 400, body: JSON.stringify({ error: 'A caption is required.' }) };
     if (caption.length > 5000) return { statusCode: 400, body: JSON.stringify({ error: 'Caption is too long.' }) };
     if (platforms.length === 0) return { statusCode: 400, body: JSON.stringify({ error: 'Select at least one platform.' }) };
     const invalid = platforms.filter(p => !VALID_PLATFORMS.includes(p));
@@ -60,7 +72,11 @@ export default withLambda(async (event) => {
     // naming Instagram, because YouTube has the same rule and a stricter one: it needs a VIDEO, and
     // a YouTube draft carrying only a still is unpublishable by construction — better refused here
     // than discovered at publish time.
-    const needsMedia = platforms.filter(p => platformFormat(p).mediaMandatory);
+    //
+    // Skipped for a blank draft: it has no media BY DEFINITION, and refusing to create the thing the
+    // user is about to add media to would make Instagram impossible to start a post for at all.
+    // approve-post enforces the same rule at the point it can actually be satisfied.
+    const needsMedia = blank ? [] : platforms.filter(p => platformFormat(p).mediaMandatory);
     if (needsMedia.length && contentAssetIds.length === 0) {
         const which = needsMedia.map(p => platformFormat(p).label).join(' and ');
         const kind = needsMedia.every(p => platformFormat(p).mediaKind === 'video') ? 'a video' : 'an image';
@@ -117,7 +133,7 @@ export default withLambda(async (event) => {
             hashtags: hashtags || null,
             // publish-social-posts.ts reads media from this legacy JSONB column, so it must be set.
             contentAssetIds,
-            status: 'pending_approval',
+            status: blank ? 'draft' : 'pending_approval',
             triggerType: 'manual',
             isAutonomous: false,
             ownerId: userId,

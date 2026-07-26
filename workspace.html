@@ -638,11 +638,33 @@ window.showComplianceModals = function showComplianceModals(force) {
                  previews and edits that platform's copy; the footer's Approve/Reject act on every
                  platform at once. -->
             <div id="post-review-tabs" class="hidden"></div>
+            <!-- Which platforms this post goes out on. Editing it genuinely creates and destroys
+                 sibling rows (see set-post-platforms.ts) — one post per platform, because each has
+                 its own caption, format and media rules. It sits ABOVE Format because the format
+                 list is per-platform: changing this changes what Format can even offer. -->
+            <div>
+              <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Platforms</p>
+              <div id="pce-platform-list" class="flex flex-wrap gap-1"></div>
+              <p id="pce-platform-msg" class="text-[10px] text-gray-400 mt-1.5">A separate draft is kept for each.</p>
+            </div>
             <!-- Format picker + the chosen format's rules. Built by _pceRenderFormats from
                  src/config/post-formats.ts, mirrored into _PCE_FORMATS below. -->
             <div>
               <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Format</p>
               <div id="pce-format-list" class="space-y-1"></div>
+            </div>
+            <!-- Drafting with the assistant, in the editor rather than on a separate screen. -->
+            <div class="pt-3 border-t border-gray-100">
+              <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Draft with AI</p>
+              <button type="button" onclick="_pceAskSwanCaption()"
+                class="w-full inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-emerald-300 text-emerald-700 hover:bg-emerald-50 text-xs font-bold transition cursor-pointer">
+                <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain">
+                <span>Ask Swan to write it</span>
+              </button>
+              <button type="button" onclick="openLegacyGeneratePostSheet()"
+                class="mt-1.5 w-full px-3 py-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 text-xs font-bold transition cursor-pointer">
+                Generate a post with media
+              </button>
             </div>
             <div id="pce-format-rules" class="hidden rounded-lg bg-gray-50 border border-gray-100 px-2.5 py-2 space-y-1"></div>
             <div id="pce-format-blocked" class="hidden rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800"></div>
@@ -748,7 +770,18 @@ window.showComplianceModals = function showComplianceModals(force) {
             <!-- ── Media: the card itself ───────────────────────────────── -->
             <!-- ── Caption. Always present: every post has words, whatever its media is. ── -->
             <div class="pce-insp hidden" data-insp="caption">
-              <label for="post-review-caption" class="block text-xs font-bold text-gray-600 mb-1">Caption</label>
+              <!-- The assistant is one click from the words, in the place the words are written.
+                   With an empty box it is asked to WRITE the caption; with a draft in it, to improve
+                   what's there — see askSwanAboutDraft. -->
+              <div class="flex items-center justify-between gap-2 mb-1">
+                <label for="post-review-caption" class="block text-xs font-bold text-gray-600">Caption</label>
+                <button type="button" onclick="_pceAskSwanCaption()"
+                  title="Ask your assistant to write or improve this caption"
+                  class="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 transition cursor-pointer">
+                  <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain">
+                  <span>Ask Swan</span>
+                </button>
+              </div>
               <textarea id="post-review-caption" rows="6"
                 class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-600"></textarea>
               <label for="post-review-hashtags" class="block text-xs font-bold text-gray-600 mb-1 mt-3">Hashtags</label>
@@ -5696,7 +5729,9 @@ async function openPostReview(postId) {
     // cache found nothing and the click did NOTHING AT ALL, with no modal and no message. Ask for
     // the status the caller actually wants before giving up.
     if (!_rqPostCache[postId]) {
-        for (const status of ['pending_approval', 'scheduled', 'approved']) {
+        // 'draft' first: a post just created by "Create Post" is in that status and nothing else
+        // fetches it, so without this the editor would open on nothing the moment it was created.
+        for (const status of ['draft', 'pending_approval', 'scheduled', 'approved']) {
             try {
                 const res = await fetch(`/.netlify/functions/get-social-drafts?status=${status}`);
                 if (res.ok) rqGroupSocialDrafts((await res.json()).drafts || []);
@@ -6466,6 +6501,85 @@ function _pceActiveFormat(post) {
 }
 
 const _PCE_MEDIA_WORD = { image: 'Image', video: 'Video', mixed: 'Images or video', audio: 'Audio', document: 'PDF', none: 'No media' };
+
+// ── Platforms ───────────────────────────────────────────────────────────────────────────────────
+// The post's platforms, as chips. Ticking one CREATES a sibling draft seeded from this one; unticking
+// deletes it (see set-post-platforms.ts) — a "post" spanning three platforms really is three rows.
+// Connected accounts are marked, but an unconnected platform stays selectable: drafting ahead of
+// connecting is normal, and the connection is asked for at approval.
+function _pceRenderPlatformPicker() {
+    const host = document.getElementById('pce-platform-list');
+    if (!host) return;
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (!post) { host.innerHTML = ''; return; }
+    // The whole sibling group's platforms, not just the one on screen.
+    const current = new Set(_rqReviewGroupIds.map(id => _rqPostCache[id]?.platform).filter(Boolean));
+    if (post.platform) current.add(post.platform);
+    const connected = (typeof gpConnectedPlatforms === 'function' ? gpConnectedPlatforms() : []) || [];
+
+    host.innerHTML = window.PlatformConstants.all.map(p => {
+        const on = current.has(p.id);
+        const isConnected = connected.some(s => String(s).includes(p.id));
+        return `<button type="button" onclick="_pceTogglePostPlatform('${p.id}')" ${_pcePlatformBusy ? 'disabled' : ''}
+          title="${isConnected ? 'Connected' : 'Not connected yet — you can still draft for it'}"
+          class="inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-[11px] font-bold transition cursor-pointer ${
+            on ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+          } ${_pcePlatformBusy ? 'opacity-50 cursor-not-allowed' : ''}">
+          <span class="w-1.5 h-1.5 rounded-full ${isConnected ? 'bg-emerald-500' : 'bg-gray-300'}"></span>
+          ${_rqEsc(p.label)}
+        </button>`;
+    }).join('');
+}
+
+let _pcePlatformBusy = false;
+function _pceSetPlatformMsg(text, kind) {
+    const el = document.getElementById('pce-platform-msg');
+    if (!el) return;
+    el.textContent = text || 'A separate draft is kept for each.';
+    el.className = 'text-[10px] mt-1.5 '
+        + (kind === 'error' ? 'text-red-600 font-semibold' : kind === 'ok' ? 'text-emerald-700 font-semibold' : 'text-gray-400');
+}
+
+async function _pceTogglePostPlatform(platformId) {
+    if (_pcePlatformBusy) return;
+    const postId = _rqReviewPostId;
+    const post = postId != null ? _rqPostCache[postId] : null;
+    if (!post) return;
+
+    const current = new Set(_rqReviewGroupIds.map(id => _rqPostCache[id]?.platform).filter(Boolean));
+    if (post.platform) current.add(post.platform);
+    if (current.has(platformId)) current.delete(platformId); else current.add(platformId);
+    // A post has to go somewhere. Refuse in the panel rather than letting the server 400 — the last
+    // chip is the one people click by accident when they mean "only this one".
+    if (!current.size) { _pceSetPlatformMsg('A post needs at least one platform.', 'error'); return; }
+
+    _pcePlatformBusy = true;
+    _pceRenderPlatformPicker();
+    _pceSetPlatformMsg('Updating…');
+    try {
+        const res = await fetch('/.netlify/functions/set-post-platforms', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId, platforms: [...current] }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || 'Could not change the platforms.');
+        // Rows were created/deleted, so the cache and the sibling map are both stale — refetch
+        // rather than patch, and reopen on whichever post survived (the one being edited may have
+        // been the one just removed).
+        _pcePlatformBusy = false;
+        await openPostReview(d.anchorId ?? postId);
+        _pceSetPlatformMsg(
+            d.locked?.length
+                ? `${d.locked.map(p => window.PlatformConstants.label(p)).join(', ')} already scheduled — not removed.`
+                : 'Platforms updated.',
+            d.locked?.length ? 'error' : 'ok',
+        );
+    } catch (err) {
+        _pcePlatformBusy = false;
+        _pceRenderPlatformPicker();
+        _pceSetPlatformMsg(err.message || 'Could not change the platforms.', 'error');
+    }
+}
 
 function _pceRenderFormats() {
     const host = document.getElementById('pce-format-list');
@@ -7579,6 +7693,7 @@ function _pceSyncForPost(post) {
     wrap.style.display = '';
     // Left pane tracks the inspector: both are for editing, and a read-only post gets neither.
     _pceShowLeftPane(true);
+    _pceRenderPlatformPicker();
     _pceRenderFormats();
     _pceApplyPanes();
     _pceSetStageWide(true);
@@ -7826,10 +7941,16 @@ function _rqReviewRenderActive() {
     })() : null;
     const approveBtn = document.getElementById('post-review-approve-btn');
     if (approveBtn) {
-        const prefix = multi ? `Approve all ${groupSize} platforms` : 'Approve';
+        // "Approve" is the right word for a draft the ASSISTANT wrote — you are passing judgement on
+        // someone else's work. It is the wrong word for one you just wrote yourself in this editor
+        // (status 'draft', reached from Create Post), where the action is simply finishing it. Same
+        // endpoint, same effect; the label reflects whose work it is.
+        const mine = post.status === 'draft';
+        const verb = mine ? 'Schedule' : 'Approve';
+        const prefix = multi ? `${verb} all ${groupSize} platforms` : verb;
         approveBtn.textContent = whenNumeric
-            ? (multi ? `${prefix} & schedule ${whenNumeric}` : `Approve & Confirm Schedule ${whenNumeric}`)
-            : (multi ? `${prefix} — let the assistant pick times` : 'Approve — let the assistant pick a time');
+            ? (multi ? `${prefix} & schedule ${whenNumeric}` : `${verb}${mine ? ' for ' : ' & Confirm Schedule '}${whenNumeric}`)
+            : (multi ? `${prefix} — let the assistant pick times` : `${verb} — let the assistant pick a time`);
     }
 
     // The "apply to all platforms" control is seeded by _pceFillCaption, which owns the caption
@@ -8541,7 +8662,60 @@ let _gpHasMedia = false;           // work-with-AI: whether the current draft ha
 // Opens the sheet on the single "write your own" composer. From there the user can hand the draft to
 // the assistant for improvements (Ask Swan) or reveal the on-demand generator via its link. The AI
 // task-limit gate is enforced only when the generator is opened — writing your own is always free.
+/**
+ * "Create Post" — opens the post EDITOR on a fresh blank draft.
+ *
+ * This is the amalgamation: creating and editing used to be two different screens with two different
+ * sets of controls, so the format picker, the layers, the text-on-image and the sound layer — all of
+ * the things that decide what a post actually looks like — were unreachable until after the post
+ * existed. Now there is one surface, and creating a post means opening it.
+ *
+ * It deliberately keeps the NAME openGeneratePostSheet: five call sites across four files
+ * (assistant-detail.html, review-queue.html, assistants.js, assistant-data-hub.js) funnel through
+ * this one function, so redefining it amalgamates every entry point at once instead of leaving some
+ * buttons on the old screen and some on the new.
+ *
+ * The draft is created immediately, because the editor edits a row. It lands in 'draft' status,
+ * which no Review Queue column selects — so abandoning one leaves nothing behind for anyone to tidy.
+ */
 async function openGeneratePostSheet() {
+    const assistantId = window._currentAssistantId || _gpCurrentAssistantId || null;
+    if (!assistantId) { window.showToast?.('Pick an assistant first.', { icon: '⚠️' }); return; }
+
+    window.showToast?.('Opening a new post…', { icon: '✍️' });
+
+    // Start on a platform the user can actually publish to, so the format list and the preview are
+    // immediately about something real. They can change it in the editor's left pane.
+    let cap = _gpCap;
+    if (!cap) { cap = await window.checkCapacity().catch(() => null); _gpCap = cap; }
+    const connected = (cap?.connectedPlatforms || []).map(s => String(s).toLowerCase());
+    const first = window.PlatformConstants.all.find(p => connected.some(c => c.includes(p.id)));
+    const platform = first ? first.id : 'instagram';
+
+    try {
+        const res = await fetch('/.netlify/functions/create-manual-post', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ assistantId, platforms: [platform], blank: true }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) { window.showToast?.(d.error || 'Could not start a new post.', { icon: '⚠️' }); return; }
+        const created = (d.created || [])[0];
+        if (!created) { window.showToast?.('Could not start a new post.', { icon: '⚠️' }); return; }
+        _gpCurrentAssistantId = assistantId;
+        await openPostReview(created.id);
+    } catch {
+        window.showToast?.('Network error — please try again.', { icon: '⚠️' });
+    }
+}
+
+/**
+ * The previous Create Post sheet, still reachable from the editor's "Generate a post with media".
+ *
+ * Kept because it owns something the editor does not yet do: the background generation JOB, which
+ * writes the caption AND sources or generates the image. That is a different, heavier thing than
+ * asking the assistant in chat, and dropping it would have been a regression dressed up as tidying.
+ */
+async function openLegacyGeneratePostSheet() {
     // A previous generation is still running in the background (sheet was closed while waiting) —
     // don't clobber its poll interval, or it'll finish with nowhere to report the result.
     if (_gpPollInterval && _gpCurrentJobId) {
@@ -9534,32 +9708,66 @@ async function _gpwApplyScheduleAction(action, rescheduleAt) {
 // suggest improvements. The chat modal (openAssistantChatModal) exposes the mounted ChatSession via
 // _chatModalSession, so once it's open we seed the conversation with the draft. The composer stays
 // open underneath — the user copies the assistant's suggestions back into their post.
-async function gpAskSwanImprove() {
-    const assistantId = _gpCurrentAssistantId || window._currentAssistantId || null;
-    if (!assistantId) { gpSetPanelStatus('gpw-status', 'Pick an assistant first.', 'error'); return; }
+/**
+ * Open the assistant in chat about the draft in front of you.
+ *
+ * Shared by the create sheet and the post editor's Caption layer, because it is the same request
+ * from two surfaces — duplicating it is how the two would end up asking the assistant subtly
+ * different questions and giving differently-shaped answers.
+ *
+ * With no caption yet, it asks the assistant to WRITE one; with a caption, to improve it. That
+ * distinction is the whole point of the button on an empty box: "ask Swan to improve" a blank post
+ * is a question with no answer.
+ */
+async function askSwanAboutDraft({ assistantId, caption, hashtags, platforms, onError }) {
+    if (!assistantId) { onError?.('Pick an assistant first.'); return; }
     if (typeof window.openAssistantChatModal !== 'function') return;
-
-    const caption   = document.getElementById('gpw-caption')?.value?.trim() || '';
-    const hashtags  = document.getElementById('gpw-hashtags')?.value?.trim() || '';
-    const platforms = _gpwSelectedPlatforms.slice();
 
     const meta = await gpResolveAssistantMeta(assistantId);
     window.openAssistantChatModal(assistantId, meta.name, meta.role, meta.roleKey);
 
-    // Only seed the conversation when there's actually a draft to critique.
-    if (caption || hashtags) {
-        const label = p => (p === 'x' ? 'X' : p.charAt(0).toUpperCase() + p.slice(1));
-        const platformLine = platforms.length ? `for ${platforms.map(label).join(', ')} ` : '';
-        const parts = [
+    const label = p => window.PlatformConstants.label(p);
+    const platformLine = platforms?.length ? `for ${platforms.map(label).join(', ')} ` : '';
+    const parts = (caption || hashtags)
+        ? [
             `Here's a draft social post ${platformLine}I'm working on. Please suggest improvements and give me a stronger version I can use.`,
             '',
             caption || '(no caption yet)',
+        ]
+        : [
+            `Please write a social post ${platformLine}for me. Give me a caption I can use as-is, plus a few hashtags.`,
         ];
-        if (hashtags) parts.push('', hashtags);
-        const seed = parts.join('\n');
-        // sendMessage is exposed by ChatSession.mount(); give the fresh mount a tick to settle.
-        setTimeout(() => { try { _chatModalSession?.sendMessage(seed); } catch { /* ignore */ } }, 60);
-    }
+    if (hashtags) parts.push('', hashtags);
+    const seed = parts.join('\n');
+    // sendMessage is exposed by ChatSession.mount(); give the fresh mount a tick to settle.
+    setTimeout(() => { try { _chatModalSession?.sendMessage(seed); } catch { /* ignore */ } }, 60);
+}
+
+async function gpAskSwanImprove() {
+    return askSwanAboutDraft({
+        assistantId: _gpCurrentAssistantId || window._currentAssistantId || null,
+        caption: document.getElementById('gpw-caption')?.value?.trim() || '',
+        hashtags: document.getElementById('gpw-hashtags')?.value?.trim() || '',
+        platforms: _gpwSelectedPlatforms.slice(),
+        onError: (m) => gpSetPanelStatus('gpw-status', m, 'error'),
+    });
+}
+
+/** The same, from the editor's Caption layer — seeded from the post being edited. */
+async function _pceAskSwanCaption() {
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (!post) return;
+    return askSwanAboutDraft({
+        assistantId: post.assistantId || _gpCurrentAssistantId || window._currentAssistantId || null,
+        caption: _pceEl('post-review-caption')?.value?.trim() || '',
+        hashtags: _pceEl('post-review-hashtags')?.value?.trim() || '',
+        // The editor edits one platform at a time; the group's other platforms are separate rows.
+        platforms: post.platform ? [post.platform] : [],
+        onError: (m) => {
+            const el = _pceEl('post-review-amend-msg');
+            if (el) { el.textContent = m; el.className = 'text-xs font-semibold text-red-600'; }
+        },
+    });
 }
 
 // Resolve an assistant's display name / role / roleKey for opening the chat modal. Cached per id so
