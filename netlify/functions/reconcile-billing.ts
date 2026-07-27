@@ -211,12 +211,17 @@ async function runReconciliation(): Promise<void> {
             .from(usageCounters)
             .where(eq(usageCounters.periodStart, periodStart));
 
+        // See the warning in src/utils/atomic-cap-check.ts: a raw Date interpolated into a
+        // db.execute(sql`...`) template throws inside postgres-js's Bind step before the statement
+        // is ever sent, and drizzle rethrows it looking like a database fault. The query builder
+        // above is safe because the column maps the value; this hand-written template is not.
+        const periodStartParam = periodStart.toISOString();
         for (const uc of ucRows) {
             const [live] = await db.execute(sql`
                 SELECT COUNT(*) AS live_count
                 FROM task_runs
                 WHERE organisation_id = ${uc.organisationId}
-                  AND created_at >= ${periodStart}
+                  AND created_at >= ${periodStartParam}
             `);
             const liveCount = Number((live as any).live_count ?? 0);
             const counterCount = uc.taskCount ?? 0;

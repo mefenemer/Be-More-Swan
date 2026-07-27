@@ -2453,12 +2453,17 @@ export default withLambda(async (event) => {
             const to   = event.queryStringParameters?.to;
             const periodStart = from ? new Date(from) : (() => { const d = new Date(); d.setDate(1); d.setHours(0,0,0,0); return d; })();
             const periodEnd   = to   ? new Date(to)   : new Date();
+            // Raw sql`` templates below: a Date bound into one throws ERR_INVALID_ARG_TYPE inside
+            // postgres-js's Bind step before the statement is sent — see the warning in
+            // src/utils/atomic-cap-check.ts. The query-builder calls beside them are safe as-is.
+            const periodStartParam = periodStart.toISOString();
+            const periodEndParam   = periodEnd.toISOString();
 
             // Category breakdown
             const catRows = await db.execute(sql`
                 SELECT category, COUNT(*) AS call_count
                 FROM ai_usage_log, unnest(data_categories) AS category
-                WHERE created_at >= ${periodStart} AND created_at <= ${periodEnd}
+                WHERE created_at >= ${periodStartParam} AND created_at <= ${periodEndParam}
                 GROUP BY category ORDER BY call_count DESC
             `);
             const totalRes = await db.select({ total: count() }).from(aiUsageLog)
@@ -2467,7 +2472,7 @@ export default withLambda(async (event) => {
 
             const specialRes = await db.execute(sql`
                 SELECT COUNT(*) AS cnt FROM ai_usage_log
-                WHERE created_at >= ${periodStart} AND created_at <= ${periodEnd}
+                WHERE created_at >= ${periodStartParam} AND created_at <= ${periodEndParam}
                   AND 'special_category_suspected' = ANY(data_categories)
             `);
             const specialCount = Number((specialRes[0] as any)?.cnt ?? 0);

@@ -70,6 +70,21 @@ export async function atomicCapCheck(params: AtomicCapCheckParams): Promise<Atom
     const db         = getDb();
     const col        = COLUMN_MAP[counterKey];
     const periodStart = getPeriodStart();
+    // ⚠️ A raw Date must NEVER be interpolated into a db.execute(sql`...`) template on postgres-js.
+    //
+    // This is the bug that took down "Talk it through in chat". The driver binds template values
+    // as-is, and its prepared-statement Bind step writes each one with Buffer.byteLength — which
+    // throws `The "string" argument must be of type string ... Received an instance of Date`. The
+    // statement never reaches Postgres, so there is no SQLSTATE and nothing wrong with the schema;
+    // drizzle then rethrows it wrapped as `Failed query: UPDATE usage_counters ...`, which reads
+    // exactly like a database fault and is why this was misdiagnosed repeatedly.
+    //
+    // Every OTHER query in this file survives the same Date because it goes through the query
+    // builder, where the column's own mapToDriverValue converts it first. Only a hand-written
+    // template bypasses that, so the conversion has to be done here — and `.toISOString()` is
+    // precisely what drizzle's timestamp mapper emits, so the value written by the INSERT below and
+    // the value matched by this WHERE are the same string.
+    const periodStartParam = periodStart.toISOString();
 
     for (let attempt = 0; attempt < 2; attempt++) {
         // Single atomic UPDATE: only succeeds when current value + increment <= limit
@@ -82,7 +97,7 @@ export async function atomicCapCheck(params: AtomicCapCheckParams): Promise<Atom
                     updated_at = now()
                 WHERE
                     organisation_id = ${organisationId}
-                    AND period_start = ${periodStart}
+                    AND period_start = ${periodStartParam}
                     AND ${sql.raw(col)} + ${increment} <= ${limit}
                 RETURNING ${sql.raw(col)} AS new_value
             `);
@@ -101,9 +116,14 @@ export async function atomicCapCheck(params: AtomicCapCheckParams): Promise<Atom
             // must not wave the request through.
             const cause = (err as { cause?: Record<string, unknown> })?.cause ?? {};
             console.error('[atomicCapCheck] cap UPDATE failed', {
-                organisationId, counterKey, limit, increment, periodStart: periodStart.toISOString(),
+                organisationId, counterKey, limit, increment, periodStart: periodStartParam,
                 message: err instanceof Error ? err.message : String(err),
-                pgCode: cause.code, pgDetail: cause.detail, pgHint: cause.hint,
+                // `code` covers both worlds and that matters: a real database fault carries a
+                // SQLSTATE (42703, 42P01, …), while a driver-side bind failure carries a Node error
+                // code (ERR_INVALID_ARG_TYPE) and never reached Postgres at all. Reading only the
+                // wrapper's "Failed query: ..." message cannot tell those apart.
+                causeCode: cause.code, causeMessage: (cause as { message?: unknown }).message,
+                pgDetail: cause.detail, pgHint: cause.hint,
                 pgColumn: cause.column_name, pgTable: cause.table_name, pgRoutine: cause.routine,
             });
             return { allowed: false, failed: true, limitMessage: 'We could not check your plan usage just now. Please try again.' };
