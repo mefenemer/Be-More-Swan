@@ -1,6 +1,23 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+  <!-- Editor-layout flag, read BEFORE anything else can navigate away.
+       auth-check.js (immediately below) calls location.replace() for a signed-out visitor, which
+       aborts the rest of the document — so a flag read further down the page never runs, and
+       ?rail=1 was silently lost on every load that bounced through the login page. It also has to
+       survive arriving at the workspace from the app's own nav, which carries no query string, so
+       the choice is persisted rather than kept per-load.
+         ?rail=1  turn the step rail on      ?rail=0  back to the three-pane layout
+       localStorage.bms_rail is the stored value; delete it to forget the choice. -->
+  <script>
+    (function () {
+      try {
+        var q = new URLSearchParams(location.search).get('rail');
+        if (q === '1' || q === '0') localStorage.setItem('bms_rail', q);
+        window.__bmsRail = localStorage.getItem('bms_rail') === '1';
+      } catch (e) { window.__bmsRail = false; }   // private mode: stay on the old layout
+    })();
+  </script>
   <script src="./auth-check.js"></script>
   <!-- Loaded in <head> (not with the body scripts) so window.ScrollLock exists before any
        overlay or loadView call can reach for it. -->
@@ -7037,14 +7054,21 @@ function _pceSelect(key, repaintHandles = true) {
 // reschedule panel changes: they are the same nodes, writing to the same ids, just somewhere else
 // in the tree. A rebuild-instead-of-move would have meant a second copy of every one of those.
 //
-// Flagged so both layouts can live on staging at once: ?rail=1 / ?rail=0 pins it, and the choice
-// sticks for the session. Default OFF until the remaining steps are wired.
-let _railOn = false;
-try {
-    const q = new URLSearchParams(location.search).get('rail');
-    if (q === '1' || q === '0') sessionStorage.setItem('bms_rail', q);
-    _railOn = sessionStorage.getItem('bms_rail') === '1';
-} catch { /* private mode: stay on the old layout */ }
+// Flagged so both layouts can live on staging at once. The flag itself is read by a tiny script at
+// the very top of <head> and left on window.__bmsRail — it CANNOT be read here, because auth-check.js
+// redirects a signed-out visitor with location.replace(), which aborts the document before this line
+// is ever reached. Reading it down here meant ?rail=1 was lost on every load that passed through the
+// login page. See the head script for how to set it.
+let _railOn = !!window.__bmsRail;
+
+/** Flip layouts from the console without a reload: _railSet(true) / _railSet(false). */
+function _railSet(on) {
+    _railOn = !!on;
+    try { localStorage.setItem('bms_rail', on ? '1' : '0'); } catch { /* private mode */ }
+    _railApplyLayout();
+    return _railOn;
+}
+window._railSet = _railSet;
 
 let _railOpen = null;                 // key of the one open step, or null
 const _railHomes = new Map();         // node id → where it came from, so it can go back
@@ -7201,8 +7225,22 @@ function _railApplyLayout() {
     const strip = document.getElementById('pce-layers-block');
     if (!_railOn) {
         _railRestoreAll();
+        _railOpen = null;
         document.getElementById('pce-rail')?.classList.add('hidden');
         strip?.classList.remove('hidden');
+        // Undo exactly what the on-path did, or turning the flag back off leaves the editor with
+        // no panes AND no rail. The inline display is the part that matters: `hidden` alone is not
+        // what hid them, so removing the class alone would not bring them back.
+        for (const el of [left, insp]) {
+            if (!el) continue;
+            el.classList.remove('hidden');
+            el.style.display = '';
+        }
+        // The re-open tabs are owned by _pceApplyPanes; let it decide, rather than guessing here.
+        for (const id of ['pce-left-reopen', 'pce-right-reopen']) {
+            document.getElementById(id)?.classList.remove('hidden');
+        }
+        _pceApplyPanes();
         return;
     }
     for (const el of [left, insp]) {
