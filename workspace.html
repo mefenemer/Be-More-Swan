@@ -5240,11 +5240,24 @@ async function rqViewDraft(postId) {
     if (postId) openPostReview(postId);
 }
 
+// How many post cards the queue asks for at a time. Each card costs the server a media resolution
+// (a presigned URL per asset), so this is the difference between the first screen waiting on ten of
+// those and waiting on fifty. "More" fetches the next page rather than re-fetching everything.
+const RQ_PAGE_SIZE = 10;
+// Groups already loaded for the column on screen, and whether the server says there are more. Reset
+// on every column switch and on every refresh — a stale page-2 from the Review tab must never be
+// appended under Scheduled.
+let _rqLoadedPosts = [];
+let _rqPostsHasMore = false;
+let _rqPostsTotal = null;
+
 async function rqRenderGroups(statusKey) {
     const col = RQ_COLUMNS[statusKey] || RQ_COLUMNS.review;
     const container = document.getElementById('rq-groups');
     if (!container) return;
     container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Loading…</p>';
+    _rqLoadedPosts = [];
+    _rqPostsHasMore = false;
 
     // One-time gate: does the org have an active Blog Writer? (drives the Blog posts group).
     if (!_rqBlogWriterActive && typeof window.resolveBlogWriter === 'function') {
@@ -5254,12 +5267,18 @@ async function rqRenderGroups(statusKey) {
     let posts = [], blogPosts = [];
     try {
         const [pRes, bRes] = await Promise.all([
-            fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}`),
+            fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}&limit=${RQ_PAGE_SIZE}&offset=0`),
             _rqBlogWriterActive ? fetch('/.netlify/functions/blog-posts') : Promise.resolve(null),
         ]);
         if (pRes.ok) {
             const pj = await pRes.json();
             posts = pj.drafts || [];
+            _rqLoadedPosts = posts;
+            _rqPostsHasMore = !!pj.hasMore;
+            // The badge counts everything awaiting review, not what has been fetched so far — the
+            // server counts in groups for exactly this reason, so "24" matches the 24 cards you get
+            // once you have paged through them all.
+            _rqPostsTotal = typeof pj.total === 'number' ? pj.total : null;
             // Workspace-wide footer state drives whether the per-post disclosure toggle appears.
             window._rqDisclosureFooterEnabled = !!pj.disclosureFooterEnabled;
         }
@@ -5279,18 +5298,80 @@ async function rqRenderGroups(statusKey) {
 
     // Keep the Review column badge in sync with the number of posts awaiting review (grouped count).
     if (statusKey === 'review') {
+        // The server's group total when paging, the rendered count otherwise — never the length of
+        // the current page, which would report "10 awaiting review" on a queue of 24.
+        const pending = _rqPostsTotal ?? postGroups.length;
         const badge = document.getElementById('rq-col-count-review');
-        if (badge) { badge.textContent = postGroups.length || ''; badge.classList.toggle('hidden', !postGroups.length); }
+        if (badge) { badge.textContent = pending || ''; badge.classList.toggle('hidden', !pending); }
         document.querySelectorAll('.pending-badge').forEach(el => {
-            el.textContent = postGroups.length || '';
-            el.classList.toggle('hidden', !postGroups.length);
+            el.textContent = pending || '';
+            el.classList.toggle('hidden', !pending);
         });
     }
 
     const groups = _rqBlogWriterActive ? [...RQ_GROUPS, RQ_BLOG_GROUP] : RQ_GROUPS;
     const itemsByGroup = { posts: postGroups, blog: blogPosts };
     const renderByGroup = { posts: rqRenderSocialCard, blog: rqRenderBlogCard };
-    container.innerHTML = groups.map(g => rqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey)).join('');
+    container.innerHTML = groups.map(g => rqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey)).join('')
+        + rqMoreButton(statusKey);
+}
+
+/** "Show more" under the list, or nothing when the last page is already on screen. */
+function rqMoreButton(statusKey) {
+    if (!_rqPostsHasMore) return '';
+    const shown = rqGroupSocialDrafts(_rqLoadedPosts).length;
+    const total = _rqPostsTotal ?? shown;
+    return `<div class="py-4 text-center border-t border-gray-100">
+      <button id="rq-more-btn" onclick="rqLoadMorePosts('${statusKey}')"
+        class="px-4 py-2 text-xs font-bold rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
+        Show more
+      </button>
+      <p class="text-[11px] text-gray-400 mt-1.5">Showing ${shown} of ${total}</p>
+    </div>`;
+}
+
+/**
+ * Fetch the next page and APPEND it.
+ *
+ * Offset is the number of GROUPS already on screen, not the number of rows loaded — the server pages
+ * by group too, so counting rows here would skip past however many extra platforms a cross-post
+ * contributed and silently drop posts from the middle of the queue.
+ */
+async function rqLoadMorePosts(statusKey) {
+    const col = RQ_COLUMNS[statusKey] || RQ_COLUMNS.review;
+    const btn = document.getElementById('rq-more-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    const offset = rqGroupSocialDrafts(_rqLoadedPosts).length;
+    try {
+        const res = await fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}&limit=${RQ_PAGE_SIZE}&offset=${offset}`);
+        if (!res.ok) throw new Error('load failed');
+        const pj = await res.json();
+        // rqGroupSocialDrafts caches every row it sees, so appending rather than replacing keeps
+        // page 1 in _rqPostCache — the editor opens from that cache and would otherwise find
+        // nothing for a post the user had already scrolled past.
+        _rqLoadedPosts = [..._rqLoadedPosts, ...(pj.drafts || [])];
+        _rqPostsHasMore = !!pj.hasMore;
+        if (typeof pj.total === 'number') _rqPostsTotal = pj.total;
+        rqRepaintPostsGroup(statusKey);
+    } catch {
+        if (btn) { btn.disabled = false; btn.textContent = 'Show more'; }
+        window.showToast?.('Could not load more posts. Please try again.', { icon: '⚠️' });
+    }
+}
+
+/** Repaint only the Posts group + the More button, leaving the Blog group and its fetch alone. */
+function rqRepaintPostsGroup(statusKey) {
+    const body = document.querySelector('.rq-group-body-posts');
+    const groups = rqGroupSocialDrafts(_rqLoadedPosts);
+    if (body) {
+        body.innerHTML = groups.length
+            ? `<div class="divide-y divide-gray-100">${groups.map(rqRenderSocialCard).join('')}</div>`
+            : body.innerHTML;
+        const count = body.closest('section')?.querySelector('button span:last-child');
+        if (count) count.textContent = groups.length;
+    }
+    const more = document.getElementById('rq-more-btn')?.closest('div');
+    if (more) more.outerHTML = rqMoreButton(statusKey);
 }
 
 // A blog post row in the Review Queue. Open jumps into the Blog Studio modal; in the Review column

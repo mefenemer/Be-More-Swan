@@ -27,6 +27,65 @@ export default withLambda(async (event) => {
             ? Number(event.queryStringParameters.assistantId)
             : null;
 
+        // ── Paging is OPT-IN, and it pages by GROUP ─────────────────────────────────────────────
+        // Opt-in because eleven other callers hit this endpoint expecting the whole list — the post
+        // editor's own refetch among them (_pceRefetchPostGroup). Silently defaulting to a page
+        // would mean a post edited from position 11 was no longer in the response, so its cache
+        // entry would never update and the reviewer would keep seeing the pre-save card.
+        //
+        // By group because a cross-post is one row PER PLATFORM sharing a crosspost_group_id, and
+        // the Review Queue collapses those into a single card. A row-level LIMIT would cut a group
+        // in half — Facebook on page 1, its LinkedIn sibling on page 2 — and render the same post
+        // as two different cards, each claiming to be the whole thing.
+        const pageSize = Math.min(50, Math.max(1, Number(event.queryStringParameters?.limit) || 0));
+        const pageOffset = Math.max(0, Number(event.queryStringParameters?.offset) || 0);
+        const paged = pageSize > 0;
+
+        const baseWhere = and(
+            eq(scheduledPosts.organisationId, organisationId),
+            statusFilter === 'scheduled'
+                ? inArray(scheduledPosts.status, ['scheduled', 'paused_credits'])
+                : eq(scheduledPosts.status, statusFilter),
+            ...(assistantIdFilter ? [eq(scheduledPosts.assistantId, assistantIdFilter)] : []),
+        );
+
+        // Which post ids make up this page. Three narrow columns, no joins and no presigned URLs —
+        // the expensive part of this endpoint is resolving media per row, and that is exactly what
+        // paging exists to avoid doing 50 times to show 10 cards.
+        let pageIds: number[] | null = null;
+        let groupTotal = 0;
+        if (paged) {
+            const keys = await db
+                .select({
+                    id: scheduledPosts.id,
+                    crosspostGroupId: scheduledPosts.crosspostGroupId,
+                    status: scheduledPosts.status,
+                })
+                .from(scheduledPosts)
+                .where(baseWhere)
+                .orderBy(desc(scheduledPosts.generatedAt));
+
+            // Same key as the browser's _rqGroupKey, so the server's idea of "one card" and the
+            // client's cannot disagree about where a page ends.
+            const order: string[] = [];
+            const byKey = new Map<string, number[]>();
+            for (const r of keys) {
+                const key = r.crosspostGroupId ? `g:${r.crosspostGroupId}|${r.status ?? ''}` : `id:${r.id}`;
+                if (!byKey.has(key)) { byKey.set(key, []); order.push(key); }
+                byKey.get(key)!.push(r.id);
+            }
+            groupTotal = order.length;
+            pageIds = order.slice(pageOffset, pageOffset + pageSize).flatMap(k => byKey.get(k)!);
+            // A page past the end has no ids; short-circuit rather than send `inArray(id, [])`.
+            if (pageIds.length === 0) {
+                return {
+                    statusCode: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ drafts: [], total: groupTotal, hasMore: false }),
+                };
+            }
+        }
+
         const drafts = await db
             .select({
                 id: scheduledPosts.id,
@@ -77,18 +136,16 @@ export default withLambda(async (event) => {
             .from(scheduledPosts)
             .leftJoin(aiAssistants, eq(aiAssistants.id, scheduledPosts.assistantId))
             .leftJoin(postIdeaSuggestions, eq(postIdeaSuggestions.usedPostId, scheduledPosts.id))
-            .where(and(
-                eq(scheduledPosts.organisationId, organisationId),
-                // X posts paused for credit exhaustion ('paused_credits') are scheduled posts waiting
-                // on next month's X allowance — not failures — so surface them in the Scheduled tab
-                // alongside 'scheduled' rather than leaving them invisible.
-                statusFilter === 'scheduled'
-                    ? inArray(scheduledPosts.status, ['scheduled', 'paused_credits'])
-                    : eq(scheduledPosts.status, statusFilter),
-                ...(assistantIdFilter ? [eq(scheduledPosts.assistantId, assistantIdFilter)] : []),
-            ))
+            // baseWhere carries the org/status/assistant filter — including the 'paused_credits'
+            // rule (X posts waiting on next month's allowance are scheduled posts, not failures, so
+            // the Scheduled tab must show them). On a paged request the id list narrows it to this
+            // page's groups, which is the only difference between the two modes.
+            .where(paged ? and(baseWhere, inArray(scheduledPosts.id, pageIds!)) : baseWhere)
             .orderBy(desc(scheduledPosts.generatedAt))
-            .limit(50);
+            // Unpaged callers keep the original ceiling. Paged ones are already bounded by pageIds,
+            // and a cross-post group can be several rows wide, so a flat 50 could truncate the last
+            // group of a page — the exact split this pages by group to avoid.
+            .limit(paged ? pageIds!.length : 50);
 
         // Why a failed video render failed. Only for the drafts actually in that state, in one query
         // — "the render failed" alone tells a reviewer nothing they can act on, and this is a dead
@@ -245,7 +302,13 @@ export default withLambda(async (event) => {
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ drafts: withThumbs, disclosureFooterEnabled: org?.enabled ?? false }),
+            // total/hasMore are counted in GROUPS, because that is what the caller renders — a card
+            // per group. Reporting rows would make "24 posts" disagree with the 24 cards on screen.
+            body: JSON.stringify({
+                drafts: withThumbs,
+                disclosureFooterEnabled: org?.enabled ?? false,
+                ...(paged ? { total: groupTotal, hasMore: pageOffset + pageSize < groupTotal } : {}),
+            }),
         };
     } catch (err) {
         console.error('[get-social-drafts]', err);
