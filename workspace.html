@@ -682,6 +682,11 @@ window.showComplianceModals = function showComplianceModals(force) {
                  it was the one control that had to be reachable BEFORE you know what this pane is
                  for — it now sits in the modal header (#pce-ai-actions). Its idea box went with it:
                  "what's it about" is a conversation, and that conversation is the chat button. -->
+            <div>
+              <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Post style</p>
+              <div id="pce-style" class="flex gap-1.5"></div>
+              <p id="pce-style-msg" class="text-[10px] text-gray-400 mt-1"></p>
+            </div>
             <div id="pce-format-rules" class="hidden rounded-lg bg-gray-50 border border-gray-100 px-2.5 py-2 space-y-1"></div>
             <div id="pce-format-blocked" class="hidden rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800"></div>
           </div>
@@ -698,7 +703,7 @@ window.showComplianceModals = function showComplianceModals(force) {
              this refactor survivable: _pceRenderPlatformPicker, _pceRenderFormats, the overlay
              and audio inspectors and the reschedule panel all keep working untouched, because
              they are the same nodes, just re-parented. See _railMount / _railRestoreAll. -->
-        <aside id="pce-rail" class="hidden w-full lg:w-60 shrink-0 space-y-1.5">
+        <aside id="pce-rail" class="hidden w-full lg:w-72 shrink-0 space-y-1.5">
           <p class="text-[9px] font-bold uppercase tracking-wider text-gray-400 px-0.5 pb-0.5">Post setup</p>
           <div id="pce-rail-steps" class="space-y-1.5"></div>
         </aside>
@@ -5655,12 +5660,19 @@ function renderPlatformMockup(post) {
     // (_pceOpenInlineCaption), and an empty one says so rather than rendering as nothing at all:
     // a post with no words showed a blank strip, which is indistinguishable from no caption field.
     const captionEmpty = !caption && !hashtags && !link;
+    // The per-platform length badges live in the inspector — which the rail layout does not have.
+    // Without somewhere on the canvas to draw them, "too long for X" simply stopped being said,
+    // which is the one warning that decides whether a post can publish at all. This host is where
+    // they go instead: attached to the words they are counting, which is where they belonged.
+    // Filled by _pceRefreshCaptionMeta; rendered only in the rail layout so the old one keeps its
+    // single copy in the pane.
+    const metaHost = (_railOn && editableNow) ? '<div data-caption-meta class="flex flex-wrap gap-1 mt-1.5"></div>' : '';
     const captionBlock = (cls) =>
         `<div class="${cls}${editableNow ? ' cursor-text hover:bg-gray-50 transition' : ''}" data-caption-host
            ${editableNow ? 'title="Click to write the caption"' : ''}>${
             captionEmpty
                 ? (editableNow ? '<p class="text-sm text-gray-400">Write your caption…</p>' : '')
-                : `${caption}${hashtags}${link}`}</div>`;
+                : `${caption}${hashtags}${link}`}${metaHost}</div>`;
 
     const body = meta.mediaFirst
         ? `${header}${media}${captionBlock('px-3.5 py-3')}${footer}`
@@ -6528,11 +6540,41 @@ function _rqReviewRenderTabs() {
     host.innerHTML = `<div class="flex flex-wrap items-center gap-1 border-b border-gray-200">${group.map(p => {
         const active = p.id === _rqReviewPostId;
         const flag = p.mediaMissing || (p.platform === 'instagram' && !p.thumbnailUrl);
+        // A platform this post's media can never satisfy — a photo on YouTube — is not an error the
+        // reviewer made, so it is not marked as one. It goes quiet: struck through and muted, with
+        // the reason on hover, and it comes back the moment the media changes. Still clickable,
+        // because you must be able to look at the copy you have written for it.
+        const blocked = _rqPlatformBlockedReason(p);
+        const tone = blocked
+            // No `decoration-1`: it is not in the compiled style.css, and rebuilding Tailwind to
+            // add one utility churns unrelated selectors across the whole file.
+            ? 'border-transparent text-gray-300 line-through'
+            : (active ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-gray-500 hover:text-gray-700');
         return `<button type="button" onclick="rqReviewSwitchPlatform(${p.id})"
-          class="relative px-3 py-1.5 text-xs font-bold -mb-px border-b-2 transition cursor-pointer ${active ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-gray-500 hover:text-gray-700'}">
-          ${_rqEsc(rqPlatformLabel(p.platform))}${flag ? '<span class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-red-500 align-middle" title="Needs an image"></span>' : ''}
+          ${blocked ? `title="${_rqEsc(blocked)}"` : ''}
+          class="relative px-3 py-1.5 text-xs font-bold -mb-px border-b-2 transition cursor-pointer ${active && blocked ? 'border-gray-300' : ''} ${tone}">
+          ${_rqEsc(rqPlatformLabel(p.platform))}${flag && !blocked ? '<span class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-red-500 align-middle" title="Needs an image"></span>' : ''}
         </button>`;
     }).join('')}</div>`;
+}
+
+/**
+ * Why this platform cannot publish this post as it stands, or null.
+ *
+ * Only structural impossibilities belong here — the media is the wrong KIND for the platform, which
+ * no amount of editing the words will fix. A caption that is too long is not one of these: it is
+ * over a limit the badges already show, and it is fixable in place.
+ */
+function _rqPlatformBlockedReason(post) {
+    const spec = window.PlatformConstants?.get(post && post.platform);
+    if (!spec || !post) return null;
+    if (spec.mediaMandatory && spec.mediaKind === 'video' && !_pcePostIsVideo(post)) {
+        return `${spec.label} only publishes video — attach one and this comes back.`;
+    }
+    if (spec.mediaMandatory && !post.thumbnailUrl) {
+        return `${spec.label} needs an image before this can publish.`;
+    }
+    return null;
 }
 
 // Switch which platform's copy is previewed/edited. Approve/Reject still act on the whole group.
@@ -6706,14 +6748,22 @@ function _pceRefreshLinkMeta() {
  * belong next to the words, updating as you type.
  */
 function _pceRefreshCaptionMeta() {
-    const host = _pceEl('pce-caption-meta');
-    if (!host) return;
+    // Two possible homes: the inspector's slot (old layout) and the host inside the canvas caption
+    // block (rail layout, where there IS no inspector). Written to both rather than moved between
+    // them — the mock-up is rebuilt with innerHTML on every render, which would destroy a node that
+    // had been re-parented into it.
+    const hosts = [
+        _pceEl('pce-caption-meta'),
+        document.querySelector('#post-review-body [data-caption-meta]'),
+    ].filter(Boolean);
+    if (!hosts.length) return;
+    const paint = (html) => { for (const h of hosts) { h.innerHTML = html; h.classList.toggle('hidden', !html); } };
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
-    if (!post) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+    if (!post) { paint(''); return; }
 
     const platforms = [...new Set(_rqReviewGroupIds.map(id => _rqPostCache[id]?.platform).filter(Boolean))];
     if (post.platform && !platforms.includes(post.platform)) platforms.push(post.platform);
-    if (!platforms.length) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+    if (!platforms.length) { paint(''); return; }
 
     const caption = _pceEl('post-review-caption')?.value || '';
     const hashtags = _pceEl('post-review-hashtags')?.value || '';
@@ -6725,7 +6775,7 @@ function _pceRefreshCaptionMeta() {
     const hasMedia = !!post.thumbnailUrl;
     const hasVideo = _pcePostIsVideo(post);
 
-    host.innerHTML = platforms.map(p => {
+    paint(platforms.map(p => {
         const spec = window.PlatformConstants.get(p);
         if (!spec) return '';
         let cls = 'border-gray-200 text-gray-500 bg-gray-50';
@@ -6738,8 +6788,7 @@ function _pceRefreshCaptionMeta() {
             cls = 'border-amber-300 text-amber-700 bg-amber-50'; detail = 'needs an image';
         }
         return `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded border ${cls}">${_rqEsc(spec.label)} · ${detail}</span>`;
-    }).join('');
-    host.classList.remove('hidden');
+    }).join(''));
 }
 
 // Mount the editing canvas ONTO the platform mock-up: the card image in the mock-up becomes the
@@ -6789,6 +6838,10 @@ function _pceCanvasClick(ev) {
 // both commit through rqReviewSaveAmend. The reason it exists is that the inspector is a pane you
 // can collapse (and is collapsed by default on a narrow window), and "open the right-hand panel
 // first" is not an answer to "where do I type my post?".
+// A short, deliberately generic strip — the ones that turn up in most business captions, not a
+// full picker. Anything else is still one OS shortcut away (⌃⌘Space / Win+.).
+const _PCE_EMOJI = ['✨', '🔥', '👏', '🙌', '💡', '📈', '👇', '❤️', '☕', '🎉'];
+
 function _pceOpenInlineCaption() {
     const host = document.querySelector('#post-review-body [data-caption-host]');
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
@@ -6803,12 +6856,35 @@ function _pceOpenInlineCaption() {
     ta.rows = Math.min(12, Math.max(3, String(post.caption || '').split('\n').length + 1));
     ta.className = 'w-full text-sm border border-emerald-300 rounded-lg px-2.5 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-emerald-600';
 
+    // Emoji, at the point the words are written. A social caption without them is the exception,
+    // and the alternative was the OS picker — which on a click-away-to-save textarea means losing
+    // focus, which means committing the caption mid-sentence. Inserted at the caret, and mousedown
+    // is prevented so pressing one never blurs the box and triggers that save.
+    const emoji = document.createElement('div');
+    emoji.className = 'flex flex-wrap gap-1 mt-1.5';
+    emoji.innerHTML = _PCE_EMOJI.map(e =>
+        `<button type="button" data-emoji="${e}" tabindex="-1"
+           class="w-6 h-6 leading-none rounded border border-gray-200 bg-white hover:bg-gray-50 transition cursor-pointer">${e}</button>`
+    ).join('');
+    emoji.addEventListener('mousedown', (ev) => ev.preventDefault());
+    emoji.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('[data-emoji]');
+        if (!btn) return;
+        const at = ta.selectionStart ?? ta.value.length;
+        ta.value = ta.value.slice(0, at) + btn.dataset.emoji + ta.value.slice(ta.selectionEnd ?? at);
+        const caret = at + btn.dataset.emoji.length;
+        ta.setSelectionRange(caret, caret);
+        ta.focus();
+        ta.dispatchEvent(new Event('input'));   // keep the length badges honest
+    });
+
     const hint = document.createElement('p');
     hint.className = 'text-[10px] text-gray-400 mt-1';
     hint.textContent = 'Click away to save · Esc to cancel';
 
     host.innerHTML = '';
     host.appendChild(ta);
+    host.appendChild(emoji);
     host.appendChild(hint);
     ta.focus();
     ta.setSelectionRange(ta.value.length, ta.value.length);
@@ -7164,7 +7240,7 @@ function _railRender() {
         return `<div class="rounded-xl border ${on ? 'border-emerald-300' : 'border-gray-200'} bg-white overflow-hidden">
           <button type="button" onclick="_railToggle('${s.key}')" aria-expanded="${on}"
             class="w-full flex items-center gap-2.5 px-2.5 py-2 text-left hover:bg-gray-50 transition cursor-pointer">
-            <span class="w-[18px] h-[18px] shrink-0 rounded-md flex items-center justify-center text-[10px] font-bold ${
+            <span class="w-5 h-5 shrink-0 rounded-md flex items-center justify-center text-[10px] font-bold ${
               on ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-500'}">${i + 1}</span>
             <span class="min-w-0 flex-1">
               <span class="block text-xs font-bold truncate ${on ? 'text-emerald-800' : 'text-gray-700'}">${_rqEsc(s.title.replace('%A', _railAssistant(post)))}</span>
@@ -7767,6 +7843,52 @@ async function _pceTogglePostPlatform(platformId) {
         _pcePlatformBusy = false;
         _pceRenderPlatformPicker();
         _pceSetPlatformMsg(err.message || 'Could not change the platforms.', 'error');
+    }
+}
+
+/**
+ * Photo-or-video vs branded card, for the post on screen.
+ *
+ * Reads the post rather than any local state: a post HAS a brand card or it does not, and that is
+ * the only truth either option can be selected from. Switching is not a preference to remember —
+ * it either makes a card (server render) or hands the post back to the sourcing panel.
+ */
+function _pceRenderStyle() {
+    const host = _pceEl('pce-style');
+    if (!host) return;
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (!post) { host.innerHTML = ''; return; }
+    const isCard = !!post.brandCard;
+    const isVideo = _pcePostIsVideo(post);
+    const opts = [
+        { key: 'media', n: 'Photo or video', d: 'Your own media', on: !isCard },
+        // A card is a still. Offering it on a video would offer replacing the video with a picture
+        // the post's format cannot publish — the same rule #insp-make-card already applies.
+        { key: 'card',  n: 'Branded card',   d: 'Words on your colours', on: isCard, off: isVideo },
+    ];
+    host.innerHTML = opts.map(o => `<button type="button" ${o.off ? 'disabled' : ''}
+        onclick="_pceChooseStyle('${o.key}')"
+        class="flex-1 rounded-lg border px-2 py-1.5 text-center transition ${
+          o.off ? 'border-gray-100 opacity-40 cursor-not-allowed'
+                : (o.on ? 'border-emerald-500 bg-emerald-50 cursor-pointer' : 'border-gray-200 hover:bg-gray-50 cursor-pointer')}">
+        <span class="block text-[11px] font-bold ${o.on ? 'text-emerald-700' : 'text-gray-700'}">${_rqEsc(o.n)}</span>
+        <span class="block text-[9px] text-gray-400 leading-tight">${_rqEsc(o.d)}</span>
+      </button>`).join('');
+    const msg = _pceEl('pce-style-msg');
+    if (msg) msg.textContent = isVideo && !isCard ? 'A branded card is a still, so it is not offered on a video.' : '';
+}
+
+/** Switch style. Both directions already exist — this is the one place that names them as a pair. */
+function _pceChooseStyle(key) {
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (!post) return;
+    const isCard = !!post.brandCard;
+    if (key === 'card' && !isCard) { _pceCreateBrandCard(); return; }
+    // Going the other way does NOT delete the card — it shows the sourcing panel so a replacement
+    // can be chosen, and the card stays until one is. See _pceSwapCardForMedia.
+    if (key === 'media' && isCard) {
+        _pceSwapCardForMedia(true);
+        if (_railOn) { _railOpen = 'media'; _railRender(); }
     }
 }
 
@@ -9035,6 +9157,7 @@ function _pceSyncForPost(post) {
     // old layout and only one place has to know about the new one.
     _railApplyLayout();
     _pceRenderPlatformPicker();
+    _pceRenderStyle();
     _pceRenderSlides();
     // The drafting status line is about the post you were looking at, so it does not follow you to
     // another one. Skipped while a draft is in flight for THIS post — that run owns the line until
@@ -9255,6 +9378,10 @@ function _rqReviewRenderActive() {
     document.getElementById('post-review-body').innerHTML = renderPlatformMockup(post);
     _pceSyncForPost(post);
     _rqRenderCanvasOverlays(post);
+    // The canvas host for the length badges is rebuilt by the line above, so it comes back empty.
+    // _pceSyncForPost fills the inspector's copy via _pceFillCaption, but that runs BEFORE the
+    // canvas host exists on the very first render — paint again now that it does.
+    _pceRefreshCaptionMeta();
 
     // Reset the Regenerate panel to a clean state — the modal DOM is reused across posts, so a
     // prior in-flight "Regenerating…" button/feedback must not carry over to the next open.
