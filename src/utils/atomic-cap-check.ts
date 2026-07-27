@@ -30,12 +30,21 @@ interface AtomicCapCheckParams {
     increment?: number;
 }
 
-interface AtomicCapCheckResult {
+export interface AtomicCapCheckResult {
     allowed: boolean;
     /** Current counter value after the operation (only reliable when allowed=true) */
     newValue?: number;
     /** Human-readable rejection reason for the 429 response body */
     limitMessage?: string;
+    /**
+     * The check could not be EVALUATED — a server fault, not a plan limit.
+     *
+     * Both cases are `allowed: false`, and callers must not conflate them: the paywall/upgrade
+     * response is a lie when the truth is "the database did not answer". Nothing about the user's
+     * plan is wrong, and telling them to upgrade to fix a transient fault is worse than saying
+     * nothing at all.
+     */
+    failed?: boolean;
 }
 
 /**
@@ -55,7 +64,7 @@ export async function atomicCapCheck(params: AtomicCapCheckParams): Promise<Atom
     // can be logged and turned into an ordinary denial.
     if (!Number.isInteger(limit) || !Number.isInteger(increment)) {
         console.error('[atomicCapCheck] non-integer cap input', { organisationId, counterKey, limit, increment });
-        return { allowed: false, limitMessage: 'Cap enforcement error. Please try again.' };
+        return { allowed: false, failed: true, limitMessage: 'Cap enforcement error. Please try again.' };
     }
 
     const db         = getDb();
@@ -64,21 +73,46 @@ export async function atomicCapCheck(params: AtomicCapCheckParams): Promise<Atom
 
     for (let attempt = 0; attempt < 2; attempt++) {
         // Single atomic UPDATE: only succeeds when current value + increment <= limit
-        const result = await db.execute(sql`
-            UPDATE usage_counters
-            SET
-                ${sql.raw(col)} = ${sql.raw(col)} + ${increment},
-                updated_at = now()
-            WHERE
-                organisation_id = ${organisationId}
-                AND period_start = ${periodStart}
-                AND ${sql.raw(col)} + ${increment} <= ${limit}
-            RETURNING ${sql.raw(col)} AS new_value
-        `);
+        let result;
+        try {
+            result = await db.execute(sql`
+                UPDATE usage_counters
+                SET
+                    ${sql.raw(col)} = ${sql.raw(col)} + ${increment},
+                    updated_at = now()
+                WHERE
+                    organisation_id = ${organisationId}
+                    AND period_start = ${periodStart}
+                    AND ${sql.raw(col)} + ${increment} <= ${limit}
+                RETURNING ${sql.raw(col)} AS new_value
+            `);
+        } catch (err) {
+            // A cap check that THROWS is not a denial, and it must not be reported as one thing or
+            // the other by accident. Two separate failures were happening here at once:
+            //
+            //   1. drizzle's postgres-js wrapper throws `Failed query: UPDATE usage_counters ...`,
+            //      and every caller (chat-orchestrator among them) put that straight into the
+            //      response — so users were shown raw SQL and a 500 for what is a server fault.
+            //   2. the ACTUAL Postgres error — the code, detail and hint that say WHY — lives on
+            //      `err.cause` and was never logged anywhere, which is why this has been diagnosed
+            //      twice from the SQL string alone and got it wrong both times.
+            //
+            // Log the cause, return an ordinary denial. Fail closed: a cap that cannot be evaluated
+            // must not wave the request through.
+            const cause = (err as { cause?: Record<string, unknown> })?.cause ?? {};
+            console.error('[atomicCapCheck] cap UPDATE failed', {
+                organisationId, counterKey, limit, increment, periodStart: periodStart.toISOString(),
+                message: err instanceof Error ? err.message : String(err),
+                pgCode: cause.code, pgDetail: cause.detail, pgHint: cause.hint,
+                pgColumn: cause.column_name, pgTable: cause.table_name, pgRoutine: cause.routine,
+            });
+            return { allowed: false, failed: true, limitMessage: 'We could not check your plan usage just now. Please try again.' };
+        }
 
-        const row = result[0] as any;
+        const row = (result as unknown as Array<Record<string, unknown>>)[0];
         if (row) {
-            return { allowed: true, newValue: row.new_value };
+            // RETURNING gives back an integer column, but it arrives untyped through db.execute.
+            return { allowed: true, newValue: Number(row.new_value) };
         }
 
         // Row missing or cap exceeded — distinguish the two cases
@@ -114,7 +148,7 @@ export async function atomicCapCheck(params: AtomicCapCheckParams): Promise<Atom
     }
 
     // Should not be reached, but fail-closed
-    return { allowed: false, limitMessage: 'Cap enforcement error. Please try again.' };
+    return { allowed: false, failed: true, limitMessage: 'Cap enforcement error. Please try again.' };
 }
 
 /** Returns the first day of the current UTC calendar month as a Date */

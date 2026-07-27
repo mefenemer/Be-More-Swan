@@ -1041,6 +1041,13 @@ async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]
     // a generic error; the client renders it inline and logs the conversion event.
     const capacity = await consumeTaskCredit(db, orgId);
     if (!capacity.allowed) {
+        // A cap that could not be EVALUATED is a server fault, and answering it with the upgrade
+        // card would tell the user to buy a bigger plan to fix our outage. 503 says "try again",
+        // which is the true and actionable thing; the cause is in the [atomicCapCheck] log line.
+        if (capacity.failed) {
+            console.error(`[chat-orchestrator] cap check failed (not a limit) org=${orgId} user=${userId}`);
+            return json(503, { code: 'cap_check_failed', error: capacity.limitMessage });
+        }
         console.warn(`[chat-orchestrator] paywall hit (foreground) org=${orgId} user=${userId}`);
         return upgradeRequired(capacity.limitMessage);
     }

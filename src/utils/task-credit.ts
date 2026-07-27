@@ -21,6 +21,8 @@ export interface TaskCreditResult {
     allowed: boolean;
     newValue?: number;
     limitMessage?: string;
+    /** Server fault, not a plan limit — see AtomicCapCheckResult.failed. Never answer this with a paywall. */
+    failed?: boolean;
 }
 
 /**
