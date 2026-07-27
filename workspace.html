@@ -7487,7 +7487,10 @@ const _RAIL = [
         if (_pceLayers.includes('overlays')) out.push('pce-insp-overlays');
         if (_pceLayers.includes('audio')) out.push('pce-insp-audio');
         return out;
-    }, enabled: (post) => !_pcePostIsVideo(post) && !!post?.thumbnailUrl },
+    // Disabled for a branded card: the card's typography is its own and is edited ON the card, and
+    // sound is a video layer — so on a card this step mounts no blocks at all. An enabled step that
+    // opens onto nothing is worse than a disabled one that says why.
+    }, enabled: (post) => !_pcePostIsVideo(post) && !!post?.thumbnailUrl && !post?.brandCard },
     { key: 'video',  title: 'Video overlays & sound', blocks: () => {
         const out = [];
         if (_pceLayers.includes('overlays')) out.push('pce-insp-overlays');
@@ -7593,11 +7596,13 @@ function _railSub(key, post) {
         case 'imgtext': {
             if (!post || !post.thumbnailUrl) return 'Add a picture first';
             if (_pcePostIsVideo(post)) return 'This is a video — use Video overlays';
+            // A branded card has nothing this step can do: its typography IS the card (edited on the
+            // canvas), and sound is a video layer now. The step is disabled for a card, and a
+            // disabled step has to say why rather than report "No sound yet" as if something were
+            // missing — sound was never coming.
+            if (post.brandCard) return 'The card’s own words — edit them on the card';
             const boxes = _pceOverlayCount(post);
             const clips = _pceAudioClips(post).length;
-            // A card has no overlay layer, so on a card this step is only ever about sound and must
-            // not report "no text" as though something were missing.
-            if (post.brandCard) return clips ? `${clips} sound clip${clips === 1 ? '' : 's'}` : 'No sound yet';
             if (!boxes && !clips) return 'Nothing on the image';
             const parts = [];
             if (boxes) parts.push(`${boxes} text box${boxes === 1 ? '' : 'es'}`);
@@ -9357,9 +9362,9 @@ function _pceDefaultLayout() {
     // Mirrors DEFAULT_CARD_LAYOUT in src/lib/brand-card.ts. The headline's 0.5 is where the old
     // renderer pinned it, so a card nobody has dragged renders exactly as it always did.
     return {
-        headline: { show: true, align: 'left', y: 0.5 },
-        wordmark: { show: true, align: 'left', y: 0 },
-        website: { show: true, align: 'left', y: 1 },
+        headline: { show: true, align: 'left', y: 0.5, x: null },
+        wordmark: { show: true, align: 'left', y: 0, x: null },
+        website: { show: true, align: 'left', y: 1, x: null },
     };
 }
 
@@ -9373,6 +9378,11 @@ function _pceNormalizeLayout(raw) {
         if (o.align === 'left' || o.align === 'center' || o.align === 'right') base[key].align = o.align;
         const y = Number(o.y);
         if (Number.isFinite(y)) base[key].y = Math.min(1, Math.max(0, y));
+        // Mirrors normalizeCardElement in src/lib/brand-card.ts: absent/null/junk all mean "no free
+        // x, anchor to align" — and junk must NOT become 0, which would drag an untouched card hard
+        // to the left. Only a real number is a real position.
+        const x = o.x === null || o.x === undefined ? null : Number(o.x);
+        base[key].x = x !== null && Number.isFinite(x) ? Math.min(1, Math.max(0, x)) : null;
     }
     return base;
 }
@@ -9543,7 +9553,9 @@ function _pcePaintHandles() {
         h.style.height = (b.height / geo.canvas.height * 100) + '%';
         // A 34px band on a 1080px card is ~12px on screen — too thin to grab reliably.
         h.style.minHeight = '20px';
-        h.style.justifyContent = _pceJustify(layout[key].align);
+        // A dragged block IS its own width — the box the server reported — so there is nothing to
+        // anchor inside it. Only an un-dragged one still sits on the full rail and needs aligning.
+        h.style.justifyContent = layout[key].x === null ? _pceJustify(layout[key].align) : 'flex-start';
         // The selected element reads as selected on the canvas, not only in the inspector — the
         // two are one control surface, so they must never disagree about what is being edited.
         if (_pceSelection === key) {
@@ -9607,14 +9619,12 @@ async function _pceRefreshPreview() {
 }
 
 // ── Dragging an element to a new spot ────────────────────────────────────────
-// Vertical is free; horizontal snaps to the rail's left/centre/right thirds. That mirrors the
-// renderer, which anchors rather than free-positions x so text can never overhang the card edge.
+// Both axes are free, and the block follows the cursor in both. Horizontal used to snap to the
+// rail's left/centre/right thirds, mirroring a renderer that could only anchor x — the block jumped
+// between thirds and the drag felt broken. The renderer now clamps a free x against the block's own
+// estimated width (see `place` in src/lib/brand-card.ts), so the overhang the snap existed to
+// prevent is prevented there instead, twice over.
 let _pceDrag = null;
-
-function _pceAlignFromX(clientX, rect) {
-    const f = (clientX - rect.left) / Math.max(1, rect.width);
-    return f < 0.34 ? 'left' : f < 0.67 ? 'center' : 'right';
-}
 
 function _pceDragStart(ev) {
     const handle = ev.target.closest?.('.pce-handle');
@@ -9629,11 +9639,16 @@ function _pceDragStart(ev) {
     }
     // Grabbing an element is also selecting it — the inspector follows without a separate click.
     _pceSelect(handle.dataset.key, false);
+    const grabRect = handle.getBoundingClientRect();
     _pceDrag = {
         key: handle.dataset.key,
         handle,
-        // Grab offset, so the handle doesn't jump its own height under the cursor on first move.
-        grabDy: ev.clientY - handle.getBoundingClientRect().top,
+        // Grab offsets, so the handle doesn't jump under the cursor on the first move. The x offset
+        // is what makes the block move WITH the pointer rather than centring itself on it — the
+        // difference between dragging something and teleporting it.
+        grabDy: ev.clientY - grabRect.top,
+        grabDx: ev.clientX - grabRect.left,
+        width: grabRect.width,
     };
     // Capture keeps the move/up stream on the handle even when the cursor outruns a 20px band.
     // It is an optimisation, not a requirement — the listeners sit on the layer, which the cursor
@@ -9645,32 +9660,44 @@ function _pceDragStart(ev) {
 
 function _pceDragMove(ev) {
     if (!_pceDrag) return;
-    const { handle, grabDy } = _pceDrag;
+    const { handle, grabDy, grabDx, width } = _pceDrag;
     // Measured per move, not cached at grab time: the modal can scroll mid-drag, and a stale rect
     // would silently offset every position by however far it moved.
     const stageRect = _pceEl('pce-stage').getBoundingClientRect();
     const maxTop = Math.max(0, stageRect.height - handle.offsetHeight);
     const top = Math.min(Math.max(ev.clientY - grabDy - stageRect.top, 0), maxTop);
     handle.style.top = (top / stageRect.height * 100) + '%';
-    const align = _pceAlignFromX(ev.clientX, stageRect);
-    handle.style.justifyContent = _pceJustify(align);
+    // Horizontal, free. It is the CENTRE that is clamped to the canvas, not the left edge — clamping
+    // the edge pins a block that is already as wide as the safe area (which every un-dragged
+    // headline is) so hard that the first drag looks like it did nothing at all. The centre is also
+    // exactly what the overlay editor clamps, so the two drags behave identically.
+    //
+    // A handle may therefore hang over the edge mid-drag. That is honest, not a bug: the renderer is
+    // the authority on where a block can legibly sit, and it re-seats the handle on the box it
+    // actually drew as soon as the drop lands.
+    const centre = Math.min(Math.max((ev.clientX - grabDx + width / 2 - stageRect.left) / stageRect.width, 0), 1);
+    handle.style.left = ((centre * stageRect.width - width / 2) / stageRect.width * 100) + '%';
+    // The block is its own width now, so there is no anchoring left to do inside it.
+    handle.style.justifyContent = 'flex-start';
     _pceDrag.y = top / stageRect.height;
-    _pceDrag.align = align;
+    // Stored as the block's CENTRE, which is what the renderer's `place` expects and what the
+    // overlay editor uses — so both drags mean the same thing by the same number.
+    _pceDrag.x = centre;
     ev.preventDefault();
 }
 
 function _pceDragEnd() {
     if (!_pceDrag) return;
-    const { key, handle, y, align } = _pceDrag;
+    const { key, handle, y, x } = _pceDrag;
     handle.style.borderStyle = 'dashed';
     _pceDrag = null;
-    // A click with no movement leaves y/align undefined — nothing to commit, and re-rendering on
+    // A click with no movement leaves y/x undefined — nothing to commit, and re-rendering on
     // every stray click would put a server render behind each one. It was still a selection
     // though, so repaint to show it.
-    if (y === undefined && align === undefined) { _pcePaintHandles(); return; }
+    if (y === undefined && x === undefined) { _pcePaintHandles(); return; }
     const layout = _pceState.layout || (_pceState.layout = _pceDefaultLayout());
     if (y !== undefined) layout[key].y = y;
-    if (align !== undefined) layout[key].align = align;
+    if (x !== undefined) layout[key].x = x;
     _pceRefreshPreview();
     // A dropped element is a change to the card, not just to the preview — with Save gone, this is
     // what commits it.
@@ -9831,6 +9858,10 @@ function _pceSetStageWide(wide) {
                 const key = btn.closest('[data-align-for]')?.dataset.alignFor;
                 if (!key || !_pceState.layout?.[key]) return;
                 _pceState.layout[key].align = btn.dataset.align;
+                // Alignment means "pin this to the rail", so it CLEARS any free x. Without this the
+                // buttons would silently do nothing on a block that had been dragged — the renderer
+                // ignores `align` whenever an x is set.
+                _pceState.layout[key].x = null;
                 _pcePaintAlign(key);
                 _pceRefreshPreview();
                 _pceScheduleCardSave();
@@ -11586,7 +11617,15 @@ function gpVoiceError(targetId, kind) {
         ? 'Microphone access is blocked. Allow it in your browser’s address bar, then try again.'
         : kind === 'no-speech' ? 'I didn’t catch anything — try again.'
         : kind === 'audio-capture' ? 'No microphone found.'
+        // 'network' means the recogniser STARTED and its speech service then failed — the microphone
+        // and the permission are both fine. It is the signature failure of a Chromium browser that
+        // exposes webkitSpeechRecognition without a working speech backend, so isSupported() says
+        // yes and every attempt dies anyway. "Try again" is the one thing that will not help, which
+        // is why this cannot share the generic message.
+        : kind === 'network' ? 'Dictation is not available in this browser. Try Chrome or Safari.'
         : 'Dictation could not start. Try again.';
+    // Named in the console too: the toast is transient and this is the line worth quoting in a report.
+    console.warn('[voice] recognition failed:', kind);
     // The editor's caption and rewrite boxes have no status line of their own, so the toast is the
     // only place this can be said.
     window.showToast?.(msg, { icon: '🎤' });

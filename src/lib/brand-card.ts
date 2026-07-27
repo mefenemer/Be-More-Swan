@@ -32,19 +32,40 @@ export type CardAlign = 'left' | 'center' | 'right';
 /**
  * Where one piece of the card's furniture sits, and whether it shows at all.
  *
- * Vertical is free (`y`), horizontal snaps to three anchors (`align`). That split is deliberate: a
- * freely-positioned x would need the rendered TEXT WIDTH to clamp against, and satori only knows
- * that after it has laid the card out — so a right-dragged wordmark could print off the edge, and
- * the first anyone would know is a published post. Anchoring to the safe-area rail instead makes
- * overhang impossible by construction, while dragging still feels free in the axis that matters
- * (how far down the card the line sits).
+ * Both axes are free. `x` used to snap to three anchors because a freely-positioned x needs the
+ * rendered TEXT WIDTH to clamp against and satori only knows that after layout — so a right-dragged
+ * wordmark could print off the edge, discovered only once published. The snap made overhang
+ * impossible by construction, and it made dragging feel broken: the block jumped between thirds.
+ *
+ * Overhang is now impossible by a different construction, in two independent layers:
+ *   1. the block's width is ESTIMATED here and `x` is clamped so its right edge lands inside the
+ *      safe area, and
+ *   2. the rendered block is capped to the space actually remaining to its right, with
+ *      `overflow: hidden` — so even a bad estimate wraps or clips instead of printing off the card.
+ * Layer 2 is what makes layer 1 safe to be an estimate rather than a measurement.
  */
 export interface CardElementLayout {
     show: boolean;
+    /**
+     * The anchor `x: null` falls back to. Kept as its own field rather than folded into `x` so the
+     * alignment buttons stay meaningful ("pin this to the left rail") and so every card saved before
+     * `x` existed renders EXACTLY as it did — see `x`.
+     */
     align: CardAlign;
     /** Top edge as a fraction of canvas height, clamped into the safe area at render time — so 0
      *  and 1 mean "as high/low as this can legibly go", never off the card. */
     y: number;
+    /**
+     * Centre of the block as a fraction of canvas width, or `null` for "anchor to `align` instead".
+     *
+     * Null is the migration: a card stored before dragging was free has no `x`, and must keep
+     * rendering off `align` alone. Nothing back-fills it — an x is only ever written by someone
+     * actually dragging the block, and the alignment buttons clear it back to null.
+     *
+     * The centre (not the left edge) is the anchor so that dragging matches the overlay editor,
+     * which is the gesture this is being made to feel like.
+     */
+    x: number | null;
 }
 
 /**
@@ -69,19 +90,24 @@ export interface CardLayout {
  * draggable renders identically after.
  */
 export const DEFAULT_CARD_LAYOUT: CardLayout = {
-    headline: { show: true, align: 'left', y: 0.5 },
-    wordmark: { show: true, align: 'left', y: 0 },
-    website: { show: true, align: 'left', y: 1 },
+    headline: { show: true, align: 'left', y: 0.5, x: null },
+    wordmark: { show: true, align: 'left', y: 0, x: null },
+    website: { show: true, align: 'left', y: 1, x: null },
 };
 
 function normalizeCardElement(raw: unknown, fallback: CardElementLayout): CardElementLayout {
     const o = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
     const align = o.align === 'left' || o.align === 'center' || o.align === 'right' ? o.align : fallback.align;
     const y = Number(o.y);
+    // ABSENT and NULL are the same answer here — "no free x, use the anchor" — but junk is too: an
+    // unparseable x must not become 0, which would silently drag the block to the left edge of a
+    // card nobody touched.
+    const x = o.x === null || o.x === undefined ? null : Number(o.x);
     return {
         show: typeof o.show === 'boolean' ? o.show : fallback.show,
         align,
         y: Number.isFinite(y) ? Math.min(1, Math.max(0, y)) : fallback.y,
+        x: x !== null && Number.isFinite(x) ? Math.min(1, Math.max(0, x)) : null,
     };
 }
 
@@ -305,11 +331,45 @@ export async function renderBrandCard(opts: {
     const justify = (align: CardAlign) =>
         align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start';
 
-    /** One full-width rail at `top`; the child anchors left/centre/right inside it. */
-    const placed = (top: number, elHeight: number, align: CardAlign, child: unknown) => el({
-        position: 'absolute', left: pad, top, width: rail, height: elHeight,
-        display: 'flex', alignItems: 'center', justifyContent: justify(align),
-    }, child);
+    /**
+     * Where a block of estimated width `w` actually lands, and how wide its box may be.
+     *
+     * With no free `x` this is the old behaviour exactly: the full safe-area rail, with the child
+     * anchored inside it by `justifyContent`. That is the path every card saved before dragging was
+     * free still takes, so none of them move by a pixel.
+     *
+     * With a free `x` the block becomes its own box, centred on `x` and then CLAMPED so neither edge
+     * leaves the safe area. `w` is an estimate, so the returned width is also capped to the room
+     * actually left to the right of `left` — the second, independent guard that makes an estimate
+     * safe to clamp with. Overflow is hidden by the callers, so the worst a bad estimate can do is
+     * wrap or clip text INSIDE the card, never print it off the edge.
+     */
+    const place = (x: number | null, w: number) => {
+        if (x === null) return { left: pad, width: rail, free: false };
+        const wide = Math.min(w, rail);
+        const left = Math.round(Math.min(Math.max(x * width - wide / 2, pad), width - pad - wide));
+        return { left, width: Math.min(wide, width - pad - left), free: true };
+    };
+
+    /** One rail (or one free block) at `top`; the child anchors inside it. */
+    const placed = (top: number, elHeight: number, e: CardElementLayout, w: number, child: unknown) => {
+        const p = place(e.x, w);
+        return el({
+            position: 'absolute', left: p.left, top, width: p.width, height: elHeight,
+            display: 'flex', alignItems: 'center',
+            // A freely-placed block IS its own width, so there is nothing left to anchor within it.
+            justifyContent: p.free ? 'flex-start' : justify(e.align),
+            overflow: 'hidden',
+        }, child);
+    };
+
+    // ── Estimating how wide a block will print ───────────────────────────────────────────────────
+    // satori knows the true advance only after layout, and the clamp has to happen before it. These
+    // are the same per-character approximations the headline already used to count its wraps, so
+    // they are no less trustworthy than the box the drag handle is drawn on — and `place` caps the
+    // result either way.
+    const textWidth = (text: string, size: number, perChar: number, tracking = 0) =>
+        Math.ceil(text.length * (size * perChar + tracking));
 
     // ── The headline, placed like everything else ────────────────────────────────────────────
     // It used to be given the whole safe area with justifyContent:center — which is why it could not
@@ -326,13 +386,20 @@ export async function renderBrandCard(opts: {
     const wrapped = headline.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil(line.length / perLine)), 0);
     const headlineHeight = Math.min(height - pad * 2, Math.round(wrapped * headlineSize * 1.14));
     const headlineTop = topFor(layout.headline.y - (headlineHeight / height) / 2, headlineHeight);
+    // A wrapped headline fills the rail; a short one is only as wide as its longest line. Using the
+    // longest line (not the whole string) is what stops a two-word headline being clamped as though
+    // it were a paragraph, which would stop it reaching the right-hand side of the card at all.
+    const longestLine = headline.split('\n').reduce((n, l) => Math.max(n, Math.min(l.length, perLine)), 0);
+    const headlinePlace = place(layout.headline.x, textWidth(' '.repeat(longestLine), headlineSize, 0.52));
 
     const children: unknown[] = [
         el({
-            position: 'absolute', left: pad, top: headlineTop, width: rail, height: headlineHeight,
+            position: 'absolute', left: headlinePlace.left, top: headlineTop,
+            width: headlinePlace.width, height: headlineHeight,
             display: 'flex', flexDirection: 'column',
-            justifyContent: 'center', alignItems: justify(layout.headline.align),
-            textAlign: layout.headline.align,
+            justifyContent: 'center',
+            alignItems: headlinePlace.free ? 'flex-start' : justify(layout.headline.align),
+            textAlign: headlinePlace.free ? 'left' : layout.headline.align,
             fontSize: headlineSize,
             lineHeight: 1.14, fontWeight: 800, color: palette.headline,
             // Long single words (a URL-ish product name) would otherwise print past the edge.
@@ -342,28 +409,39 @@ export async function renderBrandCard(opts: {
 
     const elements: BrandCardResult['elements'] = {
         // `show` is not offered for the headline, so it is always shown and always has a box.
-        headline: { available: true, shown: true, box: { left: pad, top: headlineTop, width: rail, height: headlineHeight } },
+        headline: {
+            available: true, shown: true,
+            box: { left: headlinePlace.left, top: headlineTop, width: headlinePlace.width, height: headlineHeight },
+        },
         wordmark: { available: wordmarkAvailable, shown: false, box: null },
         website: { available: websiteAvailable, shown: false, box: null },
     };
 
     if (wordmarkAvailable && layout.wordmark.show) {
         const top = topFor(layout.wordmark.y, wordmarkHeight);
-        children.push(placed(top, wordmarkHeight, layout.wordmark.align, logoSrc
+        // A logo has no glyphs to count. 3:1 is the ordinary wordmark-lockup aspect, and `place`
+        // caps whatever this returns — a wrong guess costs position, never an overhang.
+        const wordmarkWidth = logoSrc
+            ? logoHeight * 3
+            : textWidth(eyebrowText, eyebrowSize, 0.62, Math.round(width * 0.004));
+        const p = place(layout.wordmark.x, wordmarkWidth);
+        children.push(placed(top, wordmarkHeight, layout.wordmark, wordmarkWidth, logoSrc
             ? { type: 'img', props: { src: logoSrc, style: { height: logoHeight, objectFit: 'contain' } } }
             : el({
                 display: 'flex', fontSize: eyebrowSize, fontWeight: 800,
                 letterSpacing: Math.round(width * 0.004), color: palette.eyebrow,
             }, eyebrowText)));
-        elements.wordmark = { available: true, shown: true, box: { left: pad, top, width: rail, height: wordmarkHeight } };
+        elements.wordmark = { available: true, shown: true, box: { left: p.left, top, width: p.width, height: wordmarkHeight } };
     }
 
     if (websiteAvailable && layout.website.show) {
         const top = topFor(layout.website.y, websiteHeight);
-        children.push(placed(top, websiteHeight, layout.website.align, el({
+        const websiteWidth = textWidth(String(opts.kit.website), websiteSize, 0.5);
+        const p = place(layout.website.x, websiteWidth);
+        children.push(placed(top, websiteHeight, layout.website, websiteWidth, el({
             display: 'flex', fontSize: websiteSize, fontWeight: 400, color: palette.footer, opacity: 0.75,
         }, opts.kit.website)));
-        elements.website = { available: true, shown: true, box: { left: pad, top, width: rail, height: websiteHeight } };
+        elements.website = { available: true, shown: true, box: { left: p.left, top, width: p.width, height: websiteHeight } };
     }
 
     const svg = await satori(

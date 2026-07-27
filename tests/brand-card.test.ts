@@ -393,8 +393,12 @@ test('a missing, partial or junk layout falls back to the original fixed placeme
     // A half-specified element keeps the default for the fields it left out.
     assert.deepEqual(
         normalizeCardLayout({ website: { align: 'right' } }).website,
-        { show: true, align: 'right', y: 1 },
+        { show: true, align: 'right', y: 1, x: null },
     );
+    // The migration that matters: every card saved before dragging was free has no `x`, and must
+    // keep rendering off `align` alone. Nothing may back-fill it.
+    assert.strictEqual(normalizeCardLayout({ headline: { align: 'center', y: 0.5 } }).headline.x, null,
+        'a stored card with no x must not acquire one — it would move a card nobody touched');
 });
 
 test('out-of-range and junk placement values are corrected, never passed through', () => {
@@ -407,6 +411,13 @@ test('out-of-range and junk placement values are corrected, never passed through
     assert.equal(l.wordmark.y, 1, 'y clamps to 0..1');
     assert.equal(l.website.show, false);
     assert.equal(l.website.y, 0);
+    // x gets the same treatment, but junk must land on null (use the anchor), never on 0 (hard left).
+    const x = normalizeCardLayout({
+        headline: { x: 4 }, wordmark: { x: -2 }, website: { x: 'over there' },
+    });
+    assert.equal(x.headline.x, 1, 'x clamps to 0..1');
+    assert.equal(x.wordmark.x, 0);
+    assert.strictEqual(x.website.x, null, 'an unparseable x must not become a hard-left drag');
 });
 
 test('hiding an element takes it off the card, and says so in the reported geometry', async () => {
@@ -468,7 +479,64 @@ test('placement actually moves the pixels, and the same placement re-renders ide
     // The layout the caller gets back is the normalized one — that is what gets stored. A layout
     // written before the headline was placeable gains its default, which is where the headline was
     // pinned anyway, so an old card renders unchanged.
-    assert.deepEqual(b.layout, { headline: DEFAULT_CARD_LAYOUT.headline, ...swapped });
+    assert.deepEqual(b.layout, {
+        headline: DEFAULT_CARD_LAYOUT.headline,
+        wordmark: { ...swapped.wordmark, x: null },
+        website: { ...swapped.website, x: null },
+    });
+});
+
+// ── Free horizontal placement ───────────────────────────────────────────────────────────────────
+// The three-anchor snap was replaced because it made dragging feel broken — the block jumped
+// between thirds. The snap was load-bearing though: it was what made it impossible to drag text off
+// the edge of the card. These are the tests for its replacement.
+test('a free x moves the block horizontally, and align no longer decides where it sits', async () => {
+    const args = { headline: 'Cold brew', kit: BE_MORE_SWAN_BRAND_KIT, seed: 11 } as const;
+    const at = (x: number) => renderBrandCard({ ...args, layout: { headline: { show: true, align: 'left', y: 0.5, x } } });
+    const [left, mid, right] = await Promise.all([at(0.2), at(0.5), at(0.8)]);
+    const [lb, mb, rb] = [left.elements.headline.box!, mid.elements.headline.box!, right.elements.headline.box!];
+    assert.ok(lb.left < mb.left && mb.left < rb.left, 'x must move the block, not snap it to thirds');
+    assert.notDeepEqual(left.png, right.png, 'a horizontal drag produced an identical card');
+    // Free x is a genuinely different position from any anchor, or the drag would still feel snapped.
+    const anchored = await renderBrandCard({ ...args, layout: { headline: { show: true, align: 'left', y: 0.5, x: null } } });
+    assert.notStrictEqual(mb.left, anchored.elements.headline.box!.left);
+});
+
+test('no x, however extreme, can put a block outside the safe area', async () => {
+    // The guarantee the snap used to provide by construction. A long website is the worst case: the
+    // widest single-line block, dragged hard against each edge.
+    const kit = { ...BE_MORE_SWAN_BRAND_KIT, website: 'willowbrook-coffee-roasters.example.com' };
+    for (const ratio of ['1:1', '9:16', '16:9'] as const) {
+        for (const x of [0, 0.5, 1]) {
+            const card = await renderBrandCard({
+                headline: 'A headline long enough that it has to wrap onto several lines', kit, seed: 3,
+                aspectRatio: ratio,
+                layout: {
+                    headline: { show: true, align: 'left', y: 0.5, x },
+                    wordmark: { show: true, align: 'left', y: 0, x },
+                    website: { show: true, align: 'left', y: 1, x },
+                },
+            });
+            const pad = Math.round(card.width * 0.08);
+            for (const [name, e] of Object.entries(card.elements)) {
+                if (!e.box) continue;
+                assert.ok(e.box.left >= pad, `${name} at x=${x} on ${ratio} starts left of the safe area`);
+                assert.ok(e.box.left + e.box.width <= card.width - pad + 1,
+                    `${name} at x=${x} on ${ratio} runs past the safe area — this is the overhang the snap used to prevent`);
+            }
+        }
+    }
+});
+
+test('a card stored before free x renders exactly as it always did', async () => {
+    // The migration, end to end: the same layout with `x` absent and with `x: null` must be the
+    // same PNG, byte for byte.
+    const args = { headline: 'Cold brew season is here', kit: BE_MORE_SWAN_BRAND_KIT, seed: 5 } as const;
+    const [legacy, explicit] = await Promise.all([
+        renderBrandCard({ ...args, layout: { wordmark: { show: true, align: 'right', y: 0 } } as never }),
+        renderBrandCard({ ...args, layout: { wordmark: { show: true, align: 'right', y: 0, x: null } } }),
+    ]);
+    assert.deepEqual(legacy.png, explicit.png, 'adding the x field must not restyle a single stored card');
 });
 
 test('the headline is placeable, and reports the box the editor draws its handle on', async () => {

@@ -639,8 +639,8 @@ check('the headline is placeable and editable on the canvas', () => {
         'typing in a panel to change words that are on a picture somewhere else');
     // Client and server must agree on the default, or a card nobody dragged would move on first save.
     const brandCard = read('src/lib/brand-card.ts');
-    assert.match(brandCard, /headline: \{ show: true, align: 'left', y: 0\.5 \}/, 'server default');
-    assert.match(workspace, /headline: \{ show: true, align: 'left', y: 0\.5 \}/, 'client default');
+    assert.match(brandCard, /headline: \{ show: true, align: 'left', y: 0\.5, x: null \}/, 'server default');
+    assert.match(workspace, /headline: \{ show: true, align: 'left', y: 0\.5, x: null \}/, 'client default');
 });
 
 // ── 29. The card saves itself ───────────────────────────────────────────────────────────────────
@@ -732,6 +732,41 @@ check('the mic button cannot fail silently', () => {
     assert.match(head, /if \(!window\.SwanSpeech\) \{/,
         'a mic button that is silently dead is the hardest possible version of this bug to diagnose');
     assert.match(head, /console\.error\('\[voice\]/, 'and it must leave a trace that names the missing file');
+});
+
+// ── 35. The card drag is free in both axes ──────────────────────────────────────────────────────
+check('dragging a card element no longer snaps to thirds', () => {
+    assert.ok(!workspace.includes('_pceAlignFromX'),
+        'the three-anchor snap is what made this drag feel broken — the block jumped between thirds');
+    const move = workspace.slice(workspace.indexOf('function _pceDragMove(ev) {'));
+    const body = move.slice(0, move.indexOf('\n}\n'));
+    assert.match(body, /_pceDrag\.x = centre/, 'x is committed as the block centre, like the overlay editor');
+    assert.match(body, /grabDx/, 'the block must move WITH the pointer, not centre itself on it');
+    // Clamping the LEFT edge pins a block already as wide as the safe area — which every un-dragged
+    // headline is — so the first drag looks like it did nothing.
+    assert.match(body, /width \/ 2 - stageRect\.left\) \/ stageRect\.width/,
+        'it is the centre that is clamped to the canvas, not the left edge');
+});
+
+check('alignment clears a free x rather than silently doing nothing', () => {
+    // The renderer ignores `align` whenever an x is set, so a button that only wrote align would be
+    // dead on any block that had been dragged.
+    const bind = workspace.slice(workspace.indexOf('(function _pceBind()'));
+    const align = bind.slice(bind.indexOf(".pce-align'"));
+    assert.match(align.slice(0, 700), /_pceState\.layout\[key\]\.x = null/,
+        'alignment means "pin this to the rail", which is the opposite of a free x');
+});
+
+check('the client normalises x exactly as the renderer does', () => {
+    const norm = workspace.slice(workspace.indexOf('function _pceNormalizeLayout(raw) {'));
+    const body = norm.slice(0, norm.indexOf('\n}\n'));
+    // Junk must land on null (use the anchor), never on 0 — which would drag an untouched card
+    // hard to the left edge the moment it was opened.
+    assert.match(body, /o\.x === null \|\| o\.x === undefined \? null : Number\(o\.x\)/,
+        'absent, null and junk x must all mean "anchor to align"');
+    assert.match(body, /base\[key\]\.x = x !== null && Number\.isFinite\(x\)/, 'and only a real number is a position');
+    assert.match(workspace, /headline: \{ show: true, align: 'left', y: 0\.5, x: null \}/,
+        'the client default layout must carry x, or a fresh card sends a layout the server cannot match');
 });
 
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);

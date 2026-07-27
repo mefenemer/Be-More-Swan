@@ -120,14 +120,10 @@
       <!-- AC1: live status -->
       <div id="as-live" class="as-live hidden"></div>
 
-      <!-- AC2: requires your attention -->
-      <div id="as-attention-wrap" class="hidden">
-        <div class="as-head">
-          <h3 class="as-h3">Requires your attention</h3>
-          <span id="as-attention-count" class="as-badge">0</span>
-        </div>
-        <div id="as-attention" class="as-grid"></div>
-      </div>
+      <!-- AC2 "Requires your attention" was here. The Review Queue is where work waiting on the
+           user lives, and a second copy of it on the dashboard meant two places showing the same
+           backlog and disagreeing whenever one was stale. The approve/reject handlers below are
+           kept: the suggestion cards share them. -->
 
       <!-- AC3: proactive suggestions -->
       <div id="as-suggest-wrap" class="hidden">
@@ -479,17 +475,14 @@
     }
 
     function reconcile() {
-      const att = document.getElementById('as-attention');
       const sg = document.getElementById('as-suggest');
       const live = document.getElementById('as-live');
-      const attN = att ? att.querySelectorAll('.as-card').length : 0;
       const sgN = sg ? sg.querySelectorAll('.as-sg').length : 0;
-      const countEl = document.getElementById('as-attention-count');
-      if (countEl) countEl.textContent = attN;
-      document.getElementById('as-attention-wrap').classList.toggle('hidden', attN === 0);
       document.getElementById('as-suggest-wrap').classList.toggle('hidden', sgN === 0);
       const liveVisible = live && !live.classList.contains('hidden');
-      section.classList.toggle('hidden', attN === 0 && sgN === 0 && !liveVisible);
+      // The attention feed no longer counts towards showing the section — without dropping it here
+      // the whole Action Stream would stay visible with nothing in it but its own padding.
+      section.classList.toggle('hidden', sgN === 0 && !liveVisible);
     }
 
     // ── AC2: approvals ──
@@ -591,9 +584,8 @@
           live.classList.remove('hidden');
         } else { live.classList.add('hidden'); }
 
-        const att = document.getElementById('as-attention'); att.innerHTML = '';
-        (d.attention || []).forEach(i => att.appendChild(attentionCard(i)));
-
+        // d.attention is still returned by the endpoint and deliberately ignored — the Review Queue
+        // owns that list now. Nothing renders it, so attentionCard is unreachable from here.
         const sg = document.getElementById('as-suggest'); sg.innerHTML = '';
         (d.suggestions || []).forEach(i => sg.appendChild(suggestCard(i)));
 
