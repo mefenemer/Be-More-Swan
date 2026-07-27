@@ -135,4 +135,103 @@ check('closing the editor refreshes the calendar', () => {
         'calendar.js must expose the refresh hook closePostReview calls');
 });
 
+// ── 4. Drafting lives in the writing step, not the header ───────────────────────────────────────
+check('both drafting buttons are in step 1, not the modal header', () => {
+    const block = workspace.slice(workspace.indexOf('id="pce-write-block"'), workspace.indexOf('id="post-review-amend-all"'));
+    assert.ok(block.includes('id="pce-ai-actions"'), 'the Draft-with-AI pair must live inside #pce-write-block');
+    assert.ok(block.includes('_pceDraftWithAI()'), '"Draft it for me" must be in step 1');
+    assert.ok(block.includes('_pceAskSwanCaption()'), '"Talk it through in chat" must be in step 1');
+
+    // The header keeps only the title and the close button.
+    const header = workspace.slice(workspace.indexOf('id="post-review-title"'), workspace.indexOf('<!-- Body: platform mock-up'));
+    for (const gone of ['_pceDraftWithAI', '_pceAskSwanCaption', 'pce-ai-actions']) {
+        assert.ok(!header.includes(gone), `${gone} is still in the modal header — it belongs to the writing step`);
+    }
+});
+
+// ── 5. Dictation is reachable ───────────────────────────────────────────────────────────────────
+// The mic that served the caption was #pce-caption-mic in the design pane. The converged layout
+// never shows that pane, so dictating a post had quietly become impossible while the recogniser
+// stayed wired up — a feature that fails by being invisible.
+check('every text box the user writes into has a mic the layout actually shows', () => {
+    const fields = workspace.slice(workspace.indexOf('const GP_VOICE_FIELDS = {'), workspace.indexOf('function gpStartVoice'));
+    for (const id of ['pce-inline-caption', 'post-review-feedback']) {
+        assert.ok(fields.includes(`'${id}'`), `${id} must be registered with the shared recogniser`);
+    }
+    // The canvas caption box is created in JS, so its mic and its stable id are created there too.
+    const opener = workspace.slice(workspace.indexOf('function _pceOpenInlineCaption'));
+    assert.match(opener.slice(0, 4000), /ta\.id = 'pce-inline-caption'/,
+        'the inline caption box needs a stable id — gpStartVoice writes into an element by id');
+    assert.match(opener.slice(0, 4000), /gpStartVoice\('pce-inline-caption'\)/,
+        'the inline caption box needs a mic button');
+    // Dictated text must reach the field the save reads from, exactly as typing does.
+    assert.match(fields, /box\.value = ta\.value/,
+        'dictation into the canvas caption must mirror into #post-review-caption or it is lost on blur');
+    assert.ok(workspace.includes('id="pce-feedback-mic"'), 'the rewrite box needs a mic');
+});
+
+// ── 6. Format is reported, not chosen ───────────────────────────────────────────────────────────
+check('the format picker is gone and the platform step is named for what it decides', () => {
+    for (const id of ['pce-format-list', 'pce-format-for', 'pce-format-scope', 'pce-format-rules']) {
+        assert.ok(!workspace.includes(`id="${id}"`), `#${id} is part of the format picker, which the engine replaces`);
+    }
+    assert.match(workspace, /\{ key: 'setup', title: 'Platforms',/,
+        'the step decides platforms; format is derived');
+    // The blocker is NOT a picker — it says a derived format can never carry the attached media.
+    assert.ok(workspace.includes('id="pce-format-blocked"'),
+        'the "this format can never publish" warning must survive — it is the only pre-approval notice');
+    // _pceChooseFormat still runs: the format/media agreement code moves the format to fit new media.
+    assert.ok(workspace.includes('async function _pceChooseFormat('),
+        '_pceChooseFormat is still called by the format-media agreement code');
+});
+
+// ── 7. The branded card is reachable from the Media step ────────────────────────────────────────
+check('the Media step carries the style chooser and the whole media inspector', () => {
+    assert.match(workspace, /\{ key: 'media', title: 'Media',\s+mount: 'pce-style-block', also: 'pce-insp-media' \}/,
+        'mounting #gp-ai-media alone left "Make a branded card" and every card control off screen');
+    assert.ok(workspace.includes('id="pce-style-block"'), 'the photo-vs-card chooser needs its own mountable block');
+    assert.ok(workspace.includes('id="pce-insp-media"'), 'the media inspector needs an id for the rail to borrow it');
+    const render = workspace.slice(workspace.indexOf('function _railRender()'));
+    assert.match(render.slice(0, 3000), /if \(step\.key === 'media'\) _inspMountMediaPanel\(\)/,
+        'the sourcing panel must nest into #post-review-media-host inside the borrowed inspector');
+});
+
+check('a branded card can be inverted', () => {
+    assert.ok(workspace.includes('id="pce-invert"'), 'the card needs an invert control');
+    const fn = workspace.slice(workspace.indexOf('function _pceInvertCardColours()'));
+    const body = fn.slice(0, 900);
+    assert.match(body, /bg\.value = text\.value/, 'invert must swap background and text');
+    assert.match(body, /_pceRefreshPreview\(\)/,
+        'invert must re-render through the ordinary preview path, so Undo and Save need no special case');
+    assert.match(body, /if \(!_pceState\.kitSeeded\) return;/,
+        '_pceValues drops colours while unseeded, so an invert before the kit lands would be discarded');
+    assert.ok(!body.includes('primaryColor'),
+        'the accent is not part of the foreground/background pair — swapping it looks like a different brand');
+});
+
+// ── 8. The caption badges count characters and nothing else ─────────────────────────────────────
+check('the caption length badges no longer carry media warnings', () => {
+    const fn = workspace.slice(workspace.indexOf('function _pceRefreshCaptionMeta'));
+    // Comments stripped: the note explaining why the warning went naturally quotes it.
+    const body = fn.slice(0, fn.indexOf('\n}\n'))
+        .split('\n').filter(l => !l.trimStart().startsWith('//')).join('\n');
+    for (const phrase of ['needs an image', 'needs a video']) {
+        assert.ok(!body.includes(phrase),
+            `"${phrase}" under the caption answers a question nobody asked while writing — the Media step and the approve gate own it`);
+    }
+    // The protection itself must still exist somewhere.
+    assert.ok(workspace.includes('needs an image before this can publish'),
+        'the approve-time media gate must survive the badge cleanup');
+});
+
+// ── 9. The platform preview picker is always on screen ──────────────────────────────────────────
+check('the platform tab bar shows even for a single-platform post', () => {
+    const fn = workspace.slice(workspace.indexOf('function _rqReviewRenderTabs()'));
+    const body = fn.slice(0, 2500);
+    assert.ok(!body.includes('group.length < 2) { host.classList.add'),
+        'hiding the bar below two platforms left a new post with nothing naming the platform it is for');
+    assert.match(body, /if \(!group\.length\)/, 'the bar hides only when there is no platform at all');
+    assert.match(body, /Add a platform/, 'a single-platform post needs a route to a second one');
+});
+
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);

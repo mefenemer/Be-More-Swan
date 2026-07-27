@@ -596,27 +596,10 @@ window.showComplianceModals = function showComplianceModals(force) {
         <p id="post-review-sub" class="text-xs text-gray-500"></p>
       </div>
       <div class="flex items-start gap-2 shrink-0">
-        <!-- ── Draft with AI ─────────────────────────────────────────────────────────────────
-             Moved out of the left pane: on a blank post this is the FIRST thing you do, and it
-             was behind a pane that is collapsed by default and titled "Post setup". There is no
-             idea box any more — describing the post is a conversation, and the chat button is
-             where that conversation happens.
-             The job itself is unchanged (generate-post → content_generation_jobs → the drafter),
-             because it is the same engine Autopilot uses. Hidden on posts that can't be edited. -->
-        <div id="pce-ai-actions" class="hidden flex-col items-end gap-1">
-          <div class="flex items-center gap-1.5">
-            <button type="button" id="pce-ai-go" onclick="_pceDraftWithAI()"
-              class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 text-xs font-bold transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
-              <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain">
-              <span id="pce-ai-go-label">Draft it for me</span>
-            </button>
-            <button type="button" onclick="_pceAskSwanCaption()"
-              class="px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 text-xs font-bold transition cursor-pointer">
-              Talk it through in chat
-            </button>
-          </div>
-          <p id="pce-ai-msg" class="text-[10px] text-gray-400 text-right"></p>
-        </div>
+        <!-- "Draft it for me" and "Talk it through in chat" used to sit here, in the header. They
+             are now the first two controls of step 1 ("Write with <assistant>"), which is where
+             both of them describe what they do — the header is for what the modal IS and how to
+             leave it, and a pair of drafting buttons up here duplicated the step below. -->
         <button onclick="closePostReview()" aria-label="Close" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 cursor-pointer">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
@@ -652,43 +635,46 @@ window.showComplianceModals = function showComplianceModals(force) {
              made visible: it holds real, live controls (#post-review-caption is the field
              rqReviewSaveAmend saves from), not a copy of them. -->
         <aside id="pce-left" class="hidden" aria-hidden="true">
-          <!-- Given an id so the rail can move this whole block into its Platforms & format step
-               rather than rebuilding it: _pceRenderPlatformPicker and _pceRenderFormats keep
-               writing into the same nodes wherever they happen to be parented. -->
+          <!-- Given an id so the rail can move this whole block into its Platforms step rather than
+               rebuilding it: _pceRenderPlatformPicker keeps writing into the same nodes wherever
+               they happen to be parented. -->
           <div id="pce-setup-body" class="p-3 space-y-3">
             <!-- The platform TAB BAR used to sit here, directly above these chips: two rows of
                  platform pills in a 256px column, which read as the same control twice. It is not
                  setup — it chooses which platform's copy you are looking at — so it now sits above
-                 the canvas, where "you're viewing the Instagram version" is what it plainly means. -->
-            <!-- Which platforms this post goes out on. Editing it genuinely creates and destroys
-                 sibling rows (see set-post-platforms.ts) — one post per platform, because each has
-                 its own caption, format and media rules. It sits ABOVE Format because the format
-                 list is per-platform: changing this changes what Format can even offer. -->
+                 the canvas, where "you're viewing the Instagram version" is what it plainly means.
+
+                 Which platforms this post goes out on. This is the one thing on this step that is
+                 NOT derived: ticking a box genuinely creates a sibling scheduled_posts row and
+                 unticking deletes one (set-post-platforms.ts), because each platform gets its own
+                 caption, format and media rules. Autopilot infers its platforms from live
+                 connections; a post you write yourself starts on one and this is how it fans out. -->
             <div>
               <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Platforms</p>
               <div id="pce-platform-list" class="flex flex-wrap gap-1"></div>
               <p id="pce-platform-msg" class="text-[10px] text-gray-400 mt-1.5">A separate draft is kept for each.</p>
             </div>
-            <!-- Format picker + the chosen format's rules. Built by _pceRenderFormats from
-                 src/config/post-formats.ts, mirrored into _PCE_FORMATS below. -->
-            <div>
-              <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">
-                Format <span id="pce-format-for" class="text-emerald-600"></span>
-              </p>
-              <div id="pce-format-list" class="space-y-1"></div>
-              <p id="pce-format-scope" class="hidden text-[10px] text-gray-400 mt-1.5"></p>
-            </div>
-            <!-- "Draft with AI" used to live here. It is the first thing you do on a blank post, so
-                 it was the one control that had to be reachable BEFORE you know what this pane is
-                 for — it now sits in the modal header (#pce-ai-actions). Its idea box went with it:
-                 "what's it about" is a conversation, and that conversation is the chat button. -->
-            <div>
-              <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Post style</p>
-              <div id="pce-style" class="flex gap-1.5"></div>
-              <p id="pce-style-msg" class="text-[10px] text-gray-400 mt-1"></p>
-            </div>
-            <div id="pce-format-rules" class="hidden rounded-lg bg-gray-50 border border-gray-100 px-2.5 py-2 space-y-1"></div>
+            <!-- ── The Format PICKER used to sit here and is gone ────────────────────────────
+                 Format is derived, not chosen: route-post-formats.ts asks src/utils/format-router.ts
+                 what each platform would publish this post as, from the media's stored metrics —
+                 the same answer approve-post uses. Offering a list next to that made a decision out
+                 of something the engine had already made correctly, and the two could disagree.
+                 The derived format is now REPORTED, per platform, on the preview tabs above the
+                 canvas (_rqReviewRenderTabs) and in this step's own subtitle.
+                 _pceChooseFormat survives and is still called — the format↔media agreement code
+                 moves the format to fit newly attached media. It just has no buttons any more.
+
+                 #pce-format-blocked stays: "this format can never publish" is a blocker, not a
+                 choice, and it is the only thing that says so before approval refuses. -->
             <div id="pce-format-blocked" class="hidden rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800"></div>
+          </div>
+          <!-- What KIND of media this post carries — your own photo/video, or a branded card of
+               words on your colours. It sat under "Post setup", two steps away from the media it
+               decides; it is mounted into the Media step now, above the sourcing panel. -->
+          <div id="pce-style-block">
+            <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Post style</p>
+            <div id="pce-style" class="flex gap-1.5"></div>
+            <p id="pce-style-msg" class="text-[10px] text-gray-400 mt-1"></p>
           </div>
         </aside>
 
@@ -974,12 +960,30 @@ window.showComplianceModals = function showComplianceModals(force) {
                    and the discrete actions are simply the sentences people were typing anyway. The
                    free-text box is mounted below them for anything the five do not cover. -->
               <div id="pce-write-block" class="hidden">
-                <div class="space-y-1.5">
+                <!-- ── Draft with your assistant ────────────────────────────────────────────
+                     Both of these were buttons in the modal header. This is the step that is
+                     ABOUT writing, so this is where they belong — and the header's pair sat above
+                     a step that already offered "Draft from an idea", which went to the chat: two
+                     controls, one of them mislabelled, for the same two jobs.
+                       • Draft it for me      — queues the shared generate-post job (the same
+                                                engine Autopilot uses) and lands the result here.
+                       • Talk it through      — opens the assistant chat with this draft attached.
+                     #pce-ai-actions keeps its id and its hidden/flex toggle: _pceSyncForPost
+                     hides the pair on a post that cannot be edited. -->
+                <div id="pce-ai-actions" class="hidden flex-col gap-1.5 mb-2.5 pb-2.5 border-b border-gray-100">
+                  <button type="button" id="pce-ai-go" onclick="_pceDraftWithAI()"
+                    class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                    <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-3.5 h-3.5 object-contain shrink-0">
+                    <span id="pce-ai-go-label" class="text-[11px] font-bold">Draft it for me</span>
+                  </button>
                   <button type="button" onclick="_pceAskSwanCaption()"
                     class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-left hover:bg-emerald-100 transition cursor-pointer">
-                    <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-3.5 h-3.5 object-contain shrink-0">
-                    <span class="text-[11px] font-bold text-emerald-800">Draft from an idea</span>
+                    <svg class="w-3.5 h-3.5 text-emerald-700 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 10h8M8 14h5m-9 7l3.5-3.5H19a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v15z"/></svg>
+                    <span class="text-[11px] font-bold text-emerald-800">Talk it through in chat</span>
                   </button>
+                  <p id="pce-ai-msg" class="text-[10px] text-gray-400"></p>
+                </div>
+                <div class="space-y-1.5">
                   <button type="button" onclick="_railRewrite('Rewrite the caption in a warmer, more conversational tone. Keep the same message and length.')"
                     class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-gray-200 text-left hover:bg-gray-50 transition cursor-pointer">
                     <svg class="w-3 h-3 text-emerald-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M4 7h16M4 12h10M4 17h7"/></svg>
@@ -1018,7 +1022,7 @@ window.showComplianceModals = function showComplianceModals(force) {
               </div>
             </div>
 
-            <div class="pce-insp" data-insp="media">
+            <div id="pce-insp-media" class="pce-insp" data-insp="media">
               <!-- Media that is NOT a branded card: choosing what the picture is. The shared
                    sourcing panel is mounted here on demand (see _inspMountMediaPanel). -->
               <div id="insp-media-generic" class="hidden">
@@ -1086,6 +1090,15 @@ window.showComplianceModals = function showComplianceModals(force) {
                   <input type="color" id="pce-textColor" class="h-9 w-full rounded border border-gray-300 cursor-pointer bg-white p-1">
                 </div>
               </div>
+              <!-- Swap background and text. The card arrives in the org's brand style — say a white
+                   card with pink words — and the inverted version (pink card, white words) is the
+                   other half of that same brand, wanted often enough that picking both colours by
+                   hand each time is the wrong amount of work. One button, and it is its own undo. -->
+              <button type="button" id="pce-invert" onclick="_pceInvertCardColours()"
+                class="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] font-bold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16V4m0 0L4 7m3-3l3 3m7 1v12m0 0l3-3m-3 3l-3-3"/></svg>
+                <span>Invert colours</span>
+              </button>
 
               <div class="mt-3">
                 <label for="pce-fontFamily" class="block text-xs font-bold text-gray-600 mb-1">Font</label>
@@ -1223,7 +1236,16 @@ window.showComplianceModals = function showComplianceModals(force) {
     <div id="post-review-actions" class="border-t border-gray-100 p-4 space-y-3 shrink-0">
       <div id="post-review-changes" class="hidden space-y-2">
         <label class="block text-xs font-semibold text-gray-600">What should I change?</label>
-        <textarea id="post-review-feedback" rows="3" maxlength="500" placeholder="e.g. Make it punchier, drop the emojis, and mention our summer sale." class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-violet-300"></textarea>
+        <!-- Dictation, same recogniser as every other text field in the editor (GP_VOICE_FIELDS).
+             Saying what you want changed is the most speakable thing in the whole modal and it was
+             the one box with no mic. -->
+        <div class="relative">
+          <textarea id="post-review-feedback" rows="3" maxlength="500" placeholder="e.g. Make it punchier, drop the emojis, and mention our summer sale." class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 pr-9 focus:outline-none focus:ring-2 focus:ring-violet-300"></textarea>
+          <button type="button" id="pce-feedback-mic" onclick="gpStartVoice('post-review-feedback')" title="Dictate what to change"
+            class="absolute bottom-2 right-2 text-gray-400 hover:text-violet-600 transition cursor-pointer">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15a3 3 0 003-3V6a3 3 0 00-6 0v6a3 3 0 003 3zM19 11a7 7 0 01-14 0M12 18v3"/></svg>
+          </button>
+        </div>
         <div class="flex gap-2">
           <button id="post-review-regen-btn" onclick="rqReviewRequestChanges()" class="flex-1 py-2.5 text-xs font-bold bg-violet-600 hover:bg-violet-700 text-white rounded-lg cursor-pointer flex items-center justify-center gap-1.5 disabled:opacity-60 disabled:cursor-not-allowed">
             <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
@@ -6552,8 +6574,22 @@ function _rqReviewRenderTabs() {
     const host = document.getElementById('post-review-tabs');
     if (!host) return;
     const group = _rqReviewGroupIds.map(i => _rqPostCache[i]).filter(Boolean);
-    if (group.length < 2) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+    // Shown for a SINGLE platform too, not just a cross-post.
+    //
+    // Hiding it below two platforms meant a post you had just created — which starts on one
+    // platform — had nothing on screen naming the platform it was for, and no visible answer to
+    // "how do I see this as LinkedIn?". The tab is also now the place the DERIVED format is
+    // reported (the format picker is gone), so with one platform this strip still earns its space:
+    // it says which network you are looking at and what it will publish as. The trailing note is
+    // the way to a second one.
+    if (!group.length) { host.classList.add('hidden'); host.innerHTML = ''; return; }
     host.classList.remove('hidden');
+    const solo = group.length < 2
+        ? `<button type="button" onclick="_railOpen = 'setup'; _railRender(); document.getElementById('rail-panel-setup')?.scrollIntoView({ block: 'nearest' });"
+             class="ml-auto px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 hover:underline transition cursor-pointer">
+             + Add a platform
+           </button>`
+        : '';
     host.innerHTML = `<div class="flex flex-wrap items-center gap-1 border-b border-gray-200">${group.map(p => {
         const active = p.id === _rqReviewPostId;
         const flag = p.mediaMissing || (p.platform === 'instagram' && !p.thumbnailUrl);
@@ -6595,7 +6631,7 @@ function _rqReviewRenderTabs() {
               title="${_rqEsc(title)}">${_rqEsc(label)}</span>`;
           })() : ''}
         </button>`;
-    }).join('')}</div>`;
+    }).join('')}${solo}</div>`;
 }
 
 /**
@@ -6812,22 +6848,22 @@ function _pceRefreshCaptionMeta() {
     // under 280 and go over it the moment the link paragraph is appended.
     const link = _pceLinkLine(caption);
     const len = [caption, hashtags, link].filter(Boolean).join('\n\n').length;
-    const hasMedia = !!post.thumbnailUrl;
-    const hasVideo = _pcePostIsVideo(post);
-
+    // These badges count CHARACTERS, and nothing else.
+    //
+    // They used to swap the count for "needs an image" / "needs a video" on a platform with no media
+    // attached. Two things wrong with that: it answered a question nobody asked here (you are
+    // writing words, not choosing a picture), and it was noise rather than news — essentially every
+    // platform wants media, so the warning fired on almost every new post and said nothing specific.
+    // The media requirement belongs to the Media step, and it is still enforced where it counts:
+    // _pceApproveBlockReason refuses approval, and #post-review-media-alert says so at the top of
+    // the post. Losing it here loses no protection at all.
     paint(platforms.map(p => {
         const spec = window.PlatformConstants.get(p);
         if (!spec) return '';
         let cls = 'border-gray-200 text-gray-500 bg-gray-50';
-        let detail = `${len}/${spec.charLimit}`;
         if (len > spec.charLimit) cls = 'border-red-300 text-red-700 bg-red-50 font-bold';
         else if (len > spec.charLimit * 0.9) cls = 'border-amber-300 text-amber-700 bg-amber-50';
-        else if (spec.mediaMandatory && spec.mediaKind === 'video' && !hasVideo) {
-            cls = 'border-red-300 text-red-700 bg-red-50 font-bold'; detail = 'needs a video';
-        } else if (spec.mediaMandatory && !hasMedia) {
-            cls = 'border-amber-300 text-amber-700 bg-amber-50'; detail = 'needs an image';
-        }
-        return `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded border ${cls}">${_rqEsc(spec.label)} · ${detail}</span>`;
+        return `<span class="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] rounded border ${cls}">${_rqEsc(spec.label)} · ${len}/${spec.charLimit}</span>`;
     }).join(''));
 }
 
@@ -6890,6 +6926,11 @@ function _pceOpenInlineCaption() {
 
     const ta = document.createElement('textarea');
     ta.dataset.captionEdit = '1';
+    // A stable id so the shared recogniser can find it: gpStartVoice writes into an element BY ID,
+    // and this box is created per open. The mic that used to serve the caption was #pce-caption-mic
+    // in the design pane, which the converged layout never shows — so dictating a post had quietly
+    // become impossible even though the recogniser was still wired up.
+    ta.id = 'pce-inline-caption';
     ta.maxLength = 5000;
     ta.value = post.caption || '';
     ta.placeholder = 'Write your caption…';
@@ -6917,6 +6958,21 @@ function _pceOpenInlineCaption() {
         ta.focus();
         ta.dispatchEvent(new Event('input'));   // keep the length badges honest
     });
+
+    // The mic rides in the emoji row, and suppresses mousedown for the same reason the emoji do:
+    // this textarea saves on blur, so a control that steals focus would commit the caption
+    // mid-sentence — here, before a word had been spoken.
+    const mic = document.createElement('button');
+    mic.type = 'button';
+    mic.id = 'pce-inline-caption-mic';
+    mic.tabIndex = -1;
+    mic.title = 'Dictate the caption';
+    mic.className = 'w-6 h-6 flex items-center justify-center rounded border border-gray-200 bg-white text-gray-400 hover:text-emerald-600 hover:bg-gray-50 transition cursor-pointer';
+    mic.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15a3 3 0 003-3V6a3 3 0 00-6 0v6a3 3 0 003 3zM19 11a7 7 0 01-14 0M12 18v3"/></svg>';
+    mic.addEventListener('mousedown', (ev) => ev.preventDefault());
+    mic.addEventListener('click', () => gpStartVoice('pce-inline-caption'));
+    if (window.SwanSpeech && !window.SwanSpeech.isSupported()) mic.style.display = 'none';
+    emoji.appendChild(mic);
 
     const hint = document.createElement('p');
     hint.className = 'text-[10px] text-gray-400 mt-1';
@@ -7105,10 +7161,17 @@ const _railHomes = new Map();         // node id → where it came from, so it c
 // _pceRenderFormats' rules table and the blocked-format warning.
 const _RAIL = [
     { key: 'write', title: 'Write with %A',         mount: 'pce-write-block' },
-    { key: 'media', title: 'Media',                 mount: 'gp-ai-media' },
+    // Media borrows the style chooser (photo/video vs branded card) AND the whole media inspector,
+    // not just the sourcing buttons. Mounting #gp-ai-media alone was why a branded card could not be
+    // reached from here: "Make a branded card", the card's own wording/colour/font controls and the
+    // way back out all live in #pce-insp-media, and only the four sourcing buttons were on screen.
+    // _railRender calls _inspMountMediaPanel for this step so #gp-ai-media nests into
+    // #post-review-media-host inside it, exactly as it does everywhere else.
+    { key: 'media', title: 'Media',                 mount: 'pce-style-block', also: 'pce-insp-media' },
     { key: 'text',  title: 'Text & sound',          mount: 'pce-insp-overlays', also: 'pce-insp-audio' },
     { key: 'link',  title: 'Link & call to action', mount: 'pce-link-block' },
-    { key: 'setup', title: 'Platforms & format',    mount: 'pce-setup-body' },
+    // "Platforms", not "Platforms & format" — format is derived (see the note in #pce-setup-body).
+    { key: 'setup', title: 'Platforms',             mount: 'pce-setup-body' },
     { key: 'check', title: 'Check & improve',       mount: 'post-review-quality' },
     { key: 'when',  title: 'Schedule & publish',    mount: 'post-review-reschedule' },
 ];
@@ -7302,13 +7365,14 @@ function _railRender() {
         const step = _RAIL.find(s => s.key === _railOpen);
         const panel = document.getElementById(`rail-panel-${_railOpen}`);
         if (step && panel) {
-            // The sourcing panel acts on whatever _gpCurrentPostId says, and it is shared with the
-            // generate-post sheet — so point it at this post before it is shown. Deliberately NOT
-            // via _inspMountMediaPanel: that would re-parent it into the old inspector's host and
-            // leave _railHomes recording a home the converged layout no longer has.
-            if (step.mount === 'gp-ai-media') { _gpCurrentPostId = _rqReviewPostId; _gpAiMediaPrompt = ''; }
             _railMount(step.mount, panel);
             if (step.also) _railMount(step.also, panel);
+            // The sourcing panel is shared with the generate-post sheet and acts on whatever
+            // _gpCurrentPostId says. Mounted through _inspMountMediaPanel — its host
+            // (#post-review-media-host) has just been borrowed into this step, so the panel lands
+            // inside the media inspector where the card controls and the overlay jump also live,
+            // and _railHomes still records a home that exists.
+            if (step.key === 'media') _inspMountMediaPanel();
             // Both borrowed blocks are populated by the old inspector's refresh functions, which run
             // off the current selection. Ask for the right one so an open step is never stale.
             if (step.key === 'text') {
@@ -7360,7 +7424,6 @@ function _pceActiveFormat(post) {
     return _pceFormat(post.formatKey) || _pceFormatsFor(post.platform).find(f => f.a === 'live') || null;
 }
 
-const _PCE_MEDIA_WORD = { image: 'Image', video: 'Video', mixed: 'Images or video', audio: 'Audio', document: 'PDF', none: 'No media' };
 
 // ── Platforms ───────────────────────────────────────────────────────────────────────────────────
 // The post's platforms, as chips. Ticking one CREATES a sibling draft seeded from this one; unticking
@@ -7925,69 +7988,20 @@ function _pceChooseStyle(key) {
     }
 }
 
+/**
+ * Paint what the DERIVED format means for this post.
+ *
+ * There is no format picker any more — the engine routes the format (route-post-formats.ts) and the
+ * preview tabs report it. What survives here is the one thing that is not a choice: a format this
+ * post can never publish in, said while it is still fixable rather than at approval.
+ *
+ * Deliberately still called _pceRenderFormats and still called from the same places, because the
+ * format↔media agreement code re-runs it whenever media changes.
+ */
 function _pceRenderFormats() {
-    const host = document.getElementById('pce-format-list');
-    if (!host) return;
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
-    if (!post) { host.innerHTML = ''; return; }
-    // Which platform's formats these are. Always shown, so the list is never mistaken for the
-    // whole post's; the note only appears on a cross-post, where the others exist to be found.
-    const forEl = document.getElementById('pce-format-for');
-    if (forEl) forEl.textContent = post.platform ? '· ' + window.PlatformConstants.label(post.platform) : '';
-    const scope = document.getElementById('pce-format-scope');
-    if (scope) {
-        const others = [...new Set(_rqReviewGroupIds.map(id => _rqPostCache[id]?.platform).filter(Boolean))]
-            .filter(pl => pl !== post.platform);
-        scope.classList.toggle('hidden', !others.length);
-        if (others.length) {
-            scope.textContent = `${others.map(pl => window.PlatformConstants.label(pl)).join(' and ')} `
-                + `${others.length === 1 ? 'keeps its' : 'keep their'} own format — switch platform above the post to set ${others.length === 1 ? 'it' : 'them'}.`;
-        }
-    }
-    const all = _pceFormatsFor(post.platform);
-    const active = _pceActiveFormat(post);
-    // Only formats we can actually publish. Listing the rest turned a 4-item panel into a 9-item one
-    // where most rows did nothing but carry a SOON badge — clutter that made the two or three real
-    // choices harder to find, on every single post.
-    //
-    // The one exception is the format this post is ALREADY on: a draft sitting on a carousel must
-    // still show what it is, or the panel would quietly claim it were something else. That row keeps
-    // its badge, so an unpublishable choice made earlier is still visible and still explained.
-    const formats = all.filter(f => f.a === 'live' || (active && f.k === active.k));
-    const hiddenCount = all.length - formats.length;
-    // Rows say whether they fit what is already attached, so choosing a format is not a guess
-    // followed by a refusal at approval.
-    const kind = _pceMediaKindOf(post);
-    host.innerHTML = formats.map(f => {
-        const on = active && f.k === active.k;
-        const usable = f.a === 'live';
-        const fits = _pceFormatAccepts(f, kind);
-        // A not-yet-publishable format is only ever on screen as the post's CURRENT one, and it stays
-        // clickable so you can move off it. Approval is what refuses (approve-post's
-        // FORMAT_NOT_SCHEDULABLE), so choosing one can never produce a post that fails later.
-        const tone = on ? 'bg-emerald-50 border-emerald-300'
-            : usable ? 'border-gray-200 hover:bg-gray-50' : 'border-gray-100 bg-gray-50/60 hover:bg-gray-100';
-        const badge = usable ? ''
-            : `<span class="shrink-0 text-[9px] font-bold px-1 py-0.5 rounded ${f.a === 'planned' ? 'bg-amber-100 text-amber-700' : 'bg-gray-200 text-gray-500'}">${f.a === 'planned' ? 'SOON' : 'N/A'}</span>`;
-        // Still clickable when it doesn't fit — you may be about to change the media — but it says so
-        // in place of its description, which is the line you would otherwise read as encouragement.
-        const misfit = !fits
-            ? `<span class="shrink-0 text-[9px] font-bold px-1 py-0.5 rounded bg-red-100 text-red-700">NEEDS ${kind === 'video' ? 'AN IMAGE' : 'A VIDEO'}</span>`
-            : '';
-        return `<button type="button" onclick="_pceChooseFormat('${f.k}')"
-          class="w-full text-left px-2 py-1.5 rounded-lg border transition cursor-pointer ${tone}">
-          <span class="flex items-center gap-1.5">
-            <span class="flex-1 min-w-0 text-xs font-bold truncate ${on ? 'text-emerald-800' : usable ? 'text-gray-700' : 'text-gray-500'}">${_rqEsc(f.n)}</span>
-            ${misfit}${badge}
-          </span>
-          <span class="block text-[10px] truncate ${on ? 'text-emerald-600' : 'text-gray-400'}">${
-            fits ? _rqEsc(f.d) : `Your ${kind === 'video' ? 'video' : 'image'} can't go out in this format`}</span>
-        </button>`;
-    }).join('')
-    // One quiet line rather than a row each. Saying nothing at all would imply this platform simply
-    // has no other formats, which isn't true — but it doesn't earn nine list items either.
-    + (hiddenCount ? `<p class="pt-1 text-[10px] text-gray-300">${hiddenCount} more format${hiddenCount === 1 ? '' : 's'} we can’t publish yet</p>` : '');
-    _pceRenderFormatRules(post, active);
+    if (!post) { _pceRenderFormatRules(null, null); return; }
+    _pceRenderFormatRules(post, _pceActiveFormat(post));
 }
 
 // The chosen format's actual constraints, and — when it can't publish — why not.
@@ -8058,33 +8072,16 @@ async function _pceReconcileFormatToMedia(post) {
 }
 
 function _pceRenderFormatRules(post, fmt) {
-    const rules = document.getElementById('pce-format-rules');
+    // The rules TABLE (media kind, best ratio, slide count, caption cap) went with the picker: it
+    // described a format you were choosing. What is left is the mismatch warning — the format the
+    // engine derived cannot carry the media that is actually attached — which is a problem to fix,
+    // not a fact to read.
     const blocked = document.getElementById('pce-format-blocked');
-    if (!rules || !blocked) return;
-    if (!fmt) { rules.classList.add('hidden'); blocked.classList.add('hidden'); return; }
+    if (!blocked) return;
+    if (!fmt) { blocked.classList.add('hidden'); return; }
 
-    const rows = [
-        ['Media', _PCE_MEDIA_WORD[fmt.m] || '—'],
-        ...(fmt.ar ? [['Best ratio', fmt.ar]] : []),
-        ...(fmt.max > 1 ? [['Slides', `up to ${fmt.max}`]] : []),
-        ...(fmt.cl ? [['Caption', `${fmt.cl.toLocaleString()} chars`]] : []),
-    ];
-    // What is attached, next to what the format takes — the two facts that have to agree, in the one
-    // place that states the format's terms. Said here while it is fixable, not at approval.
     const kind = _pceMediaKindOf(post);
     const mismatch = kind && !_pceFormatAccepts(fmt, kind);
-    rules.innerHTML = rows.map(([k, v]) =>
-        `<div class="flex items-baseline justify-between gap-2">
-           <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">${_rqEsc(k)}</span>
-           <span class="text-[11px] font-semibold text-gray-700 text-right">${_rqEsc(v)}</span>
-         </div>`).join('')
-        + (kind
-            ? `<div class="flex items-baseline justify-between gap-2">
-                 <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">On this post</span>
-                 <span class="text-[11px] font-semibold text-right ${mismatch ? 'text-red-600' : 'text-gray-700'}">${kind === 'video' ? 'A video' : 'An image'}</span>
-               </div>`
-            : '');
-    rules.classList.remove('hidden');
 
     if (mismatch) {
         const a = kind === 'video' ? 'a video' : 'an image';
@@ -8971,6 +8968,29 @@ function _pceSetMsg(text, tone) {
         (tone === 'error' ? 'text-red-600' : tone === 'ok' ? 'text-emerald-700' : 'text-gray-500');
 }
 
+/**
+ * Swap the card's background and text colours.
+ *
+ * Writes the two inputs and re-renders through the ordinary preview path, so this is exactly a user
+ * having typed both values: "Undo changes" reverts it, "Save card" commits it, and nothing here
+ * needs its own knowledge of how a card is rendered. Pressing it twice returns to where you were.
+ *
+ * The accent is deliberately left alone. It is the brand's third colour, not part of the
+ * foreground/background pair, and swapping it too made the inversion look like a different brand.
+ */
+function _pceInvertCardColours() {
+    const bg = _pceEl('pce-backgroundColor');
+    const text = _pceEl('pce-textColor');
+    if (!bg || !text) return;
+    // Seed the kit first if the server's resolution has not landed: _pceValues drops the colours
+    // entirely while unseeded, so an invert before then would be silently discarded.
+    if (!_pceState.kitSeeded) return;
+    const swap = bg.value;
+    bg.value = text.value;
+    text.value = swap;
+    _pceRefreshPreview();
+}
+
 function _pceValues() {
     const v = {
         headline: _pceEl('pce-headline')?.value ?? '',
@@ -9215,8 +9235,8 @@ function _pceSchedulePreview() { clearTimeout(_pceDebounce); _pceDebounce = setT
 // rather than resetting to the org default.
 function _pceSyncForPost(post) {
     const editable = !!post && ['pending_approval', 'draft', 'in_review', 'approved', 'scheduled'].includes(post.status);
-    // The header's Draft-with-AI pair. It used to hide with the left pane it lived in; now it is in
-    // the header it needs saying explicitly, or a published post would be offered a redraft.
+    // The Draft-with-AI pair in step 1. Hidden explicitly rather than inheriting a pane's state,
+    // or a published post would be offered a redraft.
     // Both classes: the container is flex, and `hidden` alone loses to a display utility.
     const aiActions = _pceEl('pce-ai-actions');
     if (aiActions) {
@@ -10914,6 +10934,19 @@ const GP_VOICE_FIELDS = {
     'gen-post-context': { mic: 'gen-post-mic-btn', count: 'gen-post-ctx-count' },
     'gpw-caption':      { mic: 'gpw-mic-btn' },
     'post-review-caption': { mic: 'pce-caption-mic', after: () => _pceRefreshCaptionMeta() },
+    // The caption box on the canvas. Dictated text has to be mirrored into #post-review-caption the
+    // same way typing is (_pceOpenInlineCaption's input listener) — that hidden field is what
+    // rqReviewSaveAmend saves from, so without this a dictated caption would be lost on blur.
+    'pce-inline-caption': {
+        mic: 'pce-inline-caption-mic',
+        after: () => {
+            const ta = document.getElementById('pce-inline-caption');
+            const box = _pceEl('post-review-caption');
+            if (ta && box) box.value = ta.value;
+            _pceRefreshCaptionMeta();
+        },
+    },
+    'post-review-feedback': { mic: 'pce-feedback-mic' },
 };
 function gpStartVoice(targetId = 'gen-post-context') {
     const cfg = GP_VOICE_FIELDS[targetId] || { mic: 'gen-post-mic-btn' };
