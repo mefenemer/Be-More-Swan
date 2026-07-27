@@ -700,8 +700,11 @@ window.showComplianceModals = function showComplianceModals(force) {
             <!-- Format picker + the chosen format's rules. Built by _pceRenderFormats from
                  src/config/post-formats.ts, mirrored into _PCE_FORMATS below. -->
             <div>
-              <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Format</p>
+              <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">
+                Format <span id="pce-format-for" class="text-emerald-600"></span>
+              </p>
               <div id="pce-format-list" class="space-y-1"></div>
+              <p id="pce-format-scope" class="hidden text-[10px] text-gray-400 mt-1.5"></p>
             </div>
             <!-- "Draft with AI" used to live here. It is the first thing you do on a blank post, so
                  it was the one control that had to be reachable BEFORE you know what this pane is
@@ -7432,9 +7435,14 @@ function _pceRenderPlatformPicker() {
     if (!host) return;
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
     if (!post) { host.innerHTML = ''; return; }
-    // The whole sibling group's platforms, not just the one on screen.
-    const current = new Set(_rqReviewGroupIds.map(id => _rqPostCache[id]?.platform).filter(Boolean));
-    if (post.platform) current.add(post.platform);
+    // The whole sibling group's platforms, not just the one on screen — or, while a change is in
+    // flight, the set the user just asked for. Without the pending set the chip does not light up
+    // until the server has created the rows and the post has been refetched, which reads as a
+    // click that did nothing.
+    const current = _pcePendingPlatforms
+        ? new Set(_pcePendingPlatforms)
+        : new Set(_rqReviewGroupIds.map(id => _rqPostCache[id]?.platform).filter(Boolean));
+    if (!_pcePendingPlatforms && post.platform) current.add(post.platform);
     const connected = (typeof gpConnectedPlatforms === 'function' ? gpConnectedPlatforms() : []) || [];
 
     host.innerHTML = window.PlatformConstants.all.map(p => {
@@ -7870,6 +7878,8 @@ async function _pcePollAiDraft() {
 }
 
 let _pcePlatformBusy = false;
+// Platforms the user has just asked for, while the server catches up. Null when nothing is in flight.
+let _pcePendingPlatforms = null;
 function _pceSetPlatformMsg(text, kind) {
     const el = document.getElementById('pce-platform-msg');
     if (!el) return;
@@ -7892,6 +7902,7 @@ async function _pceTogglePostPlatform(platformId) {
     if (!current.size) { _pceSetPlatformMsg('A post needs at least one platform.', 'error'); return; }
 
     _pcePlatformBusy = true;
+    _pcePendingPlatforms = new Set(current);   // paint the answer now, reconcile when it lands
     _pceRenderPlatformPicker();
     _pceSetPlatformMsg('Updating…');
     try {
@@ -7905,6 +7916,7 @@ async function _pceTogglePostPlatform(platformId) {
         // rather than patch, and reopen on whichever post survived (the one being edited may have
         // been the one just removed).
         _pcePlatformBusy = false;
+        _pcePendingPlatforms = null;   // the refetch below is now the truth
         // refresh: true is load-bearing. Reopening alone re-renders from the cache this call just
         // invalidated, which is why the chips used to stay exactly as they were.
         await openPostReview(d.anchorId ?? postId, { refresh: true });
@@ -7916,6 +7928,7 @@ async function _pceTogglePostPlatform(platformId) {
         );
     } catch (err) {
         _pcePlatformBusy = false;
+        _pcePendingPlatforms = null;   // the change failed: fall back to what is actually stored
         _pceRenderPlatformPicker();
         _pceSetPlatformMsg(err.message || 'Could not change the platforms.', 'error');
     }
@@ -7935,11 +7948,15 @@ function _pceRenderStyle() {
     if (!post) { host.innerHTML = ''; return; }
     const isCard = !!post.brandCard;
     const isVideo = _pcePostIsVideo(post);
+    // A branded card is a still. That makes it impossible two ways: on a post that already carries a
+    // video, and on a platform that publishes nothing BUT video — an empty YouTube draft was being
+    // offered a card it could never publish.
+    const spec = window.PlatformConstants.get(post.platform);
+    const videoOnly = !!(spec && spec.mediaMandatory && spec.mediaKind === 'video');
+    const cardOff = isVideo || videoOnly;
     const opts = [
-        { key: 'media', n: 'Photo or video', d: 'Your own media', on: !isCard },
-        // A card is a still. Offering it on a video would offer replacing the video with a picture
-        // the post's format cannot publish — the same rule #insp-make-card already applies.
-        { key: 'card',  n: 'Branded card',   d: 'Words on your colours', on: isCard, off: isVideo },
+        { key: 'media', n: videoOnly ? 'Video' : 'Photo or video', d: 'Your own media', on: !isCard },
+        { key: 'card',  n: 'Branded card',   d: 'Words on your colours', on: isCard, off: cardOff },
     ];
     host.innerHTML = opts.map(o => `<button type="button" ${o.off ? 'disabled' : ''}
         onclick="_pceChooseStyle('${o.key}')"
@@ -7950,7 +7967,11 @@ function _pceRenderStyle() {
         <span class="block text-[9px] text-gray-400 leading-tight">${_rqEsc(o.d)}</span>
       </button>`).join('');
     const msg = _pceEl('pce-style-msg');
-    if (msg) msg.textContent = isVideo && !isCard ? 'A branded card is a still, so it is not offered on a video.' : '';
+    if (msg) {
+        msg.textContent = videoOnly
+            ? `${spec.label} only publishes video, so a branded card is not an option here.`
+            : (isVideo && !isCard ? 'A branded card is a still, so it is not offered on a video.' : '');
+    }
 }
 
 /** Switch style. Both directions already exist — this is the one place that names them as a pair. */
@@ -7972,6 +7993,20 @@ function _pceRenderFormats() {
     if (!host) return;
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
     if (!post) { host.innerHTML = ''; return; }
+    // Which platform's formats these are. Always shown, so the list is never mistaken for the
+    // whole post's; the note only appears on a cross-post, where the others exist to be found.
+    const forEl = document.getElementById('pce-format-for');
+    if (forEl) forEl.textContent = post.platform ? '· ' + window.PlatformConstants.label(post.platform) : '';
+    const scope = document.getElementById('pce-format-scope');
+    if (scope) {
+        const others = [...new Set(_rqReviewGroupIds.map(id => _rqPostCache[id]?.platform).filter(Boolean))]
+            .filter(pl => pl !== post.platform);
+        scope.classList.toggle('hidden', !others.length);
+        if (others.length) {
+            scope.textContent = `${others.map(pl => window.PlatformConstants.label(pl)).join(' and ')} `
+                + `${others.length === 1 ? 'keeps its' : 'keep their'} own format — switch platform above the post to set ${others.length === 1 ? 'it' : 'them'}.`;
+        }
+    }
     const all = _pceFormatsFor(post.platform);
     const active = _pceActiveFormat(post);
     // Only formats we can actually publish. Listing the rest turned a 4-item panel into a 9-item one
@@ -9596,6 +9631,7 @@ function _rqReviewMissingPlatforms() {
 
 function closePostReview() {
     _rqRestoreMediaPanel();   // hand the shared media panel back to the generate-post sheet
+    _railOpen = null;         // a reopened modal starts with every step closed; a re-RENDER does not
     _rqStopRenderPoll();      // nothing to update once the modal is gone
     _pceStopAudioPreview();   // a closed modal must not keep talking
     // The draft may still land, but nobody is waiting for it here — reopening it over a closed
@@ -9658,7 +9694,6 @@ function _rqRestoreMediaPanel() {
     // in a panel that is about to be thrown away — which would delete the block for the whole
     // session, not just this post.
     _railRestoreAll();
-    _railOpen = null;
     const panel = document.getElementById('gp-ai-media');
     if (panel && _gpAiMediaHome && panel.parentNode !== _gpAiMediaHome.parent) {
         _gpAiMediaHome.parent.insertBefore(panel, _gpAiMediaHome.next);
