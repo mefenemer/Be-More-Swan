@@ -160,9 +160,15 @@ check('step 7 is the decision, with three ways to commit', () => {
         'approve-post needs the chosen time');
     assert.match(workspace, /const r = await _rqApproveOne\(p, action, opts\);/,
         'siblings share the slot — dropping opts would approve them at their old times');
-    // Your own post has no separate Approve button; step 7 is the approval.
-    assert.match(workspace, /getElementById\('post-review-approve-btn'\)\?\.classList\.toggle\('hidden', isOwnDraft\)/,
-        'a fourth button asking the same question with the time left unstated');
+    // The footer's Approve is gone entirely — two Approve buttons on screen at once was the bug.
+    assert.ok(!workspace.includes('id="post-review-approve-btn"'),
+        'approving lives in step 7; a footer Approve put the same question on screen twice');
+    // Rejecting moved here too, so step 7 is the whole decision: three ways to yes, one to no.
+    assert.match(panel, /id="post-review-when-reject-wrap"/,
+        'a lone red button at the bottom of the footer read as the modal\'s parting question');
+    // "Pick the time myself" must not occupy the panel until it is chosen.
+    assert.match(panel, /id="post-review-when-mine" class="hidden/,
+        'the date field, the words box and their button were most of the panel whether or not anyone wanted them');
 });
 
 check('there is exactly one rqReviewPublishNow, and it is the one with the gates', () => {
@@ -347,8 +353,8 @@ check('the mic toggles, tracks one session, and reports real failures', () => {
         'starting must clear whatever session came before, so a stale one cannot hold the microphone');
     assert.match(fn, /_gpVoice = \{ handle, targetId, micId: cfg\.mic \}/,
         'the handle has to be kept or it can never be stopped');
-    assert.match(fn, /if \(kind !== 'aborted'\) gpVoiceError/,
-        "'aborted' is what a stop looks like — reporting it would cry wolf on every hand-over");
+    assert.match(fn, /if \(kind !== 'aborted' && kind !== 'start-failed'\) gpVoiceError/,
+        "'aborted' is a stop, and SwanSpeech reports 'start-failed' from its own catch BEFORE returning null — reporting it here fired the error every time, including when the retry then worked");
     assert.ok(fn.includes('Microphone access is blocked'),
         'a denied microphone must say so — silence is what made this look broken');
     // stop() is async: starting in the same tick throws InvalidStateError, which surfaced as
@@ -381,21 +387,19 @@ check('chat-orchestrator has an error boundary around the whole handler', () => 
 
 // ── 13. Your own draft gets ways out that are not "publish" ──────────────────────────────────────
 check('a post you are writing offers save-and-discard, not reject-and-rewrite', () => {
-    for (const id of ['post-review-reject-toggle', 'post-review-quick-links', 'post-review-draft-actions']) {
-        assert.ok(workspace.includes(`id="${id}"`), `#${id} is needed to switch the footer by authorship`);
+    assert.ok(workspace.includes('id="post-review-draft-actions"'),
+        'save/discard is the one pair with no step of its own');
+    for (const gone of ['post-review-reject-toggle', 'post-review-quick-links']) {
+        assert.ok(!workspace.includes(`id="${gone}"`),
+            `#${gone} duplicated a step: rejecting is in step 7, rewriting in step 1, timing in step 7`);
     }
     const sync = workspace.slice(
         workspace.indexOf("const isOwnDraft = post.status === 'draft';"),
         workspace.indexOf('// Per-post AI disclosure footer'));
-    assert.match(sync, /post-review-reject-toggle'\)\?\.classList\.toggle\('hidden', isOwnDraft\)/,
-        'you do not reject your own blank page');
-    assert.match(sync, /\['post-review-quick-links', !isOwnDraft\]/,
-        'the rewrite and re-time links belong to reviewing someone else\'s draft');
-    assert.match(sync, /\['post-review-draft-actions', isOwnDraft\]/,
+    assert.match(sync, /draftActions\.classList\.toggle\('hidden', !isOwnDraft\)/,
         'save/discard belong to writing your own');
-    // With Approve gone from the footer, step 7 has to be pointed at or it is not discoverable.
-    assert.match(sync, /post-review-draft-hint'\)\?\.classList\.toggle\('hidden', !isOwnDraft\)/,
-        'the footer is where the eye goes for "what now"');
+    assert.match(sync, /post-review-when-reject-wrap'\)\?\.classList\.toggle\('hidden', isOwnDraft\)/,
+        'you do not reject your own writing — you throw it away');
     // Discard reuses the established soft-cancel, and covers the whole cross-post group.
     const discard = workspace.slice(workspace.indexOf('async function rqReviewDiscardDraft()'));
     assert.match(discard.slice(0, 1500), /method: 'DELETE'/, 'discard must actually retire the row');
@@ -483,8 +487,78 @@ check('the orchestrator reports a code the user can quote', () => {
     const src = read('netlify/functions/chat-orchestrator.ts');
     assert.match(src, /typeof e\?\.code === 'string'/,
         'a Postgres error code (42703, 42P01, 23502) identifies the fault and leaks no row data');
-    assert.match(src, /quote that code/,
-        '"the details are in our logs" is useless to the person holding the mouse');
+    assert.match(src, /const detail = typeof e\?\.message === 'string' \? e\.message\.slice\(0, 200\) : '';/,
+        'the code alone reported "Error" for any plain throw — the message is what identifies it');
+    assert.match(src, /Something went wrong starting that conversation: \$\{detail\}/,
+        'the reader of this message is the person who can act on it');
+});
+
+// ── 20. The rewrite actions need something to rewrite ───────────────────────────────────────────
+check('step 1\'s rewrite actions are disabled until there is a caption', () => {
+    const block = workspace.slice(workspace.indexOf('id="pce-write-block"'), workspace.indexOf('id="pce-write-freetext"'));
+    const tagged = (block.match(/data-rewrite-action/g) || []).length;
+    assert.strictEqual(tagged, 4,
+        '"Change the tone" / "Shorten for X" / "Suggest hashtags" / "Fix grammar" each spend a generation asking the assistant to rewrite nothing');
+    assert.ok(workspace.includes('function _pceSyncRewriteActions()'), 'one place decides');
+    // Must be kept honest both when the step opens and as the caption is typed.
+    const render = workspace.slice(workspace.indexOf('function _railRender()'));
+    assert.match(render.slice(0, 6000), /_pceSyncRewriteActions\(\)/, 'the step can be opened at any time');
+    const meta = workspace.slice(workspace.indexOf('function _pceRefreshCaptionMeta()'));
+    assert.match(meta.slice(0, 2500), /_pceSyncRewriteActions\(\)/, 'this already runs on every keystroke');
+});
+
+// ── 21. The caption offers the assistant where the words are ────────────────────────────────────
+check('the written caption carries a swan Improve action', () => {
+    assert.match(workspace, /data-caption-improve/, 'improving the words belongs on the words');
+    const click = workspace.slice(workspace.indexOf('function _pceCanvasClick(ev)'));
+    assert.match(click.slice(0, 1800), /data-caption-improve[\s\S]*?_railRewrite\(/,
+        'route through the in-place rewrite so the better version lands in the post, not in a chat');
+    // Only when there IS something to improve.
+    assert.match(workspace, /const captionImprove = editableNow && !captionEmpty/,
+        'on a blank caption the real offers are Dictate and step 1\'s "Draft it for me"');
+});
+
+// ── 22. The old layer list stays buried ─────────────────────────────────────────────────────────
+check('nothing brings the pre-rail layer list back', () => {
+    const fn = workspace.slice(workspace.indexOf('function _pceRenderLayers()'));
+    const body = fn.slice(0, 1800);
+    assert.ok(!/block\?\.classList\.toggle\('hidden', bare\)/.test(body),
+        "toggle() REMOVED the class whenever the post had media, so the list reappeared under the caption");
+    assert.match(body, /getElementById\('pce-layers-block'\)\?\.classList\.add\('hidden'\)/,
+        'the rail is the layer list now');
+    // And a render re-pins it, so whatever un-hides it next is corrected.
+    const render = workspace.slice(workspace.indexOf('function _railRender()'));
+    assert.match(render.slice(0, 7000), /Pinned shut on EVERY render/,
+        '_railToggle re-renders without re-applying the layout — that is exactly when it came back');
+});
+
+// ── 23. A crop says what will happen, not what you must do ──────────────────────────────────────
+check('an auto-cropped route explains itself', () => {
+    const fn = workspace.slice(workspace.indexOf('function _rqReviewRenderTabs()'));
+    const body = fn.slice(0, fn.indexOf('\n}\n'));
+    assert.ok(!body.includes("'needs a crop'"),
+        '"needs a crop" read as a job with no button to do it and no hint whether the assistant would');
+    assert.match(body, /'auto-cropped'/, 'state the outcome');
+    assert.match(body, /crops it to fit\. Swap the picture in Media if the framing matters/,
+        'a crop route still PUBLISHES — only state "none" blocks — so say so');
+});
+
+// ── 24. Every media source has an explainer ─────────────────────────────────────────────────────
+// The console said: [explainers] no glossary entry for "media-source-brand_card". A fourth source
+// was added to the picker and the glossary was not, so its label had a dead tooltip.
+check('every media source in the picker has a glossary entry', () => {
+    const assistants = read('assistants.js');
+    // Bounded to the object literal — the next const along is another META map, and reading into it
+    // asserted a glossary entry for a goal status.
+    const at = assistants.indexOf('const _MEDIA_SOURCE_META = {');
+    const meta = assistants.slice(at, assistants.indexOf('\n};', at));
+    const keys = [...meta.matchAll(/^\s{4}(\w+):\s*\{/gm)].map(m => m[1]);
+    assert.ok(keys.length >= 4, `expected the media sources, got ${JSON.stringify(keys)}`);
+    const explainers = read('explainers.js');
+    for (const k of keys) {
+        assert.ok(explainers.includes(`'media-source-${k}'`),
+            `media source '${k}' is offered in the picker with no glossary entry — data-explain resolves to nothing`);
+    }
 });
 
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);

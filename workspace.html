@@ -997,22 +997,22 @@ window.showComplianceModals = function showComplianceModals(force) {
                   <p id="pce-ai-msg" class="text-[10px] text-gray-400"></p>
                 </div>
                 <div class="space-y-1.5">
-                  <button type="button" onclick="_railRewrite('Rewrite the caption in a warmer, more conversational tone. Keep the same message and length.')"
+                  <button type="button" data-rewrite-action onclick="_railRewrite('Rewrite the caption in a warmer, more conversational tone. Keep the same message and length.')"
                     class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-gray-200 text-left hover:bg-gray-50 transition cursor-pointer">
                     <svg class="w-3 h-3 text-emerald-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M4 7h16M4 12h10M4 17h7"/></svg>
                     <span class="text-[11px] font-semibold text-gray-700">Change the tone</span>
                   </button>
-                  <button type="button" onclick="_railRewrite('Shorten the caption so the whole post — caption, hashtags and link — fits inside 280 characters for X.')"
+                  <button type="button" data-rewrite-action onclick="_railRewrite('Shorten the caption so the whole post — caption, hashtags and link — fits inside 280 characters for X.')"
                     class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-gray-200 text-left hover:bg-gray-50 transition cursor-pointer">
                     <svg class="w-3 h-3 text-emerald-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6 4v6a6 6 0 0012 0V4M4 20h16"/></svg>
                     <span class="text-[11px] font-semibold text-gray-700">Shorten for X</span>
                   </button>
-                  <button type="button" onclick="_railRewrite('Replace the hashtags with a better set for this post and these platforms. Leave the caption alone.')"
+                  <button type="button" data-rewrite-action onclick="_railRewrite('Replace the hashtags with a better set for this post and these platforms. Leave the caption alone.')"
                     class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-gray-200 text-left hover:bg-gray-50 transition cursor-pointer">
                     <svg class="w-3 h-3 text-emerald-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6 4L4.5 20M13 4l-1.5 16M3 9h17M2.5 15h17"/></svg>
                     <span class="text-[11px] font-semibold text-gray-700">Suggest hashtags</span>
                   </button>
-                  <button type="button" onclick="_railRewrite('Fix any grammar, spelling and flow problems. Do not change the meaning, the tone or the length.')"
+                  <button type="button" data-rewrite-action onclick="_railRewrite('Fix any grammar, spelling and flow problems. Do not change the meaning, the tone or the length.')"
                     class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-gray-200 text-left hover:bg-gray-50 transition cursor-pointer">
                     <svg class="w-3 h-3 text-emerald-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 11l3 3 8-8M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h9"/></svg>
                     <span class="text-[11px] font-semibold text-gray-700">Fix grammar &amp; flow</span>
@@ -1275,55 +1275,69 @@ window.showComplianceModals = function showComplianceModals(force) {
           <button onclick="rqReviewToggle()" class="py-2.5 px-4 text-xs font-bold text-gray-500 hover:bg-gray-50 rounded-lg cursor-pointer">Cancel</button>
         </div>
       </div>
-      <!-- Reschedule panel: natural-language instruction OR explicit datetime picker -->
-      <!-- ── Step 7: the decision ──────────────────────────────────────────────────────────────
-           This panel used to be "reschedule", a thing you did BEFORE approving somewhere else. That
-           left the actual commitment on a separate button, so "when does it go out" and "does it go
-           out" were asked in two places. They are one question with three answers, and each of these
-           APPROVES the post — the only difference is the time it lands on.
-           Every one of them routes through the same gates (connections, mandatory media, compliance,
-           overlay baking) because choosing a time is not a way around a check. -->
-      <div id="post-review-reschedule" class="hidden space-y-2">
+      <!-- ── Step 7: the whole decision ────────────────────────────────────────────────────────
+           Three ways to say yes and one way to say no, as four equal rows. It was a pink call-to-
+           action, then a bordered card containing a date field, a divider, a textarea and a large
+           blue button, then a third box — three competing visual weights for what is really one
+           multiple-choice question, and the middle option occupied most of the panel whether or not
+           anyone wanted it.
+           Now every option is one row. "Schedule it myself" reveals its inputs only when chosen, so
+           the panel is a short list until you have actually picked the option that needs them.
+           All four route through the same gates (connections, mandatory media, compliance, overlay
+           baking) — choosing a time is not a way around a check. -->
+      <div id="post-review-reschedule" class="hidden space-y-1.5">
         <p id="post-review-when-msg" class="hidden text-xs font-semibold"></p>
 
-        <!-- 1. Let the assistant pick. Named after the assistant, because that is who does it. -->
-        <button type="button" id="post-review-when-assistant" onclick="rqReviewApprove()"
-          class="w-full text-left px-3 py-2.5 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 transition cursor-pointer">
-          <span class="flex items-center gap-2">
-            <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
-            <span class="text-xs font-bold text-emerald-800" id="post-review-when-assistant-label">Let your assistant schedule it</span>
+        <button type="button" onclick="rqReviewApprove()"
+          class="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-gray-200 text-left hover:border-emerald-300 hover:bg-emerald-50 transition cursor-pointer">
+          <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
+          <span class="min-w-0 flex-1">
+            <span class="block text-xs font-bold text-gray-800" id="post-review-when-assistant-label">Let your assistant choose the time</span>
+            <span class="block text-[10px] text-gray-400">Publishes at the next good slot</span>
           </span>
-          <span class="block text-[10px] text-emerald-700 mt-0.5" id="post-review-when-assistant-sub">Approves the post and picks the next good slot.</span>
         </button>
 
-        <!-- 2. Pick it yourself. The date input and the plain-English box are the same choice, so
-                they share one button rather than being two competing "Reschedule" actions. -->
-        <div class="rounded-lg border border-gray-200 px-3 py-2.5 space-y-2">
-          <p class="text-xs font-bold text-gray-700">Schedule it myself</p>
+        <button type="button" id="post-review-when-mine-btn" onclick="rqReviewPickOwnTime()"
+          class="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-gray-200 text-left hover:border-blue-300 hover:bg-blue-50 transition cursor-pointer">
+          <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3M4 11h16M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+          <span class="min-w-0 flex-1">
+            <span class="block text-xs font-bold text-gray-800">Pick the time myself</span>
+            <span class="block text-[10px] text-gray-400">Choose a date, or say it in words</span>
+          </span>
+        </button>
+
+        <!-- Revealed by "Pick the time myself" — the only part of this panel that needs room. -->
+        <div id="post-review-when-mine" class="hidden rounded-lg border border-blue-200 bg-blue-50/40 px-3 py-2.5 space-y-2">
           <input id="post-review-reschedule-dt" type="datetime-local"
             class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300">
-          <div class="flex items-center gap-2">
-            <div class="flex-1 h-px bg-gray-100"></div>
-            <span class="text-[10px] text-gray-400 shrink-0">or say it in words</span>
-            <div class="flex-1 h-px bg-gray-100"></div>
-          </div>
           <textarea id="post-review-reschedule-instruction" rows="2" maxlength="300"
-            placeholder='e.g. "Next Friday at 3pm" or "This Sunday morning"'
+            placeholder='…or in words: "next Friday at 3pm"'
             class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"></textarea>
           <p id="post-review-reschedule-status" class="hidden text-xs text-gray-500 italic"></p>
           <button type="button" onclick="rqReviewScheduleMyself()"
-            class="w-full py-2 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer">
-            Approve &amp; schedule for this time
-          </button>
+            class="w-full py-2 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer">Schedule it</button>
         </div>
 
-        <!-- 3. Now. Last, and styled quietest of the three, because it is the only one that cannot
-                be undone from here. rqReviewPublishNow confirms before it goes. -->
         <button type="button" onclick="rqReviewPublishNow()"
-          class="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-left hover:bg-gray-50 transition cursor-pointer">
-          <span class="block text-xs font-bold text-gray-700">Post it now</span>
-          <span class="block text-[10px] text-gray-400 mt-0.5">Approves and publishes immediately — this can't be undone.</span>
+          class="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-gray-200 text-left hover:border-gray-400 hover:bg-gray-50 transition cursor-pointer">
+          <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          <span class="min-w-0 flex-1">
+            <span class="block text-xs font-bold text-gray-800">Post it now</span>
+            <span class="block text-[10px] text-gray-400">Goes out immediately — can't be undone</span>
+          </span>
         </button>
+
+        <!-- ── The one way to say no ────────────────────────────────────────────────────────────
+             Reject was a red button alone at the bottom of the modal footer, which read as the
+             modal's parting question rather than one of the answers to "what happens to this post".
+             It belongs here, with the other three: separated by a rule so it is never mistaken for
+             a way of publishing, and last because it is the one nobody is looking for. -->
+        <div id="post-review-when-reject-wrap" class="hidden pt-1.5 mt-1.5 border-t border-gray-100">
+          <button type="button" onclick="rqReviewToggle('reject')"
+            class="w-full px-3 py-2 rounded-lg text-left text-[11px] font-bold text-red-600 hover:bg-red-50 transition cursor-pointer">
+            Don't publish this — reject &amp; archive
+          </button>
+        </div>
       </div>
       <!-- Per-platform connect notice — approving commits the post to the publisher, which needs a
            live connection for this post's platform. When it's missing, Approve is disabled and this
@@ -1347,34 +1361,23 @@ window.showComplianceModals = function showComplianceModals(force) {
            the one question the queue exists to ask was one of four things competing for the eye.
            Rewriting and re-timing are still here, as quiet links: they are things you do BEFORE you
            decide, not alternatives to deciding. -->
+      <!-- ── The footer is a way OUT, not a second set of decisions ─────────────────────────────
+           It used to hold Approve, Reject, "Ask for a rewrite" and "Change the time". Every one of
+           those now lives in the step that owns it — approving and rejecting in step 7, rewriting in
+           step 1, timing in step 7 — and having them here as well meant two Approve buttons on
+           screen at once, and two places to reject from. What is left is the pair that genuinely has
+           no step: keeping the post for later, and throwing it away. -->
       <div id="post-review-buttons" class="space-y-2">
-        <button id="post-review-approve-btn" onclick="rqReviewApprove()" class="w-full py-3 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600">Approve — let the assistant pick a time</button>
-        <!-- ── Reviewing SOMEONE ELSE'S draft ────────────────────────────────────────────────
-             Reject, "ask for a rewrite" and "change the time" are all answers to a draft the
-             assistant wrote and you are judging. On a post you are writing yourself they are
-             nonsense: you do not reject your own blank page, the rewrite actions are already in
-             step 1, and step 7 owns the schedule. Hidden for a 'draft' — see the draft actions
-             below, which replace them. -->
-        <button id="post-review-reject-toggle" onclick="rqReviewToggle('reject')" class="w-full py-2.5 text-sm font-bold border border-red-300 text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer">Reject</button>
-        <!-- "Add or change image" and "Amend myself" are gone: the picture and the caption are both
-             edited by clicking them on the post itself. -->
-        <div id="post-review-quick-links" class="flex items-center justify-center gap-2 pt-0.5 text-[11px] text-gray-400">
-          <button onclick="rqReviewToggle('changes')" class="font-semibold underline hover:text-violet-700 transition cursor-pointer">Ask for a rewrite</button>
-          <span>·</span>
-          <button onclick="rqReviewToggle('reschedule')" class="font-semibold underline hover:text-blue-700 transition cursor-pointer">Change the time</button>
-        </div>
-        <!-- ── Writing your OWN post ─────────────────────────────────────────────────────────
-             The two ways out that are not "publish it". Creating a post makes a real 'draft' row
-             immediately (the editor edits a row), so leaving without either of these already kept
-             the post — but nothing said so, and there was no way to throw one away. -->
-        <!-- With Approve gone, the way to publish your own post is step 7. Said out loud rather
-             than left to be discovered, because the footer is where the eye goes for "what now". -->
-        <p id="post-review-draft-hint" class="hidden text-[11px] text-center text-gray-500">
+        <p id="post-review-draft-hint" class="text-[11px] text-center text-gray-500">
           Ready? Open
           <button type="button" onclick="_railOpen = 'when'; _railRender(); document.getElementById('rail-panel-when')?.scrollIntoView({ block: 'nearest' });"
             class="font-bold text-emerald-700 underline hover:text-emerald-800 cursor-pointer">Schedule &amp; publish</button>
-          to send it out.
+          to decide what happens to this post.
         </p>
+        <!-- Only for a post you are writing: it exists as a real 'draft' row from the moment Create
+             Post made it, so leaving already kept it — but nothing said so, and there was no way to
+             throw one away. An assistant's draft needs neither: it is already saved, and rejecting
+             it is a decision, which lives with the other decisions in step 7. -->
         <div id="post-review-draft-actions" class="hidden items-center justify-center gap-2 pt-0.5 text-[11px] text-gray-400">
           <button onclick="rqReviewSaveDraft()" class="font-semibold underline hover:text-emerald-700 transition cursor-pointer">Save as a draft</button>
           <span>·</span>
@@ -5737,6 +5740,23 @@ function renderPlatformMockup(post) {
              <span class="text-[10px] font-bold">Dictate</span>
            </button>`
         : '';
+    // Ask the assistant to improve the words that are there — on the words themselves, which is where
+    // you are looking when you decide they need improving. Only once there IS something to improve;
+    // on a blank caption the Dictate button and step 1's "Draft it for me" are the two real offers.
+    // Routed through the in-place rewrite (rqReviewRequestChanges via _railRewrite), NOT chat, so the
+    // better version lands in the post rather than in a conversation to be copied out.
+    const captionImprove = editableNow && !captionEmpty
+        ? `<button type="button" data-caption-improve title="Ask your assistant to improve this caption"
+             class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 transition cursor-pointer">
+             <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-3.5 h-3.5 object-contain">
+             <span class="text-[10px] font-bold">Improve</span>
+           </button>`
+        : '';
+    // A quiet action row above the written caption. Absolute so it cannot push the caption text
+    // around — the mock-up is meant to look like the post, not like a toolbar.
+    const captionActions = captionImprove
+        ? `<div class="flex justify-end gap-1 mb-1.5">${captionImprove}${captionMic}</div>`
+        : '';
     const captionBlock = (cls) =>
         `<div class="${cls}${editableNow ? ' cursor-text hover:bg-gray-50 transition' : ''}" data-caption-host
            ${editableNow ? 'title="Click to write the caption"' : ''}>${
@@ -5746,7 +5766,7 @@ function renderPlatformMockup(post) {
                          <p class="text-sm text-gray-400">Write your caption…</p>${captionMic}
                        </div>`
                     : '')
-                : `${caption}${hashtags}${link}`}${metaHost}</div>`;
+                : `${captionActions}${caption}${hashtags}${link}`}${metaHost}</div>`;
 
     const body = meta.mediaFirst
         ? `${header}${media}${captionBlock('px-3.5 py-3')}${footer}`
@@ -6712,15 +6732,24 @@ function _rqReviewRenderTabs() {
             // "Reel" with the same confidence either way would be claiming a check that never ran,
             // so an unmeasured route is shown in italics and says so on hover. It settles itself:
             // opening the post backfills the metrics, and the next render is verified.
+            // "needs a crop" read as a job assigned to the user, with no button to do it and no
+            // hint whether the assistant would. It is neither: a 'crop' route still PUBLISHES —
+            // only 'none' blocks — and the platform does the cropping itself. So the label states
+            // the outcome, and the tooltip below says it publishes and where to change the framing
+            // if it matters.
             const label = route.state === 'none' ? 'no format'
-                        : route.state === 'crop' ? 'needs a crop'
-                        : route.state === 'trim' ? 'needs a trim'
+                        : route.state === 'crop' ? 'auto-cropped'
+                        : route.state === 'trim' ? 'too long'
                         : (route.formatLabel || '');
             const provisional = route.verified === false && route.state === 'ok';
             const tone = route.state === 'ok' ? 'text-gray-400' : 'text-amber-600';
             const title = provisional
               ? 'Best guess — we have not measured this media yet, so nothing was checked against it.'
-              : (route.reason || '');
+              : route.state === 'crop'
+                ? `${route.reason || ''} This still publishes — ${rqPlatformLabel(p.platform)} crops it to fit. Swap the picture in Media if the framing matters.`
+                : route.state === 'trim'
+                  ? `${route.reason || ''} Shorten the clip in Media, or it goes out cut off.`
+                  : (route.reason || '');
             return `<span class="block text-[9px] font-semibold ${tone}${provisional ? ' italic' : ''}"
               title="${_rqEsc(title)}">${_rqEsc(label)}</span>`;
           })() : ''}
@@ -6990,6 +7019,8 @@ function _pceRefreshCaptionMeta() {
     // under 280 and go over it the moment the link paragraph is appended.
     const link = _pceLinkLine(caption);
     const len = [caption, hashtags, link].filter(Boolean).join('\n\n').length;
+    // The rewrite actions live or die by the same thing this counts.
+    _pceSyncRewriteActions();
     // Nothing written yet → nothing to count.
     //
     // A brand-new post opened on "Instagram · 0/2200", which is a limit check performed against no
@@ -7058,6 +7089,10 @@ function _pceCanvasClick(ev) {
         if (ev.target.closest('[data-caption-mic]')) {
             _pceOpenInlineCaption();
             gpStartVoice('pce-inline-caption');
+            return;
+        }
+        if (ev.target.closest('[data-caption-improve]')) {
+            _railRewrite('Improve this caption — make it clearer and more engaging. Keep the same message, roughly the same length, and the same language.');
             return;
         }
         // Clicks INSIDE the open editor are ordinary text clicks — reopening would move the caret.
@@ -7359,7 +7394,7 @@ const _RAIL = [
     // and each subtitle reports it, so a disabled step always says what is missing.
     { key: 'check', title: 'Check & improve',       blocks: () => ['post-review-quality'],
       enabled: (post) => !_pceNotReadyReason(post) },
-    { key: 'when',  title: 'Schedule & publish',    blocks: () => ['post-review-reschedule'],
+    { key: 'when',  title: 'Schedule & publish',    blocks: () => ['post-review-reschedule', 'post-review-reject'],
       enabled: (post) => !_pceNotReadyReason(post) },
 ];
 
@@ -7380,6 +7415,31 @@ function _railRewrite(instruction) {
     if (!box) return;
     box.value = instruction;
     rqReviewRequestChanges();
+}
+
+/**
+ * Enable the rewrite actions only once there is something to rewrite.
+ *
+ * "Change the tone" and "Shorten for X" send the caption to the assistant with an instruction about
+ * it. On a blank post there is no caption, so each one spends a generation asking the assistant to
+ * shorten nothing — and returns something unrelated to a post the user has not written yet. The two
+ * offers that DO make sense on a blank post are right above them: "Draft it for me" and dictation.
+ *
+ * Called from the rail render (the step may be opened at any time) and from the caption meta refresh,
+ * which already runs on every keystroke.
+ */
+function _pceSyncRewriteActions() {
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    const caption = String(_pceEl('post-review-caption')?.value ?? post?.caption ?? '').trim();
+    const on = !!caption;
+    for (const btn of document.querySelectorAll('[data-rewrite-action]')) {
+        btn.disabled = !on;
+        btn.title = on ? '' : 'Write or draft a caption first — there is nothing to rewrite yet.';
+        btn.classList.toggle('opacity-40', !on);
+        btn.classList.toggle('cursor-not-allowed', !on);
+        btn.classList.toggle('cursor-pointer', on);
+        btn.classList.toggle('hover:bg-gray-50', on);
+    }
 }
 
 const _RAIL_ICON = {
@@ -7586,6 +7646,13 @@ function _railRender() {
             // inside the media inspector where the card controls and the overlay jump also live,
             // and _railHomes still records a home that exists.
             if (step.key === 'media') _inspMountMediaPanel();
+            // _railMount strips `hidden` from whatever it borrows — right for a step's own panel,
+            // wrong for the reject form, which must stay shut until "Don't publish this" is pressed.
+            // Put it back immediately; rqReviewToggle('reject') is what reveals it.
+            if (step.key === 'when') {
+                document.getElementById('post-review-reject')?.classList.add('hidden');
+                document.getElementById('post-review-when-mine')?.classList.add('hidden');
+            }
             // The overlay and audio blocks are populated by the old inspector's refresh functions,
             // which run off the current selection. Ask for the right one so an open step is never
             // stale — either step can be holding them now.
@@ -7598,9 +7665,16 @@ function _railRender() {
             if (step.key === 'write') {
                 const slot = document.getElementById('pce-write-freetext');
                 if (slot) _railMount('post-review-changes', slot);
+                _pceSyncRewriteActions();
             }
         }
     }
+
+    // Pinned shut on EVERY render, not just on open. _railApplyLayout hides the old layer list once,
+    // but _pceRenderLayers used to un-hide it whenever the post had media, and _railToggle re-renders
+    // without re-applying the layout — so the list reappeared under the caption and stayed. The
+    // source of that is fixed; this is the line that makes it stay fixed, whatever un-hides it next.
+    document.getElementById('pce-layers-block')?.classList.add('hidden');
 
     // The quality panel is the one borrowed block whose home is the CANVAS column rather than a
     // pane — so restoring it puts it back somewhere this layout still shows, and the same verdict
@@ -8411,9 +8485,13 @@ function _pceRenderLayers() {
     // Nothing on the post yet: the only two layers are the two the canvas itself now offers, so the
     // list would be a heading over "Nothing attached" and "Empty". It comes back the moment there is
     // media — which is also when the stack becomes real (text on the image, sound).
-    const block = document.getElementById('pce-layers-block');
     const bare = !post.thumbnailUrl && !_pceSlides(post).length;
-    block?.classList.toggle('hidden', bare);
+    // #pce-layers-block stays hidden, always. The rail IS the layer list now (_railApplyLayout hides
+    // this block on open) — but this line used to `toggle('hidden', bare)`, which REMOVED the class
+    // the moment the post had media, so the old list reappeared under the caption on every post with
+    // a picture. The list below is still built: #pce-layer-list is read by nothing visible, but
+    // _pceSlides and the strip's timeline share this function, and the timeline must keep working.
+    document.getElementById('pce-layers-block')?.classList.add('hidden');
     if (bare) {
         host.innerHTML = '';
         // The strip also carries the slides adder, which a carousel shows before it has any slides.
@@ -9742,56 +9820,31 @@ function _rqReviewRenderActive() {
     const reviewable = ['pending_approval', 'draft', 'in_review'].includes(post.status);
     document.getElementById('post-review-actions').classList.toggle('hidden', !reviewable);
 
-    // The draft already carries a proposed slot (shown above as "planned for …") — approving just
-    // confirms it, it doesn't schedule from scratch. Surface that date on the button itself, in the
-    // exact DD/MM/YYYY HH:mm format the reporter asked for, so it's not misread as "no time has been picked yet".
-    const whenNumeric = post.publishDate ? (() => {
-        const d = new Date(post.publishDate);
-        const pad = n => String(n).padStart(2, '0');
-        return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-    })() : null;
-    const approveBtn = document.getElementById('post-review-approve-btn');
-    if (approveBtn) {
-        // One verb, "Approve", whichever of you wrote the draft. It used to read "Schedule" on your
-        // own drafts and "Approve" on the assistant's, which was true to who did the writing but
-        // made the same button in the same place ask two different-looking questions — and the thing
-        // being decided is the same either way: does this go out? What happens NEXT (the assistant
-        // schedules it) is now said on approval instead of predicted on the button.
-        const prefix = multi ? `Approve all ${groupSize} platforms` : 'Approve';
-        approveBtn.textContent = whenNumeric
-            ? `${prefix} — schedule ${whenNumeric}`
-            : `${prefix} — let the assistant pick ${multi ? 'times' : 'a time'}`;
-    }
+    // ── Step 7 labels + which footer you get ──────────────────────────────────────────────────
+    // The footer's own Approve/Reject buttons are gone: approving and rejecting BOTH live in step 7
+    // now, and having them here as well put two Approve buttons on screen at the same time.
+    const assistantName = post.assistantName || 'your assistant';
+    const whenLabel = document.getElementById('post-review-when-assistant-label');
+    if (whenLabel) whenLabel.textContent = `Let ${assistantName} choose the time`;
 
-    // The "apply to all platforms" control is seeded by _pceFillCaption, which owns the caption
-    // section now. It used to be done here too, with a different display class — two owners for
-    // one control, quietly disagreeing.
-
-    // Reject button reads "all" for a group.
+    // Reject reads "all" for a group — it is one post to the reviewer, however many rows it is.
     const rejectBtn = document.getElementById('post-review-reject-btn');
     if (rejectBtn) rejectBtn.textContent = multi ? `Reject all ${groupSize} & archive` : 'Reject & archive';
 
     // ── Whose draft is this? ──────────────────────────────────────────────────────────────────
     // 'draft' is the status create-manual-post gives a post you started yourself; the assistant's
-    // drafts arrive as 'pending_approval' (or 'in_review' once opened). The distinction decides
-    // which footer you get: judging someone else's work, or finishing your own.
+    // drafts arrive as 'pending_approval' (or 'in_review' once opened). It decides two things: the
+    // save/discard pair in the footer, and whether rejecting is even a sensible offer — you do not
+    // reject your own writing, you throw it away.
     const isOwnDraft = post.status === 'draft';
-    // The footer Approve button goes too. On your own post there is nothing to approve in the
-    // reviewing sense — you wrote it — and step 7 is now the decision: each of its three options
-    // commits the post, so a separate Approve alongside them was a fourth button asking the same
-    // question with the time left unstated. Reviewing an assistant's draft keeps it: "approve as
-    // proposed" is exactly the one-click answer that surface exists for.
-    document.getElementById('post-review-approve-btn')?.classList.toggle('hidden', isOwnDraft);
-    document.getElementById('post-review-reject-toggle')?.classList.toggle('hidden', isOwnDraft);
-    // Both classes on each: `hidden` and a display utility are the same specificity, so removing one
-    // without removing the other leaves whichever came last in the compiled sheet winning.
-    for (const [id, on] of [['post-review-quick-links', !isOwnDraft], ['post-review-draft-actions', isOwnDraft]]) {
-        const el = document.getElementById(id);
-        if (!el) continue;
-        el.classList.toggle('hidden', !on);
-        el.classList.toggle('flex', on);
+    const draftActions = document.getElementById('post-review-draft-actions');
+    if (draftActions) {
+        // Both classes: `hidden` and a display utility are the same specificity, so removing one
+        // without removing the other leaves whichever came last in the compiled sheet winning.
+        draftActions.classList.toggle('hidden', !isOwnDraft);
+        draftActions.classList.toggle('flex', isOwnDraft);
     }
-    document.getElementById('post-review-draft-hint')?.classList.toggle('hidden', !isOwnDraft);
+    document.getElementById('post-review-when-reject-wrap')?.classList.toggle('hidden', isOwnDraft);
 
     // Per-post AI disclosure footer opt-out — only meaningful when the workspace footer is enabled.
     const discRow = document.getElementById('post-review-disclosure');
@@ -10038,23 +10091,23 @@ function _rqReviewRefresh() {
     if (typeof window.detailRqRefresh === 'function') { try { window.detailRqRefresh(); } catch { /* ignore */ } }
 }
 
-// Toggle the review modal's approve button + connect notice for the group's platform connections.
-// Only Approve is gated — amend, request-changes, reschedule and reject all still work on drafts.
-// Reads the current group from _rqReviewTargets(); the (legacy) args are ignored.
+// The connect notice for the group's platform connections.
+//
+// It used to disable the footer's Approve button as well. That button is gone — step 7 approves now,
+// and its three options each run rqEnsurePlatformConnection themselves before doing anything, which
+// is a better gate than a disabled button: it says WHICH platform is missing at the moment you ask.
+// What stays is the notice, so a missing connection is visible before you get that far.
 function rqReviewSetConnectGate() {
-    const approveBtn = document.getElementById('post-review-approve-btn');
     const notice = document.getElementById('post-review-connect');
     const targets = _rqReviewTargets();
     if (!targets.length) return;
     const reviewable = ['pending_approval', 'draft', 'in_review'].includes(targets[0].status);
     if (!reviewable) {
-        if (approveBtn) approveBtn.disabled = false;
         if (notice) notice.classList.add('hidden');
         return;
     }
     const missing = _rqReviewMissingPlatforms();
     const connected = missing.length === 0;
-    if (approveBtn) approveBtn.disabled = !connected;
     if (notice) {
         notice.classList.toggle('hidden', connected);
         if (!connected) {
@@ -10472,6 +10525,16 @@ async function rqReviewReschedule() {
         statusEl.className = 'text-xs text-red-500 italic';
         if (btn) { btn.disabled = false; btn.textContent = 'Reschedule'; }
     }
+}
+
+/** Reveal the date/words inputs. They stay collapsed until this option is actually chosen. */
+function rqReviewPickOwnTime() {
+    const wrap = document.getElementById('post-review-when-mine');
+    if (!wrap) return;
+    const opening = wrap.classList.contains('hidden');
+    wrap.classList.toggle('hidden', !opening);
+    document.getElementById('post-review-when-mine-btn')?.classList.toggle('border-blue-300', opening);
+    if (opening) document.getElementById('post-review-reschedule-dt')?.focus();
 }
 
 /**
@@ -11364,8 +11427,16 @@ function _gpBeginVoice(targetId, cfg, isRetry = false) {
         },
         onEnd: clearMic,
         onError: (kind) => {
-            // 'aborted' is what a stop() or a hand-over looks like; it is not a failure to report.
-            if (kind !== 'aborted') gpVoiceError(targetId, kind);
+            // Two kinds are deliberately silent here:
+            //   'aborted'      — what a stop() or a hand-over looks like, not a failure.
+            //   'start-failed' — SwanSpeech reports this from its own catch around rec.start() AND
+            //                    THEN returns null. Reporting it here fired the toast before the
+            //                    retry below had even been attempted, so "Dictation could not start"
+            //                    appeared every single time — including the times the retry then
+            //                    succeeded and dictation was working while the error was on screen.
+            //                    The `!handle` branch owns that message, because it is the only
+            //                    place that knows whether a retry is still coming.
+            if (kind !== 'aborted' && kind !== 'start-failed') gpVoiceError(targetId, kind);
             clearMic();
         },
     });

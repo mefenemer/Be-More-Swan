@@ -275,6 +275,11 @@
       emoji: '🔍',
       plain: "Free — searches Pexels for a ready-made stock photo or video that fits the post. This never uses your AI credits.",
     },
+    'media-source-brand_card': {
+      term: 'Branded Text Card',
+      emoji: '🎨',
+      plain: "Free — sets the post's key line as large type in your brand colours, so a post with no photo still looks like you. It takes turns with stock photos, so your feed mixes words and pictures rather than only ever showing one.",
+    },
     'media-source-ai': {
       term: 'AI Generation',
       emoji: '🎨',

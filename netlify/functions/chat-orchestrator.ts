@@ -980,13 +980,26 @@ export default withLambda(async (event) => {
         // every Error carries a `name`: both identify the fault precisely and neither contains any
         // row data or SQL text, so they are safe to show. A user can now read one line back and it
         // is immediately actionable instead of being another anonymous failure.
-        const e = err as { code?: unknown; name?: unknown };
+        const e = err as { code?: unknown; name?: unknown; message?: unknown };
         const code = typeof e?.code === 'string' && e.code.length <= 12 ? e.code
                    : typeof e?.name === 'string' && e.name.length <= 40 ? e.name
                    : 'unknown';
+        // The code alone was not enough: a plain `throw new Error(...)` reports as "Error", which
+        // narrows the fault to "our own code threw" and no further. The message is what identifies
+        // it, so it is returned as well.
+        //
+        // Deliberate, and worth stating plainly: this endpoint is authenticated and tenant-scoped, so
+        // the only reader is the workspace owner, and the strings involved are our own throw sites or
+        // a driver naming a column — never row data. Truncated because a stack-carrying message has
+        // no business being a UI string. If this app ever serves untrusted users, drop `detail` and
+        // go back to reading the function logs.
+        const detail = typeof e?.message === 'string' ? e.message.slice(0, 200) : '';
         return json(500, {
             code,
-            error: `Something went wrong starting that conversation (${code}). Please try again — if it keeps happening, quote that code.`,
+            detail,
+            error: detail
+                ? `Something went wrong starting that conversation: ${detail}`
+                : `Something went wrong starting that conversation (${code}).`,
         });
     }
 });
