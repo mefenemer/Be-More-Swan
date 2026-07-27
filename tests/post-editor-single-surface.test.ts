@@ -497,8 +497,12 @@ check('the orchestrator reports a code the user can quote', () => {
 check('step 1\'s rewrite actions are disabled until there is a caption', () => {
     const block = workspace.slice(workspace.indexOf('id="pce-write-block"'), workspace.indexOf('id="pce-write-freetext"'));
     const tagged = (block.match(/data-rewrite-action/g) || []).length;
-    assert.strictEqual(tagged, 4,
-        '"Change the tone" / "Shorten for X" / "Suggest hashtags" / "Fix grammar" each spend a generation asking the assistant to rewrite nothing');
+    assert.strictEqual(tagged, 3,
+        '"Change the tone" / "Suggest hashtags" / "Fix grammar" each spend a generation asking the assistant to rewrite nothing');
+    // "Shorten for X" is gone: the per-platform caption badges already count every platform's limit
+    // live, and _pceOverLimitPlatforms blocks approval — a button duplicating that rule for ONE
+    // platform, at the cost of a generation, was the worse half of the pair.
+    assert.ok(!workspace.includes('Shorten for X'), 'length for X is enforced, not offered as a rewrite');
     assert.ok(workspace.includes('function _pceSyncRewriteActions()'), 'one place decides');
     // Must be kept honest both when the step opens and as the caption is typed.
     const render = workspace.slice(workspace.indexOf('function _railRender()'));

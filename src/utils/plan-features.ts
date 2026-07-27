@@ -40,9 +40,34 @@ export function effectiveLimit(
     masterValue: number | null,
 ): number | null {
     if (overrides && Object.prototype.hasOwnProperty.call(overrides, key)) {
-        return (overrides[key] ?? null) as number | null;
+        return toLimit(overrides[key]);
     }
     return masterValue ?? null;
+}
+
+/**
+ * Coerce one limit out of the jsonb snapshot.
+ *
+ * `FeatureOverrides` describes what plans.featureOverrides is SUPPOSED to hold; the column is jsonb,
+ * so at runtime it holds whatever was written to it. The declared type was asserted (`as number`)
+ * rather than checked, and a string slipped straight through into atomicCapCheck's SQL — where it is
+ * bound as a parameter and compared against an integer column (`task_count + $1 <= $limit`).
+ * Postgres rejects that comparison, and the whole cap check fails the query rather than returning
+ * allowed/denied. Every caller that spends a task credit (chat-orchestrator's "Talk it through in
+ * chat" among them) then dies with a raw "Failed query: UPDATE usage_counters ..." in the user's face.
+ *
+ * A non-numeric limit is treated as "no frozen limit" rather than as zero: guessing zero would lock
+ * a paying org out of its own plan on a data-quality problem.
+ */
+function toLimit(raw: unknown): number | null {
+    if (raw === null || raw === undefined) return null;   // explicitly frozen as unlimited
+    // Numbers and numeric strings only. Number([]) is 0 and Number('') is 0, so anything that is not
+    // already one of those two shapes must be rejected BY TYPE — a coercion that turns `[]` into a
+    // cap of zero locks the org out of its own plan just as hard as a broken query does.
+    if (typeof raw === 'number') return Number.isFinite(raw) ? Math.trunc(raw) : null;
+    if (typeof raw !== 'string' || !raw.trim()) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) ? Math.trunc(n) : null;
 }
 
 /** Effective feature map: the frozen snapshot's features when present, else the live master features. */

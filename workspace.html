@@ -1051,11 +1051,11 @@ window.showComplianceModals = function showComplianceModals(force) {
                     <svg class="w-3 h-3 text-emerald-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M4 7h16M4 12h10M4 17h7"/></svg>
                     <span class="text-[11px] font-semibold text-gray-700">Change the tone</span>
                   </button>
-                  <button type="button" data-rewrite-action onclick="_railRewrite('Shorten the caption so the whole post — caption, hashtags and link — fits inside 280 characters for X.')"
-                    class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-gray-200 text-left hover:bg-gray-50 transition cursor-pointer">
-                    <svg class="w-3 h-3 text-emerald-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6 4v6a6 6 0 0012 0V4M4 20h16"/></svg>
-                    <span class="text-[11px] font-semibold text-gray-700">Shorten for X</span>
-                  </button>
+                  <!-- The shorten-for-X action was here. Length is already handled, and handled better:
+                       the per-platform caption badges count every platform's limit live as you type,
+                       and _pceOverLimitPlatforms blocks approval for any post that is over one. A
+                       button that spends a generation shortening to 280 characters duplicated a rule
+                       the editor already enforces — and only for one of the platforms. -->
                   <button type="button" data-rewrite-action onclick="_railRewrite('Replace the hashtags with a better set for this post and these platforms. Leave the caption alone.')"
                     class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-gray-200 text-left hover:bg-gray-50 transition cursor-pointer">
                     <svg class="w-3 h-3 text-emerald-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6 4L4.5 20M13 4l-1.5 16M3 9h17M2.5 15h17"/></svg>
@@ -7532,10 +7532,10 @@ function _railRewrite(instruction) {
 /**
  * Enable the rewrite actions only once there is something to rewrite.
  *
- * "Change the tone" and "Shorten for X" send the caption to the assistant with an instruction about
- * it. On a blank post there is no caption, so each one spends a generation asking the assistant to
- * shorten nothing — and returns something unrelated to a post the user has not written yet. The two
- * offers that DO make sense on a blank post are right above them: "Draft it for me" and dictation.
+ * "Change the tone" and the rest send the caption to the assistant with an instruction about it. On
+ * a blank post there is no caption, so each one spends a generation rewriting nothing — and returns
+ * something unrelated to a post the user has not written yet. The two offers that DO make sense on a
+ * blank post are right above them: "Draft it for me" and dictation.
  *
  * Called from the rail render (the step may be opened at any time) and from the caption meta refresh,
  * which already runs on every keystroke.

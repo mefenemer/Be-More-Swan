@@ -48,6 +48,16 @@ export async function atomicCapCheck(params: AtomicCapCheckParams): Promise<Atom
     // Unlimited plan — skip DB entirely
     if (limit === null) return { allowed: true };
 
+    // Both of these are interpolated straight into the SQL below as parameters and compared against
+    // integer columns. A non-integer (a string out of the plans.featureOverrides jsonb, a NaN from a
+    // bad parse) does not fail the CHECK — it fails the QUERY, and the caller surfaces a raw
+    // "Failed query: UPDATE usage_counters ..." to the user. Refuse the input here instead, where it
+    // can be logged and turned into an ordinary denial.
+    if (!Number.isInteger(limit) || !Number.isInteger(increment)) {
+        console.error('[atomicCapCheck] non-integer cap input', { organisationId, counterKey, limit, increment });
+        return { allowed: false, limitMessage: 'Cap enforcement error. Please try again.' };
+    }
+
     const db         = getDb();
     const col        = COLUMN_MAP[counterKey];
     const periodStart = getPeriodStart();
