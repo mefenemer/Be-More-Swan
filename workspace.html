@@ -593,7 +593,12 @@ window.showComplianceModals = function showComplianceModals(force) {
     <div class="flex items-start justify-between gap-3 px-5 py-3 border-b border-gray-100 shrink-0">
       <div class="min-w-0">
         <h2 id="post-review-title" class="text-base font-extrabold text-gray-900">Review post</h2>
-        <p id="post-review-sub" class="text-xs text-gray-500"></p>
+        <!-- The subtitle here read "<Assistant> · 4 platforms · planned for Tue 28 Jul, 11:38".
+             Every part of it is said better elsewhere and the last part was actively misleading: the
+             platforms are named on the tabs above the post, and "planned for" printed a DRAFT's
+             proposed publish_date as though a time had been chosen (it hasn't — see
+             src/config/post-status.ts). Step 7 is where the time is decided and where it is now
+             reported. -->
       </div>
       <div class="flex items-start gap-2 shrink-0">
         <!-- "Draft it for me" and "Talk it through in chat" used to sit here, in the header. They
@@ -5718,11 +5723,29 @@ function renderPlatformMockup(post) {
     // attached to the words they are counting, which is where they belonged. Filled by
     // _pceRefreshCaptionMeta.
     const metaHost = editableNow ? '<div data-caption-meta class="flex flex-wrap gap-1 mt-1.5"></div>' : '';
+    // A mic ON the empty caption, not only inside the box once it is open.
+    //
+    // Dictation lives in the inline editor, which means it was two steps away and invisible until
+    // you had already started typing the thing you wanted to dictate. This button is the first
+    // thing you see next to "Write your caption…", and it does both jobs at once: opens the editor
+    // and starts listening. data-caption-mic keeps it out of the click handler that opens the plain
+    // editor (see _pceCanvasClick).
+    const captionMic = editableNow
+        ? `<button type="button" data-caption-mic title="Dictate your caption"
+             class="shrink-0 inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-gray-200 bg-white text-gray-500 hover:text-emerald-700 hover:border-emerald-300 transition cursor-pointer">
+             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15a3 3 0 003-3V6a3 3 0 00-6 0v6a3 3 0 003 3zM19 11a7 7 0 01-14 0M12 18v3"/></svg>
+             <span class="text-[10px] font-bold">Dictate</span>
+           </button>`
+        : '';
     const captionBlock = (cls) =>
         `<div class="${cls}${editableNow ? ' cursor-text hover:bg-gray-50 transition' : ''}" data-caption-host
            ${editableNow ? 'title="Click to write the caption"' : ''}>${
             captionEmpty
-                ? (editableNow ? '<p class="text-sm text-gray-400">Write your caption…</p>' : '')
+                ? (editableNow
+                    ? `<div class="flex items-start justify-between gap-2">
+                         <p class="text-sm text-gray-400">Write your caption…</p>${captionMic}
+                       </div>`
+                    : '')
                 : `${caption}${hashtags}${link}`}${metaHost}</div>`;
 
     const body = meta.mediaFirst
@@ -6655,8 +6678,18 @@ function _rqReviewRenderTabs() {
         // The server's answer wins where we have it: it knows durations and ratios this page
         // cannot, and it is the same verdict approve-post enforces. The local structural check
         // stays as the fallback for the moment before the first response lands.
+        // Nothing is struck through until there is media to judge.
+        //
+        // "Instagram cannot publish without media" is TRUE and specific — of the six platforms only
+        // Instagram (image) and YouTube (video) declare mediaMandatory; Facebook, LinkedIn, X and
+        // Threads publish text alone. But on a post created seconds ago it fired before the user had
+        // done anything, and a crossed-out platform reads as "this is broken" rather than "you have
+        // not added a picture yet". The Media step asks for the picture; these tabs report what will
+        // happen to it. Once media IS attached and still wrong for a platform, the strike-through is
+        // exactly right and comes back.
         const route = _rqRoutes && _rqRoutes[p.platform];
-        const blocked = route ? (route.state === 'none' ? (route.reason || 'Cannot publish here.') : null)
+        const blocked = !p.thumbnailUrl ? null
+                      : route ? (route.state === 'none' ? (route.reason || 'Cannot publish here.') : null)
                               : _rqPlatformBlockedReason(p);
         const tone = blocked
             // No `decoration-1`: it is not in the compiled style.css, and rebuilding Tailwind to
@@ -6885,6 +6918,33 @@ function _pceRefreshLinkMeta() {
  * belong next to the words, updating as you type.
  */
 /**
+ * Why this post is not ready to be checked or scheduled yet, or null when it is.
+ *
+ * One rule, read by the two steps that act on a FINISHED post: "Check & improve" spends a paid AI
+ * review, and "Schedule & publish" commits the thing. Offering either on a blank post invites the
+ * user to buy a critique of nothing, or to schedule an empty page — and in both cases the refusal
+ * arrives later, from the server, phrased as a failure.
+ *
+ * Deliberately the same two conditions the server enforces at approval: there must be words, and
+ * every platform in the group must be able to publish what is attached (_rqPlatformBlockedReason —
+ * Instagram needs an image, YouTube needs a video; the rest publish text alone). Nothing here is a
+ * new rule; it is the existing gate, said early enough to be useful.
+ */
+function _pceNotReadyReason(post) {
+    if (!post) return 'Nothing to post yet';
+    // The live field first — the user may have typed a caption that has not been saved yet.
+    const caption = String(_pceEl('post-review-caption')?.value ?? post.caption ?? '').trim();
+    if (!caption) return 'Write a caption first';
+    const group = _rqReviewGroupIds.map(i => _rqPostCache[i]).filter(Boolean);
+    const blocked = (group.length ? group : [post]).filter(t => _rqPlatformBlockedReason(t));
+    if (blocked.length) {
+        const names = [...new Set(blocked.map(t => window.PlatformConstants.label(t.platform)))].join(', ');
+        return `${names} still needs media`;
+    }
+    return null;
+}
+
+/**
  * The platforms this post is currently too long for.
  *
  * Shares _pceLinkLine with the badges so both count the SAME string the publishers send — caption,
@@ -6992,6 +7052,14 @@ function _pceCanvasClick(ev) {
     if (ev.target.closest('a')) return;             // a link in the caption is still a link
     if (ev.target.closest('[data-caption-host]')) {
         _pceSelect('caption');
+        // The Dictate button on the empty caption: open the editor AND start listening, so speaking
+        // your caption is one click rather than click-then-find-the-mic. Handled before the plain
+        // open below, or the editor would replace the button mid-click and swallow the gesture.
+        if (ev.target.closest('[data-caption-mic]')) {
+            _pceOpenInlineCaption();
+            gpStartVoice('pce-inline-caption');
+            return;
+        }
         // Clicks INSIDE the open editor are ordinary text clicks — reopening would move the caret.
         if (!ev.target.closest('[data-caption-edit]')) _pceOpenInlineCaption();
         return;
@@ -7286,8 +7354,13 @@ const _RAIL = [
     // does. Restating that in the editor asked the user to configure something already known.
     // set-post-platforms.ts and _pceRenderPlatformPicker still exist for the API and for a future
     // per-post override; nothing in the rail reaches them.
-    { key: 'check', title: 'Check & improve',       blocks: () => ['post-review-quality'] },
-    { key: 'when',  title: 'Schedule & publish',    blocks: () => ['post-review-reschedule'] },
+    // Both of these act on a FINISHED post — one spends a paid review on it, the other commits it —
+    // so both stay shut until there is something to act on. _pceNotReadyReason is the single rule,
+    // and each subtitle reports it, so a disabled step always says what is missing.
+    { key: 'check', title: 'Check & improve',       blocks: () => ['post-review-quality'],
+      enabled: (post) => !_pceNotReadyReason(post) },
+    { key: 'when',  title: 'Schedule & publish',    blocks: () => ['post-review-reschedule'],
+      enabled: (post) => !_pceNotReadyReason(post) },
 ];
 
 /** This post's assistant, by the name its owner gave it. Falls back rather than saying "AI". */
@@ -7358,6 +7431,8 @@ function _railSub(key, post) {
             return parts.join(' · ');
         }
         case 'check': {
+            const notReady = _pceNotReadyReason(post);
+            if (notReady) return notReady;
             // Over-limit platforms come FIRST, and are computed here rather than read from the paid
             // review. This is where the length check belongs: it is a check, and it is the one that
             // decides whether a post can publish at all. The badges under the caption are the live
@@ -7382,7 +7457,14 @@ function _railSub(key, post) {
             return n ? `${n} thing${n === 1 ? '' : 's'} to look at` : 'Nothing flagged';
         }
         case 'when': {
-            if (!post || !post.publishDate) return 'Not scheduled';
+            const notReady = _pceNotReadyReason(post);
+            if (notReady) return notReady;
+            // A DRAFT's publish_date is a proposal the drafter needed in order to exist — not a time
+            // anyone chose (see src/config/post-status.ts). Printing it here made the step read as
+            // already settled, so the three options below it looked like ways to CHANGE a decision
+            // rather than ways to make one. Only a live schedule shows a time.
+            if (!post || !window.PlatformConstants.isScheduleActive(post.status)) return 'Choose when to publish';
+            if (!post.publishDate) return 'Not scheduled';
             const d = new Date(post.publishDate);
             if (isNaN(d)) return 'Not scheduled';
             return d.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
@@ -9656,9 +9738,6 @@ function _rqReviewRenderActive() {
         : 'Post';
     document.getElementById('post-review-title').textContent = title;
 
-    const when = post.publishDate ? new Date(post.publishDate).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : null;
-    document.getElementById('post-review-sub').textContent =
-        `${(post.assistantName || 'Assistant')}${multi ? ` · ${groupSize} platforms` : ''}${when ? ' · planned for ' + when : ''}`;
     // Reviewable drafts get the action footer; archived (rejected) posts are read-only with a countdown.
     const reviewable = ['pending_approval', 'draft', 'in_review'].includes(post.status);
     document.getElementById('post-review-actions').classList.toggle('hidden', !reviewable);

@@ -406,4 +406,85 @@ check('a post you are writing offers save-and-discard, not reject-and-rewrite', 
         'closing from a button is not a blur, so an open caption would be lost');
 });
 
+// ── 14. The steps that act on a finished post wait for one ──────────────────────────────────────
+check('Check & improve and Schedule & publish are gated on one readiness rule', () => {
+    assert.ok(workspace.includes('function _pceNotReadyReason(post)'),
+        'one rule, or the two steps will disagree about what "ready" means');
+    const rail = workspace.slice(workspace.indexOf('const _RAIL = ['), workspace.indexOf('\n];', workspace.indexOf('const _RAIL = [')));
+    for (const key of ['check', 'when']) {
+        assert.match(rail, new RegExp(`key: '${key}'[\\s\\S]*?enabled: \\(post\\) => !_pceNotReadyReason\\(post\\)`),
+            `step '${key}' acts on a finished post — a blank one would buy a critique of nothing, or schedule an empty page`);
+    }
+    // The rule must be the SAME two conditions the server enforces at approval.
+    const fn = workspace.slice(workspace.indexOf('function _pceNotReadyReason(post)'));
+    const body = fn.slice(0, 1400);
+    assert.match(body, /Write a caption first/, 'no words, nothing to post');
+    assert.match(body, /_rqPlatformBlockedReason\(t\)/,
+        'reuse the existing publishability gate rather than inventing a second media rule');
+    // Both subtitles must report the reason, or a disabled step says nothing.
+    const sub = workspace.slice(workspace.indexOf("case 'check': {"));
+    assert.match(sub.slice(0, 400), /const notReady = _pceNotReadyReason\(post\);/, 'step 5 must say what is missing');
+    const subWhen = workspace.slice(workspace.indexOf("case 'when': {"));
+    assert.match(subWhen.slice(0, 400), /const notReady = _pceNotReadyReason\(post\);/, 'step 7 must say what is missing');
+});
+
+// ── 15. Nothing claims a time has been chosen when it has not ───────────────────────────────────
+check('a draft shows no scheduled time anywhere', () => {
+    // The modal subtitle printed "<Assistant> · N platforms · planned for <date>".
+    assert.ok(!workspace.includes('id="post-review-sub"'),
+        'the platforms are on the tabs, and "planned for" printed a proposal as a decision');
+    assert.ok(!workspace.includes("' · planned for '"), 'the subtitle builder went with it');
+    // Step 7 shows a date only for a post whose schedule is actually live.
+    const sub = workspace.slice(workspace.indexOf("case 'when': {"));
+    assert.match(sub.slice(0, 900), /!window\.PlatformConstants\.isScheduleActive\(post\.status\)\) return 'Choose when to publish'/,
+        "a draft's publish_date is a proposal — printing it made the step read as already settled");
+});
+
+// ── 16. Warnings wait until there is something to warn about ────────────────────────────────────
+check('no platform is struck through before it has media to judge', () => {
+    const fn = workspace.slice(workspace.indexOf('function _rqReviewRenderTabs()'));
+    assert.match(fn.slice(0, 5000), /const blocked = !p\.thumbnailUrl \? null/,
+        'a crossed-out platform on a post created seconds ago reads as "broken", not "add a picture"');
+    // But the warning itself must survive — only Instagram (image) and YouTube (video) are mandatory.
+    assert.ok(workspace.includes('only publishes video'), 'a photo on YouTube is still impossible');
+    assert.ok(workspace.includes('needs an image before this can publish'), 'Instagram still needs one');
+});
+
+// ── 17. The platform allow-list is read, not retyped ────────────────────────────────────────────
+// A hand-written set in check-capacity.ts omitted 'threads', so a connected Threads account was
+// reported as not connected: missing from the tabs, skipped when a new post seeds its platforms, and
+// refused by the approve-time gate.
+check('connected platforms come from the catalogue', () => {
+    const src = read('netlify/functions/check-capacity.ts');
+    assert.match(src, /import \{ SOCIAL_PLATFORMS \} from '\.\.\/\.\.\/src\/config\/platform-formats'/,
+        'the publishable platforms live in one place');
+    assert.ok(!/new Set\(\['instagram', 'facebook', 'x', 'twitter'/.test(src),
+        'the hand-written eight-name list is what dropped Threads');
+    assert.match(src, /name === 'twitter' \? 'x' : name/,
+        "legacy 'twitter' rows are the same account as 'x' — normalise rather than listing both");
+    // Every catalogue platform must be reachable, Threads included.
+    const cat = read('src/config/platform-formats.ts');
+    for (const p of ['threads', 'youtube']) {
+        assert.ok(cat.includes(`${p}:`), `${p} must be in the catalogue for the import to include it`);
+    }
+});
+
+// ── 18. Dictation is offered where the caption is written ───────────────────────────────────────
+check('the empty caption carries its own Dictate button', () => {
+    assert.match(workspace, /data-caption-mic/,
+        'dictation was only inside the editor, so it was invisible until you had started typing');
+    const click = workspace.slice(workspace.indexOf('function _pceCanvasClick(ev)'));
+    assert.match(click.slice(0, 1400), /if \(ev\.target\.closest\('\[data-caption-mic\]'\)\) \{[\s\S]*?_pceOpenInlineCaption\(\);[\s\S]*?gpStartVoice\('pce-inline-caption'\);/,
+        'one click should open the box AND start listening');
+});
+
+// ── 19. A chat failure names itself ─────────────────────────────────────────────────────────────
+check('the orchestrator reports a code the user can quote', () => {
+    const src = read('netlify/functions/chat-orchestrator.ts');
+    assert.match(src, /typeof e\?\.code === 'string'/,
+        'a Postgres error code (42703, 42P01, 23502) identifies the fault and leaks no row data');
+    assert.match(src, /quote that code/,
+        '"the details are in our logs" is useless to the person holding the mouse');
+});
+
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);

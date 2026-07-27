@@ -972,8 +972,21 @@ export default withLambda(async (event) => {
         return await handleChatTurn(event);
     } catch (err) {
         console.error('[chat-orchestrator] unhandled error before the LLM boundary:', err);
+        // Name the fault in the reply, not just the log.
+        //
+        // "Please try again — the details are in our logs" is only useful to someone who can read
+        // the logs, which is nobody holding the mouse. A Postgres error carries a `code` (42703
+        // undefined column, 42P01 undefined table, 23502 not-null violation, 22P02 bad input) and
+        // every Error carries a `name`: both identify the fault precisely and neither contains any
+        // row data or SQL text, so they are safe to show. A user can now read one line back and it
+        // is immediately actionable instead of being another anonymous failure.
+        const e = err as { code?: unknown; name?: unknown };
+        const code = typeof e?.code === 'string' && e.code.length <= 12 ? e.code
+                   : typeof e?.name === 'string' && e.name.length <= 40 ? e.name
+                   : 'unknown';
         return json(500, {
-            error: 'Something went wrong starting that conversation. Please try again — if it keeps happening, the details are in our logs.',
+            code,
+            error: `Something went wrong starting that conversation (${code}). Please try again — if it keeps happening, quote that code.`,
         });
     }
 });

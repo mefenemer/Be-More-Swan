@@ -29,6 +29,7 @@ import { getDb } from '../../db/client';
 import { plans, masterPlans, planPrices, aiAssistants, taskRuns, usageCounters, userOrganisations, users, systemConnections, organisations } from '../../db/schema';
 import { getPeriodStart } from '../../src/utils/atomic-cap-check';
 import { effectiveLimit, effectiveFeatures, type FeatureOverrides } from '../../src/utils/plan-features';
+import { SOCIAL_PLATFORMS } from '../../src/config/platform-formats';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const stripe = process.env.STRIPE_SECRET_KEY
@@ -236,9 +237,26 @@ export default withLambda(async (event) => {
             if (appConnectionLimit !== null) {
                 maxAppConnectionCount = connRows.reduce((m, r) => Math.max(m, r.cnt), 0);
             }
-            const SOCIAL_PLATFORMS = new Set(['instagram', 'facebook', 'x', 'twitter', 'linkedin', 'tiktok', 'youtube', 'pinterest']);
+            // ── The publishable platforms, from the catalogue ────────────────────────────────
+            // This was a hand-written set of eight names, and it did not contain 'threads'. A
+            // workspace with Threads connected therefore reported it as NOT connected — invisible in
+            // the editor's platform tabs, excluded when a new post seeds its platforms, and refused
+            // by the approve-time connection gate. Exactly the drift class that has already lost
+            // Threads and YouTube from other lists in this app; the remedy is the same one: read the
+            // catalogue (src/config/platform-formats.ts), never retype it.
+            //
+            // The old list also carried 'tiktok' and 'pinterest', which have no publisher here, so
+            // they were reported as connected platforms a post could never actually go out on.
+            // 'twitter' is normalised to 'x' rather than listed separately — same account, and the
+            // catalogue's key is 'x'.
+            const publishable = new Set<string>(SOCIAL_PLATFORMS);
             connectedPlatforms = [...new Set(
-                connRows.map(r => r.serviceName.toLowerCase()).filter(s => SOCIAL_PLATFORMS.has(s))
+                connRows
+                    .map(r => {
+                        const name = r.serviceName.toLowerCase();
+                        return name === 'twitter' ? 'x' : name;
+                    })
+                    .filter(s => publishable.has(s))
             )];
         }
 
