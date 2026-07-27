@@ -585,6 +585,55 @@ window.showComplianceModals = function showComplianceModals(force) {
 </div>
 
 <!-- Review Queue: post review modal — clickable card opens a per-platform mock-up + actions -->
+<!-- ── Media picker ────────────────────────────────────────────────────────────────────────────
+     Everything about GETTING a picture, in one place, opened from the picture itself.
+     It used to be a block inside the editor's Media step: an Image/Video toggle and five source
+     buttons, permanently on screen, most of them irrelevant to whichever one you were about to use.
+     As a modal it costs nothing until asked for, and the ask is the natural one — you click the
+     picture on the post because the picture is what you want to change.
+     The stacking sits above the editor (z-[90]), which stays open behind it: the post you are
+     choosing a picture FOR should not vanish while you choose. Set INLINE, not as z-[95]: the
+     compiled style.css carries only the arbitrary z utilities that were in the markup when it was
+     built (51, 55, 60, 70, 71, 75, 80, 81, 90, 100, 9999, 10000) — a new one silently resolves to
+     `z-index: auto`, which put this modal UNDERNEATH the editor it is supposed to cover. Rebuilding
+     Tailwind to add one utility churns unrelated selectors across the whole sheet. #gp-ai-media is MOVED in here on open and put
+     back on close (_pceOpenMediaPicker / _pceCloseMediaPicker) — the same borrow-and-return the rail
+     uses, because that panel is shared with the generate-post sheet and must not be duplicated. -->
+<div id="pce-media-modal" class="hidden fixed inset-0 items-center justify-center p-4 bg-gray-900/70 backdrop-blur-sm" style="z-index:95" role="dialog" aria-modal="true" aria-labelledby="pce-media-modal-title">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[88vh] flex flex-col overflow-hidden">
+    <div class="flex items-center justify-between gap-3 px-5 py-3 border-b border-gray-100 shrink-0">
+      <div class="min-w-0">
+        <h2 id="pce-media-modal-title" class="text-base font-extrabold text-gray-900">Choose a picture</h2>
+        <p id="pce-media-modal-sub" class="text-xs text-gray-500"></p>
+      </div>
+      <button onclick="_pceCloseMediaPicker()" aria-label="Close" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 cursor-pointer">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="flex-1 overflow-y-auto px-5 py-4 space-y-3" style="overscroll-behavior:contain">
+      <!-- The shared sourcing panel is mounted here. -->
+      <div id="pce-media-modal-host"></div>
+      <!-- ── The fourth source, and the reason this modal offers it ─────────────────────────────
+           A branded card is a way of having no photo, so "I do not have a picture" has to be able to
+           end here. It is the same _pceCreateBrandCard the Post Style chooser calls — one
+           implementation, two doors that both make sense (this one when you are looking for a
+           picture, that one when you are deciding what kind of post it is). Hidden on a video post
+           and while a card is being replaced, because a card cannot be either of those. -->
+      <div id="pce-media-modal-card" class="pt-3 border-t border-gray-100">
+        <button type="button" onclick="_pceCreateBrandCardFromPicker()"
+          class="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-gray-200 text-left hover:border-emerald-300 hover:bg-emerald-50 transition cursor-pointer">
+          <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 5h16v14H4z"/><path stroke-linecap="round" d="M8 10h8M8 14h5"/></svg>
+          <span class="min-w-0 flex-1">
+            <span class="block text-xs font-bold text-gray-800">No photo — make a branded card</span>
+            <span class="block text-[10px] text-gray-400">Your words as large type in your brand colours</span>
+          </span>
+        </button>
+        <span id="pce-media-modal-msg" class="block mt-1.5 text-[11px] font-semibold text-gray-500"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="post-review-modal" class="hidden fixed inset-0 z-[90] items-center justify-center p-4 bg-gray-900/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="post-review-title">
   <!-- Widens to max-w-4xl only when this post has an inspector to show (see _pceSetStageWide), so a
        plain text post keeps the narrow reading column it has always had. -->
@@ -1018,9 +1067,6 @@ window.showComplianceModals = function showComplianceModals(force) {
                     <span class="text-[11px] font-semibold text-gray-700">Fix grammar &amp; flow</span>
                   </button>
                 </div>
-                <p class="text-[10px] text-gray-400 mt-2 leading-relaxed">
-                  Whatever comes back lands in the post itself, where you can edit it.
-                </p>
                 <div id="pce-write-freetext" class="mt-2.5 pt-2.5 border-t border-gray-100"></div>
               </div>
 
@@ -1038,38 +1084,32 @@ window.showComplianceModals = function showComplianceModals(force) {
             <div id="pce-insp-media" class="pce-insp" data-insp="media">
               <!-- Media that is NOT a branded card: choosing what the picture is. The shared
                    sourcing panel is mounted here on demand (see _inspMountMediaPanel). -->
+              <!-- ── Photo or video: what is attached, and the one way to change it ──────────────
+                   The sourcing controls (Image/Video, Use my own, Upload, Canva, Find a photo,
+                   Generate with AI) used to sit here inline. Five ways to get a picture, stacked
+                   inside a step, most of them irrelevant to whichever one you were going to use —
+                   and they were the bulk of the panel. They live in their own modal now, opened by
+                   clicking the picture on the post, which is where you are looking when you decide
+                   the picture is wrong. See #pce-media-modal.
+                   "Make a branded card" went too: the Post Style choice directly above it already
+                   offers exactly that, so the panel had two doors to one place. -->
               <div id="insp-media-generic" class="hidden">
                 <!-- Shown only while replacing a card (see _pceSwapCardForMedia): the card is still
                      on the post until something else is attached, so the way back must stay open. -->
                 <div id="insp-card-swap-note" class="hidden mb-2 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2">
                   <p class="text-[11px] font-bold text-amber-800">Replacing the branded card</p>
-                  <p class="text-[11px] text-amber-700 mt-0.5">Pick a picture or video below — the card stays until you do.</p>
+                  <p class="text-[11px] text-amber-700 mt-0.5">Pick a picture or video — the card stays until you do.</p>
                   <button type="button" onclick="_pceSwapCardForMedia(false)"
                     class="mt-1.5 text-[11px] font-bold text-amber-800 underline hover:text-amber-900 cursor-pointer">Keep the card instead</button>
                 </div>
-                <!-- No "Picture" heading here: the inspector header above already names the media
-                     per post (_pceSyncForPost sets it to Picture/Video/Branded card) and the Type
-                     row below states it too. The heading was static, so on a video post it said
-                     "Picture" directly under a header saying "Video". -->
-                <p class="text-[11px] text-gray-400 mb-2">Upload your own, search stock, or generate one.</p>
                 <!-- Measured off the media element on the canvas, not read from content_assets —
                      see _pceRenderMediaProps. Hidden until there is something to report. -->
                 <dl id="insp-media-props" class="hidden mb-3 grid grid-cols-2 gap-x-2 gap-y-1.5 rounded-lg bg-gray-50 border border-gray-100 px-2.5 py-2"></dl>
-                <div id="post-review-media-host"></div>
-                <button type="button" id="insp-overlay-jump" onclick="_pceSelect('overlays')"
-                  class="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold border border-pink-300 text-pink-700 hover:bg-pink-50 rounded-lg transition cursor-pointer">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7V5a1 1 0 011-1h14a1 1 0 011 1v2M9 20h6M12 4v16"/></svg>
-                  <span id="insp-overlay-jump-label">Text on the image</span>
+                <button type="button" onclick="_pceOpenMediaPicker()"
+                  class="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.6-4.6a2 2 0 012.8 0L16 16m-2-2 1.6-1.6a2 2 0 012.8 0L20 14M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
+                  <span id="insp-change-media-label">Choose a picture or video</span>
                 </button>
-                <!-- The fourth media source. Until now a branded card was something only an
-                     autonomous drafter could produce — the editor could restyle one but there was
-                     no way to ask for one, which is why nobody could find how to make one. -->
-                <button type="button" id="insp-make-card" onclick="_pceCreateBrandCard()"
-                  class="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 5h16v14H4z M8 10h8M8 14h5"/></svg>
-                  <span>Make a branded card</span>
-                </button>
-                <span id="insp-make-card-msg" class="block mt-1.5 text-[11px] font-semibold text-gray-500"></span>
               </div>
 
               <!-- Media that IS a branded card: the card's own parameters. -->
@@ -5659,11 +5699,14 @@ function renderPlatformMockup(post) {
         // media-sized box when the frame has no height of its own — the ratio classes are
         // arbitrary-value utilities (aspect-[4/5]), so a style.css built before this format existed
         // simply drops them and the frame collapses to its content.
-        ? `<button type="button" data-media-empty onclick="_pceCanvasPickFiles()"
+        // Opens the picker, not the OS file dialog. Uploading your own file is ONE of five ways to
+        // fill this frame (and a branded card is a sixth, for a post that wants no photo at all);
+        // going straight to the file dialog answered the question before it had been asked.
+        ? `<button type="button" data-media-empty onclick="_pceOpenMediaPicker()"
              class="w-full h-full py-16 px-4 flex flex-col items-center justify-center gap-1.5 text-center border-2 border-dashed border-gray-300 bg-gray-50 text-gray-400 hover:border-emerald-400 hover:bg-emerald-50 hover:text-emerald-700 transition cursor-pointer">
              <svg class="w-7 h-7" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.6-4.6a2 2 0 012.8 0L16 16m-2-2 1.6-1.6a2 2 0 012.8 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
              <span class="text-sm font-bold">Add a photo or a video</span>
-             <span class="text-[11px]">Click to choose files — pick several for a carousel</span>
+             <span class="text-[11px]">Upload, search stock, generate one — or use a branded card</span>
            </button>`
         : `<div class="w-full py-16 bg-gray-100 flex items-center justify-center text-gray-400 text-sm">No media attached</div>`;
     const mediaInner = _mediaUrl
@@ -7223,6 +7266,60 @@ async function _pceCommitInlineCaption(ta) {
 // ── Attaching media from the canvas ─────────────────────────────────────────────────────────────
 function _pceCanvasPickFiles() { _pceEl('pce-canvas-file')?.click(); }
 
+// ── Media picker modal ──────────────────────────────────────────────────────────────────────────
+// Borrows #gp-ai-media the way the rail borrows its blocks: moved in on open, put back on close.
+// The panel is shared with the generate-post sheet, so a second copy is not an option — and
+// _rqRestoreMediaPanel is the one place that knows where "back" is.
+function _pceOpenMediaPicker() {
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (!post) return;
+    const modal = document.getElementById('pce-media-modal');
+    const host = document.getElementById('pce-media-modal-host');
+    const panel = document.getElementById('gp-ai-media');
+    if (!modal || !host || !panel) return;
+
+    if (!_gpAiMediaHome) _gpAiMediaHome = { parent: panel.parentNode, next: panel.nextSibling };
+    _gpCurrentPostId = _rqReviewPostId;
+    _gpAiMediaPrompt = '';
+    host.appendChild(panel);
+    panel.classList.remove('hidden');
+    gpAiSetMediaType(post.mediaType === 'video' ? 'video' : 'image');
+    document.getElementById('gp-ai-media-thumb')?.classList.add('hidden');
+    gpAiShowThumb(post.thumbnailUrl, post.mediaType);
+
+    // A card is a still, so it is not on offer for a video post — and while an existing card is being
+    // replaced, offering to make another one is the opposite of what the user asked for.
+    const cardable = !_pcePostIsVideo(post) && _pceSwapCardFor !== post.id;
+    document.getElementById('pce-media-modal-card')?.classList.toggle('hidden', !cardable);
+    const msg = document.getElementById('pce-media-modal-msg');
+    if (msg) msg.textContent = '';
+    const sub = document.getElementById('pce-media-modal-sub');
+    if (sub) sub.textContent = post.thumbnailUrl ? 'Whatever you pick replaces what is on the post.' : '';
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+    // Its own lock key, so closing this modal does not unlock the editor behind it.
+    window.ScrollLock?.lock('pce-media-modal');
+}
+
+function _pceCloseMediaPicker() {
+    const modal = document.getElementById('pce-media-modal');
+    if (modal) { modal.classList.add('hidden'); modal.classList.remove('flex'); }
+    window.ScrollLock?.release('pce-media-modal');
+    // Hand the panel back. Without this the next thing to borrow it (the editor's own Media step, or
+    // the generate-post sheet) would find it parented into a hidden modal.
+    _rqRestoreMediaPanel();
+}
+
+/** Make a card from the picker, then get out of the way — the card IS the answer to "which picture". */
+async function _pceCreateBrandCardFromPicker() {
+    const msg = document.getElementById('pce-media-modal-msg');
+    if (msg) { msg.textContent = 'Making the card…'; msg.className = 'block mt-1.5 text-[11px] font-semibold text-gray-500'; }
+    await _pceCreateBrandCard();
+    if (msg) msg.textContent = '';
+    _pceCloseMediaPicker();
+}
+
 /**
  * Attach whatever the user picked, straight from the empty frame.
  *
@@ -7304,11 +7401,9 @@ function _pceSelect(key, repaintHandles = true) {
     // a header to write it into.
     _pcePaintAlign(key);
     if (repaintHandles) _pcePaintHandles();
-    // The sourcing panel is shared with the generate-post sheet, so it is moved here on demand
-    // rather than duplicated — and only when the picture layer is actually being looked at.
+    // Selecting the picture describes what is attached. Getting a DIFFERENT one is the picker's job
+    // (_pceOpenMediaPicker), so nothing is mounted here any more.
     if (key === 'media' && !_pceEl('insp-media-generic')?.classList.contains('hidden')) {
-        _inspMountMediaPanel();
-        _pceRefreshOverlayJump();
         _pceRenderMediaProps();
     }
     if (key === 'overlays') _pceRefreshOverlayInspector();
@@ -7357,27 +7452,24 @@ const _railHomes = new Map();         // node id → where it came from, so it c
 // _pceRenderFormats' rules table and the blocked-format warning.
 const _RAIL = [
     { key: 'write', title: 'Write with %A',         blocks: () => ['pce-write-block'] },
-    // ── Media owns the still image, and everything written ON it ─────────────────────────────
-    // Text-on-an-image is part of designing the image: you pick a photo, you put words on it, and a
-    // branded card IS words on a colour. Splitting those across two steps meant the same decision
-    // was reached from two places depending on which kind of still you had chosen. Sound comes here
-    // too for a still, because a photo with a voice note publishes as a video and there is nowhere
-    // else for it to live once step 3 is video-only.
+    // ── Media: WHICH picture, and what kind of post it is ────────────────────────────────────
+    // The style chooser (photo/video vs branded card), what is attached, and — for a still — the
+    // sound layer. Getting a different picture is the media picker MODAL, opened from the picture
+    // itself; the five source buttons used to live inline here and were most of the panel.
     { key: 'media', title: 'Media',                 blocks: (post) => {
         const out = ['pce-style-block', 'pce-insp-media'];
-        if (!_pcePostIsVideo(post)) {
-            // _pceLayers is the capability gate — a branded card has no overlay layer (its
-            // typography is the card's own), and a post with no media has neither.
-            if (_pceLayers.includes('overlays')) out.push('pce-insp-overlays');
-            if (_pceLayers.includes('audio')) out.push('pce-insp-audio');
-        }
+        // Sound rides with the still it plays over (a photo with a voice note publishes as a video).
+        // On a VIDEO post it belongs with the timeline instead — see the video step below.
+        if (!_pcePostIsVideo(post) && _pceLayers.includes('audio')) out.push('pce-insp-audio');
         return out;
     } },
-    // ── Video only ───────────────────────────────────────────────────────────────────────────
-    // Timed text needs a duration to be timed against, which is the one thing a still cannot give
-    // it. Disabled rather than hidden on a photo or a card: a step that vanishes leaves the user
-    // wondering whether they missed it, where a disabled one with a reason answers the question.
-    { key: 'video', title: 'Video overlays & sound', blocks: () => {
+    // ── Text on a still, and text on a video: two steps, one mechanism ───────────────────────
+    // Same block (#pce-insp-overlays), split because the two jobs are not the same job: on a still
+    // you place words, on a video you place words AND decide when they appear. A post is one or the
+    // other, so exactly one of these is ever enabled and the other says which step to use instead.
+    { key: 'imgtext', title: 'Image overlays',      blocks: () => _pceLayers.includes('overlays') ? ['pce-insp-overlays'] : [],
+      enabled: (post) => !_pcePostIsVideo(post) && _pceLayers.includes('overlays') },
+    { key: 'video',  title: 'Video overlays & sound', blocks: () => {
         const out = [];
         if (_pceLayers.includes('overlays')) out.push('pce-insp-overlays');
         if (_pceLayers.includes('audio')) out.push('pce-insp-audio');
@@ -7397,6 +7489,7 @@ const _RAIL = [
     { key: 'when',  title: 'Schedule & publish',    blocks: () => ['post-review-reschedule', 'post-review-reject'],
       enabled: (post) => !_pceNotReadyReason(post) },
 ];
+
 
 /** This post's assistant, by the name its owner gave it. Falls back rather than saying "AI". */
 function _railAssistant(post) {
@@ -7445,6 +7538,7 @@ function _pceSyncRewriteActions() {
 const _RAIL_ICON = {
     write: '<path stroke-linecap="round" stroke-linejoin="round" d="M5 3v4M3 5h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5L13 3z"/>',
     video: '<path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.6-2.3A1 1 0 0121 8.7v6.6a1 1 0 01-1.4.9L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>',
+    imgtext: '<path stroke-linecap="round" stroke-linejoin="round" d="M4 7V5h16v2M9 19h6M12 5v14"/>',
     check: '<path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>',
     link:  '<path stroke-linecap="round" stroke-linejoin="round" d="M13.8 10.2a4 4 0 010 5.7l-3 3a4 4 0 01-5.6-5.7l1.5-1.5m9.6.7a4 4 0 010-5.7l3-3a4 4 0 015.7 5.7l-1.5 1.5"/>',
     media: '<path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.6-4.6a2 2 0 012.8 0L16 16m-2-2 1.6-1.6a2 2 0 012.8 0L20 14M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>',
@@ -7476,6 +7570,13 @@ function _railSub(key, post) {
         case 'write': {
             const n = (post && post.caption ? String(post.caption) : '').trim().length;
             return n ? `${n} character${n === 1 ? '' : 's'} written` : 'Nothing written yet';
+        }
+        case 'imgtext': {
+            if (!post || !post.thumbnailUrl) return 'Add a picture first';
+            if (post.brandCard) return 'A branded card carries its own words';
+            if (_pcePostIsVideo(post)) return 'This is a video — use Video overlays';
+            const boxes = _pceOverlayCount(post);
+            return boxes ? `${boxes} text box${boxes === 1 ? '' : 'es'}` : 'No text on the image';
         }
         case 'video': {
             // A disabled step still has to say WHY, and say where the equivalent controls went for
@@ -7640,12 +7741,6 @@ function _railRender() {
             // Media, a video puts them in the video step. Resolved per render rather than declared
             // once, because attaching a video changes the answer.
             for (const id of step.blocks(post)) _railMount(id, panel);
-            // The sourcing panel is shared with the generate-post sheet and acts on whatever
-            // _gpCurrentPostId says. Mounted through _inspMountMediaPanel — its host
-            // (#post-review-media-host) has just been borrowed into this step, so the panel lands
-            // inside the media inspector where the card controls and the overlay jump also live,
-            // and _railHomes still records a home that exists.
-            if (step.key === 'media') _inspMountMediaPanel();
             // _railMount strips `hidden` from whatever it borrows — right for a step's own panel,
             // wrong for the reject form, which must stay shut until "Don't publish this" is pressed.
             // Put it back immediately; rqReviewToggle('reject') is what reveals it.
@@ -7656,7 +7751,7 @@ function _railRender() {
             // The overlay and audio blocks are populated by the old inspector's refresh functions,
             // which run off the current selection. Ask for the right one so an open step is never
             // stale — either step can be holding them now.
-            if (step.key === 'media' || step.key === 'video') {
+            if (step.key === 'media' || step.key === 'video' || step.key === 'imgtext') {
                 _pceRefreshOverlayInspector();
                 _pceRefreshAudioInspector();
             }
@@ -8517,22 +8612,9 @@ function _pceRenderLayers() {
 
 // Mount the shared Work-with-AI media panel inside the inspector's picture section, pointed at the
 // post being reviewed. _rqRestoreMediaPanel puts it back when the modal closes or the post changes.
-function _inspMountMediaPanel() {
-    const id = _rqReviewPostId;
-    const post = id != null ? _rqPostCache[id] : null;
-    const panel = document.getElementById('gp-ai-media');
-    const host = _pceEl('post-review-media-host');
-    if (!post || !panel || !host) return;
-    if (!_gpAiMediaHome) _gpAiMediaHome = { parent: panel.parentNode, next: panel.nextSibling };
-    if (panel.parentNode === host) return;   // already here — remounting would reset the flow
-    _gpCurrentPostId = id;
-    _gpAiMediaPrompt = '';
-    host.appendChild(panel);
-    panel.classList.remove('hidden');
-    gpAiSetMediaType(post.mediaType === 'video' ? 'video' : 'image');
-    document.getElementById('gp-ai-media-thumb')?.classList.add('hidden');
-    gpAiShowThumb(post.thumbnailUrl, post.mediaType);
-}
+// _inspMountMediaPanel lived here: it moved #gp-ai-media into the Media step's own
+// #post-review-media-host. Both are gone — sourcing is a modal now, and _pceOpenMediaPicker does the
+// borrowing (into #pce-media-modal-host) with _rqRestoreMediaPanel still owning the way back.
 
 // ── "Text on image" layer ────────────────────────────────────────────────────
 // The overlay data lives on the post cache (post.overlays); the canvas paints it (_rqRenderCanvasOverlays)
@@ -8662,16 +8744,9 @@ function _pceRenderMediaProps() {
 
 // The picture layer's jump button doubles as the overlay count, so you can see there is text on the
 // media without leaving the picture.
-function _pceRefreshOverlayJump() {
-    const label = _pceEl('insp-overlay-jump-label');
-    if (!label) return;
-    // _pcePostIsVideo takes the post — called bare it reads `undefined` and returns false, so the
-    // button said "image" on every video post no matter what.
-    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
-    const noun = _pcePostIsVideo(post) ? 'video' : 'image';
-    const n = _pceOverlayCount(post);
-    label.textContent = n ? `Text on the ${noun} (${n})` : `Add text on the ${noun}`;
-}
+// _pceRefreshOverlayJump labelled a "Text on the image" button inside the Media step. That button is
+// gone: overlays are their own rail step now (Image overlays / Video overlays), so the rail's own
+// subtitle carries the count and there is nothing to jump to.
 
 // The overlays inspector: title/summary wording, "Remove all" visibility, and (video) the per-box
 // timing controls — all seeded from the cache.
@@ -8760,18 +8835,34 @@ function _pceSwapCardForMedia(on) {
     _pceSelect('media');
 }
 
+/**
+ * Refetch the post's group so a freshly-rendered image has a real presigned URL on the mock-up.
+ *
+ * Asks for the post's OWN status. Two callers used to hardcode `status=pending_approval`, which is
+ * the status an ASSISTANT's draft arrives in — a post you made yourself is `draft`, so the refetch
+ * returned a list that did not contain it, the cache kept its old thumbnail, and the new card never
+ * appeared. That is the whole of "Making the card… but it never finishes".
+ */
+async function _pceRefetchPostGroup(post) {
+    const status = post?.status || 'draft';
+    try {
+        const res = await fetch(`/.netlify/functions/get-social-drafts?status=${encodeURIComponent(status)}`);
+        if (res.ok) rqGroupSocialDrafts((await res.json()).drafts || []);
+    } catch { /* the write already succeeded — a stale thumbnail is not worth failing it */ }
+}
+
 async function _pceCreateBrandCard() {
     const postId = _rqReviewPostId;
     const post = postId != null ? _rqPostCache[postId] : null;
     // A card just made is a card to edit, never one to replace — otherwise making one on a post whose
     // card you had been replacing would open straight back into the sourcing panel.
     _pceSwapCardFor = null;
-    const msg = _pceEl('insp-make-card-msg');
+    // The status line lives in whichever surface asked for the card: the picker modal has one, and
+    // the Post Style chooser has #pce-style-msg. Whichever is on screen gets the news.
+    const msg = _pceEl('pce-media-modal-msg') || _pceEl('pce-style-msg');
     const say = (t, kind) => { if (msg) { msg.textContent = t || ''; msg.className = 'block mt-1.5 text-[11px] font-semibold ' + (kind === 'error' ? 'text-red-600' : kind === 'ok' ? 'text-emerald-700' : 'text-gray-500'); } };
     if (!post) return;
     const seed = String(post.caption || '').split('\n').map(s => s.trim()).filter(Boolean)[0] || 'Your headline here';
-    const btn = _pceEl('insp-make-card');
-    if (btn) btn.disabled = true;
     say('Making the card…');
     try {
         const res = await fetch('/.netlify/functions/edit-brand-card', {
@@ -8783,18 +8874,18 @@ async function _pceCreateBrandCard() {
         // The card is now this post's picture, but the mock-up is still showing whatever was there
         // before and has no URL for the new image. Refetch the drafts — the same path openPostReview
         // uses to warm the cache — so the thumbnail is a real presigned URL before we re-render.
-        try {
-            const list = await fetch('/.netlify/functions/get-social-drafts?status=pending_approval');
-            if (list.ok) rqGroupSocialDrafts((await list.json()).drafts || []);
-        } catch { /* the card exists; a stale thumbnail is not worth failing the whole action */ }
+        await _pceRefetchPostGroup(post);
+        // Clear the in-progress line BEFORE re-rendering. It used to be left saying "Making the
+        // card…" for ever: the success path wrote its confirmation to a different element
+        // (_pceSetMsg), so this one simply never came down and the action looked stuck even when it
+        // had worked.
+        say('');
         _rqReviewRenderActive();
         // Land on the card's own controls: the next thing anyone does is change the wording.
         _pceSelect('media');
         _pceSetMsg('Card created — edit the wording below.', 'ok');
     } catch (err) {
         say(err.message || 'Could not make a card.', 'error');
-    } finally {
-        if (btn) btn.disabled = false;
     }
 }
 
@@ -9590,8 +9681,9 @@ function _pceSyncForPost(post) {
     // A branded card is a still. Offering to make one on a Reel or a YouTube video would replace the
     // post's video with a picture it cannot publish, so the offer isn't made. Nor is it offered while
     // replacing the card this post already has.
-    _pceEl('insp-make-card')?.classList.toggle('hidden', isVideo || swappingCard);
-    _pceEl('insp-make-card-msg')?.classList.toggle('hidden', isVideo || swappingCard);
+    // The "Make a branded card" button these two lines used to show/hide is gone — the Post Style
+    // chooser above and the media picker modal are the two places that offer a card now, and each
+    // does its own capability check.
     _PCE_INSP_TITLES.media.title = hasCard ? 'Branded card' : (isVideo ? 'Video' : 'Picture');
     _PCE_INSP_TITLES.overlays.title = isVideo ? 'Text on video' : 'Text on image';
     // Selecting a box drives the per-box timing controls; default to the first box so the timing
@@ -9735,10 +9827,7 @@ function _pceSetStageWide(wide) {
                 // for a storage key that no longer holds this card — so refetch (same path
                 // openPostReview uses to warm the cache) and re-render, or the reviewer would
                 // approve while looking at what the card used to be.
-                try {
-                    const list = await fetch('/.netlify/functions/get-social-drafts?status=pending_approval');
-                    if (list.ok) rqGroupSocialDrafts((await list.json()).drafts || []);
-                } catch { /* the save already succeeded — a stale thumbnail is not worth an error */ }
+                await _pceRefetchPostGroup(_rqPostCache[_pceState.postId] || _rqPostCache[_rqReviewPostId]);
                 // Re-render reseeds the editor from the newly-saved params (so Undo now reverts to
                 // what was saved) and clears the status line — hence confirming AFTER it, not before.
                 // Re-rendering remounts the canvas and reseeds the inspector, so the selection is

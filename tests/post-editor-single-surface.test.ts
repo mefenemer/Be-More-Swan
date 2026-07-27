@@ -88,8 +88,8 @@ check('the caption field the save reads from still exists, parked and hidden', (
 check('the rail steps run content first, with no Platforms step', () => {
     const block = workspace.slice(workspace.indexOf('const _RAIL = ['), workspace.indexOf('\n];', workspace.indexOf('const _RAIL = [')));
     const keys = [...block.matchAll(/key:\s*'(\w+)'/g)].map(m => m[1]);
-    assert.deepStrictEqual(keys, ['write', 'media', 'video', 'link', 'check', 'when'],
-        'write → media → video → link → check → when; platforms come from live connections, not a step');
+    assert.deepStrictEqual(keys, ['write', 'media', 'imgtext', 'video', 'link', 'check', 'when'],
+        'write → media → image overlays → video overlays → link → check → when');
     assert.ok(!keys.includes('setup'),
         'a post goes out on the connected accounts — openGeneratePostSheet seeds them, so there is nothing to choose');
 });
@@ -107,9 +107,11 @@ check('step 3 is video-only and says so, and stills keep their text and sound', 
     const block = workspace.slice(workspace.indexOf('const _RAIL = ['), workspace.indexOf('\n];', workspace.indexOf('const _RAIL = [')));
     assert.match(block, /key: 'video'[\s\S]*?enabled: \(post\) => _pcePostIsVideo\(post\)/,
         'timed text needs a duration, which a still cannot give it');
-    // The still path must still reach overlays + audio, via the Media step.
-    assert.match(block, /if \(!_pcePostIsVideo\(post\)\) \{[\s\S]*?pce-insp-overlays[\s\S]*?pce-insp-audio/,
-        'photo text overlays and photo voice notes are shipped features — they move to Media, they do not disappear');
+    // A still keeps BOTH: overlays in their own step, sound with the media it plays over.
+    assert.match(block, /key: 'imgtext'[\s\S]*?enabled: \(post\) => !_pcePostIsVideo\(post\) && _pceLayers\.includes\('overlays'\)/,
+        'text on a still is its own step now — exactly one of the two overlay steps is ever enabled');
+    assert.match(block, /if \(!_pcePostIsVideo\(post\) && _pceLayers\.includes\('audio'\)\) out\.push\('pce-insp-audio'\)/,
+        'a photo with a voice note publishes as a video — sound rides with the still');
     assert.match(block, /_pceLayers\.includes\('overlays'\)/,
         'a branded card has no overlay layer — reuse the existing capability gate rather than a second rule');
     // A disabled step must refuse to open, or it shows an empty panel.
@@ -277,12 +279,9 @@ check('the format picker is gone and the platform step is named for what it deci
 check('the Media step carries the style chooser and the whole media inspector', () => {
     const railBlocks = workspace.slice(workspace.indexOf('const _RAIL = ['), workspace.indexOf('\n];', workspace.indexOf('const _RAIL = [')));
     assert.match(railBlocks, /key: 'media'[\s\S]*?'pce-style-block', 'pce-insp-media'/,
-        'mounting #gp-ai-media alone left "Make a branded card" and every card control off screen');
+        'the style chooser and what-is-attached belong together');
     assert.ok(workspace.includes('id="pce-style-block"'), 'the photo-vs-card chooser needs its own mountable block');
     assert.ok(workspace.includes('id="pce-insp-media"'), 'the media inspector needs an id for the rail to borrow it');
-    const render = workspace.slice(workspace.indexOf('function _railRender()'));
-    assert.match(render.slice(0, 6000), /if \(step\.key === 'media'\) _inspMountMediaPanel\(\)/,
-        'the sourcing panel must nest into #post-review-media-host inside the borrowed inspector');
 });
 
 check('a branded card can be inverted', () => {
@@ -559,6 +558,60 @@ check('every media source in the picker has a glossary entry', () => {
         assert.ok(explainers.includes(`'media-source-${k}'`),
             `media source '${k}' is offered in the picker with no glossary entry — data-explain resolves to nothing`);
     }
+});
+
+// ── 25. Sourcing is a modal, opened from the picture ────────────────────────────────────────────
+check('the media sourcing panel lives in its own modal', () => {
+    assert.ok(workspace.includes('id="pce-media-modal"'), 'five source buttons were the bulk of the Media step');
+    assert.ok(!workspace.includes('id="post-review-media-host"'),
+        'the in-step host is gone — _pceOpenMediaPicker borrows #gp-ai-media into the modal instead');
+    assert.ok(!/function _inspMountMediaPanel\(\) \{/.test(workspace),
+        'its host no longer exists, so the function that filled it went too');
+    // The empty frame must open the picker, not the OS file dialog: uploading is one of six answers.
+    assert.match(workspace, /data-media-empty onclick="_pceOpenMediaPicker\(\)"/,
+        'going straight to the file dialog answered "which picture" before it had been asked');
+    // Borrow-and-return, or the next surface finds the panel parented into a hidden modal.
+    const close = workspace.slice(workspace.indexOf('function _pceCloseMediaPicker()'));
+    assert.match(close.slice(0, 700), /_rqRestoreMediaPanel\(\)/, 'the panel is shared with the generate-post sheet');
+    // Its own scroll-lock key, or closing it would unlock the editor behind it.
+    assert.match(workspace, /ScrollLock\?\.lock\('pce-media-modal'\)/, 'two overlays, two keys');
+    // z-index must be inline: the compiled sheet has no z-[95].
+    assert.match(workspace, /id="pce-media-modal"[^>]*style="z-index:95"/,
+        'an uncompiled arbitrary z utility resolves to `auto`, which put this modal UNDER the editor');
+    assert.ok(!workspace.includes('z-[95]"'), 'no uncompiled z utility in the class list');
+});
+
+check('a branded card is offered where you look for a picture, and only once', () => {
+    assert.match(workspace, /_pceCreateBrandCardFromPicker/, 'no photo is a real answer to "which picture"');
+    // R4: the standalone button duplicated the Post Style chooser directly above it.
+    assert.ok(!workspace.includes('id="insp-make-card"'),
+        'Post Style already offers Branded Card — the panel had two doors to one place');
+    // Not on a video, and not while replacing an existing card.
+    const open = workspace.slice(workspace.indexOf('function _pceOpenMediaPicker()'));
+    assert.match(open.slice(0, 2200), /const cardable = !_pcePostIsVideo\(post\) && _pceSwapCardFor !== post\.id;/,
+        'a card is a still, and offering another one mid-replacement is the opposite of the ask');
+});
+
+// ── 26. "Making the card…" has to finish ────────────────────────────────────────────────────────
+check('the card paths refetch by the post\'s own status', () => {
+    assert.ok(workspace.includes('async function _pceRefetchPostGroup(post)'), 'one helper, both callers');
+    // The bug: `status=pending_approval` is an ASSISTANT draft's status. A post you made is 'draft',
+    // so the refetch returned a list without it and the new card never reached the mock-up.
+    const hardcoded = workspace.split('\n').filter(l =>
+        l.includes("get-social-drafts?status=pending_approval") && !l.trimStart().startsWith('//'));
+    assert.ok(hardcoded.length <= 2,
+        `still ${hardcoded.length} hardcoded pending_approval refetches — a 'draft' post is invisible to them: ${hardcoded.map(l => l.trim().slice(0, 60)).join(' | ')}`);
+    const fn = workspace.slice(workspace.indexOf('async function _pceCreateBrandCard()'));
+    const body = fn.slice(0, 2500);
+    assert.match(body, /await _pceRefetchPostGroup\(post\)/, 'the card is only visible once the group is refetched');
+    assert.match(body, /say\(''\);/,
+        '"Making the card…" was written to one element and the confirmation to another, so it never came down');
+});
+
+// ── 27. Step 1 stops narrating ───────────────────────────────────────────────────────────────────
+check('step 1 does not explain itself', () => {
+    assert.ok(!workspace.includes('Whatever comes back lands in the post itself'),
+        'a caption under five buttons that already say what they do');
 });
 
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);
