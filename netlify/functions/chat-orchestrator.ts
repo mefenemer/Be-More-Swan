@@ -950,7 +950,35 @@ Only include the post draft once you have enough to write real, finished copy �
 
 // ── Handler ───────────────────────────────────────────────────────────────────
 
+/**
+ * Every failure answers in JSON, including the ones nobody predicted.
+ *
+ * The handler used to have exactly one try/catch, wrapped around the LLM call and everything after
+ * it. The whole first half — resolving the tenant, creating the session, the parallel assistant/org/
+ * target reads, the history query, persisting the user's turn — ran with no boundary at all, so a
+ * throw anywhere in there escaped to withLambda and became a bare platform 502 with no body. The
+ * chat UI can only report that as "Something went wrong (HTTP 502)": the orchestrator's own error
+ * path never ran, so there was nothing to say and nothing logged from here to say it with.
+ *
+ * That is not a hypothetical. It is the exact symptom reported from "Talk it through in chat", whose
+ * cold path (new session + immediate heavy turn) is the most likely place to hit one.
+ *
+ * This wrapper does NOT make failures succeed — a function KILLED at the timeout still returns a raw
+ * 502, because no JavaScript runs after the kill. What it fixes is the far more common case of a
+ * thrown error: the client now gets a named reason and the server logs the stack.
+ */
 export default withLambda(async (event) => {
+    try {
+        return await handleChatTurn(event);
+    } catch (err) {
+        console.error('[chat-orchestrator] unhandled error before the LLM boundary:', err);
+        return json(500, {
+            error: 'Something went wrong starting that conversation. Please try again — if it keeps happening, the details are in our logs.',
+        });
+    }
+});
+
+async function handleChatTurn(event: Parameters<Parameters<typeof withLambda>[0]>[0]) {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
 
     const db = getDb();
@@ -1350,4 +1378,4 @@ export default withLambda(async (event) => {
         // The user's turn is already persisted; the client can retry into the same session.
         return json(502, { chatSessionId: session.id, userMessageId: userMessage.id, error: "I'm having trouble right now — please try again in a moment." });
     }
-});
+}

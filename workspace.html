@@ -1318,13 +1318,28 @@ window.showComplianceModals = function showComplianceModals(force) {
            decide, not alternatives to deciding. -->
       <div id="post-review-buttons" class="space-y-2">
         <button id="post-review-approve-btn" onclick="rqReviewApprove()" class="w-full py-3 text-sm font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-emerald-600">Approve — let the assistant pick a time</button>
-        <button onclick="rqReviewToggle('reject')" class="w-full py-2.5 text-sm font-bold border border-red-300 text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer">Reject</button>
+        <!-- ── Reviewing SOMEONE ELSE'S draft ────────────────────────────────────────────────
+             Reject, "ask for a rewrite" and "change the time" are all answers to a draft the
+             assistant wrote and you are judging. On a post you are writing yourself they are
+             nonsense: you do not reject your own blank page, the rewrite actions are already in
+             step 1, and step 7 owns the schedule. Hidden for a 'draft' — see the draft actions
+             below, which replace them. -->
+        <button id="post-review-reject-toggle" onclick="rqReviewToggle('reject')" class="w-full py-2.5 text-sm font-bold border border-red-300 text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer">Reject</button>
         <!-- "Add or change image" and "Amend myself" are gone: the picture and the caption are both
              edited by clicking them on the post itself. -->
-        <div class="flex items-center justify-center gap-2 pt-0.5 text-[11px] text-gray-400">
+        <div id="post-review-quick-links" class="flex items-center justify-center gap-2 pt-0.5 text-[11px] text-gray-400">
           <button onclick="rqReviewToggle('changes')" class="font-semibold underline hover:text-violet-700 transition cursor-pointer">Ask for a rewrite</button>
           <span>·</span>
           <button onclick="rqReviewToggle('reschedule')" class="font-semibold underline hover:text-blue-700 transition cursor-pointer">Change the time</button>
+        </div>
+        <!-- ── Writing your OWN post ─────────────────────────────────────────────────────────
+             The two ways out that are not "publish it". Creating a post makes a real 'draft' row
+             immediately (the editor edits a row), so leaving without either of these already kept
+             the post — but nothing said so, and there was no way to throw one away. -->
+        <div id="post-review-draft-actions" class="hidden items-center justify-center gap-2 pt-0.5 text-[11px] text-gray-400">
+          <button onclick="rqReviewSaveDraft()" class="font-semibold underline hover:text-emerald-700 transition cursor-pointer">Save as a draft</button>
+          <span>·</span>
+          <button onclick="rqReviewDiscardDraft()" class="font-semibold underline hover:text-red-600 transition cursor-pointer">Discard this post</button>
         </div>
       </div>
       <!-- What happens AFTER approving, said in the modal rather than in a toast that is gone before
@@ -6823,6 +6838,27 @@ function _pceRefreshLinkMeta() {
  * cross-post you are writing ONE caption against as many as six different limits at once — so they
  * belong next to the words, updating as you type.
  */
+/**
+ * The platforms this post is currently too long for.
+ *
+ * Shares _pceLinkLine with the badges so both count the SAME string the publishers send — caption,
+ * hashtags and the appended link paragraph. On X that last part is the difference between a post and
+ * a 403, and two implementations of it would eventually disagree about which.
+ */
+function _pceOverLimitPlatforms(post) {
+    if (!post) return [];
+    const caption = _pceEl('post-review-caption')?.value || '';
+    const hashtags = _pceEl('post-review-hashtags')?.value || '';
+    const len = [caption, hashtags, _pceLinkLine(caption)].filter(Boolean).join('\n\n').length;
+    if (!len) return [];
+    const platforms = [...new Set(_rqReviewGroupIds.map(id => _rqPostCache[id]?.platform).filter(Boolean))];
+    if (post.platform && !platforms.includes(post.platform)) platforms.push(post.platform);
+    return platforms.filter(pl => {
+        const spec = window.PlatformConstants.get(pl);
+        return spec && len > spec.charLimit;
+    });
+}
+
 function _pceRefreshCaptionMeta() {
     // Two possible homes: the inspector's slot (old layout) and the host inside the canvas caption
     // block (rail layout, where there IS no inspector). Written to both rather than moved between
@@ -6848,6 +6884,14 @@ function _pceRefreshCaptionMeta() {
     // under 280 and go over it the moment the link paragraph is appended.
     const link = _pceLinkLine(caption);
     const len = [caption, hashtags, link].filter(Boolean).join('\n\n').length;
+    // Nothing written yet → nothing to count.
+    //
+    // A brand-new post opened on "Instagram · 0/2200", which is a limit check performed against no
+    // content, on a post that is not yet about any platform in particular. It read as a rule being
+    // imposed before the user had done anything. The count is genuinely useful the moment there ARE
+    // words — it is what says "too long for X" while there is still time to cut — so it appears then,
+    // and step 6 carries the verdict either way (see _railSub).
+    if (!len) { paint(''); return; }
     // These badges count CHARACTERS, and nothing else.
     //
     // They used to swap the count for "needs an image" / "needs a video" on a platform with no media
@@ -7009,6 +7053,9 @@ function _pceOpenInlineCaption() {
 
 async function _pceCommitInlineCaption(ta) {
     if (ta.dataset.done) return;         // Esc closed it, or a commit is already running
+    // The caption box is destroyed by the re-render below. A recogniser still running would go on
+    // writing into a detached textarea — audible-but-invisible dictation.
+    gpStopVoice();
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
     if (!post) return;
     ta.dataset.done = '1';
@@ -7243,6 +7290,14 @@ function _railSub(key, post) {
             return parts.join(' · ');
         }
         case 'check': {
+            // Over-limit platforms come FIRST, and are computed here rather than read from the paid
+            // review. This is where the length check belongs: it is a check, and it is the one that
+            // decides whether a post can publish at all. The badges under the caption are the live
+            // detail while you type; this is the verdict, stated on the step that is about checking.
+            const tooLong = _pceOverLimitPlatforms(post);
+            if (tooLong.length) {
+                return `Too long for ${tooLong.map(pl => window.PlatformConstants.label(pl)).join(', ')}`;
+            }
             // Mirrors what the quality panel is currently showing, rather than re-running it: the
             // review is a paid call and a subtitle must never trigger one.
             //
@@ -9560,6 +9615,21 @@ function _rqReviewRenderActive() {
     const rejectBtn = document.getElementById('post-review-reject-btn');
     if (rejectBtn) rejectBtn.textContent = multi ? `Reject all ${groupSize} & archive` : 'Reject & archive';
 
+    // ── Whose draft is this? ──────────────────────────────────────────────────────────────────
+    // 'draft' is the status create-manual-post gives a post you started yourself; the assistant's
+    // drafts arrive as 'pending_approval' (or 'in_review' once opened). The distinction decides
+    // which footer you get: judging someone else's work, or finishing your own.
+    const isOwnDraft = post.status === 'draft';
+    document.getElementById('post-review-reject-toggle')?.classList.toggle('hidden', isOwnDraft);
+    // Both classes on each: `hidden` and a display utility are the same specificity, so removing one
+    // without removing the other leaves whichever came last in the compiled sheet winning.
+    for (const [id, on] of [['post-review-quick-links', !isOwnDraft], ['post-review-draft-actions', isOwnDraft]]) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        el.classList.toggle('hidden', !on);
+        el.classList.toggle('flex', on);
+    }
+
     // Per-post AI disclosure footer opt-out — only meaningful when the workspace footer is enabled.
     const discRow = document.getElementById('post-review-disclosure');
     if (discRow) {
@@ -9628,7 +9698,54 @@ function _rqReviewMissingPlatforms() {
     return platforms.filter(p => !rqPlatformConnected(p));
 }
 
+/**
+ * Keep this post and come back to it later.
+ *
+ * The row already exists and every edit saves as it is made, so this mostly SAYS what has already
+ * happened — which is the point: leaving silently was indistinguishable from losing the work. The one
+ * real job is flushing a caption still open on the canvas, because that box commits on blur and
+ * closing the modal from a button is not a blur.
+ */
+async function rqReviewSaveDraft() {
+    const ta = document.getElementById('pce-inline-caption');
+    if (ta && !ta.dataset.done) await _pceCommitInlineCaption(ta);
+    window.showToast?.('Saved as a draft — pick it up from Content whenever you like.', { icon: '💾' });
+    closePostReview();
+}
+
+/**
+ * Throw this post away.
+ *
+ * Soft-cancel, not a hard delete, and for the same reason the AI-draft path already discards the
+ * blank row it replaces this way: 'cancelled' appears in no Review Queue column and is not a
+ * schedule-active status, so the post vanishes from every surface without destroying anything.
+ * Every platform in the group goes, because they are one post.
+ */
+async function rqReviewDiscardDraft() {
+    const ids = _rqReviewGroupIds.length ? [..._rqReviewGroupIds] : (_rqReviewPostId != null ? [_rqReviewPostId] : []);
+    if (!ids.length) { closePostReview(); return; }
+    const what = ids.length > 1 ? `this post and its ${ids.length - 1} other platform${ids.length > 2 ? 's' : ''}` : 'this post';
+    if (!confirm(`Discard ${what}? This cannot be undone from here.`)) return;
+
+    const results = await Promise.all(ids.map(id =>
+        fetch(`/.netlify/functions/scheduled-posts?id=${id}`, { method: 'DELETE' })
+            .then(r => r.ok)
+            .catch(() => false)
+    ));
+    if (results.some(ok => !ok)) {
+        window.showToast?.('Some platforms could not be discarded — please try again.', { icon: '⚠️' });
+        return;
+    }
+    ids.forEach(id => { delete _rqPostCache[id]; });
+    window.showToast?.('Post discarded.', { icon: '🗑️' });
+    closePostReview();
+    // Whichever review surface is on screen listed it a moment ago. closePostReview already asks
+    // the calendar to reload, so this covers the queue and the assistant-detail list.
+    rqRefreshVisibleReviewSurface();
+}
+
 function closePostReview() {
+    gpStopVoice();            // a closed modal must not keep listening
     _rqRestoreMediaPanel();   // hand the shared media panel back to the generate-post sheet
     _railOpen = null;         // a reopened modal starts with every step closed; a re-RENDER does not
     _rqStopRenderPoll();      // nothing to update once the modal is gone
@@ -10948,12 +11065,52 @@ const GP_VOICE_FIELDS = {
     },
     'post-review-feedback': { mic: 'pce-feedback-mic' },
 };
+// The one dictation session that can be running, and the field it is writing into.
+//
+// Without this, every mic click started ANOTHER recogniser and none of them was ever stopped. The
+// browser only lets one hold the microphone, so the sequence the user actually hits — click, grant
+// permission (which ends that first session with no result), click again — had the second start()
+// racing a session the page had forgotten about. It failed with 'aborted', and because the only
+// error handling was "un-redden the button", it failed in complete silence: the mic simply never
+// came on again. A second click is now STOP, and starting always clears whatever came before.
+let _gpVoice = null;   // { handle, targetId, micId } | null
+
+/** Tell the user why dictation did not start. Silence here is what made this look broken. */
+function gpVoiceError(targetId, kind) {
+    const msg = kind === 'not-allowed' || kind === 'service-not-allowed'
+        ? 'Microphone access is blocked. Allow it in your browser’s address bar, then try again.'
+        : kind === 'no-speech' ? 'I didn’t catch anything — try again.'
+        : kind === 'audio-capture' ? 'No microphone found.'
+        : 'Dictation could not start. Try again.';
+    // The editor's caption and rewrite boxes have no status line of their own, so the toast is the
+    // only place this can be said.
+    window.showToast?.(msg, { icon: '🎤' });
+}
+
+function gpStopVoice() {
+    if (!_gpVoice) return;
+    const { handle, micId } = _gpVoice;
+    _gpVoice = null;
+    document.getElementById(micId)?.classList.remove('text-red-500', 'animate-pulse');
+    try { handle?.stop(); } catch { /* already gone */ }
+}
+
 function gpStartVoice(targetId = 'gen-post-context') {
     const cfg = GP_VOICE_FIELDS[targetId] || { mic: 'gen-post-mic-btn' };
     if (!window.SwanSpeech.isSupported()) { alert('Voice input is not supported in this browser. Try Chrome or Safari.'); return; }
+
+    // Clicking the mic that is already listening means "stop", the way every dictation button does.
+    if (_gpVoice && _gpVoice.targetId === targetId) { gpStopVoice(); return; }
+    // Clicking a DIFFERENT field's mic hands the microphone over rather than fighting for it.
+    gpStopVoice();
+
     const micBtn = document.getElementById(cfg.mic);
-    const clearMic = () => { if (micBtn) micBtn.classList.remove('text-red-500'); };
-    if (micBtn) micBtn.classList.add('text-red-500');
+    const clearMic = () => {
+        if (_gpVoice && _gpVoice.targetId !== targetId) return;   // a newer session owns the UI now
+        _gpVoice = null;
+        if (micBtn) micBtn.classList.remove('text-red-500', 'animate-pulse');
+    };
+    if (micBtn) micBtn.classList.add('text-red-500', 'animate-pulse');
     const handle = window.SwanSpeech.start({
         lang: 'en-GB',
         interimResults: false,
@@ -10975,9 +11132,14 @@ function gpStartVoice(targetId = 'gen-post-context') {
             if (cfg.after) cfg.after();
         },
         onEnd: clearMic,
-        onError: clearMic,
+        onError: (kind) => {
+            // 'aborted' is what a stop() or a hand-over looks like; it is not a failure to report.
+            if (kind !== 'aborted') gpVoiceError(targetId, kind);
+            clearMic();
+        },
     });
-    if (!handle) clearMic();
+    if (!handle) { clearMic(); gpVoiceError(targetId, 'start-failed'); return; }
+    _gpVoice = { handle, targetId, micId: cfg.mic };
 }
 
 // ── Shared chip styling for the write-your-own platform buttons ──────────────────

@@ -234,4 +234,82 @@ check('the platform tab bar shows even for a single-platform post', () => {
     assert.match(body, /Add a platform/, 'a single-platform post needs a route to a second one');
 });
 
+// ── 10. Length checks wait until there is something to check ────────────────────────────────────
+check('the caption badges say nothing on an empty post, and step 6 carries the verdict', () => {
+    const fn = workspace.slice(workspace.indexOf('function _pceRefreshCaptionMeta'));
+    assert.match(fn.slice(0, 3000), /if \(!len\) \{ paint\(''\); return; \}/,
+        '"Instagram · 0/2200" on a brand-new post is a limit check against no content');
+    // The check itself must still happen — moved, not dropped.
+    assert.ok(workspace.includes('function _pceOverLimitPlatforms('),
+        'the over-limit check needs one shared implementation');
+    const sub = workspace.slice(workspace.indexOf("case 'check': {"));
+    assert.match(sub.slice(0, 900), /_pceOverLimitPlatforms\(post\)/,
+        'step 6 is where the length verdict belongs');
+    assert.match(sub.slice(0, 900), /Too long for/, 'step 6 must name the platforms it is too long for');
+    // Both readers must count the same string, link paragraph included.
+    const shared = workspace.slice(workspace.indexOf('function _pceOverLimitPlatforms('), workspace.indexOf('function _pceRefreshCaptionMeta'));
+    assert.match(shared, /_pceLinkLine\(caption\)/,
+        'the badges and step 6 must count the same text the publishers send, or they will disagree');
+});
+
+// ── 11. Dictation is a toggle that owns exactly one recogniser ───────────────────────────────────
+// The bug: every click called SwanSpeech.start() and nothing was ever stopped. The browser allows
+// one recogniser, so click → grant permission (ends that session) → click again raced a forgotten
+// session, failed with 'aborted', and the only handling was to un-redden the button. Silent.
+check('the mic toggles, tracks one session, and reports real failures', () => {
+    const fn = workspace.slice(workspace.indexOf('let _gpVoice = null;'), workspace.indexOf('// ── Shared chip styling'));
+    assert.match(fn, /if \(_gpVoice && _gpVoice\.targetId === targetId\) \{ gpStopVoice\(\); return; \}/,
+        'a second click on the listening mic must STOP, not start a rival recogniser');
+    assert.match(fn, /gpStopVoice\(\);\n\n    const micBtn/,
+        'starting must clear whatever session came before, so a stale one cannot hold the microphone');
+    assert.match(fn, /_gpVoice = \{ handle, targetId, micId: cfg\.mic \}/,
+        'the handle has to be kept or it can never be stopped');
+    assert.match(fn, /if \(kind !== 'aborted'\) gpVoiceError/,
+        "'aborted' is what a stop looks like — reporting it would cry wolf on every hand-over");
+    assert.ok(fn.includes('Microphone access is blocked'),
+        'a denied microphone must say so — silence is what made this look broken');
+
+    // Dictation must not outlive the box it writes into.
+    const commit = workspace.slice(workspace.indexOf('async function _pceCommitInlineCaption'));
+    assert.match(commit.slice(0, 600), /gpStopVoice\(\)/,
+        'the caption box is destroyed by the re-render; a live recogniser would write into a detached node');
+    const close = workspace.slice(workspace.indexOf('function closePostReview()'));
+    assert.match(close.slice(0, 400), /gpStopVoice\(\)/, 'a closed modal must not keep listening');
+});
+
+// ── 12. The orchestrator always answers in JSON ──────────────────────────────────────────────────
+// A throw outside its single try/catch escaped to withLambda as a bare platform 502 with no body,
+// which the chat UI can only report as "Something went wrong (HTTP 502)" — the exact symptom seen
+// from "Talk it through in chat". Half the handler ran with no boundary at all.
+check('chat-orchestrator has an error boundary around the whole handler', () => {
+    const src = read('netlify/functions/chat-orchestrator.ts');
+    assert.match(src, /export default withLambda\(async \(event\) => \{\s*try \{\s*return await handleChatTurn\(event\);/,
+        'the whole turn needs a boundary, not just the LLM call');
+    assert.match(src, /async function handleChatTurn\(/, 'the handler body must be callable from the wrapper');
+    assert.match(src, /unhandled error before the LLM boundary/,
+        'the outer catch must log, or the next raw 502 is just as undiagnosable');
+});
+
+// ── 13. Your own draft gets ways out that are not "publish" ──────────────────────────────────────
+check('a post you are writing offers save-and-discard, not reject-and-rewrite', () => {
+    for (const id of ['post-review-reject-toggle', 'post-review-quick-links', 'post-review-draft-actions']) {
+        assert.ok(workspace.includes(`id="${id}"`), `#${id} is needed to switch the footer by authorship`);
+    }
+    const sync = workspace.slice(workspace.indexOf("const isOwnDraft = post.status === 'draft';"));
+    assert.match(sync.slice(0, 900), /post-review-reject-toggle'\)\?\.classList\.toggle\('hidden', isOwnDraft\)/,
+        'you do not reject your own blank page');
+    assert.match(sync.slice(0, 900), /\['post-review-quick-links', !isOwnDraft\]/,
+        'the rewrite and re-time links belong to reviewing someone else\'s draft');
+    assert.match(sync.slice(0, 900), /\['post-review-draft-actions', isOwnDraft\]/,
+        'save/discard belong to writing your own');
+    // Discard reuses the established soft-cancel, and covers the whole cross-post group.
+    const discard = workspace.slice(workspace.indexOf('async function rqReviewDiscardDraft()'));
+    assert.match(discard.slice(0, 1500), /method: 'DELETE'/, 'discard must actually retire the row');
+    assert.match(discard.slice(0, 1500), /_rqReviewGroupIds/, 'every platform in the group is one post');
+    // Save must flush a caption still open on the canvas — that box commits on blur, and a button is not a blur.
+    const save = workspace.slice(workspace.indexOf('async function rqReviewSaveDraft()'));
+    assert.match(save.slice(0, 700), /_pceCommitInlineCaption\(ta\)/,
+        'closing from a button is not a blur, so an open caption would be lost');
+});
+
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);
