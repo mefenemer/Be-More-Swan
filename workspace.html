@@ -634,6 +634,14 @@ window.showComplianceModals = function showComplianceModals(force) {
           </div>
           <p id="pce-ai-msg" class="text-[10px] text-gray-400 text-right"></p>
         </div>
+        <!-- Layout switch, while both layouts exist. A URL flag turned out to be unusable for
+             comparing them: auth-check.js redirects a signed-out visitor before any script in the
+             body runs, and arriving from the app's own nav carries no query string at all — so
+             ?rail=1 kept being lost. This is the same flag, somewhere it can actually be reached.
+             Delete this button (and _railSet's storage) once the layout is decided. -->
+        <button type="button" id="pce-layout-toggle" onclick="_railToggleLayout()"
+          title="Switch between the three-pane editor and the step rail"
+          class="px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-500 hover:bg-gray-50 text-[11px] font-bold transition cursor-pointer"></button>
         <button onclick="closePostReview()" aria-label="Close" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 cursor-pointer">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
@@ -7070,6 +7078,25 @@ function _railSet(on) {
 }
 window._railSet = _railSet;
 
+/**
+ * The header's layout switch.
+ *
+ * Re-renders the whole modal rather than just re-applying the panes: the mock-up decides at RENDER
+ * time whether to carry the caption-length badges (they have nowhere else to go without an
+ * inspector), so flipping the flag without redrawing leaves the canvas built for the other layout.
+ */
+function _railToggleLayout() {
+    _railSet(!_railOn);
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (post) _rqReviewRenderActive(); else _railPaintLayoutToggle();
+}
+
+/** Label the switch with the layout it will GIVE you, not the one you are in. */
+function _railPaintLayoutToggle() {
+    const btn = document.getElementById('pce-layout-toggle');
+    if (btn) btn.textContent = _railOn ? 'Use panes' : 'Try step rail';
+}
+
 let _railOpen = null;                 // key of the one open step, or null
 const _railHomes = new Map();         // node id → where it came from, so it can go back
 
@@ -7155,9 +7182,17 @@ function _railSub(key, post) {
         case 'check': {
             // Mirrors what the quality panel is currently showing, rather than re-running it: the
             // review is a paid call and a subtitle must never trigger one.
+            //
+            // The panel itself is hidden until a review has run, and its "Checking this post…" line
+            // is visible in the markup from the start — so reading that line alone reported
+            // "Checking…" on every post that had never been checked at all. Ask whether the panel
+            // is even showing first.
+            const panel = document.getElementById('post-review-quality');
+            if (!panel || panel.classList.contains('hidden')) return 'Not checked yet';
+            const loading = document.getElementById('prq-loading');
+            if (loading && !loading.classList.contains('hidden')) return 'Checking…';
             const wrap = document.getElementById('prq-warnings');
             const n = wrap ? wrap.children.length : 0;
-            if (document.getElementById('prq-loading') && !document.getElementById('prq-loading').classList.contains('hidden')) return 'Checking…';
             return n ? `${n} thing${n === 1 ? '' : 's'} to look at` : 'Nothing flagged';
         }
         case 'when': {
@@ -7241,6 +7276,7 @@ function _railApplyLayout() {
             document.getElementById(id)?.classList.remove('hidden');
         }
         _pceApplyPanes();
+        _railPaintLayoutToggle();
         return;
     }
     for (const el of [left, insp]) {
@@ -7257,6 +7293,7 @@ function _railApplyLayout() {
     // judged against the clip, so it stays under the media.
     strip?.classList.add('hidden');
     _railRender();
+    _railPaintLayoutToggle();
 }
 
 /** Paint the rail for the post on screen. Cheap enough to call on every state change. */
@@ -9441,6 +9478,17 @@ function _rqReviewRenderActive() {
     }
 
     _rqRenderRenderAlert(post);
+
+    // The heading was the literal string "Review post" in the markup and was never set from
+    // anything — so starting a post yourself opened a modal telling you to review it. What you are
+    // doing is knowable from the post's own status: an assistant's draft waits in pending_approval
+    // (that IS the review), one you started with Create Post is a draft, and an approved or
+    // scheduled post you have reopened is an edit.
+    const title = post.status === 'pending_approval' || post.status === 'in_review' ? 'Review post'
+        : post.status === 'draft' ? 'New post'
+        : ['approved', 'scheduled'].includes(post.status) ? 'Edit post'
+        : 'Post';
+    document.getElementById('post-review-title').textContent = title;
 
     const when = post.publishDate ? new Date(post.publishDate).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : null;
     document.getElementById('post-review-sub').textContent =
