@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-calendar-grouping",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4218",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/ece948c3-2a9e-4ba2-9740-b43ac828fed5/scratchpad/calharness"
+      ],
+      "port": 4218,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-rail",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

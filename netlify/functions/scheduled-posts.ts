@@ -8,7 +8,7 @@
 
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
-import { eq, and, gte, lte } from 'drizzle-orm';
+import { eq, and, gte, lte, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, scheduledPosts, contentAssets, contentProvenance, userOrganisations } from '../../db/schema';
 import { createHmac, createHash, randomUUID } from 'crypto';
@@ -18,6 +18,7 @@ import { requireOnboarding } from '../../src/utils/onboarding-guard';
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { normalisePostLink } from '../../src/utils/post-link';
+import { SCHEDULE_ACTIVE_STATUSES } from '../../src/config/post-status';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -92,11 +93,17 @@ export default withLambda(async (event) => {
             const from = qs.from ? new Date(qs.from) : (() => { const d = new Date(); d.setDate(1); d.setHours(0,0,0,0); return d; })();
             const to   = qs.to   ? new Date(qs.to)   : (() => { const d = new Date(); d.setMonth(d.getMonth()+1,0); d.setHours(23,59,59,999); return d; })();
 
+            // Only posts whose schedule is actually LIVE. Every draft carries a proposed
+            // publish_date from the moment the assistant creates it, but that slot isn't committed
+            // until someone presses Schedule (approve-post.ts → 'scheduled'). Returning drafts here
+            // made the calendar unreadable: unapproved work sat next to real appointments, so the
+            // grid stopped answering "what is going out". Drafts live in the Review Queue.
             const posts = await db.select().from(scheduledPosts)
                 .where(and(
                     eq(scheduledPosts.userId, userId),
                     gte(scheduledPosts.publishDate, from),
                     lte(scheduledPosts.publishDate, to),
+                    inArray(scheduledPosts.status, [...SCHEDULE_ACTIVE_STATUSES]),
                 ));
 
             return { statusCode: 200, body: JSON.stringify({ posts }) };

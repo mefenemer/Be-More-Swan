@@ -53,6 +53,13 @@
     {"k":"yt_live","p":"youtube","n":"Live","d":"Real-time stream.","m":"none","ar":"","min":0,"max":0,"cl":0,"a":"blocked","why":"Streaming happens in the moment — there is nothing to draft or schedule here."},
   ];
 
+  // scheduled_posts statuses whose schedule is LIVE, from src/config/post-status.ts. A draft's
+  // publish_date is only a proposal until someone presses Schedule, so the calendar renders these
+  // and nothing else.
+  var SCHEDULE_ACTIVE_STATUSES = ["approved","scheduled","publishing","published","paused","failed"];
+  var scheduleActive = {};
+  for (var s = 0; s < SCHEDULE_ACTIVE_STATUSES.length; s++) scheduleActive[SCHEDULE_ACTIVE_STATUSES[s]] = true;
+
   var byId = {};
   for (var i = 0; i < PLATFORMS.length; i++) byId[PLATFORMS[i].id] = PLATFORMS[i];
 
@@ -62,6 +69,17 @@
 
     /** Every post format, in catalogue order. Shape matches the editor's _PCE_FORMATS records. */
     formats: POST_FORMATS,
+
+    /** scheduled_posts statuses that mean "committed to publish", in canonical order. */
+    scheduleActiveStatuses: SCHEDULE_ACTIVE_STATUSES,
+
+    /**
+     * True when a post is committed to publish — i.e. it belongs on the Content Calendar. Drafts
+     * carry a proposed publish_date from birth; only pressing Schedule makes that date real.
+     */
+    isScheduleActive: function (status) {
+      return scheduleActive[String(status == null ? '' : status)] === true;
+    },
 
     /** One platform's facts. Tolerates legacy 'twitter'; returns null for anything unknown. */
     get: function (id) {

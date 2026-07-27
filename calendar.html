@@ -107,6 +107,12 @@
         </div>
       </div>
 
+      <!-- Cross-post platform tabs. A post sent to several platforms is several scheduled_posts
+           rows sharing a crosspost_group_id; the calendar shows them as ONE chip reading
+           "Multiple", and this strip is how the user sees — and switches between — the platforms
+           it went to. Hidden (by calendar.js) for a single-platform post. -->
+      <div id="panel-platform-tabs" class="hidden shrink-0 px-5 py-2.5 border-b border-gray-100 bg-gray-50/70"></div>
+
       <!-- Panel scrollable body -->
       <div class="flex-1 overflow-y-auto px-5 py-5 space-y-6">
 

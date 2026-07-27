@@ -52,6 +52,91 @@ const STATUS_META = {
     cancelled:       { label: 'Cancelled',   badge: 'bg-gray-100 text-gray-400 border-gray-200',   chipBorder: 'border-gray-300',    dot: 'bg-gray-300' },
 };
 
+// Stacked-layers glyph for a cross-post group — one logical post going to several platforms.
+// Deliberately NOT one of the platform logos: the chip is claiming "more than one network", and
+// borrowing (say) the Instagram mark for that would misreport where the post is going.
+const MULTI_PLATFORM_ICON = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-full h-full"><path d="M12 2 2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>`;
+
+// Avatar for a grouped post. Same footprint as _platAvatar so chips stay aligned whether or not
+// they're cross-posted.
+function _multiAvatar(sizePx = 36) {
+    const inner = `<span style="display:flex;width:${Math.round(sizePx*0.55)}px;height:${Math.round(sizePx*0.55)}px;color:#fff">${MULTI_PLATFORM_ICON}</span>`;
+    return `<div style="width:${sizePx}px;height:${sizePx}px;border-radius:10px;background:linear-gradient(135deg,#334155,#64748b);display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 1px 3px rgba(0,0,0,.15)">${inner}</div>`;
+}
+
+// The generated mirror of src/config/post-status.ts, loaded ahead of this file in workspace.html.
+// A draft carries a proposed publish_date from the moment it's created; only pressing Schedule
+// commits it. Never retype the status list here — a hand copy is exactly what drifts out of step
+// with the server filter in scheduled-posts.ts.
+function _scheduleActive(status) {
+    return !!(window.PlatformConstants && window.PlatformConstants.isScheduleActive(status));
+}
+
+// ── Cross-post grouping ───────────────────────────────────────────
+// A post the user cross-posts is fanned out into one scheduled_posts row per platform, every
+// sibling carrying the same crosspost_group_id. Rendering those rows individually filled a day cell
+// with four near-identical chips, which is the clutter this collapses away — the same collapse the
+// Review Queue already does. Rows with no group id (standalone, or legacy) key by their own id and
+// therefore always stand alone.
+function _groupKey(post) {
+    return post.crosspostGroupId ? `g:${post.crosspostGroupId}` : `id:${post.id}`;
+}
+
+// Catalogue order, read from the generated constants rather than a hand-written list — the
+// hand-written one in the Review Queue had four entries, which sorted Threads and YouTube to the
+// end of every group.
+function _platformRank(platform) {
+    const order = (window.PlatformConstants && window.PlatformConstants.all) || [];
+    const i = order.findIndex(p => p.id === platform);
+    return i < 0 ? 99 : i;
+}
+
+// Collapse a flat post list into one entry per logical post: { members, rep, platforms }.
+function _groupPosts(posts) {
+    const byKey = new Map();
+    posts.forEach(p => {
+        const k = _groupKey(p);
+        if (!byKey.has(k)) byKey.set(k, []);
+        byKey.get(k).push(p);
+    });
+    const groups = [];
+    byKey.forEach(members => {
+        members.sort((a, b) => _platformRank(a.platform) - _platformRank(b.platform));
+        groups.push({ members, rep: members[0], platforms: members.map(m => m.platform) });
+    });
+    groups.sort((a, b) => new Date(a.rep.publishDate) - new Date(b.rep.publishDate));
+    return groups;
+}
+
+// The status a grouped chip reports. Ordered "needs attention first, done last" so a group is never
+// shown as finished while a sibling is still queued, and a single failed platform is never hidden
+// behind three successes.
+const _GROUP_STATUS_PRIORITY = ['failed', 'paused', 'publishing', 'scheduled', 'approved', 'published'];
+function _groupStatus(members) {
+    for (const s of _GROUP_STATUS_PRIORITY) {
+        if (members.some(m => m.status === s)) return s;
+    }
+    return members[0] ? members[0].status : 'scheduled';
+}
+
+// Every row of the logical post this one belongs to, in catalogue order. Siblings always share a
+// publish slot, so they are loaded together in any range that contains one of them.
+function _siblingsOf(post) {
+    if (!post) return [];
+    if (!post.crosspostGroupId) return [post];
+    const sibs = _posts.filter(p => p.crosspostGroupId === post.crosspostGroupId);
+    if (!sibs.some(p => p.id === post.id)) sibs.push(post);
+    sibs.sort((a, b) => _platformRank(a.platform) - _platformRank(b.platform));
+    return sibs;
+}
+
+// Human list of the platforms in a group ("Instagram, LinkedIn and X").
+function _platformNames(platforms) {
+    const labels = platforms.map(p => (PLATFORM_META[p] || {}).label || p);
+    if (labels.length <= 1) return labels[0] || '';
+    return `${labels.slice(0, -1).join(', ')} and ${labels[labels.length - 1]}`;
+}
+
 // A post is "overdue" when its scheduled time has passed but the publisher hasn't
 // confirmed it live yet. This is the case the calendar must make visible — otherwise
 // it looks identical to a normal scheduled post sitting on a past date.
@@ -300,7 +385,7 @@ function _renderMonth() {
         const date = new Date(year, month, day);
         const dateKey = _dateKey(date);
         const isToday = _dateKey(today) === dateKey;
-        const dayPosts = _postsOnDate(date);
+        const dayGroups = _postsOnDate(date);
 
         const tdClass = `relative border-r border-b border-gray-100 ${isToday ? 'bg-emerald-50/40' : 'bg-white hover:bg-gray-50/60'} transition p-1.5`;
 
@@ -314,7 +399,7 @@ function _renderMonth() {
         const dayActs = _activitiesOnDate(date);
         const dayBlogs = _blogPostsOnDate(date);
         const dayRecords = _scheduledRecordsOnDate(date);
-        html += `<div class="space-y-1">${dayPosts.map(p => _postChip(p, 'month')).join('')}${dayBlogs.map(_blogChip).join('')}${dayRecords.map(r => _recordChip(r, 'month')).join('')}${dayActs.map(a => _activityChip(a, 'month')).join('')}</div>`;
+        html += `<div class="space-y-1">${dayGroups.map(g => _postChip(g, 'month')).join('')}${dayBlogs.map(_blogChip).join('')}${dayRecords.map(r => _recordChip(r, 'month')).join('')}${dayActs.map(a => _activityChip(a, 'month')).join('')}</div>`;
         html += `</div>`;
     }
 
@@ -342,13 +427,13 @@ function _renderWeek() {
     for (let i = 0; i < 7; i++) {
         const d = new Date(ws); d.setDate(d.getDate() + i);
         const dateKey = _dateKey(d);
-        const dayPosts = _postsOnDate(d);
+        const dayGroups = _postsOnDate(d);
         html += `<div class="border-r border-b border-gray-100 min-h-[300px] p-2 space-y-1.5 bg-white hover:bg-gray-50/40 transition"
             data-date="${dateKey}"
             ondragover="window._calDragOver(event, '${dateKey}')"
             ondragleave="window._calDragLeave(event)"
             ondrop="window._calDrop(event, '${dateKey}')">
-            ${dayPosts.map(p => _postChip(p, 'week')).join('')}${_blogPostsOnDate(d).map(_blogChip).join('')}${_scheduledRecordsOnDate(d).map(r => _recordChip(r, 'week')).join('')}${_activitiesOnDate(d).map(a => _activityChip(a, 'week')).join('')}
+            ${dayGroups.map(g => _postChip(g, 'week')).join('')}${_blogPostsOnDate(d).map(_blogChip).join('')}${_scheduledRecordsOnDate(d).map(r => _recordChip(r, 'week')).join('')}${_activitiesOnDate(d).map(a => _activityChip(a, 'week')).join('')}
         </div>`;
     }
     html += `</div>`;
@@ -360,12 +445,13 @@ function _renderList() {
     const year = _anchor.getFullYear(), month = _anchor.getMonth();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
 
-    // Filter tabs
+    // Filter tabs. There is no "Pending Review" tab: unapproved drafts never reach the calendar, so
+    // it could only ever have rendered an empty list. They live in the Review Queue.
     const tabs = [
         { key: 'all',       label: 'All' },
-        { key: 'pending',   label: 'Pending Review' },
-        { key: 'approved',  label: 'Approved & Scheduled' },
+        { key: 'scheduled', label: 'Scheduled' },
         { key: 'published', label: 'Published' },
+        { key: 'attention', label: 'Needs Attention' },
     ];
     let html = `<div class="sticky top-0 z-10 bg-white border-b border-gray-200 px-4 flex gap-1 overflow-x-auto">`;
     tabs.forEach(t => {
@@ -380,37 +466,45 @@ function _renderList() {
     // Apply filter
     const statusSets = {
         all:       null,
-        pending:   new Set(['draft', 'in_review']),
-        approved:  new Set(['approved', 'scheduled']),
+        scheduled: new Set(['approved', 'scheduled', 'publishing']),
         published: new Set(['published']),
+        attention: new Set(['failed', 'paused']),
     };
     const allowedStatuses = statusSets[_listFilter];
 
-    const groups = [];
+    const days = [];
     for (let d = 1; d <= daysInMonth; d++) {
         const date = new Date(year, month, d);
-        let posts = _postsOnDate(date);
+        let postGroups = _postsOnDate(date);
         let blogs = _blogPostsOnDate(date);
         // Scheduled Data Hub records are approval_status='scheduled', so they only
-        // belong under the "All" and "Approved & Scheduled" filters.
-        let records = (_listFilter === 'all' || _listFilter === 'approved') ? _scheduledRecordsOnDate(date) : [];
+        // belong under the "All" and "Scheduled" filters.
+        let records = (_listFilter === 'all' || _listFilter === 'scheduled') ? _scheduledRecordsOnDate(date) : [];
         if (allowedStatuses) {
-            posts = posts.filter(p => allowedStatuses.has(p.status));
+            // Filter INSIDE each cross-post group, then drop groups the filter emptied — a post
+            // whose Instagram sibling failed still belongs under "Needs Attention", showing only
+            // the sibling that needs it.
+            postGroups = postGroups
+                .map(g => {
+                    const members = g.members.filter(p => allowedStatuses.has(p.status));
+                    return members.length ? { members, rep: members[0], platforms: members.map(m => m.platform) } : null;
+                })
+                .filter(Boolean);
             blogs = blogs.filter(p => allowedStatuses.has(p.status));
         }
-        if (posts.length > 0 || blogs.length > 0 || records.length > 0) groups.push({ date, posts, blogs, records });
+        if (postGroups.length > 0 || blogs.length > 0 || records.length > 0) days.push({ date, postGroups, blogs, records });
     }
 
-    if (groups.length === 0) {
+    if (days.length === 0) {
         html += `<div class="flex flex-col items-center justify-center py-24 text-gray-400 gap-3">
             <svg class="w-10 h-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-            <p class="text-sm font-medium">No posts${_listFilter !== 'all' ? ' in this filter' : ''} this month.</p>
+            <p class="text-sm font-medium">${_listFilter === 'all' ? 'Nothing scheduled this month. Approve a draft in the Review Queue to put it on the calendar.' : 'No posts in this filter this month.'}</p>
         </div>`;
         return html;
     }
 
     html += `<div class="max-w-3xl mx-auto px-4 py-6 space-y-8">`;
-    groups.forEach(({ date, posts, blogs, records }) => {
+    days.forEach(({ date, postGroups, blogs, records }) => {
         const today = new Date(); today.setHours(0,0,0,0);
         const isToday = _dateKey(date) === _dateKey(today);
         html += `<div>
@@ -421,7 +515,7 @@ function _renderList() {
                 </span>
                 <div class="flex-1 h-px bg-gray-200"></div>
             </div>
-            <div class="space-y-2">${posts.map(p => _listRow(p)).join('')}${(blogs || []).map(_blogChip).join('')}${(records || []).map(_listRecordRow).join('')}</div>
+            <div class="space-y-2">${postGroups.map(g => _listRow(g)).join('')}${(blogs || []).map(_blogChip).join('')}${(records || []).map(_listRecordRow).join('')}</div>
         </div>`;
     });
     html += `</div>`;
@@ -434,17 +528,23 @@ window._calSetListFilter = function (key) {
 };
 
 // ── Post chip (month/week) ────────────────────────────────────────
-function _postChip(post, viewType) {
+// Takes a GROUP from _postsOnDate. A cross-post renders as one chip labelled "Multiple"; opening it
+// gives per-platform tabs.
+function _postChip(group, viewType) {
+    const post = group.rep;
+    const members = group.members;
+    const multi = members.length > 1;
     const plat = PLATFORM_META[post.platform] || { label: post.platform, bg: '#9ca3af', text: 'text-white' };
-    const sm = STATUS_META[post.status] || STATUS_META.draft;
-    const posted = post.status === 'published';
-    const publishing = post.status === 'publishing';
-    const overdue = _isOverdue(post);
+    const status = _groupStatus(members);
+    const sm = STATUS_META[status] || STATUS_META.draft;
+    const posted = status === 'published';
+    const publishing = status === 'publishing';
+    const overdue = members.some(_isOverdue);
     // Posted posts show when they actually went live (publishedAt); everything else
     // shows the scheduled time.
     const stamp = posted && post.publishedAt ? new Date(post.publishedAt) : new Date(post.publishDate);
     const time = stamp.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
-    const isDraggable = ['draft', 'in_review', 'approved', 'scheduled'].includes(post.status);
+    const isDraggable = ['approved', 'scheduled'].includes(status);
 
     const revisedBadge = post.isRevised ? `<span class="text-[9px] font-bold text-violet-600 bg-violet-50 border border-violet-200 px-1 rounded shrink-0">Revised</span>` : '';
     // #4: left border = assistant colour; status stays glanceable via the right-hand marker.
@@ -475,7 +575,11 @@ function _postChip(post, viewType) {
         marker = `<span class="w-1.5 h-1.5 rounded-full ${sm.dot} shrink-0" title="${sm.label}"></span>`;
     }
 
-    const summary = post.caption || plat.label || post.platform || '';
+    // The one-line identity of the chip. A cross-post reads "Multiple" rather than naming one of its
+    // platforms — the whole point of collapsing the group is that no single platform is the answer.
+    const platLabel = multi ? `Multiple (${members.length})` : plat.label;
+    const summary = post.caption || platLabel || post.platform || '';
+    const platNames = _platformNames(group.platforms);
 
     return `<div
         onclick="window._calOpenPost(${post.id})"
@@ -485,10 +589,10 @@ function _postChip(post, viewType) {
         data-post-id="${post.id}"
         class="group flex items-center gap-1.5 px-2 py-1 rounded-lg ${chipBg} shadow-sm cursor-pointer transition select-none text-left w-full"
         style="border-left:3px solid ${asstColor}"
-        aria-label="${_escHtml(asstName)} · ${_escHtml(post.caption || post.platform)}${titleSuffix}">
-        ${_platAvatar(post.platform, 16)}
+        aria-label="${_escHtml(asstName)} · ${_escHtml(platLabel)}${multi ? ` (${_escHtml(platNames)})` : ''} · ${_escHtml(post.caption || '')}${titleSuffix}">
+        ${multi ? _multiAvatar(16) : _platAvatar(post.platform, 16)}
         <div class="flex-1 min-w-0">
-            <p class="text-[11px] font-bold ${timeColor} truncate">${overdue ? '⚠ ' : ''}${time}</p>
+            <p class="text-[11px] font-bold ${timeColor} truncate">${overdue ? '⚠ ' : ''}${time}${multi ? ` · <span class="font-extrabold">Multiple</span>` : ''}</p>
             <p class="text-[11px] text-gray-500 truncate leading-tight">${_escHtml(summary.substring(0, 40))}</p>
         </div>
         ${revisedBadge}
@@ -554,13 +658,18 @@ function _positionPreview(anchorEl) {
 }
 
 function _renderPreviewContent(post, assets) {
-    const plat = PLATFORM_META[post.platform] || { label: post.platform || '' };
     const img = (assets || []).find(a => a.assetType === 'image' && a.storageUrl);
     const caption = post.caption || '(No caption)';
+    // Hovering a "Multiple" chip should answer "which platforms?" without a click, so the header
+    // lists every sibling's logo rather than repeating the representative's.
+    const siblings = _siblingsOf(post);
+    const head = siblings.length > 1
+        ? `${siblings.map(s => _platAvatar(s.platform, 18)).join('')}<span>${_escHtml(_platformNames(siblings.map(s => s.platform)))}</span>`
+        : `${_platAvatar(post.platform, 18)}<span>${_escHtml((PLATFORM_META[post.platform] || {}).label || post.platform || '')}</span>`;
     return `
         ${img ? `<img src="${img.storageUrl}" alt="" class="cal-hover-preview-img">` : ''}
         <div class="cal-hover-preview-body">
-            <div class="cal-hover-preview-head">${_platAvatar(post.platform, 18)}<span>${_escHtml(plat.label)}</span></div>
+            <div class="cal-hover-preview-head">${head}</div>
             <p class="cal-hover-preview-caption">${_escHtml(caption)}</p>
         </div>`;
 }
@@ -667,11 +776,17 @@ function _listRecordRow(rec) {
 }
 
 // ── List row ──────────────────────────────────────────────────────
-function _listRow(post) {
+// Takes a GROUP (see _postsOnDate) — a cross-post is one row reading "Multiple", with its platform
+// logos shown inline since the list view has the width for them.
+function _listRow(group) {
+    const post = group.rep;
+    const members = group.members;
+    const multi = members.length > 1;
     const plat = PLATFORM_META[post.platform] || { label: post.platform, bg: '#9ca3af', text: 'text-white' };
-    const sm = STATUS_META[post.status] || STATUS_META.draft;
-    const posted = post.status === 'published';
-    const overdue = _isOverdue(post);
+    const status = _groupStatus(members);
+    const sm = STATUS_META[status] || STATUS_META.draft;
+    const posted = status === 'published';
+    const overdue = members.some(_isOverdue);
     const dt = new Date(post.publishDate);
     const time = dt.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
     // The scheduled time is the headline; for posted/overdue we add a second line
@@ -691,12 +806,21 @@ function _listRow(post) {
         ? `<span class="text-xs font-bold px-2.5 py-1 rounded-full border bg-amber-100 text-amber-700 border-amber-300 shrink-0 mt-1">Overdue</span>`
         : `<span class="text-xs font-bold px-2.5 py-1 rounded-full border ${sm.badge} shrink-0 mt-1">${sm.label}</span>`;
 
+    // Grouped rows name themselves "Multiple" and then SHOW the platforms — the list view has the
+    // width the month chip doesn't, so the user gets the answer without opening anything.
+    const platStrip = multi
+        ? `<span class="flex items-center gap-1 shrink-0" title="${_escHtml(_platformNames(group.platforms))}">
+               ${members.map(m => _platAvatar(m.platform, 18)).join('')}
+           </span>`
+        : '';
+
     return `<div onclick="window._calOpenPost(${post.id})"
         class="flex items-start gap-4 bg-white border border-gray-200 rounded-xl px-5 py-4 hover:border-emerald-300 hover:shadow-sm cursor-pointer transition">
-        ${_platAvatar(post.platform, 36)}
+        ${multi ? _multiAvatar(36) : _platAvatar(post.platform, 36)}
         <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 mb-1">
-                <span class="text-sm font-extrabold text-gray-900">${plat.label}</span>
+                <span class="text-sm font-extrabold text-gray-900">${multi ? 'Multiple' : plat.label}</span>
+                ${platStrip}
                 <span class="text-xs font-bold text-gray-400">${time}</span>
                 ${post.isAutonomous ? `<span class="text-[10px] font-bold text-violet-700 bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded-full">100% AI</span>` : ''}
             </div>
@@ -738,12 +862,48 @@ window._calOpenPost = async function (postId) {
     const sm = STATUS_META[post.status] || STATUS_META.draft;
     const dt = new Date(post.publishDate);
 
+    // ── Cross-post tabs ───────────────────────────────────────────
+    // The calendar collapses a cross-post into one "Multiple" chip; this is where the user unpacks
+    // it. Each tab is a real sibling row, so switching platform re-opens the panel on that row and
+    // every section below (caption, media, preview, actions) is that platform's own.
+    const siblings = _siblingsOf(post);
+    const isMulti = siblings.length > 1;
+    const tabsEl = document.getElementById('panel-platform-tabs');
+    if (tabsEl) {
+        if (isMulti) {
+            tabsEl.classList.remove('hidden');
+            tabsEl.innerHTML = `
+                <p class="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">Posted to ${siblings.length} platforms</p>
+                <div class="flex flex-wrap items-center gap-1.5">
+                    ${siblings.map(s => {
+                        const active = s.id === post.id;
+                        const label = (PLATFORM_META[s.platform] || {}).label || s.platform;
+                        const st = STATUS_META[s.status] || STATUS_META.draft;
+                        return `<button type="button" onclick="window._calOpenPost(${s.id})"
+                            title="${_escHtml(label)} — ${_escHtml(st.label)}"
+                            class="inline-flex items-center gap-1.5 pl-1 pr-2.5 py-1 rounded-full border text-[11px] font-bold transition cursor-pointer ${active ? 'bg-white border-emerald-400 text-gray-900 shadow-sm' : 'bg-white/60 border-gray-200 text-gray-500 hover:border-gray-300 hover:text-gray-700'}">
+                            ${_platAvatar(s.platform, 16)}
+                            <span>${_escHtml(label)}</span>
+                            <span class="w-1.5 h-1.5 rounded-full ${st.dot}"></span>
+                        </button>`;
+                    }).join('')}
+                </div>`;
+        } else {
+            tabsEl.classList.add('hidden');
+            tabsEl.innerHTML = '';
+        }
+    }
+
     // ── Header ────────────────────────────────────────────────────
     const iconEl = document.getElementById('panel-platform-icon');
     iconEl.className = 'w-9 h-9 rounded-xl flex items-center justify-center shrink-0 shadow-sm overflow-hidden';
     iconEl.style.background = plat.bg || '#9ca3af';
     iconEl.innerHTML = `<span style="display:flex;width:20px;height:20px;color:#fff">${PLATFORM_LOGOS[post.platform] || '📣'}</span>`;
-    document.getElementById('panel-platform-name').textContent = plat.label;
+    // "Instagram (1 of 3)" — the icon and every section below belong to ONE platform, so the header
+    // names that platform and says where it sits in the group rather than claiming "Multiple".
+    document.getElementById('panel-platform-name').textContent = isMulti
+        ? `${plat.label} (${siblings.findIndex(s => s.id === post.id) + 1} of ${siblings.length})`
+        : plat.label;
     const overdue = _isOverdue(post);
     const subEl = document.getElementById('panel-publish-date');
     if (post.status === 'published' && post.publishedAt) {
@@ -767,7 +927,11 @@ window._calOpenPost = async function (postId) {
     }
 
     // ── Section 1: Logistics ──────────────────────────────────────
-    document.getElementById('panel-logistics-platform').textContent = plat.label;
+    // The Platform row is the one place that describes the whole logical post, so this is where
+    // "Multiple" is spelled out in full.
+    document.getElementById('panel-logistics-platform').textContent = isMulti
+        ? `Multiple — ${_platformNames(siblings.map(s => s.platform))}`
+        : plat.label;
     document.getElementById('panel-logistics-datetime').textContent = dt.toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     document.getElementById('panel-logistics-format').textContent = (post.postFormat || '').replace(/_/g, ' ');
 
@@ -978,37 +1142,10 @@ window._calOpenPost = async function (postId) {
         }
     }
 
-    // ── Next Post navigator (Pending Review only) ─────────────────
-    const pendingPosts = _posts
-        .filter(p => p.status === 'in_review')
-        .sort((a, b) => new Date(a.publishDate) - new Date(b.publishDate));
-    const pendingIdx = pendingPosts.findIndex(p => p.id === postId);
-    const navEl = document.getElementById('panel-review-nav');
-    if (navEl) {
-        if (pendingPosts.length > 0 && pendingIdx >= 0) {
-            const current = pendingIdx + 1;
-            const total = pendingPosts.length;
-            const hasPrev = pendingIdx > 0;
-            const hasNext = pendingIdx < total - 1;
-            navEl.classList.remove('hidden');
-            navEl.innerHTML = `
-                <div class="flex items-center justify-between gap-2">
-                    <button type="button" onclick="window._calNavPost(-1)"
-                        ${hasPrev ? '' : 'disabled'}
-                        class="p-1.5 rounded-lg text-gray-400 ${hasPrev ? 'hover:bg-gray-100 hover:text-gray-700 cursor-pointer' : 'opacity-30 cursor-not-allowed'} transition">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
-                    </button>
-                    <span class="text-xs font-bold text-gray-500">Reviewing <span class="text-gray-900">${current}</span> of <span class="text-gray-900">${total}</span> pending</span>
-                    <button type="button" onclick="window._calNavPost(1)"
-                        ${hasNext ? '' : 'disabled'}
-                        class="p-1.5 rounded-lg text-gray-400 ${hasNext ? 'hover:bg-gray-100 hover:text-gray-700 cursor-pointer' : 'opacity-30 cursor-not-allowed'} transition">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                    </button>
-                </div>`;
-        } else {
-            navEl.classList.add('hidden');
-        }
-    }
+    // The "Reviewing N of M pending" navigator that used to live here stepped through in_review
+    // posts. Those never appear on the calendar now — reviewing happens in the Review Queue, which
+    // has its own navigator — so it could only ever have rendered "1 of 1".
+    document.getElementById('panel-review-nav')?.classList.add('hidden');
 
     // SC1: Show quality review section and trigger load
     const qualitySection = document.getElementById('panel-quality-section');
@@ -1105,16 +1242,6 @@ function toggleQualityPanel() {
     const hidden = body.classList.toggle('hidden');
     if (chevron) chevron.textContent = hidden ? '▼' : '▲';
 }
-
-window._calNavPost = function (direction) {
-    const pendingPosts = _posts
-        .filter(p => p.status === 'in_review')
-        .sort((a, b) => new Date(a.publishDate) - new Date(b.publishDate));
-    const idx = pendingPosts.findIndex(p => p.id === _openPostId);
-    if (idx < 0) return;
-    const next = pendingPosts[idx + direction];
-    if (next) window._calOpenPost(next.id);
-};
 
 window._calClosePanel = function () {
     document.getElementById('aura-panel')?.classList.add('hidden');
@@ -1397,10 +1524,15 @@ window._calDrop = function (e, dateKey) {
     const oldLabel = original.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
     const newLabel = newDate.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 
-    const msgEl = document.getElementById('reschedule-msg');
-    if (msgEl) msgEl.textContent = `Move "${post.caption?.substring(0,40) || 'this post'}" from ${oldLabel} to ${newLabel}?`;
+    // The chip is one logical post, so the drag moves every platform it goes to — leaving siblings
+    // behind would silently split a cross-post across two dates.
+    const siblings = _siblingsOf(post);
+    const scope = siblings.length > 1 ? ` on ${_platformNames(siblings.map(s => s.platform))}` : '';
 
-    _pendingReschedule = { postId: _dragPostId, newDate };
+    const msgEl = document.getElementById('reschedule-msg');
+    if (msgEl) msgEl.textContent = `Move "${post.caption?.substring(0,40) || 'this post'}"${scope} from ${oldLabel} to ${newLabel}?`;
+
+    _pendingReschedule = { postIds: siblings.map(s => s.id), newDate };
     document.getElementById('modal-reschedule')?.classList.remove('hidden');
     _dragPostId = null;
 };
@@ -1413,22 +1545,28 @@ window._calCancelReschedule = function () {
 
 window._calConfirmReschedule = async function () {
     if (!_pendingReschedule) return;
-    const { postId, newDate } = _pendingReschedule;
+    const { postIds, newDate } = _pendingReschedule;
     document.getElementById('modal-reschedule')?.classList.add('hidden');
     _pendingReschedule = null;
 
     try {
-        const res = await fetch(`/.netlify/functions/scheduled-posts?id=${postId}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ publishDate: newDate.toISOString() }),
-        });
-        if (res.ok) {
-            const { post } = await res.json();
-            _updateLocalPost(post);
-            // Reload range to include new date if needed
-            await _loadAndRender();
+        // Every sibling of the group moves to the same instant — that shared slot is what makes
+        // them one post.
+        const results = await Promise.all(postIds.map(id =>
+            fetch(`/.netlify/functions/scheduled-posts?id=${id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ publishDate: newDate.toISOString() }),
+            })
+        ));
+        const failed = results.filter(r => !r.ok).length;
+        if (failed) {
+            alert(failed === results.length
+                ? 'Reschedule failed. Please try again.'
+                : `Rescheduled, but ${failed} of ${results.length} platforms could not be moved. Please check the calendar.`);
         }
+        // Reload range to include new date if needed
+        await _loadAndRender();
     } catch (e) { alert('Reschedule failed. Please try again.'); }
 };
 
@@ -1442,14 +1580,22 @@ function _attachDragDrop() {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────
+// Returns GROUPS ({ members, rep, platforms }), not posts — a cross-posted post is one entry here
+// however many platforms it fans out to. The status guard is the client half of the rule the server
+// enforces in scheduled-posts.ts: it keeps a post that was just rejected or cancelled in the panel
+// from lingering on the grid until the next reload.
 function _postsOnDate(date) {
     const key = _dateKey(date);
-    return _posts.filter(p => {
+    const onDay = _posts.filter(p => {
         if (!p.publishDate) return false;
+        if (!_scheduleActive(p.status)) return false;
         if (!_matchesAssistantFilter(p.assistantId)) return false;
+        // Filtering by platform narrows a group to its matching sibling, so a cross-post shows as
+        // that one platform rather than as "Multiple" the user then has to open to understand.
         if (!_matchesPlatformFilter(p.platform)) return false;
         return _dateKey(new Date(p.publishDate)) === key;
     });
+    return _groupPosts(onDay);
 }
 
 // #3: completed assistant activity on a given day (respects the assistant filter).

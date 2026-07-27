@@ -22,6 +22,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PLATFORM_FORMATS, SOCIAL_PLATFORMS } from '../src/config/platform-formats';
 import { POST_FORMATS } from '../src/config/post-formats';
+import { SCHEDULE_ACTIVE_STATUSES } from '../src/config/post-status';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const OUTPUT_PATH = join(root, 'src', 'generated', 'platform-constants.js');
@@ -91,6 +92,13 @@ ${rows}
 ${formatRows}
   ];
 
+  // scheduled_posts statuses whose schedule is LIVE, from src/config/post-status.ts. A draft's
+  // publish_date is only a proposal until someone presses Schedule, so the calendar renders these
+  // and nothing else.
+  var SCHEDULE_ACTIVE_STATUSES = ${JSON.stringify(SCHEDULE_ACTIVE_STATUSES)};
+  var scheduleActive = {};
+  for (var s = 0; s < SCHEDULE_ACTIVE_STATUSES.length; s++) scheduleActive[SCHEDULE_ACTIVE_STATUSES[s]] = true;
+
   var byId = {};
   for (var i = 0; i < PLATFORMS.length; i++) byId[PLATFORMS[i].id] = PLATFORMS[i];
 
@@ -100,6 +108,17 @@ ${formatRows}
 
     /** Every post format, in catalogue order. Shape matches the editor's _PCE_FORMATS records. */
     formats: POST_FORMATS,
+
+    /** scheduled_posts statuses that mean "committed to publish", in canonical order. */
+    scheduleActiveStatuses: SCHEDULE_ACTIVE_STATUSES,
+
+    /**
+     * True when a post is committed to publish — i.e. it belongs on the Content Calendar. Drafts
+     * carry a proposed publish_date from birth; only pressing Schedule makes that date real.
+     */
+    isScheduleActive: function (status) {
+      return scheduleActive[String(status == null ? '' : status)] === true;
+    },
 
     /** One platform's facts. Tolerates legacy 'twitter'; returns null for anything unknown. */
     get: function (id) {

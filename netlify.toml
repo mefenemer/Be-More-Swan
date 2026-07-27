@@ -245,9 +245,11 @@ node_bundler = "esbuild"
 [functions.ai-approvals-digest]
   schedule = "0 8 * * *"
 
-# US-SMM-2.4.2: Review urgency check (red-zone alerts + missed post detection) — every 15 minutes
-[functions.check-review-urgency]
-  schedule = "*/15 * * * *"
+# US-SMM-2.4.2's check-review-urgency (red-zone alerts + missed-post detection, */15) was REMOVED.
+# Both halves measured a deadline against a DRAFT's publish_date — but a draft's date is only a
+# proposal until someone presses Schedule (see src/config/post-status.ts), so it emailed "post due
+# in 3h" about posts that were never committed, then expired them to 'missed'. Drafts now simply
+# wait in the Review Queue; ai-approvals-digest above is what tells you they're waiting.
 
 # US4 — Offline email fallback for unseen urgent notifications — every 15 minutes
 [functions.notification-email-fallback]
