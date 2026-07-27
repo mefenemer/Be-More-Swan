@@ -46,6 +46,21 @@ export interface PostFormatSpec {
     aspectRatios: string[];
     /** Caption/body character cap. */
     charLimit: number;
+    /**
+     * Longest clip this format will take, in seconds. Absent means NOT ENFORCED — which is not the
+     * same as unlimited.
+     *
+     * Deliberately sparse. A ceiling belongs here only when exceeding it changes which FORMAT the
+     * asset should go out as, because that is the one thing the router decides: a 4-minute 9:16
+     * clip is not a YouTube Short, it is a YouTube Video, and routing is how it gets there.
+     *
+     * Limits that merely warn are left out on purpose:
+     *   • X caps video by SUBSCRIPTION TIER (2m20s free, hours on Premium+). A number here would
+     *     block paying users from posting something their account allows.
+     *   • Instagram's Reel length has no alternative live format to fall back to, so a limit would
+     *     produce a warning, not a different route — and a warning belongs next to the asset.
+     */
+    maxDurationS?: number;
     /** Disappears on its own (Stories) — worth saying, since scheduling one is a different promise. */
     ephemeral?: boolean;
     availability: FormatAvailability;
@@ -76,7 +91,7 @@ export const POST_FORMATS: PostFormatSpec[] = [
 
     // ── Facebook ────────────────────────────────────────────────────────────────────────────────
     { key: 'fb_feed', platform: 'facebook', label: 'Feed post', blurb: 'Text, a link, an image or a video.',
-      media: 'image', mediaMandatory: false, minItems: 0, maxItems: 1, aspectRatios: ['1:1', '4:5', '16:9'], charLimit: 63206,
+      media: 'mixed', mediaMandatory: false, minItems: 0, maxItems: 1, aspectRatios: ['1:1', '4:5', '16:9'], charLimit: 63206,
       availability: 'live' },
     { key: 'fb_reel', platform: 'facebook', label: 'Reel', blurb: 'Vertical short-form video, often shared from Instagram.',
       media: 'video', mediaMandatory: true, minItems: 1, maxItems: 1, aspectRatios: ['9:16'], charLimit: 63206,
@@ -93,7 +108,7 @@ export const POST_FORMATS: PostFormatSpec[] = [
 
     // ── Threads ─────────────────────────────────────────────────────────────────────────────────
     { key: 'th_text', platform: 'threads', label: 'Text post', blurb: 'Short conversational update.',
-      media: 'image', mediaMandatory: false, minItems: 0, maxItems: 1, aspectRatios: ['1:1', '4:5'], charLimit: 500,
+      media: 'mixed', mediaMandatory: false, minItems: 0, maxItems: 1, aspectRatios: ['1:1', '4:5'], charLimit: 500,
       availability: 'live' },
     { key: 'th_carousel', platform: 'threads', label: 'Carousel', blurb: 'Up to 20 swipeable items.',
       media: 'mixed', mediaMandatory: true, minItems: 2, maxItems: 20, aspectRatios: ['1:1', '4:5'], charLimit: 500,
@@ -143,9 +158,12 @@ export const POST_FORMATS: PostFormatSpec[] = [
     { key: 'yt_vod', platform: 'youtube', label: 'Video', blurb: 'Standard horizontal video, found through search.',
       media: 'video', mediaMandatory: true, minItems: 1, maxItems: 1, aspectRatios: ['16:9'], charLimit: 5000,
       availability: 'live' },
-    { key: 'yt_short', platform: 'youtube', label: 'Short', blurb: 'Vertical short-form video, under 60 seconds.',
+    // maxDurationS is what makes the router able to tell a Short from a Video: same platform, same
+    // 9:16 clip, and the length is the only thing that decides. (The blurb said "under 60 seconds",
+    // which stopped being true when Shorts moved to 3 minutes.)
+    { key: 'yt_short', platform: 'youtube', label: 'Short', blurb: 'Vertical short-form video, up to 3 minutes.',
       media: 'video', mediaMandatory: true, minItems: 1, maxItems: 1, aspectRatios: ['9:16'], charLimit: 5000,
-      availability: 'live' },
+      maxDurationS: 180, availability: 'live' },
     { key: 'yt_community', platform: 'youtube', label: 'Community post', blurb: 'Text, image or poll for subscribers between uploads.',
       media: 'image', mediaMandatory: false, minItems: 0, maxItems: 1, aspectRatios: ['1:1', '16:9'], charLimit: 5000,
       availability: 'planned', unavailableReason: 'The Community tab is a separate YouTube API surface we haven’t connected yet.' },

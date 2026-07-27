@@ -6104,7 +6104,10 @@ async function _rqLoadQualityReview(postId) {
     _prqVerified = {};
     const wrap = document.getElementById('post-review-quality');
     if (!wrap) return;
-    wrap.classList.remove('hidden');
+    // Revealing itself is right in the pane layout, where this panel lives under the post. In the
+    // rail, step 6 owns it — so showing itself here would put the same verdict on screen twice.
+    // Leave it shut and let the step's subtitle carry the news instead.
+    wrap.classList.toggle('hidden', _railOn && !wrap.closest('#pce-rail'));
     _prqShow('prq-loading', true);
     ['prq-warnings-wrap', 'prq-suggestions-wrap', 'prq-ask-wrap', 'prq-rewrite-wrap', 'prq-clean']
         .forEach(id => _prqShow(id, false));
@@ -6166,6 +6169,11 @@ function _prqRenderReview(data) {
 
     const openCount = (data.openWarnings || warnings.filter(w => !dispositions[w])).length;
     _prqShow('prq-clean', openCount === 0 && !suggestions.length);
+
+    // In the rail layout this panel is shut, so the step's subtitle is the ONLY place the verdict
+    // shows until the step is opened. Repaint it now the counts are real, or it would sit on
+    // "Not checked yet" for a post that has just been checked.
+    if (_railOn) _railRender();
 }
 
 // Ask for ONE suggestion. This is the only path that produces one — nothing else in the panel
@@ -6559,6 +6567,35 @@ async function rqRetryRender(postId) {
 
 // The platform tab bar. Hidden for a single-platform post; one tab per platform otherwise. A red dot
 // flags a platform that still needs an image before it can be approved.
+// Routes for the post on screen, keyed by platform, as route-post-formats returned them. Null
+// until the first answer lands — the tabs render without a format line rather than guessing one.
+let _rqRoutes = null;
+let _rqRoutesFor = null;   // the post id the cached routes belong to
+
+/**
+ * Ask the server which format each platform would publish this post as.
+ *
+ * Deliberately not computed here. The rules live in src/utils/format-router.ts and depend on
+ * POST_FORMATS; a copy in this page is the drift that has bitten every shared rule the composer
+ * has ever needed — and unlike the platform constants, LOGIC cannot be mirrored by a generator.
+ * It also reads the STORED asset metrics, so the answer is the same one approve-post will use.
+ *
+ * Best-effort: a failure leaves the tabs as they were, with no format line.
+ */
+async function _rqLoadRoutes(postId) {
+    if (!postId || _rqRoutesFor === postId) return;
+    _rqRoutesFor = postId;
+    try {
+        const res = await fetch(`/.netlify/functions/route-post-formats?postId=${postId}`);
+        if (!res.ok) return;
+        const d = await res.json();
+        // The post may have moved on while this was in flight.
+        if (_rqRoutesFor !== postId) return;
+        _rqRoutes = d.routes || null;
+        _rqReviewRenderTabs();
+    } catch { /* leave the tabs alone */ }
+}
+
 function _rqReviewRenderTabs() {
     const host = document.getElementById('post-review-tabs');
     if (!host) return;
@@ -6572,7 +6609,12 @@ function _rqReviewRenderTabs() {
         // reviewer made, so it is not marked as one. It goes quiet: struck through and muted, with
         // the reason on hover, and it comes back the moment the media changes. Still clickable,
         // because you must be able to look at the copy you have written for it.
-        const blocked = _rqPlatformBlockedReason(p);
+        // The server's answer wins where we have it: it knows durations and ratios this page
+        // cannot, and it is the same verdict approve-post enforces. The local structural check
+        // stays as the fallback for the moment before the first response lands.
+        const route = _rqRoutes && _rqRoutes[p.platform];
+        const blocked = route ? (route.state === 'none' ? (route.reason || 'Cannot publish here.') : null)
+                              : _rqPlatformBlockedReason(p);
         const tone = blocked
             // No `decoration-1`: it is not in the compiled style.css, and rebuilding Tailwind to
             // add one utility churns unrelated selectors across the whole file.
@@ -6581,7 +6623,25 @@ function _rqReviewRenderTabs() {
         return `<button type="button" onclick="rqReviewSwitchPlatform(${p.id})"
           ${blocked ? `title="${_rqEsc(blocked)}"` : ''}
           class="relative px-3 py-1.5 text-xs font-bold -mb-px border-b-2 transition cursor-pointer ${active && blocked ? 'border-gray-300' : ''} ${tone}">
-          ${_rqEsc(rqPlatformLabel(p.platform))}${flag && !blocked ? '<span class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-red-500 align-middle" title="Needs an image"></span>' : ''}
+          <span class="block">${_rqEsc(rqPlatformLabel(p.platform))}${flag && !blocked ? '<span class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-red-500 align-middle" title="Needs an image"></span>' : ''}</span>
+          ${route ? (() => {
+            // `verified` is false when the asset has never been measured — every row uploaded
+            // before duration_s existed, and anything the composer has not yet opened. Stating
+            // "Reel" with the same confidence either way would be claiming a check that never ran,
+            // so an unmeasured route is shown in italics and says so on hover. It settles itself:
+            // opening the post backfills the metrics, and the next render is verified.
+            const label = route.state === 'none' ? 'no format'
+                        : route.state === 'crop' ? 'needs a crop'
+                        : route.state === 'trim' ? 'needs a trim'
+                        : (route.formatLabel || '');
+            const provisional = route.verified === false && route.state === 'ok';
+            const tone = route.state === 'ok' ? 'text-gray-400' : 'text-amber-600';
+            const title = provisional
+              ? 'Best guess — we have not measured this media yet, so nothing was checked against it.'
+              : (route.reason || '');
+            return `<span class="block text-[9px] font-semibold ${tone}${provisional ? ' italic' : ''}"
+              title="${_rqEsc(title)}">${_rqEsc(label)}</span>`;
+          })() : ''}
         </button>`;
     }).join('')}</div>`;
 }
@@ -7355,6 +7415,14 @@ function _railRender() {
             }
         }
     }
+
+    // The quality panel is the one borrowed block whose home is the CANVAS column rather than a
+    // pane — so restoring it puts it back somewhere this layout still shows, and the same verdict
+    // appears twice: once under the post and once inside step 6. Step 6 owns it here. Done after
+    // mounting (not in _railApplyLayout) because _railToggle re-renders without re-applying the
+    // layout, which is exactly the moment it came back.
+    const quality = document.getElementById('post-review-quality');
+    if (quality && !quality.closest('#pce-rail')) quality.classList.add('hidden');
 }
 
 // ── Panes ───────────────────────────────────────────────────────────────────────────────────────
@@ -8343,6 +8411,55 @@ function _pceMediaMetrics(el) {
     }
     if (!el.naturalWidth || !el.naturalHeight) return null;
     return { w: el.naturalWidth, h: el.naturalHeight, durationS: null, kind: 'Picture' };
+}
+
+// Assets already reported this session. The server only ever fills a NULL, so a repeat is harmless
+// — but it is still a request per render, and the mock-up re-renders constantly.
+const _pceMetricsSent = new Set();
+
+/**
+ * Tell the server how big this asset actually is, once we can see it.
+ *
+ * Width, height and duration cannot be recovered from the database alone — recovering them would
+ * mean fetching and decoding every stored object. But the composer has the asset LOADED, in an
+ * element that knows its own dimensions, so it can simply say. Legacy rows and anything uploaded
+ * by a client that didn't measure get filled in the first time somebody looks at the post.
+ *
+ * This is what unblocks deriving a post's format from its asset on the SERVER, where the
+ * autonomous drafters run with no element to measure. Best-effort throughout: a failure here must
+ * never disturb the editor, so nothing is awaited and nothing is reported to the user.
+ */
+function _pceBackfillAssetMetrics() {
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (!post) return;
+    const media = document.querySelector('#post-review-body [data-media-img], #post-review-body [data-media-video]');
+    if (!media) return;
+
+    // The canvas shows the SELECTED slide on a carousel, so the id must come from the same place
+    // the picture did — reporting slide 3's dimensions against slide 1 would be worse than silence.
+    const slides = _pceSlides(post);
+    const assetId = slides.length
+        ? slides[Math.min(_pceSlideIndex, slides.length - 1)]?.assetId
+        : (Array.isArray(post.contentAssetIds) ? post.contentAssetIds[0] : null);
+    if (!assetId || _pceMetricsSent.has(assetId)) return;
+
+    const m = _pceMediaMetrics(media);
+    if (!m) {
+        // Metadata hasn't arrived. Bind once per ELEMENT (they are rebuilt on every render, so the
+        // flag cannot leak to the next post) and try again when it does.
+        if (!media._pceMetricsBound) {
+            media._pceMetricsBound = true;
+            const ev = media.tagName === 'VIDEO' ? 'loadedmetadata' : 'load';
+            media.addEventListener(ev, () => _pceBackfillAssetMetrics(), { once: true });
+        }
+        return;
+    }
+
+    _pceMetricsSent.add(assetId);
+    fetch(`/.netlify/functions/content-assets?id=${assetId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ metrics: { width: m.w, height: m.h, durationS: m.durationS } }),
+    }).catch(() => { /* best effort: the next post that shows this asset will try again */ });
 }
 
 function _pceFmtDuration(s) {
@@ -9492,6 +9609,12 @@ function _rqReviewRenderActive() {
     // _pceSyncForPost fills the inspector's copy via _pceFillCaption, but that runs BEFORE the
     // canvas host exists on the very first render — paint again now that it does.
     _pceRefreshCaptionMeta();
+    // Opportunistic: the media is on screen, so its real dimensions and duration are knowable here
+    // and almost nowhere else. Fire-and-forget.
+    _pceBackfillAssetMetrics();
+    // And ask what each platform would publish this as. Also fire-and-forget — the tabs repaint
+    // themselves when the answer lands, rather than holding up the render.
+    _rqLoadRoutes(_rqReviewPostId);
 
     // Reset the Regenerate panel to a clean state — the modal DOM is reused across posts, so a
     // prior in-flight "Regenerating…" button/feedback must not carry over to the next open.

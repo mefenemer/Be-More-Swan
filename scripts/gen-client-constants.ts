@@ -61,6 +61,10 @@ export function renderClientConstants(): string {
         min: f.minItems,
         max: f.maxItems,
         cl: f.charLimit,
+        // Duration ceiling, where the catalogue declares one. Emitted so the composer can state a
+        // derived format without a round trip — and so it reads the SAME number the server routes
+        // on, rather than a second copy typed into the page.
+        ...(f.maxDurationS != null ? { maxd: f.maxDurationS } : {}),
         a: f.availability === 'live' ? 'live' : f.availability === 'planned' ? 'planned' : 'blocked',
         ...(f.unavailableReason ? { why: f.unavailableReason } : {}),
     })).map(j => `    ${j},`).join('\n');

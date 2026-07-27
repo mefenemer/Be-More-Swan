@@ -6,6 +6,9 @@ import {
   integer,
   bigint,
   boolean,
+  // `real`, not `numeric`: numeric comes back from postgres-js as a STRING, and every reader of a
+  // duration wants to compare it against a limit. A seconds value is a number.
+  real,
   numeric,
   decimal,
   jsonb,
@@ -1650,6 +1653,12 @@ export const contentAssets = pgTable("content_assets", {
   // db/content-asset-dimensions.sql.
   width: integer("width"),
   height: integer("height"),
+  // Playable length in seconds. NULL for images, links and legacy rows — and NULL must be read as
+  // "unknown", never as zero: a router treating it as 0 would call a 40-minute film a YouTube
+  // Short. Together with width/height this is what lets a format be DERIVED from the asset instead
+  // of chosen by hand, including on the server, where the autonomous drafters run with no <video>
+  // element to measure. db/content-asset-duration.sql.
+  durationS: real("duration_s"),
 
   // Storage — one of these will be populated
   storageKey: text("storage_key"),

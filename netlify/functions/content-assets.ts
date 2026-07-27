@@ -247,6 +247,10 @@ export default withLambda(async (event) => {
             // as "unknown" and falls back to its generic reminder rather than a false mismatch.
             const width  = Number.isFinite(Number(body.width))  && Number(body.width)  > 0 ? Math.round(Number(body.width))  : null;
             const height = Number.isFinite(Number(body.height)) && Number(body.height) > 0 ? Math.round(Number(body.height)) : null;
+            // Duration completes the set the format router needs (kind + ratio + length). Same
+            // contract as the dimensions: optional, coerced, and NULL when unknown — which readers
+            // must treat as "we don't know", never as zero.
+            const durationS = Number.isFinite(Number(body.durationS)) && Number(body.durationS) > 0 ? Number(body.durationS) : null;
 
             if (!name || !assetType) {
                 return { statusCode: 400, body: JSON.stringify({ error: 'name and assetType are required.' }) };
@@ -272,6 +276,7 @@ export default withLambda(async (event) => {
                 fileSize: fileSize || null,
                 width,
                 height,
+                durationS,
                 storageKey: storageKey || null,
                 storageUrl: storageUrl || null,
                 externalUrl: externalUrl || null,
@@ -316,6 +321,38 @@ export default withLambda(async (event) => {
             const [existing] = await db.select().from(contentAssets)
                 .where(and(eq(contentAssets.id, assetId), eq(contentAssets.userId, userId)));
             if (!existing) return { statusCode: 404, body: JSON.stringify({ error: 'Asset not found.' }) };
+
+            // ── Metric backfill ──────────────────────────────────────────────
+            // Dimensions and duration cannot be recovered from the database alone, so legacy rows
+            // keep NULL forever unless something that can MEASURE them says so. The composer can:
+            // it has the asset loaded in an <img>/<video>. This lets it report what it measured,
+            // and the gap closes as posts are opened rather than in one expensive sweep.
+            //
+            // Write-once by design: only ever fills a NULL. A stored value came from the upload
+            // path, and a browser's idea of a rotated video's dimensions must not overwrite it.
+            if (body.metrics && typeof body.metrics === 'object') {
+                const m = body.metrics as Record<string, unknown>;
+                const num = (v: unknown, whole: boolean) => {
+                    const n = Number(v);
+                    if (!Number.isFinite(n) || n <= 0) return null;
+                    return whole ? Math.round(n) : n;
+                };
+                const fill: Record<string, number> = {};
+                const w = num(m.width, true);
+                const h = num(m.height, true);
+                const d = num(m.durationS, false);
+                if (w && existing.width == null) fill.width = w;
+                if (h && existing.height == null) fill.height = h;
+                if (d && existing.durationS == null) fill.durationS = d;
+                if (!Object.keys(fill).length) {
+                    return { statusCode: 200, body: JSON.stringify({ asset: existing, filled: [] }) };
+                }
+                const [measured] = await db.update(contentAssets)
+                    .set({ ...fill, updatedAt: new Date() })
+                    .where(and(eq(contentAssets.id, assetId), eq(contentAssets.userId, userId)))
+                    .returning();
+                return { statusCode: 200, body: JSON.stringify({ asset: measured, filled: Object.keys(fill) }) };
+            }
 
             // Special action: detach from scheduled post (US3)
             if (action === 'detach') {

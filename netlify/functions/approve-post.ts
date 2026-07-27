@@ -18,6 +18,7 @@ import { recordPostedAssets } from '../../src/utils/pexels';
 import { resolvePostImage, resolvePostVideo } from '../../src/utils/social-publish';
 import { resolvePostingSchedule, computeScheduleSlots, intervalHoursFor } from '../../src/config/posting-cadence';
 import { formatBlockedReason, postFormatSpec } from '../../src/config/post-formats';
+import { loadAssetMetrics, validateAgainstFormat } from '../../src/utils/format-router';
 import { platformFormat } from '../../src/config/platform-formats';
 import { needsVideoRender, renderableAudio } from '../../src/lib/audio-overlays';
 import { readCachedReview, openWarnings } from '../../src/utils/post-quality-review';
@@ -282,6 +283,31 @@ export default withLambda(async (event) => {
                 }),
             };
         }
+    }
+
+    // Length. The gates above check WHICH format and HOW MANY items; none of them could ever check
+    // how LONG the video is, because until content_assets.duration_s existed there was nothing to
+    // check against. YouTube refuses a Short over three minutes outright, so this is the difference
+    // between a refusal here with a way out, and an upload that fails at 09:00 on Monday.
+    //
+    // Ratio is deliberately NOT gated: platforms crop, and blocking an approval over a shape the
+    // network would happily letterbox would refuse work that publishes perfectly well.
+    //
+    // Silent on unknown durations — a legacy asset must never be refused for failing a check that
+    // could not be run. Best-effort: a failure to read the metrics leaves the post approvable.
+    const routableAssets = await loadAssetMetrics(db, post.contentAssetIds).catch(() => []);
+    const tooLong = validateAgainstFormat((post as any).formatKey, routableAssets);
+    if (tooLong) {
+        return {
+            statusCode: 422,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                error: tooLong.reason,
+                code: tooLong.code,
+                formatKey: (post as any).formatKey,
+                ...(tooLong.suggestion ? { suggestedFormatKey: tooLong.suggestion.key } : {}),
+            }),
+        };
     }
 
     // Will this post go out as a VIDEO, and can this platform's driver actually send one?
