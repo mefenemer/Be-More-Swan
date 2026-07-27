@@ -687,4 +687,47 @@ check('Media no longer carries the card wording, the swap-media block or Sound',
         'it pointed at a panel that no longer exists, and the card appearing IS the confirmation');
 });
 
+// ── 32. The handles do not print words on the card ──────────────────────────────────────────────
+check('a drag handle is an outline, not a caption printed on the card', () => {
+    const paint = workspace.slice(workspace.indexOf('function _pcePaintHandles() {'));
+    const body = paint.slice(0, paint.indexOf('\n}\n'));
+    // The chip read "Wording" / "Company name" / "Website" on every band, permanently. It looked
+    // like part of the design — the card appeared to have the word "Website" printed on it.
+    assert.ok(!/h\.innerHTML/.test(body),
+        'a handle must draw no text of its own: the band sits over the words it moves, so it already says which it is');
+    assert.ok(!/text-\[10px\][^`]*\$\{label\}/.test(body), 'and no chip markup may come back by another route');
+    assert.match(body, /h\.title = label/,
+        'the name is still reachable on hover for anyone who wants it');
+    // The registry keeps the labels — the inspector and the title attribute both read them.
+    assert.ok(workspace.includes("const _PCE_PLACEABLE = { headline: 'Wording'"),
+        'the labels themselves are still the naming source, only the painted chip went');
+});
+
+// ── 33. Sound is a video layer ──────────────────────────────────────────────────────────────────
+check('a still image is not offered Sound', () => {
+    const sync = workspace.slice(workspace.indexOf('const audioCapable ='));
+    const line = sync.slice(0, sync.indexOf('\n'));
+    assert.match(line, /isVideo/,
+        '"On the image" is about words placed on a still; a voice note is not something you place on a still');
+    // A still that already HAS a clip must keep the panel, or the audio is stranded with no way to
+    // remove it — and it would still publish the post as a video.
+    assert.match(line, /_pceAudioClips\(post\)\.length > 0/,
+        'hiding the panel on a still that already has a clip would strand the audio');
+    // The step itself still mounts the block when the layer is present — that is the one seam.
+    const rail = workspace.slice(workspace.indexOf("{ key: 'imgtext'"));
+    assert.match(rail.slice(0, 400), /_pceLayers\.includes\('audio'\)/,
+        'the step reads the layer list, so audioCapable is the single rule');
+});
+
+// ── 34. A dead voice module says so ─────────────────────────────────────────────────────────────
+check('the mic button cannot fail silently', () => {
+    const fn = workspace.slice(workspace.indexOf('function gpStartVoice('));
+    const head = fn.slice(0, fn.indexOf('_gpBeginVoice(targetId, cfg);'));
+    // Unguarded, this threw a TypeError inside an inline onclick — which the browser swallows, so
+    // the mic became a button that does nothing at all: no toast, no alert, nothing to report.
+    assert.match(head, /if \(!window\.SwanSpeech\) \{/,
+        'a mic button that is silently dead is the hardest possible version of this bug to diagnose');
+    assert.match(head, /console\.error\('\[voice\]/, 'and it must leave a trace that names the missing file');
+});
+
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);

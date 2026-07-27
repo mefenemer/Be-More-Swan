@@ -7478,11 +7478,10 @@ const _RAIL = [
     // Same block (#pce-insp-overlays), split because the two jobs are not the same job: on a still
     // you place words, on a video you place words AND decide when they appear. A post is one or the
     // other, so exactly one of these is ever enabled and the other says which step to use instead.
-    // Sound moved OUT of Media and in here: Media is about which picture, and a voice note is not a
-    // picture. It rides with whichever overlay step this post's media type uses, so there is exactly
-    // one step that is "things layered on top of the media". A branded card has no text overlays
-    // (its typography is its own) but CAN carry sound — so this step opens for a card too, with the
-    // sound half only.
+    // Sound is NOT here. It moved out of Media into this step and did not belong in either: "On the
+    // image" is about words placed on a still, and a voice note is not something you place on a
+    // still. Sound now lives only in the video step, with the other timed layer — see `audioCapable`
+    // in _pceSyncForPost for the one case a still still shows it (it already HAS a clip to remove).
     { key: 'imgtext', title: 'On the image',        blocks: () => {
         const out = [];
         if (_pceLayers.includes('overlays')) out.push('pce-insp-overlays');
@@ -9551,11 +9550,12 @@ function _pcePaintHandles() {
             h.style.borderStyle = 'solid';
             h.style.backgroundColor = 'color-mix(in srgb, var(--color-emerald-700) 12%, transparent)';
         }
-        // The label sits outside the band so it never covers the very text being placed — above it
-        // normally, below when the band is already near the top of the card and there is no room.
-        const chipOutside = topFrac < 0.12 ? 'margin-top: 1.15rem;' : 'margin-top: -1.15rem;';
-        h.innerHTML = `<span class="px-1 text-[10px] font-bold text-emerald-700 bg-white/90 rounded pointer-events-none whitespace-nowrap"
-            style="${chipOutside}">${label}</span>`;
+        // The name is NOT painted on the card. A chip reading "Wording" / "Company name" / "Website"
+        // sat on every band permanently, and it read as part of the design — the card looked like it
+        // had the word "Website" printed on it. The band is over the text it moves, so it is already
+        // self-labelling: the one across the company name contains the company name. The inspector
+        // names the selected element, and `title` gives it back on hover for anyone who wants it.
+        h.title = label;
         layer.appendChild(h);
     }
 }
@@ -9728,10 +9728,14 @@ function _pceSyncForPost(post) {
     // video gains a "Text on image/video" layer; a card does not (its typography is the card's own).
     const overlayCapable = !hasCard && !!post.thumbnailUrl;
     const isVideo = _pcePostIsVideo(post);
-    // Sound needs something to play OVER. Any media will do — including a branded card, whose text is
-    // the card's own but which can still carry a voice note (it becomes a video, same as a photo).
-    // A post with no media at all has nothing to render, so it gets no Sound layer.
-    const audioCapable = !!post.thumbnailUrl;
+    // Sound is a VIDEO layer. It used to be offered on any post with media, on the reasoning that a
+    // still with a voice note publishes as a video anyway — technically true, and it put a whole
+    // Sound panel (plus the "no network accepts a still image with sound" warning explaining itself)
+    // in front of every reviewer editing a photo, in a step named "On the image".
+    //
+    // The one exception is a still that ALREADY has a clip: hiding the panel there would strand the
+    // audio with no way to remove it, and it would still turn the post into a video at publish time.
+    const audioCapable = !!post.thumbnailUrl && (isVideo || _pceAudioClips(post).length > 0);
     _pceLayers = hasCard
         ? ['media', 'caption', 'headline', 'wordmark', 'website']
         : (overlayCapable ? ['media', 'caption', 'overlays'] : ['media', 'caption']);
@@ -11598,6 +11602,16 @@ function gpStopVoice() {
 
 function gpStartVoice(targetId = 'gen-post-context') {
     const cfg = GP_VOICE_FIELDS[targetId] || { mic: 'gen-post-mic-btn' };
+    // Guarded, like every other SwanSpeech call site. Unguarded, a failure to load
+    // /src/components/speech-recognition.js made this line throw a TypeError inside an inline
+    // onclick — which the browser swallows, so the mic button became a button that does NOTHING at
+    // all: no toast, no alert, no console message the user would ever see. A dictation button that
+    // is silently dead is the hardest possible version of this bug to report or diagnose.
+    if (!window.SwanSpeech) {
+        window.showToast?.('Voice input did not load. Reload the page and try again.', { icon: '🎤' });
+        console.error('[voice] window.SwanSpeech is undefined — /src/components/speech-recognition.js did not load.');
+        return;
+    }
     if (!window.SwanSpeech.isSupported()) { alert('Voice input is not supported in this browser. Try Chrome or Safari.'); return; }
 
     // Clicking the mic that is already listening means "stop", the way every dictation button does.
