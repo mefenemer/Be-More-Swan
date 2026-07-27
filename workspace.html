@@ -1,23 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <!-- Editor-layout flag, read BEFORE anything else can navigate away.
-       auth-check.js (immediately below) calls location.replace() for a signed-out visitor, which
-       aborts the rest of the document — so a flag read further down the page never runs, and
-       ?rail=1 was silently lost on every load that bounced through the login page. It also has to
-       survive arriving at the workspace from the app's own nav, which carries no query string, so
-       the choice is persisted rather than kept per-load.
-         ?rail=1  turn the step rail on      ?rail=0  back to the three-pane layout
-       localStorage.bms_rail is the stored value; delete it to forget the choice. -->
-  <script>
-    (function () {
-      try {
-        var q = new URLSearchParams(location.search).get('rail');
-        if (q === '1' || q === '0') localStorage.setItem('bms_rail', q);
-        window.__bmsRail = localStorage.getItem('bms_rail') === '1';
-      } catch (e) { window.__bmsRail = false; }   // private mode: stay on the old layout
-    })();
-  </script>
   <script src="./auth-check.js"></script>
   <!-- Loaded in <head> (not with the body scripts) so window.ScrollLock exists before any
        overlay or loadView call can reach for it. -->
@@ -634,14 +617,6 @@ window.showComplianceModals = function showComplianceModals(force) {
           </div>
           <p id="pce-ai-msg" class="text-[10px] text-gray-400 text-right"></p>
         </div>
-        <!-- Layout switch, while both layouts exist. A URL flag turned out to be unusable for
-             comparing them: auth-check.js redirects a signed-out visitor before any script in the
-             body runs, and arriving from the app's own nav carries no query string at all — so
-             ?rail=1 kept being lost. This is the same flag, somewhere it can actually be reached.
-             Delete this button (and _railSet's storage) once the layout is decided. -->
-        <button type="button" id="pce-layout-toggle" onclick="_railToggleLayout()"
-          title="Switch between the three-pane editor and the step rail"
-          class="px-2.5 py-1.5 rounded-lg border border-gray-300 text-gray-500 hover:bg-gray-50 text-[11px] font-bold transition cursor-pointer"></button>
         <button onclick="closePostReview()" aria-label="Close" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 cursor-pointer">
           <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
         </button>
@@ -653,36 +628,33 @@ window.showComplianceModals = function showComplianceModals(force) {
       <!-- Video text-overlay render state. The ONLY surface telling a reviewer their post is held
            out of the publish queue — scheduled_posts.status still reads 'scheduled' throughout. -->
       <div id="post-review-render-alert" class="hidden mb-4 text-xs rounded-lg border px-3 py-2.5"></div>
-      <!-- Stage: the post canvas on the left, one selection-driven inspector on the right. The
-           inspector is the ONLY place edits live — what you select on the canvas decides what it
-           shows. Stacks on narrow screens. -->
-      <!-- Three panes. The split is by QUESTION, not by feature:
-             LEFT   — what is this post?      platform, format, and the rules that format imposes
-             MIDDLE — what does it look like? the canvas, and the video timeline
-             RIGHT  — what is selected?       layers, and the properties of the selected layer
-           Both sides collapse to a slim re-open tab so the canvas can have the width. They stack on
-           narrow screens, where collapsing is meaningless and the toggles are hidden. -->
+      <!-- Stage: the post, and the step rail beside it.
+           The editor used to be three panes split by question — LEFT what is this post (platform,
+           format), MIDDLE what does it look like, RIGHT what is selected — each side collapsible to
+           a slim re-open tab. That layout answered its questions in the order the CONTROLS were
+           built rather than the order the work happens, and it put the targeting form in front of
+           the post. It is gone. What is here now is the post itself, full width, and one rail of
+           collapsed steps in the order you actually do them (see _RAIL). -->
       <div class="flex flex-col lg:flex-row gap-4 items-start">
 
-        <!-- Slim re-open tab, shown only while the left pane is collapsed. -->
-        <button type="button" id="pce-left-reopen" onclick="_pceTogglePane('left')" title="Show post setup"
-          class="hidden lg:flex shrink-0 flex-col items-center gap-1 px-1.5 py-3 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 transition cursor-pointer">
-          <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
-          <span class="text-[9px] font-bold uppercase tracking-wider text-gray-400" style="writing-mode:vertical-rl">Setup</span>
-        </button>
+        <!-- ── PARKING: blocks the rail borrows ──────────────────────────────────────────────
+             NOT a pane. The three-pane layout that used to live here (left = post setup, right =
+             design inspector, both collapsible to slim re-open tabs) is gone — the step rail
+             replaced it, and there is no longer a way back to it.
 
-        <!-- ── LEFT: what this post is ───────────────────────────────────────────────────────── -->
-        <aside id="pce-left" class="hidden w-full lg:w-64 shrink-0 rounded-xl border border-gray-200 bg-white overflow-hidden">
-          <div class="px-3 py-2 bg-gray-50 border-b border-gray-100 flex items-center justify-between gap-2">
-            <span class="text-xs font-bold text-gray-600">Post setup</span>
-            <button type="button" onclick="_pceTogglePane('left')" title="Hide"
-              class="hidden lg:block text-gray-300 hover:text-gray-600 transition cursor-pointer">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
-            </button>
-          </div>
-          <!-- Given an id so the rail can move this whole block into its first step rather than
-               rebuilding it: _pceRenderPlatformPicker and _pceRenderFormats keep writing into the
-               same nodes wherever they happen to be parented. -->
+             What is left is a hidden HOME for the control blocks the rail lends out. _railMount
+             re-parents a block into whichever step is open and _railRestoreAll puts it back here
+             before the rail's next repaint — that repaint is an innerHTML write, so a borrowed
+             block with nowhere to go would be DESTROYED with the markup around it. The blocks
+             stay put; only their parent changes.
+
+             So this container cannot be deleted with the rest of the layout, and it must never be
+             made visible: it holds real, live controls (#post-review-caption is the field
+             rqReviewSaveAmend saves from), not a copy of them. -->
+        <aside id="pce-left" class="hidden" aria-hidden="true">
+          <!-- Given an id so the rail can move this whole block into its Platforms & format step
+               rather than rebuilding it: _pceRenderPlatformPicker and _pceRenderFormats keep
+               writing into the same nodes wherever they happen to be parented. -->
           <div id="pce-setup-body" class="p-3 space-y-3">
             <!-- The platform TAB BAR used to sit here, directly above these chips: two rows of
                  platform pills in a 256px column, which read as the same control twice. It is not
@@ -929,26 +901,14 @@ window.showComplianceModals = function showComplianceModals(force) {
               </div>
             </div>
         </div>
-        <!-- The inspector. Every control that changes how this post looks lives here, and WHICH
-             controls you see is decided by what is selected on the canvas — never by hunting for
-             the right button. Sections are all present in the DOM and shown one at a time, so an
-             input keeps its value while you select something else. -->
-        <aside id="post-review-inspector" class="hidden w-full lg:w-72 shrink-0 rounded-xl border border-gray-200 bg-white overflow-hidden">
-          <div class="px-3 py-2 bg-gray-50 border-b border-gray-100 flex items-center justify-between gap-2">
-            <span class="text-xs font-bold text-gray-600">Design</span>
-            <button type="button" onclick="_pceTogglePane('right')" title="Hide"
-              class="hidden lg:block text-gray-300 hover:text-gray-600 transition cursor-pointer">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
-            </button>
-          </div>
-          <!-- The layer list used to sit here. It lives under the canvas now (#pce-stage-strip):
-               a layer's position and duration are things you judge against the media, not against
-               a column of colour pickers. -->
-          <div class="px-3 py-2 bg-gray-50 border-b border-gray-100 flex items-center justify-between gap-2">
-            <span id="pce-insp-title" class="text-xs font-bold text-gray-600">Branded card</span>
-            <span id="pce-insp-kind" class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Media</span>
-          </div>
-
+        <!-- The second half of the parking container (see #pce-left above) — the design controls,
+             kept in the DOM and never shown as a pane. The rail borrows #pce-insp-overlays and
+             #pce-insp-audio into its "Text & sound" step and #pce-link-block into "Link & call to
+             action"; the caption block stays here because it is the MODEL, not a view — the words
+             are typed on the canvas (_pceOpenInlineCaption) and mirrored into
+             #post-review-caption, which is the field rqReviewSaveAmend actually saves from.
+             Deleting it would silently stop the editor saving captions. -->
+        <aside id="post-review-inspector" class="hidden" aria-hidden="true">
           <div class="p-3 space-y-3">
             <!-- ── Media: the card itself ───────────────────────────────── -->
             <!-- ── Caption. Always present: every post has words, whatever its media is. ── -->
@@ -1256,12 +1216,6 @@ window.showComplianceModals = function showComplianceModals(force) {
           </div>
         </aside>
 
-        <!-- Slim re-open tab, shown only while the right pane is collapsed. -->
-        <button type="button" id="pce-right-reopen" onclick="_pceTogglePane('right')" title="Show design panel"
-          class="hidden lg:flex shrink-0 flex-col items-center gap-1 px-1.5 py-3 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 transition cursor-pointer">
-          <svg class="w-3.5 h-3.5 text-gray-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/></svg>
-          <span class="text-[9px] font-bold uppercase tracking-wider text-gray-400" style="writing-mode:vertical-rl">Design</span>
-        </button>
       </div>
       <div id="post-review-archive" class="hidden mt-4 text-xs"></div>
     </div>
@@ -5688,13 +5642,11 @@ function renderPlatformMockup(post) {
     // (_pceOpenInlineCaption), and an empty one says so rather than rendering as nothing at all:
     // a post with no words showed a blank strip, which is indistinguishable from no caption field.
     const captionEmpty = !caption && !hashtags && !link;
-    // The per-platform length badges live in the inspector — which the rail layout does not have.
-    // Without somewhere on the canvas to draw them, "too long for X" simply stopped being said,
-    // which is the one warning that decides whether a post can publish at all. This host is where
-    // they go instead: attached to the words they are counting, which is where they belonged.
-    // Filled by _pceRefreshCaptionMeta; rendered only in the rail layout so the old one keeps its
-    // single copy in the pane.
-    const metaHost = (_railOn && editableNow) ? '<div data-caption-meta class="flex flex-wrap gap-1 mt-1.5"></div>' : '';
+    // The per-platform length badges have no pane to live in, and "too long for X" is the one
+    // warning that decides whether a post can publish at all. This host is where they go instead:
+    // attached to the words they are counting, which is where they belonged. Filled by
+    // _pceRefreshCaptionMeta.
+    const metaHost = editableNow ? '<div data-caption-meta class="flex flex-wrap gap-1 mt-1.5"></div>' : '';
     const captionBlock = (cls) =>
         `<div class="${cls}${editableNow ? ' cursor-text hover:bg-gray-50 transition' : ''}" data-caption-host
            ${editableNow ? 'title="Click to write the caption"' : ''}>${
@@ -6104,10 +6056,10 @@ async function _rqLoadQualityReview(postId) {
     _prqVerified = {};
     const wrap = document.getElementById('post-review-quality');
     if (!wrap) return;
-    // Revealing itself is right in the pane layout, where this panel lives under the post. In the
-    // rail, step 6 owns it — so showing itself here would put the same verdict on screen twice.
-    // Leave it shut and let the step's subtitle carry the news instead.
-    wrap.classList.toggle('hidden', _railOn && !wrap.closest('#pce-rail'));
+    // "Check & improve" owns this panel, so it must not reveal itself under the post as well —
+    // that would put the same verdict on screen twice. Shown only once the step has borrowed it;
+    // until then the step's subtitle carries the news.
+    wrap.classList.toggle('hidden', !wrap.closest('#pce-rail'));
     _prqShow('prq-loading', true);
     ['prq-warnings-wrap', 'prq-suggestions-wrap', 'prq-ask-wrap', 'prq-rewrite-wrap', 'prq-clean']
         .forEach(id => _prqShow(id, false));
@@ -6170,10 +6122,10 @@ function _prqRenderReview(data) {
     const openCount = (data.openWarnings || warnings.filter(w => !dispositions[w])).length;
     _prqShow('prq-clean', openCount === 0 && !suggestions.length);
 
-    // In the rail layout this panel is shut, so the step's subtitle is the ONLY place the verdict
-    // shows until the step is opened. Repaint it now the counts are real, or it would sit on
-    // "Not checked yet" for a post that has just been checked.
-    if (_railOn) _railRender();
+    // The panel is shut until its step is opened, so the step's subtitle is the ONLY place the
+    // verdict shows. Repaint it now the counts are real, or it would sit on "Not checked yet" for a
+    // post that has just been checked.
+    _railRender();
 }
 
 // Ask for ONE suggestion. This is the only path that produces one — nothing else in the panel
@@ -7095,9 +7047,9 @@ function _pceSelect(key, repaintHandles = true) {
         if (sec.closest('#pce-rail')) continue;
         sec.classList.toggle('hidden', sec.dataset.insp !== key);
     }
-    const label = _PCE_INSP_TITLES[key];
-    if (_pceEl('pce-insp-title')) _pceEl('pce-insp-title').textContent = label.title;
-    if (_pceEl('pce-insp-kind')) _pceEl('pce-insp-kind').textContent = label.kind;
+    // The pane's "Branded card / Media" title strip is gone with the pane. _PCE_INSP_TITLES is
+    // still the vocabulary for what a layer IS — the layer list reads it — there is just no longer
+    // a header to write it into.
     _pcePaintAlign(key);
     if (repaintHandles) _pcePaintHandles();
     // The sourcing panel is shared with the generate-post sheet, so it is moved here on demand
@@ -7125,40 +7077,11 @@ function _pceSelect(key, repaintHandles = true) {
 // reschedule panel changes: they are the same nodes, writing to the same ids, just somewhere else
 // in the tree. A rebuild-instead-of-move would have meant a second copy of every one of those.
 //
-// Flagged so both layouts can live on staging at once. The flag itself is read by a tiny script at
-// the very top of <head> and left on window.__bmsRail — it CANNOT be read here, because auth-check.js
-// redirects a signed-out visitor with location.replace(), which aborts the document before this line
-// is ever reached. Reading it down here meant ?rail=1 was lost on every load that passed through the
-// login page. See the head script for how to set it.
-let _railOn = !!window.__bmsRail;
-
-/** Flip layouts from the console without a reload: _railSet(true) / _railSet(false). */
-function _railSet(on) {
-    _railOn = !!on;
-    try { localStorage.setItem('bms_rail', on ? '1' : '0'); } catch { /* private mode */ }
-    _railApplyLayout();
-    return _railOn;
-}
-window._railSet = _railSet;
-
-/**
- * The header's layout switch.
- *
- * Re-renders the whole modal rather than just re-applying the panes: the mock-up decides at RENDER
- * time whether to carry the caption-length badges (they have nowhere else to go without an
- * inspector), so flipping the flag without redrawing leaves the canvas built for the other layout.
- */
-function _railToggleLayout() {
-    _railSet(!_railOn);
-    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
-    if (post) _rqReviewRenderActive(); else _railPaintLayoutToggle();
-}
-
-/** Label the switch with the layout it will GIVE you, not the one you are in. */
-function _railPaintLayoutToggle() {
-    const btn = document.getElementById('pce-layout-toggle');
-    if (btn) btn.textContent = _railOn ? 'Use panes' : 'Try step rail';
-}
+// This was flagged (window.__bmsRail / ?rail=1 / a header toggle) while both layouts existed, so
+// they could be compared on staging. The rail won: it is now the only layout, and the flag, its
+// head script, the toggle button and the pane machinery are all gone. There is deliberately no way
+// back — a layout switch is a promise to keep both working, and the panes were the thing being
+// replaced, not an alternative worth maintaining.
 
 let _railOpen = null;                 // key of the one open step, or null
 const _railHomes = new Map();         // node id → where it came from, so it can go back
@@ -7166,12 +7089,26 @@ const _railHomes = new Map();         // node id → where it came from, so it c
 // Steps in the order the work happens. `mount` is the id of the block this step borrows.
 // `%A` is replaced with the user's own assistant name — this is "Write with Mabel", not "Write
 // with AI". `also` names a second block mounted under the first (text and sound are one step).
+//
+// ── Content first ───────────────────────────────────────────────────────────────────────────────
+// "Platforms & format" used to be step 1, on the reasoning that the format list is per-platform so
+// the platform has to be chosen before the formats mean anything. True of the CONTROLS, wrong about
+// the WORK: nobody decides they are making a Reel and then wonders what to say. You have something
+// to say, you find a picture for it, and only then does where-it-goes become a question. Leading
+// with the targeting made the editor open on an admin form — which is the "previous logic" this
+// ordering exists to get away from.
+//
+// Nothing enforces this sequence: every step starts collapsed and any of them can be opened at any
+// time, so this is the order they are OFFERED in, not a wizard. Safe to reorder because each step
+// is found by `key` — `_railOpen`, `_railSub`, `_RAIL_ICON` and `_railToggle` never index by
+// position — and because format/media disagreements are caught wherever they are made, by
+// _pceRenderFormats' rules table and the blocked-format warning.
 const _RAIL = [
-    { key: 'setup', title: 'Platforms & format',    mount: 'pce-setup-body' },
     { key: 'write', title: 'Write with %A',         mount: 'pce-write-block' },
-    { key: 'link',  title: 'Link & call to action', mount: 'pce-link-block' },
     { key: 'media', title: 'Media',                 mount: 'gp-ai-media' },
     { key: 'text',  title: 'Text & sound',          mount: 'pce-insp-overlays', also: 'pce-insp-audio' },
+    { key: 'link',  title: 'Link & call to action', mount: 'pce-link-block' },
+    { key: 'setup', title: 'Platforms & format',    mount: 'pce-setup-body' },
     { key: 'check', title: 'Check & improve',       mount: 'post-review-quality' },
     { key: 'when',  title: 'Schedule & publish',    mount: 'post-review-reschedule' },
 ];
@@ -7310,53 +7247,24 @@ function _railToggle(key) {
 }
 
 /**
- * Put the editor into whichever layout is in force.
+ * Put the editor into its layout: the post, and the rail beside it.
  *
- * The rail does not sit ALONGSIDE the two panes, it replaces them — so this hides both, and their
- * collapse tabs with them, before painting the rail. Both `hidden` and the inline display are set:
- * these elements are shown by several different code paths, and a class alone loses to a display
- * set inline elsewhere (the trap _pceShowLeftPane already documents).
+ * The parking container holding the borrowed control blocks is hidden in the markup and stays that
+ * way — but it is pinned shut here as well, with BOTH `hidden` and the inline display. Several
+ * paths in this file still show and hide things by writing `style.display` directly, and a class
+ * alone loses to an inline display, which is the trap that had the old left pane reappearing.
  */
 function _railApplyLayout() {
-    const left = document.getElementById('pce-left');
-    const insp = document.getElementById('post-review-inspector');
-    const strip = document.getElementById('pce-layers-block');
-    if (!_railOn) {
-        _railRestoreAll();
-        _railOpen = null;
-        document.getElementById('pce-rail')?.classList.add('hidden');
-        strip?.classList.remove('hidden');
-        // Undo exactly what the on-path did, or turning the flag back off leaves the editor with
-        // no panes AND no rail. The inline display is the part that matters: `hidden` alone is not
-        // what hid them, so removing the class alone would not bring them back.
-        for (const el of [left, insp]) {
-            if (!el) continue;
-            el.classList.remove('hidden');
-            el.style.display = '';
-        }
-        // The re-open tabs are owned by _pceApplyPanes; let it decide, rather than guessing here.
-        for (const id of ['pce-left-reopen', 'pce-right-reopen']) {
-            document.getElementById(id)?.classList.remove('hidden');
-        }
-        _pceApplyPanes();
-        _railPaintLayoutToggle();
-        return;
-    }
-    for (const el of [left, insp]) {
+    for (const id of ['pce-left', 'post-review-inspector']) {
+        const el = document.getElementById(id);
         if (!el) continue;
         el.classList.add('hidden');
         el.style.display = 'none';
     }
-    // Their re-open tabs would otherwise float beside a pane that no longer exists.
-    for (const id of ['pce-left-reopen', 'pce-right-reopen']) {
-        const t = document.getElementById(id);
-        if (t) { t.classList.add('hidden'); t.classList.remove('lg:flex'); }
-    }
     // The layer list is the rail's job now. The timeline below it is NOT — a duration can only be
     // judged against the clip, so it stays under the media.
-    strip?.classList.add('hidden');
+    document.getElementById('pce-layers-block')?.classList.add('hidden');
     _railRender();
-    _railPaintLayoutToggle();
 }
 
 /** Paint the rail for the post on screen. Cheap enough to call on every state change. */
@@ -7365,7 +7273,7 @@ function _railRender() {
     const host = document.getElementById('pce-rail-steps');
     if (!wrap || !host) return;
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
-    if (!_railOn || !post) { wrap.classList.add('hidden'); wrap.style.display = 'none'; return; }
+    if (!post) { wrap.classList.add('hidden'); wrap.style.display = 'none'; return; }
     wrap.classList.remove('hidden');
     wrap.style.display = '';
 
@@ -7425,48 +7333,9 @@ function _railRender() {
     if (quality && !quality.closest('#pce-rail')) quality.classList.add('hidden');
 }
 
-// ── Panes ───────────────────────────────────────────────────────────────────────────────────────
-// Left = what this post IS, right = what is SELECTED, canvas in the middle. Either side collapses to
-// a slim re-open tab so the canvas can have the width. The choice is remembered for the session
-// (not persisted — a preference this cheap to re-set is not worth a settings round trip).
-// Collapsing is desktop-only: below lg the panes stack, where "collapse" means nothing.
-const _pceCollapsed = { left: false, right: false };
-
-// `hidden` alone is not enough here — a display set inline elsewhere wins over the class, which is a
-// trap this modal has hit before. Set both, exactly as _pceSyncForPost does for the inspector.
-function _pceShowLeftPane(on) {
-    const el = document.getElementById('pce-left');
-    if (!el) return;
-    el.classList.toggle('hidden', !on);
-    el.style.display = on ? '' : 'none';
-    // A collapsed pane must not leave its re-open tab floating on a post that has no panes at all.
-    const tab = document.getElementById('pce-left-reopen');
-    if (tab && !on) tab.classList.add('lg:hidden');
-}
-
-function _pceApplyPanes() {
-    for (const side of ['left', 'right']) {
-        const pane = document.getElementById(side === 'left' ? 'pce-left' : 'post-review-inspector');
-        const tab = document.getElementById(`pce-${side}-reopen`);
-        if (!pane || !tab) continue;
-        const off = _pceCollapsed[side];
-        // The panes are shown/hidden by their own logic too (the inspector hides entirely for a
-        // non-editable post), so only touch the lg-and-up display here — never the `hidden` class,
-        // which those other rules own.
-        pane.classList.toggle('lg:hidden', off);
-        tab.classList.toggle('lg:flex', off);
-        tab.classList.toggle('lg:hidden', !off);
-    }
-}
-
-function _pceTogglePane(side) {
-    _pceCollapsed[side] = !_pceCollapsed[side];
-    _pceApplyPanes();
-    // The canvas just changed width, so overlay boxes sized against it must be repainted or the
-    // text sits where the OLD frame was — the same reason there is a window resize listener.
-    const p = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
-    if (p) _rqRenderCanvasOverlays(p);
-}
+// The collapsible-pane machinery (_pceCollapsed, _pceShowLeftPane, _pceApplyPanes, _pceTogglePane)
+// lived here. It went with the panes: there is nothing left to collapse, and the canvas already has
+// the full width the collapse toggles existed to give it.
 
 // ── Post formats ────────────────────────────────────────────────────────────────────────────────
 // Mirrors src/config/post-formats.ts, which this static page cannot import. The SERVER is
@@ -8052,7 +7921,7 @@ function _pceChooseStyle(key) {
     // can be chosen, and the card stays until one is. See _pceSwapCardForMedia.
     if (key === 'media' && isCard) {
         _pceSwapCardForMedia(true);
-        if (_railOn) { _railOpen = 'media'; _railRender(); }
+        _railOpen = 'media'; _railRender();
     }
 }
 
@@ -9345,8 +9214,6 @@ function _pceSchedulePreview() { clearTimeout(_pceDebounce); _pceDebounce = setT
 // Seed the editor from THIS card's stored render params, so reopening shows the user's own edits
 // rather than resetting to the org default.
 function _pceSyncForPost(post) {
-    const wrap = _pceEl('post-review-inspector');
-    if (!wrap) return;
     const editable = !!post && ['pending_approval', 'draft', 'in_review', 'approved', 'scheduled'].includes(post.status);
     // The header's Draft-with-AI pair. It used to hide with the left pane it lived in; now it is in
     // the header it needs saying explicitly, or a published post would be offered a redraft.
@@ -9357,31 +9224,21 @@ function _pceSyncForPost(post) {
         aiActions.classList.toggle('flex', editable);
     }
     if (!editable) {
-        wrap.classList.add('hidden');
-        wrap.style.display = 'none';   // `hidden` loses to a display set inline elsewhere
         _pceSetStageWide(false);
         _rqRestoreMediaPanel();
         _pceState.postId = null;
         _pceState.geo = null;
         _pceLayers = [];
         // The other two exits repaint the list via _pceSelect; this one has no selection to make,
-        // so clear it here or a re-shown inspector would list the PREVIOUS post's layers.
+        // so clear it here or a re-shown list would show the PREVIOUS post's layers.
         _pceRenderLayers();
-        _pceShowLeftPane(false);
-        // A published post has nothing to decide, so the rail goes with the panes — and everything
-        // it borrowed goes home first, or those blocks would be destroyed with the next repaint.
+        // A published post has nothing to decide, so the rail goes away — and everything it
+        // borrowed goes home first, or those blocks would be destroyed with the next repaint.
         _railRestoreAll();
         _railOpen = null;
         document.getElementById('pce-rail')?.classList.add('hidden');
         return;
     }
-    wrap.classList.remove('hidden');
-    wrap.style.display = '';
-    // Left pane tracks the inspector: both are for editing, and a read-only post gets neither.
-    _pceShowLeftPane(true);
-    // …unless the rail is on, in which case it replaces both. Applied after the two lines above
-    // rather than instead of them, so every other branch in this function can keep assuming the
-    // old layout and only one place has to know about the new one.
     _railApplyLayout();
     _pceRenderPlatformPicker();
     _pceRenderStyle();
@@ -9391,7 +9248,6 @@ function _pceSyncForPost(post) {
     // it finishes.
     if (!_pceAiPoll) _pceSetAiMsg('');
     _pceRenderFormats();
-    _pceApplyPanes();
     _pceSetStageWide(true);
 
     const card = post.brandCard;
@@ -9765,6 +9621,12 @@ function closePostReview() {
     modal.classList.remove('flex');
     _rqReviewPostId = null;
     _rqReviewGroupIds = [];
+    // The Content Calendar opens posts through this editor now, so its copy of them is stale by the
+    // time the modal shuts — a caption edit, an approval, a reschedule or a rejection all happened
+    // somewhere it cannot see. Asking it to reload is also what makes a post that stopped being
+    // schedule-active (rejected here, say) leave the grid without a page refresh. No-op on every
+    // other view: the function only exists while calendar.js is mounted.
+    window._calRefreshAfterEdit?.();
 }
 
 // ── "💬 Chat" card action — mounts the shared ChatSession widget in a modal instead of
@@ -9824,11 +9686,14 @@ function _rqRestoreMediaPanel() {
     }
 }
 
-// Sourcing media is now "select the picture" — there is no separate place to go, so both of these
-// just point the inspector at the picture layer and let it mount the shared panel.
+// Sourcing media is now "select the picture" — there is no separate place to go, so this selects
+// the picture layer and opens the step that holds the sourcing panel. It used to scroll the design
+// pane into view; that pane is hidden parking now, so scrolling to it would scroll to nothing.
 function rqReviewAddMedia() {
     _pceSelect('media');
-    _pceEl('post-review-inspector')?.scrollIntoView({ block: 'nearest' });
+    _railOpen = 'media';
+    _railRender();
+    document.getElementById('rail-panel-media')?.scrollIntoView({ block: 'nearest' });
 }
 
 // Show one inline form (changes/reject/reschedule) and hide the primary buttons; no arg → buttons.
@@ -9837,7 +9702,7 @@ function rqReviewToggle(which) {
     // it into "Schedule & publish". Toggling `hidden` on a node the rail is showing would either do
     // nothing visible or blank an open step, so the footer link opens the STEP instead. Without
     // this, "Change the time" silently does nothing in the converged layout.
-    if (_railOn && which === 'reschedule') {
+    if (which === 'reschedule') {
         _railOpen = 'when';
         _railRender();
         document.getElementById('pce-rail')?.scrollIntoView({ block: 'nearest' });

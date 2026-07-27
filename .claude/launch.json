@@ -2,6 +2,15 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-rail-only",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/ece948c3-2a9e-4ba2-9740-b43ac828fed5/scratchpad/railharness2/server.mjs"
+      ],
+      "port": 4219,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-calendar-grouping",
       "runtimeExecutable": "python3",
       "runtimeArgs": [
