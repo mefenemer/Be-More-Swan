@@ -47,14 +47,29 @@ export interface CardElementLayout {
     y: number;
 }
 
-/** The two elements a reviewer can show, hide and place: the company name and the website. */
+/**
+ * The placeable pieces of a card.
+ *
+ * `headline` joined wordmark and website so the words can be dragged like everything else. It keeps
+ * the same shape for one reason — every consumer (normalizeCardElement, the drag handles, the
+ * clamp) already works on that shape — but its `show` is meaningless: a card with no headline is
+ * not a card, so the renderer ignores it and nothing offers to hide it.
+ */
 export interface CardLayout {
+    headline: CardElementLayout;
     wordmark: CardElementLayout;
     website: CardElementLayout;
 }
 
-/** Reproduces the original fixed layout: name top-left, website bottom-left, both shown. */
+/**
+ * Name top-left, website bottom-left, headline centred.
+ *
+ * The headline's default y of 0.5 reproduces exactly where it used to be pinned — the old renderer
+ * gave it the whole safe area with justifyContent:center — so a card saved before it became
+ * draggable renders identically after.
+ */
 export const DEFAULT_CARD_LAYOUT: CardLayout = {
+    headline: { show: true, align: 'left', y: 0.5 },
     wordmark: { show: true, align: 'left', y: 0 },
     website: { show: true, align: 'left', y: 1 },
 };
@@ -78,6 +93,7 @@ function normalizeCardElement(raw: unknown, fallback: CardElementLayout): CardEl
 export function normalizeCardLayout(raw: unknown): CardLayout {
     const o = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
     return {
+        headline: normalizeCardElement(o.headline, DEFAULT_CARD_LAYOUT.headline),
         wordmark: normalizeCardElement(o.wordmark, DEFAULT_CARD_LAYOUT.wordmark),
         website: normalizeCardElement(o.website, DEFAULT_CARD_LAYOUT.website),
     };
@@ -221,7 +237,7 @@ export interface BrandCardResult {
     layout: CardLayout;
     /** Drawn geometry, so the editor can put its drag handles exactly where the render put the
      *  text instead of re-deriving the same padding maths in the browser and drifting from it. */
-    elements: { wordmark: CardElementRender; website: CardElementRender };
+    elements: { headline: CardElementRender; wordmark: CardElementRender; website: CardElementRender };
 }
 
 /**
@@ -295,11 +311,29 @@ export async function renderBrandCard(opts: {
         display: 'flex', alignItems: 'center', justifyContent: justify(align),
     }, child);
 
+    // ── The headline, placed like everything else ────────────────────────────────────────────
+    // It used to be given the whole safe area with justifyContent:center — which is why it could not
+    // be dragged: "centred in the remaining space" has no y to move. It now gets a measured block at
+    // a y like the other elements, and the box it occupies is reported back so the editor can put a
+    // drag handle exactly over the words.
+    //
+    // The height is ESTIMATED, because satori only knows the true wrap after it lays the card out
+    // and the box has to be decided before that. It only has to be self-consistent: the handle is
+    // positioned from this same number, so the band the user grabs is the band the text occupies.
+    const headlineSize = headlineFontSize(headline.length, width);
+    // ~0.52em average advance for this weight at display sizes — close enough to count wraps.
+    const perLine = Math.max(1, Math.floor(rail / (headlineSize * 0.52)));
+    const wrapped = headline.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil(line.length / perLine)), 0);
+    const headlineHeight = Math.min(height - pad * 2, Math.round(wrapped * headlineSize * 1.14));
+    const headlineTop = topFor(layout.headline.y - (headlineHeight / height) / 2, headlineHeight);
+
     const children: unknown[] = [
         el({
-            position: 'absolute', left: pad, top: pad, width: rail, height: height - pad * 2,
-            display: 'flex', flexDirection: 'column', justifyContent: 'center',
-            fontSize: headlineFontSize(headline.length, width),
+            position: 'absolute', left: pad, top: headlineTop, width: rail, height: headlineHeight,
+            display: 'flex', flexDirection: 'column',
+            justifyContent: 'center', alignItems: justify(layout.headline.align),
+            textAlign: layout.headline.align,
+            fontSize: headlineSize,
             lineHeight: 1.14, fontWeight: 800, color: palette.headline,
             // Long single words (a URL-ish product name) would otherwise print past the edge.
             overflow: 'hidden',
@@ -307,6 +341,8 @@ export async function renderBrandCard(opts: {
     ];
 
     const elements: BrandCardResult['elements'] = {
+        // `show` is not offered for the headline, so it is always shown and always has a box.
+        headline: { available: true, shown: true, box: { left: pad, top: headlineTop, width: rail, height: headlineHeight } },
         wordmark: { available: wordmarkAvailable, shown: false, box: null },
         website: { available: websiteAvailable, shown: false, box: null },
     };

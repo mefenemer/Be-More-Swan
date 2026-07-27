@@ -603,7 +603,7 @@ window.showComplianceModals = function showComplianceModals(force) {
   <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[88vh] flex flex-col overflow-hidden">
     <div class="flex items-center justify-between gap-3 px-5 py-3 border-b border-gray-100 shrink-0">
       <div class="min-w-0">
-        <h2 id="pce-media-modal-title" class="text-base font-extrabold text-gray-900">Choose a picture</h2>
+        <h2 id="pce-media-modal-title" class="text-base font-extrabold text-gray-900">Choose media</h2>
         <p id="pce-media-modal-sub" class="text-xs text-gray-500"></p>
       </div>
       <button onclick="_pceCloseMediaPicker()" aria-label="Close" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 cursor-pointer">
@@ -1108,25 +1108,30 @@ window.showComplianceModals = function showComplianceModals(force) {
                 <button type="button" onclick="_pceOpenMediaPicker()"
                   class="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer">
                   <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.6-4.6a2 2 0 012.8 0L16 16m-2-2 1.6-1.6a2 2 0 012.8 0L20 14M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                  <span id="insp-change-media-label">Choose a picture or video</span>
+                  <span id="insp-change-media-label">Choose media</span>
                 </button>
               </div>
 
               <!-- Media that IS a branded card: the card's own parameters. -->
               <div id="insp-media-card">
-              <div>
-                <label for="pce-headline" class="block text-xs font-bold text-gray-600 mb-1">Wording on the card</label>
-                <textarea id="pce-headline" rows="3" maxlength="120"
-                  class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none resize-none"></textarea>
-                <p class="text-[11px] text-gray-400 mt-1">This is the card only — it doesn't change the caption.</p>
-              </div>
+              <!-- ── The card's wording is NOT here ──────────────────────────────────────────────
+                   It was a "Wording on the card" textarea, which meant typing in a panel and
+                   watching a picture change somewhere else. The words are on the card, so the card
+                   is where they are edited: click them (_pceOpenInlineHeadline). This hidden field
+                   stays as the MODEL — _pceValues reads it, exactly as rqReviewSaveAmend reads the
+                   hidden caption field — so there is still one place the value lives. -->
+              <textarea id="pce-headline" rows="3" maxlength="120" class="hidden" aria-hidden="true"></textarea>
 
-              <div class="mt-3">
+              <div>
                 <span class="block text-xs font-bold text-gray-600 mb-1">Style</span>
                 <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden">
                   <button type="button" data-variant="light" class="pce-variant px-3 py-1.5 text-xs font-bold cursor-pointer transition">Light</button>
                   <button type="button" data-variant="bold" class="pce-variant px-3 py-1.5 text-xs font-bold cursor-pointer transition border-l border-gray-300">Bold</button>
                 </div>
+                <!-- "Invert colours" sat here. Light/Bold already IS the inversion — resolveCardPalette
+                     swaps the background and the text between the two variants — so the button was a
+                     second control for a choice the segmented control had already made, and the two
+                     could disagree about which way round the card was. -->
               </div>
 
               <div class="grid grid-cols-3 gap-2 mt-3">
@@ -1143,48 +1148,51 @@ window.showComplianceModals = function showComplianceModals(force) {
                   <input type="color" id="pce-textColor" class="h-9 w-full rounded border border-gray-300 cursor-pointer bg-white p-1">
                 </div>
               </div>
-              <!-- Swap background and text. The card arrives in the org's brand style — say a white
-                   card with pink words — and the inverted version (pink card, white words) is the
-                   other half of that same brand, wanted often enough that picking both colours by
-                   hand each time is the wrong amount of work. One button, and it is its own undo. -->
-              <button type="button" id="pce-invert" onclick="_pceInvertCardColours()"
-                class="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-[11px] font-bold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer">
-                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16V4m0 0L4 7m3-3l3 3m7 1v12m0 0l3-3m-3 3l-3-3"/></svg>
-                <span>Invert colours</span>
-              </button>
 
+              <!-- A list, not a free-text box. The old input took any string and handed it to
+                   loadWebFont, which quietly falls back to the bundled family when the name is not a
+                   real Google font — so a typo produced a card in the wrong typeface with nothing
+                   said. These are families the renderer can actually fetch. "Your brand font" is the
+                   first option and means "whatever Brand Assets says", so the org-wide setting stays
+                   the default rather than being overridden by merely opening this panel. -->
               <div class="mt-3">
                 <label for="pce-fontFamily" class="block text-xs font-bold text-gray-600 mb-1">Font</label>
-                <input type="text" id="pce-fontFamily" maxlength="48" spellcheck="false" placeholder="Plus Jakarta Sans"
-                  class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 focus:ring-2 focus:ring-emerald-600 outline-none">
+                <select id="pce-fontFamily"
+                  class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white cursor-pointer focus:ring-2 focus:ring-emerald-600 outline-none"></select>
               </div>
 
-              <p class="text-[11px] text-gray-400 mt-3">Click the company name or the web address on the card to place them.</p>
+              <p class="text-[11px] text-gray-400 mt-3">Click the words, the company name or the web address on the card to edit or place them.</p>
 
+              <!-- "Save card" and "Undo changes" are gone: every change now saves itself
+                   (_pceScheduleCardSave). A card is a rendered PNG, so an unsaved edit was a preview
+                   that disagreed with what would publish — the one state this editor should never be
+                   in. "Reset to my brand style" stays: it is not an undo, it is a different starting
+                   point (discard this card's own style and re-read Brand Assets). -->
               <div class="pt-3 mt-3 border-t border-gray-100 flex flex-wrap items-center gap-2">
-                <button type="button" id="pce-save"
-                  class="px-4 py-2 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition cursor-pointer">Save card</button>
-                <button type="button" id="pce-revert"
-                  class="text-xs font-semibold text-gray-500 hover:text-gray-700 transition cursor-pointer">Undo changes</button>
                 <button type="button" id="pce-resetkit"
                   class="text-xs font-semibold text-gray-500 hover:text-gray-700 transition cursor-pointer">Reset to my brand style</button>
                 <span id="pce-msg" class="text-xs font-semibold text-gray-500"></span>
               </div>
-              <!-- The way OUT of a branded card. A card is not a kind of post — it is a generated
-                   image asset that happens to carry renderParams (get-social-drafts derives
-                   post.brandCard from it), so attaching any other picture or a video replaces it and
-                   the post simply stops being a card post. That already worked server-side; what was
-                   missing was any control that reached it, because this panel hid the whole sourcing
-                   panel whenever a card was present. "How do I turn this card back into a photo
-                   post?" had no answer. -->
-              <div class="pt-3 mt-3 border-t border-gray-100">
-                <button type="button" onclick="_pceSwapCardForMedia(true)"
-                  class="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer">
-                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.6-4.6a2 2 0 012.8 0L16 16m-2-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-                  <span>Use a photo or video instead</span>
-                </button>
-                <p class="text-[11px] text-gray-400 mt-1.5">Whatever you attach replaces the card.</p>
+              <!-- "Use a photo or video instead" was here. Swapping a card for a picture is the
+                   media picker's job now (the Post Style chooser above flips the kind, and the
+                   picker is where a picture comes from) — a third door to the same place, inside the
+                   panel the other two already sit in. _pceSwapCardForMedia survives and is still
+                   what the picker's flow calls. -->
               </div>
+            </div>
+
+            <!-- ── The headline as a selectable layer ──────────────────────────────────────────
+                 It is placeable like the other two, so it gets the same alignment control — but it
+                 has no show/hide checkbox, because a card without its words is not a card. The words
+                 themselves are edited on the canvas (double-click them), which is why there is no
+                 textarea here. -->
+            <div class="pce-insp hidden" data-insp="headline">
+              <p class="text-[11px] text-gray-400 mb-2">Double-click the words on the card to change them, or drag them up and down.</p>
+              <span class="block text-xs font-bold text-gray-600 mb-1">Line up</span>
+              <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden" data-align-for="headline">
+                <button type="button" data-align="left" class="pce-align px-2.5 py-1.5 text-xs font-bold cursor-pointer transition">Left</button>
+                <button type="button" data-align="center" class="pce-align px-2.5 py-1.5 text-xs font-bold cursor-pointer transition border-l border-gray-300">Centre</button>
+                <button type="button" data-align="right" class="pce-align px-2.5 py-1.5 text-xs font-bold cursor-pointer transition border-l border-gray-300">Right</button>
               </div>
             </div>
 
@@ -6854,7 +6862,13 @@ const _pceState = { postId: null, base: null, busy: false, token: 0, layout: nul
 
 const _PCE_KIT_FIELDS = ['primaryColor', 'backgroundColor', 'textColor', 'fontFamily'];
 
+// The elements a reviewer can SHOW AND HIDE. The headline is deliberately absent: a card with no
+// headline is not a card, so there is nothing to toggle.
 const _PCE_ELEMENTS = { wordmark: 'Company name', website: 'Website' };
+
+// The elements a reviewer can DRAG. A superset: the headline is placeable but not hideable, which is
+// why these are two lists rather than one. Order decides nothing except handle paint order.
+const _PCE_PLACEABLE = { headline: 'Wording', wordmark: 'Company name', website: 'Website' };
 
 // What the inspector calls each selectable layer. `media` is titled by what the media actually is.
 const _PCE_INSP_TITLES = {
@@ -6864,6 +6878,7 @@ const _PCE_INSP_TITLES = {
     audio:    { title: 'Sound',        kind: 'Audio' },
     wordmark: { title: 'Company name', kind: 'Element' },
     website:  { title: 'Website',      kind: 'Element' },
+    headline: { title: 'Wording',      kind: 'Text' },
 };
 
 // Which layer the inspector is showing. Selection drives the panel — nothing else does.
@@ -7294,6 +7309,8 @@ function _pceOpenMediaPicker() {
     const msg = document.getElementById('pce-media-modal-msg');
     if (msg) msg.textContent = '';
     const sub = document.getElementById('pce-media-modal-sub');
+    // "Choose a picture" was the title, but this offers video and a branded card too — so it named
+    // one of three answers.
     if (sub) sub.textContent = post.thumbnailUrl ? 'Whatever you pick replaces what is on the post.' : '';
 
     modal.classList.remove('hidden');
@@ -7311,7 +7328,7 @@ function _pceCloseMediaPicker() {
     _rqRestoreMediaPanel();
 }
 
-/** Make a card from the picker, then get out of the way — the card IS the answer to "which picture". */
+/** Make a card from the picker, then get out of the way — the card IS the answer to "which media". */
 async function _pceCreateBrandCardFromPicker() {
     const msg = document.getElementById('pce-media-modal-msg');
     if (msg) { msg.textContent = 'Making the card…'; msg.className = 'block mt-1.5 text-[11px] font-semibold text-gray-500'; }
@@ -7456,19 +7473,22 @@ const _RAIL = [
     // The style chooser (photo/video vs branded card), what is attached, and — for a still — the
     // sound layer. Getting a different picture is the media picker MODAL, opened from the picture
     // itself; the five source buttons used to live inline here and were most of the panel.
-    { key: 'media', title: 'Media',                 blocks: (post) => {
-        const out = ['pce-style-block', 'pce-insp-media'];
-        // Sound rides with the still it plays over (a photo with a voice note publishes as a video).
-        // On a VIDEO post it belongs with the timeline instead — see the video step below.
-        if (!_pcePostIsVideo(post) && _pceLayers.includes('audio')) out.push('pce-insp-audio');
-        return out;
-    } },
+    { key: 'media', title: 'Media',                 blocks: () => ['pce-style-block', 'pce-insp-media'] },
     // ── Text on a still, and text on a video: two steps, one mechanism ───────────────────────
     // Same block (#pce-insp-overlays), split because the two jobs are not the same job: on a still
     // you place words, on a video you place words AND decide when they appear. A post is one or the
     // other, so exactly one of these is ever enabled and the other says which step to use instead.
-    { key: 'imgtext', title: 'Image overlays',      blocks: () => _pceLayers.includes('overlays') ? ['pce-insp-overlays'] : [],
-      enabled: (post) => !_pcePostIsVideo(post) && _pceLayers.includes('overlays') },
+    // Sound moved OUT of Media and in here: Media is about which picture, and a voice note is not a
+    // picture. It rides with whichever overlay step this post's media type uses, so there is exactly
+    // one step that is "things layered on top of the media". A branded card has no text overlays
+    // (its typography is its own) but CAN carry sound — so this step opens for a card too, with the
+    // sound half only.
+    { key: 'imgtext', title: 'On the image',        blocks: () => {
+        const out = [];
+        if (_pceLayers.includes('overlays')) out.push('pce-insp-overlays');
+        if (_pceLayers.includes('audio')) out.push('pce-insp-audio');
+        return out;
+    }, enabled: (post) => !_pcePostIsVideo(post) && !!post?.thumbnailUrl },
     { key: 'video',  title: 'Video overlays & sound', blocks: () => {
         const out = [];
         if (_pceLayers.includes('overlays')) out.push('pce-insp-overlays');
@@ -7573,16 +7593,23 @@ function _railSub(key, post) {
         }
         case 'imgtext': {
             if (!post || !post.thumbnailUrl) return 'Add a picture first';
-            if (post.brandCard) return 'A branded card carries its own words';
             if (_pcePostIsVideo(post)) return 'This is a video — use Video overlays';
             const boxes = _pceOverlayCount(post);
-            return boxes ? `${boxes} text box${boxes === 1 ? '' : 'es'}` : 'No text on the image';
+            const clips = _pceAudioClips(post).length;
+            // A card has no overlay layer, so on a card this step is only ever about sound and must
+            // not report "no text" as though something were missing.
+            if (post.brandCard) return clips ? `${clips} sound clip${clips === 1 ? '' : 's'}` : 'No sound yet';
+            if (!boxes && !clips) return 'Nothing on the image';
+            const parts = [];
+            if (boxes) parts.push(`${boxes} text box${boxes === 1 ? '' : 'es'}`);
+            if (clips) parts.push(`${clips} clip${clips === 1 ? '' : 's'}`);
+            return parts.join(' · ');
         }
         case 'video': {
             // A disabled step still has to say WHY, and say where the equivalent controls went for
             // the media this post actually has — otherwise it reads as a feature that is missing.
             if (!post || !post.thumbnailUrl) return 'Add a video first';
-            if (!_pcePostIsVideo(post)) return 'Only for video — text and sound are in Media';
+            if (!_pcePostIsVideo(post)) return 'Only for video — see "On the image"';
             const boxes = _pceOverlayCount(post);
             const clips = _pceAudioClips(post).length;
             if (!boxes && !clips) return 'Nothing on the video';
@@ -8811,12 +8838,12 @@ function _pceRefreshOverlayTiming() {
 
 // Make a branded text card for this post — the media source that had no way in.
 //
-// The wording is seeded from the caption's first line rather than asked for in a dialog: it is
-// almost always the sentence you would have typed, and the card's own "Wording on the card" field is
-// on screen the moment this returns, so editing it is one click rather than a prompt you cannot see
-// the result of. A post with no caption yet gets a placeholder for the same reason — the server
-// refuses an empty card, and refusing the click would be a worse answer than giving you something
-// to edit.
+// The wording is seeded from the caption's first line rather than asked for in a dialog: it is almost
+// always the sentence you would have typed, and the card that comes back is editable in place
+// (double-click the words — _pceOpenInlineHeadline), so changing it is one gesture on the thing
+// itself rather than a prompt whose result you cannot see. A post with no caption yet gets a
+// placeholder for the same reason — the server refuses an empty card, and refusing the click would
+// be a worse answer than giving you something to edit.
 // ── Leaving a branded card ──────────────────────────────────────────────────────────────────────
 // Which post's card is being replaced. A card post shows the card's own controls INSTEAD of the
 // sourcing panel — right for editing a card, a dead end for leaving one, because a card is just an
@@ -8883,7 +8910,10 @@ async function _pceCreateBrandCard() {
         _rqReviewRenderActive();
         // Land on the card's own controls: the next thing anyone does is change the wording.
         _pceSelect('media');
-        _pceSetMsg('Card created — edit the wording below.', 'ok');
+        // No confirmation: the card appearing on the post IS the confirmation, and the message told
+        // the user to edit "the wording below" — which no longer exists, because the wording is
+        // edited on the card itself.
+        _pceSetMsg('');
     } catch (err) {
         say(err.message || 'Could not make a card.', 'error');
     }
@@ -9325,7 +9355,13 @@ function _pcePaintAlign(key) {
 function _pceEl(id) { return document.getElementById(id); }
 
 function _pceDefaultLayout() {
-    return { wordmark: { show: true, align: 'left', y: 0 }, website: { show: true, align: 'left', y: 1 } };
+    // Mirrors DEFAULT_CARD_LAYOUT in src/lib/brand-card.ts. The headline's 0.5 is where the old
+    // renderer pinned it, so a card nobody has dragged renders exactly as it always did.
+    return {
+        headline: { show: true, align: 'left', y: 0.5 },
+        wordmark: { show: true, align: 'left', y: 0 },
+        website: { show: true, align: 'left', y: 1 },
+    };
 }
 
 // Tolerant of a card stored before layout existed, and of a half-written one.
@@ -9351,28 +9387,10 @@ function _pceSetMsg(text, tone) {
         (tone === 'error' ? 'text-red-600' : tone === 'ok' ? 'text-emerald-700' : 'text-gray-500');
 }
 
-/**
- * Swap the card's background and text colours.
- *
- * Writes the two inputs and re-renders through the ordinary preview path, so this is exactly a user
- * having typed both values: "Undo changes" reverts it, "Save card" commits it, and nothing here
- * needs its own knowledge of how a card is rendered. Pressing it twice returns to where you were.
- *
- * The accent is deliberately left alone. It is the brand's third colour, not part of the
- * foreground/background pair, and swapping it too made the inversion look like a different brand.
- */
-function _pceInvertCardColours() {
-    const bg = _pceEl('pce-backgroundColor');
-    const text = _pceEl('pce-textColor');
-    if (!bg || !text) return;
-    // Seed the kit first if the server's resolution has not landed: _pceValues drops the colours
-    // entirely while unseeded, so an invert before then would be silently discarded.
-    if (!_pceState.kitSeeded) return;
-    const swap = bg.value;
-    bg.value = text.value;
-    text.value = swap;
-    _pceRefreshPreview();
-}
+// _pceInvertCardColours lived here, behind an "Invert colours" button. The Light/Bold segmented
+// control already IS the inversion — resolveCardPalette swaps background and text between the two
+// variants — so the button was a second control for a decision the variant had already made, and the
+// two could disagree about which way round the card was.
 
 function _pceValues() {
     const v = {
@@ -9395,13 +9413,49 @@ function _pceValues() {
 // Adopt the kit the server resolved for this card as the editor's starting point: fill the inputs,
 // and make it what "Undo changes" reverts to. Only runs while unseeded, so it can never clobber an
 // edit the user has already made.
+/**
+ * The font list.
+ *
+ * A SHORTLIST, not a whitelist: brand-card-webfont.ts will fetch any family Google Fonts publishes,
+ * so this exists to stop the field being a guessing game. It used to be a free-text input, and
+ * loadWebFont falls back to the bundled family whenever the name is not a real Google font — so a
+ * typo produced a card in the wrong typeface with nothing said about it.
+ *
+ * The empty value means "whatever Brand Assets says", so merely opening this panel cannot silently
+ * override the org-wide setting.
+ */
+const _PCE_FONTS = [
+    'Plus Jakarta Sans', 'Inter', 'Poppins', 'Montserrat', 'Raleway', 'Work Sans',
+    'DM Sans', 'Manrope', 'Nunito', 'Rubik', 'Oswald', 'Bebas Neue',
+    'Playfair Display', 'Lora', 'Merriweather', 'Space Grotesk',
+];
+
+/**
+ * Fill the font <select>, keeping whatever the card is actually set to selectable.
+ *
+ * A <select> silently drops an assignment to a value it has no option for — so a card already using
+ * a family outside the shortlist (from website extraction, or a hand-set brand kit) would have had
+ * its font quietly reset to "brand default" the moment this panel opened. Its family is appended
+ * instead.
+ */
+function _pceRenderFontOptions(current) {
+    const sel = _pceEl('pce-fontFamily');
+    if (!sel) return;
+    const cur = String(current || '').trim();
+    const families = _PCE_FONTS.includes(cur) || !cur ? _PCE_FONTS : [..._PCE_FONTS, cur];
+    sel.innerHTML = `<option value="">Your brand font</option>`
+        + families.map(f => `<option value="${_rqEsc(f)}">${_rqEsc(f)}</option>`).join('');
+    sel.value = cur;
+}
+
 function _pceAdoptServerKit(kit) {
     if (!kit || _pceState.kitSeeded) return;
     for (const f of _PCE_KIT_FIELDS) {
         const el = _pceEl('pce-' + f);
         if (!el) continue;
         const val = kit[f] ?? '';
-        if (f === 'fontFamily') el.value = val;
+        // The font field is a list now, so its option has to exist before the value can take.
+        if (f === 'fontFamily') _pceRenderFontOptions(val);
         else if (val) el.value = val;
         if (_pceState.base) _pceState.base[f] = val;
     }
@@ -9424,7 +9478,8 @@ function _pceFill(v) {
     for (const f of ['primaryColor', 'backgroundColor', 'textColor']) {
         if (_pceEl('pce-' + f) && v[f]) _pceEl('pce-' + f).value = v[f];
     }
-    if (_pceEl('pce-fontFamily')) _pceEl('pce-fontFamily').value = v.fontFamily ?? '';
+    // Rebuilt rather than assigned: a <select> ignores a value it has no option for.
+    _pceRenderFontOptions(v.fontFamily ?? '');
     _pcePaintVariant(v.variant || 'light');
     _pceState.layout = _pceNormalizeLayout(v.layout);
     _pcePaintShowToggles();
@@ -9471,7 +9526,7 @@ function _pcePaintHandles() {
     const layout = _pceState.layout;
     if (!geo || !layout) return;
 
-    for (const [key, label] of Object.entries(_PCE_ELEMENTS)) {
+    for (const [key, label] of Object.entries(_PCE_PLACEABLE)) {
         const el = geo.elements?.[key];
         if (!el || !el.shown || !el.box) continue;
         const b = el.box;
@@ -9537,8 +9592,9 @@ async function _pceRefreshPreview() {
             _pcePaintHandles();
         }
         if (wasReset) {
-            // "Save card" is still required — the reset only changes what the preview shows.
-            _pceSetMsg('Back to your brand style — save to keep it.', 'ok');
+            // Reset saves itself now (see the pce-resetkit handler), so this says what happened
+            // rather than asking for a button that no longer exists.
+            _pceSetMsg('Back to your brand style.', 'ok');
         } else if (_pceEl('pce-msg')?.dataset.tone === 'error') {
             // A successful render clears a stale error, and ONLY that. Saving re-renders the modal,
             // which starts a preview; blanket-clearing here wiped the "Card updated." confirmation
@@ -9564,6 +9620,13 @@ function _pceDragStart(ev) {
     const handle = ev.target.closest?.('.pce-handle');
     if (!handle || ev.button > 0) return;
     if (!_pceEl('pce-stage')) return;
+    // The words open for editing rather than starting a drag — but only on the second click, so the
+    // first click can still grab and move them. Same bargain as the caption: the thing you can read
+    // is the thing you click to change.
+    if (handle.dataset.key === 'headline' && ev.detail >= 2) {
+        _pceOpenInlineHeadline();
+        return;
+    }
     // Grabbing an element is also selecting it — the inspector follows without a separate click.
     _pceSelect(handle.dataset.key, false);
     _pceDrag = {
@@ -9609,6 +9672,9 @@ function _pceDragEnd() {
     if (y !== undefined) layout[key].y = y;
     if (align !== undefined) layout[key].align = align;
     _pceRefreshPreview();
+    // A dropped element is a change to the card, not just to the preview — with Save gone, this is
+    // what commits it.
+    _pceScheduleCardSave();
 }
 
 let _pceDebounce;
@@ -9667,7 +9733,7 @@ function _pceSyncForPost(post) {
     // A post with no media at all has nothing to render, so it gets no Sound layer.
     const audioCapable = !!post.thumbnailUrl;
     _pceLayers = hasCard
-        ? ['media', 'caption', 'wordmark', 'website']
+        ? ['media', 'caption', 'headline', 'wordmark', 'website']
         : (overlayCapable ? ['media', 'caption', 'overlays'] : ['media', 'caption']);
     if (audioCapable) _pceLayers.push('audio');
     // A card post normally shows only the card's own controls. While the user is replacing the card
@@ -9763,14 +9829,18 @@ function _pceSetStageWide(wide) {
                 _pceState.layout[key].align = btn.dataset.align;
                 _pcePaintAlign(key);
                 _pceRefreshPreview();
+                _pceScheduleCardSave();
             });
         }
         for (const btn of document.querySelectorAll('.pce-variant')) {
-            btn.addEventListener('click', () => { _pcePaintVariant(btn.dataset.variant); _pceSchedulePreview(); });
+            btn.addEventListener('click', () => { _pcePaintVariant(btn.dataset.variant); _pceSchedulePreview(); _pceScheduleCardSave(); });
         }
         for (const id of ['pce-headline', 'pce-primaryColor', 'pce-backgroundColor', 'pce-textColor', 'pce-fontFamily']) {
-            _pceEl(id)?.addEventListener('input', _pceSchedulePreview);
+            _pceEl(id)?.addEventListener('input', () => { _pceSchedulePreview(); _pceScheduleCardSave(); });
         }
+        // A <select> fires `change`, not `input`, in older engines — belt and braces on the one
+        // control that is now a list rather than a text box.
+        _pceEl('pce-fontFamily')?.addEventListener('change', () => { _pceSchedulePreview(); _pceScheduleCardSave(); });
         for (const key of Object.keys(_PCE_ELEMENTS)) {
             _pceEl('pce-show-' + key)?.addEventListener('change', (ev) => {
                 if (!_pceState.layout) _pceState.layout = _pceDefaultLayout();
@@ -9780,6 +9850,7 @@ function _pceSetStageWide(wide) {
                 if (_pceState.geo?.elements?.[key]) _pceState.geo.elements[key].shown = ev.target.checked;
                 _pcePaintHandles();
                 _pceRefreshPreview();
+                _pceScheduleCardSave();
             });
         }
         // Delegated from post-review-body, which survives every re-render. The handle layer does
@@ -9795,12 +9866,6 @@ function _pceSetStageWide(wide) {
         // (scroll takeover, window blur) would otherwise leave _pceDrag stuck and the next click
         // interpreted as a drop.
         canvasRoot?.addEventListener('pointercancel', _pceDragEnd);
-        _pceEl('pce-revert')?.addEventListener('click', () => {
-            if (!_pceState.base) return;
-            _pceFill(_pceState.base);
-            _pceSetMsg('');
-            _pceRefreshPreview();
-        });
         _pceEl('pce-resetkit')?.addEventListener('click', () => {
             if (!_pceState.postId) return;
             // Unseed so no invented or stale colour rides along with the request, and let the
@@ -9808,46 +9873,62 @@ function _pceSetStageWide(wide) {
             _pceState.kitSeeded = false;
             _pceState.resetKit = true;
             _pceSetMsg('Reading your brand style…');
-            _pceRefreshPreview();
-        });
-        _pceEl('pce-save')?.addEventListener('click', async () => {
-            if (_pceState.busy || !_pceState.postId) return;
-            _pceState.busy = true;
-            const btn = _pceEl('pce-save');
-            btn.disabled = true;
-            _pceSetMsg('Saving…');
-            try {
-                const res = await fetch('/.netlify/functions/edit-brand-card', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ postId: _pceState.postId, ..._pceValues() }),
-                });
-                const data = await res.json();
-                if (!res.ok) throw new Error(data.error || 'Could not save the card.');
-                // The mock-up above still shows the OLD image, and its thumbnail is a presigned URL
-                // for a storage key that no longer holds this card — so refetch (same path
-                // openPostReview uses to warm the cache) and re-render, or the reviewer would
-                // approve while looking at what the card used to be.
-                await _pceRefetchPostGroup(_rqPostCache[_pceState.postId] || _rqPostCache[_rqReviewPostId]);
-                // Re-render reseeds the editor from the newly-saved params (so Undo now reverts to
-                // what was saved) and clears the status line — hence confirming AFTER it, not before.
-                // Re-rendering remounts the canvas and reseeds the inspector, so the selection is
-                // restored explicitly — otherwise saving while placing the website would drop you
-                // back to the card's own controls.
-                const wasSelected = _pceSelection;
-                _rqReviewRenderActive();
-                _pceSelect(wasSelected);
-                _pceSetMsg('Card updated.', 'ok');
-            } catch (e) {
-                _pceSetMsg(e.message, 'error');
-            } finally {
-                _pceState.busy = false;
-                btn.disabled = false;
-            }
+            // Saved, not just previewed. With "Save card" gone this is the only thing that commits
+            // it — and a preview alone would clear the resetKit flag, so the reset could never
+            // reach the server afterwards and the published card would keep the old style.
+            _pceSaveCardNow();
         });
     };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', onReady);
     else onReady();
 })();
+
+// ── Card auto-save ──────────────────────────────────────────────────────────────────────────────
+// "Save card" and "Undo changes" are gone. A branded card is not a form that produces a document —
+// it IS a rendered PNG, so an unsaved edit meant the preview on screen and the image that would
+// publish were different pictures. That is the one state this editor must never be in, and a button
+// is a standing invitation to be in it.
+//
+// Debounced, and longer than the preview debounce: previewing is cheap and wants to feel live, while
+// saving re-renders and re-uploads, so it waits until the user has stopped fiddling. The preview call
+// is unchanged and still runs on every keystroke — the picture keeps up either way.
+let _pceSaveTimer = null;
+function _pceScheduleCardSave() {
+    clearTimeout(_pceSaveTimer);
+    _pceSaveTimer = setTimeout(_pceSaveCardNow, 900);
+}
+
+async function _pceSaveCardNow() {
+    if (!_pceState.postId) return;
+    // A save already in flight: come back once it lands, or two renders race to be the stored one.
+    if (_pceState.busy) { _pceScheduleCardSave(); return; }
+    _pceState.busy = true;
+    _pceSetMsg('Saving…');
+    try {
+        const res = await fetch('/.netlify/functions/edit-brand-card', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId: _pceState.postId, ..._pceValues() }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Could not save the card.');
+        // The mock-up still shows the OLD image, and its thumbnail is a presigned URL for a storage
+        // key that no longer holds this card — so refetch and re-render, or the reviewer would
+        // approve while looking at what the card used to be.
+        await _pceRefetchPostGroup(_rqPostCache[_pceState.postId] || _rqPostCache[_rqReviewPostId]);
+        // Re-rendering remounts the canvas and reseeds the inspector, so the selection is restored
+        // explicitly — otherwise a save mid-placement would drop you back to the card's controls.
+        const wasSelected = _pceSelection;
+        _rqReviewRenderActive();
+        _pceSelect(wasSelected);
+        _pceSetMsg('Saved.', 'ok');
+        // The confirmation is not news for long — every change produces one.
+        setTimeout(() => { if (_pceEl('pce-msg')?.textContent === 'Saved.') _pceSetMsg(''); }, 1800);
+    } catch (e) {
+        _pceSetMsg(e.message, 'error');
+    } finally {
+        _pceState.busy = false;
+    }
+}
 
 function _rqReviewRenderActive() {
     const post = _rqPostCache[_rqReviewPostId];
@@ -10614,6 +10695,61 @@ async function rqReviewReschedule() {
         statusEl.className = 'text-xs text-red-500 italic';
         if (btn) { btn.disabled = false; btn.textContent = 'Reschedule'; }
     }
+}
+
+/**
+ * Edit the card's wording where it is — on the card.
+ *
+ * A textarea is laid over the headline's own band (the box the renderer reported, the same box the
+ * drag handle uses), so the words are typed in the place they will appear. It writes into the hidden
+ * #pce-headline field, which is the model _pceValues sends — the same arrangement the caption uses,
+ * so there is still exactly one place the value lives and one path that saves it.
+ */
+function _pceOpenInlineHeadline() {
+    const layer = _pceEl('pce-handles');
+    const geo = _pceState.geo;
+    const box = geo?.elements?.headline?.box;
+    const model = _pceEl('pce-headline');
+    if (!layer || !geo || !box || !model) return;
+    if (layer.querySelector('[data-headline-edit]')) return;
+
+    const ta = document.createElement('textarea');
+    ta.dataset.headlineEdit = '1';
+    ta.maxLength = 120;
+    ta.value = model.value || '';
+    ta.className = 'absolute text-center font-extrabold rounded border-2 border-emerald-600 bg-white/95 px-2 py-1 resize-none outline-none';
+    ta.style.left = (box.left / geo.canvas.width * 100) + '%';
+    ta.style.width = (box.width / geo.canvas.width * 100) + '%';
+    ta.style.top = (box.top / geo.canvas.height * 100) + '%';
+    ta.style.minHeight = (box.height / geo.canvas.height * 100) + '%';
+    // Scaled to the canvas as drawn, so what is typed is roughly the size it will print.
+    const stage = _pceEl('pce-stage');
+    const shown = stage ? stage.getBoundingClientRect().width : geo.canvas.width;
+    ta.style.fontSize = Math.max(11, Math.round((box.height / 1.6) * (shown / geo.canvas.width))) + 'px';
+    ta.style.lineHeight = '1.14';
+
+    const done = (commit) => {
+        if (ta.dataset.done) return;
+        ta.dataset.done = '1';
+        const next = ta.value.trim();
+        ta.remove();
+        if (!commit || next === (model.value || '').trim() || !next) { _pcePaintHandles(); return; }
+        model.value = next;
+        // Straight into the ordinary save path — the words are a card parameter like any other.
+        _pceScheduleCardSave();
+        _pceRefreshPreview();
+    };
+    ta.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape') { ev.stopPropagation(); done(false); }
+        else if (ev.key === 'Enter' && (ev.metaKey || ev.ctrlKey)) { ev.preventDefault(); done(true); }
+    });
+    ta.addEventListener('blur', () => done(true));
+    // The handle underneath must not start a drag from a click meant for the text box.
+    ta.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+
+    layer.appendChild(ta);
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
 }
 
 /** Reveal the date/words inputs. They stay collapsed until this option is actually chosen. */

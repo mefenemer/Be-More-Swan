@@ -108,10 +108,14 @@ check('step 3 is video-only and says so, and stills keep their text and sound', 
     assert.match(block, /key: 'video'[\s\S]*?enabled: \(post\) => _pcePostIsVideo\(post\)/,
         'timed text needs a duration, which a still cannot give it');
     // A still keeps BOTH: overlays in their own step, sound with the media it plays over.
-    assert.match(block, /key: 'imgtext'[\s\S]*?enabled: \(post\) => !_pcePostIsVideo\(post\) && _pceLayers\.includes\('overlays'\)/,
-        'text on a still is its own step now — exactly one of the two overlay steps is ever enabled');
-    assert.match(block, /if \(!_pcePostIsVideo\(post\) && _pceLayers\.includes\('audio'\)\) out\.push\('pce-insp-audio'\)/,
-        'a photo with a voice note publishes as a video — sound rides with the still');
+    assert.match(block, /key: 'imgtext'[\s\S]*?enabled: \(post\) => !_pcePostIsVideo\(post\) && !!post\?\.thumbnailUrl/,
+        'exactly one of the two overlay steps is ever enabled, and a card has sound even without overlays');
+    // Sound left Media and rides with whichever overlay step the media type uses.
+    const imgStep = block.slice(block.indexOf("key: 'imgtext'"), block.indexOf("key: 'video'"));
+    assert.match(imgStep, /pce-insp-audio/, 'a photo with a voice note publishes as a video — sound goes with it');
+    const mediaStep = block.slice(block.indexOf("key: 'media'"), block.indexOf("key: 'imgtext'"));
+    assert.ok(!mediaStep.includes('pce-insp-audio'),
+        'Media is about which picture — a voice note is not a picture');
     assert.match(block, /_pceLayers\.includes\('overlays'\)/,
         'a branded card has no overlay layer — reuse the existing capability gate rather than a second rule');
     // A disabled step must refuse to open, or it shows an empty panel.
@@ -284,17 +288,14 @@ check('the Media step carries the style chooser and the whole media inspector', 
     assert.ok(workspace.includes('id="pce-insp-media"'), 'the media inspector needs an id for the rail to borrow it');
 });
 
-check('a branded card can be inverted', () => {
-    assert.ok(workspace.includes('id="pce-invert"'), 'the card needs an invert control');
-    const fn = workspace.slice(workspace.indexOf('function _pceInvertCardColours()'));
-    const body = fn.slice(0, 900);
-    assert.match(body, /bg\.value = text\.value/, 'invert must swap background and text');
-    assert.match(body, /_pceRefreshPreview\(\)/,
-        'invert must re-render through the ordinary preview path, so Undo and Save need no special case');
-    assert.match(body, /if \(!_pceState\.kitSeeded\) return;/,
-        '_pceValues drops colours while unseeded, so an invert before the kit lands would be discarded');
-    assert.ok(!body.includes('primaryColor'),
-        'the accent is not part of the foreground/background pair — swapping it looks like a different brand');
+check('the card has one inversion control, not two', () => {
+    // Light/Bold IS the inversion (resolveCardPalette swaps background and text between variants), so
+    // a separate "Invert colours" button was a second control for a decision already made — and the
+    // two could disagree about which way round the card was.
+    assert.ok(!workspace.includes('id="pce-invert"'), 'the variant control already inverts');
+    assert.ok(!/function _pceInvertCardColours\(\) \{/.test(workspace), 'and its handler went with it');
+    assert.match(workspace, /data-variant="light"/, 'Light/Bold must still be there');
+    assert.match(workspace, /data-variant="bold"/, 'Light/Bold must still be there');
 });
 
 // ── 8. The caption badges count characters and nothing else ─────────────────────────────────────
@@ -612,6 +613,78 @@ check('the card paths refetch by the post\'s own status', () => {
 check('step 1 does not explain itself', () => {
     assert.ok(!workspace.includes('Whatever comes back lands in the post itself'),
         'a caption under five buttons that already say what they do');
+});
+
+// ── 28. The card's wording is edited on the card ────────────────────────────────────────────────
+check('the headline is placeable and editable on the canvas', () => {
+    // Placeable: it joins the DRAG list but not the show/hide list — a card without words is not a card.
+    assert.match(workspace, /const _PCE_PLACEABLE = \{ headline: 'Wording', wordmark:/,
+        'two lists because the headline can be dragged but not hidden');
+    const paint = workspace.slice(workspace.indexOf('function _pcePaintHandles()'));
+    assert.match(paint.slice(0, 500), /Object\.entries\(_PCE_PLACEABLE\)/, 'handles come from the drag list');
+    // Editable: double-click opens a box over the words, first click still drags.
+    assert.ok(workspace.includes('function _pceOpenInlineHeadline()'), 'the words are edited where they are');
+    const drag = workspace.slice(workspace.indexOf('function _pceDragStart(ev)'));
+    assert.match(drag.slice(0, 900), /handle\.dataset\.key === 'headline' && ev\.detail >= 2/,
+        'the first click must still be able to grab and move the words');
+    // The textarea in the panel is gone, but its hidden field remains as the model _pceValues reads.
+    assert.match(workspace, /<textarea id="pce-headline" rows="3" maxlength="120" class="hidden"/,
+        'deleting the field outright would stop the card saving its wording');
+    // Comments may name it — that record is why the field went. The LABEL must not exist.
+    assert.ok(!/<label[^>]*for="pce-headline"/.test(workspace),
+        'typing in a panel to change words that are on a picture somewhere else');
+    // Client and server must agree on the default, or a card nobody dragged would move on first save.
+    const brandCard = read('src/lib/brand-card.ts');
+    assert.match(brandCard, /headline: \{ show: true, align: 'left', y: 0\.5 \}/, 'server default');
+    assert.match(workspace, /headline: \{ show: true, align: 'left', y: 0\.5 \}/, 'client default');
+});
+
+// ── 29. The card saves itself ───────────────────────────────────────────────────────────────────
+check('every card change commits without a Save button', () => {
+    for (const gone of ['pce-save', 'pce-revert']) {
+        assert.ok(!workspace.includes(`id="${gone}"`),
+            'a card IS a rendered PNG — an unsaved edit meant the preview and the published image were different pictures');
+    }
+    assert.ok(workspace.includes('function _pceScheduleCardSave()'), 'one debounced save path');
+    assert.ok(workspace.includes('async function _pceSaveCardNow()'), 'and one implementation');
+    // Every control that changes stored state must schedule it: colours/font/variant, alignment,
+    // drag-drop, show/hide, and the inline wording editor.
+    const bind = workspace.slice(workspace.indexOf('(function _pceBind()'));
+    assert.ok((bind.match(/_pceScheduleCardSave\(\)/g) || []).length >= 4,
+        'a control that only previews leaves the card unsaved, which is the state this removes');
+    const dragEnd = workspace.slice(workspace.indexOf('function _pceDragEnd('));
+    assert.match(dragEnd.slice(0, 900), /_pceScheduleCardSave\(\)/, 'a dropped element is a change to the card');
+    // "Reset to my brand style" is not an undo — it survives.
+    assert.ok(workspace.includes('id="pce-resetkit"'), 'resetting to Brand Assets is a different starting point');
+    // ...and it has to COMMIT like every other change. _pceRefreshPreview clears _pceState.resetKit,
+    // so a reset that only previewed could never reach the server on any later save: the card on
+    // screen would be the brand style and the card that published would be the old one.
+    const reset = bind.slice(bind.indexOf("_pceEl('pce-resetkit')"));
+    assert.match(reset.slice(0, 800), /_pceSaveCardNow\(\)/,
+        'a reset that only previews is an unsaved edit, which is the state this whole change removes');
+    assert.ok(!/Back to your brand style — save to keep it/.test(workspace),
+        'the message must not ask for a Save button that no longer exists');
+});
+
+// ── 30. Font is a list, not a guessing game ─────────────────────────────────────────────────────
+check('the font field is a picker', () => {
+    assert.match(workspace, /<select id="pce-fontFamily"/,
+        'loadWebFont silently falls back on an unknown family, so a typo produced the wrong typeface in silence');
+    assert.ok(workspace.includes('const _PCE_FONTS = ['), 'a shortlist of families the renderer can fetch');
+    assert.ok(workspace.includes('function _pceRenderFontOptions('),
+        'a <select> drops a value it has no option for — a card already on an off-list family would be reset');
+    assert.match(workspace, /<option value="">Your brand font<\/option>/,
+        'the empty value must mean "whatever Brand Assets says"');
+});
+
+// ── 31. What left the Media step ────────────────────────────────────────────────────────────────
+check('Media no longer carries the card wording, the swap-media block or Sound', () => {
+    assert.ok(!workspace.includes('Whatever you attach replaces the card.'),
+        'swapping a card for a picture is the media picker\'s job');
+    // _pceSwapCardForMedia is still the mechanism — only the third door to it went.
+    assert.ok(workspace.includes('function _pceSwapCardForMedia('), 'the mechanism survives');
+    assert.ok(!workspace.includes('Card created — edit the wording below.'),
+        'it pointed at a panel that no longer exists, and the card appearing IS the confirmation');
 });
 
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);

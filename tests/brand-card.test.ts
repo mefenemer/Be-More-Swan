@@ -465,8 +465,34 @@ test('placement actually moves the pixels, and the same placement re-renders ide
     assert.notDeepEqual(a.png, b.png, 'moving both elements produced an identical card');
     assert.deepEqual(b.png, again.png, 'the same layout must re-render byte-identically');
     assert.ok(b.elements.wordmark.box!.top > a.elements.wordmark.box!.top, 'the name did not move down');
-    // The layout the caller gets back is the normalized one — that is what gets stored.
-    assert.deepEqual(b.layout, swapped);
+    // The layout the caller gets back is the normalized one — that is what gets stored. A layout
+    // written before the headline was placeable gains its default, which is where the headline was
+    // pinned anyway, so an old card renders unchanged.
+    assert.deepEqual(b.layout, { headline: DEFAULT_CARD_LAYOUT.headline, ...swapped });
+});
+
+test('the headline is placeable, and reports the box the editor draws its handle on', async () => {
+    const args = { headline: 'Cold brew season is here', kit: BE_MORE_SWAN_BRAND_KIT, seed: 7 } as const;
+    const [high, low] = await Promise.all([
+        renderBrandCard({ ...args, layout: { headline: { show: true, align: 'left', y: 0.15 } } }),
+        renderBrandCard({ ...args, layout: { headline: { show: true, align: 'left', y: 0.85 } } }),
+    ]);
+    assert.notDeepEqual(high.png, low.png, 'moving the headline produced an identical card');
+    const hBox = high.elements.headline.box!;
+    const lBox = low.elements.headline.box!;
+    assert.ok(lBox.top > hBox.top, 'the headline did not move down');
+    // The handle is positioned from this box, so it must describe a real band on the canvas.
+    assert.ok(hBox.height > 0 && hBox.width > 0, 'the headline box has no area to grab');
+    assert.strictEqual(high.elements.headline.shown, true, 'a card always shows its headline');
+
+    // Clamped into the safe area at both extremes — a headline dragged off the card is not an option.
+    const pad = Math.round(high.width * 0.083);
+    for (const y of [-5, 0, 1, 9]) {
+        const r = await renderBrandCard({ ...args, layout: { headline: { show: true, align: 'left', y } } });
+        const box = r.elements.headline.box!;
+        assert.ok(box.top >= pad, `y=${y} put the headline above the safe area (top ${box.top} < ${pad})`);
+        assert.ok(box.top + box.height <= r.height - pad + 1, `y=${y} put the headline below the safe area`);
+    }
 });
 
 test('the default layout reproduces the original top-left/bottom-left card', async () => {
