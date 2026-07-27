@@ -63,10 +63,12 @@ check('the collapsible panes are gone', () => {
 // _railRestoreAll puts them back before the rail's next innerHTML write. A block with no home is
 // destroyed by that write, and #post-review-caption specifically is the field the save reads.
 check('every block the rail borrows still has a home to be restored to', () => {
-    const mounts = [...workspace.matchAll(/mount:\s*'([a-z0-9-]+)'/g)].map(m => m[1]);
-    const also   = [...workspace.matchAll(/also:\s*'([a-z0-9-]+)'/g)].map(m => m[1]);
-    const borrowed = [...mounts, ...also, 'post-review-changes'];
-    assert.ok(borrowed.length >= 8, `expected to find the rail's mounts, got ${JSON.stringify(borrowed)}`);
+    // Blocks are resolved per post now (a still puts text+sound in Media, a video in step 3), so the
+    // ids are inside blocks() bodies rather than static mount/also fields.
+    const rail = workspace.slice(workspace.indexOf('const _RAIL = ['), workspace.indexOf('\n];', workspace.indexOf('const _RAIL = [')));
+    const borrowed = [...new Set([...rail.matchAll(/'((?:pce|gp|post)-[a-z0-9-]+)'/g)].map(m => m[1]))];
+    borrowed.push('post-review-changes');
+    assert.ok(borrowed.length >= 7, `expected to find the rail's blocks, got ${JSON.stringify(borrowed)}`);
     for (const id of borrowed) {
         assert.ok(workspace.includes(`id="${id}"`),
             `the rail borrows #${id}, but no element with that id exists — _railRestoreAll would have nowhere to put it back`);
@@ -83,13 +85,95 @@ check('the caption field the save reads from still exists, parked and hidden', (
 });
 
 // ── 2. Content first ────────────────────────────────────────────────────────────────────────────
-check('the rail steps run content first', () => {
-    const block = workspace.slice(workspace.indexOf('const _RAIL = ['), workspace.indexOf('];', workspace.indexOf('const _RAIL = [')));
+check('the rail steps run content first, with no Platforms step', () => {
+    const block = workspace.slice(workspace.indexOf('const _RAIL = ['), workspace.indexOf('\n];', workspace.indexOf('const _RAIL = [')));
     const keys = [...block.matchAll(/key:\s*'(\w+)'/g)].map(m => m[1]);
-    assert.deepStrictEqual(keys, ['write', 'media', 'text', 'link', 'setup', 'check', 'when'],
-        'the editor opens on the work, not on the targeting form — writing comes before platforms & format');
-    assert.ok(keys.indexOf('write') < keys.indexOf('setup'),
-        '"Write" must come before "Platforms & format"');
+    assert.deepStrictEqual(keys, ['write', 'media', 'video', 'link', 'check', 'when'],
+        'write → media → video → link → check → when; platforms come from live connections, not a step');
+    assert.ok(!keys.includes('setup'),
+        'a post goes out on the connected accounts — openGeneratePostSheet seeds them, so there is nothing to choose');
+});
+
+check('a new post is seeded across every connected platform', () => {
+    const fn = workspace.slice(workspace.indexOf('async function openGeneratePostSheet()'));
+    const body = fn.slice(0, 2200);
+    assert.match(body, /\.filter\(p => connected\.some\(c => c\.includes\(p\.id\)\)\)/,
+        'seeding one platform is what made a Platforms step necessary');
+    assert.match(body, /platforms, blank: true/, 'the whole set goes to create-manual-post');
+    assert.ok(!/const first = /.test(body), 'the first-connected-only seed must be gone');
+});
+
+check('step 3 is video-only and says so, and stills keep their text and sound', () => {
+    const block = workspace.slice(workspace.indexOf('const _RAIL = ['), workspace.indexOf('\n];', workspace.indexOf('const _RAIL = [')));
+    assert.match(block, /key: 'video'[\s\S]*?enabled: \(post\) => _pcePostIsVideo\(post\)/,
+        'timed text needs a duration, which a still cannot give it');
+    // The still path must still reach overlays + audio, via the Media step.
+    assert.match(block, /if \(!_pcePostIsVideo\(post\)\) \{[\s\S]*?pce-insp-overlays[\s\S]*?pce-insp-audio/,
+        'photo text overlays and photo voice notes are shipped features — they move to Media, they do not disappear');
+    assert.match(block, /_pceLayers\.includes\('overlays'\)/,
+        'a branded card has no overlay layer — reuse the existing capability gate rather than a second rule');
+    // A disabled step must refuse to open, or it shows an empty panel.
+    const toggle = workspace.slice(workspace.indexOf('function _railToggle(key)'));
+    assert.match(toggle.slice(0, 700), /if \(step\?\.enabled && !step\.enabled\(post\)\) return;/,
+        'an empty panel says the controls failed to draw, not that they belong elsewhere');
+});
+
+check('the format blocker survived the deleted step, somewhere always visible', () => {
+    const body = workspace.slice(workspace.indexOf('id="post-review-media-alert"'), workspace.indexOf('id="post-review-tabs"'));
+    assert.match(body, /id="pce-format-blocked"/,
+        'it lived inside the Platforms step; with that gone it had to move or the only "cannot publish" warning would be invisible');
+});
+
+check('the header states no format until there is media to route', () => {
+    const fn = workspace.slice(workspace.indexOf('function _rqReviewRenderTabs()'));
+    const tabsBody = fn.slice(0, fn.indexOf('\n}\n'));
+    assert.match(tabsBody, /route && p\.thumbnailUrl \?/,
+        '"Instagram / no format" on a brand-new post reads as a fault, not as "add a picture"');
+    // Comments stripped: the note recording why the link went naturally names it.
+    const tabsCode = tabsBody.split('\n').filter(l => !l.trimStart().startsWith('//')).join('\n');
+    assert.ok(!tabsCode.includes('Add a platform'),
+        'the add-platform link pointed at a deleted step, which is why clicking it did nothing');
+});
+
+check('the modal owns the scroll while it is open', () => {
+    const open = workspace.slice(workspace.indexOf("const modal = document.getElementById('post-review-modal');"));
+    assert.match(open.slice(0, 900), /window\.ScrollLock\?\.lock\('post-review'\)/,
+        'the page behind scrolled because this modal never took a lock');
+    const close = workspace.slice(workspace.indexOf('function closePostReview()'));
+    assert.match(close.slice(0, 400), /window\.ScrollLock\?\.release\('post-review'\)/,
+        'a lock that is never released leaves the whole app unscrollable');
+    assert.match(workspace, /style="overscroll-behavior:contain"/,
+        'without this the gesture chains to the page once the panel scroller hits its end');
+});
+
+check('step 7 is the decision, with three ways to commit', () => {
+    const at = workspace.indexOf('id="post-review-reschedule"');
+    const panel = workspace.slice(at, workspace.indexOf('id="post-review-disclosure"', at));
+    assert.match(panel, /onclick="rqReviewApprove\(\)"/, 'option 1: let the assistant pick the slot');
+    assert.match(panel, /onclick="rqReviewScheduleMyself\(\)"/, 'option 2: a time you choose');
+    assert.match(panel, /onclick="rqReviewPublishNow\(\)"/, 'option 3: now');
+    // Choosing a time and approving must be ONE call, or a post can end up moved but unapproved.
+    const fn = workspace.slice(workspace.indexOf('async function rqReviewScheduleMyself()'));
+    assert.match(fn.slice(0, 2200), /_rqApproveTargets\(targets, 'reschedule', \{ rescheduleAt: when \}\)/,
+        'setting the time and committing the post are one action');
+    assert.match(workspace, /\.\.\.\(opts\.rescheduleAt \? \{ rescheduleAt: opts\.rescheduleAt \} : \{\}\)/,
+        'approve-post needs the chosen time');
+    assert.match(workspace, /const r = await _rqApproveOne\(p, action, opts\);/,
+        'siblings share the slot — dropping opts would approve them at their old times');
+    // Your own post has no separate Approve button; step 7 is the approval.
+    assert.match(workspace, /getElementById\('post-review-approve-btn'\)\?\.classList\.toggle\('hidden', isOwnDraft\)/,
+        'a fourth button asking the same question with the time left unstated');
+});
+
+check('there is exactly one rqReviewPublishNow, and it is the one with the gates', () => {
+    const defs = [...workspace.matchAll(/async function rqReviewPublishNow\(/g)].length;
+    assert.strictEqual(defs, 1,
+        'two definitions meant the LATER one silently won — it published one platform, skipped the connection and media gates, and asked for no confirmation');
+    const fn = workspace.slice(workspace.indexOf('async function rqReviewPublishNow()'));
+    const body = fn.slice(0, 1800);
+    assert.match(body, /rqEnsurePlatformConnection/, 'post-now skips the wait, not the checks');
+    assert.match(body, /confirm\(/, 'the one irreversible action in the editor must confirm');
+    assert.match(body, /_rqReviewTargets\(\)/, 'it must publish the whole group');
 });
 
 check('no step is auto-opened, so the order is an offer and not a wizard', () => {
@@ -175,8 +259,6 @@ check('the format picker is gone and the platform step is named for what it deci
     for (const id of ['pce-format-list', 'pce-format-for', 'pce-format-scope', 'pce-format-rules']) {
         assert.ok(!workspace.includes(`id="${id}"`), `#${id} is part of the format picker, which the engine replaces`);
     }
-    assert.match(workspace, /\{ key: 'setup', title: 'Platforms',/,
-        'the step decides platforms; format is derived');
     // The blocker is NOT a picker — it says a derived format can never carry the attached media.
     assert.ok(workspace.includes('id="pce-format-blocked"'),
         'the "this format can never publish" warning must survive — it is the only pre-approval notice');
@@ -187,12 +269,13 @@ check('the format picker is gone and the platform step is named for what it deci
 
 // ── 7. The branded card is reachable from the Media step ────────────────────────────────────────
 check('the Media step carries the style chooser and the whole media inspector', () => {
-    assert.match(workspace, /\{ key: 'media', title: 'Media',\s+mount: 'pce-style-block', also: 'pce-insp-media' \}/,
+    const railBlocks = workspace.slice(workspace.indexOf('const _RAIL = ['), workspace.indexOf('\n];', workspace.indexOf('const _RAIL = [')));
+    assert.match(railBlocks, /key: 'media'[\s\S]*?'pce-style-block', 'pce-insp-media'/,
         'mounting #gp-ai-media alone left "Make a branded card" and every card control off screen');
     assert.ok(workspace.includes('id="pce-style-block"'), 'the photo-vs-card chooser needs its own mountable block');
     assert.ok(workspace.includes('id="pce-insp-media"'), 'the media inspector needs an id for the rail to borrow it');
     const render = workspace.slice(workspace.indexOf('function _railRender()'));
-    assert.match(render.slice(0, 3000), /if \(step\.key === 'media'\) _inspMountMediaPanel\(\)/,
+    assert.match(render.slice(0, 6000), /if \(step\.key === 'media'\) _inspMountMediaPanel\(\)/,
         'the sourcing panel must nest into #post-review-media-host inside the borrowed inspector');
 });
 
@@ -260,7 +343,7 @@ check('the mic toggles, tracks one session, and reports real failures', () => {
     const fn = workspace.slice(workspace.indexOf('let _gpVoice = null;'), workspace.indexOf('// ── Shared chip styling'));
     assert.match(fn, /if \(_gpVoice && _gpVoice\.targetId === targetId\) \{ gpStopVoice\(\); return; \}/,
         'a second click on the listening mic must STOP, not start a rival recogniser');
-    assert.match(fn, /gpStopVoice\(\);\n\n    const micBtn/,
+    assert.match(fn, /const handingOver = !!_gpVoice;\s*\n\s*gpStopVoice\(\);/,
         'starting must clear whatever session came before, so a stale one cannot hold the microphone');
     assert.match(fn, /_gpVoice = \{ handle, targetId, micId: cfg\.mic \}/,
         'the handle has to be kept or it can never be stopped');
@@ -268,6 +351,12 @@ check('the mic toggles, tracks one session, and reports real failures', () => {
         "'aborted' is what a stop looks like — reporting it would cry wolf on every hand-over");
     assert.ok(fn.includes('Microphone access is blocked'),
         'a denied microphone must say so — silence is what made this look broken');
+    // stop() is async: starting in the same tick throws InvalidStateError, which surfaced as
+    // "Dictation could not start" for nothing worse than moving between boxes.
+    assert.match(fn, /if \(handingOver\) \{ setTimeout\(\(\) => _gpBeginVoice\(targetId, cfg\), 150\); return; \}/,
+        'let the previous session land before opening a new recogniser');
+    assert.match(fn, /if \(!isRetry\) \{ setTimeout\(\(\) => _gpBeginVoice\(targetId, cfg, true\), 300\); return; \}/,
+        'the click straight after granting permission must succeed on the retry, not report a failure');
 
     // Dictation must not outlive the box it writes into.
     const commit = workspace.slice(workspace.indexOf('async function _pceCommitInlineCaption'));
@@ -295,13 +384,18 @@ check('a post you are writing offers save-and-discard, not reject-and-rewrite', 
     for (const id of ['post-review-reject-toggle', 'post-review-quick-links', 'post-review-draft-actions']) {
         assert.ok(workspace.includes(`id="${id}"`), `#${id} is needed to switch the footer by authorship`);
     }
-    const sync = workspace.slice(workspace.indexOf("const isOwnDraft = post.status === 'draft';"));
-    assert.match(sync.slice(0, 900), /post-review-reject-toggle'\)\?\.classList\.toggle\('hidden', isOwnDraft\)/,
+    const sync = workspace.slice(
+        workspace.indexOf("const isOwnDraft = post.status === 'draft';"),
+        workspace.indexOf('// Per-post AI disclosure footer'));
+    assert.match(sync, /post-review-reject-toggle'\)\?\.classList\.toggle\('hidden', isOwnDraft\)/,
         'you do not reject your own blank page');
-    assert.match(sync.slice(0, 900), /\['post-review-quick-links', !isOwnDraft\]/,
+    assert.match(sync, /\['post-review-quick-links', !isOwnDraft\]/,
         'the rewrite and re-time links belong to reviewing someone else\'s draft');
-    assert.match(sync.slice(0, 900), /\['post-review-draft-actions', isOwnDraft\]/,
+    assert.match(sync, /\['post-review-draft-actions', isOwnDraft\]/,
         'save/discard belong to writing your own');
+    // With Approve gone from the footer, step 7 has to be pointed at or it is not discoverable.
+    assert.match(sync, /post-review-draft-hint'\)\?\.classList\.toggle\('hidden', !isOwnDraft\)/,
+        'the footer is where the eye goes for "what now"');
     // Discard reuses the established soft-cancel, and covers the whole cross-post group.
     const discard = workspace.slice(workspace.indexOf('async function rqReviewDiscardDraft()'));
     assert.match(discard.slice(0, 1500), /method: 'DELETE'/, 'discard must actually retire the row');

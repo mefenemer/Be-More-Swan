@@ -606,8 +606,17 @@ window.showComplianceModals = function showComplianceModals(force) {
       </div>
     </div>
     <!-- Body: platform mock-up -->
-    <div class="flex-1 overflow-y-auto bg-gray-50 px-4 py-5">
+    <!-- overscroll-behavior:contain stops a wheel gesture that reaches the end of THIS scroller from
+         continuing into the page behind it. Inline because the compiled style.css has no
+         overscroll utility, and rebuilding Tailwind to add one churns unrelated selectors. -->
+    <div class="flex-1 overflow-y-auto bg-gray-50 px-4 py-5" style="overscroll-behavior:contain">
       <div id="post-review-media-alert" class="hidden mb-4 text-xs rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-red-700"></div>
+      <!-- "This format can't carry your video" — moved out of the old Platforms step when that step
+           was deleted. It has to be somewhere always visible: it is the only warning that a post
+           cannot publish as it stands, and burying it inside a collapsed step meant the first news
+           of it was approval being refused. Sits with the other pre-flight alerts, in the column that
+           is always on screen. -->
+      <div id="pce-format-blocked" class="hidden mb-4 max-w-md mx-auto rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[11px] text-amber-800"></div>
       <!-- Video text-overlay render state. The ONLY surface telling a reviewer their post is held
            out of the publish queue — scheduled_posts.status still reads 'scheduled' throughout. -->
       <div id="post-review-render-alert" class="hidden mb-4 text-xs rounded-lg border px-3 py-2.5"></div>
@@ -666,7 +675,6 @@ window.showComplianceModals = function showComplianceModals(force) {
 
                  #pce-format-blocked stays: "this format can never publish" is a blocker, not a
                  choice, and it is the only thing that says so before approval refuses. -->
-            <div id="pce-format-blocked" class="hidden rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-2 text-[11px] text-amber-800"></div>
           </div>
           <!-- What KIND of media this post carries — your own photo/video, or a branded card of
                words on your colours. It sat under "Post setup", two steps away from the media it
@@ -1263,36 +1271,54 @@ window.showComplianceModals = function showComplianceModals(force) {
         </div>
       </div>
       <!-- Reschedule panel: natural-language instruction OR explicit datetime picker -->
-      <div id="post-review-reschedule" class="hidden space-y-2.5">
-        <div>
-          <label class="block text-xs font-semibold text-gray-700 mb-1">Ask your assistant when to post this</label>
+      <!-- ── Step 7: the decision ──────────────────────────────────────────────────────────────
+           This panel used to be "reschedule", a thing you did BEFORE approving somewhere else. That
+           left the actual commitment on a separate button, so "when does it go out" and "does it go
+           out" were asked in two places. They are one question with three answers, and each of these
+           APPROVES the post — the only difference is the time it lands on.
+           Every one of them routes through the same gates (connections, mandatory media, compliance,
+           overlay baking) because choosing a time is not a way around a check. -->
+      <div id="post-review-reschedule" class="hidden space-y-2">
+        <p id="post-review-when-msg" class="hidden text-xs font-semibold"></p>
+
+        <!-- 1. Let the assistant pick. Named after the assistant, because that is who does it. -->
+        <button type="button" id="post-review-when-assistant" onclick="rqReviewApprove()"
+          class="w-full text-left px-3 py-2.5 rounded-lg border border-emerald-300 bg-emerald-50 hover:bg-emerald-100 transition cursor-pointer">
+          <span class="flex items-center gap-2">
+            <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
+            <span class="text-xs font-bold text-emerald-800" id="post-review-when-assistant-label">Let your assistant schedule it</span>
+          </span>
+          <span class="block text-[10px] text-emerald-700 mt-0.5" id="post-review-when-assistant-sub">Approves the post and picks the next good slot.</span>
+        </button>
+
+        <!-- 2. Pick it yourself. The date input and the plain-English box are the same choice, so
+                they share one button rather than being two competing "Reschedule" actions. -->
+        <div class="rounded-lg border border-gray-200 px-3 py-2.5 space-y-2">
+          <p class="text-xs font-bold text-gray-700">Schedule it myself</p>
+          <input id="post-review-reschedule-dt" type="datetime-local"
+            class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300">
+          <div class="flex items-center gap-2">
+            <div class="flex-1 h-px bg-gray-100"></div>
+            <span class="text-[10px] text-gray-400 shrink-0">or say it in words</span>
+            <div class="flex-1 h-px bg-gray-100"></div>
+          </div>
           <textarea id="post-review-reschedule-instruction" rows="2" maxlength="300"
             placeholder='e.g. "Next Friday at 3pm" or "This Sunday morning"'
             class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"></textarea>
-        </div>
-        <div class="flex items-center gap-2">
-          <div class="flex-1 h-px bg-gray-200"></div>
-          <span class="text-xs text-gray-400 shrink-0">or pick a date &amp; time</span>
-          <div class="flex-1 h-px bg-gray-200"></div>
-        </div>
-        <input id="post-review-reschedule-dt" type="datetime-local"
-          class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300">
-        <p id="post-review-reschedule-status" class="hidden text-xs text-gray-500 italic"></p>
-        <div class="flex gap-2">
-          <button onclick="rqReviewReschedule()" class="flex-1 py-2.5 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer">Reschedule</button>
-          <button onclick="rqReviewToggle()" class="py-2.5 px-4 text-xs font-bold text-gray-500 hover:bg-gray-50 rounded-lg cursor-pointer">Cancel</button>
-        </div>
-        <!-- "Post now" belonged to the old Create Post sheet, and vanished when that sheet stopped
-             being reachable. It only survived in the editor as a fallback offered after a scheduled
-             time had already passed — so "publish this immediately" became something you could only
-             reach by being late. It lives here because this panel is already the answer to "when
-             does this go out". -->
-        <div class="pt-2.5 border-t border-gray-100">
-          <button onclick="rqReviewPublishNow()"
-            class="w-full py-2.5 text-xs font-bold border border-emerald-300 text-emerald-700 hover:bg-emerald-50 rounded-lg transition cursor-pointer">
-            Or post it now
+          <p id="post-review-reschedule-status" class="hidden text-xs text-gray-500 italic"></p>
+          <button type="button" onclick="rqReviewScheduleMyself()"
+            class="w-full py-2 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer">
+            Approve &amp; schedule for this time
           </button>
         </div>
+
+        <!-- 3. Now. Last, and styled quietest of the three, because it is the only one that cannot
+                be undone from here. rqReviewPublishNow confirms before it goes. -->
+        <button type="button" onclick="rqReviewPublishNow()"
+          class="w-full px-3 py-2.5 rounded-lg border border-gray-300 text-left hover:bg-gray-50 transition cursor-pointer">
+          <span class="block text-xs font-bold text-gray-700">Post it now</span>
+          <span class="block text-[10px] text-gray-400 mt-0.5">Approves and publishes immediately — this can't be undone.</span>
+        </button>
       </div>
       <!-- Per-platform connect notice — approving commits the post to the publisher, which needs a
            live connection for this post's platform. When it's missing, Approve is disabled and this
@@ -1336,6 +1362,14 @@ window.showComplianceModals = function showComplianceModals(force) {
              The two ways out that are not "publish it". Creating a post makes a real 'draft' row
              immediately (the editor edits a row), so leaving without either of these already kept
              the post — but nothing said so, and there was no way to throw one away. -->
+        <!-- With Approve gone, the way to publish your own post is step 7. Said out loud rather
+             than left to be discovered, because the footer is where the eye goes for "what now". -->
+        <p id="post-review-draft-hint" class="hidden text-[11px] text-center text-gray-500">
+          Ready? Open
+          <button type="button" onclick="_railOpen = 'when'; _railRender(); document.getElementById('rail-panel-when')?.scrollIntoView({ block: 'nearest' });"
+            class="font-bold text-emerald-700 underline hover:text-emerald-800 cursor-pointer">Schedule &amp; publish</button>
+          to send it out.
+        </p>
         <div id="post-review-draft-actions" class="hidden items-center justify-center gap-2 pt-0.5 text-[11px] text-gray-400">
           <button onclick="rqReviewSaveDraft()" class="font-semibold underline hover:text-emerald-700 transition cursor-pointer">Save as a draft</button>
           <span>·</span>
@@ -6056,6 +6090,12 @@ async function openPostReview(postId, opts = {}) {
     const modal = document.getElementById('post-review-modal');
     modal.classList.remove('hidden');
     modal.classList.add('flex');
+    // Stop the page behind from scrolling. This modal never took a lock, so a wheel gesture with the
+    // pointer anywhere outside the panel scrolled the workspace underneath — and once the panel's own
+    // scroller hit its end, the gesture CHAINED to the page even with the pointer inside it. Both
+    // halves are fixed: the lock, and overscroll-behavior on the scroller (see the markup).
+    // Refcounted under a key, so a second overlay opening and closing over the top cannot unlock us.
+    window.ScrollLock?.lock('post-review');
 
     // Load the quality verdict for this post. Not awaited — the modal must open instantly; the
     // panel fills in when the answer arrives (usually from cache, since the review now runs at
@@ -6599,12 +6639,12 @@ function _rqReviewRenderTabs() {
     // the way to a second one.
     if (!group.length) { host.classList.add('hidden'); host.innerHTML = ''; return; }
     host.classList.remove('hidden');
-    const solo = group.length < 2
-        ? `<button type="button" onclick="_railOpen = 'setup'; _railRender(); document.getElementById('rail-panel-setup')?.scrollIntoView({ block: 'nearest' });"
-             class="ml-auto px-2 py-1 text-[11px] font-semibold text-emerald-700 hover:text-emerald-800 hover:underline transition cursor-pointer">
-             + Add a platform
-           </button>`
-        : '';
+    // "+ Add a platform" used to sit here, opening the Platforms step. Both are gone: a post now goes
+    // out on every connected account from the moment it is created (openGeneratePostSheet), so there
+    // is nothing to add — and the link was pointing at a step that had been deleted, which is why it
+    // appeared to do nothing at all. Connecting another account is a Connections job, not a per-post
+    // one.
+    const solo = '';
     host.innerHTML = `<div class="flex flex-wrap items-center gap-1 border-b border-gray-200">${group.map(p => {
         const active = p.id === _rqReviewPostId;
         const flag = p.mediaMissing || (p.platform === 'instagram' && !p.thumbnailUrl);
@@ -6627,7 +6667,13 @@ function _rqReviewRenderTabs() {
           ${blocked ? `title="${_rqEsc(blocked)}"` : ''}
           class="relative px-3 py-1.5 text-xs font-bold -mb-px border-b-2 transition cursor-pointer ${active && blocked ? 'border-gray-300' : ''} ${tone}">
           <span class="block">${_rqEsc(rqPlatformLabel(p.platform))}${flag && !blocked ? '<span class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-red-500 align-middle" title="Needs an image"></span>' : ''}</span>
-          ${route ? (() => {
+          ${route && p.thumbnailUrl ? (() => {
+            // Only once there is MEDIA to route. A brand-new post has none, so the router has
+            // nothing to derive a format from and answered `state: 'none'` — which rendered as
+            // "Instagram / no format" in the header of every post the moment it was created. That
+            // reads as a fault, when the truth is simply "you haven't added a picture yet"; the
+            // Media step is what says that, and it says it where you can act on it.
+            //
             // `verified` is false when the asset has never been measured — every row uploaded
             // before duration_s existed, and anything the composer has not yet opened. Stating
             // "Reel" with the same confidence either way would be claiming a check that never ran,
@@ -7207,20 +7253,41 @@ const _railHomes = new Map();         // node id → where it came from, so it c
 // position — and because format/media disagreements are caught wherever they are made, by
 // _pceRenderFormats' rules table and the blocked-format warning.
 const _RAIL = [
-    { key: 'write', title: 'Write with %A',         mount: 'pce-write-block' },
-    // Media borrows the style chooser (photo/video vs branded card) AND the whole media inspector,
-    // not just the sourcing buttons. Mounting #gp-ai-media alone was why a branded card could not be
-    // reached from here: "Make a branded card", the card's own wording/colour/font controls and the
-    // way back out all live in #pce-insp-media, and only the four sourcing buttons were on screen.
-    // _railRender calls _inspMountMediaPanel for this step so #gp-ai-media nests into
-    // #post-review-media-host inside it, exactly as it does everywhere else.
-    { key: 'media', title: 'Media',                 mount: 'pce-style-block', also: 'pce-insp-media' },
-    { key: 'text',  title: 'Text & sound',          mount: 'pce-insp-overlays', also: 'pce-insp-audio' },
-    { key: 'link',  title: 'Link & call to action', mount: 'pce-link-block' },
-    // "Platforms", not "Platforms & format" — format is derived (see the note in #pce-setup-body).
-    { key: 'setup', title: 'Platforms',             mount: 'pce-setup-body' },
-    { key: 'check', title: 'Check & improve',       mount: 'post-review-quality' },
-    { key: 'when',  title: 'Schedule & publish',    mount: 'post-review-reschedule' },
+    { key: 'write', title: 'Write with %A',         blocks: () => ['pce-write-block'] },
+    // ── Media owns the still image, and everything written ON it ─────────────────────────────
+    // Text-on-an-image is part of designing the image: you pick a photo, you put words on it, and a
+    // branded card IS words on a colour. Splitting those across two steps meant the same decision
+    // was reached from two places depending on which kind of still you had chosen. Sound comes here
+    // too for a still, because a photo with a voice note publishes as a video and there is nowhere
+    // else for it to live once step 3 is video-only.
+    { key: 'media', title: 'Media',                 blocks: (post) => {
+        const out = ['pce-style-block', 'pce-insp-media'];
+        if (!_pcePostIsVideo(post)) {
+            // _pceLayers is the capability gate — a branded card has no overlay layer (its
+            // typography is the card's own), and a post with no media has neither.
+            if (_pceLayers.includes('overlays')) out.push('pce-insp-overlays');
+            if (_pceLayers.includes('audio')) out.push('pce-insp-audio');
+        }
+        return out;
+    } },
+    // ── Video only ───────────────────────────────────────────────────────────────────────────
+    // Timed text needs a duration to be timed against, which is the one thing a still cannot give
+    // it. Disabled rather than hidden on a photo or a card: a step that vanishes leaves the user
+    // wondering whether they missed it, where a disabled one with a reason answers the question.
+    { key: 'video', title: 'Video overlays & sound', blocks: () => {
+        const out = [];
+        if (_pceLayers.includes('overlays')) out.push('pce-insp-overlays');
+        if (_pceLayers.includes('audio')) out.push('pce-insp-audio');
+        return out;
+    }, enabled: (post) => _pcePostIsVideo(post) },
+    { key: 'link',  title: 'Link & call to action', blocks: () => ['pce-link-block'] },
+    // "Platforms" was here. It is gone: a post goes out on the accounts the workspace has actually
+    // connected, which openGeneratePostSheet now seeds from live connections exactly as Autopilot
+    // does. Restating that in the editor asked the user to configure something already known.
+    // set-post-platforms.ts and _pceRenderPlatformPicker still exist for the API and for a future
+    // per-post override; nothing in the rail reaches them.
+    { key: 'check', title: 'Check & improve',       blocks: () => ['post-review-quality'] },
+    { key: 'when',  title: 'Schedule & publish',    blocks: () => ['post-review-reschedule'] },
 ];
 
 /** This post's assistant, by the name its owner gave it. Falls back rather than saying "AI". */
@@ -7244,9 +7311,8 @@ function _railRewrite(instruction) {
 
 const _RAIL_ICON = {
     write: '<path stroke-linecap="round" stroke-linejoin="round" d="M5 3v4M3 5h4M13 3l2.5 6.5L22 12l-6.5 2.5L13 21l-2.5-6.5L4 12l6.5-2.5L13 3z"/>',
-    text:  '<path stroke-linecap="round" stroke-linejoin="round" d="M5 5h14M12 5v14"/>',
+    video: '<path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.6-2.3A1 1 0 0121 8.7v6.6a1 1 0 01-1.4.9L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>',
     check: '<path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>',
-    setup: '<path stroke-linecap="round" stroke-linejoin="round" d="M4 6h16M4 12h16M4 18h16"/>',
     link:  '<path stroke-linecap="round" stroke-linejoin="round" d="M13.8 10.2a4 4 0 010 5.7l-3 3a4 4 0 01-5.6-5.7l1.5-1.5m9.6.7a4 4 0 010-5.7l3-3a4 4 0 015.7 5.7l-1.5 1.5"/>',
     media: '<path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.6-4.6a2 2 0 012.8 0L16 16m-2-2 1.6-1.6a2 2 0 012.8 0L20 14M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/>',
     when:  '<path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3M4 11h16M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>',
@@ -7278,12 +7344,14 @@ function _railSub(key, post) {
             const n = (post && post.caption ? String(post.caption) : '').trim().length;
             return n ? `${n} character${n === 1 ? '' : 's'} written` : 'Nothing written yet';
         }
-        case 'text': {
-            // One step, two kinds of thing, so the subtitle counts both — and says which of them
-            // are timed, because that is the part you cannot see from the canvas.
+        case 'video': {
+            // A disabled step still has to say WHY, and say where the equivalent controls went for
+            // the media this post actually has — otherwise it reads as a feature that is missing.
+            if (!post || !post.thumbnailUrl) return 'Add a video first';
+            if (!_pcePostIsVideo(post)) return 'Only for video — text and sound are in Media';
             const boxes = _pceOverlayCount(post);
             const clips = _pceAudioClips(post).length;
-            if (!boxes && !clips) return 'Nothing on the media';
+            if (!boxes && !clips) return 'Nothing on the video';
             const parts = [];
             if (boxes) parts.push(`${boxes} box${boxes === 1 ? '' : 'es'}`);
             if (clips) parts.push(`${clips} clip${clips === 1 ? '' : 's'}`);
@@ -7360,6 +7428,11 @@ function _railRestoreAll() {
 }
 
 function _railToggle(key) {
+    // A disabled step must not open. Its subtitle already says why it is off, and an empty panel
+    // would say the opposite — that the controls exist here and simply failed to draw.
+    const step = _RAIL.find(s => s.key === key);
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (step?.enabled && !step.enabled(post)) return;
     _railOpen = _railOpen === key ? null : key;
     _railRender();
 }
@@ -7401,16 +7474,17 @@ function _railRender() {
 
     host.innerHTML = _RAIL.map((s, i) => {
         const on = s.key === _railOpen;
-        return `<div class="rounded-xl border ${on ? 'border-emerald-300' : 'border-gray-200'} bg-white overflow-hidden">
-          <button type="button" onclick="_railToggle('${s.key}')" aria-expanded="${on}"
-            class="w-full flex items-center gap-2.5 px-2.5 py-2 text-left hover:bg-gray-50 transition cursor-pointer">
+        const off = !!(s.enabled && !s.enabled(post));
+        return `<div class="rounded-xl border ${on ? 'border-emerald-300' : 'border-gray-200'} ${off ? 'bg-gray-50' : 'bg-white'} overflow-hidden">
+          <button type="button" onclick="_railToggle('${s.key}')" aria-expanded="${on}" ${off ? 'disabled aria-disabled="true"' : ''}
+            class="w-full flex items-center gap-2.5 px-2.5 py-2 text-left transition ${off ? 'cursor-not-allowed' : 'hover:bg-gray-50 cursor-pointer'}">
             <span class="w-5 h-5 shrink-0 rounded-md flex items-center justify-center text-[10px] font-bold ${
-              on ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-500'}">${i + 1}</span>
+              off ? 'bg-gray-100 text-gray-300' : on ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-500'}">${i + 1}</span>
             <span class="min-w-0 flex-1">
-              <span class="block text-xs font-bold truncate ${on ? 'text-emerald-800' : 'text-gray-700'}">${_rqEsc(s.title.replace('%A', _railAssistant(post)))}</span>
-              <span class="block text-[10px] truncate ${on ? 'text-emerald-600' : 'text-gray-400'}">${_rqEsc(_railSub(s.key, post))}</span>
+              <span class="block text-xs font-bold truncate ${off ? 'text-gray-400' : on ? 'text-emerald-800' : 'text-gray-700'}">${_rqEsc(s.title.replace('%A', _railAssistant(post)))}</span>
+              <span class="block text-[10px] truncate ${off ? 'text-gray-300' : on ? 'text-emerald-600' : 'text-gray-400'}">${_rqEsc(_railSub(s.key, post))}</span>
             </span>
-            <svg class="w-3 h-3 shrink-0 ${on ? 'text-emerald-600 rotate-90' : 'text-gray-300'} transition-transform" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>
+            ${off ? '' : `<svg class="w-3 h-3 shrink-0 ${on ? 'text-emerald-600 rotate-90' : 'text-gray-300'} transition-transform" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/></svg>`}
           </button>
           <div id="rail-panel-${s.key}" class="${on ? '' : 'hidden'} border-t border-gray-100 px-2.5 py-2.5"></div>
         </div>`;
@@ -7420,17 +7494,20 @@ function _railRender() {
         const step = _RAIL.find(s => s.key === _railOpen);
         const panel = document.getElementById(`rail-panel-${_railOpen}`);
         if (step && panel) {
-            _railMount(step.mount, panel);
-            if (step.also) _railMount(step.also, panel);
+            // Which blocks this step borrows depends on the post: a still puts its text and sound in
+            // Media, a video puts them in the video step. Resolved per render rather than declared
+            // once, because attaching a video changes the answer.
+            for (const id of step.blocks(post)) _railMount(id, panel);
             // The sourcing panel is shared with the generate-post sheet and acts on whatever
             // _gpCurrentPostId says. Mounted through _inspMountMediaPanel — its host
             // (#post-review-media-host) has just been borrowed into this step, so the panel lands
             // inside the media inspector where the card controls and the overlay jump also live,
             // and _railHomes still records a home that exists.
             if (step.key === 'media') _inspMountMediaPanel();
-            // Both borrowed blocks are populated by the old inspector's refresh functions, which run
-            // off the current selection. Ask for the right one so an open step is never stale.
-            if (step.key === 'text') {
+            // The overlay and audio blocks are populated by the old inspector's refresh functions,
+            // which run off the current selection. Ask for the right one so an open step is never
+            // stale — either step can be holding them now.
+            if (step.key === 'media' || step.key === 'video') {
                 _pceRefreshOverlayInspector();
                 _pceRefreshAudioInspector();
             }
@@ -9620,6 +9697,12 @@ function _rqReviewRenderActive() {
     // drafts arrive as 'pending_approval' (or 'in_review' once opened). The distinction decides
     // which footer you get: judging someone else's work, or finishing your own.
     const isOwnDraft = post.status === 'draft';
+    // The footer Approve button goes too. On your own post there is nothing to approve in the
+    // reviewing sense — you wrote it — and step 7 is now the decision: each of its three options
+    // commits the post, so a separate Approve alongside them was a fourth button asking the same
+    // question with the time left unstated. Reviewing an assistant's draft keeps it: "approve as
+    // proposed" is exactly the one-click answer that surface exists for.
+    document.getElementById('post-review-approve-btn')?.classList.toggle('hidden', isOwnDraft);
     document.getElementById('post-review-reject-toggle')?.classList.toggle('hidden', isOwnDraft);
     // Both classes on each: `hidden` and a display utility are the same specificity, so removing one
     // without removing the other leaves whichever came last in the compiled sheet winning.
@@ -9629,6 +9712,7 @@ function _rqReviewRenderActive() {
         el.classList.toggle('hidden', !on);
         el.classList.toggle('flex', on);
     }
+    document.getElementById('post-review-draft-hint')?.classList.toggle('hidden', !isOwnDraft);
 
     // Per-post AI disclosure footer opt-out — only meaningful when the workspace footer is enabled.
     const discRow = document.getElementById('post-review-disclosure');
@@ -9745,6 +9829,7 @@ async function rqReviewDiscardDraft() {
 }
 
 function closePostReview() {
+    window.ScrollLock?.release('post-review');
     gpStopVoice();            // a closed modal must not keep listening
     _rqRestoreMediaPanel();   // hand the shared media panel back to the generate-post sheet
     _railOpen = null;         // a reopened modal starts with every step closed; a re-RENDER does not
@@ -9970,7 +10055,15 @@ async function _rqApproveOne(post, action, opts = {}) {
         }
         const res = await fetch('/.netlify/functions/approve-post', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ postId: post.id, action, acknowledgeWarnings: !!opts.acknowledgeWarnings }),
+            body: JSON.stringify({
+                postId: post.id,
+                action,
+                acknowledgeWarnings: !!opts.acknowledgeWarnings,
+                // Only for action 'reschedule' — "schedule it myself" is one call that sets the time
+                // AND approves, rather than a reschedule followed by a separate approval that could
+                // half-succeed. approve-post refuses a past time, which is the gate we want.
+                ...(opts.rescheduleAt ? { rescheduleAt: opts.rescheduleAt } : {}),
+            }),
         });
         const d = await res.json().catch(() => ({}));
         if (res.status === 409 && d.pastSchedule) return { pastSchedule: true, message: d.message };
@@ -10011,7 +10104,9 @@ async function _rqApproveTargets(targets, action, opts = {}) {
     if (r0.handled) return;
     if (!r0.ok) { alert(r0.error || 'Failed to approve.'); return; }
     for (const p of rest) {
-        const r = await _rqApproveOne(p, action);
+        // opts carries rescheduleAt, and the siblings share the slot — dropping it here would
+        // approve the rest of the group at their old proposed times.
+        const r = await _rqApproveOne(p, action, opts);
         if (r.handled) return;
         if (!r.ok) { alert(r.error || 'Failed to approve.'); return; }
     }
@@ -10065,24 +10160,11 @@ function _rqShowApprovedPanel(targets, action) {
     return true;
 }
 
-async function rqReviewPublishNow() {
-    const id = _rqReviewPostId;
-    if (!id) return;
-    try {
-        // Bake user text overlays into the image before publishing (fail-closed).
-        try { await gpApplyOverlaysBeforeApprove(id); }
-        catch (e) { alert(e && e.message ? e.message : 'Could not apply your text overlays.'); return; }
-        const res = await fetch('/.netlify/functions/approve-post', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ postId: id, action: 'publish_now' }),
-        });
-        const d = await res.json().catch(() => ({}));
-        if (rqHandleNotConnected(res.status, d, _rqPostCache[id]?.assistantId)) return;
-        if (!res.ok) { alert(d.error || 'Failed to publish.'); return; }
-        if (d.confirmation && window.showToast) window.showToast(d.confirmation);
-        _rqReviewRefresh();
-    } catch { alert('Network error — please try again.'); }
-}
+// A SECOND rqReviewPublishNow lived here and, being later in the file, silently won — so every
+// "post now" ran this older version instead of the one above. It published only the platform on
+// screen (never the cross-post group), skipped the connection gate, skipped the mandatory-media
+// check, and asked for NO confirmation before the one irreversible action in the editor. Deleted;
+// the definition above is the live one.
 
 // Add/remove the AI disclosure footer for this post (and its cross-post siblings, which share the
 // caption). Server strips/appends the exact footer and flips the flag; we mirror the returned caption
@@ -10313,6 +10395,49 @@ async function rqReviewReschedule() {
     }
 }
 
+/**
+ * "Schedule it myself" — option 2 of step 7, and an approval.
+ *
+ * A plain-English instruction still goes to the assistant to resolve (reschedule-post-chat owns that
+ * parsing, and it is the only thing that can turn "next Friday afternoon" into an instant). A picked
+ * date does not need a round trip. Either way the resolved time is handed to approve-post as a
+ * 'reschedule' action, so setting the time and committing the post are ONE call — a reschedule
+ * followed by a separate approve could leave a post moved but unapproved if the second half failed.
+ */
+async function rqReviewScheduleMyself() {
+    const targets = _rqReviewTargets();
+    if (!targets.length) return;
+    const instruction = document.getElementById('post-review-reschedule-instruction')?.value.trim() || '';
+    const dtValue = document.getElementById('post-review-reschedule-dt')?.value || '';
+    const statusEl = document.getElementById('post-review-reschedule-status');
+    const say = (msg, kind) => {
+        if (!statusEl) return;
+        statusEl.textContent = msg;
+        statusEl.className = `text-xs italic ${kind === 'error' ? 'text-red-500' : 'text-gray-500'}`;
+        statusEl.classList.toggle('hidden', !msg);
+    };
+
+    if (!instruction && !dtValue) { say('Pick a date and time, or describe when to post it.', 'error'); return; }
+
+    let when = dtValue ? new Date(dtValue).toISOString() : null;
+    if (!when && instruction) {
+        say('Working out when that is…');
+        try {
+            const res = await fetch('/.netlify/functions/reschedule-post-chat', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ postId: targets[0].id, instruction }),
+            });
+            const d = await res.json().catch(() => ({}));
+            if (!res.ok || !d.scheduledFor) { say(d.error || 'I could not work out that time — try picking a date.', 'error'); return; }
+            when = d.scheduledFor;
+        } catch { say('Network error — please try again.', 'error'); return; }
+    }
+
+    say('Scheduling…');
+    await _rqApproveTargets(targets, 'reschedule', { rescheduleAt: when });
+    say('');
+}
+
 async function rqReviewReject() {
     const reason = document.getElementById('post-review-reason').value.trim();
     if (!reason) { alert('Please enter a reason for rejecting.'); return; }
@@ -10522,18 +10647,27 @@ async function openGeneratePostSheet() {
 
     window.showToast?.('Opening a new post…', { icon: '✍️' });
 
-    // Start on a platform the user can actually publish to, so the format list and the preview are
-    // immediately about something real. They can change it in the editor's left pane.
+    // ── Every connected platform, the way Autopilot does it ───────────────────────────────────
+    // This used to seed the FIRST connected platform only, which is why the editor needed a
+    // Platforms step at all: a post could not reach anywhere else without one. But the answer was
+    // never in doubt — a post goes to the accounts the workspace has actually connected, which is
+    // exactly what resolveConnectedDraftPlatforms gives the autonomous drafter. Asking the user to
+    // restate it was asking them to configure something the system already knew.
+    //
+    // Falls back to Instagram when nothing is connected: the post is still editable, and approving
+    // it is where the missing connection is reported (rqEnsurePlatformConnection).
     let cap = _gpCap;
     if (!cap) { cap = await window.checkCapacity().catch(() => null); _gpCap = cap; }
     const connected = (cap?.connectedPlatforms || []).map(s => String(s).toLowerCase());
-    const first = window.PlatformConstants.all.find(p => connected.some(c => c.includes(p.id)));
-    const platform = first ? first.id : 'instagram';
+    const platforms = window.PlatformConstants.all
+        .filter(p => connected.some(c => c.includes(p.id)))
+        .map(p => p.id);
+    if (!platforms.length) platforms.push('instagram');
 
     try {
         const res = await fetch('/.netlify/functions/create-manual-post', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ assistantId, platforms: [platform], blank: true }),
+            body: JSON.stringify({ assistantId, platforms, blank: true }),
         });
         const d = await res.json().catch(() => ({}));
         if (!res.ok) { window.showToast?.(d.error || 'Could not start a new post.', { icon: '⚠️' }); return; }
@@ -11102,8 +11236,26 @@ function gpStartVoice(targetId = 'gen-post-context') {
     // Clicking the mic that is already listening means "stop", the way every dictation button does.
     if (_gpVoice && _gpVoice.targetId === targetId) { gpStopVoice(); return; }
     // Clicking a DIFFERENT field's mic hands the microphone over rather than fighting for it.
+    const handingOver = !!_gpVoice;
     gpStopVoice();
+    // stop() is asynchronous — the browser releases the microphone when it fires `onend`, which is
+    // AFTER this call returns. Starting a new recogniser in the same tick throws InvalidStateError,
+    // SwanSpeech.start returns null, and the user gets "Dictation could not start" for doing nothing
+    // more unusual than moving from one box to another. Let the old session land first.
+    if (handingOver) { setTimeout(() => _gpBeginVoice(targetId, cfg), 150); return; }
+    _gpBeginVoice(targetId, cfg);
+}
 
+/**
+ * Actually open a recogniser, retrying once.
+ *
+ * The retry is not defensive padding. Chrome throws InvalidStateError whenever a previous session is
+ * still shutting down — most reliably on the click straight after granting microphone permission,
+ * because that grant ends the first session and the second click lands while it is still unwinding.
+ * That is the exact sequence a first-time user performs, so it has to work on the second attempt
+ * rather than reporting a failure the user cannot act on.
+ */
+function _gpBeginVoice(targetId, cfg, isRetry = false) {
     const micBtn = document.getElementById(cfg.mic);
     const clearMic = () => {
         if (_gpVoice && _gpVoice.targetId !== targetId) return;   // a newer session owns the UI now
@@ -11138,7 +11290,12 @@ function gpStartVoice(targetId = 'gen-post-context') {
             clearMic();
         },
     });
-    if (!handle) { clearMic(); gpVoiceError(targetId, 'start-failed'); return; }
+    if (!handle) {
+        if (!isRetry) { setTimeout(() => _gpBeginVoice(targetId, cfg, true), 300); return; }
+        clearMic();
+        gpVoiceError(targetId, 'start-failed');
+        return;
+    }
     _gpVoice = { handle, targetId, micId: cfg.mic };
 }
 
