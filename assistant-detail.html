@@ -171,8 +171,9 @@
         <div class="flex items-center gap-2 min-w-0 flex-wrap">
           <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 010 5.657l-3 3a4 4 0 01-5.657-5.657l1.5-1.5m6.828-6.829l3-3a4 4 0 015.657 5.657l-1.5 1.5"/></svg>
           <span class="text-[11px] font-bold text-gray-400 uppercase tracking-wide shrink-0">Connections</span>
-          <span id="connections-pill" class="inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">—</span>
-          <p id="connections-headline" class="text-xs text-gray-600 font-semibold min-w-0 truncate"></p>
+          <!-- #connections-pill ("N of M on") and #connections-headline ("Posting to …") were here.
+               Both were derived state that the Connections tab already shows in full, and computing
+               them was what made this card wait on four separate loads before it could paint. -->
           <span id="connections-save-status" class="text-xs font-bold text-emerald-600 transition-all"></span>
         </div>
         <button type="button" onclick="window._openBriefDrawer && window._openBriefDrawer('platforms')" class="shrink-0 px-3 py-1.5 text-xs font-bold rounded-lg border border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Manage connections</button>

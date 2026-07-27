@@ -935,39 +935,15 @@ window._renderConnectionsStatusCard = function () {
     }
     card.classList.remove('hidden');
 
-    const rows = platforms.map(p => ({ p, conn: _userConnections.find(c => _serviceMatchesPlatform(c.serviceName, p.id)) }));
-    const connected = rows.filter(r => r.conn && r.conn.status === 'active');
-    const enabled = connected.filter(r => _assistantSelectedIds.has(r.conn.id));
-    const sourceRows = sources.map(s => ({ s, conn: _userConnections.find(c => String(c.serviceName).toLowerCase() === s.id) }));
-    const activeSources = sourceRows.filter(r => r.conn && r.conn.status === 'active');
-    const connectedBlogs = blogDests.filter(d => d.connected);
-
-    const pill = document.getElementById('connections-pill');
-    if (pill) {
-        // A connected source/blog has no switch, so it counts as on the moment it is connected.
-        const onCount = enabled.length + activeSources.length + connectedBlogs.length;
-        const connectedCount = connected.length + activeSources.length + connectedBlogs.length;
-        pill.textContent = connectedCount ? `${onCount} of ${connectedCount} on` : '● None connected';
-        pill.className = 'inline-flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-full ' +
-            (onCount ? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-500');
-    }
-    const headline = document.getElementById('connections-headline');
-    if (headline) {
-        const parts = [];
-        if (enabled.length) parts.push(`Posting to ${_listPhrase(enabled.map(r => r.p.label))}`);
-        if (activeSources.length) parts.push(`Designs from ${_listPhrase(activeSources.map(r => r.s.label))}`);
-        if (connectedBlogs.length) parts.push(`Publishing to ${_listPhrase(connectedBlogs.map(d => d.label))}`);
-        const anyConnected = connected.length || activeSources.length || connectedBlogs.length;
-        headline.textContent = !anyConnected
-            ? ((sources.length || blogDests.length) ? 'Nothing connected yet' : 'No channels connected yet')
-            : parts.length
-            ? parts.join(' · ')
-            : 'Connected — but no channel is switched on for this assistant';
-    }
-    // The per-connection list + toggles were removed from this summary card — they were slow to
-    // render here and rarely acted on. The card now shows only the "N of M on" pill and the
-    // "Posting to …" headline; the full connect / manage / per-assistant switch UI lives behind the
-    // "Manage connections" button (the Connections tab). rows/enabled above still drive the summary.
+    // The "N of M on" pill and the "Posting to Facebook, Instagram, …" headline were computed here
+    // and are gone. Both were derived state — every fact in them is on the Connections tab, one
+    // click away behind "Manage connections" — and deriving them was the slowest thing on Overview:
+    // it needed _userConnections, _assistantSelectedIds, the relevant-platform and relevant-source
+    // maps and the blog destinations to have ALL loaded before it could render a single word, so the
+    // card sat on a skeleton waiting for the last of them.
+    //
+    // What remains is the label and the button, which need nothing fetched at all. The per-connection
+    // list and toggles went the same way earlier, for the same reason.
     window._syncStatusRow && window._syncStatusRow();
 };
 
@@ -994,11 +970,8 @@ function _blogDestStatusRow(d) {
         </div>`;
 }
 
-// "Facebook", "Facebook and X", "Facebook, X and LinkedIn"
-function _listPhrase(items) {
-    if (items.length <= 1) return items[0] || '';
-    return items.slice(0, -1).join(', ') + ' and ' + items[items.length - 1];
-}
+// _listPhrase ("Facebook, X and LinkedIn") lived here. Its only caller was the Connections
+// headline it built the platform list for; nothing else ever needed the phrasing.
 
 // US-GAP-10.1.1 SC4: token health of a stored connection — Connected / Expiring soon /
 // Disconnected / Needs attention. Shared by the platform card badge and the Overview

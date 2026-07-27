@@ -3559,13 +3559,19 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     //                 spinner and then vanish. _beginCardLoading un-hides what it skeletons, so we
     //                 must NOT call it on a card a role keeps hidden — hence the explicit guards.
     const _skelAutopilot = !document.getElementById('autopilot-status-card')?.classList.contains('hidden');
-    const _skelConnections = currentData.roleKey === 'social_media_manager';
     _OVERVIEW_SKELETON_KPI_CARDS.forEach(k => _beginCardLoading('kpi-card-' + k));
     if (_skelAutopilot) _beginCardLoading('autopilot-status-card');
-    if (_skelConnections) {
-        _beginCardLoading('connections-status-card');
-        // Connections was un-hidden to reserve its slot; keep the status row two-up so its
-        // real card slots straight into place instead of reflowing the row when it arrives.
+    // Connections no longer skeletons — it PAINTS. Its card carried a "N of M on" pill and a
+    // "Posting to …" headline, and computing those needed initAssistantConnections to have
+    // finished, so the card sat on a spinner until the slowest load on Overview came back. Both are
+    // gone; what is left is a label and a button that need nothing fetched.
+    //
+    // Shown up front only for the social role, which is the one role guaranteed to keep the card
+    // (connections-card-social-always-visible). Every other role's card self-hides when it has no
+    // connectors, so revealing it here would flash a card that then disappears — the same reason the
+    // skeleton was guarded this way.
+    if (currentData.roleKey === 'social_media_manager') {
+        document.getElementById('connections-status-card')?.classList.remove('hidden');
         window._syncStatusRow?.();
     }
 
@@ -3731,9 +3737,9 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
 
     // ── Connections (full connect/manage UI, scoped to this assistant) ──
     await window.initAssistantConnections(assistantId, currentData);
-    // The status card has rendered (or self-hidden if there's nothing to connect) — clear its
-    // loading skeleton. _syncStatusRow already ran inside the render, so the row settles here.
-    if (_skelConnections) _endCardLoading('connections-status-card');
+    // No _endCardLoading here: the connections card never starts a skeleton now (see above). It
+    // still renders from this call — that is what decides whether it shows at all for a non-social
+    // role — but it no longer BLOCKS on it.
     // Synced actions — this assistant's Integration Scenario Library recipes, in the same tab.
     // Reads relevance from window._detailReviewQueue.recordType (set by the dashboard registry).
     window.AssistantIntegrations?.init({ assistantId });
