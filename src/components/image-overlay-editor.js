@@ -3,10 +3,16 @@
  *
  * Text-overlay editor + baker for post images.
  *
- *   window.ImageOverlayEditor.open({ imageUrl, overlays, onDone })
+ *   window.ImageOverlayEditor.open({ imageUrl, overlays, onDone, suggestText? })
  *     Opens a full-screen editor over `imageUrl`. Lets the user add one or more draggable text
  *     overlays, style each (font, colour, size, box outline, box fill + transparency), add emoji,
  *     and delete them. Calls onDone(overlays[]) when the user saves, or onDone(null) on cancel.
+ *
+ *     `suggestText(mode, currentText) → Promise<string>` is OPTIONAL and is what puts the
+ *     "Suggest wording" / "Improve this" pair in the panel. `mode` is 'suggest' | 'improve'; throw
+ *     with a user-readable message and it is shown beside the buttons. Omit it and the row is
+ *     removed — this editor is reused by hosts with no assistant behind them, and a button that
+ *     cannot work is worse than no button. It stays DOM-agnostic: no post ids in here.
  *
  *   window.ImageOverlayEditor.bake(imageUrl, overlays) → Promise<Blob>   // PNG
  *     Flattens the overlays into the image at its NATIVE resolution and returns a PNG blob.
@@ -230,6 +236,11 @@
       .ioe-btn.block{width:100%}
       .ioe-btn:disabled{opacity:.5;cursor:not-allowed}
       .ioe-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 18px;border-top:1px solid #eef2f7}
+      .ioe-ai{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:6px 0 2px}
+      .ioe-ai .ioe-btn{font-size:11px;padding:5px 9px;background:#ecfdf5;color:#065f46;border-color:#a7f3d0}
+      .ioe-ai .ioe-btn:hover:not(:disabled){background:#d1fae5}
+      .ioe-ai-msg{font-size:11px;font-weight:600;color:#64748b}
+      .ioe-ai-msg.err{color:#dc2626}
       .ioe-emojis{display:flex;flex-wrap:wrap;gap:2px}
       .ioe-emojis button{font-size:18px;line-height:1;background:none;border:0;padding:3px;cursor:pointer;border-radius:6px}
       .ioe-emojis button:hover{background:#f1f5f9}
@@ -242,7 +253,7 @@
   }
 
   // ── The interactive editor ───────────────────────────────────────────────────
-  function open({ imageUrl, overlays, onDone }) {
+  function open({ imageUrl, overlays, onDone, suggestText }) {
     ensureStyles();
     const state = (overlays || []).map((o) => ({ ...DEFAULTS, ...o, id: o.id || uid() }));
     let selectedId = state.length ? state[state.length - 1].id : null;
@@ -350,6 +361,15 @@
         <div class="ioe-row">
           <label>Text</label>
           <textarea data-f="text" maxlength="500" placeholder="Type your text…">${esc(ov.text || '')}</textarea>
+          <!-- The assistant writes the overlay, not just the caption. Overlay wording is the one
+               piece of copy on a post that is read on mute in about a second, and it is the piece
+               people stare at a blank box over. Improve is disabled until there is something to
+               improve — asking a model to improve an empty string returns an apology, not wording. -->
+          <div class="ioe-ai" data-ai-row>
+            <button type="button" data-ai="suggest" class="ioe-btn">✨ Suggest wording</button>
+            <button type="button" data-ai="improve" class="ioe-btn"${String(ov.text || '').trim() ? '' : ' disabled'}>Improve this</button>
+            <span data-ai-msg class="ioe-ai-msg"></span>
+          </div>
           <div class="ioe-emojis" data-emojis>${EMOJIS.map((em) => `<button type="button" data-em="${em}">${em}</button>`).join('')}</div>
         </div>
         <div class="ioe-row">
@@ -391,7 +411,49 @@
       const q = (sel) => side.querySelector(sel);
       const rerender = () => { renderOverlays(); markSelected(); };
 
-      q('[data-f="text"]').addEventListener('input', (e) => { ov.text = e.target.value; rerender(); });
+      q('[data-f="text"]').addEventListener('input', (e) => {
+        ov.text = e.target.value;
+        // "Improve this" only means something once there is something to improve.
+        const imp = q('[data-ai="improve"]');
+        if (imp) imp.disabled = !String(ov.text || '').trim();
+        rerender();
+      });
+
+      // ── Assistant wording ────────────────────────────────────────────────────────────────────
+      // Only wired when the host passed a suggestText function. The editor is reused by surfaces
+      // that have no assistant behind them, and a button that cannot work is worse than no button.
+      const aiRow = q('[data-ai-row]');
+      if (aiRow && typeof suggestText !== 'function') {
+        aiRow.remove();
+      } else if (aiRow) {
+        const msg = q('[data-ai-msg]');
+        const buttons = Array.prototype.slice.call(aiRow.querySelectorAll('[data-ai]'));
+        aiRow.addEventListener('click', async (e) => {
+          const btn = e.target.closest('[data-ai]');
+          if (!btn || btn.disabled) return;
+          const mode = btn.dataset.ai;
+          const before = btn.textContent;
+          buttons.forEach((b) => { b.disabled = true; });
+          btn.textContent = 'Thinking…';
+          if (msg) { msg.textContent = ''; msg.classList.remove('err'); }
+          try {
+            const text = await suggestText(mode, ov.text || '');
+            ov.text = text;
+            // The textarea is the model the rest of this panel reads from, so write it there and
+            // repaint the canvas — not one or the other, or the box and the picture disagree.
+            const ta = q('[data-f="text"]');
+            if (ta) ta.value = text;
+            rerender();
+          } catch (err) {
+            if (msg) { msg.textContent = (err && err.message) || 'Could not write that wording.'; msg.classList.add('err'); }
+          } finally {
+            btn.textContent = before;
+            buttons.forEach((b) => { b.disabled = false; });
+            const imp = q('[data-ai="improve"]');
+            if (imp) imp.disabled = !String(ov.text || '').trim();
+          }
+        });
+      }
       q('[data-f="fontFamily"]').addEventListener('change', (e) => { ov.fontFamily = e.target.value; rerender(); });
       q('[data-f="fontSizePct"]').addEventListener('input', (e) => {
         ov.fontSizePct = clamp(Number(e.target.value) / 100, 0.02, 0.25);

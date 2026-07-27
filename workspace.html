@@ -12537,6 +12537,24 @@ function _pcePlaceholderBackdrop(width, height) {
     return c.toDataURL('image/png');
 }
 
+/**
+ * Ask the assistant for overlay wording. Returns the text, or throws with a message worth showing.
+ *
+ * Thin on purpose: the overlay editor owns its own button/spinner/error state, and this owns the
+ * request. The endpoint spends a task credit, so 403 (cap reached) and 503 (cap check failed, or AI
+ * off) are both real answers the user needs to read — not "something went wrong".
+ */
+async function _pceSuggestOverlayText(postId, mode, currentText) {
+    const res = await fetch('/.netlify/functions/suggest-overlay-text', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ postId, mode, currentText: currentText || '' }),
+    });
+    const d = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(d.error || 'Could not write that wording.');
+    if (!d.text) throw new Error('Nothing came back — try again.');
+    return d.text;
+}
+
 async function _pceOpenOverlayEditor(postId) {
     if (!postId) return;
     if (!window.ImageOverlayEditor) { _pceSetOverlayMsg('Text editor could not load. Please refresh.', 'error'); return; }
@@ -12572,6 +12590,11 @@ async function _pceOpenOverlayEditor(postId) {
     window.ImageOverlayEditor.open({
         imageUrl: backdrop,
         overlays: (cached && cached.length ? cached : base.overlays) || [],
+        // Lets the editor's "Suggest wording" / "Improve this" reach the assistant. The editor is
+        // deliberately DOM-agnostic and knows nothing about posts, so it is handed a function rather
+        // than a post id — bake() and the blog studio reuse it with no assistant at all, and the
+        // buttons simply do not appear when this is absent.
+        suggestText: (mode, currentText) => _pceSuggestOverlayText(postId, mode, currentText),
         onDone: async (overlays) => {
             if (overlays == null) return;   // cancelled — leave everything as it was
             _pceSetOverlayMsg('Saving your text…');
