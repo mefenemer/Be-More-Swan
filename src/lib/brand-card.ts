@@ -39,10 +39,14 @@ export type CardAlign = 'left' | 'center' | 'right';
  *
  * Overhang is now impossible by a different construction, in two independent layers:
  *   1. the block's width is ESTIMATED here and `x` is clamped so its right edge lands inside the
- *      safe area, and
+ *      CANVAS, and
  *   2. the rendered block is capped to the space actually remaining to its right, with
  *      `overflow: hidden` — so even a bad estimate wraps or clips instead of printing off the card.
  * Layer 2 is what makes layer 1 safe to be an estimate rather than a measurement.
+ *
+ * The clamp is the canvas, not the safe area, ONLY for an element that has been dragged. Springing a
+ * hand-placed block back to an invisible margin is the other thing that made this feel like it was
+ * snapping. An element still on its default position keeps the safe area, so no existing card moves.
  */
 export interface CardElementLayout {
     show: boolean;
@@ -52,8 +56,14 @@ export interface CardElementLayout {
      * `x` existed renders EXACTLY as it did — see `x`.
      */
     align: CardAlign;
-    /** Top edge as a fraction of canvas height, clamped into the safe area at render time — so 0
-     *  and 1 mean "as high/low as this can legibly go", never off the card. */
+    /**
+     * Top edge as a fraction of canvas height.
+     *
+     * Clamped at render time to the CANVAS once the element has been dragged (`x !== null`), and to
+     * the safe area until then — so an untouched card's y:0 still means "at the top padding", while
+     * a dragged one can sit flush to the edge if that is where it was put. Never off the card either
+     * way.
+     */
     y: number;
     /**
      * Centre of the block as a fraction of canvas width, or `null` for "anchor to `align` instead".
@@ -324,9 +334,25 @@ export async function renderBrandCard(opts: {
     const wordmarkHeight = logoSrc ? logoHeight : Math.round(eyebrowSize * 1.3);
     const websiteHeight = Math.round(websiteSize * 1.3);
 
-    /** Clamp an element's top edge into the safe area, so no `y` can push it off the canvas. */
-    const topFor = (y: number, elHeight: number) =>
-        Math.round(Math.min(Math.max(y * height, pad), Math.max(pad, height - pad - elHeight)));
+    /**
+     * Where an element's top edge lands.
+     *
+     * Two rules, chosen by whether the reviewer has ever placed this element by hand (`free`).
+     *
+     * NOT free — the element still sits on its default y (0, 0.5, 1) — keeps the safe-area clamp
+     * exactly as it was. That is what makes y:0 mean "at the top padding" rather than "flush to the
+     * edge", and it is the placement every card drafted so far already has. Widening this branch
+     * would move the furniture on every existing card at once.
+     *
+     * Free — the reviewer dragged it — clamps only to the CANVAS. Being unable to put the company
+     * name in the margin is the "snap" people hit: you drag to the edge and it springs back to the
+     * padding. The safe area is good advice about where text stays legible, not a rule the card
+     * gets to enforce over an explicit instruction.
+     */
+    const topFor = (y: number, elHeight: number, free: boolean) =>
+        free
+            ? Math.round(Math.min(Math.max(y * height, 0), Math.max(0, height - elHeight)))
+            : Math.round(Math.min(Math.max(y * height, pad), Math.max(pad, height - pad - elHeight)));
 
     const justify = (align: CardAlign) =>
         align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start';
@@ -338,17 +364,28 @@ export async function renderBrandCard(opts: {
      * anchored inside it by `justifyContent`. That is the path every card saved before dragging was
      * free still takes, so none of them move by a pixel.
      *
-     * With a free `x` the block becomes its own box, centred on `x` and then CLAMPED so neither edge
-     * leaves the safe area. `w` is an estimate, so the returned width is also capped to the room
-     * actually left to the right of `left` — the second, independent guard that makes an estimate
-     * safe to clamp with. Overflow is hidden by the callers, so the worst a bad estimate can do is
-     * wrap or clip text INSIDE the card, never print it off the edge.
+     * With a free `x` the block becomes its own box, centred on `x` and then clamped to the CANVAS —
+     * not to the safe area. Clamping a hand-placed block to the padding is the "snap" people run
+     * into: you drag the website into the corner and it springs back to an invisible margin. The
+     * safe area is where text is guaranteed legible, which is the right DEFAULT and the wrong veto
+     * over somebody who has deliberately dragged something into the corner.
+     *
+     * The canvas edge itself is still enforced, and `w` is only an estimate, so the returned width
+     * is capped to the room actually left to the right of `left` — the second, independent guard
+     * that makes an estimate safe to clamp with. Overflow is hidden by the callers, so the worst a
+     * bad estimate can do is wrap or clip text INSIDE the card, never print it off the edge.
      */
     const place = (x: number | null, w: number) => {
         if (x === null) return { left: pad, width: rail, free: false };
-        const wide = Math.min(w, rail);
-        const left = Math.round(Math.min(Math.max(x * width - wide / 2, pad), width - pad - wide));
-        return { left, width: Math.min(wide, width - pad - left), free: true };
+        // The estimate is deliberately GENEROUS. It decides how much room the block gets, and the
+        // two errors are not symmetric: over-estimating costs a few px of position, while
+        // under-estimating loses letters — which is exactly what dropping a block in a corner used
+        // to expose, once the safe area stopped holding it back from the edge. A long wordmark wrapped
+        // and had its second line cut off by `overflow: hidden`, and a long website lost its last
+        // character. Both were the estimate being ~7% short with no slack to absorb it.
+        const wide = Math.min(Math.ceil(w * 1.15), width);
+        const left = Math.round(Math.min(Math.max(x * width - wide / 2, 0), Math.max(0, width - wide)));
+        return { left, width: Math.min(wide, width - left), free: true };
     };
 
     /** One rail (or one free block) at `top`; the child anchors inside it. */
@@ -359,6 +396,12 @@ export async function renderBrandCard(opts: {
             display: 'flex', alignItems: 'center',
             // A freely-placed block IS its own width, so there is nothing left to anchor within it.
             justifyContent: p.free ? 'flex-start' : justify(e.align),
+            // The furniture is single-line by design, and its box is exactly one line tall. Letting it
+            // wrap therefore does not shrink the text, it HIDES the second line — so a name too wide
+            // for where it was dropped silently lost half of itself. Refusing the wrap makes the
+            // failure a slight clip at the edge instead of a missing word, and the generous estimate
+            // above is what stops it reaching even that.
+            whiteSpace: 'nowrap',
             overflow: 'hidden',
         }, child);
     };
@@ -385,7 +428,10 @@ export async function renderBrandCard(opts: {
     const perLine = Math.max(1, Math.floor(rail / (headlineSize * 0.52)));
     const wrapped = headline.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil(line.length / perLine)), 0);
     const headlineHeight = Math.min(height - pad * 2, Math.round(wrapped * headlineSize * 1.14));
-    const headlineTop = topFor(layout.headline.y - (headlineHeight / height) / 2, headlineHeight);
+    // `free` is simply "has this ever been dragged": a drag writes both axes at once (see
+    // _pceDragEnd), so a non-null x is the reliable marker that the reviewer placed this element
+    // themselves — and therefore that the safe-area clamp should not overrule them.
+    const headlineTop = topFor(layout.headline.y - (headlineHeight / height) / 2, headlineHeight, layout.headline.x !== null);
     // A wrapped headline fills the rail; a short one is only as wide as its longest line. Using the
     // longest line (not the whole string) is what stops a two-word headline being clamped as though
     // it were a paragraph, which would stop it reaching the right-hand side of the card at all.
@@ -418,7 +464,7 @@ export async function renderBrandCard(opts: {
     };
 
     if (wordmarkAvailable && layout.wordmark.show) {
-        const top = topFor(layout.wordmark.y, wordmarkHeight);
+        const top = topFor(layout.wordmark.y, wordmarkHeight, layout.wordmark.x !== null);
         // A logo has no glyphs to count. 3:1 is the ordinary wordmark-lockup aspect, and `place`
         // caps whatever this returns — a wrong guess costs position, never an overhang.
         const wordmarkWidth = logoSrc
@@ -435,7 +481,7 @@ export async function renderBrandCard(opts: {
     }
 
     if (websiteAvailable && layout.website.show) {
-        const top = topFor(layout.website.y, websiteHeight);
+        const top = topFor(layout.website.y, websiteHeight, layout.website.x !== null);
         const websiteWidth = textWidth(String(opts.kit.website), websiteSize, 0.5);
         const p = place(layout.website.x, websiteWidth);
         children.push(placed(top, websiteHeight, layout.website, websiteWidth, el({

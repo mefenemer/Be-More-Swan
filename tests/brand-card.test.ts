@@ -445,12 +445,14 @@ test('an org with nothing to draw reports unavailable rather than an empty box',
     assert.equal(card.elements.wordmark.box, null);
 });
 
-test('a dragged element stays inside the safe area on every ratio', async () => {
+test('an out-of-range y on an UN-dragged element is clamped to the safe area, on every ratio', async () => {
+    // No `x` on either element, so neither counts as hand-placed and both keep the safe-area rule.
+    // (What a hand-placed element does instead is two tests below.)
     for (const ratio of ['1:1', '4:5', '9:16', '16:9'] as const) {
         const card = await renderBrandCard({
             headline: 'Placement must never print off the edge',
             kit: BE_MORE_SWAN_BRAND_KIT, aspectRatio: ratio,
-            // Deliberately past both ends: this is what a drag to the very edge sends.
+            // Deliberately past both ends: junk that normalizeCardLayout has to correct.
             layout: { wordmark: { show: true, align: 'right', y: 5 }, website: { show: true, align: 'center', y: -5 } },
         });
         const pad = Math.round(card.width * 0.083);
@@ -502,9 +504,14 @@ test('a free x moves the block horizontally, and align no longer decides where i
     assert.notStrictEqual(mb.left, anchored.elements.headline.box!.left);
 });
 
-test('no x, however extreme, can put a block outside the safe area', async () => {
-    // The guarantee the snap used to provide by construction. A long website is the worst case: the
-    // widest single-line block, dragged hard against each edge.
+test('no x, however extreme, can put a block outside the CANVAS', async () => {
+    // The guarantee that survives. A long website is the worst case: the widest single-line block,
+    // dragged hard against each edge.
+    //
+    // It used to be the safe area, and that was the "snap": drag the website into the corner and it
+    // sprang back to an invisible margin. The safe area is where text is guaranteed legible, which
+    // makes it the right DEFAULT and the wrong veto over somebody who deliberately dragged something
+    // into the corner. Printing off the card is still impossible — that is what this pins.
     const kit = { ...BE_MORE_SWAN_BRAND_KIT, website: 'willowbrook-coffee-roasters.example.com' };
     for (const ratio of ['1:1', '9:16', '16:9'] as const) {
         for (const x of [0, 0.5, 1]) {
@@ -517,15 +524,88 @@ test('no x, however extreme, can put a block outside the safe area', async () =>
                     website: { show: true, align: 'left', y: 1, x },
                 },
             });
-            const pad = Math.round(card.width * 0.08);
             for (const [name, e] of Object.entries(card.elements)) {
                 if (!e.box) continue;
-                assert.ok(e.box.left >= pad, `${name} at x=${x} on ${ratio} starts left of the safe area`);
-                assert.ok(e.box.left + e.box.width <= card.width - pad + 1,
-                    `${name} at x=${x} on ${ratio} runs past the safe area — this is the overhang the snap used to prevent`);
+                assert.ok(e.box.left >= 0, `${name} at x=${x} on ${ratio} starts left of the canvas`);
+                assert.ok(e.box.left + e.box.width <= card.width + 1,
+                    `${name} at x=${x} on ${ratio} prints off the card — the one thing free placement must still never do`);
+                assert.ok(e.box.top >= 0, `${name} at x=${x} on ${ratio} sits above the canvas`);
+                assert.ok(e.box.top + e.box.height <= card.height + 1,
+                    `${name} at x=${x} on ${ratio} runs off the bottom`);
             }
         }
     }
+});
+
+test('a dragged element CAN sit in the margin — the snap is gone', async () => {
+    // The actual request: drag the furniture anywhere on the card, including outside the safe area.
+    // Dragging writes both axes at once, so a non-null x is what marks an element as hand-placed.
+    const kit = { ...BE_MORE_SWAN_BRAND_KIT, website: 'willowbrook.example.com' };
+    const card = await renderBrandCard({
+        headline: 'Corner to corner', kit, seed: 7, aspectRatio: '1:1',
+        layout: {
+            wordmark: { show: true, align: 'left', y: 0, x: 0 },     // hard into the top-left
+            website: { show: true, align: 'left', y: 1, x: 1 },      // hard into the bottom-right
+        },
+    });
+    const pad = Math.round(card.width * 0.083);
+    const wm = card.elements.wordmark.box!;
+    const web = card.elements.website.box!;
+    assert.ok(wm.left < pad, `the company name should reach into the margin, but sits at ${wm.left} (pad ${pad})`);
+    assert.ok(wm.top < pad, `it should reach the top margin too, but sits at ${wm.top}`);
+    assert.ok(web.left + web.width > card.width - pad, 'the website should reach the right margin');
+    assert.ok(web.top + web.height > card.height - pad, 'and the bottom margin');
+});
+
+test('a block dropped in a corner has room for ALL of its text', async () => {
+    // The defect that free placement exposed. Until the safe area stopped holding blocks back from
+    // the edge, the width estimate always had the whole rail to be wrong inside. At the edge it has
+    // only itself — and it was ~7% short, so "WILLOWBROOK COFFEE" wrapped and lost its second line
+    // to overflow:hidden, and a long website lost its final character.
+    //
+    // Mirrors the renderer's own sizing maths (as the safe-area test mirrors `pad`) and asserts the
+    // box is WIDER than a tight estimate — i.e. that the slack which stops the clip is really there.
+    const wordmark = 'WILLOWBROOK COFFEE';
+    const website = 'willowbrook-coffee-roasters.example.com';
+    const card = await renderBrandCard({
+        headline: 'Corners', kit: { ...BE_MORE_SWAN_BRAND_KIT, wordmark, website }, seed: 11, aspectRatio: '1:1',
+        layout: {
+            wordmark: { show: true, align: 'left', y: 0, x: 0 },
+            website: { show: true, align: 'left', y: 1, x: 1 },
+        },
+    });
+    const eyebrowSize = Math.round(card.width * 0.024);
+    const tracking = Math.round(card.width * 0.004);
+    const websiteSize = Math.round(card.width * 0.026);
+    const tight = {
+        wordmark: Math.ceil(wordmark.length * (eyebrowSize * 0.62 + tracking)),
+        website: Math.ceil(website.length * (websiteSize * 0.52)),
+    };
+    for (const key of ['wordmark', 'website'] as const) {
+        const box = card.elements[key].box!;
+        assert.ok(box.width > tight[key],
+            `${key} box ${box.width} has no slack over the raw estimate ${tight[key]} — this is what clipped the text`);
+        // And the slack must not have pushed it off the card, which is the whole reason the estimate
+        // was tight in the first place.
+        assert.ok(box.left >= 0 && box.left + box.width <= card.width,
+            `${key} box ${box.left}..${box.left + box.width} left the canvas`);
+    }
+});
+
+test('an element nobody dragged still keeps the safe area', async () => {
+    // The other half of the rule, and the reason existing cards do not all shift at once: the safe
+    // area is still what an untouched y:0 / y:1 means.
+    const card = await renderBrandCard({
+        headline: 'Untouched', kit: BE_MORE_SWAN_BRAND_KIT, seed: 8, aspectRatio: '1:1',
+        layout: {
+            wordmark: { show: true, align: 'left', y: 0, x: null },
+            website: { show: true, align: 'left', y: 1, x: null },
+        },
+    });
+    const pad = Math.round(card.width * 0.083);
+    assert.ok(card.elements.wordmark.box!.top >= pad, 'an un-dragged name must stay at the padding');
+    assert.ok(card.elements.website.box!.top + card.elements.website.box!.height <= card.height - pad,
+        'an un-dragged website must stay at the padding');
 });
 
 test('a card stored before free x renders exactly as it always did', async () => {
