@@ -635,8 +635,10 @@ window.showComplianceModals = function showComplianceModals(force) {
 </div>
 
 <div id="post-review-modal" class="hidden fixed inset-0 z-[90] items-center justify-center p-4 bg-gray-900/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="post-review-title">
-  <!-- Widens to max-w-4xl only when this post has an inspector to show (see _pceSetStageWide), so a
-       plain text post keeps the narrow reading column it has always had. -->
+  <!-- max-w-lg is only the starting class: _pceSetStageWide swaps it for max-w-4xl on every post
+       the modal actually opens, editable or already published. The narrow width used to be kept for
+       a read-only post on the grounds that it has no inspector beside the canvas — which shrank the
+       picture on the one screen where looking at it is all you can do. -->
   <div id="post-review-panel" class="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[92vh] flex flex-col overflow-hidden">
     <!-- Header -->
     <div class="flex items-start justify-between gap-3 px-5 py-3 border-b border-gray-100 shrink-0">
@@ -9845,7 +9847,14 @@ function _pceSyncForPost(post) {
         aiActions.classList.toggle('flex', editable);
     }
     if (!editable) {
-        _pceSetStageWide(false);
+        // Same width as the editor, deliberately. A published post opened from the Calendar used to
+        // narrow to max-w-lg on the reasoning that the wide layout exists to fit an inspector beside
+        // the canvas, and a read-only post has no inspector. True of the CONTROLS, wrong about the
+        // POST: it is the same post, with the same picture and the same caption, and shrinking it on
+        // the one screen where all you can do is look at it made the media smaller exactly when
+        // looking is the entire purpose. The card stays centred (max-w-md), so the extra width is
+        // margin rather than stretched content.
+        _pceSetStageWide(true);
         _rqRestoreMediaPanel();
         _pceState.postId = null;
         _pceState.geo = null;
