@@ -486,6 +486,14 @@
       <button type="button" id="maintab-btn-review-queue" data-maintab="review-queue" class="main-tab-btn">Review
         <span id="detail-rq-pending-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
       </button>
+      <!-- Inspo — content-roles only (inspoTab: social_media_manager, blog_writer); the
+           styles/tones the assistant studies and applies to every draft
+           (assistant-inspo.js → inspo-items.ts). Sits right after the Review Queue (Posts) tab and
+           before Calendar so the content-creation tabs read together. Hidden by default, shown by
+           _applyDashboardRegistry when an inspoTab exists. -->
+      <button type="button" id="maintab-btn-inspo" data-maintab="inspo" class="main-tab-btn hidden">
+        <span id="inspo-tab-label">Inspo</span>
+      </button>
       <!-- Calendar — this assistant's scheduled work / timeline (assistant-calendar.js scopes
            the global calendar to this assistant). Always shown. -->
       <button type="button" id="maintab-btn-calendar" data-maintab="calendar" class="main-tab-btn">Calendar</button>
@@ -505,13 +513,6 @@
            Placed last; hidden by default, shown by _applyDashboardRegistry when a kbTab exists. -->
       <button type="button" id="maintab-btn-kb" data-maintab="kb" class="main-tab-btn hidden">
         <span id="kb-tab-label">Knowledge Base</span>
-      </button>
-      <!-- Inspo — content-roles only (inspoTab: social_media_manager, blog_writer); the
-           styles/tones the assistant studies and applies to every draft
-           (assistant-inspo.js → inspo-items.ts). Hidden by default, shown by
-           _applyDashboardRegistry when an inspoTab exists. -->
-      <button type="button" id="maintab-btn-inspo" data-maintab="inspo" class="main-tab-btn hidden">
-        <span id="inspo-tab-label">Inspo</span>
       </button>
     </nav>
   </div>
