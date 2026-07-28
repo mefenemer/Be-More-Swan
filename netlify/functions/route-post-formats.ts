@@ -1,6 +1,10 @@
 // netlify/functions/route-post-formats.ts
 // GET ?postId=N → the format every platform in this post's cross-post group would publish as.
 //
+// Each platform is answered from ITS OWN row's media, not from the row in the query string — the
+// siblings carry separate contentAssetIds and are allowed to differ, so the answer must not depend
+// on which tab the composer happens to have open.
+//
 // ── Why an endpoint and not a copy of the rules ─────────────────────────────────────────────────
 // workspace.html is unbundled and cannot import src/, so every shared rule it has ever needed was
 // retyped into the page — and every hand copy eventually drifted, always into a user-visible bug
@@ -17,7 +21,7 @@ import jwt from 'jsonwebtoken';
 import { eq, and, or, isNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, scheduledPosts } from '../../db/schema';
-import { loadAssetMetrics, routeAcross } from '../../src/utils/format-router';
+import { assetIdList, loadAssetMetricsById, orderMetrics, routeAsset } from '../../src/utils/format-router';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -56,22 +60,57 @@ export default withLambda(async (event) => {
             )).limit(1);
         if (!post) return { statusCode: 404, body: JSON.stringify({ error: 'Post not found.' }) };
 
-        // Every platform this post goes out on. Siblings share a crosspost group; a post that has
-        // never been cross-posted is a group of one.
-        let platforms: string[] = [post.platform!].filter(Boolean);
+        // ── Each platform is routed against ITS OWN row ─────────────────────────────────────────
+        // Siblings share a crosspost group but are separate rows with their own contentAssetIds, and
+        // the composer lets a reviewer give one platform a different picture (the "Apply to all
+        // platforms" opt-out on the media panel).
+        //
+        // This used to route every platform in the group against the QUERIED row's media, so the
+        // answer depended on which tab happened to be open. Attaching a picture on Instagram and
+        // then clicking Facebook re-asked from the Facebook row — which had no media of its own —
+        // and every platform came back 'none', so the composer struck Instagram out and relabelled
+        // it "no format" a second after it had correctly said "auto-cropped".
         const groupId = post.crosspostGroupId;
-        if (groupId) {
-            const siblings = await db.select({ platform: scheduledPosts.platform })
-                .from(scheduledPosts).where(eq(scheduledPosts.crosspostGroupId, groupId));
-            platforms = [...new Set(siblings.map((s: any) => s.platform).filter(Boolean))];
+        const siblings = groupId
+            ? await db.select({
+                id: scheduledPosts.id,
+                platform: scheduledPosts.platform,
+                contentAssetIds: scheduledPosts.contentAssetIds,
+            })
+                .from(scheduledPosts)
+                // Tenant-scoped like the post lookup above: a crosspost_group_id is not a secret, so
+                // an unscoped read here would answer for another organisation's rows.
+                .where(and(
+                    eq(scheduledPosts.crosspostGroupId, groupId),
+                    me.organisationId
+                        ? or(eq(scheduledPosts.organisationId, me.organisationId), isNull(scheduledPosts.organisationId))
+                        : eq(scheduledPosts.userId, userId),
+                ))
+            : [{ id: post.id, platform: post.platform, contentAssetIds: post.contentAssetIds }];
+
+        // One row per platform. The queried post wins for its own platform, so the tab you are
+        // looking at is always described by the row you are looking at.
+        const rowFor = new Map<string, { id: number; contentAssetIds: unknown }>();
+        for (const s of siblings as any[]) {
+            if (!s.platform) continue;
+            if (!rowFor.has(s.platform) || s.id === post.id) {
+                rowFor.set(s.platform, { id: s.id, contentAssetIds: s.contentAssetIds });
+            }
+        }
+        if (post.platform && !rowFor.has(post.platform)) {
+            rowFor.set(post.platform, { id: post.id, contentAssetIds: post.contentAssetIds });
         }
 
-        const assets = await loadAssetMetrics(db, post.contentAssetIds);
-        const routed = routeAcross(platforms, assets);
+        // Metrics for every asset any sibling carries, in one query rather than one per platform.
+        const metrics = await loadAssetMetricsById(
+            db,
+            [...rowFor.values()].flatMap(r => assetIdList(r.contentAssetIds)),
+        );
 
         // Flattened for the client: it needs to render a tab, not reason about a format object.
         const routes: Record<string, unknown> = {};
-        for (const [platform, r] of Object.entries(routed)) {
+        for (const [platform, row] of rowFor) {
+            const r = routeAsset(platform, orderMetrics(assetIdList(row.contentAssetIds), metrics));
             routes[platform] = {
                 state: r.state,
                 formatKey: r.format?.key ?? null,
@@ -82,14 +121,16 @@ export default withLambda(async (event) => {
             };
         }
 
+        // What the QUERIED post's routing was derived from, so the composer can say "we haven't
+        // measured this yet" rather than showing a confident answer built on nulls.
+        const ownAssets = orderMetrics(assetIdList(post.contentAssetIds), metrics);
+
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 routes,
-                // What the routing was derived FROM, so the composer can say "we haven't measured
-                // this yet" rather than showing a confident answer built on nulls.
-                assets: assets.map(a => ({ kind: a.kind, width: a.width ?? null, height: a.height ?? null, durationS: a.durationS ?? null })),
+                assets: ownAssets.map(a => ({ kind: a.kind, width: a.width ?? null, height: a.height ?? null, durationS: a.durationS ?? null })),
             }),
         };
     } catch (err) {

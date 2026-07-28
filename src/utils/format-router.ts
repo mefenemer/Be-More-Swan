@@ -232,8 +232,26 @@ export const FORMATS_WITH_DURATION_LIMIT = POST_FORMATS.filter(f => f.maxDuratio
  * and a 0 would be a lie that passes every ceiling.
  */
 export async function loadAssetMetrics(db: any, contentAssetIds: unknown): Promise<AssetMetrics[]> {
-    const ids = Array.isArray(contentAssetIds) ? contentAssetIds.map(Number).filter(Number.isFinite) : [];
+    const ids = assetIdList(contentAssetIds);
     if (!ids.length) return [];
+    return orderMetrics(ids, await loadAssetMetricsById(db, ids));
+}
+
+/** The routable asset ids on a post, in slide order. */
+export function assetIdList(contentAssetIds: unknown): number[] {
+    return Array.isArray(contentAssetIds) ? contentAssetIds.map(Number).filter(Number.isFinite) : [];
+}
+
+/**
+ * Metrics for a set of asset ids, keyed by id, in ONE query.
+ *
+ * Exists so a caller routing several posts at once — the cross-post tab strip asks what EACH
+ * platform's own row would publish as — can do it without a query per sibling.
+ */
+export async function loadAssetMetricsById(db: any, ids: number[]): Promise<Map<number, AssetMetrics>> {
+    const out = new Map<number, AssetMetrics>();
+    const wanted = [...new Set(ids.filter(Number.isFinite))];
+    if (!wanted.length) return out;
 
     const rows = await db.select({
         id: contentAssets.id,
@@ -241,21 +259,28 @@ export async function loadAssetMetrics(db: any, contentAssetIds: unknown): Promi
         width: contentAssets.width,
         height: contentAssets.height,
         durationS: contentAssets.durationS,
-    }).from(contentAssets).where(inArray(contentAssets.id, ids));
+    }).from(contentAssets).where(inArray(contentAssets.id, wanted));
 
-    const byId = new Map<number, any>(rows.map((r: any) => [r.id, r]));
-    const out: AssetMetrics[] = [];
-    for (const id of ids) {
-        const r = byId.get(id);
+    for (const r of rows as any[]) {
         // 'link' and 'audio' rows are not routable media. Treating them as images would let them
         // satisfy an image format they can never fill.
-        if (!r || (r.assetType !== 'image' && r.assetType !== 'video')) continue;
-        out.push({
+        if (r.assetType !== 'image' && r.assetType !== 'video') continue;
+        out.set(r.id, {
             kind: r.assetType === 'video' ? 'video' : 'image',
             width: r.width ?? undefined,
             height: r.height ?? undefined,
             durationS: r.durationS ?? undefined,
         });
+    }
+    return out;
+}
+
+/** Re-sort loaded metrics back onto the id order the post carries, dropping unroutable rows. */
+export function orderMetrics(ids: number[], byId: Map<number, AssetMetrics>): AssetMetrics[] {
+    const out: AssetMetrics[] = [];
+    for (const id of ids) {
+        const m = byId.get(id);
+        if (m) out.push(m);
     }
     return out;
 }
