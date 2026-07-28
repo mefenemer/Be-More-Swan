@@ -130,8 +130,8 @@
         <p class="opacity-90 leading-relaxed mb-8 text-lg">
             Stop paddling frantically beneath the surface. Hire your first digital assistant today and be more swan.
         </p>
-        <a href="register.html" onclick="bmsStart(event)" class="inline-block px-8 py-4 text-lg font-bold rounded-lg text-white bg-green-600 hover:bg-green-700 shadow-lg hover:shadow-xl transition">
-            Deploy Your Assistant
+        <a href="pricing.html" class="inline-block px-8 py-4 text-lg font-bold rounded-lg text-white bg-green-600 hover:bg-green-700 shadow-lg hover:shadow-xl transition">
+            Hire Your Assistant
         </a>
     </div>
 </section>
@@ -140,14 +140,6 @@
 
 <script src="./mobileMenu.js"></script>
 <script>
-    // CTA router — same behaviour as index.html: known registered devices go to Login.
-    function bmsStart(ev) {
-        if (ev && ev.preventDefault) ev.preventDefault();
-        let known = false;
-        try { known = localStorage.getItem('bms_known_user') === '1'; } catch (e) {}
-        window.location.href = known ? 'login.html' : 'register.html';
-    }
-
     async function loadComponent(id, path) {
         try {
             const r = await fetch(path);
