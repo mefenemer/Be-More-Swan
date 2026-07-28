@@ -18,6 +18,7 @@ import assert from 'node:assert';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { checkAssistantCapacity, SEAT_OCCUPYING_STATUSES } from '../src/utils/assistant-capacity';
+import { extractOnboardingGuardrails } from '../src/utils/onboarding-guardrails';
 
 let passed = 0, total = 0;
 const deferred: Array<() => Promise<void>> = [];
@@ -135,6 +136,54 @@ check('completion is still judged on drafts existing — so cleanup has to be co
     const src = read('netlify/functions/get-onboarding-progress.ts');
     assert.match(src, /onboardingDrafts\.organisationId, orgId/);
     assert.match(src, /const onboardAssistant = firstAssistant && !draftInProgress/);
+});
+
+// ── Onboarding guardrails become content rules ────────────────────────────────────────────────────
+// The wizard's "Guardrails & rules set" item reads the content_rules table (get-assistant-readiness
+// → hasRule), but onboarding only ever wrote the rules into the system prompt — which post
+// generation doesn't read either. So a user who entered guardrails still saw "enter guardrails", and
+// the rules steered nothing. onboarding.ts now materialises them into content_rules.
+check('only NON-NEGOTIABLE entries become rules — KNOWLEDGE BASE context is excluded', () => {
+    const strictRules = [
+        '- NON-NEGOTIABLE: Never mention competitors by name',
+        '- NON-NEGOTIABLE: Always use British spelling',
+        '- KNOWLEDGE BASE (TEXT): Consider the following brand stories and context: "we roast in Peckham"',
+        '- KNOWLEDGE BASE (LINKS): MUST DO: Always cross-reference facts at: https://example.com',
+    ];
+    assert.deepStrictEqual(extractOnboardingGuardrails(strictRules), [
+        'Never mention competitors by name',
+        'Always use British spelling',
+    ], 'the NON-NEGOTIABLE prefix is stripped; KB entries are not rules');
+});
+
+check('blank, whitespace and non-string entries are dropped, non-arrays yield []', () => {
+    assert.deepStrictEqual(extractOnboardingGuardrails(['- NON-NEGOTIABLE:   ', '- NON-NEGOTIABLE: real']), ['real']);
+    assert.deepStrictEqual(extractOnboardingGuardrails([42, null, '- NON-NEGOTIABLE: keep']), ['keep']);
+    for (const notArray of [undefined, null, 'a string', {}, 7]) {
+        assert.deepStrictEqual(extractOnboardingGuardrails(notArray), [], `${JSON.stringify(notArray)} → []`);
+    }
+});
+
+check('onboarding.ts persists the extracted rules into content_rules for the new assistant', () => {
+    const src = read('netlify/functions/onboarding.ts');
+    // Sourced from the guardrail extractor, then written as content_rules rows against the new
+    // assistant. This is the exact join the wizard's hasRule check reads back.
+    assert.match(src, /extractOnboardingGuardrails\(rawInputs\?\.strictRules\)/,
+        'rules must come from the shared extractor, not an inline re-parse');
+    assert.match(src, /db\.insert\(contentRules\)\.values\(/,
+        'the rules must land in content_rules — the table get-assistant-readiness reads');
+    const block = src.slice(src.indexOf('extractOnboardingGuardrails'), src.indexOf('// 7. CLEAR DRAFT'));
+    assert.match(block, /assistantId:\s*newAssistant\.id/, 'rows must be keyed to the assistant just created');
+    assert.match(block, /\.slice\(0, 300\)/, 'rule_text is capped at 300, as content-rules.ts enforces');
+    // Best-effort: a guardrail write must never fail an otherwise-successful onboarding.
+    assert.match(block, /catch \(rulesErr\)/, 'the materialisation must be wrapped so it cannot break onboarding');
+});
+
+check('the wizard reads content_rules for the guardrails item — the store onboarding now fills', () => {
+    // The two ends of the bug: readiness computes hasRule from content_rules; onboarding writes there.
+    const readiness = read('netlify/functions/get-assistant-readiness.ts');
+    assert.match(readiness, /from\(contentRules\)/, 'hasRule is a content_rules existence check');
+    assert.match(readiness, /key: 'guardrails'.*done: hasRule/s, 'the guardrails item is driven by hasRule');
 });
 
 (async () => {

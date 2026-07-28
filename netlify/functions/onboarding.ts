@@ -15,6 +15,7 @@ import {
   masterAssistants,
   onboardingDrafts,
   dpaAcceptances,
+  contentRules,
 } from '../../db/schema';
 import { CURRENT_DPA_VERSION } from './accept-dpa';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmark';
@@ -22,6 +23,7 @@ import { checkRateLimit } from '../../src/utils/rate-limit';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
 import { checkAssistantCapacity } from '../../src/utils/assistant-capacity';
+import { extractOnboardingGuardrails } from '../../src/utils/onboarding-guardrails';
 import { createNotification } from '../../src/utils/notify';
 import { isEuCountry } from '../../src/config/compliance';
 import { normalizeMediaSources, type MediaSource } from '../../src/utils/media-sources';
@@ -328,6 +330,41 @@ export default withLambda(async (event): Promise<HandlerResponse> => {
         };
       }
       throw insertErr; // Re-throw unexpected errors
+    }
+
+    // 6b. MATERIALISE ONBOARDING GUARDRAILS AS CONTENT RULES
+    // The "Guardrails & Rules" step collects strict rules, but until now they only ever went into
+    // the compiled system prompt — which post generation does NOT read: generate-post.ts drives the
+    // model from the assembled blueprint (src/utils/blueprint.ts), not systemPrompt. Blueprint
+    // section 3 ("strict rules") sources from onboardingContext.constraints/strict_rules, which this
+    // wizard never populates, and section 4 ("content rules") sources from content_rules, which
+    // onboarding never wrote. So the rules the user typed steered nothing, AND the setup wizard's
+    // "Guardrails & rules set" check (get-assistant-readiness.ts → hasRule) stayed red because it
+    // looks for a content_rules row. Persisting each rule here fixes both at once: the rules reach
+    // blueprint section 4 (enforced at generation + quality review) and the wizard reads green.
+    // No double-application: section 3 stays empty (onboardingContext carries no rules), and
+    // systemPrompt is not in the generation path.
+    //
+    // Source is rawInputs.strictRules, where the client tags the user's own guardrails with a
+    // '- NON-NEGOTIABLE: ' prefix (onboarding-social-media.html) — distinct from the KNOWLEDGE BASE
+    // entries in the same array, which are context, not rules, and are deliberately excluded.
+    // Best-effort: a failure here must not fail an otherwise-successful onboarding.
+    try {
+      const ruleTexts = extractOnboardingGuardrails(rawInputs?.strictRules)
+        .map((r) => sanitizeUserInput(r).slice(0, 300)) // injection defence, then content-rules.ts's 300-char cap
+        .filter((r) => r.length > 0);
+      if (ruleTexts.length > 0) {
+        await db.insert(contentRules).values(ruleTexts.map((ruleText) => ({
+          assistantId: newAssistant.id,
+          workspaceId: orgId,
+          ruleText,
+          origin: 'manual' as const,
+          createdByUserId: existingUser.id,
+          isActive: true,
+        })));
+      }
+    } catch (rulesErr) {
+      console.warn('[onboarding] Failed to materialise onboarding guardrails as content rules:', rulesErr);
     }
 
     // 7. CLEAR DRAFT & NOTIFY
