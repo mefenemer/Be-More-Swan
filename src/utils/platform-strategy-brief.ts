@@ -12,7 +12,29 @@ export interface PlatformStrategy {
   x?: { tags?: string; length?: string; media?: boolean };
   threads?: { conversational?: boolean };
   tiktok?: { tags?: string; hooks?: boolean };
-  youtube?: { format?: string; seo?: boolean };
+  youtube?: { format?: string; seo?: boolean; repurpose?: boolean; hooks?: boolean; contentType?: string; cadence?: string };
+}
+
+// Map the platform names used on jobs/connections (full names) to the strategy object's keys, so a
+// per-platform generation job can inject just the relevant directives.
+export const PLATFORM_NAME_TO_STRATEGY_KEY: Record<string, keyof PlatformStrategy> = {
+  facebook: 'fb', instagram: 'ig', linkedin: 'li', x: 'x', twitter: 'x',
+  threads: 'threads', tiktok: 'tiktok', youtube: 'youtube',
+};
+
+// Narrow a platform strategy to only the given platforms (by full name, e.g. 'youtube'). Returns
+// null when none apply, so a caller can skip the directive entirely.
+export function platformStrategyFor(
+  ps: PlatformStrategy | null | undefined,
+  platforms: string[],
+): PlatformStrategy | null {
+  if (!ps || typeof ps !== 'object') return null;
+  const out: PlatformStrategy = {};
+  for (const p of platforms) {
+    const key = PLATFORM_NAME_TO_STRATEGY_KEY[(p || '').toLowerCase()];
+    if (key && ps[key]) (out as Record<string, unknown>)[key] = ps[key];
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 // Only Facebook exposes a hashtag "strategy" selector; for the other platforms a provided tag
@@ -105,6 +127,15 @@ export function formatPlatformStrategyBrief(
     ]);
   }
   if (ps.youtube) {
+    const ytContentLabels: Record<string, string> = {
+      tutorial: 'tutorial / how-to',
+      demo: 'product demo',
+      talking_head: 'talking-head / thought-leadership',
+      vlog: 'vlog / behind-the-scenes',
+      listicle: 'listicle / tips',
+    };
+    const contentType = (ps.youtube.contentType || '').trim();
+    const cadence = (ps.youtube.cadence || '').trim();
     block('YouTube', [
       ps.youtube.format === 'shorts'
         ? 'Prioritise Shorts over long-form videos.'
@@ -113,6 +144,10 @@ export function formatPlatformStrategyBrief(
           : ps.youtube.format === 'mix'
             ? 'Mix Shorts and long-form videos.'
             : null,
+      ps.youtube.repurpose ? 'Cut short-form clips (Shorts) from every long-form video to maximise reach.' : null,
+      ps.youtube.hooks ? 'Open every Short with a scroll-stopping hook in the first 1–2 seconds.' : null,
+      contentType && ytContentLabels[contentType] ? `Focus on ${ytContentLabels[contentType]} style videos.` : null,
+      cadence ? `Target this publishing cadence: ${sanitize(cadence)}.` : null,
       ps.youtube.seo ? 'Optimise every video description for YouTube SEO (keywords, chapters, links).' : null,
     ]);
   }

@@ -671,6 +671,17 @@
                 <option value="shorts">Prioritize Shorts</option>
                 <option value="longform">Prioritize Long-form</option>
               </select>
+              <select id="youtube_opt_content_type" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 transition">
+                <option value="">Video style: no preference</option>
+                <option value="tutorial">Tutorials / how-to</option>
+                <option value="demo">Product demos</option>
+                <option value="talking_head">Talking-head / thought leadership</option>
+                <option value="vlog">Vlog / behind-the-scenes</option>
+                <option value="listicle">Listicles / tips</option>
+              </select>
+              <label class="flex items-center cursor-pointer hover:text-emerald-800 transition"><input type="checkbox" id="youtube_opt_repurpose" class="h-4 w-4 text-emerald-700 rounded border-gray-300"><span class="ml-2 text-sm text-gray-700">Cut Shorts from every long-form video</span></label>
+              <label class="flex items-center cursor-pointer hover:text-emerald-800 transition gated-feature" data-feature="youtube_opt_hooks"><input type="checkbox" id="youtube_opt_hooks" class="h-4 w-4 text-emerald-700 rounded border-gray-300"><span class="ml-2 text-sm text-gray-700">Open every Short with a scroll-stopping hook</span></label>
+              <input type="text" id="youtube_opt_cadence" class="w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-2 focus:ring-emerald-700 transition" placeholder="Publishing cadence, e.g. 3 Shorts + 1 long-form per week">
               <label class="flex items-center cursor-pointer hover:text-emerald-800 transition gated-feature" data-feature="youtube_opt_seo"><input type="checkbox" id="youtube_opt_seo" class="h-4 w-4 text-emerald-700 rounded border-gray-300"><span class="ml-2 text-sm text-gray-700">Optimize description for YouTube SEO</span></label>
             </div>
           </div>
@@ -1766,7 +1777,14 @@
       if (p === 'x')  ps.x  = { tags: '', length: val('x_opt_length') || 'mix', media: on('x_opt_media') };
       if (p === 'threads') ps.threads = { conversational: on('threads_opt_conversational') };
       if (p === 'tiktok')  ps.tiktok  = { tags: val('algo_custom_tags_tiktok'), hooks: on('tiktok_opt_hooks') };
-      if (p === 'youtube') ps.youtube = { format: val('youtube_opt_format') || 'mix', seo: on('youtube_opt_seo') };
+      if (p === 'youtube') ps.youtube = {
+        format: val('youtube_opt_format') || 'mix',
+        contentType: val('youtube_opt_content_type') || '',
+        repurpose: on('youtube_opt_repurpose'),
+        hooks: on('youtube_opt_hooks'),
+        cadence: val('youtube_opt_cadence') || '',
+        seo: on('youtube_opt_seo'),
+      };
     });
     return ps;
   }
@@ -1800,6 +1818,7 @@
     li_opt_sliders: { tier: 'buster', name: 'PDF carousel outlines',      desc: 'Generates multi-slide PDF carousel outlines that boost LinkedIn dwell time and engagement.' },
     x_opt_media:    { tier: 'buster', name: 'Media placeholders',         desc: 'Inserts smart media placeholders so every post ships with eye-catching visuals.' },
     tiktok_opt_hooks: { tier: 'buster', name: 'Viral text hooks',         desc: 'Auto-generates scroll-stopping text hooks for the opening seconds of each TikTok video.' },
+    youtube_opt_hooks: { tier: 'buster', name: 'YouTube Shorts hooks',    desc: 'Opens every Short with a scroll-stopping hook in the first 1–2 seconds to maximise retention.' },
     youtube_opt_seo:  { tier: 'buster', name: 'YouTube SEO optimisation', desc: 'Optimises every video description for YouTube search — keywords, chapters and links.' },
   };
   let _gatingTier = currentTierKey;   // AC1.1 — refined from check-capacity on load

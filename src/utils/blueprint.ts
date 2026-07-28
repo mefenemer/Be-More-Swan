@@ -226,7 +226,7 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
         })),
     };
     // Platform/integration mismatch check
-    const platformKeyMap: Record<string, string> = { fb: 'Facebook', ig: 'Instagram', li: 'LinkedIn', x: 'X' };
+    const platformKeyMap: Record<string, string> = { fb: 'Facebook', ig: 'Instagram', li: 'LinkedIn', x: 'X', threads: 'Threads', tiktok: 'TikTok', youtube: 'YouTube' };
     const primaryPlatforms = ((onboardingCtx.primary_platforms as string[]) || []).map(k => platformKeyMap[k] ?? k);
     const connectedServices = conns.map(c => c.serviceName?.toLowerCase());
     for (const p of primaryPlatforms) {

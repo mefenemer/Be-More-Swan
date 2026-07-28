@@ -1290,6 +1290,23 @@
               <option value="longform">Prioritize Long-form</option>
             </select>
           </div>
+          <div>
+            <label for="edit_youtube_opt_content_type" class="block text-xs font-semibold text-gray-600 mb-1">Video Style</label>
+            <select id="edit_youtube_opt_content_type" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-700 transition">
+              <option value="">No preference</option>
+              <option value="tutorial">Tutorials / how-to</option>
+              <option value="demo">Product demos</option>
+              <option value="talking_head">Talking-head / thought leadership</option>
+              <option value="vlog">Vlog / behind-the-scenes</option>
+              <option value="listicle">Listicles / tips</option>
+            </select>
+          </div>
+          <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700"><input type="checkbox" id="edit_youtube_opt_repurpose" class="rounded text-emerald-700 focus:ring-emerald-700"> Cut Shorts from every long-form video</label>
+          <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700"><input type="checkbox" id="edit_youtube_opt_hooks" class="rounded text-emerald-700 focus:ring-emerald-700"> Open every Short with a scroll-stopping hook</label>
+          <div>
+            <label for="edit_youtube_opt_cadence" class="block text-xs font-semibold text-gray-600 mb-1">Publishing Cadence</label>
+            <input type="text" id="edit_youtube_opt_cadence" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-700 transition" placeholder="e.g. 3 Shorts + 1 long-form per week">
+          </div>
           <label class="flex items-center gap-2 cursor-pointer text-sm text-gray-700"><input type="checkbox" id="edit_youtube_opt_seo" class="rounded text-emerald-700 focus:ring-emerald-700"> Optimize description for YouTube SEO</label>
         </div>
       </div>

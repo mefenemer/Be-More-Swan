@@ -2999,7 +2999,14 @@ function _hydratePlatformStrategy(data) {
         if (p === 'x')  { set('edit_x_opt_length', s.length || 'mix'); check('edit_x_opt_media', s.media); }
         if (p === 'threads') { check('edit_threads_opt_conversational', s.conversational); }
         if (p === 'tiktok')  { check('edit_tiktok_opt_hooks', s.hooks); }
-        if (p === 'youtube') { set('edit_youtube_opt_format', s.format || 'mix'); check('edit_youtube_opt_seo', s.seo); }
+        if (p === 'youtube') {
+            set('edit_youtube_opt_format', s.format || 'mix');
+            set('edit_youtube_opt_content_type', s.contentType || '');
+            set('edit_youtube_opt_cadence', s.cadence || '');
+            check('edit_youtube_opt_repurpose', s.repurpose);
+            check('edit_youtube_opt_hooks', s.hooks);
+            check('edit_youtube_opt_seo', s.seo);
+        }
     });
 }
 
@@ -3017,7 +3024,14 @@ function _collectPlatformStrategy(prior) {
     if (visible('x'))  out.x  = { tags: val('edit_algo_tags_x'), length: val('edit_x_opt_length'), media: on('edit_x_opt_media') };
     if (visible('threads')) out.threads = { conversational: on('edit_threads_opt_conversational') };
     if (visible('tiktok'))  out.tiktok  = { tags: val('edit_algo_tags_tiktok'), hooks: on('edit_tiktok_opt_hooks') };
-    if (visible('youtube')) out.youtube = { format: val('edit_youtube_opt_format'), seo: on('edit_youtube_opt_seo') };
+    if (visible('youtube')) out.youtube = {
+        format: val('edit_youtube_opt_format'),
+        contentType: val('edit_youtube_opt_content_type'),
+        cadence: val('edit_youtube_opt_cadence'),
+        repurpose: on('edit_youtube_opt_repurpose'),
+        hooks: on('edit_youtube_opt_hooks'),
+        seo: on('edit_youtube_opt_seo'),
+    };
     return out;
 }
 

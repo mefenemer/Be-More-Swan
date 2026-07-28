@@ -28,6 +28,7 @@ import { fitForPlatform, isShortForm, type BrandHashtags } from '../../src/utils
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { decideAutoPublish, describeDecision } from '../../src/utils/auto-publish-runtime';
 import { platformFormat } from '../../src/config/platform-formats';
+import { formatPlatformStrategyBrief, platformStrategyFor, type PlatformStrategy } from '../../src/utils/platform-strategy-brief';
 import { parseModelJson } from '../../src/utils/model-json';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import { reviewDraftGroup } from '../../src/utils/post-quality-review';
@@ -353,12 +354,27 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             ? `This is a ${format.toUpperCase()}. In addition to the caption, return a "reelScript" (concise shot-by-shot or beat-by-beat script the user can film with their available assets and comfort on camera) and "textOverlays" (an array of short on-screen text lines). Keep it simple and authentic — talking-to-camera or b-roll, not choreography.`
             : `This is a ${format.toUpperCase()} post.`;
 
+        // Per-platform algorithm/format strategy (context.platform_strategy — captured at onboarding,
+        // editable in the profile). Read LIVE from onboardingContext (like brand hashtags above) so an
+        // edit applies without a blueprint recompile, and SCOPED to this job's platform(s) so a YouTube
+        // "prioritise Shorts" rule never bleeds into a LinkedIn post. Without this the strategy only
+        // reached the model as a raw JSON blob in the blueprint dump, not as an explicit directive.
+        const scopedStrategy = platformStrategyFor(
+            brandCtx.platform_strategy as PlatformStrategy | undefined,
+            targetPlatforms,
+        );
+        const strategyBrief = scopedStrategy ? formatPlatformStrategyBrief(scopedStrategy) : null;
+        const platformStrategyLine = strategyBrief
+            ? `PLATFORM STRATEGY — follow these platform-specific directions:\n${strategyBrief}`
+            : '';
+
         const baseInstruction = [
             `You are ${assistantName}, a social media assistant for ${businessName}.`,
             `Generate a ${promptPlatform} post targeting ${audience} in a ${tone} voice.`,
             `Follow all strict and content rules in the system prompt.`,
             formatBlock,
             strategyBlock,
+            platformStrategyLine,
             hookLine,
             recentBlock,
             conversionBlock,
