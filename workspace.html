@@ -6238,7 +6238,14 @@ async function openPostReview(postId, opts = {}) {
         // 'draft' first: a post just created by "Create Post" is in that status and nothing else
         // fetches it, so without this the editor would open on nothing the moment it was created.
         const known = refresh ? _rqPostCache[postId]?.status : null;
-        for (const status of (known ? [known] : ['draft', 'pending_approval', 'scheduled', 'approved'])) {
+        // 'published'/'posted' belong here too. The editor OPENS a post that has already gone out —
+        // read-only, but it opens — and the Calendar is full of them, yet neither status was ever
+        // asked for. That worked only for as long as something else happened to have cached the row
+        // first; from a genuinely cold cache the click produced "That post couldn't be opened".
+        // Same class of bug as the comment above describes for approved/scheduled, and the same fix:
+        // ask for the statuses the editor actually accepts. Ordered cheapest-first — the loop stops
+        // at the first status that yields the post, so the common cases still cost one request.
+        for (const status of (known ? [known] : ['draft', 'pending_approval', 'scheduled', 'approved', 'published', 'posted'])) {
             try {
                 const res = await fetch(`/.netlify/functions/get-social-drafts?status=${status}`);
                 if (res.ok) rqGroupSocialDrafts((await res.json()).drafts || []);

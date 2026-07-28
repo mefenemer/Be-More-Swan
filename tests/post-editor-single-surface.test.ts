@@ -769,4 +769,20 @@ check('the client normalises x exactly as the renderer does', () => {
         'the client default layout must carry x, or a fresh card sends a layout the server cannot match');
 });
 
+// ── 36. A published post opens from a cold cache ────────────────────────────────────────────────
+check('openPostReview warms the cache for every status the editor accepts', () => {
+    const fn = workspace.slice(workspace.indexOf('async function openPostReview(postId, opts = {})'));
+    const warm = fn.slice(0, fn.indexOf('const post = _rqPostCache[postId];'));
+    // The Calendar reads from scheduled-posts, a different endpoint that does NOT populate
+    // _rqPostCache — so clicking a post there depends entirely on this loop. 'published' was
+    // missing, and the Posted column uses exactly that status (RQ_COLUMNS.posted), so opening an
+    // already-published post from the Calendar produced "That post couldn't be opened".
+    for (const status of ['draft', 'pending_approval', 'scheduled', 'approved', 'published', 'posted']) {
+        assert.ok(warm.includes(`'${status}'`), `the warming loop must ask for '${status}'`);
+    }
+    // The editor genuinely opens these read-only, so they are not decoration.
+    assert.match(workspace, /RQ_COLUMNS = \{[\s\S]*?posted:\s*\{ label: 'Posted',\s*postStatus: 'published' \}/,
+        'the Posted column is what makes published a status the editor must be able to fetch');
+});
+
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);
