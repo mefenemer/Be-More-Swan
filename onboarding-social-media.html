@@ -926,9 +926,20 @@
         const errorMsg = this.parentNode.querySelector('.error-msg');
         if(errorMsg) errorMsg.classList.add('hidden');
       });
-      // Trigger background sync on any change
-      el.addEventListener('input', triggerAutoSave);
-      el.addEventListener('change', triggerAutoSave);
+    });
+
+    // ── Autosave, by DELEGATION rather than per-element ───────────────────────────────────────
+    // These listeners used to be attached to each input found at load. Every field added AFTER
+    // that — each workflow step, each brain-trust link — therefore had none, so typing a whole
+    // workflow triggered no save at all: the answers only survived if the user happened to touch
+    // an older field afterwards, or pressed Next / Save & Continue Later. That is precisely the
+    // "I thought it was saving" report. One listener on the document covers what exists now and
+    // whatever gets built later.
+    document.addEventListener('input', (ev) => {
+      if (ev.target.closest('#intake-form input, #intake-form textarea, #intake-form select')) triggerAutoSave();
+    });
+    document.addEventListener('change', (ev) => {
+      if (ev.target.closest('#intake-form input, #intake-form textarea, #intake-form select')) triggerAutoSave();
     });
 
     document.querySelectorAll('input[id$="_handle"]').forEach(input => {
@@ -965,6 +976,15 @@
       textEl.textContent = 'Saved';
       statusEl.className = 'flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-700 shadow-sm transition-all duration-300';
       setTimeout(() => statusEl.classList.add('opacity-0'), 3000);
+    } else if (state === 'error') {
+      // A failed save used to leave the pill spinning on "Saving..." for ever — indistinguishable
+      // from a slow one, and the single most misleading thing this screen could do: the user reads
+      // it as "my work is safe" and closes the tab. It stays on screen (no fade) because it is the
+      // one state that needs acting on.
+      iconEl.innerHTML = `<svg class="w-3 h-3 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path></svg>`;
+      textEl.textContent = 'Not saved — use Save & Continue Later';
+      statusEl.classList.remove('opacity-0');
+      statusEl.className = 'flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-50 border border-red-200 text-xs font-bold text-red-700 shadow-sm transition-all duration-300';
     }
   }
 
@@ -993,7 +1013,12 @@
     return data;
   }
 
-  async function saveDraftToBackend() {
+  // Is there an edit that has not reached the server yet? Set the moment anything is typed, cleared
+  // only by a save the server actually acknowledged — so the leave-the-page flush below knows
+  // whether there is anything to rescue, and does not fire a request on every tab switch.
+  let draftDirty = false;
+
+  async function saveDraftToBackend(opts = {}) {
     updateDraftStatus('saving');
     try {
       const payload = {
@@ -1005,20 +1030,15 @@
       };
 
       let res;
+      // keepalive lets a request outlive the page, which is the whole point of the flush below —
+      // without it, closing the tab cancels the save that was rescuing the last thing typed.
+      const init = { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), keepalive: !!opts.keepalive };
       if (draftId) {
         // Resume / continue: patch the existing draft.
-        res = await fetch(`/.netlify/functions/onboarding-draft?id=${draftId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
+        res = await fetch(`/.netlify/functions/onboarding-draft?id=${draftId}`, { ...init, method: 'PATCH' });
       } else {
         // First save of a fresh hire: create the draft and remember its id.
-        res = await fetch('/.netlify/functions/onboarding-draft', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
+        res = await fetch('/.netlify/functions/onboarding-draft', { ...init, method: 'POST' });
         if (res.ok) {
           const created = await res.json();
           draftId = created.id;
@@ -1029,11 +1049,20 @@
         }
       }
 
-      if (res.ok) updateDraftStatus('saved');
-    } catch (e) { console.error("Draft save failed", e); }
+      // A non-2xx is a FAILED save — an expired session is the common one — and used to be
+      // swallowed, leaving the pill saying "Saving..." for ever. Say so instead.
+      if (res.ok) { draftDirty = false; updateDraftStatus('saved'); }
+      else updateDraftStatus('error');
+      return !!res.ok;
+    } catch (e) {
+      console.error("Draft save failed", e);
+      updateDraftStatus('error');
+      return false;
+    }
   }
 
   function triggerAutoSave() {
+    draftDirty = true;
     const statusEl = document.getElementById('draft-save-status');
     if(statusEl) statusEl.classList.remove('opacity-0');
     updateDraftStatus('saving');
@@ -1041,6 +1070,22 @@
     clearTimeout(saveDraftTimeout);
     saveDraftTimeout = setTimeout(saveDraftToBackend, 1500); // Wait 1.5s after user stops typing
   }
+
+  // ── Don't lose the last 1.5 seconds ──────────────────────────────────────────────────────────
+  // Autosave is debounced, so anything typed just before the tab is closed, reloaded or switched
+  // away from was still sitting in a pending timer — and went with the page. That is the gap
+  // between "it autosaves" and what someone who never pressed Save & Continue Later actually got.
+  //
+  // visibilitychange→hidden is the reliable signal (mobile Safari and background-tab discards do
+  // not fire beforeunload at all); pagehide covers the desktop close/navigate. Both can fire for
+  // one departure, which is harmless — the dirty flag makes the second a no-op.
+  function flushDraftNow() {
+    if (!draftDirty) return;
+    clearTimeout(saveDraftTimeout);
+    saveDraftToBackend({ keepalive: true });
+  }
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushDraftNow(); });
+  window.addEventListener('pagehide', flushDraftNow);
 
   async function hydrateDraft() {
     if (!draftId) return; // Fresh hire — nothing to resume.
