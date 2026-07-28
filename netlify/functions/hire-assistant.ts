@@ -19,20 +19,17 @@
 // erroring — re-saving onboardingContext is idempotent and audit-logged server-side.
 
 import { Handler } from '@netlify/functions';
-import { and, asc, count, eq, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, count, eq, isNull, or, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
+import { checkAssistantCapacity } from '../../src/utils/assistant-capacity';
 import {
     aiAssistants,
     dpaAcceptances,
     masterAssistants,
-    masterPlans,
-    organisations,
-    plans,
     taskRuns,
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { createNotification } from '../../src/utils/notify';
-import { effectiveLimit, type FeatureOverrides } from '../../src/utils/plan-features';
 import { checkRateLimit } from '../../src/utils/rate-limit';
 import { CURRENT_DPA_VERSION } from './accept-dpa';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -102,48 +99,10 @@ export default withLambda(async (event) => {
         }
 
         // ── 3. Capacity gate (server-side twin of check-capacity's client gate) ───
-        // Assistants in provisioning/ready_for_work/working occupy a plan seat.
-        // Scope by org OR user: an org member shares the owner's plan (which is keyed to
-        // the owner's userId + the org id), so a userId-only lookup would wrongly find no
-        // plan for members of a paid workspace.
-        const [planRow] = await db
-            .select({ assistantLimit: masterPlans.assistantLimit, featureOverrides: plans.featureOverrides })
-            .from(plans)
-            .leftJoin(masterPlans, eq(plans.masterPlanId, masterPlans.id))
-            .where(and(
-                or(eq(plans.userId, userId), eq(plans.organisationId, orgId)),
-                inArray(plans.status, ['active', 'past_due']),
-            ))
-            .orderBy(asc(plans.status), asc(plans.startedAt))
-            .limit(1);
-        // No active/past_due plan → HARD BLOCK. The free trial was removed (product decision):
-        // a user with no paid plan can hire no assistants. Previously a missing plan resolved
-        // to assistantLimit=null and skipped the gate entirely, granting unlimited free hires.
-        if (!planRow) {
-            return json(402, { error: 'Choose a plan to hire your first assistant.', code: 'NO_PLAN' });
-        }
-        // Plan Features: prefer a "new subscribers only" frozen snapshot over the live master limit.
-        let assistantLimit: number | null = effectiveLimit(
-            planRow.featureOverrides as FeatureOverrides | null, 'assistantLimit', planRow.assistantLimit ?? null);
-        if (assistantLimit !== null) {
-            const [org] = await db
-                .select({ bonusAssistants: organisations.bonusAssistants })
-                .from(organisations)
-                .where(eq(organisations.id, orgId))
-                .limit(1);
-            assistantLimit += org?.bonusAssistants ?? 0;
-
-            const [{ value: occupied }] = await db
-                .select({ value: count() })
-                .from(aiAssistants)
-                .where(and(
-                    eq(aiAssistants.organisationId, orgId),
-                    inArray(aiAssistants.lifecycleStatus, ['provisioning', 'ready_for_work', 'working']),
-                ));
-            if (occupied >= assistantLimit) {
-                return json(409, { error: "You've used all your assistant slots. Upgrade your plan to add more.", code: 'CAPACITY' });
-            }
-        }
+        // Shared with onboarding.ts, which creates assistants too and had NO check at all — see
+        // src/utils/assistant-capacity.ts for why a second copy was the wrong answer.
+        const refusal = await checkAssistantCapacity(db, userId, orgId);
+        if (refusal) return json(refusal.status, { error: refusal.error, code: refusal.code });
 
         // ── 4. One instance per role name per org ─────────────────────────────────
         // Names are unique per organisation; the instance takes the catalogue name.

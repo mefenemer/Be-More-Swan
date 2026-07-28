@@ -21,6 +21,7 @@ import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmar
 import { checkRateLimit } from '../../src/utils/rate-limit';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
+import { checkAssistantCapacity } from '../../src/utils/assistant-capacity';
 import { createNotification } from '../../src/utils/notify';
 import { isEuCountry } from '../../src/config/compliance';
 import { normalizeMediaSources, type MediaSource } from '../../src/utils/media-sources';
@@ -211,6 +212,23 @@ export default withLambda(async (event): Promise<HandlerResponse> => {
       }
     }
 
+    // 2b. CAPACITY GATE
+    // This endpoint creates an assistant and had no plan check of any kind. The only gate was in
+    // the browser (assistant-catalogue.html's _catHire) — which the setup wizard's "Resume setup"
+    // link never goes through, and which fails OPEN when check-capacity errors. So an org on a
+    // one-assistant plan could be given a second simply by completing this form twice, and only
+    // found out afterwards. Shared with hire-assistant.ts rather than copied; the dedup above runs
+    // first so that re-submitting the SAME assistant still repairs an abandoned row rather than
+    // being refused for a seat it already occupies.
+    const capacityRefusal = await checkAssistantCapacity(db, existingUser.id, orgId);
+    if (capacityRefusal) {
+      return {
+        statusCode: capacityRefusal.status,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ error: capacityRefusal.error, code: capacityRefusal.code }),
+      };
+    }
+
     // 3. UPDATE PROFILE CONSENTS & ORG NAME
     const profileUpdate: Record<string, unknown> = { legalConsents: consents || {} };
     if (typeof hourlyRateGbp === 'number' && hourlyRateGbp > 0) {
@@ -313,10 +331,33 @@ export default withLambda(async (event): Promise<HandlerResponse> => {
     }
 
     // 7. CLEAR DRAFT & NOTIFY
-    // Drafts are now multi-row — clear the specific draft this submission came from.
-    // Fall back to clearing all of the user's drafts only when no id was supplied (legacy clients).
+    // Every draft for THIS onboarding path, not just the submitted id.
+    //
+    // Drafts are multi-row on purpose (you may be setting up two different roles at once), and this
+    // used to delete only the row whose id was posted. But get-onboarding-progress asks "does ANY
+    // draft exist for this org?" to decide whether onboarding is finished — so a single leftover
+    // row left the setup wizard reporting "not complete" for ever, and offering a "Resume setup"
+    // link straight back into the form. Following it created a SECOND assistant.
+    //
+    // Leftovers are easy to make: the form POSTs a NEW draft whenever it autosaves without a
+    // draftId in the URL, so every fresh load of the page starts another row for the same setup.
+    // Scoped to the submitted draft's own path so a genuinely different role's setup, which is what
+    // multi-row exists for, is untouched.
     if (typeof draftId === 'number') {
-      await db.delete(onboardingDrafts).where(and(eq(onboardingDrafts.id, draftId), eq(onboardingDrafts.userId, existingUser.id)));
+      const [submitted] = await db
+        .select({ onboardingPath: onboardingDrafts.onboardingPath })
+        .from(onboardingDrafts)
+        .where(and(eq(onboardingDrafts.id, draftId), eq(onboardingDrafts.userId, existingUser.id)))
+        .limit(1);
+      if (submitted?.onboardingPath) {
+        await db.delete(onboardingDrafts).where(and(
+          eq(onboardingDrafts.userId, existingUser.id),
+          eq(onboardingDrafts.onboardingPath, submitted.onboardingPath),
+        ));
+      } else {
+        // The id did not resolve (already gone, or another user's) — fall back to the old behaviour.
+        await db.delete(onboardingDrafts).where(and(eq(onboardingDrafts.id, draftId), eq(onboardingDrafts.userId, existingUser.id)));
+      }
     } else {
       await db.delete(onboardingDrafts).where(eq(onboardingDrafts.userId, existingUser.id));
     }
