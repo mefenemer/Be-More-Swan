@@ -5155,28 +5155,41 @@ document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') refreshPendingBadge();
 });
 
+/**
+ * The sidebar "Review" pill.
+ *
+ * ── It must count exactly what the Review Queue renders ─────────────────────────────────────────
+ * Two different functions write .pending-badge: this poll, and rqRenderGroups when the queue is
+ * opened. They used to disagree on both terms of the sum, so the pill was wrong on load and
+ * "corrected itself" the moment you clicked Review:
+ *
+ *   • ROWS vs CARDS. This counted drafts.length — one row PER PLATFORM. A single post going to four
+ *     platforms read as 4 here and as 1 in the queue. Paging with limit=1 returns the server's
+ *     `total`, which is counted in crosspost GROUPS (see get-social-drafts.ts) — the same unit the
+ *     queue renders, and the same trick _detailRqColumnCount uses.
+ *   • A 50-ROW CEILING. The unpaged read is capped at 50 rows server-side, so a busy queue silently
+ *     under-reported. `total` counts everything.
+ *
+ * It also added get-pending-actions.totalPending, which rqRenderGroups does not — and nothing in the
+ * app renders those HITL rows any more (rqLoadItems only draws posts; rqApprove/rqReject are
+ * orphaned). A pill that counts work with no surface to action it can never be cleared, so the
+ * badge now means what its destination shows: posts awaiting review.
+ *
+ * limit=1 also makes the 60s poll far cheaper — it presigns media for one group instead of fifty.
+ */
 async function refreshPendingBadge() {
     try {
-        const [hitlRes, socialRes] = await Promise.all([
-            fetch('/.netlify/functions/get-pending-actions?status=pending&limit=1'),
-            fetch('/.netlify/functions/get-social-drafts?status=pending_approval'),
-        ]);
-        const { totalPending } = hitlRes.ok ? await hitlRes.json() : { totalPending: 0 };
-        const { drafts: socialDrafts } = socialRes.ok ? await socialRes.json() : { drafts: [] };
-        const socialCount = (socialDrafts || []).length;
-        const totalBadge = (totalPending || 0) + socialCount;
+        const socialRes = await fetch('/.netlify/functions/get-social-drafts?status=pending_approval&limit=1&offset=0');
+        const body = socialRes.ok ? await socialRes.json() : {};
+        // `total` is the grouped count. Fall back to grouping the page only if it is missing.
+        const socialCount = typeof body.total === 'number'
+            ? body.total
+            : rqGroupSocialDrafts(body.drafts || []).length;
 
         document.querySelectorAll('.pending-badge').forEach(el => {
-            el.textContent = totalBadge || '';
-            el.classList.toggle('hidden', !totalBadge);
+            el.textContent = socialCount || '';
+            el.classList.toggle('hidden', !socialCount);
         });
-        const tabCount = document.getElementById('rq-pending-tab-count');
-        if (tabCount) tabCount.textContent = totalPending ? `(${totalPending})` : '';
-        const socialTabCount = document.getElementById('rq-social-tab-count');
-        if (socialTabCount) {
-            socialTabCount.textContent = socialCount || '';
-            socialTabCount.classList.toggle('hidden', !socialCount);
-        }
 
         // A newly-drafted post landing while the user is ALREADY looking at the review list used to
         // update only the badge — the list itself sat stale until a manual reload, so the

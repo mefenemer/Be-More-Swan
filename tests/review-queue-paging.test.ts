@@ -143,6 +143,32 @@ check('the pending badge reports the total, not the page', () => {
         '"10 awaiting review" on a queue of 24 is worse than no badge');
 });
 
+// ── The sidebar pill and the queue must count the same thing ────────────────────────────────────
+// Two functions write .pending-badge: the 60s poll (refreshPendingBadge) and rqRenderGroups when
+// the queue is opened. They disagreed, so the pill was wrong on load and silently "corrected itself"
+// the moment you clicked Review — which is exactly how the bug was reported.
+check('the sidebar pill counts CARDS, not per-platform rows', () => {
+    const ws = readFileSync(path.join(ROOT, 'workspace.html'), 'utf8');
+    const poll = ws.slice(ws.indexOf('async function refreshPendingBadge('));
+    const head = poll.slice(0, 1400);
+    // The bug: drafts.length is one row PER PLATFORM, so a 4-platform post read as 4 in the sidebar
+    // and 1 in the queue.
+    assert.ok(!/const socialCount = \(socialDrafts \|\| \[\]\)\.length/.test(head),
+        'counting raw rows is the bug');
+    assert.match(head, /limit=1&offset=0/, 'page it, so the server returns a grouped total');
+    assert.match(head, /typeof body\.total === 'number'/, 'the grouped total is the count');
+});
+
+check('the sidebar pill is not inflated by rows nothing renders', () => {
+    const ws = readFileSync(path.join(ROOT, 'workspace.html'), 'utf8');
+    const poll = ws.slice(ws.indexOf('async function refreshPendingBadge('), ws.indexOf('// ── Review Queue ──'));
+    // get-pending-actions has no renderer left (rqLoadItems draws posts only), so counting it gave a
+    // pill that could never be cleared — and that rqRenderGroups dropped on the first click anyway.
+    assert.ok(!/get-pending-actions/.test(poll), 'the pill must count what its destination shows');
+    // Both writers must therefore land on the same unit.
+    assert.match(poll, /\.pending-badge/, 'the poll still owns the pill');
+});
+
 // ── The assistant-detail Review tab pages too ────────────────────────────────────────────────────
 // It is a fragment loaded INTO workspace.html, so it reuses rqGroupSocialDrafts / rqRenderSocialCard
 // but has its own fetch + "Show more" loop in assistants.js. Its regression was the mirror image of
