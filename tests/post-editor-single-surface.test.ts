@@ -785,4 +785,29 @@ check('openPostReview warms the cache for every status the editor accepts', () =
         'the Posted column is what makes published a status the editor must be able to fetch');
 });
 
+// ── 37. A post that has gone out offers no editing ──────────────────────────────────────────────
+check('a published post gets no rail steps, and no repaint hands them back', () => {
+    // The rule lives in ONE function now. It used to be inline in _pceSyncForPost, which hid the
+    // rail — and then _railRender un-hid it on the next repaint, because that only asked whether a
+    // post EXISTED. Several things repaint the rail (the quality panel, a platform switch, a step
+    // toggle), so a published post reliably got its editing steps back a moment after opening.
+    assert.match(workspace, /function _pceIsEditablePost\(post\) \{/, 'one rule, one place');
+    assert.match(workspace, /\['pending_approval', 'draft', 'in_review', 'approved', 'scheduled'\]\.includes\(post\.status\)/,
+        'only work that has not published yet has anything left to decide');
+    const render = workspace.slice(workspace.indexOf('function _railRender() {'));
+    assert.match(render.slice(0, 1400), /if \(!post \|\| !_pceIsEditablePost\(post\)\)/,
+        'the test must be in _railRender, or every repaint is a way back in');
+    // Borrowed blocks must go home before the wrapper is hidden, or the next innerHTML write
+    // destroys them — #post-review-caption among them, which is what the save reads from.
+    assert.match(render.slice(0, 1400), /_railRestoreAll\(\)/, 'a borrowed block with no home is destroyed');
+    // Showing it again must clear the inline display, not just the class.
+    assert.match(render.slice(0, 1800), /wrap\.style\.display = ''/, 'the rail must come back for the next editable post');
+});
+
+check('the footer stops inviting a published post to schedule itself', () => {
+    const sync = workspace.slice(workspace.indexOf('function _pceSyncForPost(post) {'));
+    assert.match(sync.slice(0, 1200), /post-review-draft-hint'\)\?\.classList\.toggle\('hidden', !editable\)/,
+        'its button targets a rail step that is hidden for these posts, so it could only do nothing');
+});
+
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);

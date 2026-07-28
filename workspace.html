@@ -7872,8 +7872,23 @@ function _railRender() {
     const host = document.getElementById('pce-rail-steps');
     if (!wrap || !host) return;
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
-    if (!post) { wrap.classList.add('hidden'); wrap.style.display = 'none'; return; }
+    // A post that has already gone out has nothing left to decide, so it gets no steps. This test
+    // belongs HERE and not only in _pceSyncForPost: several things repaint the rail (the quality
+    // panel, a platform switch, a step toggle), and each one used to hand the editing steps back to
+    // a published post a moment after _pceSyncForPost had hidden them.
+    if (!post || !_pceIsEditablePost(post)) {
+        wrap.classList.add('hidden');
+        wrap.style.display = 'none';
+        // Whatever the rail borrowed goes home first, or the next innerHTML write destroys it —
+        // #post-review-caption among them, which is the field the save reads from.
+        _railRestoreAll();
+        _railOpen = null;
+        return;
+    }
     wrap.classList.remove('hidden');
+    // Cleared explicitly: the branch above sets an inline display:none, and removing the class alone
+    // would leave a rail that never comes back for the next, editable post.
+    wrap.style.display = '';
     wrap.style.display = '';
 
     // Anything currently borrowed goes home before the panels are rebuilt — innerHTML on the host
@@ -9843,8 +9858,29 @@ function _pceSchedulePreview() { clearTimeout(_pceDebounce); _pceDebounce = setT
 
 // Seed the editor from THIS card's stored render params, so reopening shows the user's own edits
 // rather than resetting to the org default.
+/**
+ * Can this post still be changed?
+ *
+ * The single rule. It used to live inline in _pceSyncForPost, which hid the rail for a read-only
+ * post — and then _railRender un-hid it again on the next repaint, because that function only asked
+ * whether a post EXISTED. Several things repaint the rail (the quality panel, a platform switch, a
+ * step toggle), so a published post reliably got its editing steps back a moment after opening.
+ *
+ * A post that has gone out cannot be edited: the words and picture are on someone else's timeline
+ * and nothing here re-uploads them. Only work that has not published yet — a draft, something
+ * awaiting review, or a FUTURE scheduled/approved post — has anything left to decide.
+ */
+function _pceIsEditablePost(post) {
+    return !!post && ['pending_approval', 'draft', 'in_review', 'approved', 'scheduled'].includes(post.status);
+}
+
 function _pceSyncForPost(post) {
-    const editable = !!post && ['pending_approval', 'draft', 'in_review', 'approved', 'scheduled'].includes(post.status);
+    const editable = _pceIsEditablePost(post);
+    // The footer's "Ready? Open Schedule & publish…" line was never toggled, so a post that had
+    // already gone out was still being invited to schedule itself — and its button targets a rail
+    // step that is now hidden, so it would have done nothing. An affordance on a post that cannot
+    // act on it is the same bug as the rail, one element further down.
+    _pceEl('post-review-draft-hint')?.classList.toggle('hidden', !editable);
     // The Draft-with-AI pair in step 1. Hidden explicitly rather than inheriting a pane's state,
     // or a published post would be offered a redraft.
     // Both classes: the container is flex, and `hidden` alone loses to a display utility.
