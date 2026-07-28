@@ -1210,7 +1210,17 @@ window.showComplianceModals = function showComplianceModals(force) {
                  textarea here. -->
             <div id="pce-insp-headline" class="pce-insp hidden" data-insp="headline">
               <p class="text-xs font-bold text-emerald-800 mb-1">Wording</p>
-              <p class="text-[11px] text-gray-400 mb-2">Double-click the words on the card to change them, or drag them up and down.</p>
+              <!-- Opens the editor ON THE CARD (_pceOpenInlineHeadline), it does not bring the words
+                   into this panel — typing here while the picture changed somewhere else is exactly
+                   what the old "Wording on the card" textarea got wrong. What this fixes is reaching
+                   it: the only way in was a DOUBLE-click on the words, and a single click starts a
+                   drag, so the gesture both went undiscovered and felt like "clicking does nothing
+                   but move it". The double-click still works for anyone who knows it. -->
+              <button type="button" onclick="_pceEditCardWording()"
+                class="w-full mb-2 px-3 py-2 rounded-lg border border-emerald-300 bg-emerald-50 text-emerald-800 text-xs font-bold hover:bg-emerald-100 transition cursor-pointer">
+                Edit the words on the card
+              </button>
+              <p class="text-[11px] text-gray-400 mb-2">Or double-click them on the card. Drag them up and down to move them.</p>
               <span class="block text-xs font-bold text-gray-600 mb-1">Line up</span>
               <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden" data-align-for="headline">
                 <button type="button" data-align="left" class="pce-align px-2.5 py-1.5 text-xs font-bold cursor-pointer transition">Left</button>
@@ -11105,6 +11115,36 @@ async function rqReviewReschedule() {
  * #pce-headline field, which is the model _pceValues sends — the same arrangement the caption uses,
  * so there is still exactly one place the value lives and one path that saves it.
  */
+/**
+ * "Edit the words on the card", from the Wording panel.
+ *
+ * Deliberately opens the SAME in-place editor as double-clicking the words — the panel is a way in,
+ * not a second place the words live. Anything else would be the old panel textarea again: two boxes
+ * holding one value, and typing somewhere other than where the result appears.
+ *
+ * The two things that can go wrong are both silent in _pceOpenInlineHeadline, which is fine for a
+ * double-click on a handle that only exists once the card has drawn, and not fine for a button that
+ * is on screen regardless. So they are said out loud here.
+ */
+function _pceEditCardWording() {
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (!post?.brandCard) { window.showToast?.('This post has no branded card to edit.', { icon: '⚠️' }); return; }
+    // The editor is positioned from the geometry the SERVER reported drawing. Until the first
+    // preview lands there is nothing to position against — a moment on a fresh card, and the one
+    // time somebody is most likely to press this.
+    if (!_pceState.geo?.elements?.headline?.box) {
+        window.showToast?.('Still drawing the card — try again in a moment.', { icon: '⏳' });
+        return;
+    }
+    // Selecting it first means the handle is painted and reads as selected, so the box that opens is
+    // visibly the thing the panel is about.
+    _pceSelect('headline');
+    // The card can be off screen when the panel is what you are looking at, and an editor you cannot
+    // see is indistinguishable from nothing happening — which is the whole complaint.
+    _pceEl('pce-stage')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    _pceOpenInlineHeadline();
+}
+
 function _pceOpenInlineHeadline() {
     const layer = _pceEl('pce-handles');
     const geo = _pceState.geo;
