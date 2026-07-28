@@ -203,9 +203,31 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
     };
 
     // ── Section 6 — ONBOARDING ANSWERS ───────────────────────────────────────
-    const s6content = { answers: onboardingCtx };
+    // `answers` is the whole onboarding_context verbatim; `operational` lifts the Operational Setup
+    // pair (when the assistant runs, and who supplies the raw material) into named fields. Both are
+    // in the same object because everything downstream reads `.answers` — pulling them out would be
+    // a breaking change for process-content-jobs and post-quality-review — but a wholesale dump
+    // reports no gap when an answer is absent, and these two are the ones worth reporting: an
+    // assistant told nothing about its content source will happily invent material for a user who
+    // meant to supply it. Values are the stored radio keys ('scheduled', 'client_provided', …).
+    const OPERATIONAL_TRIGGERS = ['on_demand', 'reactive', 'scheduled'];
+    const OPERATIONAL_SOURCES = ['client_provided', 'assistant_generated', 'hybrid'];
+    const oneOf = (v: unknown, allowed: string[]) =>
+        typeof v === 'string' && allowed.includes(v) ? v : null;
+    const s6operational = {
+        triggerType: oneOf(onboardingCtx.trigger_type, OPERATIONAL_TRIGGERS),
+        scheduleFrequency: (onboardingCtx.trigger_schedule_frequency as string | null) ?? (onboardingCtx.posting_frequency as string | null) ?? null,
+        scheduleTimezone: (onboardingCtx.trigger_timezone as string | null) ?? (onboardingCtx.posting_timezone as string | null) ?? null,
+        contentSource: oneOf(onboardingCtx.content_source, OPERATIONAL_SOURCES),
+        contentSourceDetail: (onboardingCtx.content_source_detail as string | null) ?? null,
+    };
+    const s6content = { answers: onboardingCtx, operational: s6operational };
     const hasAnswers = Object.keys(onboardingCtx).length > 0;
     if (!hasAnswers) missing.push({ section: '6-onboarding', field: 'onboardingContext', sourceTable: 'ai_assistants', sourceColumn: 'onboarding_context', severity: 'warning' });
+    // Warning, not blocking: assistants hired before onboarding stored these answers must stay
+    // generatable. The gap shows up in the blueprint's missing-fields list instead.
+    if (hasAnswers && !s6operational.triggerType) missing.push({ section: '6-onboarding', field: 'trigger_type', sourceTable: 'ai_assistants', sourceColumn: 'onboarding_context', severity: 'warning' });
+    if (hasAnswers && !s6operational.contentSource) missing.push({ section: '6-onboarding', field: 'content_source', sourceTable: 'ai_assistants', sourceColumn: 'onboarding_context', severity: 'warning' });
     sections['6-onboarding'] = {
         status: hasAnswers ? 'complete' : 'missing',
         content: s6content,

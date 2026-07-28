@@ -26,6 +26,7 @@ import { FalContentPolicyError } from '../../src/lib/fal-gateway';
 import { resolveDisclosureFooter } from '../../src/utils/disclosure-footer';
 import { fitForPlatform, isShortForm, type BrandHashtags } from '../../src/utils/platform-caption';
 import { fireOrchestrations } from '../../src/utils/orchestration';
+import { operationalSetupLines } from '../../src/utils/operational-setup';
 import { decideAutoPublish, describeDecision } from '../../src/utils/auto-publish-runtime';
 import { platformFormat } from '../../src/config/platform-formats';
 import { formatPlatformStrategyBrief, platformStrategyFor, type PlatformStrategy } from '../../src/utils/platform-strategy-brief';
@@ -368,10 +369,19 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             ? `PLATFORM STRATEGY — follow these platform-specific directions:\n${strategyBrief}`
             : '';
 
+        // Operational Setup (onboarding step 3) as explicit directives — see operational-setup.ts
+        // for what each answer means and why content_source_detail is withheld. Read LIVE from
+        // onboardingContext (like brand hashtags and platform strategy above) so a profile edit
+        // applies without a blueprint recompile; section 6's copy is the fallback.
+        const operationalLines = operationalSetupLines(brandCtx, answers);
+
         const baseInstruction = [
             `You are ${assistantName}, a social media assistant for ${businessName}.`,
             `Generate a ${promptPlatform} post targeting ${audience} in a ${tone} voice.`,
             `Follow all strict and content rules in the system prompt.`,
+            // Before the creative direction: these bound what the post may claim, and a constraint
+            // stated after the brief reads as an afterthought.
+            ...operationalLines,
             formatBlock,
             strategyBlock,
             platformStrategyLine,

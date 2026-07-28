@@ -1443,6 +1443,35 @@
 
   window.globalRawInputs = {}; // Store raw answers for backend compilation
 
+  /**
+   * Step 3's Operational Setup answers, as the RADIO VALUES rather than the labels shown on screen.
+   *
+   * Only the labels used to be submitted (triggerText/sourceText, scraped out of the DOM), which
+   * made the answers unreadable to everything downstream: the Assistant Profile matches its radios
+   * on value keys, so "On a Schedule" never matched `scheduled` and "I will provide the raw inputs"
+   * never matched `client_provided` — the Operational Setup section came up blank for five of the
+   * six options. The free-text follow-ups (timezone, and where the assistant should look for
+   * inputs) were collected on screen and then dropped entirely.
+   *
+   * These go into onboardingContext, which is what blueprint section 6 reads — configuration.inputs
+   * is not on that path.
+   */
+  function collectOperationalSetup() {
+    const trigger = document.querySelector('input[name="trigger_type"]:checked')?.value || null;
+    const source = document.querySelector('input[name="content_source"]:checked')?.value || null;
+    // Each content-source option has its own follow-up box; only the selected one is meaningful.
+    const detailId = { client_provided: 'source_client', assistant_generated: 'source_ai', hybrid: 'source_hybrid' }[source];
+    const val = (id) => (id && document.getElementById(id)?.value?.trim()) || null;
+    return {
+      trigger_type: trigger,
+      // Only asked for (and only meaningful on) the scheduled branch.
+      trigger_schedule_frequency: trigger === 'scheduled' ? val('schedule_frequency') : null,
+      trigger_timezone: trigger === 'scheduled' ? val('schedule_timezone') : null,
+      content_source: source,
+      content_source_detail: val(detailId),
+    };
+  }
+
   function generateSummary() {
     const hasValue = (val) => val && val.trim() !== '' && val !== missingFallback;
 
@@ -1519,6 +1548,10 @@
       incentive: incentiveText,
       triggerText,
       sourceText,
+      // The same two answers as stable keys. triggerText/sourceText stay because
+      // compileServerSideBrief prints them as prose; these are what anything matching on a
+      // value (the Assistant Profile's radios) needs.
+      ...collectOperationalSetup(),
       platforms,
       platform_strategy: platformStrategy,
       generalPreferences,
@@ -1643,6 +1676,9 @@
       sales_objections: document.getElementById('val_objections')?.value || null,
       tone_of_voice: document.getElementById('val_tone')?.value || null,
       posting_frequency: document.getElementById('schedule_frequency')?.value || 'On Demand',
+      // Operational Setup (Step 3). onboardingContext is the blueprint's source for section 6, so
+      // these have to be here — not only in rawInputs — to reach the assistant at all.
+      ...collectOperationalSetup(),
       primary_platforms: extractedPlatforms,
       problem_statement: document.getElementById('user_story_problem')?.value || null,
       // Reference style link + per-platform hashtag/algorithm strategy — stored structurally so

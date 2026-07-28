@@ -2756,6 +2756,14 @@ function _renderOperationSection(data) {
     _syncSchemaSelects(fields, ctx, 'edit_op_');
 }
 
+// Human labels for the Operational Setup answers, keyed by the radio value that is actually
+// stored. Used for the prose triggerText/sourceText fields the onboarding brief prints; the
+// canonical answer is always the key, never the label.
+const _OPERATIONAL_LABELS = {
+    on_demand: 'On Demand', reactive: 'Reactive', scheduled: 'Scheduled',
+    client_provided: 'Client Provided', assistant_generated: 'Assistant Generated', hybrid: 'Hybrid',
+};
+
 function _detailHydrate(data) {
     const ctx = data.context || {};
     const cfg = data.configuration || {};
@@ -2826,8 +2834,13 @@ function _detailHydrate(data) {
             if (r) { r.checked = true; return; }
         }
     };
-    _checkRadio('edit_trigger', inputs.trigger_type, inputs.triggerText);
-    _checkRadio('edit_source', inputs.content_source, inputs.sourceText);
+    // onboardingContext first: that is where onboarding now writes the answer, and it's the copy
+    // the blueprint reads. configuration.inputs is the profile page's own save target, and the
+    // scraped *Text labels are the last resort for assistants hired before either existed (only
+    // "On Demand" ever normalised cleanly out of those — every other label produced a key that
+    // matched no radio, which is why this section looked empty).
+    _checkRadio('edit_trigger', ctx.trigger_type, inputs.trigger_type, inputs.triggerText);
+    _checkRadio('edit_source', ctx.content_source, inputs.content_source, inputs.sourceText);
 
     // Platforms are rendered dynamically in the Connections tab — see initAssistantConnections()
 
@@ -3160,6 +3173,16 @@ function _detailCollect(currentData) {
         publishPolicy: _collectPublishPolicy(currentData.context?.publishPolicy),
         // AI-media auto-publish opt-in (Autopilot card). Read from the toggle; default off.
         allowAiMediaAutoPublish: document.getElementById('edit_allow_ai_media')?.checked === true,
+        // Operational Setup — mirrored into onboarding_context, not just configuration.inputs.
+        // The blueprint only ever reads onboarding_context, so an edit that landed solely in
+        // configuration.inputs changed what this page displayed and nothing the assistant knew.
+        // Preserve the stored answer when nothing is selected, so a save from a role whose
+        // Operational Setup section is hidden (#operation-generic is social/legacy only) does not
+        // blank an answer the user gave at onboarding.
+        trigger_type: document.querySelector('input[name="edit_trigger"]:checked')?.value
+            || currentData.context?.trigger_type || null,
+        content_source: document.querySelector('input[name="edit_source"]:checked')?.value
+            || currentData.context?.content_source || null,
         primary_platforms: platforms,
     };
 
@@ -3184,10 +3207,14 @@ function _detailCollect(currentData) {
         inputs: {
             ...(currentData.configuration?.inputs || {}),
             problem: document.getElementById('edit_problem')?.value || '',
-            trigger_type: document.querySelector('input[name="edit_trigger"]:checked')?.value || '',
-            triggerText: document.querySelector('input[name="edit_trigger"]:checked')?.value || '',
-            content_source: document.querySelector('input[name="edit_source"]:checked')?.value || '',
-            sourceText: document.querySelector('input[name="edit_source"]:checked')?.value || '',
+            // Same values as newContext above (see the note there), kept here so the profile page
+            // still round-trips for assistants whose onboarding_context predates the fix.
+            trigger_type: newContext.trigger_type || '',
+            content_source: newContext.content_source || '',
+            // …and the prose forms, which the onboarding brief prints verbatim. These used to be
+            // overwritten with the raw key, so a save turned "On a Schedule" into "scheduled".
+            triggerText: _OPERATIONAL_LABELS[newContext.trigger_type] || newContext.trigger_type || '',
+            sourceText: _OPERATIONAL_LABELS[newContext.content_source] || newContext.content_source || '',
             platforms: platformsRaw,
             generalPreferences: [
                 document.getElementById('edit_audience')?.value ? `- Target Audience: ${document.getElementById('edit_audience').value}` : '',

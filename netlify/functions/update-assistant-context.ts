@@ -43,11 +43,17 @@ export default withLambda(async (event) => {
             // wizard (assistant-onboarding-shell.js) sends only its own answers, so re-running
             // setup would quietly reset a deployer's auto-publish choice. Carry it across when the
             // caller didn't mention it; an explicit value (even {}) still wins.
+            // trigger_type/content_source are carried for the same reason: they are asked once, in
+            // the social wizard's Operational Setup step, and the blueprint reads them from here —
+            // so a partial save from any other surface must not erase them.
+            const CARRY_ACROSS = ['publishPolicy', 'trigger_type', 'content_source'];
             const mergedContext = { ...newContext };
             const existingCtx = (existingAssistant.onboardingContext as Record<string, unknown> | null) ?? {};
-            if (!Object.prototype.hasOwnProperty.call(mergedContext, 'publishPolicy')
-                && Object.prototype.hasOwnProperty.call(existingCtx, 'publishPolicy')) {
-                mergedContext.publishPolicy = existingCtx.publishPolicy;
+            for (const key of CARRY_ACROSS) {
+                if (!Object.prototype.hasOwnProperty.call(mergedContext, key)
+                    && Object.prototype.hasOwnProperty.call(existingCtx, key)) {
+                    mergedContext[key] = existingCtx[key];
+                }
             }
 
             // Perform the Update
