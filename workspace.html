@@ -1009,12 +1009,17 @@ window.showComplianceModals = function showComplianceModals(force) {
                    the words. Same nodes either way, so _pceRefreshLinkMeta is untouched. -->
               <div id="pce-link-block" class="mt-3 pt-3 border-t border-gray-100">
                 <label for="post-review-link-url" class="block text-xs font-bold text-gray-600 mb-1">Link</label>
+                <!-- Saved on blur (_pceSaveLinkFields). The rail mounts this block into its own step,
+                     which does NOT carry the caption block's "Save changes" button — so without this
+                     the echo below promised a line that was never written, never previewed and never
+                     published. -->
                 <input id="post-review-link-url" type="url" inputmode="url" spellcheck="false"
-                  placeholder="example.com/your-page" oninput="_pceRefreshLinkMeta()" onblur="_pceTidyLinkField()"
+                  placeholder="example.com/your-page" oninput="_pceRefreshLinkMeta()"
+                  onblur="_pceTidyLinkField(); _pceSaveLinkFields()"
                   class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-600">
                 <label for="post-review-cta" class="block text-xs font-bold text-gray-600 mb-1 mt-2">Call to action <span class="font-semibold text-gray-400">— optional</span></label>
                 <input id="post-review-cta" type="text" maxlength="80" placeholder="Read the full story"
-                  oninput="_pceRefreshLinkMeta()"
+                  oninput="_pceRefreshLinkMeta()" onblur="_pceSaveLinkFields()"
                   class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-emerald-600">
                 <p id="pce-link-echo" class="hidden mt-1.5 text-[11px] text-gray-500">Added to the end of your post: <span class="font-semibold text-gray-700"></span></p>
                 <p id="pce-link-error" class="hidden mt-1.5 text-[11px] font-semibold text-red-600"></p>
@@ -5901,11 +5906,17 @@ function renderPlatformMockup(post) {
     // a `javascript:` URL working, and this value is user-supplied. A row that fails the check is
     // still SHOWN — as text, so you can see what is stored and fix it — just never as an anchor.
     const linkHref = _pceNormaliseLink(post.linkUrl);
-    const linkLabel = post.ctaText || post.linkUrl;
-    const link = post.linkUrl
+    // The line the PUBLISHERS will append, not a prettified stand-in for it. This used to render the
+    // CTA alone as the anchor text, so a post whose link step promised "Added to the end of your
+    // post: Buy Now https://example.com" previewed as a bare "Buy Now" — and, when the caption
+    // already carried the URL, as a duplicate the publisher would never actually add. Mirrors
+    // postLinkLine (src/utils/post-link.ts), including its "already in the caption" rule, so what is
+    // on screen is what goes out.
+    const linkLine = _pcePostLinkLine(post);
+    const link = linkLine
         ? (linkHref
-            ? `<a class="block mt-2 text-xs font-semibold underline truncate" style="color:${meta.accent}" href="${_rqEsc(linkHref)}" target="_blank" rel="noopener">${_rqEsc(linkLabel)}</a>`
-            : `<p class="block mt-2 text-xs font-semibold text-gray-400 truncate">${_rqEsc(linkLabel)}</p>`)
+            ? `<a class="block mt-2 text-xs font-semibold underline break-words" style="color:${meta.accent}" href="${_rqEsc(linkHref)}" target="_blank" rel="noopener">${_rqEsc(linkLine)}</a>`
+            : `<p class="block mt-2 text-xs font-semibold text-gray-400 break-words">${_rqEsc(linkLine)}</p>`)
         : '';
 
     const header = `
@@ -7060,10 +7071,18 @@ let _pceLayers = [];
 // Seed the caption controls from the post. Kept separate from the card seeding because a caption
 // exists on every post, card or not.
 function _pceFillCaption(post) {
-    if (_pceEl('post-review-caption')) _pceEl('post-review-caption').value = post.caption || '';
-    if (_pceEl('post-review-hashtags')) _pceEl('post-review-hashtags').value = post.hashtags || '';
-    if (_pceEl('post-review-link-url')) _pceEl('post-review-link-url').value = post.linkUrl || '';
-    if (_pceEl('post-review-cta')) _pceEl('post-review-cta').value = post.ctaText || '';
+    // Never overwrite the field the user is typing in. Saving the link on blur re-renders the post,
+    // which lands back here — and by then the cursor has usually moved to the NEXT field (link →
+    // call to action). Re-seeding that one from the stored post would delete what was just typed
+    // into it, mid-word.
+    const seed = (id, value) => {
+        const el = _pceEl(id);
+        if (el && document.activeElement !== el) el.value = value;
+    };
+    seed('post-review-caption', post.caption || '');
+    seed('post-review-hashtags', post.hashtags || '');
+    seed('post-review-link-url', post.linkUrl || '');
+    seed('post-review-cta', post.ctaText || '');
     _pceRefreshLinkMeta();
     // "Apply to all platforms" only means anything when there is more than one.
     const all = _pceEl('post-review-amend-all');
@@ -7101,6 +7120,28 @@ function _pceNormaliseLink(raw) {
     return candidate;
 }
 
+/**
+ * The same line, for a SAVED post rather than the open input fields.
+ *
+ * _pceLinkLine reads the link step's inputs, which is right for the echo under them ("this is what
+ * you are about to add"). The mock-up has to answer a different question — what does THIS POST
+ * publish — and reading the inputs there would draw the link step's unsaved state onto a preview of
+ * something else, including on a sibling platform tab that never had a link at all.
+ *
+ * Kept beside _pceLinkLine so the two stay recognisably the same rule; both mirror postLinkLine in
+ * src/utils/post-link.ts, which is what the publishers actually run.
+ */
+function _pcePostLinkLine(post) {
+    const raw = String(post?.linkUrl ?? '').trim();
+    const url = _pceNormaliseLink(raw);
+    if (!url) return null;
+    const caption = String(post?.caption ?? '');
+    // Already in the words — the publisher does not add it twice, so neither does the preview.
+    if (caption.includes(url) || caption.includes(raw)) return null;
+    const cta = String(post?.ctaText ?? '').replace(/\s+/g, ' ').trim();
+    return cta ? `${cta} ${url}` : url;
+}
+
 // The exact line the publishers append, or null when there is nothing to append — including when
 // the caption already carries the URL, which is the common case for a caption written around a link.
 function _pceLinkLine(caption) {
@@ -7119,6 +7160,38 @@ function _pceTidyLinkField() {
     if (!el || !el.value.trim()) return;
     const url = _pceNormaliseLink(el.value);
     if (url) el.value = url;
+    _pceRefreshLinkMeta();
+}
+
+/**
+ * Commit the link and call to action.
+ *
+ * The rail borrows #pce-link-block into its own "Link & call to action" step — but "Save changes"
+ * lives in the CAPTION block, which that step does not mount. So the link fields had no save
+ * affordance at all: the echo said "Added to the end of your post: Buy Now https://…", the preview
+ * showed nothing, and unless the user happened to save a caption edit afterwards the link was never
+ * written — so it did not publish either. The echo was describing something that was not going to
+ * happen.
+ *
+ * On blur rather than on input: this is a real PATCH per platform in the group, and one per
+ * keystroke would be a request per character. rqReviewSaveAmend is reused rather than PATCHing here
+ * so there is still ONE caption/link write path — it reads these same fields, and the caption and
+ * hashtags it also sends come straight from the post, so they are a no-op.
+ */
+async function _pceSaveLinkFields() {
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (!post) return;
+    const raw = (_pceEl('post-review-link-url')?.value || '').trim();
+    const cta = (_pceEl('post-review-cta')?.value || '').trim();
+    // A link that cannot be published must not be saved. _pceRefreshLinkMeta is already saying so
+    // under the field; writing it anyway would store something the publisher silently drops.
+    if (raw && !_pceNormaliseLink(raw)) return;
+    // Nothing changed — don't spend a write (and a re-render) on a focus that merely passed through.
+    const storedLink = String(post.linkUrl ?? '');
+    const storedCta = String(post.ctaText ?? '');
+    if ((_pceNormaliseLink(raw) || '') === storedLink && cta === storedCta) return;
+    await rqReviewSaveAmend();
+    // The mock-up draws the link from the post, so it only tells the truth once the cache has it.
     _pceRefreshLinkMeta();
 }
 

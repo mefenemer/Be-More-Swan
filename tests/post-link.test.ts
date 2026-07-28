@@ -14,7 +14,9 @@
 // Pure logic — no DB required.
 
 import assert from 'node:assert';
-import { normalisePostLink, postLinkLine, composePostText } from '../src/utils/post-link';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { normalisePostLink, postLinkLine, composePostText, type PostLinkFields } from '../src/utils/post-link';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -133,6 +135,74 @@ check('the composed length is what a platform limit must be checked against', ()
     const caption = 'x'.repeat(260);
     const text = composePostText({ caption, linkUrl: 'https://example.com/a-fairly-long-path' });
     assert.ok(text.length > 280, `expected the link to push past X's limit, got ${text.length}`);
+});
+
+// ── The composer's mirror of this rule ──────────────────────────────────────────────────────────
+// workspace.html cannot import src/, so it carries its own copy of postLinkLine (_pcePostLinkLine)
+// to draw the link on the mock-up. The two must agree: the preview claims to show what will be
+// published, and the link step's echo says "Added to the end of your post: …". They disagreed —
+// the mock-up rendered the CTA ALONE as the anchor text, so a post promising
+// "Buy Now https://example.com" previewed as a bare "Buy Now" — which is what this pins.
+
+/** Pull a function out of workspace.html and make it callable here. */
+function clientFn(names: string[]): (post: unknown) => string | null {
+    const html = readFileSync(path.join(import.meta.dirname, '..', 'workspace.html'), 'utf8');
+    const bodies = names.map(name => {
+        const start = html.indexOf(`function ${name}(`);
+        if (start < 0) throw new Error(`${name} not found in workspace.html`);
+        let depth = 0;
+        for (let j = html.indexOf('{', start); j < html.length; j++) {
+            if (html[j] === '{') depth++;
+            else if (html[j] === '}') { depth--; if (depth === 0) return html.slice(start, j + 1); }
+        }
+        throw new Error(`unbalanced ${name}`);
+    });
+    return new Function(`${bodies.join('\n')}\nreturn ${names[names.length - 1]};`)() as (p: unknown) => string | null;
+}
+
+const clientLinkLine = clientFn(['_pceNormaliseLink', '_pcePostLinkLine']);
+
+check('the composer draws exactly the line the publishers append', () => {
+    const cases: PostLinkFields[] = [
+        { caption: 'Autumn menu is here', linkUrl: 'https://www.somepage.com', ctaText: 'Buy Now' },
+        { caption: 'Autumn menu is here', linkUrl: 'https://www.somepage.com', ctaText: null },
+        { caption: 'Autumn menu is here', linkUrl: 'somepage.com', ctaText: 'Buy Now' },
+        // Already in the words — the publisher does not append it, so the preview must not draw it.
+        { caption: 'Order at https://www.somepage.com today', linkUrl: 'https://www.somepage.com', ctaText: 'Buy Now' },
+        { caption: 'Order at somepage.com today', linkUrl: 'somepage.com', ctaText: 'Buy Now' },
+        // Never publishable, never rendered as an anchor.
+        { caption: 'Hi', linkUrl: 'javascript:alert(1)', ctaText: 'Tap' },
+        { caption: 'Hi', linkUrl: '', ctaText: 'Tap' },
+        { caption: 'Hi', linkUrl: null, ctaText: null },
+        // A CTA is a label: newlines in it would split the link onto its own line.
+        { caption: 'Hi', linkUrl: 'https://example.com', ctaText: 'Read\n  the  story' },
+    ];
+    for (const c of cases) {
+        assert.strictEqual(clientLinkLine(c), postLinkLine(c),
+            `preview and publish disagree for ${JSON.stringify(c)}`);
+    }
+});
+
+check('a CTA is only ever shown with its URL, never on its own', () => {
+    // The exact shape of the bug: a CTA with a link must render both.
+    const line = clientLinkLine({ caption: 'x', linkUrl: 'https://www.somepage.com', ctaText: 'Buy Now' });
+    assert.strictEqual(line, 'Buy Now https://www.somepage.com');
+    assert.ok(line!.includes('https://www.somepage.com'), 'the URL is half of what gets published');
+});
+
+check('the link step saves itself, since its rail step has no Save button', () => {
+    // "Save changes" lives in the CAPTION block; the rail mounts #pce-link-block into its own step
+    // and does not bring that button with it. Without a save on blur the echo described a line that
+    // was never written, never previewed and never published.
+    const html = readFileSync(path.join(import.meta.dirname, '..', 'workspace.html'), 'utf8');
+    const block = html.slice(html.indexOf('<div id="pce-link-block"'), html.indexOf('<!-- ── "Write with'));
+    assert.match(block, /id="post-review-link-url"[\s\S]*?onblur="[^"]*_pceSaveLinkFields\(\)"/,
+        'the link field must commit on blur');
+    assert.match(block, /id="post-review-cta"[\s\S]*?onblur="[^"]*_pceSaveLinkFields\(\)"/,
+        'so must the call to action');
+    // And re-seeding must not eat what is being typed in the field the cursor just moved to.
+    assert.match(html, /if \(el && document\.activeElement !== el\) el\.value = value;/,
+        '_pceFillCaption must skip the focused field');
 });
 
 console.log(`\n${passed} check(s) passed.`);
