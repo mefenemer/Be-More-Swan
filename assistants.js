@@ -553,6 +553,15 @@ const _DETAIL_RQ_COLUMNS = {
 let _detailRqCurrentStatus = 'review';
 const _detailRqGroupOpen = { posts: true };
 
+// Paging, mirroring the global Review Queue in workspace.html. Each card costs the server a media
+// resolution (a presigned URL per asset), so the tab asks for one page at a time and "Show more"
+// fetches the next rather than re-fetching everything. Offset counts GROUPS, not rows — the server
+// pages by crosspost group too, so a cross-post's extra platform rows must not shift the boundary.
+const _DETAIL_RQ_PAGE_SIZE = 10;
+let _detailRqLoadedPosts = [];
+let _detailRqHasMore = false;
+let _detailRqTotal = null;
+
 window.detailRqOpenStatus = function(statusKey, btn) {
     if (!_DETAIL_RQ_COLUMNS[statusKey]) return;
     _detailRqCurrentStatus = statusKey;
@@ -583,9 +592,14 @@ async function _detailRqColumnCount(statusKey, assistantId) {
     const col = _DETAIL_RQ_COLUMNS[statusKey];
     if (!col) return 0;
     try {
-        const res = await fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}&assistantId=${assistantId}`);
+        // Page with limit=1 purely to read the server's grouped `total`: it counts every group but
+        // only resolves media for one, so a five-column count no longer presigns the whole queue
+        // five times over. Fall back to grouping the returned page if an older server omits `total`.
+        const res = await fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}&assistantId=${assistantId}&limit=1&offset=0`);
         if (!res.ok) return 0;
-        const drafts = (await res.json()).drafts || [];
+        const body = await res.json();
+        if (typeof body.total === 'number') return body.total;
+        const drafts = body.drafts || [];
         return (typeof rqGroupSocialDrafts === 'function' ? rqGroupSocialDrafts(drafts) : drafts).length;
     } catch { return 0; }
 }
@@ -634,14 +648,25 @@ async function _detailRqRenderGroups(statusKey) {
     const container = document.getElementById('detail-rq-groups');
     if (!container) return;
     container.innerHTML = '<p class="text-sm text-gray-400 py-10 text-center">Loading…</p>';
+    // Reset paging state on every column switch/refresh — a stale page 2 from Review must never be
+    // appended under Scheduled.
+    _detailRqLoadedPosts = [];
+    _detailRqHasMore = false;
+    _detailRqTotal = null;
 
     const aid = window._currentAssistantId;
     if (!aid) { container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">No assistant selected.</p>'; return; }
 
     let posts = [];
     try {
-        const pRes = await fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}&assistantId=${aid}`);
-        if (pRes.ok) posts = (await pRes.json()).drafts || [];
+        const pRes = await fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}&assistantId=${aid}&limit=${_DETAIL_RQ_PAGE_SIZE}&offset=0`);
+        if (pRes.ok) {
+            const pj = await pRes.json();
+            posts = pj.drafts || [];
+            _detailRqLoadedPosts = posts;
+            _detailRqHasMore = !!pj.hasMore;
+            _detailRqTotal = typeof pj.total === 'number' ? pj.total : null;
+        }
     } catch {
         container.innerHTML = '<p class="text-sm text-red-500 py-10 text-center">Failed to load.</p>';
         return;
@@ -652,9 +677,10 @@ async function _detailRqRenderGroups(statusKey) {
     // is defined in workspace.html alongside rqRenderSocialCard.
     const postGroups = typeof rqGroupSocialDrafts === 'function' ? rqGroupSocialDrafts(posts) : posts;
 
-    // Keep the Review column badge and the tab badge in sync (grouped count).
+    // Keep the Review column badge and the tab badge in sync. Use the server's grouped total when
+    // paging, not the length of the first page — otherwise a queue of 24 would report "10".
     if (statusKey === 'review') {
-        const groupedCount = postGroups.length;
+        const groupedCount = _detailRqTotal ?? postGroups.length;
         const colBadge = document.getElementById('detail-rq-col-count-review');
         if (colBadge) { colBadge.textContent = groupedCount || ''; colBadge.classList.toggle('hidden', !groupedCount); }
         const tabBadge = document.getElementById('detail-rq-pending-badge');
@@ -670,7 +696,65 @@ async function _detailRqRenderGroups(statusKey) {
         { key: 'posts', label: 'Posts', empty: 'No posts here.', emptyReview: 'No posts awaiting review.' },
     ];
     const itemsByGroup = { posts: postGroups };
-    container.innerHTML = RQ_GROUPS.map(g => _detailRqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey)).join('');
+    container.innerHTML = RQ_GROUPS.map(g => _detailRqGroupSection(g, itemsByGroup[g.key] || [], renderByGroup[g.key], statusKey)).join('')
+        + _detailRqMoreButton(statusKey);
+}
+
+/** "Show more" under the list, or nothing when the last page is already on screen. */
+function _detailRqMoreButton(statusKey) {
+    if (!_detailRqHasMore) return '';
+    const shown = (typeof rqGroupSocialDrafts === 'function' ? rqGroupSocialDrafts(_detailRqLoadedPosts) : _detailRqLoadedPosts).length;
+    const total = _detailRqTotal ?? shown;
+    return `<div class="py-4 text-center border-t border-gray-100">
+      <button id="detail-rq-more-btn" onclick="_detailRqLoadMore('${statusKey}')"
+        class="px-4 py-2 text-xs font-bold rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed">
+        Show more
+      </button>
+      <p class="text-[11px] text-gray-400 mt-1.5">Showing ${shown} of ${total}</p>
+    </div>`;
+}
+
+/**
+ * Fetch the next page and APPEND it. Offset is the number of GROUPS already on screen, not the rows
+ * loaded — the server pages by group, so counting rows would skip past a cross-post's extra platform
+ * rows and silently drop posts from the middle of the queue.
+ */
+window._detailRqLoadMore = async function(statusKey) {
+    const col = _DETAIL_RQ_COLUMNS[statusKey] || _DETAIL_RQ_COLUMNS.review;
+    const aid = window._currentAssistantId;
+    if (!aid) return;
+    const btn = document.getElementById('detail-rq-more-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading…'; }
+    const offset = (typeof rqGroupSocialDrafts === 'function' ? rqGroupSocialDrafts(_detailRqLoadedPosts) : _detailRqLoadedPosts).length;
+    try {
+        const res = await fetch(`/.netlify/functions/get-social-drafts?status=${col.postStatus}&assistantId=${aid}&limit=${_DETAIL_RQ_PAGE_SIZE}&offset=${offset}`);
+        if (!res.ok) throw new Error('load failed');
+        const pj = await res.json();
+        // rqGroupSocialDrafts caches every row it sees, so appending rather than replacing keeps the
+        // earlier pages in that cache — the editor opens from it and would otherwise find nothing for
+        // a post the reviewer had already paged past.
+        _detailRqLoadedPosts = [..._detailRqLoadedPosts, ...(pj.drafts || [])];
+        _detailRqHasMore = !!pj.hasMore;
+        if (typeof pj.total === 'number') _detailRqTotal = pj.total;
+        _detailRqRepaintPostsGroup(statusKey);
+    } catch {
+        if (btn) { btn.disabled = false; btn.textContent = 'Show more'; }
+        window.showToast?.('Could not load more posts. Please try again.', { icon: '⚠️' });
+    }
+};
+
+/** Repaint only the Posts group body + the More button after a page is appended. */
+function _detailRqRepaintPostsGroup(statusKey) {
+    const body = document.querySelector('.detail-rq-group-body-posts');
+    const groups = typeof rqGroupSocialDrafts === 'function' ? rqGroupSocialDrafts(_detailRqLoadedPosts) : _detailRqLoadedPosts;
+    const render = typeof rqRenderSocialCard === 'function' ? rqRenderSocialCard : () => '';
+    if (body && groups.length) {
+        body.innerHTML = `<div class="divide-y divide-gray-100">${groups.map(render).join('')}</div>`;
+        const count = body.closest('section')?.querySelector('button span:last-child');
+        if (count) count.textContent = groups.length;
+    }
+    const more = document.getElementById('detail-rq-more-btn')?.closest('div');
+    if (more) more.outerHTML = _detailRqMoreButton(statusKey);
 }
 
 function _detailRqGroupSection(g, items, render, statusKey) {

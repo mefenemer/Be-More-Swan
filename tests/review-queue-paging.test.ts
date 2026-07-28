@@ -143,4 +143,33 @@ check('the pending badge reports the total, not the page', () => {
         '"10 awaiting review" on a queue of 24 is worse than no badge');
 });
 
+// ── The assistant-detail Review tab pages too ────────────────────────────────────────────────────
+// It is a fragment loaded INTO workspace.html, so it reuses rqGroupSocialDrafts / rqRenderSocialCard
+// but has its own fetch + "Show more" loop in assistants.js. Its regression was the mirror image of
+// the workspace one: it never sent a limit at all, so before the server fix it got a single group,
+// and after the fix it dumped the entire queue with no paging. These pin the paged wiring.
+check('the detail Review tab requests a page, not the whole queue', () => {
+    const js = readFileSync(path.join(ROOT, 'assistants.js'), 'utf8');
+    const render = js.slice(js.indexOf('async function _detailRqRenderGroups('));
+    assert.match(render.slice(0, 1600), /limit=\$\{_DETAIL_RQ_PAGE_SIZE\}&offset=0/,
+        'the first load must be paged, or a large queue re-presigns every asset at once');
+    assert.match(render.slice(0, 4000), /container\.innerHTML = [\s\S]*\+ _detailRqMoreButton\(statusKey\)/, 'no Show-more button ⇒ pages past the first are unreachable');
+});
+
+check('the detail tab offsets by groups and appends, like the workspace queue', () => {
+    const js = readFileSync(path.join(ROOT, 'assistants.js'), 'utf8');
+    const more = js.slice(js.indexOf('window._detailRqLoadMore ='));
+    assert.match(more.slice(0, 1200), /rqGroupSocialDrafts\(_detailRqLoadedPosts\) : _detailRqLoadedPosts\)\.length/,
+        'offsetting by rows would skip whole posts across the group boundary');
+    assert.match(more.slice(0, 1200), /_detailRqLoadedPosts = \[\.\.\._detailRqLoadedPosts, \.\.\.\(pj\.drafts \|\| \[\]\)\]/,
+        'replacing rather than appending would evict earlier pages from the editor cache');
+});
+
+check('the detail Review badge reports the server total, not the first page', () => {
+    const js = readFileSync(path.join(ROOT, 'assistants.js'), 'utf8');
+    assert.match(js, /const groupedCount = _detailRqTotal \?\? postGroups\.length/,
+        'a paged first response is 10 cards — the badge must show the queue total');
+});
+
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);
+if (passed !== total) process.exit(1);
