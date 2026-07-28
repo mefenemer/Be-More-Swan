@@ -1046,7 +1046,7 @@ window.showComplianceModals = function showComplianceModals(force) {
                   <p id="pce-ai-msg" class="text-[10px] text-gray-400"></p>
                 </div>
                 <div class="space-y-1.5">
-                  <button type="button" data-rewrite-action onclick="_railRewrite('Rewrite the caption in a warmer, more conversational tone. Keep the same message and length.')"
+                  <button type="button" data-rewrite-action onclick="_railRewrite('tone', 'warmer, more conversational')"
                     class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-gray-200 text-left hover:bg-gray-50 transition cursor-pointer">
                     <svg class="w-3 h-3 text-emerald-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M4 7h16M4 12h10M4 17h7"/></svg>
                     <span class="text-[11px] font-semibold text-gray-700">Change the tone</span>
@@ -1056,12 +1056,12 @@ window.showComplianceModals = function showComplianceModals(force) {
                        and _pceOverLimitPlatforms blocks approval for any post that is over one. A
                        button that spends a generation shortening to 280 characters duplicated a rule
                        the editor already enforces — and only for one of the platforms. -->
-                  <button type="button" data-rewrite-action onclick="_railRewrite('Replace the hashtags with a better set for this post and these platforms. Leave the caption alone.')"
+                  <button type="button" data-rewrite-action onclick="_railRewrite('hashtags')"
                     class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-gray-200 text-left hover:bg-gray-50 transition cursor-pointer">
                     <svg class="w-3 h-3 text-emerald-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" d="M6 4L4.5 20M13 4l-1.5 16M3 9h17M2.5 15h17"/></svg>
                     <span class="text-[11px] font-semibold text-gray-700">Suggest hashtags</span>
                   </button>
-                  <button type="button" data-rewrite-action onclick="_railRewrite('Fix any grammar, spelling and flow problems. Do not change the meaning, the tone or the length.')"
+                  <button type="button" data-rewrite-action onclick="_railRewrite('grammar')"
                     class="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg border border-gray-200 text-left hover:bg-gray-50 transition cursor-pointer">
                     <svg class="w-3 h-3 text-emerald-600 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M9 11l3 3 8-8M20 12v7a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h9"/></svg>
                     <span class="text-[11px] font-semibold text-gray-700">Fix grammar &amp; flow</span>
@@ -7231,7 +7231,7 @@ function _pceCanvasClick(ev) {
             return;
         }
         if (ev.target.closest('[data-caption-improve]')) {
-            _railRewrite('Improve this caption — make it clearer and more engaging. Keep the same message, roughly the same length, and the same language.');
+            _railRewrite('tone', 'clearer and more engaging');
             return;
         }
         // Clicks INSIDE the open editor are ordinary text clicks — reopening would move the caret.
@@ -7600,17 +7600,61 @@ function _railAssistant(post) {
 }
 
 /**
- * Run one of the step's pre-written rewrite instructions.
+ * Run one of step 1's quick rewrites — tone, hashtags, grammar — IN PLACE.
  *
- * Fills the existing feedback box and presses the existing button, so this shares every bit of
- * rqReviewRequestChanges' behaviour — the in-flight state, the "revising" canvas, the error
- * handling — instead of a second, subtly different copy of it.
+ * These used to fill the feedback box and press Regenerate, on the reasoning that sharing
+ * rqReviewRequestChanges meant sharing its in-flight state and error handling. That reasoning was
+ * wrong about what the endpoint does: request-post-changes CANCELS the draft (status 'cancelled')
+ * and queues a job that generates a REPLACEMENT post with a new id. So "suggest hashtags" threw the
+ * post away, redrafted the whole thing from the blueprint, and handed the user back to the Review
+ * Queue to wait for something else to arrive — which is exactly how it looked.
+ *
+ * rewrite-post-text edits nothing and creates nothing: it returns the new words and they go into
+ * the field on screen. The post you were editing is still the post you are editing. The free-text
+ * "Regenerate" box still uses request-post-changes, because there a redraft IS the request.
  */
-function _railRewrite(instruction) {
-    const box = document.getElementById('post-review-feedback');
-    if (!box) return;
-    box.value = instruction;
-    rqReviewRequestChanges();
+async function _railRewrite(action, tone) {
+    const postId = _rqReviewPostId;
+    if (!postId) return;
+    const msg = _pceEl('pce-ai-msg');
+    const say = (t, kind) => {
+        if (!msg) return;
+        msg.textContent = t || '';
+        msg.className = 'text-[10px] ' + (kind === 'error' ? 'text-red-600 font-semibold' : kind === 'ok' ? 'text-emerald-700 font-semibold' : 'text-gray-400');
+    };
+    const buttons = [...document.querySelectorAll('[data-rewrite-action]')];
+    buttons.forEach(b => { b.disabled = true; b.classList.add('opacity-40'); });
+    say('Rewriting…');
+    try {
+        const res = await fetch('/.netlify/functions/rewrite-post-text', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId, action, tone: tone || '' }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || 'Could not rewrite that.');
+
+        if (typeof d.hashtags === 'string') {
+            const el = _pceEl('post-review-hashtags');
+            if (el) el.value = d.hashtags;
+            say('Hashtags updated — save when you are happy with them.', 'ok');
+        } else if (typeof d.caption === 'string') {
+            const el = _pceEl('post-review-caption');
+            if (el) el.value = d.caption;
+            // The caption lives on the canvas as well as in this hidden field, and the length badges
+            // are driven by it — neither updates on its own when .value is set in script.
+            _pceRefreshCaptionMeta();
+            _rqReviewRenderActive();
+            say(d.overLimit
+                ? 'Rewritten, but it is over this platform\'s limit — trim it before approving.'
+                : 'Caption updated — save when you are happy with it.', d.overLimit ? 'error' : 'ok');
+        }
+        _pceSyncRewriteActions();
+    } catch (e) {
+        say(e.message, 'error');
+    } finally {
+        buttons.forEach(b => { b.disabled = false; b.classList.remove('opacity-40'); });
+        _pceSyncRewriteActions();
+    }
 }
 
 /**
