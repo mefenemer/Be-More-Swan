@@ -1487,7 +1487,11 @@ window.showComplianceModals = function showComplianceModals(force) {
 <!-- Chat with assistant modal — card action opens this in-page instead of navigating to
      assistant-chat.html (window.ChatSession.mount, same widget that page used to own). -->
 <div id="chat-modal" class="hidden fixed inset-0 z-[90] items-center justify-center p-4 bg-gray-900/70 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="chat-modal-title">
-  <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[92vh] flex flex-col overflow-hidden">
+  <!-- The panel needs a DEFINITE height, not just max-h: #chat-modal-root is a flex item whose
+       child (ChatSession's root) sizes itself with height:100%. Against an auto-height panel that
+       percentage does not resolve, so a long reply — a generated post, say — made the chat body
+       taller than the panel, and overflow-hidden clipped it with no scrollbar anywhere. -->
+  <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[92vh] flex flex-col overflow-hidden" style="height: min(85vh, 44rem);">
     <div class="flex items-center justify-between px-5 py-3 border-b border-gray-100 shrink-0">
       <div class="flex items-center gap-3 min-w-0">
         <div class="w-9 h-9 bg-emerald-100 rounded-full flex items-center justify-center text-lg shrink-0">💬</div>
@@ -1509,7 +1513,9 @@ window.showComplianceModals = function showComplianceModals(force) {
       </svg>
       <span>You are interacting with an AI assistant. AI-generated content may be inaccurate — always review before sending or publishing.</span>
     </div>
-    <div id="chat-modal-root" class="flex-1 min-h-[24rem] overflow-hidden"></div>
+    <!-- min-h-0, not a 24rem floor: the floor existed to give this box a size back when the panel
+         had none, and on a short window (landscape phone) it now overflows the panel instead. -->
+    <div id="chat-modal-root" class="flex-1 min-h-0 overflow-hidden"></div>
   </div>
 </div>
 
