@@ -866,7 +866,10 @@
   // map that used to sit here was assigned and never read.
 
   const handlePatterns = {
-    'fb': { regex: /^(https?:\/\/)?(www\.)?facebook\.com\/[\w.-]+$/, example: "https://facebook.com/yourpage" },
+    // Accepts a vanity URL (facebook.com/yourpage) AND the numeric profile form
+    // (facebook.com/profile.php?id=1234…), which is what Facebook gives profiles/pages
+    // without a username. The old pattern only allowed [\w.-]+, so the ?id= query was rejected.
+    'fb': { regex: /^(https?:\/\/)?(www\.)?facebook\.com\/(profile\.php\?id=\d+|[\w.-]+)\/?$/, example: "https://facebook.com/yourpage" },
     'ig': { regex: /^@?[a-zA-Z0-9._]{1,30}$/, example: "@yourbrand" },
     'li': { regex: /^(https?:\/\/)?(www\.)?linkedin\.com\/(in|company)\/[\w-]+\/?$/, example: "https://linkedin.com/in/yourprofile" },
     'x':  { regex: /^@?[a-zA-Z0-9_]{1,15}$/, example: "@yourhandle" },
