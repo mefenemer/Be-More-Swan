@@ -20,6 +20,8 @@ import { and, asc, eq, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { aiAssistants, assistantRecords, chatMessages, chatSessions, kbArticles, kbChunks, masterAssistants, organisations, scheduledPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { appendFooter } from '../../src/utils/disclosure-footer';
+import { resolvePostFooter } from '../../src/utils/post-disclosure';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { consumeTaskCredit } from '../../src/utils/task-credit';
 import { embedTexts } from '../../src/utils/kb-embeddings';
@@ -451,6 +453,14 @@ async function persistSocialPostDraft(
         // single-platform draft stays standalone (null).
         const crosspostGroupId = draft.platforms.length > 1 ? randomUUID() : null;
 
+        // The disclosure is appended to the CAPTION at generation, not at publish — so a post saved
+        // straight out of chat, whose caption is whatever the model returned, carries none at all
+        // while the editor's checkbox reads as enabled. Every other drafting route goes through
+        // buildPlatformCaption, which appends it; this one writes the model's text directly, so it
+        // has to append it here.
+        const footer = await resolvePostFooter(db, orgId, aiAssistantId).catch(() => null);
+        const captionWithFooter = appendFooter(draft.caption, footer);
+
         const created: { id: number; platform: string }[] = [];
         for (const platform of draft.platforms) {
             const isInstagram = platform === 'instagram';
@@ -461,7 +471,7 @@ async function persistSocialPostDraft(
                 platform,
                 postFormat: 'text',
                 publishDate,
-                caption: draft.caption,
+                caption: captionWithFooter,
                 hashtags: draft.hashtags,
                 contentAssetIds: [],
                 status: 'pending_approval',

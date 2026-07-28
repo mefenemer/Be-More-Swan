@@ -19,6 +19,7 @@ import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { normalisePostLink } from '../../src/utils/post-link';
 import { SCHEDULE_ACTIVE_STATUSES } from '../../src/config/post-status';
+import { keepDisclosureOnCaption } from '../../src/utils/post-disclosure';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -242,6 +243,17 @@ export default withLambda(async (event) => {
 
             const editableFields = ['caption', 'linkUrl', 'ctaText', 'hashtags', 'mentions', 'utmParams', 'campaign', 'pillar', 'postFormat', 'contentAssetIds'];
             editableFields.forEach(f => { if (body[f] !== undefined) updates[f] = body[f]; });
+
+            // The disclosure lives INSIDE the caption, so replacing the caption deletes it — while
+            // disclosure_footer_disabled still reads false and the editor's checkbox goes on saying
+            // the post carries one. Ticked box, no disclosure. Re-asserted here, on the write, rather
+            // than in whichever caller happened to overwrite the text: chat's "add it to my draft"
+            // is the route this was reported from, but an assistant rewrite, an applied quality
+            // suggestion and a person deleting the line by hand all do exactly the same thing.
+            // Idempotent, and a post whose owner ticked the footer OFF is left alone.
+            if (updates.caption !== undefined) {
+                updates.caption = await keepDisclosureOnCaption(db, updates.caption, existing);
+            }
 
             // The link is the one editable field that leaves this app: the publishers append it to
             // the post text, and the composer + calendar render it into an `<a href>`. Store only

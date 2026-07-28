@@ -12,9 +12,10 @@
 
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts, organisations, aiAssistants } from '../../db/schema';
+import { scheduledPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
-import { resolveDisclosureFooter, appendFooter, stripFooter } from '../../src/utils/disclosure-footer';
+import { appendFooter, stripFooter } from '../../src/utils/disclosure-footer';
+import { resolvePostFooter } from '../../src/utils/post-disclosure';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -43,25 +44,11 @@ export default withLambda(async (event) => {
     if (!post) return { statusCode: 404, body: JSON.stringify({ error: 'Post not found.' }) };
 
     // Resolve the footer for THIS post exactly as generation did: org setting wins when enabled, else
-    // the per-assistant disclosure; {assistant} → this post's assistant name.
-    const [org] = await db
-        .select({ enabled: organisations.aiDisclosureFooterEnabled, text: organisations.aiDisclosureFooterText })
-        .from(organisations).where(eq(organisations.id, orgId)).limit(1);
-    let assistantName: string | null = null;
-    let perAssistantText: string | null = null;
-    if (post.assistantId) {
-        const [asst] = await db
-            .select({ name: aiAssistants.name, disclosureText: aiAssistants.disclosureText })
-            .from(aiAssistants).where(eq(aiAssistants.id, post.assistantId)).limit(1);
-        assistantName = asst?.name ?? null;
-        perAssistantText = asst?.disclosureText ?? null;
-    }
-    const footer = resolveDisclosureFooter({
-        orgEnabled: org?.enabled ?? false,
-        orgText: org?.text ?? null,
-        perAssistantText,
-        assistantName,
-    });
+    // the per-assistant disclosure; {assistant} → this post's assistant name. Shared with the caption
+    // write path (scheduled-posts PATCH), which has to put the footer back when an edit replaces the
+    // caption wholesale — two copies of this precedence would eventually disagree, and the way that
+    // shows up is a post published with no disclosure on it.
+    const footer = await resolvePostFooter(db, orgId, post.assistantId);
 
     const caption = disabled ? stripFooter(post.caption, footer) : appendFooter(post.caption, footer);
 

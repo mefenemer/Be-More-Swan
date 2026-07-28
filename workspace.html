@@ -10936,9 +10936,15 @@ async function rqReviewSaveAmend() {
                 body: JSON.stringify({ caption, hashtags, linkUrl, ctaText }),
             });
             if (!res.ok) { alert('Could not save your changes.'); return; }
-            // Update the cache so the edit is visible immediately (re-rendered below for the active tab).
+            // Cache what the SERVER stored, not what we sent. The two differ on purpose: a caption
+            // that arrives without the AI disclosure — the assistant's suggestion from chat, an
+            // applied rewrite, a line someone deleted by hand — has it re-appended on the write. Echo
+            // our own text back into the cache and the preview keeps showing the version WITHOUT the
+            // disclosure, next to a ticked "include the disclosure" box, until the page is reloaded.
+            // That mismatch is exactly what this was reported as.
+            const savedPost = (await res.json().catch(() => ({}))).post || null;
             if (_rqPostCache[tid]) {
-                _rqPostCache[tid].caption = caption;
+                _rqPostCache[tid].caption = savedPost && typeof savedPost.caption === 'string' ? savedPost.caption : caption;
                 _rqPostCache[tid].hashtags = hashtags;
                 _rqPostCache[tid].linkUrl = linkUrl || null;
                 _rqPostCache[tid].ctaText = ctaText || null;
@@ -12667,7 +12673,13 @@ async function _pceApplyChatCaption({ caption, hashtags }) {
     await rqReviewSaveAmend();
     // rqReviewSaveAmend reports its own failures in the panel rather than throwing, so confirm the
     // write landed by asking the cache — the card must never claim success for a save that didn't.
-    if ((_rqPostCache[_rqReviewPostId]?.caption || '') !== caption) {
+    //
+    // Compared by PREFIX, not equality: the server re-appends the AI disclosure to a caption that
+    // has just been replaced (the assistant's suggestion arrives without one), so what comes back is
+    // deliberately longer than what was sent. Demanding an exact match would report "could not save"
+    // on every successful save the moment the workspace footer is switched on.
+    const saved = _rqPostCache[_rqReviewPostId]?.caption || '';
+    if (!saved.startsWith(caption.replace(/\s+$/, ''))) {
         throw new Error('Could not save that to your draft — please try again.');
     }
 }
