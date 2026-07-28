@@ -10,6 +10,7 @@ import { eq, and, desc, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, contentAssets, userOrganisations, scheduledPosts } from '../../db/schema';
 import { resolveAssetDisplayUrl } from '../../src/utils/social-publish';
+import { SCHEDULE_ACTIVE_STATUSES, isScheduleActive } from '../../src/config/post-status';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -17,6 +18,41 @@ const jwtSecret = process.env.JWT_SECRET;
 // Draft/scheduled statuses that still need their media — matches the Review Queue's
 // "pending" tab. Posts that are already published/rejected/cancelled don't need a flag.
 const ACTIVE_POST_STATUSES = ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled'];
+
+// Every status worth reading when deciding what an asset is DOING — the drafts above plus the
+// committed ones (see SCHEDULE_ACTIVE_STATUSES). Wider than ACTIVE_POST_STATUSES because a
+// published post is exactly what makes its media "Posted".
+const RELEVANT_POST_STATUSES = [...new Set([...ACTIVE_POST_STATUSES, ...SCHEDULE_ACTIVE_STATUSES])];
+
+/**
+ * What My Content should call this asset, worked out from the posts that actually use it.
+ *
+ * ── Why this is derived rather than read ────────────────────────────────────────────────────────
+ * content_assets.status is a denormalised copy maintained by hand-written transitions in
+ * scheduled-posts.ts (`propagateAssetStatuses`), and those transitions do not cover every way a
+ * post stops being scheduled. Each gap strands an asset on 'scheduled' for ever:
+ *
+ *   • Deleting a post soft-cancels it with a direct db.update that never propagates at all.
+ *   • Sending a scheduled post back for changes moves it to pending_approval/draft/in_review —
+ *     none of which the PATCH's propagation handles.
+ *   • 'missed' is handled nowhere.
+ *   • Replacing a post's media leaves the old asset attached to nothing, still marked scheduled.
+ *
+ * So My Content listed media as Scheduled that no scheduled post referenced — disagreeing with the
+ * Calendar and the Review Queue about the same posts. Deriving from live rows cannot drift: there
+ * is no transition to miss, and it self-heals the rows already stranded. isScheduleActive is the
+ * SAME rule the Calendar reads (src/config/post-status.ts), which is the point.
+ */
+export function deriveAssetStatus(stored: string | null, usage: AssetUsage[]): string {
+    // A moderation verdict, not a post state — the safety benchmark owns this one and no post
+    // should ever overturn it.
+    if (stored === 'rejected') return 'rejected';
+    if (usage.some(u => u.status === 'published')) return 'posted';
+    if (usage.some(u => isScheduleActive(u.status))) return 'scheduled';
+    // It genuinely went out once, even if the post row has since gone. Never demote history.
+    if (stored === 'posted') return 'posted';
+    return 'pending';
+}
 
 type AssetUsage = { id: number; platform: string; publishDate: Date; status: string };
 
@@ -27,6 +63,7 @@ async function findActivePostsByAsset(
     db: any,
     orgId: number | null | undefined,
     assetIds: number[],
+    statuses: string[] = ACTIVE_POST_STATUSES,
 ): Promise<Map<number, AssetUsage[]>> {
     const usage = new Map<number, AssetUsage[]>();
     if (!orgId || assetIds.length === 0) return usage;
@@ -39,7 +76,7 @@ async function findActivePostsByAsset(
         contentAssetIds: scheduledPosts.contentAssetIds,
     }).from(scheduledPosts).where(and(
         eq(scheduledPosts.organisationId, orgId),
-        inArray(scheduledPosts.status, ACTIVE_POST_STATUSES),
+        inArray(scheduledPosts.status, statuses),
     ));
 
     for (const post of posts) {
@@ -224,15 +261,23 @@ export default withLambda(async (event) => {
                 return { ...r, storageUrl: await resolveAssetDisplayUrl(r) };
             }));
 
-            // Issue #55: tell the client which active drafts/scheduled posts use each asset, so
-            // the delete-confirmation modal can warn before an in-use asset is removed.
-            const usageMap = await findActivePostsByAsset(db, orgId, enriched.map(r => r.id));
+            // One read covering drafts AND committed posts: the delete warning wants the drafts,
+            // the status derivation wants both. Asking twice would be two scans of the same table.
+            const usageMap = await findActivePostsByAsset(db, orgId, enriched.map(r => r.id), RELEVANT_POST_STATUSES);
 
             enriched.forEach(r => {
                 if (r.purgedAt) return; // hide physically purged records
-                const bucket = grouped[r.status] ?? [];
-                bucket.push({ ...r, usedInPosts: usageMap.get(r.id) || [] });
-                grouped[r.status] = bucket;
+                const usage = usageMap.get(r.id) || [];
+                // The status SHOWN is derived from the posts, not read from the row — see
+                // deriveAssetStatus for the four ways the stored column drifts to a stale
+                // 'scheduled'. The row keeps its own value; nothing here writes back, so this is a
+                // display correction rather than a migration.
+                const status = deriveAssetStatus(r.status, usage);
+                // usedInPosts drives the "this is in use" delete warning, which is about work that
+                // would BREAK — a published post is done with, so it stays out of that list.
+                const bucket = grouped[status] ?? [];
+                bucket.push({ ...r, status, usedInPosts: usage.filter(u => ACTIVE_POST_STATUSES.includes(u.status)) });
+                grouped[status] = bucket;
             });
 
             return { statusCode: 200, body: JSON.stringify({ assets: grouped }) };
