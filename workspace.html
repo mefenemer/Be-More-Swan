@@ -1173,7 +1173,17 @@ window.showComplianceModals = function showComplianceModals(force) {
                   class="w-full px-3 py-2 text-sm rounded-lg border border-gray-300 bg-white cursor-pointer focus:ring-2 focus:ring-emerald-600 outline-none"></select>
               </div>
 
-              <p class="text-[11px] text-gray-400 mt-3">Click the words, the company name or the web address on the card to edit or place them.</p>
+              <!-- ── Which part of the card you are editing ──────────────────────────────────────
+                   The canvas handles are the other way in (and stay the primary one — the thing you
+                   can see is the thing you click). This row exists because they were the ONLY way
+                   in, which meant the per-element controls — alignment above all — were reachable
+                   only by hitting a dashed band a few pixels tall, and were invisible to anyone who
+                   did not already know they were there. Same _pceSelect either way, so the canvas
+                   and this row can never disagree about what is selected. -->
+              <div class="mt-3">
+                <span class="block text-xs font-bold text-gray-600 mb-1">Edit part of the card</span>
+                <div id="pce-card-parts" class="inline-flex flex-wrap rounded-lg border border-gray-300 overflow-hidden"></div>
+              </div>
 
               <!-- "Save card" and "Undo changes" are gone: every change now saves itself
                    (_pceScheduleCardSave). A card is a rendered PNG, so an unsaved edit was a preview
@@ -1198,7 +1208,8 @@ window.showComplianceModals = function showComplianceModals(force) {
                  has no show/hide checkbox, because a card without its words is not a card. The words
                  themselves are edited on the canvas (double-click them), which is why there is no
                  textarea here. -->
-            <div class="pce-insp hidden" data-insp="headline">
+            <div id="pce-insp-headline" class="pce-insp hidden" data-insp="headline">
+              <p class="text-xs font-bold text-emerald-800 mb-1">Wording</p>
               <p class="text-[11px] text-gray-400 mb-2">Double-click the words on the card to change them, or drag them up and down.</p>
               <span class="block text-xs font-bold text-gray-600 mb-1">Line up</span>
               <div class="inline-flex rounded-lg border border-gray-300 overflow-hidden" data-align-for="headline">
@@ -1210,7 +1221,8 @@ window.showComplianceModals = function showComplianceModals(force) {
 
             <!-- ── The two placeable elements. Identical controls, because they are the same
                  kind of thing — which is the whole reason they share one inspector. ── -->
-            <div class="pce-insp hidden" data-insp="wordmark">
+            <div id="pce-insp-wordmark" class="pce-insp hidden" data-insp="wordmark">
+              <p class="text-xs font-bold text-emerald-800 mb-1.5">Company name</p>
               <label class="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-700 cursor-pointer">
                 <input type="checkbox" id="pce-show-wordmark" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer">
                 Show on the card
@@ -1226,7 +1238,8 @@ window.showComplianceModals = function showComplianceModals(force) {
               <p class="pce-avail-note text-[11px] text-gray-400 mt-3">Drag it up or down on the card to place it.</p>
             </div>
 
-            <div class="pce-insp hidden" data-insp="website">
+            <div id="pce-insp-website" class="pce-insp hidden" data-insp="website">
+              <p class="text-xs font-bold text-emerald-800 mb-1.5">Website</p>
               <label class="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-700 cursor-pointer">
                 <input type="checkbox" id="pce-show-website" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-600 cursor-pointer">
                 Show on the card
@@ -7586,6 +7599,13 @@ function _pceSelect(key, repaintHandles = true) {
     // The pane's "Branded card / Media" title strip is gone with the pane. _PCE_INSP_TITLES is
     // still the vocabulary for what a layer IS — the layer list reads it — there is just no longer
     // a header to write it into.
+    // The Media step mounts the selected card part's inspector, so changing the selection has to
+    // rebuild it — otherwise clicking the company name on the canvas would leave the website's
+    // controls on screen. Guarded on that step actually being open: _railRender restores and
+    // re-mounts every borrowed block, which is not something to do on an unrelated selection.
+    // Re-entry is safe — _railRender never calls back into _pceSelect.
+    if (_railOpen === 'media' && _pceSelectedCardPart() !== _pceMountedCardPart) _railRender();
+    _pceRenderCardParts();
     _pcePaintAlign(key);
     if (repaintHandles) _pcePaintHandles();
     // Selecting the picture describes what is attached. Getting a DIFFERENT one is the picker's job
@@ -7619,6 +7639,9 @@ function _pceSelect(key, repaintHandles = true) {
 
 let _railOpen = null;                 // key of the one open step, or null
 const _railHomes = new Map();         // node id → where it came from, so it can go back
+// Which card part's inspector the Media step currently has mounted, so _pceSelect can tell a real
+// change from a repaint and rebuild the rail only when the answer actually moved.
+let _pceMountedCardPart = null;
 
 // Steps in the order the work happens. `mount` is the id of the block this step borrows.
 // `%A` is replaced with the user's own assistant name — this is "Write with Mabel", not "Write
@@ -7643,7 +7666,21 @@ const _RAIL = [
     // The style chooser (photo/video vs branded card), what is attached, and — for a still — the
     // sound layer. Getting a different picture is the media picker MODAL, opened from the picture
     // itself; the five source buttons used to live inline here and were most of the panel.
-    { key: 'media', title: 'Media',                 blocks: () => ['pce-style-block', 'pce-insp-media'] },
+    // On a branded card the step also carries the controls for whichever PART of the card is
+    // selected — alignment, and show/hide for the name and website. Those inspectors used to be
+    // unreachable: they live in the parked #post-review-inspector aside, which is never shown, and
+    // the rail borrows by id, which they had none of. So _pceSelect faithfully un-hid a panel inside
+    // a hidden parent and nothing appeared — there was no way to align anything on a card.
+    { key: 'media', title: 'Media',                 blocks: () => {
+        const out = ['pce-style-block', 'pce-insp-media'];
+        // Written out in full rather than assembled from a prefix and the part name. Every id the
+        // rail borrows must have a home to be restored to, and post-editor-single-surface.test.ts
+        // proves it by reading the ids straight out of this array — a string built at runtime is
+        // invisible to that check, so these three would silently stop being covered by it.
+        const id = { headline: 'pce-insp-headline', wordmark: 'pce-insp-wordmark', website: 'pce-insp-website' }[_pceSelectedCardPart()];
+        if (id) out.push(id);
+        return out;
+    } },
     // ── Text on a still, and text on a video: two steps, one mechanism ───────────────────────
     // Same block (#pce-insp-overlays), split because the two jobs are not the same job: on a still
     // you place words, on a video you place words AND decide when they appear. A post is one or the
@@ -7974,6 +8011,9 @@ function _railRender() {
     // Anything currently borrowed goes home before the panels are rebuilt — innerHTML on the host
     // would otherwise DESTROY the borrowed nodes, taking #pce-platform-list and friends with them.
     _railRestoreAll();
+    // Nothing is mounted until the loop below says so; without this a closed rail would keep
+    // claiming it still holds the card part it had before, and _pceSelect would skip the rebuild.
+    _pceMountedCardPart = null;
 
     host.innerHTML = _RAIL.map((s, i) => {
         const on = s.key === _railOpen;
@@ -8001,6 +8041,12 @@ function _railRender() {
             // Media, a video puts them in the video step. Resolved per render rather than declared
             // once, because attaching a video changes the answer.
             for (const id of step.blocks(post)) _railMount(id, panel);
+            // Record what Media ended up with, so _pceSelect can tell a genuine selection change
+            // from a repaint and avoid rebuilding the rail on every one.
+            _pceMountedCardPart = step.key === 'media' ? _pceSelectedCardPart() : null;
+            // The switcher lives inside the borrowed card panel, so it is (re)painted here — opening
+            // the step is the moment it first appears, and no selection has necessarily happened.
+            if (step.key === 'media') { _pceRenderCardParts(); _pcePaintAlign(_pceSelection); }
             // _railMount strips `hidden` from whatever it borrows — right for a step's own panel,
             // wrong for the reject form, which must stay shut until "Don't publish this" is pressed.
             // Put it back immediately; rqReviewToggle('reject') is what reveals it.
@@ -9737,6 +9783,28 @@ function _pceFill(v) {
 
 function _pceJustify(align) {
     return align === 'center' ? 'center' : align === 'right' ? 'flex-end' : 'flex-start';
+}
+
+/**
+ * The "Edit part of the card" switcher, and the rule for which card layer is being edited.
+ *
+ * _PCE_PLACEABLE is the same list the canvas draws handles for, so the two routes offer exactly the
+ * same set and stay in step by construction.
+ */
+function _pceRenderCardParts() {
+    const host = _pceEl('pce-card-parts');
+    if (!host) return;
+    host.innerHTML = Object.entries(_PCE_PLACEABLE).map(([key, label], i) => {
+        const on = _pceSelection === key;
+        return `<button type="button" onclick="_pceSelect('${key}')" data-part="${key}"
+          class="px-2.5 py-1.5 text-xs font-bold cursor-pointer transition${i ? ' border-l border-gray-300' : ''} ${
+            on ? 'bg-emerald-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50'}">${_rqEsc(label)}</button>`;
+    }).join('');
+}
+
+/** The card layer whose inspector the Media step should be showing, or null for none. */
+function _pceSelectedCardPart() {
+    return Object.hasOwn(_PCE_PLACEABLE, _pceSelection || '') ? _pceSelection : null;
 }
 
 function _pcePaintShowToggles() {
