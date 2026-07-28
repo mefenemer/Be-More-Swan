@@ -11320,13 +11320,21 @@ function gpChooseMode(mode) {
 
     if (mode === 'ai') {
         gpUpdateConnectedPlatforms(_gpCap?.connectedPlatforms || []);
-        // Default to the first connected platform (falling back to Instagram) so we never preselect
-        // a chip the user can't actually publish to. Ordered by _GP_PLATFORMS rather than a second
-        // hardcoded list — that one still said four platforms and would have skipped a workspace
-        // connected only to Threads or YouTube.
+        // Preselect EVERY connected platform, not just the first one.
+        //
+        // This used to take the first connected platform and select that alone, which on a workspace
+        // with four accounts connected produced a single Instagram draft unless the user noticed the
+        // chips and added the rest. The default was doing the opposite of what it looks like: a post
+        // goes to the accounts you have connected — that is what connecting them meant — and
+        // deselecting a chip is a much easier gesture than remembering to select three.
+        //
+        // Ordered by _GP_PLATFORMS rather than a second hardcoded list, and still never preselects a
+        // chip the user cannot publish to. Instagram remains the fallback ONLY when nothing is
+        // connected, where the draft is still editable and the connection is asked for at approval.
         const connected = gpConnectedPlatforms();
-        const preferred = _GP_PLATFORMS.map(p => p.id).find(p => connected.some(s => s.includes(p)));
-        gpSelectPlatformByValue(preferred || 'instagram');
+        const all = _GP_PLATFORMS.map(p => p.id).filter(p => connected.some(s => s.includes(p)));
+        _gpSelectedPlatforms = all.length ? all : ['instagram'];
+        gpRenderPlatformSelection();
     }
 }
 
@@ -13587,10 +13595,31 @@ async function gpSubmitReject() {
       if (d.type === 'delegate' && d.assistantId) {
         showReply(reply);
         try {
-          const platform = d.platform || undefined;
+          // Every connected account, the way Autopilot does it — NOT just whichever platform the
+          // router happened to name. This path sent `platform` alone and no `platforms`, so
+          // generate-post stored a legacy single-platform job: asking the assistant for a post got
+          // one Instagram draft while the workspace had four accounts connected. The user asked for
+          // a post, not a post on one network.
+          //
+          // A platform the router DID name is kept as the primary, so "post this to LinkedIn" still
+          // leads with LinkedIn. Falls back to that platform alone if capacity cannot be read —
+          // never to a hardcoded default.
+          let platforms = [];
+          try {
+            const cap = await window.checkCapacity();
+            const connected = (cap?.connectedPlatforms || []).map(s => String(s).toLowerCase());
+            platforms = window.PlatformConstants.all.filter(p => connected.includes(p.id)).map(p => p.id);
+          } catch { /* fall through to the named platform */ }
+          if (d.platform && !platforms.includes(d.platform)) platforms.unshift(d.platform);
+          else if (d.platform) platforms = [d.platform, ...platforms.filter(p => p !== d.platform)];
+          const platform = d.platform || platforms[0] || undefined;
           const r = await fetch('/.netlify/functions/generate-post', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ assistantId: d.assistantId, platform, contextPrompt: d.brief || command, triggerType: 'on_demand' }),
+            body: JSON.stringify({
+              assistantId: d.assistantId, platform,
+              platforms: platforms.length ? platforms : undefined,
+              contextPrompt: d.brief || command, triggerType: 'on_demand',
+            }),
           });
           if (!r.ok) throw 0;
           showReply(`${reply}<div class="cmdbar-followup"><button type="button" class="cmdbar-go">View in Review →</button></div>`);
