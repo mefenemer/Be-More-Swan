@@ -1113,8 +1113,10 @@ window.showComplianceModals = function showComplianceModals(force) {
                     class="mt-1.5 text-[11px] font-bold text-amber-800 underline hover:text-amber-900 cursor-pointer">Keep the card instead</button>
                 </div>
                 <!-- Measured off the media element on the canvas, not read from content_assets —
-                     see _pceRenderMediaProps. Hidden until there is something to report. -->
-                <dl id="insp-media-props" class="hidden mb-3 grid grid-cols-2 gap-x-2 gap-y-1.5 rounded-lg bg-gray-50 border border-gray-100 px-2.5 py-2"></dl>
+                     see _pceRenderMediaProps. Empty and hidden unless the media has a problem worth
+                     acting on (too small to render sharply, or a shape nothing publishes); a healthy
+                     asset says nothing at all. -->
+                <div id="insp-media-props" class="hidden mb-3 grid grid-cols-2 gap-x-2 gap-y-1.5 rounded-lg bg-amber-50 border border-amber-200 px-2.5 py-2"></div>
                 <button type="button" onclick="_pceOpenMediaPicker()"
                   class="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-bold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer">
                   <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16l4.6-4.6a2 2 0 012.8 0L16 16m-2-2 1.6-1.6a2 2 0 012.8 0L20 14M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
@@ -8919,11 +8921,9 @@ function _pceBackfillAssetMetrics() {
     }).catch(() => { /* best effort: the next post that shows this asset will try again */ });
 }
 
-function _pceFmtDuration(s) {
-    const total = Math.round(s);
-    const m = Math.floor(total / 60);
-    return `${m}:${String(total % 60).padStart(2, '0')}`;
-}
+// _pceFmtDuration is gone with the Duration row it existed for. Duration is still MEASURED — the
+// backfill above sends it to content_assets, which is what lets the server route video formats — it
+// is just no longer printed at the reader, since a clip's length is not a problem on its own.
 
 function _pceRenderMediaProps() {
     const dl = document.getElementById('insp-media-props');
@@ -8944,18 +8944,20 @@ function _pceRenderMediaProps() {
         return hide();
     }
 
-    const ratio = (window.PlatformPostPreview && window.PlatformPostPreview.ratioLabel)
-        ? window.PlatformPostPreview.ratioLabel(m.w / m.h) : null;
-    const rows = [
-        ['Type', m.kind],
-        ['Resolution', `${m.w} × ${m.h}`],
-        ...(ratio ? [['Aspect', ratio]] : []),
-        ...(m.durationS != null ? [['Duration', _pceFmtDuration(m.durationS)]] : []),
-    ];
-    dl.innerHTML = rows.map(([k, v]) => `<div class="min-w-0">
-        <dt class="text-[9px] font-bold uppercase tracking-wider text-gray-400">${_rqEsc(k)}</dt>
-        <dd class="text-[11px] font-semibold text-gray-700 truncate">${_rqEsc(v)}</dd>
-      </div>`).join('');
+    // Only speak when there is something to act on. This used to print Type / Resolution / Aspect
+    // for every asset unconditionally — three rows of raw measurement that said the same thing about
+    // a perfect photo as about a broken one, and left the reader to know that "1.63:1" is not a
+    // shape anything publishes. The judgement lives with the ratio rules it uses
+    // (PlatformPostPreview.mediaAdvice), not here.
+    const advice = window.PlatformPostPreview?.mediaAdvice?.(m) || null;
+    if (!advice) return hide();
+
+    dl.innerHTML = `<div class="col-span-2 flex gap-2">
+        <span aria-hidden="true" class="text-amber-600 shrink-0">⚠</span>
+        <div class="min-w-0 space-y-1">
+          ${advice.lines.map(t => `<p class="text-[11px] text-amber-800">${_rqEsc(t)}</p>`).join('')}
+        </div>
+      </div>`;
     dl.classList.remove('hidden');
 }
 

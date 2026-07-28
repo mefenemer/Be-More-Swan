@@ -116,15 +116,28 @@
     return { level: 'info', text: `This slot is designed for ${label}. We couldn't read this asset's dimensions to check it.` };
   }
 
-  /** Human-readable ratio for a measured asset, e.g. 1.78 → "16:9". */
-  function _ratioLabel(ratio) {
+  /**
+   * The nearest ratio a platform actually publishes, and whether it is near ENOUGH to claim.
+   *
+   * Split out from _ratioLabel because two callers need different halves of the same answer: the
+   * label wants a string either way, while mediaAdvice needs to know whether anything matched at
+   * all. Sniffing that back out of the string ("does it end in :1?") would misread 1:1 and 1.91:1,
+   * which are legitimate matches of exactly that shape.
+   */
+  function _nearestRatio(ratio) {
     const known = [[1, 1], [4, 5], [9, 16], [16, 9], [1.91, 1]];
     let best = null, bestErr = Infinity;
     for (const [w, h] of known) {
       const err = Math.abs(ratio - w / h);
       if (err < bestErr) { bestErr = err; best = `${w}:${h}`; }
     }
-    return bestErr / ratio < 0.06 ? best : `${ratio.toFixed(2)}:1`;
+    return { label: best, matched: bestErr / ratio < 0.06 };
+  }
+
+  /** Human-readable ratio for a measured asset, e.g. 1.78 → "16:9". */
+  function _ratioLabel(ratio) {
+    const near = _nearestRatio(ratio);
+    return near.matched ? near.label : `${ratio.toFixed(2)}:1`;
   }
 
   // ── Media placeholder ────────────────────────────────────────────────────
@@ -400,9 +413,49 @@
     };
   }
 
+  // ── Is there anything WRONG with this media? ────────────────────────────
+  // The post editor's media panel used to print Type / Resolution / Aspect for every asset, always.
+  // That is diagnostic data with no decision attached: "1.63:1" only means something if you already
+  // know the five ratios platforms publish, and a healthy 1080×1350 photo got the same three rows as
+  // a broken one. So the panel now asks this instead, and says nothing when the answer is nothing.
+  //
+  // Deliberately narrow — only the two things the composer does not already tell you elsewhere:
+  //
+  //   • TOO SMALL. Nothing else mentions it. Platforms render feed images at about 1080px wide and
+  //     upscale anything narrower, so it publishes soft — invisibly, until it is live.
+  //   • A SHAPE NO PLATFORM PUBLISHES. The per-platform tab already states the OUTCOME
+  //     ("auto-cropped"); this states the CAUSE once, which is the part a raw ratio was hiding.
+  //     Phrased as "will be cropped somewhere", never as a per-platform verdict — the tabs own that,
+  //     and Facebook/LinkedIn/X are far more permissive than Instagram.
+
+  /** The width platforms render a feed image at. Narrower than this is upscaled, and looks soft. */
+  const RECOMMENDED_MIN_WIDTH = 1080;
+
+  /**
+   * What is worth saying about this asset, or null when it is fine.
+   * @returns {{ level: 'warn'|'info', lines: string[] } | null}
+   */
+  function _mediaAdvice(metrics) {
+    if (!metrics || !metrics.w || !metrics.h) return null;
+    const { w, h, kind } = metrics;
+    const lines = [];
+
+    if (w < RECOMMENDED_MIN_WIDTH) {
+      lines.push(`${w} × ${h} is below the ${RECOMMENDED_MIN_WIDTH}px width platforms render at, so it may publish soft.`);
+    }
+    // A ratio nothing matched is a ratio no format declares. Videos are left alone: their framing is
+    // the format router's call, and it weighs duration too.
+    const near = _nearestRatio(w / h);
+    if (kind !== 'Video' && !near.matched) {
+      lines.push(`${(w / h).toFixed(2)}:1 isn’t a shape any platform publishes, so it will be cropped — the platform tabs say where.`);
+    }
+    return lines.length ? { level: 'warn', lines } : null;
+  }
+
   // ratioLabel is exported so the post editor's media panel can name an aspect ratio the same way
   // this component's mismatch warning does. Exported rather than copied: two implementations would
   // eventually disagree, and then the inspector would call a clip 9:16 while the preview warned it
-  // was not — the same drift the overlay-geometry test exists to prevent.
-  window.PlatformPostPreview = { render, ratioLabel: _ratioLabel };
+  // was not — the same drift the overlay-geometry test exists to prevent. mediaAdvice is exported for
+  // the same reason: the judgement of "is this asset a problem" belongs with the ratio rules it uses.
+  window.PlatformPostPreview = { render, ratioLabel: _ratioLabel, mediaAdvice: _mediaAdvice, RECOMMENDED_MIN_WIDTH };
 })();
