@@ -90,9 +90,36 @@ check('offset counts groups, so the client must send a GROUP count', () => {
 });
 
 // ── The wiring, at source level ─────────────────────────────────────────────────────────────────
+/** The endpoint's opt-in decision, reproduced exactly. */
+function pagingFor(limit?: string) {
+    const rawLimit = limit;
+    const paged = rawLimit !== undefined && rawLimit !== null && rawLimit !== '';
+    const pageSize = paged ? Math.min(50, Math.max(1, Number(rawLimit) || 10)) : 0;
+    return { paged, pageSize };
+}
+
+check('a caller that sends no limit is NOT paged', () => {
+    // The regression this exists for: pageSize was clamped with Math.max(1, ...) BEFORE the opt-in
+    // test, and Math.max(1, Number(undefined) || 0) is 1 — so `paged = pageSize > 0` was true for
+    // every caller that had asked for nothing, and each got a single group back. The workspace queue
+    // hid it by always sending limit; the assistant-detail Review tab showed one post.
+    assert.deepEqual(pagingFor(undefined), { paged: false, pageSize: 0 }, 'absent limit must never page');
+    assert.deepEqual(pagingFor(''), { paged: false, pageSize: 0 }, 'an empty limit is not a request to page');
+});
+
+check('an explicit limit pages, and junk falls back to a usable page', () => {
+    assert.deepEqual(pagingFor('10'), { paged: true, pageSize: 10 });
+    assert.deepEqual(pagingFor('1'), { paged: true, pageSize: 1 });
+    assert.deepEqual(pagingFor('999'), { paged: true, pageSize: 50 }, 'capped');
+    // Opting in with nonsense must still yield a page, never a silent 1.
+    assert.deepEqual(pagingFor('abc'), { paged: true, pageSize: 10 });
+    assert.deepEqual(pagingFor('0'), { paged: true, pageSize: 10 });
+});
+
 check('paging is opt-in, so the other callers still get the whole list', () => {
     const fn = readFileSync(path.join(ROOT, 'netlify/functions/get-social-drafts.ts'), 'utf8');
-    assert.match(fn, /const paged = pageSize > 0/, 'no limit param ⇒ unpaged');
+    assert.match(fn, /const paged = rawLimit !== undefined/, 'presence of the param decides, not a number derived from it');
+    assert.ok(!/const paged = pageSize > 0/.test(fn), 'deriving the opt-in from a clamped number is the bug');
     assert.match(fn, /\.limit\(paged \? pageIds!\.length : 50\)/, 'unpaged keeps the original ceiling');
     // _pceRefetchPostGroup is the one that matters: it refetches after every card save, and a
     // silently-paged response would stop updating posts outside the first page.

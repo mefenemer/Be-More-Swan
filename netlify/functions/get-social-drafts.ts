@@ -37,9 +37,16 @@ export default withLambda(async (event) => {
         // the Review Queue collapses those into a single card. A row-level LIMIT would cut a group
         // in half — Facebook on page 1, its LinkedIn sibling on page 2 — and render the same post
         // as two different cards, each claiming to be the whole thing.
-        const pageSize = Math.min(50, Math.max(1, Number(event.queryStringParameters?.limit) || 0));
+        // Whether the caller opted in is decided by the PRESENCE of the param, never by a number
+        // derived from it. `Math.max(1, Number(undefined) || 0)` is 1, not 0 — so clamping first and
+        // then testing `pageSize > 0` made every unpaged caller a paged one asking for a single
+        // group. The workspace queue looked fine because it sends limit explicitly; everything that
+        // does not (the assistant-detail Review tab, the column counts, _pceRefetchPostGroup) got
+        // exactly one post back.
+        const rawLimit = event.queryStringParameters?.limit;
+        const paged = rawLimit !== undefined && rawLimit !== null && rawLimit !== '';
+        const pageSize = paged ? Math.min(50, Math.max(1, Number(rawLimit) || 10)) : 0;
         const pageOffset = Math.max(0, Number(event.queryStringParameters?.offset) || 0);
-        const paged = pageSize > 0;
 
         const baseWhere = and(
             eq(scheduledPosts.organisationId, organisationId),
