@@ -247,45 +247,51 @@ const ICONS = {
   cog:      `<svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><circle cx="12" cy="12" r="3"/></svg>`,
 };
 
-// ── Role metadata: connected apps + core outcomes rendered on each card ──────
+// ── Role metadata: core outcomes rendered on each card ───────────────────────
 // Keyed by roleKey (see db/seed-catalog.ts). Roles without an entry simply
-// render without the extra blocks.
+// render without the outcomes list. NOTE: the "Works with" chips are NOT here —
+// they come from the DB (master_assistants.integrations, served by
+// master-assistants.ts) so the card matches the detail view. Only these benefit
+// bullets remain hardcoded.
 const ROLE_META = {
-  inbox_manager:             { apps: ['Gmail', 'Outlook', 'Slack'],                 outcomes: ['Drafts replies to routine email', 'Flags urgent messages instantly', 'Keeps your inbox at zero'] },
-  calendar_coordinator:      { apps: ['Google Calendar', 'Outlook', 'Zoom'],        outcomes: ['Negotiates times across time zones', 'Prepares daily schedule briefings', 'Ends booking ping-pong for good'] },
-  travel_logistics_booker:   { apps: ['Gmail', 'Google Calendar', 'Booking.com'],   outcomes: ['Sources flights & hotels in budget', 'Builds complete itineraries', 'Books within your guardrails'] },
-  document_organizer:        { apps: ['Google Drive', 'Dropbox', 'Notion'],         outcomes: ['Auto-files and tags documents', 'Keeps cloud folders tidy', 'Finds any file in seconds'] },
-  social_media_manager:      { apps: ['Meta', 'Instagram', 'LinkedIn', 'Notion'],   outcomes: ['Auto-schedules posts', 'Matches brand tone', 'Tracks engagement'] },
-  lead_qualifier:            { apps: ['HubSpot', 'LinkedIn', 'Gmail'],              outcomes: ['Scores every inbound lead', 'Drafts personalised outreach', 'Keeps sales focused on winners'] },
-  seo_content_strategist:    { apps: ['WordPress', 'Search Console', 'Notion'],     outcomes: ['Researches winning keywords', 'Drafts SEO-ready posts', 'Keeps brand voice consistent'] },
-  crm_enricher:              { apps: ['HubSpot', 'Salesforce', 'LinkedIn'],         outcomes: ['Fills missing contact data', 'Enriches every new lead', 'Keeps your CRM spotless'] },
-  newsletter_editor:         { apps: ['Mailchimp', 'Substack', 'Notion'],           outcomes: ['Curates weekly industry news', 'Formats ready-to-send campaigns', 'Grows your audience on schedule'] },
-  vendor_communications_rep: { apps: ['Gmail', 'Slack', 'Google Sheets'],           outcomes: ['Chases suppliers for updates', 'Collects and compares quotes', 'Keeps procurement moving'] },
-  inventory_tracker:         { apps: ['Shopify', 'Google Sheets', 'Slack'],         outcomes: ['Monitors stock in real time', 'Drafts reorder requests', 'Prevents costly stockouts'] },
-  sop_writer:                { apps: ['Notion', 'Google Docs', 'Loom'],             outcomes: ['Turns voice notes into manuals', 'Documents processes as you work', 'Standardises your operations'] },
-  tier1_support_agent:       { apps: ['Zendesk', 'Intercom', 'Gmail'],              outcomes: ['Resolves common FAQs instantly', 'Escalates with full context', 'Cuts first-response times'] },
-  client_onboarding_guide:   { apps: ['Gmail', 'Calendly', 'Notion'],               outcomes: ['Sends polished welcome packets', 'Chases missing forms politely', 'Schedules every kick-off call'] },
-  review_reputation_manager: { apps: ['Trustpilot', 'Google Business', 'Meta'],     outcomes: ['Monitors reviews 24/7', 'Drafts on-brand responses', 'Protects your reputation'] },
-  standup_summarizer:        { apps: ['Slack', 'Teams', 'Jira'],                    outcomes: ['Chases daily updates for you', 'Compiles one clean summary', 'Replaces status meetings'] },
-  meeting_note_taker:        { apps: ['Zoom', 'Teams', 'Notion'],                   outcomes: ['Transcribes every meeting', 'Extracts clear action items', 'Assigns owners instantly'] },
-  status_report_generator:   { apps: ['Jira', 'Asana', 'Monday.com'],               outcomes: ['Pulls live project data', 'Writes executive summaries', 'Keeps leadership in the loop'] },
-  accounts_receivable_clerk: { apps: ['Xero', 'QuickBooks', 'Gmail'],               outcomes: ['Chases unpaid invoices', 'Drafts payment reminders', 'Protects your cash flow'] },
-  expense_categorizer:       { apps: ['Xero', 'QuickBooks', 'Google Drive'],        outcomes: ['Reads scanned receipts', 'Matches tax categories', 'Keeps books audit-ready'] },
+  inbox_manager:             { outcomes: ['Drafts replies to routine email', 'Flags urgent messages instantly', 'Keeps your inbox at zero'] },
+  calendar_coordinator:      { outcomes: ['Negotiates times across time zones', 'Prepares daily schedule briefings', 'Ends booking ping-pong for good'] },
+  travel_logistics_booker:   { outcomes: ['Sources flights & hotels in budget', 'Builds complete itineraries', 'Books within your guardrails'] },
+  document_organizer:        { outcomes: ['Auto-files and tags documents', 'Keeps cloud folders tidy', 'Finds any file in seconds'] },
+  social_media_manager:      { outcomes: ['Auto-schedules posts', 'Matches brand tone', 'Tracks engagement'] },
+  lead_qualifier:            { outcomes: ['Scores every inbound lead', 'Drafts personalised outreach', 'Keeps sales focused on winners'] },
+  seo_content_strategist:    { outcomes: ['Researches winning keywords', 'Drafts SEO-ready posts', 'Keeps brand voice consistent'] },
+  crm_enricher:              { outcomes: ['Fills missing contact data', 'Enriches every new lead', 'Keeps your CRM spotless'] },
+  newsletter_editor:         { outcomes: ['Curates weekly industry news', 'Formats ready-to-send campaigns', 'Grows your audience on schedule'] },
+  vendor_communications_rep: { outcomes: ['Chases suppliers for updates', 'Collects and compares quotes', 'Keeps procurement moving'] },
+  inventory_tracker:         { outcomes: ['Monitors stock in real time', 'Drafts reorder requests', 'Prevents costly stockouts'] },
+  sop_writer:                { outcomes: ['Turns voice notes into manuals', 'Documents processes as you work', 'Standardises your operations'] },
+  tier1_support_agent:       { outcomes: ['Resolves common FAQs instantly', 'Escalates with full context', 'Cuts first-response times'] },
+  client_onboarding_guide:   { outcomes: ['Sends polished welcome packets', 'Chases missing forms politely', 'Schedules every kick-off call'] },
+  review_reputation_manager: { outcomes: ['Monitors reviews 24/7', 'Drafts on-brand responses', 'Protects your reputation'] },
+  standup_summarizer:        { outcomes: ['Chases daily updates for you', 'Compiles one clean summary', 'Replaces status meetings'] },
+  meeting_note_taker:        { outcomes: ['Transcribes every meeting', 'Extracts clear action items', 'Assigns owners instantly'] },
+  status_report_generator:   { outcomes: ['Pulls live project data', 'Writes executive summaries', 'Keeps leadership in the loop'] },
+  accounts_receivable_clerk: { outcomes: ['Chases unpaid invoices', 'Drafts payment reminders', 'Protects your cash flow'] },
+  expense_categorizer:       { outcomes: ['Reads scanned receipts', 'Matches tax categories', 'Keeps books audit-ready'] },
 };
 
 // Renders the core-outcomes bullets + connected-app chips for a card
 function metaBlocks(a) {
   const meta = ROLE_META[a.roleKey];
-  if (!meta) return '';
-  const outcomes = (meta.outcomes || []).map(o => `
+  const outcomes = ((meta && meta.outcomes) || []).map(o => `
     <li class="flex items-start gap-2 text-sm text-gray-600">
       <svg class="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
       <span>${escHtml(o)}</span>
     </li>`).join('');
-  const apps = (meta.apps || []).map(app => `
+  // "Works with" chips come from the DB (master_assistants.integrations, served by
+  // master-assistants.ts) so the card matches the detail view exactly — they used to be hardcoded
+  // in ROLE_META.apps and had drifted from the real integrations.
+  const apps = (Array.isArray(a.integrations) ? a.integrations : []).map(app => `
     <span class="inline-flex items-center gap-1.5 bg-white border border-gray-200 rounded-full px-2.5 py-1 text-[11px] font-semibold text-gray-600">
       <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>${escHtml(app)}
     </span>`).join('');
+  if (!outcomes && !apps) return '';
   return `
     ${outcomes ? `<ul class="space-y-1.5 mb-4">${outcomes}</ul>` : ''}
     ${apps ? `<div class="flex flex-wrap gap-1.5 items-center mb-1">

@@ -3020,12 +3020,11 @@ function formatCurrency(amount, currency) {
     // ── Busy cursor ──────────────────────────────────────────────────────
     // "This is working, wait" for an action with a visible delay.
     //
-    // The class goes on <body>, NOT on the control that was clicked, because swan-cursor.js clears
-    // an inline style.cursor on mouseup AND mouseleave — an inline 'wait' would be wiped the instant
-    // the pointer moved off the button, which is exactly when someone waiting starts moving it. The
-    // `body.bms-busy *` rule with !important is also what beats the favicon cursor that same script
-    // writes inline while a button is held down. The rule lives in the hand-written <style> block at
-    // the end of this file, so no Tailwind rebuild is involved.
+    // The class goes on <body>, NOT on the control that was clicked, so the wait state survives the
+    // pointer moving off the button mid-action (exactly when someone waiting starts moving it). The
+    // `body.bms-busy *` rule with !important overrides any element-level cursor for the duration. The
+    // rule lives in the hand-written <style> block at the end of this file, so no Tailwind rebuild is
+    // involved.
     //
     // Refcounted: two overlapping operations must not have the first to finish clear the cursor out
     // from under the second.
@@ -5179,7 +5178,6 @@ function formatCurrency(amount, currency) {
      assistants that consume it. -->
 <script src="/src/components/assistant-my-content.js"></script>
 <script src="/billing.js"></script>
-<script src="/swan-cursor.js"></script>
 <script src="/tour.js"></script>
 
 <!-- US-GOV-2.1.1: Review Queue + Pending Badge JS -->
@@ -13882,10 +13880,8 @@ async function gpSubmitReject() {
 <style>
   /* Busy cursor — set by window.setBusyCursor/withBusyCursor while a slow action runs.
 
-     On <body> and every descendant, with !important, for two reasons that are both about
-     swan-cursor.js: it writes the favicon cursor INLINE on mousedown (which a plain rule would
-     lose to), and it clears that inline value on mouseup and mouseleave (which would wipe a
-     cursor we had set on the button itself the moment the pointer moved away).
+     On <body> and every descendant, with !important, so the wait cursor wins over any inline
+     or element-level cursor (e.g. a button's own pointer) for the duration of the action.
 
      Plain CSS here rather than a Tailwind utility: rebuilding style.css to add one class churns
      unrelated selectors across the whole file. */
