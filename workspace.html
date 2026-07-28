@@ -7490,18 +7490,16 @@ function _pceCloseMediaPicker() {
     _rqRestoreMediaPanel();
 }
 
-/** Make a card from the picker, then get out of the way — the card IS the answer to "which media". */
 /**
- * Make a branded card from the media picker.
+ * Make a card from the picker, then get out of the way — the card IS the answer to "which media".
  *
- * Rendering the card is a server round trip plus a refetch, so there is a visible pause between the
- * click and the card appearing. The status line alone did not carry it: it sits below the button and
- * is easy to miss, so the action read as "nothing happened". Hence the wait cursor, which is where
- * the user is already looking, and the disabled button.
+ * The wait cursor and the double-create guard are NOT here: they live in _pceCreateBrandCard, which
+ * both this and the Post Style chooser go through. Putting them in this wrapper is what left the
+ * Style tile — the "Branded card" in the Media step — with no feedback at all.
  *
- * Disabling is not just tidiness. edit-brand-card decides it is CREATING from `!existing`, so two
- * clicks close enough together both find no card and both make one — the second orphaning the
- * first's asset. Not knowing to wait is exactly what produces that second click.
+ * The button is still disabled here, because dimming the control you actually pressed is local to
+ * this surface. It is re-enabled in a `finally`: the picker closes on the happy path but the button
+ * outlives it, so leaving it disabled would break the NEXT card rather than this one.
  */
 async function _pceCreateBrandCardFromPicker() {
     const btn = document.getElementById('pce-media-modal-card-btn');
@@ -7510,10 +7508,8 @@ async function _pceCreateBrandCardFromPicker() {
     if (msg) { msg.textContent = 'Making the card…'; msg.className = 'block mt-1.5 text-[11px] font-semibold text-gray-500'; }
     if (btn) { btn.disabled = true; btn.classList.add('opacity-60'); }
     try {
-        await window.withBusyCursor(() => _pceCreateBrandCard());
+        await _pceCreateBrandCard();
     } finally {
-        // The picker closes on the happy path, but this button outlives it — the same element is
-        // reused for the next post, so leaving it disabled would break the NEXT card, not this one.
         if (btn) { btn.disabled = false; btn.classList.remove('opacity-60'); }
     }
     if (msg) msg.textContent = '';
@@ -8652,10 +8648,12 @@ function _pceRenderStyle() {
     // offered a card it could never publish.
     const spec = window.PlatformConstants.get(post.platform);
     const videoOnly = !!(spec && spec.mediaMandatory && spec.mediaKind === 'video');
-    const cardOff = isVideo || videoOnly;
+    // Making a card is a server render, so the tile says so while it runs — and goes dead, because
+    // pressing it twice is what creates two cards.
+    const cardOff = isVideo || videoOnly || _pceCardBusy;
     const opts = [
-        { key: 'media', n: videoOnly ? 'Video' : 'Photo or video', d: 'Your own media', on: !isCard },
-        { key: 'card',  n: 'Branded card',   d: 'Words on your colours', on: isCard, off: cardOff },
+        { key: 'media', n: videoOnly ? 'Video' : 'Photo or video', d: 'Your own media', on: !isCard, off: _pceCardBusy },
+        { key: 'card',  n: 'Branded card',   d: _pceCardBusy ? 'Making the card…' : 'Words on your colours', on: isCard, off: cardOff },
     ];
     host.innerHTML = opts.map(o => `<button type="button" ${o.off ? 'disabled' : ''}
         onclick="_pceChooseStyle('${o.key}')"
@@ -8678,7 +8676,18 @@ function _pceChooseStyle(key) {
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
     if (!post) return;
     const isCard = !!post.brandCard;
-    if (key === 'card' && !isCard) { _pceCreateBrandCard(); return; }
+    // Awaited so the tile repaints as busy and stays that way until the card exists. Fire-and-forget
+    // left the chooser looking idle through the whole render — this is the "Branded card" people
+    // press in the Media step, and it was the one route with no feedback at all.
+    if (key === 'card' && !isCard) {
+        // Repaint immediately so the tile reads as busy, then again when the card lands. Awaited
+        // rather than fire-and-forget: the chooser used to look idle through the whole render, and
+        // this is the "Branded card" people press in the Media step — the one route that had no
+        // feedback at all.
+        const done = _pceCreateBrandCard();
+        _pceRenderStyle();
+        return done.then(_pceRenderStyle);
+    }
     // Going the other way does NOT delete the card — it shows the sourcing panel so a replacement
     // can be chosen, and the card stays until one is. See _pceSwapCardForMedia.
     if (key === 'media' && isCard) {
@@ -9167,6 +9176,20 @@ async function _pceRefetchPostGroup(post) {
     } catch { /* the write already succeeded — a stale thumbnail is not worth failing it */ }
 }
 
+// True while a card is being made, by EITHER route. Guards the double-create: edit-brand-card
+// decides it is creating from `!existing`, so two requests in flight both find no card and both make
+// one, the second orphaning the first's asset.
+let _pceCardBusy = false;
+
+/**
+ * Make this post a branded card.
+ *
+ * The wait cursor lives HERE, not in the callers, because there are two of them and they are easy to
+ * miss: the media picker's "make a branded card" button, and the Post Style chooser's "Branded card"
+ * tile in the Media step. The cursor was first added to the picker's wrapper only, which left the
+ * Style tile — the one people actually reach for in step 2 — with no feedback at all. Anything that
+ * makes a card goes through this function, so this is the one place that cannot be forgotten.
+ */
 async function _pceCreateBrandCard() {
     const postId = _rqReviewPostId;
     const post = postId != null ? _rqPostCache[postId] : null;
@@ -9177,9 +9200,11 @@ async function _pceCreateBrandCard() {
     // the Post Style chooser has #pce-style-msg. Whichever is on screen gets the news.
     const msg = _pceEl('pce-media-modal-msg') || _pceEl('pce-style-msg');
     const say = (t, kind) => { if (msg) { msg.textContent = t || ''; msg.className = 'block mt-1.5 text-[11px] font-semibold ' + (kind === 'error' ? 'text-red-600' : kind === 'ok' ? 'text-emerald-700' : 'text-gray-500'); } };
-    if (!post) return;
+    if (!post || _pceCardBusy) return;
     const seed = String(post.caption || '').split('\n').map(s => s.trim()).filter(Boolean)[0] || 'Your headline here';
     say('Making the card…');
+    _pceCardBusy = true;
+    window.setBusyCursor(true);
     try {
         const res = await fetch('/.netlify/functions/edit-brand-card', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -9205,6 +9230,11 @@ async function _pceCreateBrandCard() {
         _pceSetMsg('');
     } catch (err) {
         say(err.message || 'Could not make a card.', 'error');
+    } finally {
+        // `finally`, so a failed render cannot strand the page in a wait cursor, nor leave the busy
+        // flag set and refuse every later attempt to make a card.
+        _pceCardBusy = false;
+        window.setBusyCursor(false);
     }
 }
 
