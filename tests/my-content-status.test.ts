@@ -163,17 +163,30 @@ check('the endpoint serves the derived id, not the stored column', () => {
 });
 
 // ── The source pills ────────────────────────────────────────────────────────────────────────────
-/** The real _sourceInfo, lifted out of my-content.js. */
-function sourceInfo(asset: Record<string, unknown>): { label: string } | null {
+/** Lift a top-level function out of the my-content.js IIFE and make it callable. */
+function clientFn<T>(names: string[]): T {
     const src = readFileSync(path.join(import.meta.dirname, '..', 'my-content.js'), 'utf8');
-    const i = src.indexOf('function _sourceInfo(');
-    let d = 0, body = '';
-    for (let j = src.indexOf('{', i); j < src.length; j++) {
-        if (src[j] === '{') d++;
-        else if (src[j] === '}') { d--; if (d === 0) { body = src.slice(i, j + 1); break; } }
-    }
-    return new Function(`${body}; return _sourceInfo;`)()(asset);
+    const bodies = names.map(name => {
+        const i = src.indexOf(`function ${name}(`);
+        if (i < 0) throw new Error(`${name} not found in my-content.js`);
+        let d = 0;
+        for (let j = src.indexOf('{', i); j < src.length; j++) {
+            if (src[j] === '{') d++;
+            else if (src[j] === '}') { d--; if (d === 0) return src.slice(i, j + 1); }
+        }
+        throw new Error(`unbalanced ${name}`);
+    });
+    // MEDIA_TYPES is a const the helpers close over; lift it too.
+    const consts = src.slice(src.indexOf('const MEDIA_TYPES = {'), src.indexOf('/** Which of MEDIA_TYPES'));
+    return new Function(`${consts}\n${bodies.join('\n')}\nreturn ${names[names.length - 1]};`)() as T;
 }
+
+/**
+ * The real _sourceInfo, lifted out of my-content.js — together with _sourceKey, which it now
+ * branches on. Lifting it alone used to work and stopped the moment the two were joined, which is
+ * itself the point: they are one rule in two places.
+ */
+const sourceInfo = clientFn<(a: Record<string, unknown>) => { label: string } | null>(['_sourceKey', '_sourceInfo']);
 
 check('the pills name the assistant when we know it', () => {
     assert.strictEqual(sourceInfo({ assetType: 'image', provider: 'fal', assistantName: 'Ava' })?.label,
@@ -197,6 +210,71 @@ check('Canva and your own uploads are untouched by the rename', () => {
     assert.strictEqual(sourceInfo({ assetType: 'image', provider: 'canva', assistantName: 'Ava' })?.label, 'From Canva');
     assert.strictEqual(sourceInfo({ assetType: 'image', provider: null, assistantName: 'Ava' })?.label, 'Your Upload');
     assert.strictEqual(sourceInfo({ assetType: 'link', provider: 'fal', assistantName: 'Ava' }), null);
+});
+
+// ── Filter & group facets ───────────────────────────────────────────────────────────────────────
+// Two facets the library can be sliced by. Each has ONE definition shared by the filter, the
+// grouping and the badge — the point being that anything a badge says must be reachable by
+// filtering for it.
+
+const mediaTypeKey = clientFn<(a: unknown) => string>(['_mediaTypeKey']);
+const sourceKey = clientFn<(a: unknown) => string>(['_sourceKey']);
+
+check('a branded card is its own media type, not an image', () => {
+    // Stored as an image with provider 'brand_card'. Nobody hunting for "the cards I made" thinks
+    // of them as images, and lumping them in would make the Image filter useless.
+    assert.strictEqual(mediaTypeKey({ assetType: 'image', provider: 'brand_card' }), 'card');
+    assert.strictEqual(mediaTypeKey({ assetType: 'image', provider: null }), 'image');
+});
+
+check('video, sound and link each have a type', () => {
+    assert.strictEqual(mediaTypeKey({ assetType: 'video', provider: null }), 'video');
+    assert.strictEqual(mediaTypeKey({ assetType: 'audio', provider: null }), 'audio');
+    assert.strictEqual(mediaTypeKey({ assetType: 'link', provider: null }), 'link');
+});
+
+check('an unknown asset type does not vanish from the list', () => {
+    // A type added server-side before this map knows about it must still be reachable, not filtered
+    // into nowhere.
+    assert.strictEqual(mediaTypeKey({ assetType: 'hologram', provider: null }), 'link');
+});
+
+check('a branded card counts as GENERATED, not sourced', () => {
+    // It is rendered deterministically for this business, not found somewhere. It used to fall
+    // through to the generic "provider is set" branch and label itself "Sourced by Assistant".
+    assert.strictEqual(sourceKey({ provider: 'brand_card' }), 'generated');
+    assert.strictEqual(sourceKey({ provider: 'fal' }), 'generated');
+    assert.strictEqual(sourceKey({ provider: 'remotion' }), 'generated');
+});
+
+check('stock is sourced, Canva is Canva, and no provider is your upload', () => {
+    assert.strictEqual(sourceKey({ provider: 'pexels' }), 'sourced');
+    assert.strictEqual(sourceKey({ provider: 'canva' }), 'canva');
+    assert.strictEqual(sourceKey({ provider: null }), 'upload');
+    assert.strictEqual(sourceKey({}), 'upload');
+});
+
+check('the badge and the source filter cannot disagree', () => {
+    // The whole reason _sourceInfo branches on _sourceKey: a badge reading "Generated by Ava" that
+    // the Generated filter then hid would be worse than no filter at all.
+    const cases: Array<[Record<string, unknown>, string]> = [
+        [{ assetType: 'image', provider: 'fal', assistantName: 'Ava' }, 'generated'],
+        [{ assetType: 'image', provider: 'brand_card', assistantName: 'Ava' }, 'generated'],
+        [{ assetType: 'image', provider: 'pexels', assistantName: 'Ava' }, 'sourced'],
+        [{ assetType: 'image', provider: 'canva' }, 'canva'],
+        [{ assetType: 'image', provider: null }, 'upload'],
+    ];
+    const expected: Record<string, RegExp> = {
+        generated: /^Generated by |^AI Generated$/,
+        sourced: /^Sourced by /,
+        canva: /^From Canva$/,
+        upload: /^Your Upload$/,
+    };
+    for (const [asset, key] of cases) {
+        assert.strictEqual(sourceKey(asset), key);
+        assert.match(String(sourceInfo(asset)?.label), expected[key],
+            `the badge for a '${key}' asset must read as ${key}`);
+    }
 });
 
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);
