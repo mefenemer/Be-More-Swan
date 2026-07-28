@@ -28,7 +28,7 @@ import { fitForPlatform, isShortForm, type BrandHashtags } from '../../src/utils
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { operationalSetupLines } from '../../src/utils/operational-setup';
 import { decideAutoPublish, describeDecision } from '../../src/utils/auto-publish-runtime';
-import { platformFormat } from '../../src/config/platform-formats';
+import { platformFormat, SOCIAL_PLATFORMS } from '../../src/config/platform-formats';
 import { formatPlatformStrategyBrief, platformStrategyFor, type PlatformStrategy } from '../../src/utils/platform-strategy-brief';
 import { parseModelJson } from '../../src/utils/model-json';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
@@ -46,10 +46,13 @@ const BACKOFF_SECS = [10, 30, 90];
 // teaches it to write a second copy into the caption.
 const DISCLOSURE_PROMPT_BLOCKLIST = new Set(['disclosureText', 'orgFooterText', 'orgFooterEnabled']);
 
-const SOCIAL_PLATFORMS = ['instagram', 'facebook', 'linkedin', 'x'];
-
 // Scheduled/conversion jobs (draft-horizon-fill.ts, schedule-conversion-posts.ts) never set
 // job.platform, so fall back to the org's actual connection instead of a hardcoded platform.
+//
+// The candidate list is the shared catalogue, NOT a local array. It used to be a hand-written
+// four — instagram/facebook/linkedin/x — which meant an org connected only to Threads or YouTube
+// matched nothing here and fell through to the 'instagram' default, drafting every autopilot and
+// conversion post for a platform it cannot publish to.
 async function resolveFallbackPlatform(db: ReturnType<typeof getDb>, organisationId: number): Promise<string> {
     const [conn] = await db
         .select({ serviceName: systemConnections.serviceName })
@@ -57,7 +60,7 @@ async function resolveFallbackPlatform(db: ReturnType<typeof getDb>, organisatio
         .where(and(
             eq(systemConnections.organisationId, organisationId),
             eq(systemConnections.isActive, true),
-            inArray(systemConnections.serviceName, SOCIAL_PLATFORMS),
+            inArray(systemConnections.serviceName, SOCIAL_PLATFORMS as unknown as string[]),
         ))
         .orderBy(systemConnections.createdAt)
         .limit(1);

@@ -850,6 +850,20 @@ export function youtubeMetaFromCaption(caption: string, hashtags: string, format
 
 // Read the authenticated channel (read-only preflight for the harness). Proves the OAuth token and
 // upload scope resolve to a real channel WITHOUT uploading anything.
+/**
+ * Read-only Threads credential check for the publisher self-test: proves the token resolves to a
+ * real profile without publishing anything. Threads posts cannot be created privately, so a
+ * preflight that publishes nothing is the only non-destructive check available here.
+ */
+export async function fetchThreadsIdentity(token: string): Promise<DriverResult> {
+    const res = await fetch('https://graph.threads.net/v1.0/me?fields=id,username', {
+        headers: { Authorization: `Bearer ${token}` },
+    });
+    const data: any = await res.json().catch(() => ({}));
+    if (res.ok && data?.id) return { ok: true, id: `${data.username ? `@${data.username} ` : ''}(${data.id})` };
+    return { ok: false, status: res.status, error: data?.error?.message || `Threads API error (${res.status})` };
+}
+
 export async function fetchYouTubeIdentity(token: string): Promise<DriverResult> {
     const res = await fetch('https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true', {
         headers: { Authorization: `Bearer ${token}` },
@@ -890,8 +904,11 @@ export type YouTubeOutcome =
 export interface YouTubePublishOpts {
     chunkSize?: number;
     /**
-     * Defaults to YOUTUBE_DEFAULT_PRIVACY (currently 'private' pending live verification). The
-     * self-test passes 'private' explicitly so it stays private even after that default reverts.
+     * Defaults to YOUTUBE_DEFAULT_PRIVACY (currently 'public'). The self-test passes 'private'
+     * explicitly so a verification upload stays private regardless of what the default is.
+     *
+     * NB: a Google Cloud project that has not passed YouTube's upload audit forces private no
+     * matter what we send here — a video landing private is not evidence this value is wrong.
      */
     privacyStatus?: 'public' | 'private' | 'unlisted';
     /** Absolute epoch-ms wall-clock budget; the loop stops cleanly at a chunk boundary before it. */

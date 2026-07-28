@@ -17,6 +17,7 @@ import { aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { computeOnboardingProgress } from '../../src/utils/onboarding-progress';
 import { provisioningBlockInfo } from '../../src/utils/assistant-lifecycle';
+import { normalizePlatform } from '../../src/config/platform-formats';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -194,7 +195,10 @@ Rules:
         } else if (type === 'delegate') {
             const validId = assistants.find(a => a.id === Number(parsed.assistantId));
             out.assistantId = validId ? validId.id : null;
-            out.platform = ['instagram', 'facebook', 'linkedin', 'x'].includes((parsed.platform || '').toLowerCase()) ? parsed.platform.toLowerCase() : null;
+            // Normalised through the shared catalogue rather than matched against a local list:
+            // the hand-written four here predated Threads and YouTube, so delegating "post this to
+            // Threads" silently resolved the platform to null.
+            out.platform = normalizePlatform(parsed.platform);
             out.brief = typeof parsed.brief === 'string' ? parsed.brief.slice(0, 500) : command;
             // If we have no assistant to delegate to, soften to guidance.
             if (!out.assistantId) {

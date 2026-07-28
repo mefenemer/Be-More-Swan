@@ -26,13 +26,21 @@ const CONCURRENCY = 25;
 
 // How close to expiry (ms) before we proactively refresh, per provider. Only providers
 // listed here are swept — omit a provider to leave it on pure on-demand refresh.
-// All three below are Google OAuth: ~1h access tokens backed by an offline refresh token,
-// so a 40-min window renews a run or two before they lapse.
+// All three Google entries below are Google OAuth: ~1h access tokens backed by an offline
+// refresh token, so a 40-min window renews a run or two before they lapse.
 const GOOGLE_WINDOW_MS = 40 * 60 * 1000;
+// Threads is a different shape and needs a much wider window. Its long-lived token lasts ~60
+// days and is refreshed BY ITSELF (th_refresh_token, see workspace-integrations.ts) — which only
+// works while the token is still valid. On-demand refresh alone is therefore not enough: an org
+// that simply doesn't post to Threads for 60 days sails past expiry without ever calling the
+// publish path, and the connection is then unrecoverable without a full reconnect. Seven days of
+// slack means ~336 sweeps between the first eligible run and the point of no return.
+const THREADS_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 const WINDOW_MS: Partial<Record<IntegrationProvider, number>> = {
     youtube: GOOGLE_WINDOW_MS,
     gmail: GOOGLE_WINDOW_MS,
     searchconsole: GOOGLE_WINDOW_MS,
+    threads: THREADS_WINDOW_MS,
 };
 
 export default withLambda(async () => {

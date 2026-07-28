@@ -19,15 +19,15 @@ import { getSecret } from '../../src/utils/vault';
 import { requireTenant } from '../../src/utils/tenant';
 import {
     fetchXIdentity, resolveLinkedInAuthor, resolveFacebookPageCredentials, fetchYouTubeIdentity,
-    resolveSocialCredentials, publishX, publishLinkedIn, publishFacebook, publishYouTube,
-    refreshXToken, type DriverResult,
+    fetchThreadsIdentity, resolveSocialCredentials, publishX, publishLinkedIn, publishFacebook,
+    publishYouTube, publishThreads, refreshXToken, type DriverResult,
 } from '../../src/utils/social-publish';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
-const PLATFORMS = ['facebook', 'linkedin', 'x', 'youtube'] as const;
+const PLATFORMS = ['facebook', 'linkedin', 'x', 'threads', 'youtube'] as const;
 type SelfTestPlatform = typeof PLATFORMS[number];
 
-const LABEL: Record<SelfTestPlatform, string> = { facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X (Twitter)', youtube: 'YouTube' };
+const LABEL: Record<SelfTestPlatform, string> = { facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X (Twitter)', threads: 'Threads', youtube: 'YouTube' };
 
 // A test post that is unmistakably a diagnostic, timestamped so repeated runs stay unique.
 function testMessage(): string {
@@ -37,6 +37,9 @@ function testMessage(): string {
 // How to remove the test post afterwards, per platform (surfaced to the user; we never auto-delete).
 function deleteHint(platform: SelfTestPlatform, id: string): string {
     if (platform === 'youtube') return `Delete the video from YouTube Studio (video id ${id}) — it was uploaded PRIVATE.`;
+    // Threads has no private/draft mode: a test post is PUBLIC the moment it publishes, so this
+    // hint matters more here than anywhere else.
+    if (platform === 'threads') return `Delete the post from your Threads profile (post id ${id}) — it published PUBLICLY.`;
     if (platform === 'x') return `Delete the tweet from your X account (post id ${id}).`;
     if (platform === 'linkedin') return `Delete the post from your LinkedIn feed (urn ${id}).`;
     return `Delete the post from your Facebook Page (post id ${id}).`;
@@ -119,6 +122,32 @@ export default withLambda(async (event) => {
                 { url: videoUrl, mimeType: 'video/mp4' },
                 { privacyStatus: 'private' },
             );
+            return result.ok
+                ? json(200, { preflight: 'ok', testPost: 'ok', postId: result.id, deleteHint: deleteHint(platform, result.id) })
+                : json(200, { preflight: 'ok', testPost: 'fail', detail: result.error, status: result.status });
+        }
+
+        // ── Threads: verify the profile, then optionally publish ONE text-only test post. ──
+        // Workspace-backed like YouTube, so credentials come through resolveSocialCredentials and
+        // externalUserId is the Threads user id the publish endpoints are rooted at (/{id}/threads).
+        // Text-only by design: Threads is the one platform here where media is not mandatory, and a
+        // diagnostic should exercise the smallest path that proves the token and the two-step
+        // container publish. Unlike the YouTube arm there is no private mode to hide behind — see
+        // deleteHint — so it stays behind the same explicit confirmTestPost gate as the rest.
+        if (platform === 'threads') {
+            let token: string, threadsUserId: string | null;
+            try {
+                ({ token, externalUserId: threadsUserId } = await resolveSocialCredentials(db, {
+                    organisationId, platform: 'threads', connectionId: body.connectionId,
+                }));
+            } catch (e) {
+                return json(200, { preflight: 'fail', detail: e instanceof Error ? e.message : 'No connected Threads profile for this organisation.' });
+            }
+            const idCheck = await fetchThreadsIdentity(token);
+            if (!idCheck.ok) return json(200, { preflight: 'fail', detail: idCheck.error, status: idCheck.status });
+            if (!wantTestPost) return json(200, { preflight: 'ok', detail: `Authenticated as ${idCheck.id}.` });
+
+            const result: DriverResult = await publishThreads(testMessage(), token, threadsUserId, null);
             return result.ok
                 ? json(200, { preflight: 'ok', testPost: 'ok', postId: result.id, deleteHint: deleteHint(platform, result.id) })
                 : json(200, { preflight: 'ok', testPost: 'fail', detail: result.error, status: result.status });

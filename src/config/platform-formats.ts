@@ -94,7 +94,7 @@ export function platformFormat(platform: string): PlatformFormat {
 /**
  * Normalise a raw platform token from onboarding context (primary_platforms can hold short codes
  * 'fb'/'ig'/'li'/'x' or full names 'facebook'/'instagram'/…) to a canonical service name, or null
- * if it isn't one of the four social platforms we draft/publish for. Mirrors _platformCodes() in
+ * if it isn't one of the social platforms we draft/publish for. Mirrors _platformCodes() in
  * assistants.js so server and UI agree on which platform a value refers to.
  */
 export function normalizePlatform(raw: unknown): SocialPlatform | null {

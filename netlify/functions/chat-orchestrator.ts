@@ -26,6 +26,7 @@ import { logAiUsage } from '../../src/utils/ai-usage';
 import { consumeTaskCredit } from '../../src/utils/task-credit';
 import { embedTexts } from '../../src/utils/kb-embeddings';
 import { computeScheduleSlots, resolvePostingSchedule } from '../../src/config/posting-cadence';
+import { normalizePlatform, type SocialPlatform } from '../../src/config/platform-formats';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -353,18 +354,14 @@ function hubLinkFromRecords(records: HubRecord[]): HubLink | null {
 // platform, status 'pending_approval', same lifecycle create-manual-post.ts's manual
 // "Write your own" path lands in) so the chat can instead hand the user a direct link to
 // review and approve it.
-const SOCIAL_PLATFORMS = ['instagram', 'facebook', 'linkedin', 'x'];
-
-// primary_platforms (onboardingContext) is stored as short codes — fb/ig/li/x, per
+// primary_platforms (onboardingContext) is stored as short codes — fb/ig/li/x/th/yt, per
 // integrations.js PLATFORM_KEY_MAP — but the draft wire shape, the model's output format,
-// and persistence all use full names. Normalize to the canonical full name so the SMM prompt
-// can name the configured platforms in exactly the form the model must emit them.
-const PLATFORM_CODE_TO_NAME: Record<string, string> = {
-    fb: 'facebook', facebook: 'facebook',
-    ig: 'instagram', instagram: 'instagram',
-    li: 'linkedin', linkedin: 'linkedin',
-    x: 'x', twitter: 'x',
-};
+// and persistence all use full names. normalizePlatform() is the shared code→name mapping.
+//
+// This was a local four-entry map plus a matching four-name allow-list, both written before
+// Threads and YouTube shipped. A user asking the chat for a Threads post got prose and no
+// draft: the platform was filtered out, socialPostDraftFromUiElement returned null, and
+// nothing was ever persisted.
 
 /** Configured social platforms for this assistant, normalized to the supported full names. */
 function configuredPlatforms(onboardingContext: unknown): string[] {
@@ -376,8 +373,8 @@ function configuredPlatforms(onboardingContext: unknown): string[] {
     if (!Array.isArray(raw)) return [];
     return [...new Set(
         raw
-            .map((p) => (typeof p === 'string' ? PLATFORM_CODE_TO_NAME[p.toLowerCase()] : null))
-            .filter((p): p is string => !!p && SOCIAL_PLATFORMS.includes(p)),
+            .map((p) => normalizePlatform(p))
+            .filter((p): p is SocialPlatform => !!p),
     )];
 }
 
@@ -386,9 +383,10 @@ type SocialPostDraft = { platforms: string[]; caption: string; hashtags: string 
 /**
  * `forcePlatform` — the platform of the post the user is EDITING (see draftTarget). When set, the
  * model's own platforms array is ignored in favour of the one fact we know authoritatively: which
- * platform that row is for. It also side-steps SOCIAL_PLATFORMS above being narrower than the
- * platform catalogue (no threads/youtube), which would otherwise reject a perfectly good caption
- * for a Threads post and leave the user with prose and no offer.
+ * platform that row is for.
+ *
+ * (It used to double as the workaround for the local allow-list being narrower than the platform
+ * catalogue — that gap is gone now that both paths normalise through normalizePlatform.)
  */
 function socialPostDraftFromUiElement(uiElement: unknown, forcePlatform: string | null = null): SocialPostDraft | null {
     if (!uiElement || typeof uiElement !== 'object') return null;
@@ -397,7 +395,7 @@ function socialPostDraftFromUiElement(uiElement: unknown, forcePlatform: string 
     const caption = typeof ui.caption === 'string' ? ui.caption.trim() : '';
     if (!caption) return null;
     const platforms = forcePlatform ? [forcePlatform] : (Array.isArray(ui.platforms)
-        ? [...new Set(ui.platforms.filter((p): p is string => typeof p === 'string' && SOCIAL_PLATFORMS.includes(p)))]
+        ? [...new Set(ui.platforms.map(p => normalizePlatform(p)).filter((p): p is SocialPlatform => !!p))]
         : []);
     if (platforms.length === 0) return null;
     const hashtags = typeof ui.hashtags === 'string' && ui.hashtags.trim() ? ui.hashtags.trim() : null;

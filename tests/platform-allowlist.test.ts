@@ -50,6 +50,43 @@ test('neither drafting endpoint carries its own hand-written list any more', () 
     }
 });
 
+test('no other endpoint reintroduces the stale four either', () => {
+    // Three more copies surfaced after this file was written, each invisible for a different
+    // reason. Two of them SHADOWED the exported name — `const SOCIAL_PLATFORMS = [...four]` —
+    // so the import-based check above would have passed them. Grep for the SHAPE, not the name.
+    //
+    //   process-content-jobs.ts  an org connected only to Threads/YouTube matched nothing in the
+    //                            fallback lookup and drafted every autopilot post for Instagram
+    //   chat-orchestrator.ts     "draft me a Threads post" produced prose and no saved draft
+    //   assistant-command.ts     delegating with platform 'threads' resolved to null
+    const FILES = ['process-content-jobs.ts', 'chat-orchestrator.ts', 'assistant-command.ts'];
+    for (const f of FILES) {
+        const src = readFileSync(new URL(`../netlify/functions/${f}`, import.meta.url), 'utf8');
+        assert.ok(
+            !/\[\s*'instagram',\s*'facebook',\s*'linkedin',\s*'x'\s*\]/.test(src),
+            `${f} hardcodes the stale four-platform list again`,
+        );
+        assert.ok(
+            /from '\.\.\/\.\.\/src\/config\/platform-formats'/.test(src),
+            `${f} must resolve platforms through the shared catalogue`,
+        );
+    }
+});
+
+test('normalizePlatform accepts the short codes onboarding actually stores', () => {
+    // chat-orchestrator used to carry its own fb/ig/li/x map, which is why primary_platforms
+    // containing Threads or YouTube came back empty. The shared normaliser covers all six.
+    const CODES: Record<string, string> = {
+        fb: 'facebook', ig: 'instagram', li: 'linkedin', x: 'x', th: 'threads', yt: 'youtube',
+    };
+    for (const [code, expected] of Object.entries(CODES)) {
+        assert.equal(normalizePlatform(code), expected, `short code '${code}' must resolve`);
+    }
+    // The onboarding checkbox values are the full labels, and they must round-trip too.
+    assert.equal(normalizePlatform('Threads'), 'threads');
+    assert.equal(normalizePlatform('YouTube'), 'youtube');
+});
+
 test('the media-mandatory rule knows YouTube needs a video, not an image', () => {
     assert.equal(PLATFORM_FORMATS.youtube.mediaMandatory, true);
     assert.equal(PLATFORM_FORMATS.youtube.mediaKind, 'video');
@@ -81,4 +118,5 @@ test('normalizePlatform resolves every offered platform to itself', () => {
     assert.equal(normalizePlatform('nonsense'), null);
 });
 
-console.log(`\n${passed}/6 passed\n`);
+// Counted, not hardcoded — the literal denominator was already stale by two tests.
+console.log(`\n${passed} passed${process.exitCode ? ', some failed' : ''}\n`);
