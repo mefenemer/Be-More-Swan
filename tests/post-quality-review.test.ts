@@ -8,8 +8,10 @@
 // ones that make the loop terminate and make a settled compliance warning stay settled.
 
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import {
-    hasComplianceWarnings, hashCaption, openWarnings, readCachedReview,
+    hasComplianceWarnings, hashCaption, openWarnings, readCachedReview, normaliseVoiceScore,
     type QualityReview, type WarningDisposition,
 } from '../src/utils/post-quality-review';
 
@@ -98,5 +100,49 @@ check('a review with an empty warning list is clean', () => {
 // runQualityReview / apply-post-suggestions, which need a database and the AI gateway. Asserting
 // them against hand-built objects would only re-state the fixtures. They are exercised by the
 // smoke test in the PR notes instead.
+
+// ── The brand-voice score ───────────────────────────────────────────────────────────────────────
+// Step 6 read "Brand voice 0/100" in red on every post, however good the caption. Two causes, and
+// the first is what made it look like a verdict rather than a gap: `Number(x) || 0` turned a
+// missing score into 0, which is an ordinary-looking mark. An unknown has to look unknown.
+
+check('an absent score is null, not zero', () => {
+    for (const raw of [null, undefined, '', 'n/a', 'high', NaN, {}]) {
+        assert.strictEqual(normaliseVoiceScore(raw), null,
+            `${JSON.stringify(raw)} became a score — this is what printed 0/100 on every post`);
+    }
+});
+
+check('a real score still comes through, including a real zero', () => {
+    assert.strictEqual(normaliseVoiceScore(0), 0, 'a genuinely off-brand post can score 0');
+    assert.strictEqual(normaliseVoiceScore(72), 72);
+    assert.strictEqual(normaliseVoiceScore('72'), 72, 'models quote numbers');
+    assert.strictEqual(normaliseVoiceScore(72.4), 72);
+});
+
+check('an out-of-range score is clamped rather than dropped', () => {
+    assert.strictEqual(normaliseVoiceScore(140), 100);
+    assert.strictEqual(normaliseVoiceScore(-20), 0);
+});
+
+check('the compliance-only prompt still demands a score', () => {
+    // The second cause: that pass told the reviewer "Style feedback is not being requested here",
+    // and brand voice IS style — so it dropped the score, and every post came back unscored.
+    const src = readFileSync(path.join(import.meta.dirname, '..', 'src/utils/post-quality-review.ts'), 'utf8');
+    assert.ok(!/Style feedback is not being requested here\./.test(src),
+        'a blanket "no style feedback" also switches off the brand-voice score');
+    assert.match(src, /brandVoiceScore is still required/,
+        'the no-suggestions pass must say the score is exempt');
+    assert.match(src, /ALWAYS return this, on every review/);
+});
+
+check('the panel shows an unknown as unknown, not as 0 in red', () => {
+    const ws = readFileSync(path.join(import.meta.dirname, '..', 'workspace.html'), 'utf8');
+    const render = ws.slice(ws.indexOf('function _prqRenderReview('), ws.indexOf('const warnings = data.complianceWarnings'));
+    assert.match(render, /Brand voice not scored/, 'null needs its own wording');
+    assert.match(render, /text-gray-400/, 'and its own colour — red reads as a bad score');
+    assert.ok(!/typeof data\.brandVoiceScore === 'number'\) \{\n        const s = data/.test(render),
+        'the old guard left the previous post\'s score on screen when this one had none');
+});
 
 console.log(`\n${passed} passed, 0 failed\n`);

@@ -6443,11 +6443,21 @@ async function _rqLoadQualityReview(postId) {
 function _prqRenderReview(data) {
     _prqReview = data;
 
+    // A score of null means the reviewer did not return one — NOT that the post scored nothing.
+    // The two were the same value until now, so a post nobody had scored showed "Brand voice 0/100"
+    // in red, which reads as a verdict on the writing rather than an absence of one. Say "not
+    // scored" in grey instead, and keep the red for a mark the reviewer actually gave.
     const scoreEl = document.getElementById('prq-score');
-    if (scoreEl && typeof data.brandVoiceScore === 'number') {
+    if (scoreEl) {
         const s = data.brandVoiceScore;
-        scoreEl.className = `text-xs font-extrabold ${s >= 75 ? 'text-emerald-600' : s >= 50 ? 'text-amber-500' : 'text-red-500'}`;
-        scoreEl.textContent = `Brand voice ${s}/100`;
+        if (typeof s === 'number') {
+            scoreEl.className = `text-xs font-extrabold ${s >= 75 ? 'text-emerald-600' : s >= 50 ? 'text-amber-500' : 'text-red-500'}`;
+            scoreEl.textContent = `Brand voice ${s}/100`;
+        } else {
+            scoreEl.className = 'text-xs font-extrabold text-gray-400';
+            scoreEl.textContent = 'Brand voice not scored';
+            scoreEl.title = 'The reviewer did not return a score for this post.';
+        }
         scoreEl.classList.remove('hidden');
     }
 

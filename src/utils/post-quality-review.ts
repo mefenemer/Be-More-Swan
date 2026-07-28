@@ -70,7 +70,15 @@ export interface WarningDisposition {
 }
 
 export interface QualityReview {
-    brandVoiceScore: number;
+    /**
+     * 0-100, or NULL when the reviewer did not return one.
+     *
+     * Nullable on purpose. This used to be `Number(parsed.brandVoiceScore) || 0`, so a missing or
+     * unparseable score became 0 — and 0 is a plausible-looking mark, not an obvious absence. Every
+     * post read "Brand voice 0/100" in red, which says "this copy is completely off-brand" when the
+     * truth was "nothing scored it". An unknown has to look unknown.
+     */
+    brandVoiceScore: number | null;
     /** Regulatory / brand / policy issues. Undisposed ones block approval. */
     complianceWarnings: string[];
     suggestions: string[];
@@ -204,6 +212,21 @@ export interface RunReviewOptions {
  * With `withSuggestions: false` (the default) this is the cheap compliance-only pass: a shorter
  * prompt, a smaller response, and — crucially — no new style nits to tempt another rewrite.
  */
+/**
+ * A brand-voice score we are willing to show, or null.
+ *
+ * Deliberately strict. The reviewer is an LLM: it can answer `null`, omit the field, or write
+ * "n/a" — and the old coercion turned every one of those into 0. A real 0 is still honoured
+ * (a genuinely off-brand post can score it), which is exactly why the absent case must not
+ * share that value.
+ */
+export function normaliseVoiceScore(raw: unknown): number | null {
+    if (raw === null || raw === undefined || raw === '') return null;
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return null;
+    return Math.max(0, Math.min(100, Math.round(n)));
+}
+
 export async function runQualityReview(
     db: Db,
     post: ReviewablePost,
@@ -235,7 +258,7 @@ export async function runQualityReview(
     const platform = post.platform || 'instagram';
 
     const prompt = `You are a social media quality reviewer. Analyse the following ${platform} post and return a JSON object with these exact fields:
-- brandVoiceScore: integer 0-100 measuring how well the post matches the brand voice "${brandVoice}"
+- brandVoiceScore: integer 0-100 measuring how well the post matches the brand voice "${brandVoice}". ALWAYS return this, on every review. Never null, never omitted, never 0 as a stand-in for "not assessed" — if the caption has words in it, it can be scored against the voice above.
 - complianceWarnings: array of short string warnings (regulatory, brand, policy issues). Empty array if none.${
     withSuggestions ? '\n- suggestions: array containing EXACTLY ONE actionable improvement suggestion as a string — your single highest-value change.' : ''}
 
@@ -248,7 +271,9 @@ Raise a warning ONLY where there is a specific, nameable problem a person can ac
 with nothing to verify must return an empty array — do not invent a warning to seem thorough.${
     withSuggestions ? '' : `
 
-Do NOT return a suggestions field. Style feedback is not being requested here.`}
+Do NOT return a suggestions field — no written style advice is wanted on this pass. This is about
+the SUGGESTIONS FIELD ONLY: brandVoiceScore is still required. Read as a blanket "no style
+feedback", this line had the reviewer drop the score too, and every post came back 0/100.`}
 ${knownFacts ? `
 THE BUSINESS'S OWN DECLARED FACTS — treat these as established and true. They come from the
 business itself, so it is the authority on them. A statement in the caption that AGREES with
@@ -288,7 +313,9 @@ Return ONLY valid JSON, no markdown, no explanation.`;
     const previous = opts.previous !== undefined ? opts.previous : await readStoredReview(db, post.id);
 
     const result: QualityReview = {
-        brandVoiceScore: Math.max(0, Math.min(100, Math.round(Number(parsed.brandVoiceScore) || 0))),
+        // `Number(x) || 0` was the bug: null, undefined, "" and "n/a" all became 0, an ordinary-looking
+        // score. Only an actual number in range counts; anything else is honestly unknown.
+        brandVoiceScore: normaliseVoiceScore(parsed.brandVoiceScore),
         complianceWarnings,
         // Ignore any suggestions the model volunteered when we didn't ask. Persisting them would
         // repopulate the panel behind the user's back and restart the loop.
