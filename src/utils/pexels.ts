@@ -277,29 +277,39 @@ export async function createPexelsAsset(
     return asset.id;
 }
 
-// Create a contentAssets row for a Pexels candidate, attach it to the post via the
+// Create a contentAssets row for a Pexels candidate, attach it to the post(s) via the
 // scheduledPostAssets junction, and keep the deprecated contentAssetIds array in sync during the
 // migration window. Returns the new asset id. Handles both photos and videos.
+//
+// `postIds` carries the caller's cross-post fan-out (mediaTargetPostIds): one stock photo chosen for
+// a post that goes to four platforms is attached to all four, but the asset row is created ONCE —
+// looping the whole helper per sibling would mint four identical content_assets and four Pexels
+// download records for a single pick.
 export async function attachPexelsImageToPost(
     db: Db,
-    args: { postId: number; userId: number; orgId: number | null; candidate: PexelsCandidate | PexelsVideoCandidate; assetType?: 'image' | 'video' },
+    args: { postId: number; postIds?: number[]; userId: number; orgId: number | null; candidate: PexelsCandidate | PexelsVideoCandidate; assetType?: 'image' | 'video' },
 ): Promise<number> {
     const { postId, userId, orgId, candidate } = args;
+    const targets = args.postIds?.length ? [...new Set(args.postIds)] : [postId];
     const assetId = await createPexelsAsset(db, { userId, orgId, candidate, assetType: args.assetType });
     const asset = { id: assetId };
 
     await db.insert(scheduledPostAssets)
-        .values({ scheduledPostId: postId, contentAssetId: asset.id, position: 0 })
+        .values(targets.map(id => ({ scheduledPostId: id, contentAssetId: asset.id, position: 0 })))
         .onConflictDoNothing();
 
     // Keep the deprecated JSONB array in sync so resolvePostImage() (which reads it) works today.
-    const [post] = await db.select({ ids: scheduledPosts.contentAssetIds })
-        .from(scheduledPosts).where(eq(scheduledPosts.id, postId)).limit(1);
-    const existing = Array.isArray(post?.ids) ? (post!.ids as number[]) : [];
-    if (!existing.includes(asset.id)) {
-        await db.update(scheduledPosts)
-            .set({ contentAssetIds: [...existing, asset.id], updatedAt: new Date() })
-            .where(eq(scheduledPosts.id, postId));
+    // Read-then-write per post because this APPENDS to whatever each row already carries, and
+    // siblings can legitimately differ (someone may have set one platform's picture by hand).
+    for (const id of targets) {
+        const [post] = await db.select({ ids: scheduledPosts.contentAssetIds })
+            .from(scheduledPosts).where(eq(scheduledPosts.id, id)).limit(1);
+        const existing = Array.isArray(post?.ids) ? (post!.ids as number[]) : [];
+        if (!existing.includes(asset.id)) {
+            await db.update(scheduledPosts)
+                .set({ contentAssetIds: [...existing, asset.id], updatedAt: new Date() })
+                .where(eq(scheduledPosts.id, id));
+        }
     }
 
     return asset.id;

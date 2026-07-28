@@ -21,6 +21,8 @@ import { scheduledPosts, scheduledPostAssets, contentAssets } from '../../db/sch
 import { requireTenant } from '../../src/utils/tenant';
 import { resolvePostMediaList } from '../../src/utils/social-publish';
 import { postFormatSpec } from '../../src/config/post-formats';
+import { isMediaEditable } from '../../src/config/post-status';
+import { mediaTargetPostIds } from '../../src/utils/crosspost-media';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
@@ -30,8 +32,9 @@ const json = (statusCode: number, body: unknown) => ({
 /** Hard ceiling regardless of format — the largest any platform accepts is 20. */
 const MAX_SLIDES = 20;
 
-/** Statuses whose media may still be changed. A published post's media is a matter of record. */
-const EDITABLE = ['draft', 'pending_approval', 'in_review', 'approved', 'scheduled'];
+// "Statuses whose media may still be changed" now lives in src/config/post-status.ts — the
+// cross-post fan-out needs the same rule to decide which siblings it may write, and two copies of it
+// would eventually disagree about whether a post is still editable.
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method Not Allowed' });
@@ -41,7 +44,7 @@ export default withLambda(async (event) => {
     if ('error' in ctx) return ctx.error;
     const { organisationId: orgId } = ctx;
 
-    let body: { postId?: number; assetIds?: unknown };
+    let body: { postId?: number; assetIds?: unknown; applyToGroup?: boolean };
     try { body = JSON.parse(event.body || '{}'); }
     catch { return json(400, { error: 'Invalid JSON.' }); }
 
@@ -60,7 +63,7 @@ export default withLambda(async (event) => {
         .where(and(eq(scheduledPosts.id, postId), eq(scheduledPosts.organisationId, orgId)))
         .limit(1);
     if (!post) return json(404, { error: 'Post not found.' });
-    if (!EDITABLE.includes(post.status)) {
+    if (!isMediaEditable(post.status)) {
         return json(409, { error: 'This post has already gone out, so its media can’t be changed.' });
     }
 
@@ -79,13 +82,17 @@ export default withLambda(async (event) => {
         if (bad.length) return json(422, { error: 'One of those items isn’t an image or video on this workspace.' });
     }
 
+    // The slides belong to the post, not to the platform tab that was open — so by default every
+    // cross-post sibling gets the same carousel. See src/utils/crosspost-media.ts.
+    const targetIds = await mediaTargetPostIds(db, { postId, orgId, applyToGroup: body.applyToGroup });
+
     // Rewrite the junction rows to match the requested order exactly, then mirror into the legacy
     // array. Both, always: the publishers read the array and newer queries read the junction, so
     // writing one without the other means the post publishes something different from what it shows.
-    await db.delete(scheduledPostAssets).where(eq(scheduledPostAssets.scheduledPostId, postId));
+    await db.delete(scheduledPostAssets).where(inArray(scheduledPostAssets.scheduledPostId, targetIds));
     if (assetIds.length) {
         await db.insert(scheduledPostAssets)
-            .values(assetIds.map((contentAssetId, position) => ({ scheduledPostId: postId, contentAssetId, position })))
+            .values(targetIds.flatMap(id => assetIds.map((contentAssetId, position) => ({ scheduledPostId: id, contentAssetId, position }))))
             .onConflictDoNothing();
     }
     await db.update(scheduledPosts)
@@ -96,7 +103,7 @@ export default withLambda(async (event) => {
             ...(assetIds.length ? { mediaMissing: false, mediaMissingNote: null } : {}),
             updatedAt: new Date(),
         })
-        .where(eq(scheduledPosts.id, postId));
+        .where(inArray(scheduledPosts.id, targetIds));
 
     const slides = await resolvePostMediaList(db, assetIds);
 
@@ -106,6 +113,8 @@ export default withLambda(async (event) => {
     return json(200, {
         ok: true,
         slides: slides.map(s => ({ assetId: s.assetId, url: s.url, kind: s.kind })),
+        // Every row this write landed on, so the editor can refresh the sibling tabs it changed.
+        postIds: targetIds,
         ...(spec ? { minItems: spec.minItems, maxItems: spec.maxItems } : {}),
     });
 });

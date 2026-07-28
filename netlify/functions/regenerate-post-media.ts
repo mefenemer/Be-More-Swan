@@ -8,7 +8,7 @@
 // Image only. Video regeneration runs through the async composer flow (generate-ai-video).
 
 import { Handler } from '@netlify/functions';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, scheduledPostAssets, contentAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
@@ -17,6 +17,7 @@ import { generateAndPersistImage } from '../../src/lib/media-persist';
 import { holdCredits, settleHold, getBalance, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
 import { presignR2Get } from '../../src/utils/social-publish';
 import { FalContentPolicyError } from '../../src/lib/fal-gateway';
+import { mediaTargetPostIds } from '../../src/utils/crosspost-media';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -27,7 +28,7 @@ export default withLambda(async (event) => {
     if ('error' in ctx) return ctx.error;
     const { userId, organisationId: orgId } = ctx;
 
-    let body: { postId?: number; prompt?: string };
+    let body: { postId?: number; prompt?: string; applyToGroup?: boolean };
     try { body = JSON.parse(event.body || '{}'); }
     catch { return { statusCode: 400, body: JSON.stringify({ error: 'Invalid JSON.' }) }; }
 
@@ -62,13 +63,20 @@ export default withLambda(async (event) => {
         return { statusCode: 502, body: JSON.stringify({ error: 'Could not regenerate the image. Please try again.' }) };
     }
 
+    // One generated image covers the whole cross-post by default — the credit was charged once, and
+    // leaving the other platforms on their old picture is not what "regenerate this post's media"
+    // means. See src/utils/crosspost-media.ts.
+    const targetIds = await mediaTargetPostIds(db, { postId, orgId, applyToGroup: body.applyToGroup });
+
     // Swap the attached media: drop the old junction rows, attach the new asset.
-    await db.delete(scheduledPostAssets).where(eq(scheduledPostAssets.scheduledPostId, postId));
-    await db.insert(scheduledPostAssets).values({ scheduledPostId: postId, contentAssetId: assetId, position: 0 }).onConflictDoNothing();
+    await db.delete(scheduledPostAssets).where(inArray(scheduledPostAssets.scheduledPostId, targetIds));
+    await db.insert(scheduledPostAssets)
+        .values(targetIds.map(id => ({ scheduledPostId: id, contentAssetId: assetId, position: 0 })))
+        .onConflictDoNothing();
     // Issue #55: regenerating media resolves any "media deleted" flag from the Review Queue.
     await db.update(scheduledPosts)
         .set({ contentAssetIds: [assetId], mediaMissing: false, mediaMissingNote: null })
-        .where(eq(scheduledPosts.id, postId));
+        .where(inArray(scheduledPosts.id, targetIds));
 
     const [asset] = await db.select({ storageKey: contentAssets.storageKey, externalUrl: contentAssets.externalUrl })
         .from(contentAssets).where(eq(contentAssets.id, assetId)).limit(1);
@@ -80,6 +88,6 @@ export default withLambda(async (event) => {
     return {
         statusCode: 200,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assetId, thumbnailUrl, balance: balance.balance }),
+        body: JSON.stringify({ assetId, thumbnailUrl, balance: balance.balance, postIds: targetIds }),
     };
 });

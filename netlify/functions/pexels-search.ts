@@ -9,13 +9,14 @@
 
 import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, userOrganisations, organisations, scheduledPosts } from '../../db/schema';
 import {
     searchUniqueImages, searchUniqueVideos, attachPexelsImageToPost, creditLine,
     PexelsRateLimitError, PEXELS_RATE_LIMIT_MESSAGE, type PexelsCandidate, type PexelsVideoCandidate,
 } from '../../src/utils/pexels';
+import { mediaTargetPostIds } from '../../src/utils/crosspost-media';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -48,7 +49,7 @@ export default withLambda(async (event) => {
     if (!user) return { statusCode: 403, body: JSON.stringify({ error: 'User not found.' }) };
     const orgId = user.organisationId;
 
-    let body: { action?: string; topic?: string; postId?: number; candidate?: PexelsCandidate | PexelsVideoCandidate; mediaType?: string; dedup?: boolean };
+    let body: { action?: string; topic?: string; postId?: number; candidate?: PexelsCandidate | PexelsVideoCandidate; mediaType?: string; dedup?: boolean; applyToGroup?: boolean };
     try { body = JSON.parse(event.body || '{}'); } catch { body = {}; }
 
     const mediaType: 'image' | 'video' = body.mediaType === 'video' ? 'video' : 'image';
@@ -72,24 +73,41 @@ export default withLambda(async (event) => {
                 .limit(1);
             if (!post) return { statusCode: 404, body: JSON.stringify({ error: 'Post not found.' }) };
 
-            const assetId = await attachPexelsImageToPost(db, { postId, userId, orgId, candidate, assetType: mediaType });
+            // A stock photo picked for a cross-post goes on every platform of it, not just the tab
+            // that was open. orgId gates the fan-out because it is what scopes the sibling lookup —
+            // without it we could not prove the siblings are this tenant's.
+            const targetIds = orgId
+                ? await mediaTargetPostIds(db, { postId, orgId, applyToGroup: body.applyToGroup })
+                : [postId];
+
+            const assetId = await attachPexelsImageToPost(db, { postId, postIds: targetIds, userId, orgId, candidate, assetType: mediaType });
 
             // US3 AC3.3: append the credit line to the draft only when the org opts in.
+            // Every post carrying the photo needs the credit — attributing it on one platform while
+            // three others publish the same picture uncredited is the licence breach this prevents.
             let attributionAppended = false;
             if (orgId) {
                 const [org] = await db
                     .select({ enabled: organisations.pexelsAttributionEnabled })
                     .from(organisations).where(eq(organisations.id, orgId)).limit(1);
                 const line = creditLine(candidate.photographer);
-                if (org?.enabled && !(post.caption || '').includes(line.trim())) {
-                    await db.update(scheduledPosts)
-                        .set({ caption: `${post.caption || ''}${line}`, updatedAt: new Date() })
-                        .where(eq(scheduledPosts.id, postId));
-                    attributionAppended = true;
+                if (org?.enabled) {
+                    // Per post: siblings can already differ (a rewritten caption on one platform),
+                    // so appending the anchor's caption to all of them would overwrite that work.
+                    const rows = await db
+                        .select({ id: scheduledPosts.id, caption: scheduledPosts.caption })
+                        .from(scheduledPosts).where(inArray(scheduledPosts.id, targetIds));
+                    for (const row of rows) {
+                        if ((row.caption || '').includes(line.trim())) continue;
+                        await db.update(scheduledPosts)
+                            .set({ caption: `${row.caption || ''}${line}`, updatedAt: new Date() })
+                            .where(eq(scheduledPosts.id, row.id));
+                        if (row.id === postId) attributionAppended = true;
+                    }
                 }
             }
 
-            return { statusCode: 200, body: JSON.stringify({ assetId, attributionAppended }) };
+            return { statusCode: 200, body: JSON.stringify({ assetId, attributionAppended, postIds: targetIds }) };
         }
 
         // ── SEARCH: return unique candidates for the picker ───────────────────

@@ -452,6 +452,14 @@ window.showComplianceModals = function showComplianceModals(force) {
              the old inline "Add text" button here is retired to keep a single entry point. -->
       </div>
       <p id="gp-ai-media-status" class="hidden text-xs"></p>
+      <!-- Cross-post scope. One post going to several platforms is still ONE post, so media lands on
+           all of them by default; unticking this changes only the platform whose tab is open, which
+           is how a reviewer gives one channel its own picture. Hidden entirely when the post has no
+           siblings — a checkbox offering a choice that does not exist is just noise. -->
+      <label id="gp-ai-apply-all-row" class="hidden items-center gap-2 mt-2 text-xs text-gray-600 cursor-pointer">
+        <input type="checkbox" id="gp-ai-apply-all" checked class="rounded text-emerald-700 focus:ring-emerald-700">
+        <span>Apply to all platforms <span id="gp-ai-apply-all-list" class="text-gray-400"></span></span>
+      </label>
       <!-- Stock search box (shown by "Find a photo"/"Find a video"). Pre-filled with the post's own
            media suggestion, so pressing Search straight away reproduces the old one-click behaviour
            — but the terms are now visible and editable, which is the point: when the automatic
@@ -6270,6 +6278,10 @@ async function openPostReview(postId, opts = {}) {
 
     _rqReviewRenderTabs();
     _rqReviewRenderActive();
+    // Re-arm the cross-post media scope for THIS post: the checkbox is a persistent element, so a
+    // reviewer who narrowed the last post to one platform would otherwise carry that choice into the
+    // next one — silently, since the media panel may not even be open yet.
+    gpAiSyncApplyAllRow(postId);
 
     const modal = document.getElementById('post-review-modal');
     modal.classList.remove('hidden');
@@ -7391,6 +7403,8 @@ function _pceOpenMediaPicker() {
     gpAiSetMediaType(post.mediaType === 'video' ? 'video' : 'image');
     document.getElementById('gp-ai-media-thumb')?.classList.add('hidden');
     gpAiShowThumb(post.thumbnailUrl, post.mediaType);
+    // After _gpCurrentPostId is set: the row names the OTHER platforms of this post.
+    gpAiSyncApplyAllRow();
 
     // A card is a still, so it is not on offer for a video post — and while an existing card is being
     // replaced, offering to make another one is the opposite of what the user asked for.
@@ -8304,7 +8318,7 @@ async function _pcePersistSlides(assetIds) {
     try {
         const res = await fetch('/.netlify/functions/set-post-slides', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ postId, assetIds }),
+            body: JSON.stringify({ postId, assetIds, applyToGroup: gpApplyToGroup() }),
         });
         const d = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(d.error || 'Could not save the slides.');
@@ -8313,6 +8327,16 @@ async function _pcePersistSlides(assetIds) {
         // The first slide is the post's thumbnail everywhere else (queue cards, siblings), so it has
         // to move when slide 1 does — otherwise reordering looks like it did nothing in the queue.
         post.thumbnailUrl = post.slides[0]?.url ?? null;
+        // The carousel was written to every platform of this post (unless the user narrowed it), so
+        // the sibling tabs must stop showing the slides they no longer carry.
+        (d.postIds || []).forEach(id => {
+            if (id === postId) return;
+            const sib = _rqPostCache[id];
+            if (!sib) return;
+            sib.slides = post.slides;
+            sib.contentAssetIds = post.contentAssetIds;
+            sib.thumbnailUrl = post.thumbnailUrl;
+        });
         _pceSlidesBusy = false;
         _rqReviewRenderActive();
         _pceSetSlidesMsg('Slides updated.', 'ok');
@@ -12482,6 +12506,87 @@ function gpAiMediaBusy(busy) {
     });
 }
 
+// ── Cross-post scope for media ──────────────────────────────────────────────────────────────────
+// A cross-post is one row per platform, and the editor shows them as tabs over a single card. Media
+// therefore lands on ALL of them by default (the server fans out; see src/utils/crosspost-media.ts)
+// and this checkbox is how the reviewer says "just this platform" instead. Sent explicitly on every
+// call rather than relying on the server default, so the request says what the screen showed.
+
+/** True when the media about to be attached should go on every platform of this post. */
+function gpApplyToGroup() {
+    const cb = document.getElementById('gp-ai-apply-all');
+    // No checkbox on screen ⇒ no siblings to fan out to, so the answer cannot matter. Defaulting to
+    // true keeps single-platform posts on the server's own default path.
+    return !cb || !!cb.checked;
+}
+
+/**
+ * Show the scope checkbox only for a post that actually has other platforms, and name them.
+ *
+ * `activePostId` is passed explicitly by openPostReview, which runs before the media panel has been
+ * pointed at anything — reading _gpCurrentPostId there would describe the PREVIOUS post's group.
+ */
+function gpAiSyncApplyAllRow(activePostId) {
+    const row = document.getElementById('gp-ai-apply-all-row');
+    if (!row) return;
+    const active = activePostId != null ? activePostId : _gpCurrentPostId;
+    const ids = (_rqReviewGroupIds || []).filter(id => id != null);
+    const others = ids.filter(id => id !== active);
+    const show = active != null && others.length > 0;
+    row.classList.toggle('hidden', !show);
+    row.classList.toggle('flex', show);
+    if (!show) return;
+    // Re-tick on every open: "all platforms" is the default behaviour, and a box left unticked from
+    // the last post would silently make the next attach single-platform.
+    const cb = document.getElementById('gp-ai-apply-all');
+    if (cb) cb.checked = true;
+    const names = others
+        .map(id => _rqPostCache[id]?.platform)
+        .filter(Boolean)
+        .map(p => rqPlatformLabel(p));
+    const list = document.getElementById('gp-ai-apply-all-list');
+    if (list) list.textContent = names.length ? `(also ${names.join(', ')})` : '';
+}
+
+/**
+ * What actually happened, in the confirmation line.
+ *
+ * "Media attached to this post" was true when a post was one row; on a cross-post it now understates
+ * a change to four platforms, and a reviewer who wanted one platform has no way to tell the fan-out
+ * ran. The message counts the rows the server reported writing.
+ */
+function gpAiAttachedMsg(postIds, noun) {
+    const n = Array.isArray(postIds) ? postIds.length : 1;
+    return n > 1
+        ? `${noun} attached to all ${n} platforms.`
+        : `${noun} attached to this post.`;
+}
+
+/**
+ * Mirror an attach into the SIBLINGS' cache entries.
+ *
+ * The server wrote the media to every id in `postIds`; without this the tabs the user has not
+ * clicked keep rendering the thumbnail they had before, so switching to LinkedIn after attaching
+ * shows the old picture and the reviewer approves believing the change did not take.
+ */
+function gpAiMirrorToSiblings(postIds, url, type) {
+    if (!Array.isArray(postIds) || !url) return;
+    const kind = type ? (type === 'video' ? 'video' : 'image') : (/\.mp4(\?|$)/i.test(url) ? 'video' : 'image');
+    postIds.forEach(id => {
+        if (id === _gpCurrentPostId) return;   // the active post is handled by gpAiShowThumb
+        const p = _rqPostCache[id];
+        if (!p) return;
+        p.thumbnailUrl = url;
+        p.mediaType = kind;
+        p.mediaMissing = false;
+        // Same reasoning as the active post: a swapped picture drops the overlays and any brand card
+        // that lived on the asset it replaced.
+        p.overlays = [];
+        p.brandCard = null;
+        _gpOverlayCountByPost[id] = 0;
+    });
+}
+
 // Switch the media type (image ⇄ video). Updates the toggle styling + button labels and collapses
 // any open picker/grid, since candidates from the previous type no longer apply.
 function gpAiSetMediaType(type) {
@@ -12864,12 +12969,13 @@ async function gpAiSelectOwn(assetId) {
         const res = await fetch('/.netlify/functions/attach-draft-media', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ postId: _gpCurrentPostId, assetId }),
+            body: JSON.stringify({ postId: _gpCurrentPostId, assetId, applyToGroup: gpApplyToGroup() }),
         });
         const d = await res.json().catch(() => ({}));
         if (!res.ok) { gpAiMediaStatus(d.error || 'Could not attach that media.', 'error'); return; }
+        gpAiMirrorToSiblings(d.postIds, d.thumbnailUrl, d.assetType);
         gpAiShowThumb(d.thumbnailUrl, d.assetType);
-        gpAiMediaStatus('Media attached to this post.');
+        gpAiMediaStatus(gpAiAttachedMsg(d.postIds, 'Media'));
     } catch {
         gpAiMediaStatus('Network error — please try again.', 'error');
     }
@@ -13024,17 +13130,18 @@ async function gpAiSelectPexels(candidate) {
         const res = await fetch('/.netlify/functions/pexels-search', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'select', postId: _gpCurrentPostId, candidate, mediaType: _gpAiMediaType }),
+            body: JSON.stringify({ action: 'select', postId: _gpCurrentPostId, candidate, mediaType: _gpAiMediaType, applyToGroup: gpApplyToGroup() }),
         });
         const d = await res.json().catch(() => ({}));
         if (!res.ok) { gpAiMediaStatus(d.error || `Could not attach the ${noun}.`, 'error'); return; }
+        gpAiMirrorToSiblings(d.postIds, candidate.url, _gpAiMediaType);
         gpAiShowThumb(candidate.url, _gpAiMediaType);
         // pexels-search appends the credit line server-side when the org opts in — mirror it in the preview.
         if (d.attributionAppended && candidate.photographer) {
             const cap = document.getElementById('gen-post-preview-caption');
             if (cap) cap.textContent = `${cap.textContent || ''}\n\nPhoto by ${candidate.photographer} on Pexels`;
         }
-        gpAiMediaStatus(d.attributionAppended ? `${Noun} attached — a credit line was added to your caption.` : `${Noun} attached to this post.`);
+        gpAiMediaStatus(d.attributionAppended ? `${Noun} attached — a credit line was added to your caption.` : gpAiAttachedMsg(d.postIds, Noun));
     } catch {
         gpAiMediaStatus('Network error — please try again.', 'error');
     }
@@ -13053,14 +13160,15 @@ async function gpAiGenerate() {
         const res = await fetch('/.netlify/functions/regenerate-post-media', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ postId: _gpCurrentPostId, prompt: _gpAiMediaPrompt || undefined }),
+            body: JSON.stringify({ postId: _gpCurrentPostId, prompt: _gpAiMediaPrompt || undefined, applyToGroup: gpApplyToGroup() }),
         });
         const d = await res.json().catch(() => ({}));
         if (res.status === 402) { gpAiMediaStatus("You're out of image credits — upgrade to generate more.", 'error'); gpAiMediaBusy(false); return; }
         if (res.status === 422) { gpAiMediaStatus(d.error || 'That description was flagged. Try different wording.', 'error'); gpAiMediaBusy(false); return; }
         if (!res.ok) { gpAiMediaStatus(d.error || 'Could not generate an image.', 'error'); gpAiMediaBusy(false); return; }
+        gpAiMirrorToSiblings(d.postIds, d.thumbnailUrl, 'image');
         gpAiShowThumb(d.thumbnailUrl, 'image');
-        gpAiMediaStatus('New AI image attached to this post.');
+        gpAiMediaStatus(gpAiAttachedMsg(d.postIds, 'New AI image'));
     } catch {
         gpAiMediaStatus('Network error — please try again.', 'error');
         gpAiMediaBusy(false);
@@ -13103,12 +13211,13 @@ function gpAiPollVideo(jobId) {
                 const aRes = await fetch('/.netlify/functions/attach-draft-media', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ postId: _gpCurrentPostId, assetId: d.assetId }),
+                    body: JSON.stringify({ postId: _gpCurrentPostId, assetId: d.assetId, applyToGroup: gpApplyToGroup() }),
                 });
                 const aData = await aRes.json().catch(() => ({}));
                 if (!aRes.ok) { gpAiMediaStatus(aData.error || 'Video generated but could not be attached.', 'error'); gpAiMediaBusy(false); return; }
+                gpAiMirrorToSiblings(aData.postIds, aData.thumbnailUrl || d.videoUrl, 'video');
                 gpAiShowThumb(aData.thumbnailUrl || d.videoUrl, 'video');
-                gpAiMediaStatus('New AI video attached to this post.');
+                gpAiMediaStatus(gpAiAttachedMsg(aData.postIds, 'New AI video'));
                 return;
             }
             if (d.status === 'failed') { gpAiMediaStatus(d.errorMessage || 'Video generation failed. Please try again.', 'error'); gpAiMediaBusy(false); return; }

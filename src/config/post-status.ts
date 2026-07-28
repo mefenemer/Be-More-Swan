@@ -72,3 +72,27 @@ const ACTIVE = new Set<string>(SCHEDULE_ACTIVE_STATUSES);
 export function isScheduleActive(status: string | null | undefined): boolean {
     return ACTIVE.has(String(status ?? ''));
 }
+
+/**
+ * Statuses whose MEDIA may still be changed. A post that has gone out is a matter of record, and a
+ * rejected/cancelled one is not coming back — swapping either one's picture would rewrite history.
+ *
+ * Deliberately narrower than SCHEDULE_ACTIVE_STATUSES, and not derivable from it: 'published',
+ * 'publishing' and 'failed' all have live schedules but must never have their media rewritten,
+ * while 'draft'/'pending_approval'/'in_review' have no schedule yet and are the most editable posts
+ * there are. The browser's copy of this rule is _pceIsEditablePost in workspace.html.
+ */
+export const MEDIA_EDITABLE_STATUSES = [
+    'draft',
+    'pending_approval',
+    'in_review',
+    'approved',
+    'scheduled',
+] as const satisfies readonly PostStatus[];
+
+const MEDIA_EDITABLE = new Set<string>(MEDIA_EDITABLE_STATUSES);
+
+/** True when this post's attached media may still be swapped. */
+export function isMediaEditable(status: string | null | undefined): boolean {
+    return MEDIA_EDITABLE.has(String(status ?? ''));
+}
