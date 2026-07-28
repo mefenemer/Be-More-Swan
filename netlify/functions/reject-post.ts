@@ -117,6 +117,10 @@ export default withLambda(async (event) => {
         status: 'draft',
         ownerId: post.ownerId,
         ownerLabel: post.ownerLabel ?? undefined,
+        // Carry the parent's origin. Without it the clone lands with trigger_type NULL and the
+        // Review Queue can no longer say where the post came from — isRevised tells the reviewer
+        // it was re-drafted, but not whether the original was autopilot, on-demand or hand-written.
+        triggerType: post.triggerType ?? undefined,
         isAutonomous: post.isAutonomous,
         campaign: post.campaign ?? undefined,
         pillar: post.pillar ?? undefined,

@@ -5532,6 +5532,39 @@ function rqToggleGroup(key) {
     if (chev) chev.classList.toggle('rotate-90', !wasOpen);
 }
 
+// ── Origin pill ───────────────────────────────────────────────────────────────
+// Where did this draft come from? Previously only on-demand posts said anything ("On Demand"),
+// which left the reviewer unable to tell an unprompted autopilot draft from one they asked for,
+// from one they wrote themselves. Every origin now gets a pill, and it names the author rather
+// than the mechanism — "Created by Nova" reads as attribution; "On Demand" read as jargon.
+//
+// Precedence matters: the trigger type is the *least* interesting fact when something more
+// specific is true. A draft re-written after a rejection is "Revised" whatever originally made
+// it, and a draft built from the reviewer's own suggestion is "From your idea" even though the
+// job that produced it was an ordinary scheduled one.
+function rqOriginPill(draft) {
+    const who = draft.assistantName || 'your assistant';
+    const P = (label, cls) => ({ label, cls });
+    if (draft.isRevised)              return P(`Revised by ${who}`,  'bg-violet-100 text-violet-700');
+    if (draft.originIdea)             return P('From your idea',     'bg-sky-100 text-sky-700');
+    switch (draft.triggerType) {
+        case 'on_demand':     return P(`Created by ${who}`, 'bg-violet-100 text-violet-700');
+        case 'scheduled':     return P(`Autopilot · ${who}`, 'bg-indigo-100 text-indigo-700');
+        case 'conversion':    return P('Conversion post',   'bg-amber-100 text-amber-700');
+        case 'orchestration': return P(draft.handoffFrom ? `Hand-off from ${draft.handoffFrom}` : 'Team hand-off',
+                                                           'bg-teal-100 text-teal-700');
+        // A person typed this one. ownerLabel is "Jane Smith" for a teammate's post; its absence
+        // means the post belongs to whoever is looking at it.
+        case 'manual':        return P(draft.ownerLabel ? `Written by ${draft.ownerLabel}` : 'Written by you',
+                                                           'bg-gray-100 text-gray-600');
+        // Legacy rows predate trigger_type. An assistant on the row still makes it the author;
+        // anything else is old hand-written content.
+        default: return draft.assistantId
+            ? P(`Created by ${who}`,   'bg-violet-100 text-violet-700')
+            : P('Written by you',      'bg-gray-100 text-gray-600');
+    }
+}
+
 // A clean, clickable summary row. The full per-platform mock-up + approve/amend/request-changes/reject
 // actions live in openPostReview() so the list itself stays scannable (the old cramped inline-button
 // card was the source of the "confusing layout" feedback).
@@ -5542,7 +5575,7 @@ function rqRenderSocialCard(draft) {
     const multi = group.length > 1;
     rqCachePost(draft);
     const ago = rqTimeAgo(draft.generatedAt || draft.rejectedAt);
-    const isOnDemand = draft.triggerType === 'on_demand';
+    const origin = rqOriginPill(draft);
     const isArchived = draft.status === 'rejected';
     const isVideo = draft.mediaType === 'video' || /video|reel/i.test(draft.postFormat || '');
     const thumb = draft.thumbnailUrl
@@ -5591,9 +5624,9 @@ function rqRenderSocialCard(draft) {
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 mb-0.5">
           <p class="text-sm font-semibold text-gray-900 truncate">${title}</p>
-          ${isOnDemand && !isArchived ? '<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700">On Demand</span>' : ''}
+          ${!isArchived ? `<span class="shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${origin.cls}">${_rqEsc(origin.label)}</span>` : ''}
         </div>
-        <p class="text-xs text-gray-500 truncate">${_rqEsc(draft.assistantName || 'AI Assistant')} · ${ago}</p>
+        <p class="text-xs text-gray-500 truncate">${isArchived ? _rqEsc(draft.assistantName || 'AI Assistant') + ' · ' : ''}${ago}</p>
         ${draft.caption ? `<p class="text-xs text-gray-600 truncate mt-0.5 ${isArchived ? 'line-through opacity-60' : ''}">${_rqEsc(draft.caption)}</p>` : ''}
         ${chips}
       </div>

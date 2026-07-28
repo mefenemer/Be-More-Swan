@@ -4,7 +4,7 @@
 import { Handler } from '@netlify/functions';
 import { eq, and, desc, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts, aiAssistants, postIdeaSuggestions, organisations, scheduledPostAssets, contentAssets, postRenderJobs } from '../../db/schema';
+import { scheduledPosts, aiAssistants, postIdeaSuggestions, organisations, scheduledPostAssets, contentAssets, postRenderJobs, orchestrationRuns } from '../../db/schema';
 import { resolvePostImage, presignR2Get, resolvePostMediaList } from '../../src/utils/social-publish';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -106,6 +106,11 @@ export default withLambda(async (event) => {
                 mediaMissingNote: scheduledPosts.mediaMissingNote,
                 status: scheduledPosts.status,
                 triggerType: scheduledPosts.triggerType,
+                // Origin attribution for the Review Queue's pill. trigger_type alone can't tell the
+                // whole story: a draft regenerated after a rejection inherits its parent's trigger,
+                // and a human-written post is identified by who owns it, not by how it was made.
+                isRevised: scheduledPosts.isRevised,
+                ownerLabel: scheduledPosts.ownerLabel,
                 publishDate: scheduledPosts.publishDate,
                 generatedAt: scheduledPosts.generatedAt,
                 assistantId: scheduledPosts.assistantId,
@@ -174,6 +179,32 @@ export default withLambda(async (event) => {
                 // db/post-render-jobs.sql not applied in this environment — degrade to a bare
                 // warning rather than emptying the review queue.
                 console.warn('[get-social-drafts] render-error lookup skipped:', err instanceof Error ? err.message : err);
+            }
+        }
+
+        // Which assistant handed off to produce an orchestration draft. Only looked up for the
+        // drafts actually in that state — hand-offs are rare, so this stays off the hot path rather
+        // than adding two more joins to the main query for a column almost every row leaves null.
+        // Best-effort: without it the card falls back to a generic "Team hand-off" pill.
+        const handoffFrom = new Map<number, string>();
+        const handoffJobIds = drafts.filter(d => d.triggerType === 'orchestration' && d.jobId).map(d => d.jobId!);
+        if (handoffJobIds.length) {
+            try {
+                const rows = await db
+                    .select({ jobId: orchestrationRuns.targetJobId, sourceName: aiAssistants.name })
+                    .from(orchestrationRuns)
+                    .leftJoin(aiAssistants, eq(aiAssistants.id, orchestrationRuns.sourceAssistantId))
+                    .where(and(
+                        eq(orchestrationRuns.organisationId, organisationId),
+                        inArray(orchestrationRuns.targetJobId, handoffJobIds),
+                    ));
+                const byJob = new Map(rows.filter(r => r.jobId && r.sourceName).map(r => [r.jobId!, r.sourceName!]));
+                for (const d of drafts) {
+                    const name = d.jobId ? byJob.get(d.jobId) : undefined;
+                    if (name) handoffFrom.set(d.id, name);
+                }
+            } catch (err) {
+                console.warn('[get-social-drafts] hand-off source lookup skipped:', err instanceof Error ? err.message : err);
             }
         }
 
@@ -287,6 +318,8 @@ export default withLambda(async (event) => {
                 // Why the video render failed, when it did — null in every other state.
                 renderError: d.renderStatus === 'failed' ? (renderErrors.get(d.id) ?? null) : null,
                 brandCard: brandCards.get(d.id) ?? null,
+                // Name of the assistant whose post triggered this hand-off — orchestration drafts only.
+                handoffFrom: handoffFrom.get(d.id) ?? null,
                 // The saved text-overlay design, so the Review canvas can paint it live on open without
                 // a per-post get-post-image round trip. Normalised to an array the client renders directly.
                 slides,

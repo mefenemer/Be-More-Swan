@@ -151,6 +151,10 @@ export default withLambda(async (event) => {
                 status: finalStatus,
                 ownerId: userId,
                 ownerLabel: ownerLabel || null,
+                // A post composed here was typed by a person, same as create-manual-post. Leaving it
+                // NULL made human-written posts indistinguishable from legacy AI rows, so the Review
+                // Queue attributed them to the assistant.
+                triggerType: 'manual',
                 isAutonomous: isAutonomous || false,
                 campaign: campaign || null,
                 pillar: pillar || null,
