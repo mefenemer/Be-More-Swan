@@ -416,33 +416,10 @@
   .as-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px;
     background: rgba(255,255,255,0.85); border: 1px solid rgba(15,23,42,0.08); font-size: 13px; color: #334155; }
 
-  /* AC2 — attention cards */
-  .as-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
-  @media (max-width: 760px) { .as-grid { grid-template-columns: 1fr; } }
-  .as-card { position: relative; padding: 16px 16px 14px; border-radius: 16px; background: #fff;
-    border: 1px solid rgba(15,23,42,0.08); box-shadow: 0 1px 2px rgba(0,0,0,0.04);
-    transition: box-shadow .2s ease, transform .25s ease, opacity .25s ease; }
-  .as-card:hover { box-shadow: 0 14px 26px -16px rgba(131,24,67,0.35); }
-  .as-card.as-removing { opacity: 0; transform: translateY(-6px) scale(.98); }
-  .as-card-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-  .as-card-assist { font-size: 12px; font-weight: 700; color: #db2777; }
-  .as-pill { margin-left: auto; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: #f1f5f9; color: #64748b; }
-  .as-pill-warn { background: #fef3c7; color: #b45309; }
-  .as-card-title { font-size: 14px; font-weight: 700; color: #0f172a; margin: 0 0 4px; }
-  .as-card-prev { font-size: 13px; color: #64748b; margin: 0 0 12px; line-height: 1.45; }
-  .as-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  /* Shared button base — the AC2 attention cards it was written for are gone; the AC3
+     suggestion cards below still use it (.as-btn-yes / .as-btn-later extend it). */
   .as-btn { border: 0; cursor: pointer; font-size: 13px; font-weight: 700; padding: 8px 14px; border-radius: 10px; transition: all .15s ease; }
-  .as-btn-approve { background: #ec4899; color: #fff; }
-  .as-btn-approve:hover { background: #db2777; }
-  .as-btn-edit { background: #f1f5f9; color: #334155; }
-  .as-btn-edit:hover { background: #e2e8f0; }
-  .as-btn-reject { background: #fff; color: #dc2626; border: 1px solid #fecaca; }
-  .as-btn-reject:hover { background: #fef2f2; }
   .as-btn:disabled { opacity: .5; cursor: default; }
-  .as-reject-box { margin-top: 10px; display: none; }
-  .as-reject-box.open { display: block; }
-  .as-reject-input { width: 100%; font-size: 13px; padding: 8px 10px; border: 1px solid #e2e8f0; border-radius: 10px; resize: vertical; min-height: 54px; font-family: inherit; }
-  .as-reject-row { display: flex; gap: 8px; margin-top: 8px; }
 
   /* AC3 — suggestion cards */
   .as-suggest-row { display: flex; gap: 14px; overflow-x: auto; padding-bottom: 4px; }
@@ -483,65 +460,6 @@
       // The attention feed no longer counts towards showing the section — without dropping it here
       // the whole Action Stream would stay visible with nothing in it but its own padding.
       section.classList.toggle('hidden', sgN === 0 && !liveVisible);
-    }
-
-    // ── AC2: approvals ──
-    async function rejectPost(id, reason, card) {
-      try {
-        const res = await fetch('/.netlify/functions/reject-post', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ postId: id, feedbackText: reason, applyAsRule: false }) });
-        if (!res.ok) throw 0;
-        toast('Sent back with your feedback.');
-        removeCard(card, null, reconcile);
-      } catch { toast('Could not send that — please try again.'); }
-    }
-    async function decideAction(id, decision, reason, card, btn) {
-      if (btn) { btn.disabled = true; }
-      try {
-        const res = await fetch('/.netlify/functions/approve-pending-action', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pendingActionId: id, decision, rejectionReason: reason }) });
-        if (!res.ok) throw 0;
-        toast(decision === 'approved' ? 'Approved. ✅' : 'Declined.');
-        removeCard(card, null, reconcile);
-      } catch { if (btn) btn.disabled = false; toast('Could not update — please try again.'); }
-    }
-
-    function attentionCard(item) {
-      const isPost = item.kind === 'post';
-      const card = document.createElement('div');
-      card.className = 'as-card';
-      const pill = item.platform
-        ? `<span class="as-pill">${esc(item.platform)}</span>`
-        : (item.reversibilityTier ? `<span class="as-pill ${item.reversibilityTier !== 'reversible' ? 'as-pill-warn' : ''}">${esc(item.reversibilityTier)}</span>` : '');
-      card.innerHTML = `
-        <div class="as-card-top"><span class="as-card-assist">${esc(item.assistantName)}</span>${pill}</div>
-        <p class="as-card-title">${esc(item.title)}</p>
-        ${item.preview ? `<p class="as-card-prev">${esc(item.preview)}${isPost && item.preview.length >= 140 ? '…' : ''}</p>` : ''}
-        <div class="as-actions">
-          <button class="as-btn as-btn-approve">${isPost ? 'Review' : 'Approve'}</button>
-          <button class="as-btn as-btn-reject">Reject</button>
-        </div>
-        <div class="as-reject-box">
-          <textarea class="as-reject-input" placeholder="${isPost ? 'What should change? (saved as feedback)' : 'Why are you declining this?'}"></textarea>
-          <div class="as-reject-row">
-            <button class="as-btn as-btn-reject as-reject-confirm">Confirm reject</button>
-            <button class="as-btn as-btn-edit as-reject-cancel">Cancel</button>
-          </div>
-        </div>`;
-      const approveBtn = card.querySelector('.as-btn-approve');
-      // Posts follow the Review Queue's own rules (e.g. platform must be connected before
-      // approval) — rather than duplicate that logic here, open the same review modal it uses.
-      approveBtn.onclick = () => isPost
-        ? (window.openPostReview ? window.openPostReview(item.id) : (window.loadView && window.loadView('review-queue')))
-        : decideAction(item.id, 'approved', undefined, card, approveBtn);
-      const box = card.querySelector('.as-reject-box');
-      card.querySelector('.as-btn-reject').onclick = () => { box.classList.toggle('open'); if (box.classList.contains('open')) box.querySelector('.as-reject-input').focus(); };
-      card.querySelector('.as-reject-cancel').onclick = () => box.classList.remove('open');
-      card.querySelector('.as-reject-confirm').onclick = () => {
-        const input = card.querySelector('.as-reject-input');
-        const v = input.value.trim();
-        if (!v) { input.focus(); return; }
-        isPost ? rejectPost(item.id, v, card) : decideAction(item.id, 'rejected', v, card);
-      };
-      return card;
     }
 
     // ── AC3: act on a suggestion ──
@@ -585,7 +503,7 @@
         } else { live.classList.add('hidden'); }
 
         // d.attention is still returned by the endpoint and deliberately ignored — the Review Queue
-        // owns that list now. Nothing renders it, so attentionCard is unreachable from here.
+        // owns that list now, so nothing here renders it.
         const sg = document.getElementById('as-suggest'); sg.innerHTML = '';
         (d.suggestions || []).forEach(i => sg.appendChild(suggestCard(i)));
 
@@ -862,7 +780,7 @@
   #dash-root .cc-toggle-btn:active, #dash-root .as-btn:active, #dash-root .dw-customize:active,
   #dash-root .cc-tile:active { transform: scale(.97); }
   #dash-root .as-btn, #dash-root .dw-customize, #dash-root .cc-toggle-btn { transition: transform .12s ease, background .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease; }
-  #dash-root .as-btn-approve:hover, #dash-root .dw-tray-close:hover { box-shadow: 0 6px 16px -6px rgba(236,72,153,0.6); }
+  #dash-root .dw-tray-close:hover { box-shadow: 0 6px 16px -6px rgba(236,72,153,0.6); }
   #dash-root button:focus-visible, #dash-root input:focus-visible, #dash-root [tabindex]:focus-visible {
     outline: 2px solid #ec4899; outline-offset: 2px; border-radius: 8px; }
   #dash-root .dw-switch input:focus-visible + span { outline: 2px solid #ec4899; outline-offset: 2px; }
