@@ -715,28 +715,49 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 }).from(scheduledPosts).where(eq(scheduledPosts.id, post.id)).limit(1);
                 const sharedAssetIds = Array.isArray(primary?.contentAssetIds) ? (primary!.contentAssetIds as number[]) : [];
 
+                // Per-sibling, not per-fan-out. One platform failing used to abort the loop and take
+                // every platform AFTER it with it — so a cross-post aimed at four accounts could
+                // land on two, look like a deliberate two-platform post in the Review Queue, and say
+                // nothing. Each sibling now stands or falls on its own.
+                const made: string[] = [];
+                const failed: string[] = [];
                 for (const siblingPlatform of targetPlatforms.slice(1)) {
-                    const siblingFit = captionFor(siblingPlatform, stockCreditSuffix);
-                    const [sibling] = await db.insert(scheduledPosts).values({
-                        userId: job.user_id, organisationId: job.organisation_id, assistantId: job.assistant_id,
-                        blueprintId: job.blueprint_id, jobId: job.job_id,
-                        platform: siblingPlatform, postFormat: primary?.postFormat ?? format, pillar: primary?.pillar ?? null,
-                        publishDate: primary?.publishDate ?? new Date(now.getTime() + 24 * 60 * 60 * 1000),
-                        caption: siblingFit.caption || null, hashtags: siblingFit.hashtags || null,
-                        suggestedMediaDescription: primary?.suggestedMediaDescription ?? null,
-                        status: 'pending_approval', generatedAt: now, triggerType: job.trigger_type ?? 'scheduled',
-                        crosspostGroupId: primary?.crosspostGroupId ?? job.crosspost_group_id,
-                    }).returning({ id: scheduledPosts.id });
+                    try {
+                        const siblingFit = captionFor(siblingPlatform, stockCreditSuffix);
+                        const [sibling] = await db.insert(scheduledPosts).values({
+                            userId: job.user_id, organisationId: job.organisation_id, assistantId: job.assistant_id,
+                            blueprintId: job.blueprint_id, jobId: job.job_id,
+                            platform: siblingPlatform, postFormat: primary?.postFormat ?? format, pillar: primary?.pillar ?? null,
+                            publishDate: primary?.publishDate ?? new Date(now.getTime() + 24 * 60 * 60 * 1000),
+                            caption: siblingFit.caption || null, hashtags: siblingFit.hashtags || null,
+                            suggestedMediaDescription: primary?.suggestedMediaDescription ?? null,
+                            status: 'pending_approval', generatedAt: now, triggerType: job.trigger_type ?? 'scheduled',
+                            crosspostGroupId: primary?.crosspostGroupId ?? job.crosspost_group_id,
+                        }).returning({ id: scheduledPosts.id });
 
-                    for (const aid of sharedAssetIds) await attachAssetToPost(db, sibling.id, aid);
+                        for (const aid of sharedAssetIds) await attachAssetToPost(db, sibling.id, aid);
 
-                    if (attachedMediaSource) {
-                        await runAutoPublishGate(db, {
-                            postId: sibling.id, platform: siblingPlatform, assistantId: job.assistant_id,
-                            organisationId: job.organisation_id, caption: siblingFit.caption,
-                            mediaSource: attachedMediaSource, now,
-                        });
+                        if (attachedMediaSource) {
+                            await runAutoPublishGate(db, {
+                                postId: sibling.id, platform: siblingPlatform, assistantId: job.assistant_id,
+                                organisationId: job.organisation_id, caption: siblingFit.caption,
+                                mediaSource: attachedMediaSource, now,
+                            });
+                        }
+                        made.push(siblingPlatform);
+                    } catch (sibErr) {
+                        failed.push(siblingPlatform);
+                        console.error(`[process-content-jobs] job ${job.job_id} sibling ${siblingPlatform} failed:`,
+                            sibErr instanceof Error ? sibErr.message : sibErr);
                     }
+                }
+                // Say plainly that the group is short. A partial cross-post is indistinguishable from
+                // an intentionally narrow one once it is in the queue, so the log is the only place
+                // the discrepancy can be seen at all.
+                if (failed.length) {
+                    console.error(`[process-content-jobs] job ${job.job_id} PARTIAL cross-post: `
+                        + `asked for ${targetPlatforms.join(',')} — created ${[targetPlatforms[0], ...made].join(',')}, `
+                        + `missing ${failed.join(',')}`);
                 }
             } catch (fanErr) {
                 // A fan-out failure must not fail the job — the primary post is already safely drafted.
