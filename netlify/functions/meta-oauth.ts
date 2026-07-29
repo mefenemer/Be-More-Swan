@@ -70,7 +70,7 @@ export default withLambda(async (event) => {
         // (re-verifies current membership) rather than reading the JWT claim directly.
         const ctx = await requireTenant(event, getDb());
         if ('error' in ctx) return ctx.error;
-        const { organisationId } = ctx;
+        const { organisationId, userId } = ctx;
 
         const assistantId = event.queryStringParameters?.assistantId;
         // Carry the platform the user clicked (Instagram connects through Facebook) so an error
@@ -78,7 +78,12 @@ export default withLambda(async (event) => {
         const platform = event.queryStringParameters?.platform === 'instagram' ? 'instagram' : 'facebook';
         const csrf = csrfToken();
         const csrfHmac = createHmac('sha256', jwtSecret).update(csrf).digest('hex');
-        const state = signState({ organisationId: String(organisationId), assistantId: assistantId ?? '', platform, csrf, csrfHmac });
+        // `userId` rides in the state for the same reason `organisationId` does: the callback is a
+        // top-level redirect back from Meta and cannot rely on the session cookie being present.
+        // Without it the stored connection had NO owner — and `user_id IS NULL` is the sentinel
+        // integrations.ts uses for a global catalog row, so every Facebook/Instagram connection
+        // was served to every workspace as an unconnected "platform definition".
+        const state = signState({ organisationId: String(organisationId), userId: String(userId), assistantId: assistantId ?? '', platform, csrf, csrfHmac });
 
         const url = `https://www.facebook.com/v19.0/dialog/oauth?client_id=${metaAppId}&redirect_uri=${encodeURIComponent(REDIRECT_URI)}&scope=${SCOPES}&state=${state}&response_type=code`;
 
@@ -112,6 +117,7 @@ export default withLambda(async (event) => {
         }
 
         const organisationId = parseInt(state.organisationId);
+        const stateUserId   = state.userId ? parseInt(state.userId) : null;
         const assistantId   = state.assistantId ? parseInt(state.assistantId) : null;
         const platform      = state.platform === 'instagram' ? 'instagram' : 'facebook';
 
@@ -303,9 +309,15 @@ export default withLambda(async (event) => {
 
         const tokenExpiresAt = new Date(Date.now() + TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000);
 
+        // The org's first member — the notification recipient below, and the owner of last resort
+        // for a connection whose state predates `userId` riding in it (an OAuth flow already in
+        // flight across this deploy). Resolved before the upsert because the row now needs it.
+        const [orgUser] = await db.select({ id: users.id }).from(users).innerJoin(userOrganisations, eq(users.id, userOrganisations.userId)).where(eq(userOrganisations.organisationId, organisationId)).limit(1);
+        const connectionUserId = stateUserId ?? orgUser?.id ?? null;
+
         // Upsert system_connections — update existing if same external id, else create.
         const [existing] = await db
-            .select({ id: systemConnections.id })
+            .select({ id: systemConnections.id, userId: systemConnections.userId })
             .from(systemConnections)
             .where(and(
                 eq(systemConnections.organisationId, organisationId),
@@ -324,11 +336,15 @@ export default withLambda(async (event) => {
                 isActive: true,
                 metadata: connMetadata,
                 ...(assistantId ? { assistantId } : {}),
+                // Heal a row stored before this was set, but never reassign one that already has an
+                // owner: a teammate reconnecting a shared account must not take it over.
+                ...(existing.userId == null && connectionUserId ? { userId: connectionUserId } : {}),
                 updatedAt: new Date(),
             }).where(eq(systemConnections.id, existing.id));
         } else {
             await db.insert(systemConnections).values({
                 organisationId,
+                userId: connectionUserId,
                 assistantId,
                 serviceName,
                 connectionType: 'oauth',
@@ -342,8 +358,6 @@ export default withLambda(async (event) => {
             });
         }
 
-        // Find userId from org (use first active user for notification)
-        const [orgUser] = await db.select({ id: users.id }).from(users).innerJoin(userOrganisations, eq(users.id, userOrganisations.userId)).where(eq(userOrganisations.organisationId, organisationId)).limit(1);
         if (orgUser) {
             if (serviceName === 'instagram') {
                 await createNotification(db, isReconnect ? 'instagram_reconnected' : 'instagram_connected', {

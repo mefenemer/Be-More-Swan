@@ -52,7 +52,19 @@ export default withLambda(async (event) => {
                 tokenExpiresAt: systemConnections.tokenExpiresAt,
             };
 
-            const systemCatalog = await db.select(safeColumns).from(systemConnections).where(isNull(systemConnections.userId));
+            // Org-scoped, because `user_id IS NULL` never actually meant "global platform
+            // definition": organisation_id is NOT NULL (US-DB-1.3.1), so every such row belongs to
+            // a real workspace. Unscoped, this returned every other tenant's unattributed
+            // connections — service name, external account id and metadata (a Facebook Page id and
+            // name, an Instagram username) — to any signed-in user. Tokens were never exposed;
+            // safeColumns has always withheld vaultRefKey. The cards themselves come from the
+            // client's own PROVIDERS list, so nothing renders differently for a legitimate caller.
+            const systemCatalog = currentOrgId
+                ? await db.select(safeColumns).from(systemConnections).where(and(
+                    isNull(systemConnections.userId),
+                    eq(systemConnections.organisationId, currentOrgId),
+                ))
+                : [];
 
             // 2. Fetch current user's connections scoped by org (US-DB-1.3.1)
             const userConnections = await db.select(safeColumns).from(systemConnections).where(
