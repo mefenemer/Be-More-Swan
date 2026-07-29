@@ -87,6 +87,14 @@ test('the ceilings are declared once, not copied into either consumer', () => {
     assert.match(blueprint, /from '\.\.\/config\/execution-budgets'/);
 });
 
+test('an inherited budget is a complete section, not a partial one', () => {
+    // The UI renders the field count beside the status, so tying status to whether a HUMAN chose
+    // the numbers produced "6/6 fields — Partial", which reads as a fault when nothing is wrong.
+    // Provenance belongs to budgetSource; only a malformed budget (the one case that warns) is partial.
+    assert.match(blueprint, /status: budgetMalformed \? 'partial' : 'complete'/);
+    assert.match(blueprint, /budgetSource: budgetExplicit \? 'assistant' : 'platform-default'/);
+});
+
 test('section 10 no longer reads budget keys off the top of configuration', () => {
     assert.ok(
         !/execConfig\.max(LlmCalls|ToolCalls|TokensGenerated|WallClockMinutes|CostGbp)/.test(blueprint),

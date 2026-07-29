@@ -416,7 +416,11 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
     };
     if (budgetMalformed) missing.push({ section: '10-execution', field: 'executionBudgets', sourceTable: 'ai_assistants', sourceColumn: 'configuration', severity: 'warning' });
     sections['10-execution'] = {
-        status: budgetExplicit ? 'complete' : 'partial',
+        // Every value resolves, so the section is complete — `budgetSource` is what says whether a
+        // human chose the numbers, and status must not contradict the field count the UI renders
+        // beside it ("6/6 fields — Partial" reads as a fault when nothing is wrong). Only a
+        // malformed budget, which is also the only thing that warns here, is partial.
+        status: budgetMalformed ? 'partial' : 'complete',
         content: s10content,
         sources: [
             src('ai_assistants', 'configuration', asst.id, asst.updatedAt),
