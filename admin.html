@@ -30,7 +30,7 @@
 
   <!-- US-ADM-1.4.1: Two-tier navigation -->
   <!-- Primary sidebar: category icons + labels -->
-  <aside id="admin-primary-nav" class="admin-primary-nav w-16 lg:w-20 bg-gray-950 text-white flex flex-col flex-shrink-0 z-20 h-full min-h-screen overflow-y-auto">
+  <aside id="admin-primary-nav" class="admin-primary-nav w-16 bg-gray-950 text-white flex flex-col flex-shrink-0 z-20 h-full min-h-screen overflow-y-auto">
     <div class="h-14 flex items-center justify-center border-b border-gray-800 shrink-0">
       <span class="text-emerald-400 font-extrabold text-lg">A</span>
     </div>
@@ -40,61 +40,43 @@
         class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
         aria-label="Dashboard" title="Dashboard">
         <span class="text-xl">📊</span>
-        <span class="text-[10px] font-bold mt-0.5 hidden lg:block truncate text-gray-400 group-hover:text-white transition-colors">Dash</span>
+        <span class="admin-cat-label group-hover:text-white">Dashboard</span>
       </button>
-      <button data-cat="users" onclick="adminCatNav('users')"
+      <button data-cat="customers" onclick="adminCatNav('customers')"
         class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
-        aria-label="CRM" title="CRM">
+        aria-label="Customers" title="Customers — users, workspaces, contacts and support">
         <span class="text-xl">👥</span>
-        <span class="text-[10px] font-bold mt-0.5 hidden lg:block truncate text-gray-400 group-hover:text-white transition-colors">CRM</span>
+        <span class="admin-cat-label group-hover:text-white">Customers</span>
       </button>
-      <button data-cat="billing" onclick="adminCatNav('billing')"
+      <button data-cat="revenue" onclick="adminCatNav('revenue')"
         class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
-        aria-label="Billing" title="Billing">
+        aria-label="Revenue" title="Revenue — billing, dunning, disputes and COGS">
         <span class="text-xl">💳</span>
-        <span class="text-[10px] font-bold mt-0.5 hidden lg:block truncate text-gray-400 group-hover:text-white transition-colors">Billing</span>
+        <span class="admin-cat-label group-hover:text-white">Revenue</span>
       </button>
       <button data-cat="assistants" onclick="adminCatNav('assistants')"
         class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
-        aria-label="Assistants" title="Assistants">
+        aria-label="Assistants" title="Assistants — catalog, blueprints, models and publishing">
         <span class="text-xl">🤖</span>
-        <span class="text-[10px] font-bold mt-0.5 hidden lg:block truncate text-gray-400 group-hover:text-white transition-colors">Assist.</span>
+        <span class="admin-cat-label group-hover:text-white">Assistants</span>
       </button>
       <button data-cat="platform" onclick="adminCatNav('platform')"
         class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
-        aria-label="Platform" title="Platform">
+        aria-label="Platform" title="Platform — configuration, insights and operations">
         <span class="text-xl">🔧</span>
-        <span class="text-[10px] font-bold mt-0.5 hidden lg:block truncate text-gray-400 group-hover:text-white transition-colors">Platform</span>
+        <span class="admin-cat-label group-hover:text-white">Platform</span>
       </button>
-      <button data-cat="security" onclick="adminCatNav('security')"
+      <button data-cat="comms" onclick="adminCatNav('comms')"
         class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
-        aria-label="Security" title="Security">
-        <span class="text-xl">🛡️</span>
-        <span class="text-[10px] font-bold mt-0.5 hidden lg:block truncate text-gray-400 group-hover:text-white transition-colors">Security</span>
-      </button>
-      <button data-cat="communications" onclick="adminCatNav('communications')"
-        class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
-        aria-label="Communications" title="Communications">
+        aria-label="Comms" title="Comms — email and notification templates">
         <span class="text-xl">✉️</span>
-        <span class="text-[10px] font-bold mt-0.5 hidden lg:block truncate text-gray-400 group-hover:text-white transition-colors">Comms</span>
+        <span class="admin-cat-label group-hover:text-white">Comms</span>
       </button>
-      <button data-cat="compliance" onclick="adminCatNav('compliance')"
+      <button data-cat="trust" onclick="adminCatNav('trust')"
         class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
-        aria-label="Compliance" title="Compliance">
-        <span class="text-xl">📋</span>
-        <span class="text-[10px] font-bold mt-0.5 hidden lg:block truncate text-gray-400 group-hover:text-white transition-colors">Comply</span>
-      </button>
-      <button data-cat="testing" onclick="adminCatNav('testing')"
-        class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
-        aria-label="Testing" title="Testing">
-        <span class="text-xl">🐞</span>
-        <span class="text-[10px] font-bold mt-0.5 hidden lg:block truncate text-gray-400 group-hover:text-white transition-colors">Testing</span>
-      </button>
-      <button data-cat="workspaces" onclick="adminCatNav('workspaces')"
-        class="admin-cat-btn group relative flex flex-col items-center justify-center py-3 px-1 transition-colors cursor-pointer"
-        aria-label="Workspaces" title="Workspaces">
-        <span class="text-xl">🏢</span>
-        <span class="text-[10px] font-bold mt-0.5 hidden lg:block truncate text-gray-400 group-hover:text-white transition-colors">Spaces</span>
+        aria-label="Trust" title="Trust — admin access, audit trails, abuse and breach response">
+        <span class="text-xl">🛡️</span>
+        <span class="admin-cat-label group-hover:text-white">Trust</span>
       </button>
     </nav>
     <div class="pb-4 flex flex-col items-center gap-1">
@@ -117,7 +99,7 @@
   <!-- Secondary sidebar: child items for selected category -->
   <div id="admin-secondary-nav"
     class="admin-secondary-nav w-0 bg-gray-900 text-white flex flex-col flex-shrink-0 overflow-hidden z-10 transition-[width] duration-200 ease-out border-r border-gray-800">
-    <div class="w-48 flex flex-col h-full">
+    <div class="w-52 flex flex-col h-full">
       <div class="h-14 flex items-center px-4 border-b border-gray-800 shrink-0">
         <span id="admin-secondary-title" class="text-xs font-extrabold text-gray-400 uppercase tracking-widest"></span>
         <button id="admin-secondary-close" onclick="adminCatClose()" title="Close (Esc)"
@@ -1387,7 +1369,7 @@
               <div id="bp-test-strict-rules" class="space-y-1.5 mt-2"></div>
               <div id="bp-test-compliance-note" class="hidden text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg p-3 mt-2">
                 <strong>Compliance failure detected.</strong> Consider refining the system prompt or strict rules for this assistant.
-                <a id="bp-test-edit-link" href="#" onclick="adminCatNav('master-data')" class="ml-1 underline font-semibold">Navigate to Master Data → Assistants to edit.</a>
+                <a id="bp-test-edit-link" href="#" onclick="adminGoTo('master-data'); return false;" class="ml-1 underline font-semibold">Navigate to Master Data → Assistants to edit.</a>
               </div>
             </div>
 
@@ -1932,8 +1914,26 @@
   .admin-cat-btn.active { background: rgba(16,185,129,.15); border-left-color: #10b981; color: #fff; }
   .admin-cat-btn:focus-visible { outline: 2px solid #10b981; outline-offset: -2px; border-radius: 4px; }
 
+  /* Category labels are spelled out in full — the old truncated forms ("Assist.",
+     "Comply", "Spaces") were the reason the rail could not be read at a glance.
+     The label-width rail lives here rather than on a `lg:w-24` utility because
+     that class is not in the compiled style.css, and rebuilding Tailwind churns
+     unrelated selectors across the whole app. */
+  .admin-cat-label { display: none; margin-top: 2px; font-size: 11px; font-weight: 700;
+    line-height: 1.2; text-align: center; white-space: nowrap; color: #9ca3af; transition: color .12s; }
+  @media (min-width: 1024px) {
+    #admin-primary-nav { width: 6rem; }
+    .admin-cat-label { display: block; }
+  }
+
   .admin-secondary-nav { width: 0; }
-  .admin-secondary-nav.open { width: 12rem; }
+  .admin-secondary-nav.open { width: 13rem; }
+
+  /* Sub-menu group heading — splits the longer sections (Platform, Trust, Customers)
+     into scannable blocks instead of one undifferentiated list. */
+  .admin-child-group { padding: 12px 10px 4px; font-size: 10px; font-weight: 800;
+    letter-spacing: .09em; text-transform: uppercase; color: #6b7280; }
+  .admin-child-group:first-child { padding-top: 2px; }
 
   .admin-child-btn { width: 100%; text-align: left; display: flex; align-items: center; gap: 8px;
     padding: 8px 10px; border-radius: 8px; font-size: 13px; font-weight: 600;
@@ -1984,8 +1984,13 @@
 
     /* Hide primary sidebar on mobile — replaced by bottom tab bar */
     #admin-primary-nav { display: none !important; }
-    /* Hide secondary nav panel on mobile */
-    #admin-secondary-nav-wrapper { display: none !important; }
+
+    /* The sub-menu overlays the page on phones rather than sitting beside it. As an
+       inline flex column it claimed 13rem of a 375px screen and squeezed every page
+       into what was left. (The old rule here named #admin-secondary-nav-wrapper,
+       which is not an element that exists, so it never did anything.) */
+    #admin-secondary-nav { position: fixed; top: 0; bottom: 0; left: 0; z-index: 40; }
+    .admin-secondary-nav.open { box-shadow: 4px 0 32px rgba(0,0,0,.55); }
 
     /* Add bottom padding to main so content clears the bottom tab bar */
     main { padding-bottom: 68px; }
@@ -1997,7 +2002,7 @@
 
   /* 768px–1023px: icon-only rail (existing sidebar, no text labels) */
   @media (min-width: 768px) and (max-width: 1023px) {
-    #admin-primary-nav span.text-\[10px\] { display: none !important; }
+    #admin-primary-nav .admin-cat-label { display: none !important; }
     #admin-primary-nav { width: 52px !important; }
     #admin-bottom-tabs { display: none !important; }
   }
@@ -2172,7 +2177,8 @@ const VIEW_LABELS = {
   dashboard: 'Dashboard', users: 'All Users', tickets: 'Support Tickets',
   catalog: 'Assistant Catalog', analytics: 'Analytics', 'model-config': 'AI Model Config',
   logs: 'System Logs', 'audit-log': 'Audit Log', 'security-abuse': 'Security & Abuse', cogs: 'COGS Dashboard',
-  reconciliation: 'Stripe Reconciliation', dunning: 'Dunning Queue',
+  reconciliation: 'Stripe Reconciliation', dunning: 'Dunning Queue', disputes: 'Disputes',
+  'publish-pipeline': 'Publishing Pipeline',
   'manage-admins': 'Admin Accounts', 'kill-switches': 'Emergency Controls',
   gamification: 'Gamification Settings', 'session-timeout': 'Session Timeout', 'reward-audits': 'Reward Audits',
   'feature-flags': 'Feature Flags', contacts: 'Contacts',
@@ -2194,59 +2200,67 @@ const VIEW_LABELS = {
 // resolves them from rbac.ts, so there is exactly one matrix.
 //
 // A category is shown when at least one of its children is — no separate cat gate.
+//
+// Seven top-level categories, down from ten. The rail is the scarcest space in the
+// portal — it has to stay readable at a glance without truncating labels or
+// scrolling — so anything that could sit one level deeper does. Children may carry
+// an optional `group`, which renders as a heading inside the sub-menu; that keeps
+// the three big sections (Customers, Platform, Trust) scannable without paying for
+// them in the rail. Groups are only drawn when a section has more than one visible,
+// so a permission-trimmed sub-menu never shows a lone heading.
 const ADMIN_CATS = {
   dashboard: { label: 'Dashboard', children: [
     { view: 'dashboard', icon: '📊', label: 'Dashboard', perm: null }, // always visible to any admin
   ]},
-  users: { label: 'Users', children: [
-    { view: 'users',    icon: '👥', label: 'All Users',       perm: 'view_users' },
-    { view: 'contacts', icon: '👤', label: 'Contacts',        perm: 'view_users' },
-    { view: 'tickets',  icon: '🎫', label: 'Support Tickets', perm: 'view_tickets' },
+  // Everything about the people and organisations paying us: who they are, and what
+  // they have told us. Workspaces used to be its own rail entry for a single page.
+  customers: { label: 'Customers', children: [
+    { view: 'users',          icon: '👥', label: 'All Users',        perm: 'view_users',      group: 'Accounts' },
+    { view: 'workspaces',     icon: '🏢', label: 'Workspaces',       perm: 'view_workspaces', group: 'Accounts' },
+    { view: 'contacts',       icon: '👤', label: 'Contacts',         perm: 'view_users',      group: 'Accounts' },
+    { view: 'tickets',        icon: '🎫', label: 'Support Tickets',  perm: 'view_tickets',            group: 'Inbound' },
+    { view: 'issue-reports',  icon: '🐞', label: 'Issue Reports',    perm: 'view_issue_reports',      group: 'Inbound' },
+    { view: 'feature-roadmap',icon: '💡', label: 'Feature Requests', perm: 'manage_feature_requests', group: 'Inbound' },
   ]},
-  billing: { label: 'Billing', children: [
+  revenue: { label: 'Revenue', children: [
     { view: 'reconciliation', icon: '🔄', label: 'Stripe Reconciliation', perm: 'view_reconciliation' },
     { view: 'dunning',        icon: '⏰', label: 'Dunning Queue',         perm: 'dunning_override' },
     { view: 'disputes',       icon: '⚠️', label: 'Disputes',              perm: 'view_reconciliation' },
     { view: 'cogs',           icon: '💰', label: 'COGS Dashboard',        perm: 'view_cogs' },
   ]},
   assistants: { label: 'Assistants', children: [
-    { view: 'catalog',              icon: '🤖', label: 'Assistant Catalog',  perm: 'assistant_catalog' },
+    { view: 'catalog',              icon: '🤖', label: 'Assistant Catalog',   perm: 'assistant_catalog' },
     // Assistant Features moved to Master Data → Assistant Features, where its catalog is now
     // DB-driven and sits alongside the assistant copy fields it relates to.
-    { view: 'model-config',         icon: '⚙️', label: 'AI Model Config',    perm: 'platform_config' },
     { view: 'blueprint-inspector',  icon: '🔬', label: 'Blueprint Inspector', perm: 'assistant_catalog' },
+    { view: 'model-config',         icon: '⚙️', label: 'AI Model Config',     perm: 'platform_config' },
+    // Publishing is what the content assistants actually do, so its pipeline reads
+    // better next to them than buried in a ten-deep Platform list.
+    { view: 'publish-pipeline',     icon: '📡', label: 'Publishing Pipeline', perm: 'platform_config' },
   ]},
   platform: { label: 'Platform', children: [
-    { view: 'analytics',            icon: '📈', label: 'Analytics',             perm: 'view_analytics' },
-    { view: 'master-data',          icon: '🗂️', label: 'Master Data',           perm: 'platform_config' },
-    { view: 'feature-flags',        icon: '🚩', label: 'Feature Flags',         perm: 'feature_flags' },
-    { view: 'kill-switches',        icon: '🚨', label: 'Emergency Controls',    perm: 'kill_switch' },
-    { view: 'gamification',         icon: '🎮', label: 'Gamification Settings', perm: 'platform_config' },
-    { view: 'session-timeout',      icon: '⏱️', label: 'Session Timeout',       perm: 'manage_session_timeout' },
-    { view: 'reward-audits',        icon: '🏆', label: 'Reward Audits',         perm: 'platform_config' },
-    { view: 'publish-pipeline',     icon: '📡', label: 'Publishing Pipeline',   perm: 'platform_config' },
-    { view: 'sandbox',              icon: '🧪', label: 'Sandbox Environment',   perm: 'sandbox_access' },
-    { view: 'systems',              icon: '🛠️', label: 'Systems & Connections', perm: 'view_system_status' },
+    { view: 'master-data',          icon: '🗂️', label: 'Master Data',           perm: 'platform_config',         group: 'Configuration' },
+    { view: 'feature-flags',        icon: '🚩', label: 'Feature Flags',         perm: 'feature_flags',           group: 'Configuration' },
+    { view: 'session-timeout',      icon: '⏱️', label: 'Session Timeout',       perm: 'manage_session_timeout',  group: 'Configuration' },
+    { view: 'gamification',         icon: '🎮', label: 'Gamification Settings', perm: 'platform_config',         group: 'Configuration' },
+    { view: 'analytics',            icon: '📈', label: 'Analytics',             perm: 'view_analytics',          group: 'Insights' },
+    { view: 'reward-audits',        icon: '🏆', label: 'Reward Audits',         perm: 'platform_config',         group: 'Insights' },
+    { view: 'systems',              icon: '🛠️', label: 'Systems & Connections', perm: 'view_system_status',      group: 'Operations' },
+    { view: 'sandbox',              icon: '🧪', label: 'Sandbox Environment',   perm: 'sandbox_access',          group: 'Operations' },
+    { view: 'kill-switches',        icon: '🚨', label: 'Emergency Controls',    perm: 'kill_switch',             group: 'Operations' },
   ]},
-  security: { label: 'Security', children: [
-    { view: 'manage-admins',  icon: '🛡️', label: 'Admin Accounts',    perm: 'manage_admin_roles' },
-    { view: 'audit-log',      icon: '🔐', label: 'Audit Log',         perm: 'view_audit_log' },
-    { view: 'security-abuse', icon: '🚩', label: 'Security & Abuse',  perm: 'view_security_abuse' },
-  ]},
-  communications: { label: 'Communications', children: [
+  comms: { label: 'Comms', children: [
     { view: 'email-templates',        icon: '✉️', label: 'Manage Emails',          perm: 'manage_comms_templates' },
     { view: 'notification-templates', icon: '🔔', label: 'Notification Templates', perm: 'manage_comms_templates' },
   ]},
-  compliance: { label: 'Compliance', children: [
-    { view: 'breach-response', icon: '🚨', label: 'Breach Response', perm: 'breach_response' },
-    { view: 'logs',            icon: '📋', label: 'System Logs',     perm: 'view_audit_log' },
-  ]},
-  testing: { label: 'Testing', children: [
-    { view: 'issue-reports',   icon: '🐞', label: 'Issue Reports',    perm: 'view_issue_reports' },
-    { view: 'feature-roadmap', icon: '💡', label: 'Feature Requests', perm: 'manage_feature_requests' },
-  ]},
-  workspaces: { label: 'Workspaces', children: [
-    { view: 'workspaces', icon: '🏢', label: 'All Workspaces', perm: 'view_workspaces' },
+  // Security and Compliance were two rail entries holding five pages between them,
+  // and an admin chasing an incident had to guess which one owned the trail.
+  trust: { label: 'Trust', children: [
+    { view: 'manage-admins',   icon: '🛡️', label: 'Admin Accounts',   perm: 'manage_admin_roles',  group: 'Access' },
+    { view: 'audit-log',       icon: '🔐', label: 'Audit Log',        perm: 'view_audit_log',      group: 'Monitoring' },
+    { view: 'logs',            icon: '📋', label: 'System Logs',      perm: 'view_audit_log',      group: 'Monitoring' },
+    { view: 'security-abuse',  icon: '🚩', label: 'Security & Abuse', perm: 'view_security_abuse', group: 'Monitoring' },
+    { view: 'breach-response', icon: '🚨', label: 'Breach Response',  perm: 'breach_response',     group: 'Incidents' },
   ]},
 };
 
@@ -2432,13 +2446,23 @@ function adminCatNav(cat) {
   if (!catDef) return;
 
   titleEl.textContent = catDef.label;
-  itemsEl.innerHTML = _visibleChildren(cat)
-    .map(c =>
-    `<button class="admin-child-btn${_activeView === c.view ? ' active' : ''}"
-      data-view="${c.view}"
-      onclick="adminNav('${c.view}')"
-      tabindex="0">${c.icon} ${c.label}</button>`
-  ).join('');
+
+  const kids = _visibleChildren(cat);
+  // Headings earn their space only when they actually divide something. A section
+  // trimmed by permissions down to one group reads better as a plain list.
+  const showGroups = new Set(kids.map(c => c.group || '')).size > 1;
+  let lastGroup = null;
+
+  itemsEl.innerHTML = kids.map(c => {
+    const heading = showGroups && c.group && c.group !== lastGroup
+      ? `<p class="admin-child-group">${c.group}</p>` : '';
+    lastGroup = c.group || null;
+    return heading +
+      `<button class="admin-child-btn${_activeView === c.view ? ' active' : ''}"
+        data-view="${c.view}"
+        onclick="adminNav('${c.view}')"
+        tabindex="0">${c.icon} ${c.label}</button>`;
+  }).join('');
 
   secondary.classList.add('open');
 
@@ -2458,6 +2482,26 @@ function adminCatClose() {
   document.getElementById('admin-secondary-nav')?.classList.remove('open');
   _activeCategory = null;
   document.querySelectorAll('.admin-cat-btn').forEach(b => b.classList.remove('active'));
+}
+
+// Which category owns a view. With pages moving between categories, no caller
+// should have to know — they name the view and this finds the way in.
+function _catOwning(view) {
+  return Object.keys(ADMIN_CATS).find(k => ADMIN_CATS[k].children.some(c => c.view === view));
+}
+
+// Jump to a view from anywhere in the page body, opening its category so the
+// sub-menu reflects where you landed. Cross-links used to call adminCatNav()
+// with a *view* key, which matched no category and silently did nothing.
+function adminGoTo(view) {
+  const cat = _catOwning(view);
+  // Dashboard is standalone; adminCatNav handles closing the panel and navigating.
+  if (cat === 'dashboard') { adminCatNav('dashboard'); return; }
+  // Only open the category when it isn't already open. adminCatNav() reads a repeat
+  // call as a toggle, so hopping between two views in the same section — or stepping
+  // Back through them — would otherwise collapse the sub-menu out from under you.
+  if (cat && _activeCategory !== cat) adminCatNav(cat);
+  adminNav(view);
 }
 
 // Escape key closes secondary panel
@@ -2484,6 +2528,12 @@ function adminNav(view) {
 
   // Highlight active child in secondary panel
   document.querySelectorAll('.admin-child-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+
+  // On phones the sub-menu is an overlay sitting on top of the page — once you have
+  // picked something, get it out of the way. On desktop it stays put as a sidebar.
+  if (window.matchMedia('(max-width: 767px)').matches) {
+    document.getElementById('admin-secondary-nav')?.classList.remove('open');
+  }
 
   // Lazy-load section data
   if (view === 'dashboard')    loadDashboard();
@@ -3044,12 +3094,15 @@ let _bpPreviousResult = null;
 // Route source table/recordId to relevant admin edit section
 function bpNavToSource(table, recordId) {
   const routeMap = {
-    users:            () => { adminNav('users');       if (recordId) setTimeout(() => loadUserDetail?.(recordId), 300); },
-    ai_assistants:    () => { adminNav('assistants');  if (recordId) setTimeout(() => loadAssistantDetail?.(recordId), 300); },
-    organisations:    () => { adminNav('workspaces');  },
-    user_profiles:    () => { adminNav('users');       if (recordId) setTimeout(() => loadUserDetail?.(recordId), 300); },
-    onboarding_data:  () => { adminNav('users'); },
-    compliance_records: () => { adminNav('audit-log'); },
+    // adminGoTo, not adminNav — these hop across categories, and the rail and
+    // sub-menu have to follow or you land on a page the nav says you aren't on.
+    users:            () => { adminGoTo('users');       if (recordId) setTimeout(() => loadUserDetail?.(recordId), 300); },
+    // 'assistants' is a category, not a view: routing to it blanked the page.
+    ai_assistants:    () => { adminGoTo('catalog');     if (recordId) setTimeout(() => loadAssistantDetail?.(recordId), 300); },
+    organisations:    () => { adminGoTo('workspaces');  },
+    user_profiles:    () => { adminGoTo('users');       if (recordId) setTimeout(() => loadUserDetail?.(recordId), 300); },
+    onboarding_data:  () => { adminGoTo('users'); },
+    compliance_records: () => { adminGoTo('audit-log'); },
   };
   const fn = routeMap[table];
   if (fn) fn();
@@ -7605,12 +7658,7 @@ async function submitIcoNotification() {
 // ── popstate: back/forward navigation restores the correct view ──────────────
 window.addEventListener('popstate', (e) => {
   const view = e.state?.view || new URLSearchParams(location.search).get('view') || 'dashboard';
-  // Find which category owns this view and open it, then load the view
-  const cat = Object.keys(ADMIN_CATS).find(k => ADMIN_CATS[k].children.some(c => c.view === view));
-  if (cat && cat !== 'dashboard') {
-    adminCatNav(cat);
-  }
-  adminNav(view);
+  adminGoTo(view);
 });
 
 // Boot runs at the END of this script (see bootAdmin below): adminNav() reads let-declared
@@ -8517,34 +8565,29 @@ function closeMoreDrawer() {
 (function bootAdmin() {
   const params = new URLSearchParams(location.search);
   const initialView = params.get('view') || 'dashboard';
-  const cat = Object.keys(ADMIN_CATS).find(k => ADMIN_CATS[k].children.some(c => c.view === initialView));
-  if (cat && cat !== 'dashboard') {
-    adminCatNav(cat);
-    adminNav(initialView);
-  } else {
-    adminCatNav('dashboard');
-  }
+  if (_catOwning(initialView) && initialView !== 'dashboard') adminGoTo(initialView);
+  else adminCatNav('dashboard');
 })();
 </script>
 
 <!-- US-ADM-1.5.1: Bottom tab bar (mobile <768px) — 4 tabs + More -->
 <div id="admin-bottom-tabs" role="navigation" aria-label="Admin mobile navigation">
   <nav>
-    <button class="admin-bottom-tab-btn" data-cat="users" onclick="adminCatNav('users')" aria-label="CRM">
+    <button class="admin-bottom-tab-btn" data-cat="customers" onclick="adminCatNav('customers')" aria-label="Customers">
       <span class="tab-icon">👥</span>
-      <span>CRM</span>
+      <span>Customers</span>
     </button>
-    <button class="admin-bottom-tab-btn" data-cat="billing" onclick="adminCatNav('billing')" aria-label="Billing">
+    <button class="admin-bottom-tab-btn" data-cat="revenue" onclick="adminCatNav('revenue')" aria-label="Revenue">
       <span class="tab-icon">💳</span>
-      <span>Billing</span>
+      <span>Revenue</span>
+    </button>
+    <button class="admin-bottom-tab-btn" data-cat="assistants" onclick="adminCatNav('assistants')" aria-label="Assistants">
+      <span class="tab-icon">🤖</span>
+      <span>Assistants</span>
     </button>
     <button class="admin-bottom-tab-btn" data-cat="platform" onclick="adminCatNav('platform')" aria-label="Platform">
-      <span class="tab-icon">⚙️</span>
+      <span class="tab-icon">🔧</span>
       <span>Platform</span>
-    </button>
-    <button class="admin-bottom-tab-btn" data-cat="security" onclick="adminCatNav('security')" aria-label="Security">
-      <span class="tab-icon">🔒</span>
-      <span>Security</span>
     </button>
     <button class="admin-bottom-tab-btn" id="admin-more-btn" onclick="toggleMoreDrawer()" aria-label="More" aria-expanded="false">
       <span class="tab-icon">•••</span>
@@ -8560,20 +8603,11 @@ function closeMoreDrawer() {
     <button class="admin-more-item" data-cat="dashboard" onclick="adminCatNav('dashboard');closeMoreDrawer()">
       <span class="more-icon">📊</span>Dashboard
     </button>
-    <button class="admin-more-item" data-cat="assistants" onclick="adminCatNav('assistants');closeMoreDrawer()">
-      <span class="more-icon">🤖</span>Assistants
+    <button class="admin-more-item" data-cat="comms" onclick="adminCatNav('comms');closeMoreDrawer()">
+      <span class="more-icon">✉️</span>Comms
     </button>
-    <button class="admin-more-item" data-cat="communications" onclick="adminCatNav('communications');closeMoreDrawer()">
-      <span class="more-icon">✉️</span>Communications
-    </button>
-    <button class="admin-more-item" data-cat="compliance" onclick="adminCatNav('compliance');closeMoreDrawer()">
-      <span class="more-icon">📋</span>Compliance
-    </button>
-    <button class="admin-more-item" data-cat="testing" onclick="adminCatNav('testing');closeMoreDrawer()">
-      <span class="more-icon">🐞</span>Testing
-    </button>
-    <button class="admin-more-item" data-cat="workspaces" onclick="adminCatNav('workspaces');closeMoreDrawer()">
-      <span class="more-icon">🏢</span>Workspaces
+    <button class="admin-more-item" data-cat="trust" onclick="adminCatNav('trust');closeMoreDrawer()">
+      <span class="more-icon">🛡️</span>Trust
     </button>
   </div>
 </div>
