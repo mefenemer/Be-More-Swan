@@ -5,9 +5,10 @@
 // is derived from real rows; `allRequiredDone` gates the Kick Off action in the UI.
 
 import { Handler } from '@netlify/functions';
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, desc, inArray } from 'drizzle-orm';
 import { getDb, withTenant } from '../../db/client';
-import { aiAssistants, systemConnections, contentRules, tosAcceptances, dpaAcceptances, masterAssistants, riskAssessments } from '../../db/schema';
+import { aiAssistants, systemConnections, contentRules, tosAcceptances, dpaAcceptances, masterAssistants, riskAssessments, aiBlueprints } from '../../db/schema';
+import type { MissingField } from '../../src/utils/blueprint';
 import { requireTenant } from '../../src/utils/tenant';
 import { provisioningBlockInfo } from '../../src/utils/assistant-lifecycle';
 import { checkProhibitedUsePatterns } from '../../src/utils/tos-gate';
@@ -20,6 +21,22 @@ const json = (statusCode: number, body: unknown) => ({
 });
 
 type Db = ReturnType<typeof getDb>;
+
+/**
+ * Blueprint check → the checklist item that already covers it. Mapped rather than duplicated, so a
+ * customer never reads "Accept the Data Processing Agreement" twice in one list.
+ *
+ * `connection:<Platform>` is deliberately ABSENT. The generic 'connections' item asks only whether
+ * ANY healthy connection exists, so a workspace with Instagram connected but YouTube named as a
+ * primary platform reads fully green while half its posting is impossible. The per-platform gaps
+ * are the actionable form, and they say something the existing item structurally cannot.
+ */
+const BLUEPRINT_FIELD_COVERED: Record<string, string> = {
+    prohibitedUseAcknowledged: 'prohibited_use',
+    dpaAcceptedAt:             'dpa',
+    disclosureText:            'disclosure',
+    onboardingContext:         'brand_strategy',
+};
 
 /**
  * Compute the Kick Off Meeting readiness checklist for one assistant — the items the user
@@ -189,6 +206,48 @@ export async function computeAssistantReadiness(db: Db, orgId: number, assistant
         }
         items.push({ key: 'guardrails', label: 'Guardrails & rules set', done: hasRule, required: false,
           hint: 'Add at least one rule to steer tone and content (recommended).' });
+
+        // ── Blueprint gaps the CUSTOMER can close ───────────────────────────────────────────
+        // The blueprint already works out precisely what an assistant is missing, but that list
+        // has only ever been visible in the admin Blueprint Inspector — a tool the person who can
+        // actually fix these cannot open. One prod workspace sat for weeks having named Instagram
+        // and YouTube as its platforms with neither connected, so its assistant could not publish
+        // anything, and nothing told the customer. Each check now declares an `owner` and a
+        // `remedy` (src/utils/blueprint.ts); the customer-owned ones belong here, in the checklist
+        // they already read.
+        //
+        // Read from the latest PERSISTED blueprint rather than recompiling — assembleBlueprint runs
+        // ~15 queries and this endpoint is on the workspace load path. Every write that changes a
+        // blueprint input recompiles, so the stored row is current. Owner connection with an
+        // explicit org filter, matching the ToS/DPA reads above (only ai_assistants carries RLS).
+        //
+        // Added as `required: false` WITHOUT EXCEPTION: allRequiredDone gates the Kick Off button,
+        // and a warning list must never quietly turn into a blocker.
+        try {
+            const [bp] = await db.select({ missingFields: aiBlueprints.missingFields })
+                .from(aiBlueprints)
+                .where(and(eq(aiBlueprints.assistantId, assistantId), eq(aiBlueprints.organisationId, orgId)))
+                .orderBy(desc(aiBlueprints.compiledAt))
+                .limit(1);
+            for (const f of (bp?.missingFields ?? []) as MissingField[]) {
+                if (f.owner !== 'customer') continue;
+                // Already represented by an item above — mapped, not duplicated.
+                if (BLUEPRINT_FIELD_COVERED[f.field]) continue;
+                // Rows compiled before checks carried a remedy have nothing to show a customer.
+                // They resolve themselves on the next recompile; skipping beats a blank checklist row.
+                if (!f.remedy?.label) continue;
+                items.push({
+                    key: `blueprint:${f.field}`,
+                    label: f.remedy.label,
+                    done: false,          // it is in missingFields, so by definition it is not done
+                    required: false,
+                    hint: f.remedy.where,
+                });
+            }
+        } catch (e) {
+            // The checklist is more useful incomplete than absent.
+            console.warn('[get-assistant-readiness] blueprint gap lookup failed (checklist still returned):', e instanceof Error ? e.message : e);
+        }
 
         const allRequiredDone = items.filter(i => i.required).every(i => i.done);
 

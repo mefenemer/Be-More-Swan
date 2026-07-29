@@ -4386,12 +4386,16 @@ async function _renderKickOff(assistantId) {
         }, 120);
     };
 
+    // label/hint are escaped because they are no longer all hard-coded here: blueprint-derived
+    // items (key `blueprint:…`) build their label from the assistant's own onboarding answers —
+    // "Connect ${platform}" comes from primary_platforms, which the user types. Unescaped, an
+    // unrecognised platform key would be injected straight into this list as markup.
     listEl.innerHTML = items.map(it => `
         <li class="flex items-start gap-3">
             ${it.done ? tick : cross}
             <span class="min-w-0">
-                <span class="block text-sm font-semibold ${it.done ? 'text-gray-800' : 'text-gray-500'}">${it.label}${it.required ? '' : ' <span class="text-xs font-normal text-gray-400">(recommended)</span>'}</span>
-                ${it.done ? '' : `<span class="block text-xs text-gray-400 mt-0.5">${it.hint || ''}${it.key === 'disclosure' ? ' <button type="button" onclick="window._goToDisclosureField()" class="text-emerald-600 hover:underline cursor-pointer font-semibold">Open Guardrails tab →</button>' : ''}</span>`}
+                <span class="block text-sm font-semibold ${it.done ? 'text-gray-800' : 'text-gray-500'}">${_escapeHtml(it.label)}${it.required ? '' : ' <span class="text-xs font-normal text-gray-400">(recommended)</span>'}</span>
+                ${it.done ? '' : `<span class="block text-xs text-gray-400 mt-0.5">${_escapeHtml(it.hint || '')}${it.key === 'disclosure' ? ' <button type="button" onclick="window._goToDisclosureField()" class="text-emerald-600 hover:underline cursor-pointer font-semibold">Open Guardrails tab →</button>' : ''}</span>`}
             </span>
         </li>`).join('') || '<li class="text-sm text-gray-400">No checklist items.</li>';
 

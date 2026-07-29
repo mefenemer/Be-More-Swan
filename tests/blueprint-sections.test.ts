@@ -137,6 +137,33 @@ test('a customer-owned gap never points at an admin-only screen', () => {
     }
 });
 
+// ── Customer-owned gaps reach the customer ───────────────────────────────────────────────────
+
+test('the readiness checklist surfaces customer-owned blueprint gaps', () => {
+    const readiness = read('../netlify/functions/get-assistant-readiness.ts');
+    assert.match(readiness, /owner !== 'customer'/, 'internal gaps must not reach the customer');
+    assert.match(readiness, /key: `blueprint:\$\{f\.field\}`/, 'gaps are not being added as items');
+});
+
+test('a blueprint gap can never block Kick Off', () => {
+    // allRequiredDone gates the button. A warning list quietly becoming a blocker would be a
+    // regression far worse than the missing information it set out to surface.
+    const readiness = read('../netlify/functions/get-assistant-readiness.ts');
+    const block = readiness.slice(readiness.indexOf('for (const f of (bp?.missingFields'));
+    const pushed = block.slice(0, block.indexOf('} catch'));
+    assert.match(pushed, /required: false/, 'blueprint items must be recommended, never required');
+    assert.ok(!/required: true/.test(pushed), 'a blueprint gap is marked required');
+});
+
+test('checklist labels are escaped before render', () => {
+    // "Connect ${platform}" is built from primary_platforms, which the user types.
+    const ui = read('../assistants.js');
+    const render = ui.slice(ui.indexOf('listEl.innerHTML = items.map'));
+    const li = render.slice(0, render.indexOf("|| '<li"));
+    assert.match(li, /_escapeHtml\(it\.label\)/, 'label rendered raw');
+    assert.match(li, /_escapeHtml\(it\.hint/, 'hint rendered raw');
+});
+
 // ── Section 7 — active integrations ──────────────────────────────────────────────────────────
 
 test('connections are scoped by organisation, never by user', () => {
