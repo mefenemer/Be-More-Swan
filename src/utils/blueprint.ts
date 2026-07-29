@@ -43,13 +43,58 @@ export interface SourceRef {
     resolvedAt?: string | null;
 }
 
+/**
+ * Who can actually resolve a gap, and where they go to do it.
+ *
+ * `owner` + `remedy` are REQUIRED, and that is the point of them. A check nobody can act on is
+ * worse than no check: `executionBudgets` fired for every assistant on the platform for months
+ * because nothing anywhere could set a per-assistant budget, and a warnings list containing
+ * permanent false positives taught everyone to ignore it — so the two REAL warnings (both prod
+ * assistants generating with no anti-fabrication clause) sat unread. Making these mandatory means
+ * the compiler asks "who fixes this, and where?" when a check is written, and a check with no
+ * honest answer never ships.
+ *
+ * `owner: 'customer'` is the load-bearing one — those gaps belong in the customer's own readiness
+ * checklist and reminders, not in an admin tool they cannot open. `internal` gaps stay with us.
+ */
+export interface Remedy {
+    /** Imperative, customer-readable: "Connect Instagram", "Choose a content source". */
+    label: string;
+    /** Human location, breadcrumb style: "Assistant profile ▸ How it Works ▸ Operational Setup". */
+    where: string;
+    /** Deep link, when one exists for the owner who has to act. Admins often cannot open a customer screen. */
+    href?: string;
+}
+
 export interface MissingField {
     section: string;
     field: string;
     sourceTable: string;
     sourceColumn: string;
     severity: 'blocking' | 'warning';
+    /** 'customer' — surfaced in their readiness card + reminders. 'internal' — ours to fix. */
+    owner: 'customer' | 'internal';
+    remedy: Remedy;
 }
+
+/**
+ * Destinations, written once so two checks pointing at the same screen cannot describe it two ways.
+ * Breadcrumbs only — no hrefs yet. Business Information and the assistant profile are views inside
+ * the workspace shell rather than standalone URLs, and a plausible-looking link that 404s is worse
+ * than a clear instruction. Links get added where these are rendered for the owner who must act.
+ */
+const WHERE = {
+    operationalSetup: 'Assistant profile ▸ How it Works ▸ Operational Setup',
+    guardrails:       'Assistant profile ▸ Guardrails',
+    compliance:       'Assistant profile ▸ Compliance',
+    kickOff:          'Assistant profile ▸ Kick-Off checklist',
+    businessProfile:  'Business Information ▸ Business Profile',
+    legalBilling:     'Business Information ▸ Legal & Billing',
+    connections:      'Workspace ▸ Connections',
+    billingPlans:     'Billing ▸ Plans',
+    adminCatalogue:   'Admin ▸ Assistant Catalogue',
+    adminAssistants:  'Admin ▸ Assistants',
+} as const;
 
 export interface SectionResult {
     status: 'complete' | 'partial' | 'missing';
@@ -104,8 +149,8 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
         category: master?.category ?? null,
         riskTier: master?.riskClassification ?? null,
     };
-    if (!s1content.role) missing.push({ section: '1-identity', field: 'role', sourceTable: 'ai_assistants', sourceColumn: 'ai_assistant_job_role', severity: 'warning' });
-    if (!s1content.riskTier) missing.push({ section: '1-identity', field: 'riskTier', sourceTable: 'master_assistants', sourceColumn: 'risk_classification', severity: 'warning' });
+    if (!s1content.role) missing.push({ section: '1-identity', field: 'role', sourceTable: 'ai_assistants', sourceColumn: 'ai_assistant_job_role', severity: 'warning', owner: 'internal', remedy: { label: 'Set the assistant\u2019s job role', where: WHERE.adminAssistants } });
+    if (!s1content.riskTier) missing.push({ section: '1-identity', field: 'riskTier', sourceTable: 'master_assistants', sourceColumn: 'risk_classification', severity: 'warning', owner: 'internal', remedy: { label: 'Set a risk classification for this role', where: WHERE.adminCatalogue } });
     sections['1-identity'] = {
         status: sectionStatus(s1content, ['assistantName', 'role', 'category', 'riskTier']),
         content: s1content,
@@ -135,7 +180,7 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
         versionNumber: version?.versionNumber ?? null,
         effectiveDate: version?.createdAt ?? null,
     };
-    if (!s2content.systemPrompt) missing.push({ section: '2-base-prompt', field: 'systemPrompt', sourceTable: 'ai_assistants', sourceColumn: 'system_prompt', severity: 'blocking' });
+    if (!s2content.systemPrompt) missing.push({ section: '2-base-prompt', field: 'systemPrompt', sourceTable: 'ai_assistants', sourceColumn: 'system_prompt', severity: 'blocking', owner: 'internal', remedy: { label: 'Re-provision the assistant \u2014 hire-time brief never compiled', where: WHERE.adminAssistants } });
     sections['2-base-prompt'] = {
         status: sectionStatus(s2content, ['systemPrompt']),
         content: s2content,
@@ -170,7 +215,7 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
         prohibitedUseAcknowledged: asst.prohibitedUseAcknowledged,
         prohibitedUseDetected,
     };
-    if (!ackResolved) missing.push({ section: '3-strict-rules', field: 'prohibitedUseAcknowledged', sourceTable: 'ai_assistants', sourceColumn: 'prohibited_use_acknowledged', severity: 'blocking' });
+    if (!ackResolved) missing.push({ section: '3-strict-rules', field: 'prohibitedUseAcknowledged', sourceTable: 'ai_assistants', sourceColumn: 'prohibited_use_acknowledged', severity: 'blocking', owner: 'customer', remedy: { label: 'Acknowledge the prohibited-use terms', where: WHERE.kickOff } });
     sections['3-strict-rules'] = {
         status: ackResolved ? 'complete' : 'missing',
         content: s3content,
@@ -215,7 +260,7 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
         brandVoice: (onboardingCtx.brand_voice as string | null) ?? (onboardingCtx.tone_of_voice as string | null) ?? null,
         toneOfVoice: (onboardingCtx.tone_of_voice as string | null) ?? null,
     };
-    if (!s5content.businessName) missing.push({ section: '5-org-context', field: 'businessName', sourceTable: 'organisations', sourceColumn: 'name', severity: 'warning' });
+    if (!s5content.businessName) missing.push({ section: '5-org-context', field: 'businessName', sourceTable: 'organisations', sourceColumn: 'name', severity: 'warning', owner: 'customer', remedy: { label: 'Add your business name', where: WHERE.businessProfile } });
     sections['5-org-context'] = {
         status: sectionStatus(s5content, ['businessName', 'targetAudience', 'brandVoice']),
         content: s5content,
@@ -246,11 +291,11 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
     };
     const s6content = { answers: onboardingCtx, operational: s6operational };
     const hasAnswers = Object.keys(onboardingCtx).length > 0;
-    if (!hasAnswers) missing.push({ section: '6-onboarding', field: 'onboardingContext', sourceTable: 'ai_assistants', sourceColumn: 'onboarding_context', severity: 'warning' });
+    if (!hasAnswers) missing.push({ section: '6-onboarding', field: 'onboardingContext', sourceTable: 'ai_assistants', sourceColumn: 'onboarding_context', severity: 'warning', owner: 'customer', remedy: { label: 'Complete your assistant\u2019s setup answers', where: WHERE.operationalSetup } });
     // Warning, not blocking: assistants hired before onboarding stored these answers must stay
     // generatable. The gap shows up in the blueprint's missing-fields list instead.
-    if (hasAnswers && !s6operational.triggerType) missing.push({ section: '6-onboarding', field: 'trigger_type', sourceTable: 'ai_assistants', sourceColumn: 'onboarding_context', severity: 'warning' });
-    if (hasAnswers && !s6operational.contentSource) missing.push({ section: '6-onboarding', field: 'content_source', sourceTable: 'ai_assistants', sourceColumn: 'onboarding_context', severity: 'warning' });
+    if (hasAnswers && !s6operational.triggerType) missing.push({ section: '6-onboarding', field: 'trigger_type', sourceTable: 'ai_assistants', sourceColumn: 'onboarding_context', severity: 'warning', owner: 'customer', remedy: { label: 'Choose when this assistant runs', where: WHERE.operationalSetup } });
+    if (hasAnswers && !s6operational.contentSource) missing.push({ section: '6-onboarding', field: 'content_source', sourceTable: 'ai_assistants', sourceColumn: 'onboarding_context', severity: 'warning', owner: 'customer', remedy: { label: 'Choose where its content comes from', where: WHERE.operationalSetup } });
     sections['6-onboarding'] = {
         status: hasAnswers ? 'complete' : 'missing',
         content: s6content,
@@ -308,7 +353,7 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
     ].filter(Boolean) as string[];
     for (const p of primaryPlatforms) {
         const connected = liveServices.some(s => s.includes(p.toLowerCase()));
-        if (!connected) missing.push({ section: '7-integrations', field: `connection:${p}`, sourceTable: 'system_connections', sourceColumn: 'service_name', severity: 'warning' });
+        if (!connected) missing.push({ section: '7-integrations', field: `connection:${p}`, sourceTable: 'system_connections', sourceColumn: 'service_name', severity: 'warning', owner: 'customer', remedy: { label: `Connect ${p}`, where: WHERE.connections } });
     }
 
     sections['7-integrations'] = {
@@ -346,7 +391,7 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
         currentTokensUsed: counter?.tokenCount ?? null,
         activeFeatureFlags: flags.map(f => f.key),
     };
-    if (!s8content.planName) missing.push({ section: '8-plan', field: 'planName', sourceTable: 'plans', sourceColumn: 'plan_name', severity: 'blocking' });
+    if (!s8content.planName) missing.push({ section: '8-plan', field: 'planName', sourceTable: 'plans', sourceColumn: 'plan_name', severity: 'blocking', owner: 'customer', remedy: { label: 'Choose a plan \u2014 no active subscription', where: WHERE.billingPlans } });
     sections['8-plan'] = {
         status: plan ? 'complete' : 'missing',
         content: s8content,
@@ -380,8 +425,8 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
         orgFooterText: orgDisclosureRow?.aiDisclosureFooterText ?? null,
         hitlMode: (asst.configuration as Record<string, unknown> | null)?.hitlMode ?? 'require-approval',
     };
-    if (!dpa) missing.push({ section: '9-compliance', field: 'dpaAcceptedAt', sourceTable: 'dpa_acceptances', sourceColumn: 'accepted_at', severity: 'blocking' });
-    if (!asst.disclosureText) missing.push({ section: '9-compliance', field: 'disclosureText', sourceTable: 'ai_assistants', sourceColumn: 'disclosure_text', severity: 'warning' });
+    if (!dpa) missing.push({ section: '9-compliance', field: 'dpaAcceptedAt', sourceTable: 'dpa_acceptances', sourceColumn: 'accepted_at', severity: 'blocking', owner: 'customer', remedy: { label: 'Accept the Data Processing Agreement', where: WHERE.legalBilling } });
+    if (!asst.disclosureText) missing.push({ section: '9-compliance', field: 'disclosureText', sourceTable: 'ai_assistants', sourceColumn: 'disclosure_text', severity: 'warning', owner: 'customer', remedy: { label: 'Set the AI disclosure wording', where: WHERE.compliance } });
     sections['9-compliance'] = {
         status: sectionStatus(s9content, ['dpaAcceptedAt', 'riskClassification']),
         content: s9content,
@@ -414,7 +459,7 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
         ...budget,
         budgetSource: budgetExplicit ? 'assistant' : 'platform-default',
     };
-    if (budgetMalformed) missing.push({ section: '10-execution', field: 'executionBudgets', sourceTable: 'ai_assistants', sourceColumn: 'configuration', severity: 'warning' });
+    if (budgetMalformed) missing.push({ section: '10-execution', field: 'executionBudgets', sourceTable: 'ai_assistants', sourceColumn: 'configuration', severity: 'warning', owner: 'internal', remedy: { label: 'Repair the malformed configuration.budget value', where: WHERE.adminAssistants } });
     sections['10-execution'] = {
         // Every value resolves, so the section is complete — `budgetSource` is what says whether a
         // human chose the numbers, and status must not contradict the field count the UI renders

@@ -102,6 +102,41 @@ test('section 10 no longer reads budget keys off the top of configuration', () =
     );
 });
 
+// ── Every check names an owner and a destination ─────────────────────────────────────────────
+
+test('every check declares who fixes it and where', () => {
+    // The type makes owner+remedy mandatory, so a missing one is a build error, not a test failure.
+    // What the compiler CANNOT catch is a remedy that exists but says nothing — so check the shape
+    // of what was actually written at each of the call sites.
+    const checks = blueprint.match(/missing\.push\(\{[\s\S]*?\}\);/g) ?? [];
+    assert.ok(checks.length >= 13, `expected the full check list, found ${checks.length}`);
+    for (const c of checks) {
+        const field = (c.match(/field: [`']([^`']+)/) ?? [])[1] ?? '(unknown)';
+        assert.match(c, /owner: '(customer|internal)'/, `${field}: no owner`);
+        assert.match(c, /remedy: \{/, `${field}: no remedy`);
+        assert.match(c, /where: (WHERE\.\w+|['`])/, `${field}: remedy names no destination`);
+        // A label is what the customer reads — an empty one is the placeholder this guards against.
+        assert.ok(!/label: ['"`]\s*['"`]/.test(c), `${field}: remedy label is empty`);
+    }
+});
+
+test('destinations are shared constants, not retyped per check', () => {
+    // Two checks pointing at one screen must not describe it two different ways.
+    assert.match(blueprint, /const WHERE = \{/, 'the destination table is gone');
+    const inlineWhere = blueprint.match(/where: '(?!.*▸)[^']*'/g) ?? [];
+    assert.deepEqual(inlineWhere, [], `destinations bypassing WHERE: ${inlineWhere.join(', ')}`);
+});
+
+test('a customer-owned gap never points at an admin-only screen', () => {
+    // The whole point of `owner` is routing the gap to someone who can act on it. Telling a customer
+    // to visit Admin ▸ anything is the failure this classification exists to prevent.
+    const checks = blueprint.match(/missing\.push\(\{[\s\S]*?\}\);/g) ?? [];
+    for (const c of checks.filter(c => /owner: 'customer'/.test(c))) {
+        const field = (c.match(/field: [`']([^`']+)/) ?? [])[1] ?? '(unknown)';
+        assert.ok(!/WHERE\.admin\w+/.test(c), `${field}: customer-owned but sent to an admin screen`);
+    }
+});
+
 // ── Section 7 — active integrations ──────────────────────────────────────────────────────────
 
 test('connections are scoped by organisation, never by user', () => {
