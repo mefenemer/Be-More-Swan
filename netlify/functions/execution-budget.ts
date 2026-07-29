@@ -22,40 +22,15 @@ import { getDb } from '../../db/client';
 import { aiAssistants, platformConfig, taskRuns } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { withLambda } from '@netlify/aws-lambda-compat';
+// Single source of truth, shared with the blueprint's section 10 — see src/config/execution-budgets.ts
+// for why these no longer live here.
+import {
+    type BudgetConfig,
+    WORKSPACE_DEFAULTS,
+    clampToPlatform,
+} from '../../src/config/execution-budgets';
 
 const jwtSecret = process.env.JWT_SECRET;
-
-// ── Defaults ──────────────────────────────────────────────────────────────────
-
-const PLATFORM_DEFAULTS = {
-    maxLlmCalls: 200,
-    maxToolCalls: 500,
-    maxTokensGenerated: 200_000,
-    maxWallClockMinutes: 60,
-    maxCostGbp: 10.00,
-};
-
-const WORKSPACE_DEFAULTS = {
-    maxLlmCalls: 50,
-    maxToolCalls: 100,
-    maxTokensGenerated: 50_000,
-    maxWallClockMinutes: 15,
-    maxCostGbp: 1.50,
-};
-
-type BudgetConfig = typeof WORKSPACE_DEFAULTS;
-
-function clampToPlatform(workspace: Partial<BudgetConfig>, platform: Partial<BudgetConfig>): BudgetConfig {
-    const p = { ...PLATFORM_DEFAULTS, ...platform };
-    const w = { ...WORKSPACE_DEFAULTS, ...workspace };
-    return {
-        maxLlmCalls: Math.min(w.maxLlmCalls, p.maxLlmCalls),
-        maxToolCalls: Math.min(w.maxToolCalls, p.maxToolCalls),
-        maxTokensGenerated: Math.min(w.maxTokensGenerated, p.maxTokensGenerated),
-        maxWallClockMinutes: Math.min(w.maxWallClockMinutes, p.maxWallClockMinutes),
-        maxCostGbp: Math.min(w.maxCostGbp, p.maxCostGbp),
-    };
-}
 
 function getAuth(event: any): { userId: number } | null {
     if (!jwtSecret) return null;

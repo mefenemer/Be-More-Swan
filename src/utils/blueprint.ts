@@ -27,9 +27,12 @@ import {
     aiBlueprints,
     integrationAuthorizations,
     workspaceAssets,
+    workspaceIntegrations,
+    platformConfig,
 } from '../../db/schema';
 import { checkProhibitedUsePatterns } from './tos-gate';
 import { OPERATIONAL_TRIGGERS, OPERATIONAL_SOURCES } from './operational-setup';
+import { BUDGET_CONFIG_KEY, resolveBudget } from '../config/execution-budgets';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -255,31 +258,66 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
     };
 
     // ── Section 7 — ACTIVE INTEGRATIONS ──────────────────────────────────────
+    // Scoped by ORGANISATION, like every other consumer of this table (get-assistant-readiness,
+    // process-content-jobs, kickoff-assistant). Scoping by user_id under-reported badly: the column
+    // is nullable and meta-oauth.ts has never set it, so Facebook and Instagram were invisible to
+    // this section on every org, and a connection made by any other member of the workspace was
+    // invisible too. One prod workspace with six live connections had a blueprint listing two.
     const conns = await db.select().from(systemConnections)
-        .where(and(eq(systemConnections.userId, asst.userId), eq(systemConnections.isActive, true)));
+        .where(and(eq(systemConnections.organisationId, asst.organisationId), eq(systemConnections.isActive, true)));
+    // Threads, YouTube and Canva authenticate through the org-scoped workspace_integrations store
+    // instead, so system_connections alone can never see them — integrations.ts merges the two for
+    // exactly this reason. Without this the mismatch check below reported a platform as missing
+    // while the publish path was happily using its token.
+    const wsIntegrations = await db.select().from(workspaceIntegrations)
+        .where(eq(workspaceIntegrations.organisationId, asst.organisationId));
     const auths = await db.select().from(integrationAuthorizations)
         .where(and(eq(integrationAuthorizations.workspaceId, asst.organisationId), isNull(integrationAuthorizations.revokedAt)));
     conns.forEach(c => hashParts.push({ id: `conn:${c.id}`, updatedAt: c.updatedAt }));
+    wsIntegrations.forEach(w => hashParts.push({ id: `wsint:${w.id}`, updatedAt: w.updatedAt }));
+    const hitlFor = (service: string | null) =>
+        auths.find(a => a.integrationType === service)?.humanApprovalRequired ?? true;
+    // A system_connections row wins on collision — for Threads that is the per-assistant shadow
+    // row, which carries state the workspace row does not. Negative ids mark workspace_integrations
+    // rows, the same convention integrations.ts uses, because the two tables have independent id
+    // sequences and a positive id here could collide with an unrelated connection.
+    const connectedServices = new Set(conns.map(c => c.serviceName?.toLowerCase()).filter(Boolean) as string[]);
     const s7content = {
-        connections: conns.map(c => ({
-            id: c.id, service: c.serviceName, type: c.connectionType,
-            scopes: c.scopes, status: c.status,
-            hitlRequired: auths.find(a => a.integrationType === c.serviceName)?.humanApprovalRequired ?? true,
-        })),
+        connections: [
+            ...conns.map(c => ({
+                id: c.id, service: c.serviceName, type: c.connectionType,
+                scopes: c.scopes, status: c.status,
+                hitlRequired: hitlFor(c.serviceName),
+            })),
+            ...wsIntegrations
+                .filter(w => !connectedServices.has(w.provider.toLowerCase()))
+                .map(w => ({
+                    id: -w.id, service: w.provider, type: 'oauth',
+                    scopes: w.scopes, status: w.status,
+                    hitlRequired: hitlFor(w.provider),
+                })),
+        ],
     };
-    // Platform/integration mismatch check
+    // Platform/integration mismatch check. Only a usable connection counts — a revoked or expired
+    // token is a gap the user needs to see, which is what isActive already means on the other side.
     const platformKeyMap: Record<string, string> = { fb: 'Facebook', ig: 'Instagram', li: 'LinkedIn', x: 'X', threads: 'Threads', tiktok: 'TikTok', youtube: 'YouTube' };
     const primaryPlatforms = ((onboardingCtx.primary_platforms as string[]) || []).map(k => platformKeyMap[k] ?? k);
-    const connectedServices = conns.map(c => c.serviceName?.toLowerCase());
+    const liveServices = [
+        ...conns.map(c => c.serviceName?.toLowerCase()),
+        ...wsIntegrations.filter(w => w.status === 'active').map(w => w.provider.toLowerCase()),
+    ].filter(Boolean) as string[];
     for (const p of primaryPlatforms) {
-        const connected = connectedServices.some(s => s?.includes(p.toLowerCase()));
+        const connected = liveServices.some(s => s.includes(p.toLowerCase()));
         if (!connected) missing.push({ section: '7-integrations', field: `connection:${p}`, sourceTable: 'system_connections', sourceColumn: 'service_name', severity: 'warning' });
     }
 
     sections['7-integrations'] = {
-        status: conns.length > 0 ? 'complete' : 'partial',
+        status: s7content.connections.length > 0 ? 'complete' : 'partial',
         content: s7content,
-        sources: conns.map(c => src('system_connections', 'service_name', c.id, c.updatedAt)),
+        sources: [
+            ...conns.map(c => src('system_connections', 'service_name', c.id, c.updatedAt)),
+            ...wsIntegrations.map(w => src('workspace_integrations', 'provider', w.id, w.updatedAt)),
+        ],
     };
 
     // ── Section 8 — PLAN & CAPABILITY CONSTRAINTS ─────────────────────────────
@@ -355,20 +393,35 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
     };
 
     // ── Section 10 — EXECUTION CONSTRAINTS ───────────────────────────────────
-    const execConfig = (asst.configuration as Record<string, unknown> | null) ?? {};
+    // Resolved exactly the way execution-budget.ts resolves it at run time: the assistant's own
+    // budget under configuration.budget, clamped to the platform ceiling, falling back to the
+    // shared WORKSPACE_DEFAULTS. This section previously read the five keys from the TOP level of
+    // configuration — a shape nothing has ever written — so it reported "missing" for every
+    // assistant on the platform while every run was in fact budgeted. A ceiling that applies is
+    // not a gap, so `budgetSource` records whether a human chose these numbers and only a
+    // MALFORMED budget warns.
+    const [budgetLimitRow] = await db.select({ value: platformConfig.value })
+        .from(platformConfig)
+        .where(eq(platformConfig.key, 'execution_budget_limits'))
+        .limit(1);
+    const rawBudget = (asst.configuration as Record<string, unknown> | null)?.[BUDGET_CONFIG_KEY];
+    const budgetMalformed = rawBudget != null && (typeof rawBudget !== 'object' || Array.isArray(rawBudget));
+    const { budget, explicit: budgetExplicit } = resolveBudget(
+        asst.configuration as Record<string, unknown> | null,
+        (budgetLimitRow?.value ?? {}) as Partial<typeof budget>,
+    );
     const s10content = {
-        maxLlmCalls: execConfig.maxLlmCalls ?? null,
-        maxToolCalls: execConfig.maxToolCalls ?? null,
-        maxTokensGenerated: execConfig.maxTokensGenerated ?? null,
-        maxWallClockMinutes: execConfig.maxWallClockMinutes ?? null,
-        maxCostGbp: execConfig.maxCostGbp ?? null,
+        ...budget,
+        budgetSource: budgetExplicit ? 'assistant' : 'platform-default',
     };
-    const hasBudgets = Object.values(s10content).some(v => v != null);
-    if (!hasBudgets) missing.push({ section: '10-execution', field: 'executionBudgets', sourceTable: 'ai_assistants', sourceColumn: 'configuration', severity: 'warning' });
+    if (budgetMalformed) missing.push({ section: '10-execution', field: 'executionBudgets', sourceTable: 'ai_assistants', sourceColumn: 'configuration', severity: 'warning' });
     sections['10-execution'] = {
-        status: hasBudgets ? 'partial' : 'missing',
+        status: budgetExplicit ? 'complete' : 'partial',
         content: s10content,
-        sources: [src('ai_assistants', 'configuration', asst.id, asst.updatedAt)],
+        sources: [
+            src('ai_assistants', 'configuration', asst.id, asst.updatedAt),
+            src('platform_config', 'execution_budget_limits', budgetLimitRow ? 'execution_budget_limits' : null, null),
+        ],
     };
 
     // ── Section 11 — BUSINESS KNOWLEDGE (Business Information docs & links) ─────
