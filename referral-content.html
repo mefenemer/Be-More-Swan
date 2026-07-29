@@ -231,7 +231,7 @@
     // US-GAP-8.3.1: Who referred me
     if (data.referredBy) {
       const dateStr = new Date(data.referredBy.joinedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
-      document.getElementById('ref-referrer-name').textContent = data.referredBy.displayName || 'An Be More Swan member';
+      document.getElementById('ref-referrer-name').textContent = data.referredBy.displayName || 'A Be More Swan member';
       document.getElementById('ref-referrer-date').textContent = dateStr;
       if (data.referredBy.referralBonusApplied) {
         document.getElementById('ref-bonus-badge').classList.remove('hidden');

@@ -56,7 +56,7 @@ export function buildAnnualRenewalEmail(firstName: string, renewalDay: string, a
         <p>Your Be More Swan annual subscription will automatically renew on <strong>${renewalDay}</strong>${amount ? ` for <strong>${amount}</strong>` : ''}.</p>
         <p>If you wish to cancel before this date, you can do so at any time from your <a href="${process.env.BASE_URL || 'https://bemoreswan.com'}/billing.html">account settings</a>. Cancellations take effect at the end of your current billing period.</p>
         <p>If you have any questions, reply to this email or contact our support team.</p>
-        <p>Thank you for being an Be More Swan customer.</p>
+        <p>Thank you for being a Be More Swan customer.</p>
         <p>— The Be More Swan Team</p>
     `;
 }

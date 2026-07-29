@@ -41,7 +41,7 @@ type Inserter = {
 
 export interface NotifyOptions {
     userId: number;
-    /** Nested merge context, e.g. { assistant: { name: 'Aura' } }. */
+    /** Nested merge context, e.g. { assistant: { name: 'Social Media Assistant' } }. */
     context?: MergeContext;
     metadata?: Record<string, unknown> | null;
     /** Denormalised assistant link, where the notifications row carries one. */

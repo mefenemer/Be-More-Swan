@@ -52,7 +52,7 @@ export interface NotificationTemplateDefault {
 const v = (key: string, label: string, sample: string): NotificationVariable => ({ key, label, sample });
 
 // Frequently reused variable declarations.
-const ASSISTANT_NAME = v('assistant.name', 'Assistant name', 'Aura');
+const ASSISTANT_NAME = v('assistant.name', 'Assistant name', 'Social Media Assistant');
 const PLAN_NAME = v('plan.name', 'Plan name', 'Growth');
 const ORG_NAME = v('org.name', 'Workspace name', 'Acme Marketing');
 const PLATFORM_LABEL = v('platform.label', 'Platform name', 'LinkedIn');
@@ -861,7 +861,7 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [
             v('plan.assistant_limit', 'New assistant limit', '3'),
             v('paused.assistant_phrase', '"assistant has" or "assistants have"', 'assistants have'),
-            v('paused.names', 'Paused assistant names', 'Aura, Blog Writer'),
+            v('paused.names', 'Paused assistant names', 'Social Media Assistant, Blog Writer'),
         ],
     },
     {
@@ -890,7 +890,7 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [
             v('resumed.assistant_phrase', '"assistant" or "assistants"', 'assistants'),
             v('resumed.verb', '"has" or "have"', 'have'),
-            v('resumed.names', 'Resumed assistant names', 'Aura, Blog Writer'),
+            v('resumed.names', 'Resumed assistant names', 'Social Media Assistant, Blog Writer'),
             v('plan.tier_name', 'Plan tier name', 'Growth'),
         ],
     },

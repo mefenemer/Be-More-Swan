@@ -89,7 +89,7 @@ function buildReminderEmail(firstName: string, resumeUrl: string): string {
               </table>
 
               <p style="margin:0;font-size:13px;color:#9ca3af;line-height:1.6;">
-                This link expires in 15 minutes for security. If you didn't start an Be More Swan onboarding,
+                This link expires in 15 minutes for security. If you didn't start a Be More Swan onboarding,
                 you can safely ignore this email.
               </p>
             </td>

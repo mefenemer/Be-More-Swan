@@ -151,7 +151,7 @@ export const EMAIL_VARIABLES: EmailVariable[] = [
     { key: 'user.last_name', label: 'Last name', group: 'User', sample: 'Doe' },
     { key: 'user.email', label: 'Email address', group: 'User', sample: 'jane@example.com' },
     { key: 'workspace.name', label: 'Workspace name', group: 'Workspace', sample: 'Acme Marketing' },
-    { key: 'assistant.name', label: 'Assistant name', group: 'Assistant', sample: 'Aura' },
+    { key: 'assistant.name', label: 'Assistant name', group: 'Assistant', sample: 'Social Media Assistant' },
     { key: 'assistant.role', label: 'Assistant role', group: 'Assistant', sample: 'Lead Generator' },
     { key: 'billing.amount', label: 'Amount', group: 'Billing', sample: '£49.00' },
     { key: 'billing.plan_name', label: 'Plan name', group: 'Billing', sample: 'Growth' },

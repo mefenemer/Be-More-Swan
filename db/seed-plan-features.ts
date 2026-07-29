@@ -149,7 +149,7 @@ const DEFS: Def[] = [
     { key: 'support_channel', label: 'Support Channel', description: 'How you can reach our team when you need help',
       category: 'Support', valueType: 'text', storageTarget: 'feature', enterpriseValue: 'Dedicated Account Manager',
       values: { saver: 'Email & Help Centre', buster: 'Priority Email & Chat', employee: 'Priority + Strategy Call' } },
-    { key: 'onboarding_call', label: '1-on-1 Strategy & Onboarding Call', description: 'A dedicated session with an Be More Swan expert to set up and optimise your workspace',
+    { key: 'onboarding_call', label: '1-on-1 Strategy & Onboarding Call', description: 'A dedicated session with a Be More Swan expert to set up and optimise your workspace',
       category: 'Support', valueType: 'boolean', storageTarget: 'feature', enterpriseValue: 'true',
       values: { saver: DASH, buster: DASH, employee: CHECK } },
 

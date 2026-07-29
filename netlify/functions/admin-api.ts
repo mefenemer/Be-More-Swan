@@ -467,7 +467,7 @@ export default withLambda(async (event) => {
   <div style="padding:32px">
     <h2 style="margin:0 0 12px;color:#111827">Admin-sent login link</h2>
     <p style="color:#6b7280;font-size:15px;line-height:1.6">Hi ${targetUser.firstName || 'there'},<br><br>
-      An Be More Swan admin has sent you a one-click login link. Click below to access your account — this link expires in 24 hours.</p>
+      A Be More Swan admin has sent you a one-click login link. Click below to access your account — this link expires in 24 hours.</p>
     <div style="text-align:center;margin:28px 0">
       <a href="${loginUrl}" style="display:inline-block;background:#10b981;color:#fff;font-weight:700;font-size:16px;padding:14px 32px;border-radius:8px;text-decoration:none">Log in to Be More Swan</a>
     </div>
