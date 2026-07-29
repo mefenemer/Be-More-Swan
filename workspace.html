@@ -4432,9 +4432,14 @@ function formatCurrency(amount, currency) {
   // ═══════════════════════════════════════════════════════════════════
   const ONBOARDING_ROLE_META = {
     social_media: { label: 'Social Media Assistant', icon: '📣', wizard: 'onboarding-social-media.html' },
-    paid_ads:     { label: 'Performance Marketing Assistant', icon: '📈', wizard: 'onboarding-performance.html' },
-    data_entry:   { label: 'Inventory & Data',     icon: '🗂️', wizard: 'onboarding-inventory.html' },
-    custom:       { label: 'Custom Assistant',     icon: '🤖', wizard: 'onboarding-custom.html' },
+    // Labels and icons kept so an existing in-progress card still reads correctly, but these three
+    // point at onboarding.html on purpose: their own wizards end at a placeholder alert and persist
+    // nothing, so "Continue this step" into one could never finish the draft it claims to resume.
+    // Defensive — nothing currently creates a draft on those paths. Point each back at its own
+    // wizard once that wizard POSTs to onboarding.ts.
+    paid_ads:     { label: 'Performance Marketing Assistant', icon: '📈', wizard: 'onboarding.html' },
+    data_entry:   { label: 'Inventory & Data',     icon: '🗂️', wizard: 'onboarding.html' },
+    custom:       { label: 'Custom Assistant',     icon: '🤖', wizard: 'onboarding.html' },
   };
   window.ONBOARDING_ROLE_META = ONBOARDING_ROLE_META;
 

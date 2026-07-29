@@ -178,29 +178,41 @@
                             </div>
                         </label>
 
-                        <label class="relative cursor-pointer role-card" data-role="paid_ads" onclick="checkRoleAccess(event, 'paid_ads')">
-                            <input type="radio" name="category" value="paid_ads" class="sr-only">
-                            <div class="p-4 border border-gray-200 rounded-lg hover:border-emerald-300 transition h-full">
+                        <!-- Performance Marketing + Inventory & Order are COMING SOON, not Locked.
+                             Their wizards (onboarding-performance.html / onboarding-inventory.html)
+                             collect six steps of answers and end at
+                             `alert("Blueprint finalized! Redirecting to checkout...")` — they persist
+                             nothing and create no assistant, so there is no state in which selecting
+                             one is useful. "Locked" was the wrong affordance regardless: it invites an
+                             upgrade, and no tier unlocks a wizard that does not work.
+                             NOTE: this page's own routing (proceedToRole) is dead code with no caller,
+                             so these cards were not actually reaching those wizards — the change is to
+                             stop advertising a role that cannot be set up, not to close a live leak.
+                             Restore the selectable cards (and the tierConfig entries below) when the
+                             wizards POST to onboarding.ts. -->
+                        <label class="relative cursor-pointer role-card opacity-60 hover:opacity-100 transition" onclick="showWaitlistModal(event, 'Performance Marketing Assistant')">
+                            <input type="radio" name="category" value="paid_ads" class="sr-only" disabled>
+                            <div class="p-4 border border-gray-200 rounded-lg bg-gray-50 transition h-full">
                                 <div class="flex items-center mb-2 justify-between">
                                     <div class="flex items-center">
                                         <div class="radio-indicator h-4 w-4 rounded-full border border-gray-300 mr-3 flex-shrink-0"></div>
                                         <span class="font-bold text-gray-900">🎯 Performance Marketing Assistant</span>
                                     </div>
-                                    <span id="lock_paid_ads" class="hidden text-xs font-bold text-gray-400 uppercase tracking-wide bg-gray-100 px-2 py-1 rounded">Locked</span>
+                                    <span class="text-[10px] font-bold text-gray-600 uppercase tracking-wide bg-gray-200 px-2 py-1 rounded">Coming Soon</span>
                                 </div>
                                 <span class="block text-sm text-gray-500 ml-7">Ad generation, campaign publishing, and audience targeting.</span>
                             </div>
                         </label>
 
-                        <label class="relative cursor-pointer role-card" data-role="data_entry" onclick="checkRoleAccess(event, 'data_entry')">
-                            <input type="radio" name="category" value="data_entry" class="sr-only">
-                            <div class="p-4 border border-gray-200 rounded-lg hover:border-emerald-300 transition h-full">
+                        <label class="relative cursor-pointer role-card opacity-60 hover:opacity-100 transition" onclick="showWaitlistModal(event, 'Inventory &amp; Order Assistant')">
+                            <input type="radio" name="category" value="data_entry" class="sr-only" disabled>
+                            <div class="p-4 border border-gray-200 rounded-lg bg-gray-50 transition h-full">
                                 <div class="flex items-center mb-2 justify-between">
                                     <div class="flex items-center">
                                         <div class="radio-indicator h-4 w-4 rounded-full border border-gray-300 mr-3 flex-shrink-0"></div>
-                                        <span class="font-bold text-gray-900">📦 Inventory & Order Assistant</span>
+                                        <span class="font-bold text-gray-900">📦 Inventory &amp; Order Assistant</span>
                                     </div>
-                                    <span id="lock_data_entry" class="hidden text-xs font-bold text-gray-400 uppercase tracking-wide bg-gray-100 px-2 py-1 rounded">Locked</span>
+                                    <span class="text-[10px] font-bold text-gray-600 uppercase tracking-wide bg-gray-200 px-2 py-1 rounded">Coming Soon</span>
                                 </div>
                                 <span class="block text-sm text-gray-500 ml-7">Managing cross-platform orders, syncing stock, and automating fulfillment logs.</span>
                             </div>
@@ -234,15 +246,17 @@
                             </div>
                         </label>
 
-                        <label class="relative cursor-pointer sm:col-span-2 role-card" data-role="custom" onclick="checkRoleAccess(event, 'custom')">
-                            <input type="radio" name="category" value="custom" class="sr-only">
-                            <div class="p-4 border border-gray-200 rounded-lg hover:border-emerald-300 transition h-full">
+                        <!-- Coming Soon for the same reason as the two above — onboarding-custom.html
+                             ends at the same placeholder alert and persists nothing. -->
+                        <label class="relative cursor-pointer sm:col-span-2 role-card opacity-60 hover:opacity-100 transition" onclick="showWaitlistModal(event, 'Operations Assistant (Custom)')">
+                            <input type="radio" name="category" value="custom" class="sr-only" disabled>
+                            <div class="p-4 border border-gray-200 rounded-lg bg-gray-50 transition h-full">
                                 <div class="flex items-center justify-between mb-2">
                                     <div class="flex items-center">
                                         <div class="radio-indicator h-4 w-4 rounded-full border border-gray-300 mr-3 flex-shrink-0"></div>
                                         <span class="font-bold text-gray-900">⚙️ Operations Assistant (Custom)</span>
                                     </div>
-                                    <span id="lock_custom" class="hidden text-xs font-bold text-gray-400 uppercase tracking-wide bg-gray-100 px-2 py-1 rounded">Locked</span>
+                                    <span class="text-[10px] font-bold text-gray-600 uppercase tracking-wide bg-gray-200 px-2 py-1 rounded">Coming Soon</span>
                                 </div>
                                 <span class="block text-sm text-gray-500 ml-7">A unique, multi-step process that doesn't fit the roles above.</span>
                             </div>
@@ -396,14 +410,21 @@
 
         if(currentTierKey) sessionStorage.setItem('aura_tier', currentTierKey);
 
+        // ONLY roles whose wizard actually persists an assistant belong here. The three legacy
+        // wizards (performance / inventory / custom) end at a placeholder alert and save nothing.
+        // NOTE: proceedToRole has no caller — this whole function is dead code today, kept and
+        // corrected rather than deleted because it is the obvious thing to revive when this picker
+        // is finished. Add a role back only once its wizard POSTs to onboarding.ts.
         const routeMap = {
             'social_media': 'onboarding-social-media.html',
-            'paid_ads': 'onboarding-performance.html',
-            'data_entry': 'onboarding-inventory.html',
-            'custom': 'onboarding-custom.html'
         };
 
         let targetUrl = routeMap[role];
+        if (!targetUrl) {
+            // Never navigate to a dead end — offer the waitlist instead.
+            showWaitlistModal(new Event('click'), assistantNameMap[role] || 'this assistant');
+            return;
+        }
 
         // Append the tier to the URL for robust state management
         if (currentTierKey) {

@@ -247,8 +247,14 @@ export async function runQualityReview(
         if (bp) {
             const sections = bp.sections as Record<string, { content: Record<string, unknown> }>;
             brandVoice = (sections['5-org-context']?.content?.brandVoice as string) ?? brandVoice;
-            const rules = sections['4-content-rules']?.content;
-            if (rules) contentRulesText = JSON.stringify(rules);
+            // Test the RULES, not the wrapper: section 4's content is `{ rules: [...] }`, an object
+            // that is truthy even when the array is empty. An assistant with no rules was therefore
+            // handing the reviewer a literal `Content rules:\n{"rules":[]}` — tokens spent telling
+            // the model nothing, in a prompt that is asking it for a judgement.
+            const s4 = sections['4-content-rules']?.content;
+            const rules = (s4?.rules ?? []) as unknown[];
+            // Payload shape unchanged for assistants that HAVE rules — only the guard moves.
+            if (rules.length > 0) contentRulesText = JSON.stringify(s4);
             knownFacts = collectKnownFacts(sections);
         }
     }

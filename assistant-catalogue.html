@@ -396,11 +396,12 @@
     // from the DB. Falls back to onboarding.html for any role without a dedicated wizard.
     // (Previously this called loadView('onboarding'), but there is no 'onboarding'
     // workspace route, so the click silently did nothing.)
+    // paid_ads / data_entry / custom removed deliberately — their wizards end at a placeholder alert
+    // and persist nothing, so they fall through to onboarding.html (which shows them as Coming Soon).
+    // Those roleKeys have no row in db/seed-catalog.ts, so no card renders for them today; this is
+    // defensive. Restore when those wizards POST to onboarding.ts.
     const ROLE_ONBOARDING_PAGE = {
       social_media_manager: 'onboarding-social-media.html',
-      paid_ads:             'onboarding-performance.html',
-      data_entry:           'onboarding-inventory.html',
-      custom:               'onboarding-custom.html',
     };
     sessionStorage.setItem('intended_role_key', roleKey);
     window.location.href = ROLE_ONBOARDING_PAGE[roleKey] || 'onboarding.html';

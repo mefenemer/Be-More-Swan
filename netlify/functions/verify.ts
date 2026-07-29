@@ -149,12 +149,14 @@ export default withLambda(async (event) => {
         const VALID_TIERS = ['saver', 'buster', 'employee'];
 
         // Onboarding path → HTML page map (mirrors onboarding-reminder.ts)
+        // custom / inventory / performance deliberately fall through (|| 'onboarding.html' below)
+        // rather than resolving to their own wizards: those three end at a placeholder alert and
+        // persist nothing, so resuming a draft into one cannot complete it. Reaching this needs an
+        // onboarding_drafts row with one of those paths, which nothing currently creates — this is
+        // defensive, not a live leak. Restore the direct routes when the wizards POST to onboarding.ts.
         const ONBOARDING_PAGE: Record<string, string> = {
             'social-media':  'onboarding-social-media.html',
             'social_media':  'onboarding-social-media.html',
-            'custom':        'onboarding-custom.html',
-            'inventory':     'onboarding-inventory.html',
-            'performance':   'onboarding-performance.html',
         };
 
         // If no pending tier — this is a returning user logging in (not a new registration).
