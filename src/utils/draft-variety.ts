@@ -58,3 +58,121 @@ export function buildVarietyBlock(rows: PriorPost[]): string {
     }
     return parts.join('\n\n');
 }
+
+// ── Near-duplicate detection ──────────────────────────────────────────────────────────────────
+// Telling the model "don't repeat yourself" is advice, and advice is not a guarantee. This is the
+// check that verifies it actually complied, so a near-identical draft never reaches the queue
+// unchallenged.
+//
+// Deliberately DETERMINISTIC — no model call, no embeddings. It runs on every generated caption,
+// so it has to be free and instant; an LLM judge here would double the cost of drafting to answer
+// a question that set arithmetic answers well. It is also then perfectly testable, which a model
+// judge is not.
+
+/**
+ * Strip a caption to the words that carry its meaning: no case, no punctuation, no emoji, no URLs,
+ * no hashtags, no @mentions. Two posts that differ only in hashtags and an emoji are the same post.
+ */
+export function normaliseForCompare(text: string): string[] {
+    return (text || '')
+        .toLowerCase()
+        .replace(/https?:\/\/\S+/g, ' ')       // links
+        .replace(/[#@][\w-]+/g, ' ')           // hashtags and mentions
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')     // punctuation + emoji (any non letter/number)
+        .split(/\s+/)
+        .filter(Boolean);
+}
+
+/** Overlapping word pairs. Order-sensitive enough to tell a rewrite from a reshuffle. */
+function bigrams(words: string[]): Set<string> {
+    const out = new Set<string>();
+    for (let i = 0; i < words.length - 1; i++) out.add(`${words[i]} ${words[i + 1]}`);
+    return out;
+}
+
+function jaccard(a: Set<string>, b: Set<string>): number {
+    if (!a.size || !b.size) return 0;
+    let shared = 0;
+    for (const v of a) if (b.has(v)) shared++;
+    return shared / (a.size + b.size - shared);
+}
+
+/** Words of the opening hook — the part a reader sees before "…more", and the part that repeats. */
+const HOOK_WORDS = 12;
+
+/**
+ * How alike two captions are, 0–1.
+ *
+ * The higher of two views, because repetition shows up as either:
+ *   - whole-caption overlap — the same post lightly reworded; and
+ *   - opening overlap — different bodies behind an identical hook, which is what a reviewer
+ *     scrolling a queue actually notices, and what the first live cross-post batch produced.
+ * Taking the max means catching either is enough; requiring both would miss the common cases.
+ */
+export function captionSimilarity(a: string, b: string): number {
+    const { whole, hook } = scorePair(a, b);
+    return Math.max(whole, hook);
+}
+
+/**
+ * The two views of one pair, computed once. Both the score and the trip test read from here, so
+ * they can never disagree about how similar two captions are.
+ */
+function scorePair(a: string, b: string): { whole: number; hook: number } {
+    const wa = normaliseForCompare(a);
+    const wb = normaliseForCompare(b);
+    if (wa.length < 4 || wb.length < 4) return { whole: 0, hook: 0 };   // too short to judge
+    return {
+        whole: jaccard(bigrams(wa), bigrams(wb)),
+        hook: jaccard(new Set(wa.slice(0, HOOK_WORDS)), new Set(wb.slice(0, HOOK_WORDS))),
+    };
+}
+
+/**
+ * Trip points, tuned so a genuine rewrite of the same premise trips and two posts merely sharing a
+ * content pillar do not. They are not symmetric on purpose: two captions can share a lot of
+ * vocabulary across a whole post and still read as different posts, whereas a near-identical
+ * OPENING reads as a duplicate however the body continues.
+ *
+ * Erring low here is not free — every trip costs one extra generation call, and the drainer runs
+ * to a tight time budget. These are set to catch what a human would call "I've seen this already".
+ */
+export const NEAR_DUPLICATE_WHOLE = 0.45;
+export const NEAR_DUPLICATE_HOOK = 0.7;
+
+export interface NearDuplicate {
+    /** The existing caption the new draft is too close to. */
+    caption: string;
+    /** 0–1, for the log line. */
+    score: number;
+}
+
+/**
+ * The prior post this caption is too close to, or null when it is genuinely new.
+ * Returns the WORST offender so the corrective re-ask quotes the most similar one.
+ */
+export function findNearDuplicate(caption: string, priors: PriorPost[]): NearDuplicate | null {
+    let worst: NearDuplicate | null = null;
+    for (const prior of priors) {
+        if (!prior.caption) continue;
+        const { whole, hook } = scorePair(caption, prior.caption);
+        if (whole < NEAR_DUPLICATE_WHOLE && hook < NEAR_DUPLICATE_HOOK) continue;
+        const score = Math.max(whole, hook);
+        if (!worst || score > worst.score) worst = { caption: prior.caption, score };
+    }
+    return worst;
+}
+
+/**
+ * The corrective turn sent when a draft trips the check. Quotes BOTH captions: the model cannot
+ * fix a collision it can't see, and naming the specific existing post is what stops it rewording
+ * the same idea a second time.
+ */
+export function nearDuplicateRetryPrompt(dup: NearDuplicate): string {
+    return 'That draft is too close to a post this assistant has already produced — the user would '
+        + 'see the same idea twice in their review queue.\n\n'
+        + `THE EXISTING POST:\n"${dup.caption.replace(/\s+/g, ' ').trim().slice(0, 400)}"\n\n`
+        + 'Write a COMPLETELY different post instead: a different opening hook, a different core '
+        + 'premise, and a different angle on the strategy above. Do not reword what you just wrote — '
+        + 'the idea itself has to change. Return the same JSON shape as before.';
+}

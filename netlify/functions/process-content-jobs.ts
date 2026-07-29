@@ -27,7 +27,10 @@ import { resolveDisclosureFooter } from '../../src/utils/disclosure-footer';
 import { fitForPlatform, isShortForm, type BrandHashtags } from '../../src/utils/platform-caption';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { operationalSetupLines } from '../../src/utils/operational-setup';
-import { buildVarietyBlock, VARIETY_LOOKBACK } from '../../src/utils/draft-variety';
+import {
+    buildVarietyBlock, VARIETY_LOOKBACK, findNearDuplicate, nearDuplicateRetryPrompt,
+    type PriorPost,
+} from '../../src/utils/draft-variety';
 import { decideAutoPublish, describeDecision } from '../../src/utils/auto-publish-runtime';
 import { platformFormat, SOCIAL_PLATFORMS } from '../../src/config/platform-formats';
 import { formatPlatformStrategyBrief, platformStrategyFor, type PlatformStrategy } from '../../src/utils/platform-strategy-brief';
@@ -330,9 +333,12 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // anti-repetition context at all. created_at is NOT NULL, so the coalesce always sorts by a
         // real timestamp and hand-written posts take their rightful place by age instead of jumping
         // the queue or being exiled to the end.
+        // Declared out here because the near-duplicate gate after generation checks the new caption
+        // against this SAME corpus — one fetch serves both the prompt and the verification.
+        let recent: PriorPost[] = [];
         let recentBlock = '';
         try {
-            const recent = await db.select({ caption: scheduledPosts.caption, media: scheduledPosts.suggestedMediaDescription })
+            recent = await db.select({ caption: scheduledPosts.caption, media: scheduledPosts.suggestedMediaDescription })
                 .from(scheduledPosts)
                 .where(and(eq(scheduledPosts.assistantId, job.assistant_id), isNotNull(scheduledPosts.caption)))
                 .orderBy(sql`coalesce(${scheduledPosts.generatedAt}, ${scheduledPosts.createdAt}) desc`)
@@ -490,6 +496,52 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 : `Model reply was not valid JSON with a caption (stop_reason: ${gwResponse.stopReason ?? 'unknown'}) — retrying`);
         }
         generated = parsedReply;
+
+        // ── Near-duplicate gate ───────────────────────────────────────────────────────────────
+        // The prompt ASKS for a different angle; this checks it got one. Compared against the same
+        // `recent` corpus already fetched for the variety block — every status, so a draft awaiting
+        // review counts as much as one already published — so the check itself costs no query and
+        // no model call.
+        //
+        // On a trip: ONE corrective re-ask quoting the collision. Exactly one, then we take
+        // whatever came back. An unbounded "try again" against a model that has already shown it
+        // wants to write this idea is how a drafting job turns into a timeout, and the drainer runs
+        // to a 26s cap. A second near-duplicate is a far better outcome than a failed job or an
+        // empty queue slot, so the gate degrades to "we tried" rather than blocking the draft.
+        //
+        // Fail-open throughout: any error here leaves the original caption exactly as generated.
+        let dupTokensIn = 0;
+        let dupTokensOut = 0;
+        try {
+            const dup = findNearDuplicate(String(generated.caption ?? ''), recent);
+            if (dup) {
+                console.warn(`[process-content-jobs] job ${job.job_id}: near-duplicate (score ${dup.score.toFixed(2)}) — re-asking once`);
+                const retry = await gatewayGenerate({
+                    system: systemPrompt,
+                    messages: [
+                        ...messages,
+                        { role: 'assistant', content: rawText },
+                        { role: 'user', content: nearDuplicateRetryPrompt(dup) },
+                    ],
+                    maxTokens: 4096,
+                });
+                dupTokensIn = retry.tokensInput ?? 0;
+                dupTokensOut = retry.tokensOutput ?? 0;
+                const reparsed = parseModelJson<typeof generated>(retry.text);
+                // Only take the retry if it is BOTH valid and actually different. A malformed or
+                // still-duplicate second attempt leaves the first draft in place — swapping one
+                // duplicate for another gains nothing, and throwing would waste a good draft.
+                if (reparsed?.caption && String(reparsed.caption).trim()
+                    && !findNearDuplicate(String(reparsed.caption), recent)) {
+                    generated = reparsed;
+                } else {
+                    console.warn(`[process-content-jobs] job ${job.job_id}: re-ask did not clear the duplicate — keeping the first draft`);
+                }
+            }
+        } catch (err) {
+            console.warn(`[process-content-jobs] job ${job.job_id}: near-duplicate check skipped:`, err instanceof Error ? err.message : err);
+        }
+
         // The raw model caption, WITHOUT the footer — kept for orchestration hand-off and as the
         // long-form source that fitForPlatform trims per platform. The disclosure footer (EU AI Act
         // Art. 50) is appended deterministically inside fitForPlatform for each platform, so every
@@ -809,7 +861,12 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             });
         }
 
-        const tokenCols = tokensInput != null ? `, tokens_input = ${tokensInput}, tokens_output = ${tokensOutput ?? 0}` : '';
+        // Includes the near-duplicate re-ask when one fired (0 otherwise), so the job's recorded
+        // cost is what it actually spent — a second generation billed as free would make the
+        // gate's real cost invisible in exactly the reporting used to judge whether to keep it.
+        const tokenCols = tokensInput != null
+            ? `, tokens_input = ${tokensInput + dupTokensIn}, tokens_output = ${(tokensOutput ?? 0) + dupTokensOut}`
+            : '';
         await db.execute(
             `UPDATE content_generation_jobs SET status = 'completed', result_post_id = ${post.id}${tokenCols}, updated_at = now() WHERE id = ${job.id}`
         );
