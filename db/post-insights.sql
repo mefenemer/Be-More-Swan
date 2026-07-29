@@ -1,7 +1,7 @@
 -- US-SMM-PERF: Social Performance Metrics ingestion.
 -- One upserted snapshot per published post, holding the platform's engagement
 -- counters. Written by the ingest-instagram-insights cron and aggregated per
--- assistant by get-assistant-metrics.ts. Idempotent — safe to run more than once.
+-- assistant by get-assistant-performance.ts. Idempotent — safe to run more than once.
 --
 -- APPLY THIS FILE (Neon SQL editor / psql as the owner) — do NOT use `drizzle-kit push`.
 -- RLS policies live in raw SQL (db/rls/) and are invisible to Drizzle, so a push can
@@ -9,7 +9,7 @@
 -- Canonical column definitions live in db/schema.ts (export const postInsights).
 --
 -- RLS: intentionally NOT enabled here. Both writers (ingest-instagram-insights) and
--- the reader (get-assistant-metrics) query this table via getDb() (the neondb_owner
+-- the reader (get-assistant-performance) query this table via getDb() (the neondb_owner
 -- connection, which bypasses RLS) and filter by organisation_id explicitly — the same
 -- owner-path + manual-filter pattern as audit_logs / get-assistant-activity.ts. No
 -- function routes post_insights through withTenant(), so a tenant_isolation policy
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS post_insights (
 CREATE UNIQUE INDEX IF NOT EXISTS post_insights_post_uidx
     ON post_insights (scheduled_post_id);
 
--- Per-assistant aggregation over a time window (get-assistant-metrics.ts).
+-- Per-assistant aggregation over a time window (get-assistant-performance.ts).
 CREATE INDEX IF NOT EXISTS post_insights_assistant_published_idx
     ON post_insights (assistant_id, published_at);
 

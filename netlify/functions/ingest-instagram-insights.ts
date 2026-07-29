@@ -1,7 +1,7 @@
 // netlify/functions/ingest-instagram-insights.ts
 // US-SMM-PERF: Scheduled ingester that pulls Instagram media insights for
 // recently-published posts and upserts them into post_insights. Aggregated by
-// get-assistant-metrics.ts to power the assistant-detail "Performance Metrics" cards.
+// get-assistant-performance.ts to power the assistant-detail "Performance Metrics" cards.
 //
 // Schedule: every 6 hours (see netlify.toml). Insights keep changing for days
 // after publish, so we re-fetch posts published within a rolling window each run.
@@ -32,7 +32,11 @@ function pickMetric(map: Record<string, number>, ...names: string[]): number | n
     return null;
 }
 
-export default withLambda(async () => {
+export type IngestResult = { processed: number; updated: number; failed: number; durationMs: number };
+
+/** The ingest tick itself. Exported so run-insights-ingest.ts can drive the SAME logic over HTTP
+ *  on staging, where Netlify's scheduler never fires (branch deploys get no crons). */
+export async function ingestInstagramInsights(): Promise<IngestResult> {
     const db = getDb();
     const tickStart = Date.now();
     const windowStart = new Date(Date.now() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
@@ -58,7 +62,7 @@ export default withLambda(async () => {
         .limit(BATCH);
 
     if (!posts.length) {
-        return { statusCode: 200, body: JSON.stringify({ processed: 0, updated: 0, failed: 0 }) };
+        return { processed: 0, updated: 0, failed: 0, durationMs: Date.now() - tickStart };
     }
 
     // Cache one token per connection so we don't re-read the vault per post.
@@ -154,5 +158,12 @@ export default withLambda(async () => {
 
     const durationMs = Date.now() - tickStart;
     console.log(`[ingest-instagram-insights] processed=${posts.length} updated=${updated} failed=${failed} ${durationMs}ms`);
-    return { statusCode: 200, body: JSON.stringify({ processed: posts.length, updated, failed, durationMs }) };
+    return { processed: posts.length, updated, failed, durationMs };
+}
+
+// The scheduled entry point (netlify.toml → every 6 hours). PRODUCTION ONLY — Netlify never runs
+// scheduled functions on a branch deploy, so staging is driven by run-insights-ingest.ts instead.
+export default withLambda(async () => {
+    const result = await ingestInstagramInsights();
+    return { statusCode: 200, body: JSON.stringify(result) };
 });

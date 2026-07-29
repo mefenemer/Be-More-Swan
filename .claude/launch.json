@@ -2,6 +2,16 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-perf-metrics",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/c63468af-48fd-4abc-85df-0543adb7b68d/scratchpad/perfharness/server.mts"
+      ],
+      "port": 4220,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-rail-only",
       "runtimeExecutable": "node",
       "runtimeArgs": [

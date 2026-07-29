@@ -4578,7 +4578,10 @@ async function _loadAssistantMetrics(assistantId) {
     };
 
     try {
-        const res = await fetch(`/.netlify/functions/get-assistant-metrics?id=${assistantId}`);
+        // get-assistant-PERFORMANCE, not get-assistant-metrics: the latter owns the ROI strip and
+        // the Created/Scheduled/Published totals and has never returned the KPI shape read below.
+        // Pointing here at that endpoint is exactly what left these four cards permanently blank.
+        const res = await fetch(`/.netlify/functions/get-assistant-performance?id=${assistantId}`);
         if (!res.ok) return; // leave the "—" placeholders in place
         const data = await res.json();
 

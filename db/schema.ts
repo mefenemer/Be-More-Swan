@@ -1932,7 +1932,7 @@ export const scheduledPosts = pgTable("scheduled_posts", {
 // One upserted row per published post, refreshed by ingest-instagram-insights.ts.
 // Source of truth for the assistant-detail "Performance Metrics" cards
 // (engagement rate, organic reach growth, click-through rate), aggregated by
-// get-assistant-metrics.ts. Platform-agnostic so LinkedIn/X ingesters can reuse it.
+// get-assistant-performance.ts. Platform-agnostic so LinkedIn/X ingesters can reuse it.
 export const postInsights = pgTable("post_insights", {
   id: serial().primaryKey(),
   scheduledPostId: integer("scheduled_post_id")
@@ -1967,7 +1967,7 @@ export const postInsights = pgTable("post_insights", {
 }, (t) => [
   // One snapshot per post — ingester upserts on this key.
   uniqueIndex("post_insights_post_uidx").on(t.scheduledPostId),
-  // Per-assistant aggregation over a time window (get-assistant-metrics.ts).
+  // Per-assistant aggregation over a time window (get-assistant-performance.ts).
   index("post_insights_assistant_published_idx").on(t.assistantId, t.publishedAt),
   // Org-scoped + platform reporting.
   index("post_insights_org_platform_idx").on(t.organisationId, t.platform),
