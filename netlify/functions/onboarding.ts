@@ -24,6 +24,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
 import { checkAssistantCapacity } from '../../src/utils/assistant-capacity';
 import { extractOnboardingGuardrails } from '../../src/utils/onboarding-guardrails';
+import { sanitizeUserInput } from '../../src/utils/sanitize-user-input';
 import { createNotification } from '../../src/utils/notify';
 import { isEuCountry } from '../../src/config/compliance';
 import { normalizeMediaSources, type MediaSource } from '../../src/utils/media-sources';
@@ -47,25 +48,10 @@ function isEuJurisdiction(headers: Record<string, string | undefined>): boolean 
 }
 
 // ── Direct Prompt Injection / Jailbreak defence ────────────────────────────
-// User-supplied onboarding inputs (business name, rules, workflow descriptions)
-// are embedded directly into the system prompt. Sanitise to remove common
-// jailbreak patterns before compilation.
-// This does NOT replace the structural safety fence added in the system prompt
-// template — it is belt-and-braces input sanitisation.
-function sanitizeUserInput(str: string): string {
-  if (!str || typeof str !== 'string') return str;
-  return str
-    .replace(/ignore\s+(all\s+)?(previous|prior|above)\s+instructions?/gi, '[removed]')
-    .replace(/disregard\s+(all\s+)?(previous|prior|above)/gi, '[removed]')
-    .replace(/you\s+are\s+now\s+(a|an|acting\s+as)\s+/gi, '[removed] ')
-    .replace(/\[system\]/gi, '[removed]')
-    .replace(/<\|im_start\|>|<\|im_end\|>/g, '')
-    .replace(/SYSTEM:/gi, '[removed]:')
-    .replace(/new\s+instructions?\s*:/gi, '[removed]:')
-    // Strip null bytes and C0/C1 control characters (invisible injection)
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, '')
-    .trim();
-}
+// User-supplied onboarding inputs (business name, rules, workflow descriptions) are embedded
+// directly into the system prompt. `sanitizeUserInput` now lives in src/utils — the guardrail
+// backfill has to apply exactly the same transformation to text this function would have cleaned
+// at hire time, and a second copy of a sanitiser drifts into one that stops catching things.
 
 function compileServerSideBrief(clientName: string, businessName: string, assistantName: string, inputs: any): string {
   if (!inputs) throw new Error('Transformation Failure: Missing inputs payload.');

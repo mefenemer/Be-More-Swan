@@ -12,7 +12,32 @@ import { and, eq, isNull, or } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { contentRules, aiAssistants, scheduledPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { assembleBlueprint } from '../../src/utils/blueprint';
 import { withLambda } from '@netlify/aws-lambda-compat';
+
+/**
+ * Recompile the blueprint so a rule change actually reaches the model.
+ *
+ * Rules are consumed from the COMPILED blueprint (section 4), not from content_rules live:
+ * process-content-jobs dumps the blueprint into the generation prompt, and post-quality-review
+ * reads section 4 out of the latest persisted row. Without this, a rule added here sat dormant
+ * until some unrelated recompile happened — the exact gap reject-post.ts already closes for
+ * rejection-feedback rules.
+ *
+ * Applies to every mutation, not just create: deactivating a rule (section 4 filters on isActive),
+ * editing its text, and deleting it all change what the assistant is steered by.
+ *
+ * Best-effort by design — data assembly, no LLM call. A recompile failure must never fail the
+ * user's edit, which is already committed by the time this runs.
+ */
+async function recompileAfterRuleChange(assistantId: number | null, userId: number, what: string) {
+    if (!assistantId) return;
+    try {
+        await assembleBlueprint(assistantId, `user-${userId}`, 'context_update');
+    } catch (e) {
+        console.warn(`[content-rules] blueprint recompile after ${what} failed (change still saved):`, e instanceof Error ? e.message : e);
+    }
+}
 
 export default withLambda(async (event) => {
     const db = getDb();
@@ -102,6 +127,8 @@ export default withLambda(async (event) => {
             origin:          'manual',
         }).returning();
 
+        await recompileAfterRuleChange(Number(assistantId), userId, 'create');
+
         return {
             statusCode: 201,
             headers: { 'Content-Type': 'application/json' },
@@ -146,6 +173,8 @@ export default withLambda(async (event) => {
             .where(eq(contentRules.id, Number(id)))
             .returning();
 
+        await recompileAfterRuleChange(existing.assistantId, userId, 'edit');
+
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json' },
@@ -158,7 +187,9 @@ export default withLambda(async (event) => {
         const id = params.id ? Number(params.id) : NaN;
         if (isNaN(id)) return { statusCode: 400, body: JSON.stringify({ error: 'id is required.' }) };
 
-        const [existing] = await db.select({ workspaceId: contentRules.workspaceId })
+        // assistantId comes back too — the row is gone by the time we recompile, so it has to be
+        // captured before the delete.
+        const [existing] = await db.select({ workspaceId: contentRules.workspaceId, assistantId: contentRules.assistantId })
             .from(contentRules)
             .where(eq(contentRules.id, id))
             .limit(1);
@@ -168,6 +199,8 @@ export default withLambda(async (event) => {
         }
 
         await db.delete(contentRules).where(eq(contentRules.id, id));
+
+        await recompileAfterRuleChange(existing.assistantId, userId, 'delete');
 
         return {
             statusCode: 200,

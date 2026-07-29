@@ -39,6 +39,7 @@
     "db:seed": "npx tsx seed/cli.ts",
     "db:seed:sandbox": "npx tsx seed/cli.ts --sandbox",
     "db:seed-catalog": "npx tsx db/seed-catalog.ts",
+    "db:backfill-guardrails": "npx tsx scripts/backfill-onboarding-guardrails.ts",
     "db:seed-assistant-content": "npx tsx db/seed-assistant-content.ts",
     "db:migrate:status": "node scripts/db-migrate.mjs status",
     "db:migrate": "node scripts/db-migrate.mjs apply",

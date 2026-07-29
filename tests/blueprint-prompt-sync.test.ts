@@ -34,6 +34,7 @@ const worker = read('../netlify/functions/process-content-jobs.ts');
 const adminTest = read('../netlify/functions/admin-test-generate-background.ts');
 const blueprint = read('../src/utils/blueprint.ts');
 const saveFn = read('../netlify/functions/update-assistant-context.ts');
+const rulesFn = read('../netlify/functions/content-rules.ts');
 
 /** A blueprint shaped like the real thing, carrying every hazard at once. */
 const HAZARDOUS_SECTIONS = {
@@ -150,6 +151,23 @@ test('saving the profile recompiles the blueprint', () => {
     assert.match(saveFn, /assembleBlueprint\(assistantId/, 'a profile save must recompile');
     const idx = saveFn.indexOf('assembleBlueprint(assistantId');
     assert.match(saveFn.slice(idx - 200, idx + 300), /catch/, 'a recompile failure must not fail the save');
+});
+
+test('every content-rule mutation recompiles the blueprint', () => {
+    // Rules reach the model through COMPILED section 4, never live: the generation worker dumps the
+    // blueprint, and post-quality-review reads section 4 from the latest persisted row. A rule added
+    // in the Guardrails panel used to sit dormant until an unrelated recompile happened.
+    // Deactivating and deleting count too — section 4 filters on isActive.
+    for (const mutation of ['create', 'edit', 'delete']) {
+        assert.match(
+            rulesFn,
+            // [^;]* not [^)]* — the create call passes Number(assistantId), parens and all.
+            new RegExp(`recompileAfterRuleChange\\([^;]*'${mutation}'\\)`),
+            `the ${mutation} path must recompile`,
+        );
+    }
+    const idx = rulesFn.indexOf('await assembleBlueprint');
+    assert.match(rulesFn.slice(idx - 200, idx + 300), /catch/, 'a recompile failure must not fail the edit');
 });
 
 test('an unchanged recompile reuses the existing row instead of appending', () => {
