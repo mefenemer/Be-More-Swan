@@ -357,7 +357,7 @@
       <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Performance Metrics</h3>
       <span id="metrics-status-note" class="text-xs text-gray-400 font-medium">Last 30 days</span>
     </div>
-    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+    <div id="metrics-kpi-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
 
       <!-- KPI card 1 — label/title/desc injected from AssistantDashboardRegistry by role -->
       <div id="kpi-card-engagement" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-5 flex flex-col gap-3">
@@ -460,6 +460,30 @@
       </div>
 
     </div>
+
+    <!-- Explanatory empty state. Replaces the four-card grid whenever the metrics endpoint has
+         nothing to report — four cards reading "—" look broken, which is what this exists to stop.
+         Hidden by default and shown only by _loadAssistantMetrics, so the cards remain the
+         default and this can never mask real figures. Copy is set from JS (two variants: no data
+         yet vs. could not load) rather than hardcoded here, because those are different truths. -->
+    <div id="metrics-empty-state" class="hidden bg-white rounded-2xl border border-gray-200 shadow-sm p-6">
+      <div class="flex items-start gap-4">
+        <span aria-hidden="true" class="shrink-0 w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center text-gray-400">
+          <svg class="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75">
+            <path d="M3 16.5V11m4.5 5.5V7M12 16.5v-4m4.5 4V4.5" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <div class="min-w-0">
+          <p id="metrics-empty-title" class="text-sm font-bold text-gray-700"></p>
+          <p id="metrics-empty-body" class="text-xs text-gray-500 mt-1 leading-relaxed"></p>
+          <button type="button" id="metrics-empty-review-link"
+                  class="hidden mt-3 text-xs font-bold text-gray-700 underline underline-offset-2 hover:text-gray-900">
+            Open Review Queue
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Value wins: posts that converted on saves/shares regardless of reach (AC8) -->
     <p id="metric-value-wins" class="hidden text-xs text-emerald-700 font-medium mt-3"></p>
   </div>

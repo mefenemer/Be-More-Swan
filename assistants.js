@@ -4549,6 +4549,53 @@ function _setKpiCard(key, { empty, tone = 'brand', series = null } = {}) {
         empty ? 'text-gray-200' : tone === 'down' ? 'text-rose-400' : 'text-emerald-400'}`);
 }
 
+// Swaps the four KPI cards for a single panel that says why they're blank. Four cards reading "—"
+// are indistinguishable from a broken page, and the section stays on screen for every role even
+// where nothing can currently feed it. `mode` is 'cards' (real figures), 'no-data' (nothing
+// published to measure) or 'error' (we genuinely don't know) — the last two are different truths
+// and must not share copy, or a network blip would tell the user they've published nothing.
+function _setMetricsEmptyState(mode) {
+    const grid  = document.getElementById('metrics-kpi-grid');
+    const panel = document.getElementById('metrics-empty-state');
+    const note  = document.getElementById('metrics-status-note');
+    if (!grid || !panel) return;
+
+    if (mode === 'cards') {
+        grid.classList.remove('hidden');
+        // `hidden` loses to the panel's own display, so clear both the class and the inline style.
+        panel.classList.add('hidden');
+        panel.style.display = 'none';
+        return;
+    }
+
+    grid.classList.add('hidden');
+    panel.classList.remove('hidden');
+    panel.style.display = '';
+
+    const title = document.getElementById('metrics-empty-title');
+    const body  = document.getElementById('metrics-empty-body');
+    if (mode === 'error') {
+        if (title) title.textContent = 'Performance metrics couldn’t be loaded';
+        if (body)  body.textContent  = 'Something went wrong fetching them. Refresh the page to try again — this doesn’t affect your posts or scheduling.';
+        // The period note would imply we know what happened in that window. We don't.
+        if (note) note.textContent = '';
+    } else {
+        if (title) title.textContent = 'Performance metrics aren’t available yet';
+        if (body)  body.textContent  = 'These fill in automatically once there’s published activity for this assistant to measure, and the platform reports back on it. Nothing has been published in the last 30 days.';
+        // The panel now says this better than the note did.
+        if (note) note.textContent = '';
+    }
+
+    // Only offer the jump if the tab is actually on this page and the app exposes the switcher.
+    const link = document.getElementById('metrics-empty-review-link');
+    const hasReviewTab = !!document.querySelector('.main-tab-btn[data-maintab="review-queue"]');
+    if (link) {
+        const show = mode === 'no-data' && hasReviewTab && typeof window._activateMainTab === 'function';
+        link.classList.toggle('hidden', !show);
+        if (show) link.onclick = () => window._activateMainTab('review-queue');
+    }
+}
+
 async function _loadAssistantMetrics(assistantId) {
     const valEl   = (k) => document.getElementById(`metric-${k}-value`);
     const trendEl = (k) => document.getElementById(`metric-${k}-trend`);
@@ -4582,15 +4629,14 @@ async function _loadAssistantMetrics(assistantId) {
         // the Created/Scheduled/Published totals and has never returned the KPI shape read below.
         // Pointing here at that endpoint is exactly what left these four cards permanently blank.
         const res = await fetch(`/.netlify/functions/get-assistant-performance?id=${assistantId}`);
-        if (!res.ok) return; // leave the "—" placeholders in place
+        if (!res.ok) { _setMetricsEmptyState('error'); return; }
         const data = await res.json();
 
-        const note = document.getElementById('metrics-status-note');
-        if (note) note.textContent = data.hasData
-            ? `Last ${data.periodDays || 30} days`
-            : 'No published-post data yet';
+        if (!data.hasData) { _setMetricsEmptyState('no-data'); return; }
 
-        if (!data.hasData) return; // keep placeholders
+        _setMetricsEmptyState('cards');
+        const note = document.getElementById('metrics-status-note');
+        if (note) note.textContent = `Last ${data.periodDays || 30} days`;
 
         const m = data.metrics || {};
         const series = data.series || {};
@@ -4653,7 +4699,9 @@ async function _loadAssistantMetrics(assistantId) {
             }
         }
     } catch {
-        // Network/parse failure — leave the static "—" placeholders untouched.
+        // Network/parse failure. We don't know whether there's data, so say that rather than
+        // leaving four "—" cards that read as broken.
+        _setMetricsEmptyState('error');
     }
 }
 
