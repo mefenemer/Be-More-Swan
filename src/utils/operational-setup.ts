@@ -16,6 +16,15 @@ const NO_FABRICATION =
     + 'that are not in the context you were given. Where a specific is missing, write around it rather than '
     + 'filling the gap with something plausible.';
 
+/**
+ * The stored answers, as the onboarding radios write them. Exported so the blueprint validates
+ * against exactly the set this file can act on — the two lived separately for a day and would have
+ * drifted the moment either gained an option, leaving the blueprint reporting an answer as valid
+ * that generation then silently ignored.
+ */
+export const OPERATIONAL_TRIGGERS = ['on_demand', 'reactive', 'scheduled'] as const;
+export const OPERATIONAL_SOURCES = ['client_provided', 'assistant_generated', 'hybrid'] as const;
+
 const CONTENT_SOURCE_DIRECTIVE: Record<string, string> = {
     client_provided:
         'CONTENT SOURCE — the user supplies the raw material for these posts, and this post must be built '

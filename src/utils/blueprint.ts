@@ -29,6 +29,7 @@ import {
     workspaceAssets,
 } from '../../db/schema';
 import { checkProhibitedUsePatterns } from './tos-gate';
+import { OPERATIONAL_TRIGGERS, OPERATIONAL_SOURCES } from './operational-setup';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -210,9 +211,9 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
     // reports no gap when an answer is absent, and these two are the ones worth reporting: an
     // assistant told nothing about its content source will happily invent material for a user who
     // meant to supply it. Values are the stored radio keys ('scheduled', 'client_provided', …).
-    const OPERATIONAL_TRIGGERS = ['on_demand', 'reactive', 'scheduled'];
-    const OPERATIONAL_SOURCES = ['client_provided', 'assistant_generated', 'hybrid'];
-    const oneOf = (v: unknown, allowed: string[]) =>
+    // Allowed values come from operational-setup.ts — the file that turns them into directives —
+    // so the blueprint can never call an answer valid that generation would then ignore.
+    const oneOf = (v: unknown, allowed: readonly string[]) =>
         typeof v === 'string' && allowed.includes(v) ? v : null;
     const s6operational = {
         triggerType: oneOf(onboardingCtx.trigger_type, OPERATIONAL_TRIGGERS),

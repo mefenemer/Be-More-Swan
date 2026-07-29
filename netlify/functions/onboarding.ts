@@ -342,8 +342,15 @@ export default withLambda(async (event): Promise<HandlerResponse> => {
     // "Guardrails & rules set" check (get-assistant-readiness.ts → hasRule) stayed red because it
     // looks for a content_rules row. Persisting each rule here fixes both at once: the rules reach
     // blueprint section 4 (enforced at generation + quality review) and the wizard reads green.
-    // No double-application: section 3 stays empty (onboardingContext carries no rules), and
-    // systemPrompt is not in the generation path.
+    // Section 3 stays empty (onboardingContext carries no rules), so section 4 is the one place a
+    // rule is ENFORCED — at generation and at quality review.
+    //
+    // ⚠️ Corrected 2026-07-29: "systemPrompt is not in the generation path" was wrong. The worker
+    // dumps EVERY blueprint section into its system prompt, section 2 included, so this compiled
+    // brief — strict rules and all — does reach the model, just as an unstructured blob rather than
+    // as enforced rules. That makes the rules here doubly present, which is harmless; what is not
+    // harmless is that section 2 is a HIRE-TIME SNAPSHOT and is never recompiled, so a rule the
+    // user later edits appears in the prompt in both its old and new form.
     //
     // Source is rawInputs.strictRules, where the client tags the user's own guardrails with a
     // '- NON-NEGOTIABLE: ' prefix (onboarding-social-media.html) — distinct from the KNOWLEDGE BASE

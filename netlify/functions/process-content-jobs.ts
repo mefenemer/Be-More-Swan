@@ -425,6 +425,15 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             messages.push({ role: 'user', content: `Additional context from the user: ${job.context_prompt}` });
         }
 
+        // Blueprint section 2 carries `systemPrompt` — the brief compiled at hire time by
+        // compileServerSideBrief(), which ENDS with a full copy of AURA_SAFE_CONTENT_BENCHMARK.
+        // The canonical copy is appended once at the bottom of this prompt, so dumping the section
+        // verbatim sent the same ~1,400 tokens of safety text twice on every single draft. Stripped
+        // from any dumped string, not just that one key: the benchmark has exactly one correct
+        // position in this prompt, and it is the end.
+        const withoutBenchmark = (s: string) =>
+            s.includes(AURA_SAFE_CONTENT_BENCHMARK) ? s.split(AURA_SAFE_CONTENT_BENCHMARK).join('').trimEnd() : s;
+
         let systemPrompt = `You are an expert social media copywriter.\n`;
         for (const [key, sec] of Object.entries(sections)) {
             systemPrompt += `\n--- ${key.toUpperCase()} ---\n`;
@@ -439,7 +448,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 // stripDisclosureEchoes() in platform-caption.ts cleans up what still slips through
                 // (and covers blueprints compiled before this change).
                 if (DISCLOSURE_PROMPT_BLOCKLIST.has(k)) continue;
-                systemPrompt += `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}\n`;
+                systemPrompt += `${k}: ${typeof v === 'object' ? JSON.stringify(v) : withoutBenchmark(String(v))}\n`;
             }
         }
 
