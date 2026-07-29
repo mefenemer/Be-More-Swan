@@ -14,6 +14,7 @@ import { users, aiBlueprints, contentGenerationJobs, scheduledPosts } from '../.
 import { hasPermission } from '../../src/utils/rbac';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { AURA_SAFE_CONTENT_BENCHMARK } from '../../src/constants/safety-benchmark';
+import { renderBlueprintPrompt } from '../../src/utils/blueprint-prompt';
 import { resolveDisclosureFooter, appendFooter } from '../../src/utils/disclosure-footer';
 import { parseModelJson, toCaptionText } from '../../src/utils/model-json';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -136,13 +137,13 @@ export default withLambda(async (event) => {
             messages.push({ role: 'user', content: `Additional context: ${job.contextPrompt}` });
         }
 
+        // Rendered by the SAME shared renderer production uses. This loop was a hand-written copy
+        // and had drifted badly: it applied NO withholding rules at all, so the smoke test fed the
+        // model the disclosure strings (which production hides, after prod shipped a post carrying
+        // three), the stale hire-time brief, and the workspace's plan price. A test that assembles
+        // a different prompt from production reports on a prompt no customer ever receives.
         let systemPrompt = 'You are an expert social media copywriter.\n';
-        for (const [key, sec] of Object.entries(sections)) {
-            systemPrompt += `\n--- ${key.toUpperCase()} ---\n`;
-            for (const [k, v] of Object.entries(sec.content || {})) {
-                if (v != null) systemPrompt += `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}\n`;
-            }
-        }
+        systemPrompt += renderBlueprintPrompt(sections);
 
         systemPrompt += `\n\n${AURA_SAFE_CONTENT_BENCHMARK}`;
 

@@ -27,6 +27,7 @@ import { resolveDisclosureFooter } from '../../src/utils/disclosure-footer';
 import { fitForPlatform, isShortForm, type BrandHashtags } from '../../src/utils/platform-caption';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { operationalSetupLines } from '../../src/utils/operational-setup';
+import { renderBlueprintPrompt } from '../../src/utils/blueprint-prompt';
 import {
     buildVarietyBlock, VARIETY_LOOKBACK, findNearDuplicate, nearDuplicateRetryPrompt,
     type PriorPost,
@@ -45,10 +46,6 @@ const AI_IMAGE_MODEL = process.env.FAL_IMAGE_MODEL ?? 'fal-ai/flux-pro/v1.1';
 
 const BACKOFF_SECS = [10, 30, 90];
 
-// Blueprint COMPLIANCE keys withheld from the system prompt. These carry the literal disclosure
-// text, which the code appends itself after generation — putting it in front of the model only
-// teaches it to write a second copy into the caption.
-const DISCLOSURE_PROMPT_BLOCKLIST = new Set(['disclosureText', 'orgFooterText', 'orgFooterEnabled']);
 
 // Scheduled/conversion jobs (draft-horizon-fill.ts, schedule-conversion-posts.ts) never set
 // job.platform, so fall back to the org's actual connection instead of a hardcoded platform.
@@ -425,32 +422,13 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             messages.push({ role: 'user', content: `Additional context from the user: ${job.context_prompt}` });
         }
 
-        // Blueprint section 2 carries `systemPrompt` — the brief compiled at hire time by
-        // compileServerSideBrief(), which ENDS with a full copy of AURA_SAFE_CONTENT_BENCHMARK.
-        // The canonical copy is appended once at the bottom of this prompt, so dumping the section
-        // verbatim sent the same ~1,400 tokens of safety text twice on every single draft. Stripped
-        // from any dumped string, not just that one key: the benchmark has exactly one correct
-        // position in this prompt, and it is the end.
-        const withoutBenchmark = (s: string) =>
-            s.includes(AURA_SAFE_CONTENT_BENCHMARK) ? s.split(AURA_SAFE_CONTENT_BENCHMARK).join('').trimEnd() : s;
-
+        // Rendered by the SHARED renderer (src/utils/blueprint-prompt.ts), which owns what is
+        // withheld and why — the admin smoke test renders the same way, so a test result reflects
+        // the prompt a customer actually gets. stripDisclosureEchoes() in platform-caption.ts still
+        // cleans up any disclosure the model echoes anyway, including from blueprints compiled
+        // before the withholding rules existed.
         let systemPrompt = `You are an expert social media copywriter.\n`;
-        for (const [key, sec] of Object.entries(sections)) {
-            systemPrompt += `\n--- ${key.toUpperCase()} ---\n`;
-            for (const [k, v] of Object.entries(sec.content || {})) {
-                if (v == null) continue;
-                // Never show the model the disclosure strings. They are appended DETERMINISTICALLY
-                // in code (see resolveDisclosureFooter above), so the model has no use for them —
-                // but the blueprint dumps every section verbatim, so it was reading its own
-                // workspace footer and per-assistant disclosure and helpfully writing them into the
-                // caption body. The result was up to three disclosures on one post: two echoed, one
-                // appended. Withholding the text is the only fix that stops it at the source;
-                // stripDisclosureEchoes() in platform-caption.ts cleans up what still slips through
-                // (and covers blueprints compiled before this change).
-                if (DISCLOSURE_PROMPT_BLOCKLIST.has(k)) continue;
-                systemPrompt += `${k}: ${typeof v === 'object' ? JSON.stringify(v) : withoutBenchmark(String(v))}\n`;
-            }
-        }
+        systemPrompt += renderBlueprintPrompt(sections);
 
         // Inspo (AC5) — the styles/tones the user parked in the Inspo tab. Injected here, NOT
         // as a blueprint section: sections are dumped wholesale above, so inspo living there

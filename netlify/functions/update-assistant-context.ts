@@ -5,6 +5,7 @@ import { aiAssistants, auditLogs } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { retryBlockedAssistants } from '../../src/utils/retry-provisioning';
+import { assembleBlueprint } from '../../src/utils/blueprint';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -88,6 +89,27 @@ export default withLambda(async (event) => {
                 ipAddress: event.headers['x-nf-client-connection-ip'] || 'unknown',
             });
         });
+
+        // Recompile the blueprint so this edit actually reaches generation.
+        //
+        // Generation drives off the COMPILED blueprint sections, not the live rows — so before this,
+        // an edit here changed what the profile displayed while drafts carried on being written from
+        // whatever the sections held when they were last assembled. Some fields hid the lag because
+        // the worker reads them live (platform_strategy, brand hashtags, operational setup); the
+        // rest — audience, tone, pillars, offerings, objective, strict rules — simply did not apply
+        // until something else happened to trigger a recompile.
+        //
+        // It also keeps the STORED blueprint an honest record of what produced a post, which it
+        // could not be while half its inputs were read live and half from a stale snapshot.
+        //
+        // Data assembly only, no LLM call, so it is cheap enough to run on every save. Best-effort
+        // exactly as in reject-post.ts: a recompile failure must never fail the user's save — the
+        // edit is already committed, and the next recompile picks it up.
+        try {
+            await assembleBlueprint(assistantId, `user-${currentUserId}`, 'context_update');
+        } catch (e) {
+            console.warn('[update-assistant-context] blueprint recompile failed (context still saved):', e instanceof Error ? e.message : e);
+        }
 
         // If the user just supplied AI disclosure text, re-trigger this assistant in case it was
         // parked at provisioning_status='blocked' on the disclosure gate (best-effort; the

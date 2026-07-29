@@ -120,8 +120,15 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
         version = v ?? null;
         if (version) hashParts.push({ id: `version:${version.id}`, updatedAt: version.createdAt });
     }
+    // `systemPrompt` is the brief compiled ONCE at hire time and never rebuilt, so it is a RECORD,
+    // not live steering — the generation prompt withholds it for exactly that reason (every fact in
+    // it is also carried, live, by sections 3/4/5/6/7, and a frozen second copy only contradicts
+    // them). `workflowText` is the one thing it held that had no live equivalent, so it is lifted
+    // out here and sourced from configuration.inputs, which the profile save preserves.
+    const execInputs = ((asst.configuration as Record<string, unknown> | null)?.inputs ?? {}) as Record<string, unknown>;
     const s2content = {
         systemPrompt: asst.systemPrompt ?? version?.systemPrompt ?? null,
+        workflowText: (execInputs.workflowText as string | null) || null,
         versionNumber: version?.versionNumber ?? null,
         effectiveDate: version?.createdAt ?? null,
     };
@@ -143,8 +150,20 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
     const onboardingCtx = (asst.onboardingContext ?? {}) as Record<string, unknown>;
     const prohibitedUseDetected = asst.systemPrompt ? checkProhibitedUsePatterns(asst.systemPrompt).detected : false;
     const ackResolved = !prohibitedUseDetected || Boolean(asst.prohibitedUseAcknowledged);
+    // `constraints` sourced from onboardingContext ALONE was always null for social assistants —
+    // neither the wizard nor the profile save ever writes constraints/strict_rules there; both put
+    // the user's guardrails in configuration.inputs.strictRules. So the section named "strict rules"
+    // was permanently empty, and the rules reached the model only as frozen text inside section 2's
+    // hire-time brief. That mattered most on EDIT: changing a guardrail in the profile rewrote
+    // configuration.inputs.strictRules while section 2 kept the original, so the edit steered
+    // nothing. Reading the live array here makes this section the rules the user can actually see
+    // and change, and covers assistants hired before onboarding began materialising rules as
+    // content_rules rows (section 4, which is where they are ENFORCED).
+    const liveStrictRules = Array.isArray(execInputs.strictRules)
+        ? (execInputs.strictRules as unknown[]).map(String).filter(r => r.trim())
+        : null;
     const s3content = {
-        constraints: onboardingCtx.constraints ?? onboardingCtx.strict_rules ?? null,
+        constraints: onboardingCtx.constraints ?? onboardingCtx.strict_rules ?? liveStrictRules ?? null,
         prohibitedUseAcknowledged: asst.prohibitedUseAcknowledged,
         prohibitedUseDetected,
     };
@@ -424,6 +443,35 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
     const version_hash = blueprintHash(hashParts);
 
     // ── Persist blueprint ─────────────────────────────────────────────────────
+    // A recompile that produces the SAME content reuses the existing row instead of appending a
+    // near-identical one. The version hash cannot decide this: it is built from row ids and
+    // updated_at values, so any touch of ai_assistants changes it even when nothing the assistant
+    // is steered by moved. `sources` are excluded from the comparison for the same reason — they
+    // carry those timestamps. Only section CONTENT decides whether this is a new blueprint.
+    //
+    // Load-bearing now the profile save recompiles: that save is autosaved on a 1.2s debounce, so
+    // an editing session would otherwise leave dozens of rows an hour apart in meaning and seconds
+    // apart in time, burying the real versions in the history this table exists to provide.
+    const contentFingerprint = JSON.stringify(
+        Object.fromEntries(Object.entries(sections).map(([k, s]) => [k, s.content ?? null])),
+    );
+    const [latest] = await db.select().from(aiBlueprints)
+        .where(eq(aiBlueprints.assistantId, assistantId))
+        .orderBy(desc(aiBlueprints.compiledAt))
+        .limit(1);
+    if (latest?.sections) {
+        const prior = JSON.stringify(
+            Object.fromEntries(Object.entries(latest.sections as Record<string, { content?: unknown }>)
+                .map(([k, s]) => [k, s?.content ?? null])),
+        );
+        if (prior === contentFingerprint) {
+            return {
+                blueprint: latest, sections, missingFields: missing, completenessPercent,
+                blueprintVersion: latest.blueprintVersion,
+            };
+        }
+    }
+
     const [row] = await db.insert(aiBlueprints).values({
         assistantId,
         organisationId: asst.organisationId,
