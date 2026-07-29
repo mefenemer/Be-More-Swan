@@ -4,7 +4,7 @@
 
 import { Handler } from '@netlify/functions';
 import Anthropic from '@anthropic-ai/sdk';
-import { eq, and, inArray, desc, isNotNull } from 'drizzle-orm';
+import { eq, and, inArray, isNotNull, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import {
     contentGenerationJobs, aiBlueprints, aiAssistants,
@@ -27,6 +27,7 @@ import { resolveDisclosureFooter } from '../../src/utils/disclosure-footer';
 import { fitForPlatform, isShortForm, type BrandHashtags } from '../../src/utils/platform-caption';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { operationalSetupLines } from '../../src/utils/operational-setup';
+import { buildVarietyBlock, VARIETY_LOOKBACK } from '../../src/utils/draft-variety';
 import { decideAutoPublish, describeDecision } from '../../src/utils/auto-publish-runtime';
 import { platformFormat, SOCIAL_PLATFORMS } from '../../src/config/platform-formats';
 import { formatPlatformStrategyBrief, platformStrategyFor, type PlatformStrategy } from '../../src/utils/platform-strategy-brief';
@@ -317,28 +318,26 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // a fresh angle instead of collapsing onto the same premise every slot. Best-effort — a lookup
         // failure never blocks the draft. Siblings drafted in the SAME parallel batch aren't visible
         // here yet; the pillar rotation above + the distinct claimed idea keep those apart.
+        //
+        // No status filter, deliberately: a draft awaiting review, one already scheduled and one
+        // published all count as "we have said this already".
+        //
+        // ORDER BY matters more than it looks. This was `generated_at DESC`, and Postgres sorts
+        // NULLs FIRST on a DESC ordering — so every post with no generated_at (the calendar
+        // composer never set it, nor did the revised clone a rejection creates) sorted to the TOP
+        // and filled all the slots, pushing out the genuinely recent AI drafts this block exists to
+        // show. An assistant with a handful of hand-composed posts was effectively drafting with no
+        // anti-repetition context at all. created_at is NOT NULL, so the coalesce always sorts by a
+        // real timestamp and hand-written posts take their rightful place by age instead of jumping
+        // the queue or being exiled to the end.
         let recentBlock = '';
         try {
             const recent = await db.select({ caption: scheduledPosts.caption, media: scheduledPosts.suggestedMediaDescription })
                 .from(scheduledPosts)
                 .where(and(eq(scheduledPosts.assistantId, job.assistant_id), isNotNull(scheduledPosts.caption)))
-                .orderBy(desc(scheduledPosts.generatedAt))
-                .limit(8);
-            const hooks = recent
-                .map(r => (r.caption || '').replace(/\s+/g, ' ').trim().slice(0, 140))
-                .filter(Boolean);
-            // Recent VISUALS too, so the model doesn't reuse the same image concept (e.g. every post a laptop).
-            const visuals = recent
-                .map(r => (r.media || '').replace(/\s+/g, ' ').trim().slice(0, 120))
-                .filter(Boolean);
-            const parts = [];
-            if (hooks.length) {
-                parts.push(`ALREADY DRAFTED RECENTLY — bring a genuinely DIFFERENT angle. Do NOT reuse the opening hook, core premise, or overall structure of any of these:\n${hooks.map(h => `- "${h}…"`).join('\n')}`);
-            }
-            if (visuals.length) {
-                parts.push(`RECENT VISUALS — the "suggestedMediaDescription" for this post MUST use a different visual concept from these (and never a laptop/desk cliché):\n${visuals.map(v => `- "${v}…"`).join('\n')}`);
-            }
-            recentBlock = parts.join('\n\n');
+                .orderBy(sql`coalesce(${scheduledPosts.generatedAt}, ${scheduledPosts.createdAt}) desc`)
+                .limit(VARIETY_LOOKBACK);
+            recentBlock = buildVarietyBlock(recent);
         } catch { /* best-effort; variety context is a nicety, never a blocker */ }
 
         // US-SMM (AC5): the requested format drives the creative. Reels/video need a shot-by-shot
