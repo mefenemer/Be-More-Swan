@@ -5,7 +5,7 @@ import { Handler } from '@netlify/functions';
 import { eq, and, desc, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, aiAssistants, postIdeaSuggestions, organisations, scheduledPostAssets, contentAssets, postRenderJobs, orchestrationRuns } from '../../db/schema';
-import { resolvePostImage, presignR2Get, resolvePostMediaList } from '../../src/utils/social-publish';
+import { resolvePostMedia, isVideoMedia, presignR2Get, resolvePostMediaList } from '../../src/utils/social-publish';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { displayCaption } from '../../src/utils/model-json';
@@ -274,13 +274,30 @@ export default withLambda(async (event) => {
             }
         }
 
-        // Resolve a preview thumbnail for the first attached image (presigned R2 or external URL).
+        // Resolve a preview URL for the post's attachment — image OR VIDEO (presigned R2 or external).
         // Best-effort per draft — a resolution failure must never blank out the list.
+        //
+        // resolvePostMedia, not resolvePostImage: the image-only resolver returned null for a post
+        // whose single attachment is a clip, so a video post came back from the server carrying no
+        // media at all. Everything downstream keys off thumbnailUrl — the canvas fell back to "Add a
+        // photo or a video", `overlayCapable` went false so the text layer was never even mounted,
+        // and any refetch mid-session (which replaces the cached post wholesale) wiped the URL the
+        // client had set locally when the clip was attached. The video only ever appeared to work
+        // between attaching it and the next refetch. resolvePostMedia also presigns a video for an
+        // hour rather than ten minutes, which is what streaming one across an editing session needs.
         const ARCHIVE_RETENTION_DAYS = 30;
         const now = Date.now();
         const withThumbs = await Promise.all(drafts.map(async ({ contentAssetIds, imageOverlays, audioOverlays, ...d }) => {
             let thumbnailUrl: string | null = null;
-            try { thumbnailUrl = (await resolvePostImage(db, contentAssetIds))?.url ?? null; } catch { /* ignore */ }
+            let mediaType: 'image' | 'video' | null = null;
+            try {
+                const media = await resolvePostMedia(db, contentAssetIds);
+                thumbnailUrl = media?.url ?? null;
+                // The client decides <video> vs <img> from this. It used to infer the kind from the
+                // post FORMAT, which is right for a Reel and wrong for a clip on a plain feed post —
+                // and a video rendered into an <img> is a broken-image icon, not a preview.
+                mediaType = media ? (isVideoMedia(media) ? 'video' : 'image') : null;
+            } catch { /* ignore */ }
             // Carousel slides, in order — but ONLY for posts that actually have more than one
             // attachment. Resolving every draft's full list would presign up to 50 × 20 objects to
             // populate a queue whose cards show one thumbnail each; the single-media case, which is
@@ -314,7 +331,7 @@ export default withLambda(async (event) => {
             // Older rows can hold a raw model reply (fenced JSON) in `caption` — unwrap it so the
             // editor shows the copy, and an edit-and-save persists the repair.
             // brandCard non-null ⇒ the review UI offers "Edit card" for this draft.
-            return { ...d, caption: displayCaption(d.caption), thumbnailUrl, archiveDeletesAt, daysRemaining, failureMessage,
+            return { ...d, caption: displayCaption(d.caption), thumbnailUrl, mediaType, archiveDeletesAt, daysRemaining, failureMessage,
                 // Why the video render failed, when it did — null in every other state.
                 renderError: d.renderStatus === 'failed' ? (renderErrors.get(d.id) ?? null) : null,
                 brandCard: brandCards.get(d.id) ?? null,

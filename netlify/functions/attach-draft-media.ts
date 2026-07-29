@@ -84,8 +84,14 @@ export default withLambda(async (event) => {
         .set({ contentAssetIds: [assetId], mediaMissing: false, mediaMissingNote: null, updatedAt: new Date(), ...overlayReset })
         .where(inArray(scheduledPosts.id, targetIds));
 
+    // An HOUR, not the ten-minute default. This URL is not a thumbnail for a video: it is what the
+    // editor's <video> element streams from, and a clip is fetched in byte ranges ACROSS the whole
+    // editing session rather than downloaded once. At ten minutes, a reviewer who attaches a clip and
+    // then spends a while writing the caption or timing text boxes presses play against a URL R2 has
+    // started refusing — and a mid-stream 403 does not fire an error event, it just stalls the player
+    // for ever. Matches resolvePostVideo / resolvePostMediaList, which presign for the same reason.
     let thumbnailUrl: string | null = null;
-    if (asset.storageKey) { try { thumbnailUrl = await presignR2Get(asset.storageKey); } catch { /* ignore */ } }
+    if (asset.storageKey) { try { thumbnailUrl = await presignR2Get(asset.storageKey, 3600); } catch { /* ignore */ } }
     if (!thumbnailUrl && asset.externalUrl) thumbnailUrl = asset.externalUrl;
 
     return {

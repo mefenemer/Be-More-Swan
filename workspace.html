@@ -5577,7 +5577,7 @@ function rqRenderSocialCard(draft) {
     const ago = rqTimeAgo(draft.generatedAt || draft.rejectedAt);
     const origin = rqOriginPill(draft);
     const isArchived = draft.status === 'rejected';
-    const isVideo = draft.mediaType === 'video' || /video|reel/i.test(draft.postFormat || '');
+    const isVideo = _rqMediaIsVideo(draft);
     const thumb = draft.thumbnailUrl
         ? (isVideo
             ? `<video src="${draft.thumbnailUrl}" muted class="w-16 h-16 rounded-lg object-cover bg-black shrink-0"></video>`
@@ -5862,7 +5862,7 @@ function renderPlatformMockup(post) {
 
     const brand = post.assistantName || 'Your Brand';
     const initial = (brand.trim()[0] || 'B').toUpperCase();
-    const isVideo = post.mediaType === 'video' || /video|reel/i.test(post.postFormat || '');
+    const isVideo = _rqMediaIsVideo(post);
     // The media sits in a positioned host so an editor can mount a selection/drag layer directly
     // ON the mock-up. This is what makes the preview the canvas rather than a picture of one —
     // there is no second preview anywhere to disagree with it.
@@ -6092,7 +6092,22 @@ function _rqRenderCanvasOverlays(post) {
     // arrive, or the text sizes against nothing and never appears.
     if (media && media.tagName === 'IMG' && !(media.complete && media.naturalWidth)) media.addEventListener('load', paint, { once: true });
     if (media && media.tagName === 'VIDEO') {
-        if (!media.videoHeight) media.addEventListener('loadedmetadata', () => { paint(); _rqRenderTimeline(post); }, { once: true });
+        // The clip's real length arrives with its metadata, and it is the first moment a box timed
+        // against the fallback axis can be recognised as stranded past the end — so reconcile here,
+        // on BOTH paths, before the timeline is drawn against it.
+        if (!media.videoHeight) {
+            media.addEventListener('loadedmetadata', () => {
+                _rqReconcileOverlayTimes(_rqPostCache[_rqReviewPostId] || post, media.duration);
+                paint();
+                _rqRenderTimeline(post);
+                // The Start/End controls hide themselves while the length is unknown, so they have to
+                // be told it has arrived — otherwise a box selected during loading has no timing UI
+                // until it is clicked again.
+                _pceRefreshOverlayTiming();
+            }, { once: true });
+        } else {
+            _rqReconcileOverlayTimes(_rqPostCache[_rqReviewPostId] || post, media.duration);
+        }
         // Bind the time toggle once per media element (elements are fresh on each mock-up render).
         if (!media._rqTimed) {
             media._rqTimed = true;
@@ -6126,11 +6141,56 @@ function _rqHideTimeline() {
     if (el) { el.classList.add('hidden'); el.innerHTML = ''; }
 }
 
-// A sensible clip length even before/without real metadata, so the timeline is usable immediately.
-function _rqVideoDuration() {
+// The clip's REAL length, or 0 when the browser has not read it yet (metadata still loading, or the
+// media URL has stopped answering). Zero means UNKNOWN, never "short".
+//
+// The distinction is the whole point: every text box on a video is timed against this number, and it
+// is stored as seconds. Inventing a length while the clip is unreadable let a reviewer time a box to
+// 8–14s on a phantom axis over a clip that is really 6s long — the box then never appears in the
+// preview, and overlayFrameRange clamps it to a SINGLE frame in the render, so it is missing from the
+// published video too. Callers that need an axis to draw must decide for themselves what an unknown
+// length means; they must not be handed a plausible-looking guess.
+function _rqVideoDurationKnown() {
     const v = document.querySelector('#post-review-body [data-media-video]');
     const d = v && v.duration;
-    return d && isFinite(d) && d > 0 ? d : 15;
+    return d && isFinite(d) && d > 0 ? d : 0;
+}
+
+// A sensible clip length even before/without real metadata, so the timeline is usable immediately.
+function _rqVideoDuration() {
+    return _rqVideoDurationKnown() || 15;
+}
+
+// Pull text boxes back inside the clip once its real length is known.
+//
+// A box timed against the fallback axis above (or against a longer clip that has since been swapped
+// out) can sit entirely past the end, where it is invisible in the preview AND effectively invisible
+// in the render. Losing text the reviewer wrote is the worst outcome available, so the window is
+// moved to the end of the clip — keeping its length where it fits — rather than left stranded or
+// silently dropped. Only ever narrows/moves; a box already inside the clip is untouched.
+function _rqReconcileOverlayTimes(post, dur) {
+    if (!post || !(dur > 0) || !Array.isArray(post.overlays)) return;
+    let moved = 0;
+    for (const ov of post.overlays) {
+        if (!ov) continue;
+        const start = ov.startS == null ? 0 : ov.startS;
+        if (start < dur - 0.05) {
+            // Inside the clip. An end past the end is harmless — drop it so it reads "to the end".
+            if (ov.endS != null && ov.endS > dur) { ov.endS = undefined; moved++; }
+            continue;
+        }
+        const len = (ov.endS == null ? dur : ov.endS) - start;
+        const newStart = Math.max(0, dur - Math.min(len > 0 ? len : dur, dur));
+        ov.startS = newStart > 0.05 ? newStart : undefined;
+        ov.endS = undefined;   // runs to the end of the clip
+        moved++;
+    }
+    if (!moved) return;
+    _rqPersistOverlays(post.id);
+    _pceSetOverlayMsg(
+        `This clip is ${Math.round(dur * 10) / 10}s long — ${moved} text box${moved > 1 ? 'es were' : ' was'} timed past the end and has been pulled back into it. Check the timeline.`,
+        'error',
+    );
 }
 
 // How long the finished piece will be — the axis every track is drawn against.
@@ -6178,6 +6238,20 @@ function _rqRenderTimeline(post) {
     const overlays = isVideo ? ((post && post.overlays) || []) : [];
     const clips = _pceAudioClips(post);
     if (!overlays.length && !clips.length) { host.classList.add('hidden'); host.innerHTML = ''; return; }
+    // A video whose length we cannot read gets NO draggable axis. Drawing one against the 15s
+    // fallback is how boxes end up timed past the end of a six-second clip — invisible in the preview
+    // and a single frame in the render. Say so instead: it is also the visible symptom of a media URL
+    // that has stopped answering, which is worth the reviewer knowing before they approve.
+    if (isVideo && !_rqVideoDurationKnown()) {
+        host.innerHTML = `<div class="pt-1">
+            <div class="flex items-center justify-between mb-1.5">
+              <span class="text-[10px] font-bold uppercase tracking-wider text-gray-400">Timeline</span>
+            </div>
+            <p class="text-[11px] text-gray-500">Reading the clip's length… If this doesn't clear, the video isn't loading — reopen the post before timing your text.</p>
+          </div>`;
+        host.classList.remove('hidden');
+        return;
+    }
     const dur = _rqTimelineDuration(post);
     const fmt = (s) => `${(Math.round(s * 10) / 10)}s`;
 
@@ -9080,11 +9154,23 @@ function _pceOverlayCount(post) {
         ? post.overlays.filter((o) => o && String(o.text || '').trim()).length : 0;
 }
 
+// Is this post's ATTACHED MEDIA a video? The attachment decides it whenever there is one —
+// get-social-drafts now reports the kind it actually resolved — and only a post with nothing
+// attached yet falls back to what its format implies. The format alone was wrong in both
+// directions: a clip on a plain feed post rendered into an <img> (a broken-image icon where the
+// preview should be), and an image on a Reel-shaped post rendered into a <video> that plays
+// nothing.
+function _rqMediaIsVideo(post) {
+    if (!post) return false;
+    if (post.mediaType) return post.mediaType === 'video';
+    return /video|reel/i.test(post.postFormat || '');
+}
+
 // Is the post being reviewed a video? Overlays behave the same for both, but the wording and the
 // timeline/timing only apply to video.
 function _pcePostIsVideo(post) {
     post = post || (_rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null);
-    return !!post && (post.mediaType === 'video' || /video|reel/i.test(post.postFormat || ''));
+    return _rqMediaIsVideo(post);
 }
 
 // ── Media properties (resolution / aspect / duration) ───────────────────────────────────────────
@@ -9232,7 +9318,9 @@ function _pceRefreshOverlayTiming() {
     const isVideo = _pcePostIsVideo(post);
     const overlays = (post && post.overlays) || [];
     const ov = _pceSelectedOverlayId ? overlays.find((o) => o && o.id === _pceSelectedOverlayId) : null;
-    if (!isVideo || !ov) { wrap.classList.add('hidden'); _pceSyncStageTimingBox(); return; }
+    // Same rule as the timeline: with no readable clip length there is nothing to time against, and
+    // seconds typed against the 15s fallback are what strand a box past the end of a shorter clip.
+    if (!isVideo || !ov || !_rqVideoDurationKnown()) { wrap.classList.add('hidden'); _pceSyncStageTimingBox(); return; }
     wrap.classList.remove('hidden');
     _pceSyncStageTimingBox();
     const lbl = _pceEl('insp-overlay-timing-label');
