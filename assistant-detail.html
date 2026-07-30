@@ -246,10 +246,36 @@
     </div>
   </div>
 
-  <!-- Overview stack: Performance Metrics render first (order:-1), then the Autopilot + Connections
-       status row. Flex-column + inline order keeps the DOM order (status row, then metrics) while
-       displaying metrics on top — no reliance on Tailwind order-* utilities (prebuilt CSS). -->
+  <!-- Overview stack: Goal Progress renders first (order:-2), then Performance Metrics (order:-1),
+       then the Autopilot + Connections status row. Flex-column + inline order keeps the DOM order
+       (status row, then metrics) while displaying metrics on top — no reliance on Tailwind order-*
+       utilities (prebuilt CSS). -->
   <div style="display:flex;flex-direction:column">
+
+  <!-- ── Goal Progress — the user's own SMART goals for this assistant, surfaced on Overview so
+       progress is visible without opening the Goals tab. The header carries only the single headline
+       goal (#detail-primary-goal, a max-w-xs identity line), so an assistant with several goals had
+       nowhere to show them but the tab. Populated by _renderGoalProgressCard() (assistants.js) from
+       the SAME _goalsCache the Goals tab renders, so the two surfaces cannot disagree; every mutation
+       path already re-runs _fetchAndRenderGoals, which repaints this too.
+       order:-2 pulls it above Performance Metrics within the flex-column wrapper.
+       Deliberately always visible (goals exist for every role) — with no goals it renders its own
+       empty state and CTA rather than hiding, which is what makes the feature discoverable. That is
+       also what makes it safe to skeleton on first load. -->
+  <div id="goal-progress-card" class="mb-8" style="order:-2">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="text-sm font-bold text-gray-700 uppercase tracking-wide">Goal Progress</h3>
+      <button type="button" onclick="window._activateMainTab && window._activateMainTab('goals')"
+        class="text-xs font-bold text-emerald-700 hover:text-emerald-800 underline underline-offset-2 cursor-pointer transition-colors">Manage goals</button>
+    </div>
+    <!-- The loading skeleton is applied to this inner panel, not to #goal-progress-card: the overlay
+         is inset:0 with a rounded-2xl radius, so on the outer wrapper it would veil the section
+         heading too and its corners wouldn't line up. min-height gives the spinner room while the
+         body is still empty (p-6 around nothing is shorter than the spinner). -->
+    <div id="goal-progress-panel" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6" style="min-height:92px">
+      <div id="goal-progress-body"></div>
+    </div>
+  </div>
 
   <!-- ── Status row: Autopilot + Connections, side by side. Each card hides on its own signal, and
        _syncStatusRow() (assistants.js) drops the row to one column so a lone card never sits in a

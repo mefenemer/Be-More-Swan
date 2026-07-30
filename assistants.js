@@ -3764,6 +3764,10 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     const _skelAutopilot = !document.getElementById('autopilot-status-card')?.classList.contains('hidden');
     _OVERVIEW_SKELETON_KPI_CARDS.forEach(k => _beginCardLoading('kpi-card-' + k));
     if (_skelAutopilot) _beginCardLoading('autopilot-status-card');
+    // Goal Progress — safe to skeleton for every role: the card never hides itself (it has an empty
+    // state), and the goals fetch is late in this function's sequence, so without a placeholder the
+    // card sits visibly blank while everything below it fills in. Cleared by _renderGoalProgressCard.
+    _beginCardLoading('goal-progress-panel');
     // Connections no longer skeletons — it PAINTS. Its card carried a "N of M on" pill and a
     // "Posting to …" headline, and computing those needed initAssistantConnections to have
     // finished, so the card sat on a spinner until the slowest load on Overview came back. Both are
@@ -5166,6 +5170,7 @@ const GOALS_API = '/.netlify/functions/manage-goals';
 let _goalsAssistantId = null;
 let _goalMetrics = [];   // available metric catalog entries for this workspace (AC1.1.3)
 let _goalsCache = [];    // last-loaded goals for this assistant (for the header bar + review modal)
+let _goalsLoadFailed = false; // last fetch errored — the Overview card must not call that "no goals"
 let _goalHeadlineId = null;  // server's pick of which goal represents this assistant (goal-summary.ts)
 let _goalEntitlements = { aiRecommendations: false, magicWand: false, autonomous: false }; // Feature 3 tier gates
 let _autonomousGoalSeeking = false;
@@ -5263,6 +5268,7 @@ async function _fetchAndRenderGoals(assistantId) {
     let goals = [];
     try {
         const res = await fetch(`${GOALS_API}?assistantId=${_goalsAssistantId}`);
+        _goalsLoadFailed = !res.ok;
         if (res.ok) {
             const data = await res.json();
             goals = data.goals || [];
@@ -5276,6 +5282,7 @@ async function _fetchAndRenderGoals(assistantId) {
             _mediaSources = _normalizeMediaSources(data.mediaSources);
         }
     } catch (e) {
+        _goalsLoadFailed = true;
         console.warn('Could not load goals:', e);
     }
 
@@ -5283,6 +5290,7 @@ async function _fetchAndRenderGoals(assistantId) {
     window._goalsCache = goals; // keep window reference in sync for IIFE closures
     _populateGoalMetricDropdown();
     _renderPrimaryGoalHeader();
+    _renderGoalProgressCard();
     _syncReviewButton();
     _applyGoalEntitlementsUi();
     _applyAutonomousMediaUi();
@@ -5343,6 +5351,113 @@ function _renderPrimaryGoalHeader() {
             ${moreHtml}
         </div>`;
 }
+
+/**
+ * Overview "Goal Progress" card — every goal the user has set for this assistant, with its bar.
+ *
+ * Reads _goalsCache, so it is always the same data (and the same status/percentage arithmetic) as the
+ * Goals tab list and the header bar; it renders wherever _fetchAndRenderGoals runs, which is every
+ * save/delete/manual-entry path, so it cannot go stale against them.
+ *
+ * Read-only by design: edit, delete and manual figure entry stay in the Goals tab. Putting an entry
+ * field here would mean two inputs for one goal on one page, and only one of them re-renders.
+ * Each tile is a button through to that tab instead.
+ *
+ * The primary/headline goal is pulled to the front — the server picks it (goal-summary.ts) and the
+ * header bar shows the same one, so the card leads with it rather than with whatever order the API
+ * happened to return.
+ */
+function _renderGoalProgressCard() {
+    const body = document.getElementById('goal-progress-body');
+    if (!body) return;
+    _endCardLoading('goal-progress-panel');
+
+    if (!_goalsCache.length) {
+        // Two different truths: "you have no goals" invites a goal, "we couldn't load them" must not.
+        body.innerHTML = _goalsLoadFailed
+            ? `<div class="flex items-start gap-4">
+                    <span aria-hidden="true" class="shrink-0 w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center text-gray-400">
+                        <svg class="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75"><path d="M10 6.5v5m0 2.5h.01M10 2.5 2.5 16.5h15L10 2.5Z" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    </span>
+                    <div class="min-w-0">
+                        <p class="text-sm font-bold text-gray-700">Couldn't load your goals</p>
+                        <p class="text-xs text-gray-500 mt-1 leading-relaxed">Your goals are safe — this card just couldn't reach them. Reload the page to try again.</p>
+                    </div>
+                </div>`
+            : `<div class="flex items-start justify-between gap-4 flex-wrap">
+                    <div class="flex items-start gap-4 min-w-0">
+                        <span aria-hidden="true" class="shrink-0 w-9 h-9 rounded-full bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-600">
+                            <svg class="w-4 h-4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75"><circle cx="10" cy="10" r="7"/><circle cx="10" cy="10" r="3"/></svg>
+                        </span>
+                        <div class="min-w-0">
+                            <p class="text-sm font-bold text-gray-700">No goals set yet</p>
+                            <p class="text-xs text-gray-500 mt-1 leading-relaxed">Set a target — followers, engagement, leads — and this card tracks how close your assistant is getting.</p>
+                        </div>
+                    </div>
+                    <button type="button" onclick="window._addGoalFromOverview()"
+                        class="shrink-0 px-3.5 py-2 text-xs font-bold rounded-lg border border-emerald-600 text-emerald-700 hover:bg-emerald-50 transition cursor-pointer">Set your first goal</button>
+                </div>`;
+        return;
+    }
+
+    const headlineFirst = [..._goalsCache].sort((a, b) => {
+        const rank = (g) => (Number(g.id) === Number(_goalHeadlineId) ? 0 : (g.isPrimary ? 1 : 2));
+        return rank(a) - rank(b);
+    });
+
+    // Two columns from lg up: goal tiles are short, and a single column left a wide card mostly
+    // whitespace. A lone goal simply takes the first cell.
+    // gap-x-6/gap-y-4 (not gap-y-5): style.css is prebuilt and committed, so only classes already
+    // compiled into it can be used here — gap-y-5 isn't one of them.
+    body.innerHTML = `<div class="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-4">
+        ${headlineFirst.map(_buildGoalProgressTile).join('')}
+    </div>`;
+}
+
+/** One goal as a compact Overview tile: name, status, bar, progress figures, deadline. */
+function _buildGoalProgressTile(g) {
+    const meta = _GOAL_STATUS_META[g.status] || _GOAL_STATUS_META.pending;
+    const { label, unit } = _goalLabel(g);
+    const target = Number(g.targetValue);
+    const latest = g.latestValue != null ? Number(g.latestValue) : null;
+    const pct = (latest != null && target > 0) ? Math.max(0, Math.min(100, Math.round((latest / target) * 100))) : 0;
+    const due = g.targetDate ? new Date(g.targetDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : null;
+    // A goal with no figure yet reads as 0% otherwise, which looks like failure rather than "not
+    // measured yet" — and the two are different for a manual metric the user simply hasn't filled in.
+    const pending = latest == null
+        ? (g.isManual ? 'No figure entered yet' : 'Awaiting first data sync')
+        : null;
+
+    return `<button type="button" onclick="window._activateMainTab && window._activateMainTab('goals')"
+        title="Open the Goals tab to update this goal"
+        class="text-left w-full group cursor-pointer">
+        <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <p class="text-sm font-bold text-gray-900 truncate group-hover:text-emerald-700 transition-colors">${_escapeHtml(g.title || label)}</p>
+                    ${g.isPrimary ? '<span class="text-[10px] font-bold uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded">Primary</span>' : ''}
+                </div>
+                <p class="text-[11px] text-gray-400 mt-0.5 truncate">${_escapeHtml(label)}${due ? ' · by ' + due : ''}</p>
+            </div>
+            <span class="inline-flex items-center gap-1.5 text-[11px] font-bold shrink-0 ${meta.text}">
+                <span class="w-2 h-2 rounded-full ${meta.dot}"></span>${meta.label}
+            </span>
+        </div>
+        <div class="mt-2 h-2 w-full bg-gray-100 rounded-full overflow-hidden">
+            <div class="h-full ${meta.dot} transition-all" style="width:${pct}%"></div>
+        </div>
+        <div class="flex items-center justify-between gap-3 mt-1.5">
+            <p class="text-xs font-semibold text-gray-600 truncate">${pending ? `<span class="font-medium text-gray-400">${pending}</span>` : _escapeHtml(_fmtGoalPair(latest, target, unit))}</p>
+            <p class="text-xs font-bold text-gray-500 shrink-0">${pending ? _escapeHtml(`Target ${_fmtGoalValue(target, unit)}`) : pct + '%'}</p>
+        </div>
+    </button>`;
+}
+
+/** Overview empty-state CTA — jump to the Goals tab with the builder already open. */
+window._addGoalFromOverview = function () {
+    window._activateMainTab('goals');
+    setTimeout(() => window._toggleGoalBuilder(true), 80);
+};
 
 function _syncReviewButton() {
     // Always visible — Review Meeting is not gated on goals existing.
