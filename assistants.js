@@ -5285,7 +5285,10 @@ function _buildGoalCard(g) {
                 <span class="inline-flex items-center gap-1.5 text-xs font-bold ${meta.text}">
                     <span class="w-2 h-2 rounded-full ${meta.dot}"></span>${meta.label}
                 </span>
-                <button type="button" onclick="window._deleteGoal(${g.id})" aria-label="Delete goal" class="text-gray-300 hover:text-red-500 transition cursor-pointer">
+                <button type="button" onclick="window._editGoal(${g.id})" aria-label="Edit goal ${_escapeHtml(g.title || label)}" title="Edit this goal" class="text-gray-300 hover:text-emerald-600 transition cursor-pointer">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                </button>
+                <button type="button" onclick="window._deleteGoal(${g.id})" aria-label="Delete goal ${_escapeHtml(g.title || label)}" title="Delete this goal" class="text-gray-300 hover:text-red-500 transition cursor-pointer">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
                 </button>
             </div>
@@ -5302,12 +5305,39 @@ function _buildGoalCard(g) {
     </div>`;
 }
 
+// Which goal the builder is currently editing, or null when it's in "add" mode. The builder is
+// reused for both rather than duplicated into a modal, so the SMART explainers, the validation and
+// the "Use <attainable>" prefill affordance all work identically on an edit.
+let _editingGoalId = null;
+
+/**
+ * Put the builder into add or edit mode. In edit mode the Objective and Target Metric selects are
+ * disabled — see the #goal-builder-locked-note comment in assistant-detail.html for why the metric
+ * can't move once telemetry exists against it.
+ */
+function _setGoalBuilderMode(mode) {
+    const isEdit = mode === 'edit';
+    const heading = document.getElementById('goal-builder-heading');
+    const note = document.getElementById('goal-builder-locked-note');
+    const saveBtn = document.getElementById('btn-save-goal');
+    const objSel = document.getElementById('goal-objective');
+    const metricSel = document.getElementById('goal-metric');
+
+    if (heading) heading.textContent = isEdit ? 'Edit goal' : 'Add a new goal';
+    if (saveBtn) saveBtn.textContent = isEdit ? 'Save Changes' : 'Save Goal';
+    if (note) note.classList.toggle('hidden', !isEdit);
+    // `hidden` alone loses to a competing display, so these selects are toggled via .disabled only.
+    if (objSel) objSel.disabled = isEdit;
+    if (metricSel) metricSel.disabled = isEdit;
+}
+
 window._toggleGoalBuilder = function (show) {
     const builder = document.getElementById('goal-builder');
     const err = document.getElementById('goal-builder-error');
     if (!builder) return;
     if (err) err.classList.add('hidden');
     if (show) {
+        _editingGoalId = null;          // "Add New Goal" always starts a fresh create
         builder.classList.remove('hidden');
         const t = document.getElementById('goal-target'); if (t) t.value = '';
         const d = document.getElementById('goal-date'); if (d) d.value = '';
@@ -5317,11 +5347,71 @@ window._toggleGoalBuilder = function (show) {
         const ti = document.getElementById('goal-title'); if (ti) ti.value = '';
         const ra = document.getElementById('goal-rationale'); if (ra) ra.value = '';
         const help = document.getElementById('goal-metric-help'); if (help) help.textContent = '';
+        _setGoalBuilderMode('add');
         // Reset the Metric dropdown back to its "select an objective first" state.
         _populateGoalMetricDropdown();
     } else {
+        _editingGoalId = null;
         builder.classList.add('hidden');
+        _setGoalBuilderMode('add');     // never leave a locked metric behind for the next create
     }
+};
+
+/**
+ * Open the builder pre-filled for an existing goal.
+ *
+ * The goal's own metric is force-selected even when it is no longer in `_goalMetrics` — a metric can
+ * drop off the available list because its connection was removed, or because we marked it
+ * unmeasurable (linkedin_followers). The user still needs to see what this goal tracks while they
+ * edit its target, so the option is injected rather than leaving the select blank.
+ */
+window._editGoal = function (id) {
+    const g = (_goalsCache || []).find(x => Number(x.id) === Number(id));
+    const builder = document.getElementById('goal-builder');
+    if (!g || !builder) return;
+
+    _editingGoalId = Number(g.id);
+    const err = document.getElementById('goal-builder-error');
+    if (err) { err.textContent = ''; err.classList.add('hidden'); }
+
+    document.getElementById('goal-title').value = g.title || '';
+    document.getElementById('goal-rationale').value = g.rationale || '';
+    document.getElementById('goal-target').value = g.targetValue != null ? String(Number(g.targetValue)) : '';
+    document.getElementById('goal-primary').checked = !!g.isPrimary;
+
+    // <input type="date"> needs YYYY-MM-DD. Take it off the stored string rather than via Date, so a
+    // timestamp near midnight can't shift the displayed day in the viewer's timezone.
+    const raw = String(g.targetDate || '');
+    document.getElementById('goal-date').value = /^\d{4}-\d{2}-\d{2}/.test(raw)
+        ? raw.slice(0, 10)
+        : (g.targetDate ? new Date(g.targetDate).toISOString().slice(0, 10) : '');
+
+    // Objective select: rebuild, then select this goal's objective. The server sends `objective` on
+    // every goal, so this resolves even for a metric that has dropped off `availableMetrics`.
+    _populateGoalMetricDropdown();
+    const objective = g.objective || (_goalMetrics || []).find(m => m.key === g.metricKey)?.objective;
+    const objSel = document.getElementById('goal-objective');
+    if (objSel && objective) {
+        if (![...objSel.options].some(o => o.value === objective)) {
+            objSel.add(new Option(_GOAL_OBJECTIVE_LABELS[objective] || objective, objective));
+        }
+        objSel.value = objective;
+        objSel.dispatchEvent(new Event('change'));   // repopulates the metric list for that objective
+    }
+
+    // Metric select: guarantee this goal's metric is present and selected.
+    const metricSel = document.getElementById('goal-metric');
+    if (metricSel) {
+        if (![...metricSel.options].some(o => o.value === g.metricKey)) {
+            metricSel.add(new Option(g.metricLabel || _goalMetricLabel(g.metricKey).label, g.metricKey));
+        }
+        metricSel.value = g.metricKey;
+    }
+
+    _setGoalBuilderMode('edit');
+    builder.classList.remove('hidden');
+    builder.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    document.getElementById('goal-title').focus();
 };
 
 window._saveGoal = async function () {
@@ -5334,23 +5424,94 @@ window._saveGoal = async function () {
     const title = (document.getElementById('goal-title')?.value || '').trim();
     const rationale = (document.getElementById('goal-rationale')?.value || '').trim();
 
-    const fail = (msg) => { if (err) { err.textContent = msg; err.classList.remove('hidden'); } };
+    /**
+     * Show a save error. When the server rejects a target as unattainable it also returns
+     * `attainableTarget` — a figure that WOULD pass for the chosen date. The realism checker has
+     * always computed it "for prefilling a fix", but nothing ever read it, so the user was told
+     * "try about 24,000" and then had to retype it by hand. Offer it as one click instead.
+     *
+     * Built with DOM nodes rather than innerHTML: the message is server text and the figure is a
+     * number, so neither is interpolated into markup.
+     */
+    const fail = (msg, attainable) => {
+        if (!err) return;
+        err.textContent = msg;
+        const n = Number(attainable);
+        if (Number.isFinite(n) && n > 0) {
+            const use = document.createElement('button');
+            use.type = 'button';
+            use.className = 'ml-2 underline font-bold text-emerald-700 hover:text-emerald-800 cursor-pointer';
+            use.textContent = `Use ${n.toLocaleString()}`;
+            use.addEventListener('click', () => {
+                const field = document.getElementById('goal-target');
+                if (field) { field.value = String(n); field.focus(); }
+                err.textContent = '';
+                err.classList.add('hidden');
+            });
+            err.appendChild(use);
+        }
+        err.classList.remove('hidden');
+    };
     if (err) err.classList.add('hidden');
     if (!metricKey) return fail('Please choose a target metric.');
     if (!targetValue || Number(targetValue) <= 0) return fail('Enter a positive target value.');
-    if (!targetDate || new Date(targetDate).getTime() <= Date.now()) return fail('Choose a target date in the future.');
+    if (!targetDate || Number.isNaN(new Date(targetDate).getTime())) return fail('Choose a valid target date.');
+    // A future date is required only when CREATING. On an edit we match the server, which lets a past
+    // date through — otherwise someone could not fix the wording of an already-overdue goal without
+    // also being forced to move its deadline.
+    if (!_editingGoalId && new Date(targetDate).getTime() <= Date.now()) {
+        return fail('Choose a target date in the future.');
+    }
+
+    const editingId = _editingGoalId;
+    let request;
+    if (editingId) {
+        // Send ONLY the fields that actually changed — never metricKey. PATCH treats an omitted key
+        // as "leave alone" and an explicit null as "clear", so title/rationale go as null when
+        // blanked rather than '' (which would store an empty string instead of clearing the column).
+        //
+        // Diffing matters beyond tidiness: the server re-runs the attainability check whenever
+        // targetValue or targetDate is present. Time has passed since the goal was created, so a
+        // target that was realistic then can be unreachable now — and re-sending an UNCHANGED target
+        // would let a title-only edit be rejected with "that target needs about 5,781 followers per
+        // day". Only a deliberate change to the number or the date should be re-judged.
+        const orig = (_goalsCache || []).find(x => Number(x.id) === editingId) || {};
+        const origDate = /^\d{4}-\d{2}-\d{2}/.test(String(orig.targetDate || ''))
+            ? String(orig.targetDate).slice(0, 10)
+            : (orig.targetDate ? new Date(orig.targetDate).toISOString().slice(0, 10) : '');
+
+        const body = { id: editingId };
+        if (Number(targetValue) !== Number(orig.targetValue)) body.targetValue = Number(targetValue);
+        if (targetDate !== origDate) body.targetDate = targetDate;
+        if (isPrimary !== !!orig.isPrimary) body.isPrimary = isPrimary;
+        if ((title || null) !== (orig.title || null)) body.title = title || null;
+        if ((rationale || null) !== (orig.rationale || null)) body.rationale = rationale || null;
+
+        // Nothing to save — close rather than firing a pointless write and blueprint recompile.
+        if (Object.keys(body).length === 1) { window._toggleGoalBuilder(false); return; }
+        request = { method: 'PATCH', body };
+    } else {
+        request = {
+            method: 'POST',
+            body: { assistantId: _goalsAssistantId, metricKey, targetValue: Number(targetValue), targetDate, isPrimary, title, rationale },
+        };
+    }
 
     if (btn) { btn.disabled = true; btn.classList.add('opacity-60'); }
     try {
         const res = await fetch(GOALS_API, {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ assistantId: _goalsAssistantId, metricKey, targetValue: Number(targetValue), targetDate, isPrimary, title, rationale }),
+            method: request.method, headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(request.body),
         });
-        if (!res.ok) { const e = await res.json().catch(() => ({})); return fail(e.error || 'Could not save goal.'); }
+        if (!res.ok) {
+            const e = await res.json().catch(() => ({}));
+            // attainableTarget only accompanies a GOAL_UNREALISTIC 422; absent on every other error.
+            return fail(e.error || (editingId ? 'Could not save changes.' : 'Could not save goal.'), e.attainableTarget);
+        }
         window._toggleGoalBuilder(false);
         await _fetchAndRenderGoals(_goalsAssistantId);
     } catch {
-        fail('Could not save goal. Please try again.');
+        fail(editingId ? 'Could not save changes. Please try again.' : 'Could not save goal. Please try again.');
     } finally {
         if (btn) { btn.disabled = false; btn.classList.remove('opacity-60'); }
     }

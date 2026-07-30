@@ -177,7 +177,14 @@ export default withLambda(async (event) => {
         const planMonthlyCredits = await monthlyAllowance(db, orgId);
 
         return json(200, {
-            goals: rows,
+            // Each goal carries its metric's objective, label and unit so the client never has to
+            // look them up in `availableMetrics`. A goal can outlive its metric's availability — the
+            // connection was removed, or we marked the metric unmeasurable (linkedin_followers) — and
+            // the edit form still has to show what the goal tracks rather than rendering blank.
+            goals: rows.map((g: any) => {
+                const m = getGoalMetric(g.metricKey);
+                return { ...g, objective: m?.objective ?? null, metricLabel: m?.label ?? g.metricKey, unit: m?.unit ?? '' };
+            }),
             availableMetrics: availableMetricsForRole(roleKey, services),
             autonomousGoalSeeking: assistant.autonomousGoalSeeking,
             autonomousMediaEnabled: assistant.autonomousMediaEnabled,
