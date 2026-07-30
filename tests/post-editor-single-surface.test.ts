@@ -231,6 +231,38 @@ check('closing the editor refreshes the calendar', () => {
         'calendar.js must expose the refresh hook closePostReview calls');
 });
 
+// A card edit waits ~900ms on a debounce and then renders and re-uploads, so it can be seconds
+// behind the click. Clicking away in that window used to DISCARD it: _pceSyncForPost reseeds from
+// _rqPostCache, which still held the pre-edit render_params, so the card snapped back to its
+// original brand style — the reported symptom being an unticked website reappearing.
+check('an unsaved card edit is landed, not discarded, when you click away', () => {
+    assert.match(workspace, /async function _pceFlushCardSave\(\)/,
+        'there must be one way to land a pending card edit early');
+
+    const close = workspace.slice(workspace.indexOf('function closePostReview()'));
+    const body = close.slice(0, 2000);
+    assert.match(body, /_pceFlushCardSave\(\)/,
+        'closing the editor during the save debounce must flush the edit, or it is lost');
+    assert.ok(body.indexOf('_pceFlushCardSave()') < body.indexOf('_rqReviewPostId = null'),
+        'the flush must run BEFORE the ids are cleared, or the write no longer knows which post it is for');
+
+    // The reseed guard: never adopt the server's copy over an edit that has not reached it.
+    const sync = workspace.slice(workspace.indexOf('const sameCardStillPending'));
+    assert.match(sync.slice(0, 400), /_pceCardSavePending\(\)/,
+        '_pceSyncForPost must not reseed _pceState.base while a save is pending');
+    assert.match(sync.slice(0, 700), /if \(!sameCardStillPending\) \{/,
+        'the reseed itself has to be inside the guard, not merely computed alongside it');
+
+    // …but the save's OWN refresh must still get through, or base never catches up with what was
+    // just stored. That works only because busy is cleared before the re-render.
+    const save = workspace.slice(workspace.indexOf('async function _pceSaveCardNow()'));
+    const clearsBusy = save.indexOf('_pceState.busy = false');
+    const rerenders = save.indexOf('_rqReviewRenderActive()');
+    assert.ok(clearsBusy !== -1 && rerenders !== -1, 'expected both the busy reset and the re-render');
+    assert.ok(clearsBusy < rerenders,
+        'busy must be cleared before the post-save re-render, or the guard above blocks the one reseed that should happen');
+});
+
 // ── 4. Drafting lives in the writing step, not the header ───────────────────────────────────────
 check('both drafting buttons are in step 1, not the modal header', () => {
     const block = workspace.slice(workspace.indexOf('id="pce-write-block"'), workspace.indexOf('id="post-review-amend-all"'));

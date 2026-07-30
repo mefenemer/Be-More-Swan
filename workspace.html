@@ -10238,16 +10238,24 @@ function _pceSyncForPost(post) {
     // a branded card grey — see _pceState.kitSeeded.
     _pceState.kitSeeded = !!rp.kit;
     _pceState.resetKit = false;   // never carry one post's reset into the next
-    _pceState.base = {
-        headline: rp.headline || card.headline || '',
-        variant: rp.variant === 'bold' ? 'bold' : 'light',
-        primaryColor: kit.primaryColor || '',
-        backgroundColor: kit.backgroundColor || '',
-        textColor: kit.textColor || '',
-        fontFamily: kit.fontFamily || '',
-        layout: _pceNormalizeLayout(rp.layout),
-    };
-    _pceFill(_pceState.base);
+    // Reseeding from `rp` means adopting what the SERVER last stored. While an edit is still on its
+    // way there, `rp` is the pre-edit card — so reseeding would overwrite the user's unsaved change
+    // with the value they just changed away from, and the card would snap back to the original brand
+    // style. Only skipped for the same post: a genuine post switch must reseed, pending or not
+    // (_pceFlushCardSave has already been given the chance to land it).
+    const sameCardStillPending = _pceState.postId === post.id && _pceCardSavePending();
+    if (!sameCardStillPending) {
+        _pceState.base = {
+            headline: rp.headline || card.headline || '',
+            variant: rp.variant === 'bold' ? 'bold' : 'light',
+            primaryColor: kit.primaryColor || '',
+            backgroundColor: kit.backgroundColor || '',
+            textColor: kit.textColor || '',
+            fontFamily: kit.fontFamily || '',
+            layout: _pceNormalizeLayout(rp.layout),
+        };
+        _pceFill(_pceState.base);
+    }
     _pceSetMsg('');
     // Every post opens on the card itself. Selection is per-open, not remembered: carrying the last
     // post's selection over would show element controls for a card you have not looked at yet.
@@ -10346,7 +10354,31 @@ function _pceSetStageWide(wide) {
 let _pceSaveTimer = null;
 function _pceScheduleCardSave() {
     clearTimeout(_pceSaveTimer);
-    _pceSaveTimer = setTimeout(_pceSaveCardNow, 900);
+    _pceSaveTimer = setTimeout(() => { _pceSaveTimer = null; _pceSaveCardNow(); }, 900);
+}
+
+/** True while an edit exists that the server has not acknowledged yet. */
+function _pceCardSavePending() { return _pceSaveTimer !== null || _pceState.busy; }
+
+/**
+ * Send a pending card edit NOW instead of waiting out the debounce.
+ *
+ * The debounce plus a render-and-upload round trip means a save can be a couple of seconds behind
+ * the click that caused it. Anything that tears the editor down or reseeds it from the server has
+ * to come through here first — otherwise the pending edit is not merely delayed, it is DISCARDED:
+ * `_pceSyncForPost` reseeds `_pceState.base` from `_rqPostCache`, which still holds the pre-edit
+ * render_params, so the card visibly snaps back to the original brand style.
+ *
+ * That was the reported bug: untick "Show on the card", click away before it saved, and the website
+ * came back.
+ */
+async function _pceFlushCardSave() {
+    if (_pceSaveTimer !== null) { clearTimeout(_pceSaveTimer); _pceSaveTimer = null; }
+    // A save already in flight will finish on its own; _pceSaveCardNow would only reschedule behind
+    // it. Wait for it rather than starting a second one — two renders racing to be the stored one is
+    // the exact thing its own busy guard exists to prevent.
+    for (let i = 0; i < 60 && _pceState.busy; i++) await new Promise(r => setTimeout(r, 50));
+    if (!_pceState.busy && _pceState.postId) await _pceSaveCardNow();
 }
 
 async function _pceSaveCardNow() {
@@ -10362,6 +10394,12 @@ async function _pceSaveCardNow() {
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || 'Could not save the card.');
+        // The write has landed, so this post is no longer "unsaved" — cleared BEFORE the re-render
+        // below, because that render reseeds the editor and _pceSyncForPost skips reseeding while a
+        // save is pending. Left set, the save's own refresh would be the one thing it blocked, and
+        // _pceState.base would never catch up with what was just stored. An edit made DURING this
+        // round trip is still protected: it sets _pceSaveTimer, which the same guard reads.
+        _pceState.busy = false;
         // The mock-up still shows the OLD image, and its thumbnail is a presigned URL for a storage
         // key that no longer holds this card — so refetch and re-render, or the reviewer would
         // approve while looking at what the card used to be.
@@ -10594,6 +10632,9 @@ function closePostReview() {
     const modal = document.getElementById('post-review-modal');
     modal.classList.add('hidden');
     modal.classList.remove('flex');
+    // Land any card edit still on its debounce; see _pceFlushCardSave. Before the ids are cleared,
+    // and not awaited — the modal must shut instantly.
+    void _pceFlushCardSave();
     _rqReviewPostId = null;
     _rqReviewGroupIds = [];
     // The Content Calendar opens posts through this editor now, so its copy of them is stale by the
