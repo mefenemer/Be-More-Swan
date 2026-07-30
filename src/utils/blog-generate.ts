@@ -97,6 +97,15 @@ export async function buildBlueprintGuardrailsBlock(
             );
         }
 
+        // Section 12 — active SMART goals. Duplicated here rather than shared with the social path
+        // on purpose: blog drafting assembles its prompt through this function, NOT through
+        // renderBlueprintPrompt(), so an injection added there does not reach a Blog Writer. The
+        // directive is already-rendered prose from renderGoalDirective(), so it is emitted verbatim.
+        const goalDirective = sections['12-goals']?.content?.directive;
+        if (typeof goalDirective === 'string' && goalDirective.trim()) {
+            parts.push(goalDirective.trim());
+        }
+
         return parts.length ? parts.join('\n\n') : null;
     } catch (err) {
         console.error(`buildBlueprintGuardrailsBlock: assistant ${opts.assistantId} failed`, err);

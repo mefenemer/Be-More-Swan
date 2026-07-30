@@ -1628,6 +1628,14 @@
       <!-- Add New Goal builder (AC1.1.1 / AC1.1.2) — hidden until "Add New Goal" -->
       <div id="goal-builder" class="hidden mt-5 border border-emerald-100 bg-emerald-50/40 rounded-xl p-5">
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <!-- SMART "Specific" — the name and the why. The rationale is the single most useful thing
+               we hand the content model: it turns "reach 20,000 followers" into a brief it can act on. -->
+          <div class="sm:col-span-3">
+            <label for="goal-title" class="block text-sm font-bold text-gray-700 mb-1">Goal Name</label>
+            <input id="goal-title" type="text" maxlength="120" placeholder="e.g. Reach wholesale buyers before the Q4 launch"
+              class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+            <p class="text-xs text-gray-400 mt-1">A short name so you can tell your goals apart at a glance.</p>
+          </div>
           <div class="sm:col-span-3">
             <label for="goal-objective" class="block text-sm font-bold text-gray-700 mb-1">Objective</label>
             <select id="goal-objective" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
@@ -1660,6 +1668,16 @@
               <input id="goal-primary" type="checkbox" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500">
               Primary goal
             </label>
+          </div>
+          <div class="sm:col-span-3">
+            <label for="goal-rationale" class="block text-sm font-bold text-gray-700 mb-1">
+              Why does this matter?
+              <span class="font-normal text-emerald-700">— this steers what your assistant writes</span>
+            </label>
+            <textarea id="goal-rationale" rows="3" maxlength="600"
+              placeholder="e.g. We're launching a wholesale range in Q4 and need independent retailers to discover us. Most of our current followers are direct consumers, so we need content that speaks to buyers."
+              class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition"></textarea>
+            <p class="text-xs text-gray-400 mt-1">Your assistant reads this when drafting, and uses it to choose topics, formats and calls to action. The more context, the better the content.</p>
           </div>
         </div>
         <p id="goal-builder-error" class="hidden text-sm text-red-600 font-medium mt-3"></p>

@@ -5,9 +5,15 @@
 // activeOrganisationId, NOT organisationId — see [[social-oauth-and-disclosure]]).
 //
 // GET    ?assistantId=N  → { goals: [...], availableMetrics: [...] }  (catalog gated by active connections — AC1.1.3)
-// POST   { assistantId, metricKey, targetValue, targetDate, isPrimary? }  → create (AC1.1.2)
-// PATCH  { id, targetValue?, targetDate?, isPrimary?, isActive? }  → update
+// POST   { assistantId, metricKey, targetValue, targetDate, title?, rationale?, isPrimary? }  → create (AC1.1.2)
+// PATCH  { id, targetValue?, targetDate?, title?, rationale?, isPrimary?, isActive? }  → update
 // DELETE ?id=N  → delete
+//
+// Every write recompiles the assistant's blueprint. This is what makes a goal steer generation:
+// blueprint section 12 carries the active goals and the funnel directive the drafting prompt reads
+// (src/utils/goal-directive.ts). Without the recompile a user could change a target and the next
+// post would still be generated against the previous one — which was effectively the old behaviour,
+// since nothing read goals at all.
 
 import { Handler } from '@netlify/functions';
 import { and, eq, desc, sql } from 'drizzle-orm';
@@ -24,6 +30,7 @@ import {
     isValidMetricKey,
     tierAllows,
 } from '../../src/config/goal-metrics';
+import { assembleBlueprint } from '../../src/utils/blueprint';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, payload: unknown) => ({
@@ -31,6 +38,41 @@ const json = (statusCode: number, payload: unknown) => ({
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
 });
+
+/** Max lengths for the free-text SMART fields — long enough to be useful, short enough not to
+ *  crowd out the rest of the brief (the rationale is injected verbatim into the drafting prompt). */
+const TITLE_MAX = 120;
+const RATIONALE_MAX = 600;
+
+/**
+ * Normalise an optional free-text field: trim, collapse to null when blank, enforce a cap.
+ * Returns `undefined` when the caller didn't supply the field at all (so PATCH can tell
+ * "not provided" from "explicitly cleared").
+ */
+function optionalText(v: unknown, max: number): string | null | undefined {
+    if (v === undefined) return undefined;
+    if (v === null) return null;
+    const s = String(v).trim();
+    if (!s) return null;
+    return s.slice(0, max);
+}
+
+/**
+ * Recompile the blueprint so a goal change reaches the next generated post (section 12).
+ *
+ * Best-effort by design — same rationale as content-rules.ts: this is data assembly with no LLM
+ * call, and the user's write is already committed by the time it runs, so a recompile failure must
+ * never surface as a failed save.
+ */
+async function recompileAfterGoalChange(assistantId: number | null, userId: number, what: string) {
+    if (!assistantId) return;
+    try {
+        await assembleBlueprint(assistantId, `user-${userId}`, 'goal_change');
+    } catch (e) {
+        console.warn(`[manage-goals] blueprint recompile after ${what} failed (change still saved):`,
+            e instanceof Error ? e.message : e);
+    }
+}
 
 /** Active third-party services connected for this org (lowercased serviceName). */
 async function connectedServices(db: any, orgId: number): Promise<string[]> {
@@ -134,6 +176,19 @@ export default withLambda(async (event) => {
         if (!isValidMetricKey(metricKey)) {
             return json(400, { error: 'Unknown target metric.' });
         }
+        // Reject a metric we cannot actually measure, even if a stale client still offers it.
+        // `linkedin_followers` is the live example: it needs LinkedIn organisation scopes we are not
+        // approved for, so a goal set on it would sit 'pending' and then rot to 'data_disconnected'
+        // forever. Failing here is far kinder than accepting a goal that can never move.
+        if (!getGoalMetric(metricKey)!.available) {
+            return json(400, {
+                error: `"${getGoalMetric(metricKey)!.label}" can't be measured yet, so a goal can't be set against it.`,
+                code: 'METRIC_UNAVAILABLE',
+            });
+        }
+
+        const title = optionalText(body.title, TITLE_MAX) ?? null;
+        const rationale = optionalText(body.rationale, RATIONALE_MAX) ?? null;
         const target = Number(targetValue);
         if (!Number.isFinite(target) || target <= 0) {
             return json(400, { error: 'targetValue must be a positive number.' });
@@ -190,6 +245,8 @@ export default withLambda(async (event) => {
             organisationId: orgId,
             assistantId: Number(assistantId),
             metricKey,
+            title,
+            rationale,
             targetValue: String(target),
             targetDate: when,
             isPrimary: Boolean(isPrimary),
@@ -197,6 +254,7 @@ export default withLambda(async (event) => {
             createdByUserId: userId,
         }).returning();
 
+        await recompileAfterGoalChange(Number(assistantId), userId, 'create');
         return json(201, { goal: created });
     }
 
@@ -241,6 +299,12 @@ export default withLambda(async (event) => {
         }
         if (isActive !== undefined) updates.isActive = Boolean(isActive);
 
+        // SMART "Specific". `null` explicitly clears the field; omitting the key leaves it untouched.
+        const nextTitle = optionalText(body.title, TITLE_MAX);
+        if (nextTitle !== undefined) updates.title = nextTitle;
+        const nextRationale = optionalText(body.rationale, RATIONALE_MAX);
+        if (nextRationale !== undefined) updates.rationale = nextRationale;
+
         // Re-check attainability whenever the target value or date changes.
         if (targetValue !== undefined || targetDate !== undefined) {
             const effectiveTarget = updates.targetValue !== undefined ? Number(updates.targetValue) : Number(existing.targetValue);
@@ -265,6 +329,7 @@ export default withLambda(async (event) => {
         }
 
         const [updated] = await db.update(goals).set(updates).where(eq(goals.id, Number(id))).returning();
+        await recompileAfterGoalChange(existing.assistantId, userId, 'update');
         return json(200, { goal: updated });
     }
 
@@ -273,10 +338,13 @@ export default withLambda(async (event) => {
         const id = Number(params.id);
         if (!id || Number.isNaN(id)) return json(400, { error: 'id is required.' });
 
-        const [existing] = await db.select({ orgId: goals.organisationId }).from(goals).where(eq(goals.id, id)).limit(1);
+        const [existing] = await db.select({ orgId: goals.organisationId, assistantId: goals.assistantId })
+            .from(goals).where(eq(goals.id, id)).limit(1);
         if (!existing || existing.orgId !== orgId) return json(404, { error: 'Goal not found.' });
 
         await db.delete(goals).where(eq(goals.id, id));
+        // Recompile so a deleted goal stops steering generation immediately.
+        await recompileAfterGoalChange(existing.assistantId, userId, 'delete');
         return json(200, { deleted: true, id });
     }
 

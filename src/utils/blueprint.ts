@@ -5,8 +5,11 @@
 // reused outside the admin tool — notably by generate-post, which auto-compiles a
 // blueprint on demand for self-serve assistants that have never been compiled by an admin.
 //
-// `assembleBlueprint(assistantId, compiledBy, triggerType)` builds the 11-section brief
+// `assembleBlueprint(assistantId, compiledBy, triggerType)` builds the 12-section brief
 // from the assistant's current data, persists a new ai_blueprints row, and returns it.
+//
+// Sections 11 (business knowledge) and 12 (goals) are OPTIONAL context — they carry real steering
+// weight but an assistant without them is fully configured, so neither counts toward completeness.
 
 import { eq, and, desc, isNull, inArray } from 'drizzle-orm';
 import * as crypto from 'crypto';
@@ -29,10 +32,13 @@ import {
     workspaceAssets,
     workspaceIntegrations,
     platformConfig,
+    goals,
 } from '../../db/schema';
 import { checkProhibitedUsePatterns } from './tos-gate';
 import { OPERATIONAL_TRIGGERS, OPERATIONAL_SOURCES } from './operational-setup';
 import { BUDGET_CONFIG_KEY, resolveBudget } from '../config/execution-budgets';
+import { buildGoalDirective, renderGoalDirective } from './goal-directive';
+import type { GoalStatus } from '../config/goal-metrics';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -530,12 +536,53 @@ export async function assembleBlueprint(assistantId: number, compiledBy: string,
         sources: knowledgeAssets.map(a => src('workspace_assets', 'extracted_text', a.id, a.updatedAt)),
     };
 
+    // ── Section 12 — GOALS ────────────────────────────────────────────────────
+    // The user's active SMART goals, plus the funnel playbook for the primary one. This is what
+    // makes a goal steer generation instead of just moving a progress bar: process-content-jobs.ts
+    // and blog-generate.ts read this section and splice renderGoalDirective() into their prompts.
+    //
+    // Read LIVE from the goals table (not from a hire-time snapshot) and hashed on each goal's
+    // updatedAt, so editing a target — or the poller flipping a status to off_track — forces a
+    // recompile and reaches the next generated post. Only ACTIVE goals are carried; an archived
+    // goal must stop steering immediately.
+    const activeGoals = await db.select()
+        .from(goals)
+        .where(and(eq(goals.assistantId, assistantId), eq(goals.isActive, true)))
+        .orderBy(desc(goals.isPrimary), desc(goals.createdAt));
+
+    for (const g of activeGoals) hashParts.push({ id: `goal:${g.id}`, updatedAt: g.updatedAt });
+
+    // numeric columns come back as strings from postgres-js — coerce before any arithmetic.
+    const goalDirective = buildGoalDirective(activeGoals.map(g => ({
+        metricKey: g.metricKey,
+        title: g.title,
+        rationale: g.rationale,
+        targetValue: Number(g.targetValue),
+        latestValue: g.latestValue != null ? Number(g.latestValue) : null,
+        targetDate: new Date(g.targetDate),
+        status: g.status as GoalStatus,
+        isPrimary: g.isPrimary,
+    })));
+
+    // No goals ⇒ empty content, so the section serialises to nothing rather than an empty header.
+    const s12content: Record<string, unknown> = goalDirective
+        ? { ...goalDirective, directive: renderGoalDirective(goalDirective) }
+        : {};
+    sections['12-goals'] = {
+        status: goalDirective ? 'complete' : 'missing',
+        content: s12content,
+        sources: activeGoals.map(g => src('goals', 'target_value', g.id, g.updatedAt)),
+    };
+
     // ── Compute completeness ──────────────────────────────────────────────────
     // Business knowledge is optional context, so it does not count toward the required-section total
-    // (numerator or denominator) — exclude it so completeness can't exceed 100%.
+    // (numerator or denominator) — exclude it so completeness can't exceed 100%. Goals are optional
+    // in exactly the same way: an assistant with no goals is fully configured, so excluding section
+    // 12 keeps a goal-less assistant at 100% instead of capping it at 91%.
     const totalSections = 10;
+    const OPTIONAL_SECTIONS = new Set(['11-business-knowledge', '12-goals']);
     const requiredSections = Object.entries(sections)
-        .filter(([key]) => key !== '11-business-knowledge')
+        .filter(([key]) => !OPTIONAL_SECTIONS.has(key))
         .map(([, s]) => s);
     const completeSections = requiredSections.filter(s => s.status === 'complete').length;
     const partialSections = requiredSections.filter(s => s.status === 'partial').length;

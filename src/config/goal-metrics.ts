@@ -75,9 +75,13 @@ export interface GoalMetric {
     /** One-line helper shown under the dropdown. */
     description: string;
     /**
-     * Whether a Phase-2 telemetry poller can actually fetch this yet. Listed-but-not-yet-pollable
-     * metrics still appear (so users can plan) but newly-created goals stay 'pending' until a poller
-     * lands. Everything in v1 is wired to an existing data path, so all are true.
+     * Whether a telemetry poller can actually fetch this metric today.
+     *
+     * This flag is LOAD-BEARING: `false` removes the metric from every builder dropdown and makes
+     * manage-goals reject it. It originally meant "listed but not yet pollable — users can still
+     * plan against it", but nothing ever read it, so an unmeasurable metric was fully selectable
+     * and the resulting goal just never moved off 'pending'. A goal the platform cannot measure is
+     * not a goal, so an unavailable metric is now hidden rather than offered with a caveat.
      */
     available: boolean;
     /** Attainability ceilings (AC: goals must be realistic). Omit to skip the realism check. */
@@ -132,7 +136,14 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         direction: 'increase',
         objective: 'awareness',
         description: 'Total followers of your connected LinkedIn organisation.',
-        available: true,
+        // ⚠️ NOT MEASURABLE TODAY, and this is a permanent platform limit, not a missing poller.
+        // poll-goal-telemetry.ts reads it via /v2/organizationAcls + /v2/networkSizes, both of which
+        // need ORGANISATION scopes. We are approved for member-only posting and request exactly
+        // `openid profile email w_member_social` (social-oauth-callback.ts), so those calls always
+        // 403 — a goal set on this metric sits 'pending' and then rots to 'data_disconnected'.
+        // Offering an unmeasurable metric is worse than not offering it: the user sets a goal in good
+        // faith and it silently never moves. Flip to true only if organisation scopes are approved.
+        available: false,
         // B2B follower growth is steadier than IG, but keep the ceiling generous, not blocking.
         realism: { maxDailyDelta: 5000, maxDailyGrowthPct: 0.25 },
     },
@@ -289,7 +300,8 @@ export function isValidMetricKey(key: string): boolean {
 export function availableMetricsForConnections(connectedServices: readonly string[]): GoalMetric[] {
     const connected = new Set(connectedServices.map(s => s.toLowerCase()));
     return GOAL_METRICS.filter(m =>
-        m.source === 'internal' || (m.connectionService != null && connected.has(m.connectionService)),
+        m.available
+        && (m.source === 'internal' || (m.connectionService != null && connected.has(m.connectionService))),
     );
 }
 
@@ -312,6 +324,7 @@ export function availableMetricsForRole(
     const connected = new Set(connectedServices.map(s => s.toLowerCase()));
     const isSocialDefault = !roleKey || SOCIAL_DEFAULT_ROLES.has(roleKey);
     return GOAL_METRICS.filter(m => {
+        if (!m.available) return false;   // never offer a metric we cannot measure
         const roleOk = m.roles ? m.roles.includes(roleKey as string) : isSocialDefault;
         if (!roleOk) return false;
         return m.source === 'internal' || (m.connectionService != null && connected.has(m.connectionService));
@@ -474,12 +487,17 @@ export const RUN_RATE_THRESHOLDS = {
 
 // AC4.1.1 — polling cadence by subscription tier. The cron runs hourly; each goal is polled
 // at most once per its tier's cadence. Higher tiers get near-real-time tracking.
-// Tier prices: buster=£20, saver=£50, employee=£100 → saver+employee are the
-// premium tiers that get hourly telemetry; buster gets daily.
+//
+// ⚠️ TIER KEYS READ BACKWARDS — the ordering is `saver` (£29, entry) → `buster` (£99) →
+// `employee` (£349) → `enterprise`. See db/seed.ts. The previous version of this block was written
+// against a dead price list ("buster=£20, saver=£50, employee=£100") and so gave the £29 ENTRY plan
+// hourly telemetry while the £99 plan got daily. Always derive gates from the seed ordering, never
+// from a remembered price. Entry tier gets daily; paid-up tiers get hourly.
 export const POLL_CADENCE_HOURS_BY_TIER: Record<string, number> = {
+    enterprise: 1,
     employee: 1,
-    saver: 1,
-    buster: 24,
+    buster: 1,
+    saver: 24,
 };
 export const DEFAULT_POLL_CADENCE_HOURS = 24;
 
@@ -487,14 +505,19 @@ export function pollCadenceHours(tierKey: string | null | undefined): number {
     return (tierKey && POLL_CADENCE_HOURS_BY_TIER[tierKey]) || DEFAULT_POLL_CADENCE_HOURS;
 }
 
-// Feature 3 (premium AI) tier gates. saver+employee unlock AI recommendations + magic-wand
-// rewrite (US3.1/3.2) and autonomous optimization (US3.3); buster is base tier and gets
-// the padlock → upgrade modal (AC3.1.1). Editable here as the gating SoT.
+// Feature 3 (premium AI) tier gates — AI recommendations + magic-wand rewrite (US3.1/3.2) and
+// autonomous optimization (US3.3). `saver` (£29 entry) is the base tier and gets the padlock →
+// upgrade modal (AC3.1.1); everything above it unlocks.
+//
+// ⚠️ These gates were inverted, and the inversion contradicted our own sales copy: db/seed.ts
+// sells `buster` (£99) on "autonomous goal tracking, advanced analytics" while this map locked
+// `buster` OUT of all three features and handed them to the £29 plan instead. If a tier is added,
+// add it here explicitly — and check what master_plans.description promises it.
 export type GoalAiFeature = 'recommendations' | 'magicWand' | 'autonomous';
 export const GOAL_AI_TIERS: Record<GoalAiFeature, readonly string[]> = {
-    recommendations: ['saver', 'employee'],
-    magicWand:       ['saver', 'employee'],
-    autonomous:      ['saver', 'employee'],
+    recommendations: ['buster', 'employee', 'enterprise'],
+    magicWand:       ['buster', 'employee', 'enterprise'],
+    autonomous:      ['buster', 'employee', 'enterprise'],
 };
 
 export function tierAllows(feature: GoalAiFeature, tierKey: string | null | undefined): boolean {

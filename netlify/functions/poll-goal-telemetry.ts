@@ -22,11 +22,29 @@ import { createNotification } from '../../src/utils/notify';
 import { getSecret } from '../../src/utils/vault';
 import { connectionDisplayName, getGoalMetric, pollCadenceHours, RUN_RATE_THRESHOLDS } from '../../src/config/goal-metrics';
 import { computeGoalProgress } from '../../src/utils/goal-progress';
+import { assembleBlueprint } from '../../src/utils/blueprint';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const GRAPH_VERSION = 'v19.0';
 const BATCH = 200;
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+/**
+ * Recompile the assistant's blueprint after a goal STATUS transition, so section 12's directive
+ * (and its escalated "this goal is NOT on track" wording) reaches the next drafted post.
+ *
+ * Best-effort: this runs inside a cron that must finish inside the function timeout, and the
+ * telemetry write is already committed. A recompile failure is logged and skipped — the status is
+ * still correct in the database and the next user edit or transition will recompile.
+ */
+async function recompileForGoalStatus(assistantId: number, from: string, to: string): Promise<void> {
+    try {
+        await assembleBlueprint(assistantId, 'system', `goal_status_${to}`);
+    } catch (e) {
+        console.warn(`[poll-goal-telemetry] recompile after ${from}→${to} for assistant ${assistantId} failed:`,
+            e instanceof Error ? e.message : e);
+    }
+}
 
 type FetchResult = { value: number | null; disconnected: boolean };
 
@@ -303,6 +321,13 @@ export async function pollGoalTelemetry(): Promise<{ goals: number; polled: numb
                 statusUpdatedAt: now,
                 updatedAt: now,
             }).where(eq(goals.id, goal.id));
+            // A STATUS CHANGE has to reach the drafting prompt: blueprint section 12 escalates its
+            // directive when a goal is at_risk/off_track, and generation reads the PERSISTED
+            // blueprint (job.blueprint_id), not the live goals table. Recompile only on a genuine
+            // transition — recompiling on every poll would churn a blueprint row per goal per hour.
+            if (progress.status !== goal.status) {
+                await recompileForGoalStatus(goal.assistantId, goal.status, progress.status);
+            }
             polled++;
             return;
         }
@@ -312,6 +337,7 @@ export async function pollGoalTelemetry(): Promise<{ goals: number; polled: numb
         const isStale = !lastTelemetryAt || (now.getTime() - lastTelemetryAt.getTime() > staleCutoff);
         if (disconnected && isStale && goal.status !== 'data_disconnected') {
             await db.update(goals).set({ status: 'data_disconnected', statusUpdatedAt: now, updatedAt: now }).where(eq(goals.id, goal.id));
+            await recompileForGoalStatus(goal.assistantId, goal.status, 'data_disconnected');
             disconnectedCount++;
             const metric = getGoalMetric(goal.metricKey);
             const integration = connectionDisplayName(metric?.connectionService) ?? 'your data source';

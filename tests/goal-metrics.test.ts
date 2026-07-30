@@ -173,21 +173,35 @@ check('US-03 AC3.3/AC3.4 — strategyChanges returns only the genuinely changed 
     assert.equal(strategyChanges(current, null).length, 0);
 });
 
-check('US-04 — LinkedIn followers is a connection-gated awareness metric the poller can fetch', () => {
+check('US-04 — LinkedIn followers stays in the catalog but is NOT offered (no org scopes)', () => {
     const li = getGoalMetric('linkedin_followers');
     assert.ok(li, 'linkedin_followers should be in the catalog');
     assert.equal(li!.source, 'connection');
     assert.equal(li!.connectionService, 'linkedin');
     assert.equal(li!.objective, 'awareness');
-    assert.equal(li!.available, true, 'metric must be pollable now that the LinkedIn poller exists');
 
-    // Gated by the LinkedIn connection — hidden until connected, shown once connected.
+    // This assertion was inverted until 2026-07-30. It read "must be pollable now that the LinkedIn
+    // poller exists" — but a poller existing is not the same as a poller working. The poller calls
+    // /v2/organizationAcls + /v2/networkSizes, which need LinkedIn ORGANISATION scopes; the app is
+    // approved for member-only posting and requests just `openid profile email w_member_social`
+    // (social-oauth-callback.ts), so every call 403s. The metric was offered, accepted, and the
+    // resulting goal sat at 'pending' until it rotted to 'data_disconnected'.
+    // Flip this back only if organisation scopes are actually approved.
+    assert.equal(li!.available, false, 'not measurable with member-only LinkedIn scopes');
+
+    // Being unavailable, it must be hidden even when LinkedIn IS connected — the connection is not
+    // the blocker, the scope grant is.
     assert.ok(!availableMetricsForConnections([]).some(m => m.key === 'linkedin_followers'));
-    assert.ok(availableMetricsForConnections(['linkedin']).some(m => m.key === 'linkedin_followers'));
-    // case-insensitive service matching, like the IG path.
-    assert.ok(availableMetricsForConnections(['LinkedIn']).some(m => m.key === 'linkedin_followers'));
+    assert.ok(!availableMetricsForConnections(['linkedin']).some(m => m.key === 'linkedin_followers'));
+    assert.ok(!availableMetricsForConnections(['LinkedIn']).some(m => m.key === 'linkedin_followers'));
 
-    // It resolves to a top-of-funnel diagnostic, so off-track fixes draw on awareness levers.
+    // Connection-gating itself still works, proven on a metric that IS measurable.
+    assert.ok(!availableMetricsForConnections([]).some(m => m.key === 'instagram_followers'));
+    assert.ok(availableMetricsForConnections(['instagram']).some(m => m.key === 'instagram_followers'));
+    // case-insensitive service matching.
+    assert.ok(availableMetricsForConnections(['Instagram']).some(m => m.key === 'instagram_followers'));
+
+    // The diagnostic mapping is unaffected by availability.
     assert.ok(/Awareness/.test(funnelDiagnosticFor('linkedin_followers')!.stage));
 
     // The disconnect alert uses a properly-cased service name ("LinkedIn", not "Linkedin").

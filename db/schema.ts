@@ -2599,6 +2599,9 @@ export const goals = pgTable("goals", {
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
   assistantId: integer("assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
   metricKey: text("metric_key").notNull(),                 // → goal-metrics.ts catalog (e.g. 'instagram_followers')
+  // SMART "Specific" (db/goal-smart-fields.sql). Nullable — legacy goals predate them.
+  title: text(),                                           // short user-authored name, e.g. "Reach wholesale buyers"
+  rationale: text(),                                       // the "why"; steers generation via blueprint section 12
   targetValue: numeric("target_value").notNull(),          // AC1.1.2 — desired value
   startValue: numeric("start_value"),                      // baseline captured at creation, for run-rate math
   targetDate: timestamp("target_date").notNull(),          // AC1.1.2 — deadline

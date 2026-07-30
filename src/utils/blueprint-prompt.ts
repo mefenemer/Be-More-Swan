@@ -47,6 +47,19 @@ function withoutBenchmark(s: string): string {
 export interface BlueprintSection { content?: Record<string, unknown> | null }
 
 /**
+ * Sections that carry a ready-written `directive` string and must be emitted VERBATIM rather than
+ * flattened to `field: value` lines.
+ *
+ * Section 12 (goals) is the case this exists for. Its content holds both the structured goal data
+ * (for the UI and for tests) and a `directive` string built by renderGoalDirective() — prose that
+ * has been deliberately worded to steer without overriding guardrails. The generic flattener would
+ * emit the prose AND `goals: [{"metricKey":"instagram_followers",...}]` beside it, so the model
+ * would read the same targets twice in two formats, one of them raw JSON. Emitting the directive
+ * alone keeps exactly one authoritative statement of the goal in the prompt.
+ */
+const VERBATIM_DIRECTIVE_SECTIONS = new Set(['12-goals']);
+
+/**
  * Render sections as `--- KEY ---` blocks of `field: value` lines.
  *
  * Returns the body only — callers add their own preamble and append the safety benchmark, so the
@@ -56,6 +69,17 @@ export function renderBlueprintPrompt(sections: Record<string, BlueprintSection>
     let out = '';
     for (const [key, sec] of Object.entries(sections || {})) {
         if (PROMPT_SECTION_BLOCKLIST.has(key)) continue;
+
+        if (VERBATIM_DIRECTIVE_SECTIONS.has(key)) {
+            const directive = sec?.content?.directive;
+            // An empty section (no active goals) emits nothing at all — not even a header, which
+            // would otherwise read to the model as "goals exist but are unknown".
+            if (typeof directive === 'string' && directive.trim()) {
+                out += `\n--- ${key.toUpperCase()} ---\n${withoutBenchmark(directive.trim())}\n`;
+            }
+            continue;
+        }
+
         out += `\n--- ${key.toUpperCase()} ---\n`;
         for (const [k, v] of Object.entries(sec?.content || {})) {
             if (v == null) continue;

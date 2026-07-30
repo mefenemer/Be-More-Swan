@@ -5184,7 +5184,7 @@ function _renderPrimaryGoalHeader() {
     box.classList.remove('hidden');
     box.innerHTML = `
         <div class="flex items-center justify-between text-xs mb-1">
-            <span class="font-bold text-gray-700">${_escapeHtml(label)}</span>
+            <span class="font-bold text-gray-700" title="${_escapeHtml(label)}">${_escapeHtml(primary.title || label)}</span>
             <span class="inline-flex items-center gap-1.5 font-bold ${meta.text}"><span class="w-2 h-2 rounded-full ${meta.dot}"></span>${meta.label}</span>
         </div>
         <div class="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
@@ -5275,10 +5275,11 @@ function _buildGoalCard(g) {
         <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
                 <div class="flex items-center gap-2 flex-wrap">
-                    <h4 class="text-sm font-bold text-gray-900">${_escapeHtml(label)}</h4>
+                    <h4 class="text-sm font-bold text-gray-900">${_escapeHtml(g.title || label)}</h4>
                     ${g.isPrimary ? '<span class="text-[10px] font-bold uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded">Primary</span>' : ''}
                 </div>
-                <p class="text-xs text-gray-500 mt-0.5">Target: <span class="font-semibold text-gray-700">${fmt(target)} ${_escapeHtml(unit)}</span> by ${due}</p>
+                <p class="text-xs text-gray-500 mt-0.5">${g.title ? _escapeHtml(label) + ' — t' : 'T'}arget: <span class="font-semibold text-gray-700">${fmt(target)} ${_escapeHtml(unit)}</span> by ${due}</p>
+                ${g.rationale ? `<p class="text-xs text-gray-400 mt-1.5 italic border-l-2 border-emerald-100 pl-2">${_escapeHtml(g.rationale)}</p>` : ''}
             </div>
             <div class="flex items-center gap-3 shrink-0">
                 <span class="inline-flex items-center gap-1.5 text-xs font-bold ${meta.text}">
@@ -5313,6 +5314,8 @@ window._toggleGoalBuilder = function (show) {
         const o = document.getElementById('goal-objective'); if (o) o.value = '';
         const m = document.getElementById('goal-metric'); if (m) m.value = '';
         const p = document.getElementById('goal-primary'); if (p) p.checked = false;
+        const ti = document.getElementById('goal-title'); if (ti) ti.value = '';
+        const ra = document.getElementById('goal-rationale'); if (ra) ra.value = '';
         const help = document.getElementById('goal-metric-help'); if (help) help.textContent = '';
         // Reset the Metric dropdown back to its "select an objective first" state.
         _populateGoalMetricDropdown();
@@ -5328,6 +5331,8 @@ window._saveGoal = async function () {
     const targetValue = document.getElementById('goal-target')?.value;
     const targetDate = document.getElementById('goal-date')?.value;
     const isPrimary = document.getElementById('goal-primary')?.checked || false;
+    const title = (document.getElementById('goal-title')?.value || '').trim();
+    const rationale = (document.getElementById('goal-rationale')?.value || '').trim();
 
     const fail = (msg) => { if (err) { err.textContent = msg; err.classList.remove('hidden'); } };
     if (err) err.classList.add('hidden');
@@ -5339,7 +5344,7 @@ window._saveGoal = async function () {
     try {
         const res = await fetch(GOALS_API, {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ assistantId: _goalsAssistantId, metricKey, targetValue: Number(targetValue), targetDate, isPrimary }),
+            body: JSON.stringify({ assistantId: _goalsAssistantId, metricKey, targetValue: Number(targetValue), targetDate, isPrimary, title, rationale }),
         });
         if (!res.ok) { const e = await res.json().catch(() => ({})); return fail(e.error || 'Could not save goal.'); }
         window._toggleGoalBuilder(false);
