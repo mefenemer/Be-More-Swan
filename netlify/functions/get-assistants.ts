@@ -5,6 +5,8 @@ import { aiAssistants, contentGenerationJobs, goals, masterAssistants, scheduled
 import { requireTenant } from '../../src/utils/tenant';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
 import { parseRoiPeriod, roiPeriodStart } from '../../src/utils/roi-period';
+import { summariseGoals, pickHeadlineGoal, type GoalSummary } from '../../src/utils/goal-summary';
+import { getGoalMetric } from '../../src/config/goal-metrics';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -56,14 +58,29 @@ export default withLambda(async (event) => {
 
         // Run goals + post metrics + hourly rate in parallel
         const [goalRows, postRows, activeJobRows, profileRow, mult, postsInPeriodRows, taskRunsInPeriodRows, [{ leadsInPeriod }]] = await Promise.all([
-            // SMART Goals AC2.1.1 — per-assistant goal status counts for dashboard card micro-summary.
+            // SMART Goals AC2.1.1 — the goal block on the dashboard / My Assistants card.
+            //
+            // Selects the ROWS rather than a GROUP BY tally. The card shows one headline goal with a
+            // real progress bar ("12,000 / 20,000 followers"), which counts alone can never supply,
+            // and the summary is then derived from the same rows in JS — so this stays ONE query, not
+            // two. Bounded by the org's own goals, which is a handful per assistant.
+            //
             // goals has no RLS (owner-path, like content_rules), so query it on the owner connection.
             assistantIds.length > 0
-                ? db.select({ assistantId: goals.assistantId, status: goals.status, c: sql<number>`count(*)::int` })
+                ? db.select({
+                    id: goals.id,
+                    assistantId: goals.assistantId,
+                    metricKey: goals.metricKey,
+                    title: goals.title,
+                    targetValue: goals.targetValue,
+                    latestValue: goals.latestValue,
+                    status: goals.status,
+                    isPrimary: goals.isPrimary,
+                    createdAt: goals.createdAt,
+                  })
                     .from(goals)
                     .where(and(eq(goals.organisationId, orgId), eq(goals.isActive, true)))
-                    .groupBy(goals.assistantId, goals.status)
-                : Promise.resolve([] as { assistantId: number; status: string; c: number }[]),
+                : Promise.resolve([] as any[]),
 
             // Per-assistant post counts grouped by status (draft|scheduled|published|…)
             assistantIds.length > 0
@@ -140,14 +157,41 @@ export default withLambda(async (event) => {
                 )),
         ]);
 
-        // --- Goals summary ---
-        const goalSummary = new Map<number, { onTrack: number; offTrack: number; total: number }>();
+        // --- Goals summary + headline goal ---
+        //
+        // ⚠️ The previous version read `else if (r.status !== 'pending') s.offTrack++`, which swept
+        // every non-pending, non-on_track status into the RED bucket. That was already wrong for
+        // `data_disconnected` (a lapsed token rendered as a failing goal) and would have been worse
+        // for `awaiting_update` — a revenue goal merely waiting on this month's figure showing as
+        // "1 Off Track". Both are measurement gaps, not verdicts; summariseGoals keeps them apart.
+        const goalsByAssistant = new Map<number, typeof goalRows>();
         for (const r of goalRows) {
-            const s = goalSummary.get(r.assistantId) || { onTrack: 0, offTrack: 0, total: 0 };
-            s.total += r.c;
-            if (r.status === 'on_track') s.onTrack += r.c;
-            else if (r.status !== 'pending') s.offTrack += r.c;
-            goalSummary.set(r.assistantId, s);
+            const list = goalsByAssistant.get(r.assistantId) ?? [];
+            list.push(r);
+            goalsByAssistant.set(r.assistantId, list);
+        }
+
+        const goalBlock = new Map<number, { summary: GoalSummary; headline: any | null }>();
+        for (const [assistantId, rows] of goalsByAssistant) {
+            const head = pickHeadlineGoal(rows);
+            const metric = head ? getGoalMetric(head.metricKey) : undefined;
+            goalBlock.set(assistantId, {
+                summary: summariseGoals(rows),
+                // Everything the card needs to draw one bar, resolved here so the client never has to
+                // look a metric up — its catalog copy is only ever the metrics you may pick TODAY.
+                headline: head ? {
+                    id: head.id,
+                    metricKey: head.metricKey,
+                    title: head.title,
+                    metricLabel: metric?.label ?? head.metricKey,
+                    unit: metric?.unit ?? '',
+                    targetValue: head.targetValue,
+                    latestValue: head.latestValue,
+                    status: head.status,
+                    isPrimary: head.isPrimary,
+                    isManual: metric?.source === 'manual',
+                } : null,
+            });
         }
 
         // --- Post metrics per assistant ---
@@ -228,7 +272,8 @@ export default withLambda(async (event) => {
             const gbpSaved = hourlyRateGbp ? parseFloat((hoursSaved * hourlyRateGbp).toFixed(2)) : null;
             return {
                 ...a,
-                goalSummary: goalSummary.get(a.id) || { onTrack: 0, offTrack: 0, total: 0 },
+                goalSummary: goalBlock.get(a.id)?.summary ?? summariseGoals([]),
+                headlineGoal: goalBlock.get(a.id)?.headline ?? null,
                 postMetrics: {
                     ...pm,
                     hoursSaved,

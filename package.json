@@ -27,6 +27,7 @@
     "test:compliance-config": "tsx tests/compliance-config.test.ts",
     "test:goal-metrics": "tsx tests/goal-metrics.test.ts",
     "test:goal-progress": "tsx tests/goal-progress.test.ts",
+    "test:goal-summary": "tsx tests/goal-summary.test.ts",
     "test:roi-period": "tsx tests/roi-period.test.ts",
     "test:blog-destinations": "tsx tests/blog-destinations.test.ts",
     "test:blog-blueprint": "tsx tests/blog-blueprint-injection.test.ts",

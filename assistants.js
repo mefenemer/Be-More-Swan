@@ -111,6 +111,100 @@ window._resolveAssistantBadge = function(data, opSignals) {
     return p;
 };
 
+/**
+ * The goal block on the dashboard / My Assistants card.
+ *
+ * ── Why ONE bar and not N ────────────────────────────────────────────────────────────────
+ * Nothing caps goals per assistant, so any layout with a row per goal is a layout that breaks at
+ * six. The card also sits in a 2-up grid already carrying a status pill, a metrics strip, quick
+ * actions and a footer. So: one headline goal drawn properly (the server picks it — see
+ * src/utils/goal-summary.ts, so this card and the detail header can never disagree), and everything
+ * else collapsed into counts. The full list lives on the Goals tab, one click away.
+ *
+ * ── Why two separate rows of counts ──────────────────────────────────────────────────────
+ * On track / at risk / off track are performance verdicts and get colour. `awaiting_update` and
+ * `data_disconnected` are NOT verdicts — they mean the measurement stopped, one waiting on a figure
+ * the user types in, the other on an integration to re-authenticate. They get a quieter muted row of
+ * their own. Previously both were bucketed into a red "Off Track", which read as "your assistant is
+ * failing" when the actual message was "we need a number from you".
+ */
+window._buildAssistantCardGoals = function (assistant) {
+    const gs = assistant.goalSummary || {};
+    const total = gs.total || 0;
+    const goalsTab = `event.stopPropagation(); window._assistantDetailInitialTab='goals'; window.routeToAssistantDetail('${assistant.id}')`;
+
+    if (total === 0) {
+        return `
+        <button type="button" onclick="${goalsTab}"
+            class="flex items-center gap-2 text-xs font-semibold text-gray-400 hover:text-emerald-700 mb-5 cursor-pointer transition-colors text-left">
+            <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v8m4-4H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            No goals set yet — <span class="underline">add goals to track performance</span>
+        </button>`;
+    }
+
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    const h = assistant.headlineGoal;
+    const meta = (h && _GOAL_STATUS_META[h.status]) || _GOAL_STATUS_META.pending;
+
+    // ── Headline goal ────────────────────────────────────────────────────────
+    let headlineHtml = '';
+    if (h) {
+        const target = Number(h.targetValue);
+        const latest = h.latestValue != null ? Number(h.latestValue) : null;
+        const pct = (latest != null && target > 0) ? Math.max(0, Math.min(100, Math.round((latest / target) * 100))) : 0;
+        const label = h.title || h.metricLabel || h.metricKey;
+        // No reading yet is stated plainly rather than drawn as 0% — an empty bar reads as failure.
+        const figures = latest != null
+            ? _escapeHtml(_fmtGoalPair(latest, target, h.unit))
+            : `Target ${_escapeHtml(_fmtGoalValue(target, h.unit))} — no reading yet`;
+        headlineHtml = `
+            <div class="flex items-center justify-between gap-2 text-xs mb-1.5">
+                <span class="font-bold text-gray-700 truncate" title="${_escapeHtml(label)}">${_escapeHtml(label)}</span>
+                <span class="inline-flex items-center gap-1.5 font-bold shrink-0 ${meta.text}"><span class="w-2 h-2 rounded-full ${meta.dot}"></span>${meta.label}</span>
+            </div>
+            <div class="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
+                <div class="h-full ${meta.dot} transition-all" style="width:${pct}%"></div>
+            </div>
+            <p class="text-[11px] text-gray-400 mt-1">${figures}</p>`;
+    }
+
+    // ── Performance counts (coloured) ────────────────────────────────────────
+    // Suppressed for a single goal — the headline above already said it — and when nothing has been
+    // assessed yet, where "0 on track" would be a misleading way to say "we haven't measured".
+    const pills = [
+        gs.onTrack  ? `<span class="inline-flex items-center gap-1 text-emerald-600"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>${gs.onTrack} on track</span>` : '',
+        gs.atRisk   ? `<span class="inline-flex items-center gap-1 text-amber-600"><span class="w-1.5 h-1.5 rounded-full bg-amber-500"></span>${gs.atRisk} at risk</span>` : '',
+        gs.offTrack ? `<span class="inline-flex items-center gap-1 text-red-600"><span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>${gs.offTrack} off track</span>` : '',
+    ].filter(Boolean).join('');
+    const pillsHtml = (total > 1 && gs.assessed && pills) ? `
+        <div class="flex items-center gap-3 flex-wrap text-[11px] font-semibold mt-2">
+            <span class="text-gray-400">${plural(total, 'goal')}:</span>${pills}
+        </div>` : '';
+
+    // Goals sit at 'pending' until the run-rate engine has enough observations
+    // (RUN_RATE_THRESHOLDS.minObservationDays). Saying so beats "0 on track | 0 off track" (issue #135).
+    const pendingHtml = (!gs.assessed && gs.pending > 0) ? `
+        <div class="flex items-center gap-2 text-[11px] font-semibold text-gray-400 mt-2">
+            <span class="w-1.5 h-1.5 rounded-full bg-gray-300"></span>Awaiting first progress check-in
+        </div>` : '';
+
+    // ── Measurement gaps (muted, deliberately not a verdict) ─────────────────
+    // Kept apart from each other as well as from the pills: one is fixed by typing a number in, the
+    // other by re-authenticating an integration, so a merged "2 need attention" would be useless.
+    const attention = [
+        gs.awaitingUpdate   ? `${plural(gs.awaitingUpdate, 'figure')} to update` : '',
+        gs.dataDisconnected ? `${plural(gs.dataDisconnected, 'goal')} needs reconnecting` : '',
+    ].filter(Boolean).join(' · ');
+    const attentionHtml = attention ? `
+        <button type="button" onclick="${goalsTab}"
+            class="flex items-center gap-1.5 text-[11px] font-medium text-gray-400 hover:text-gray-600 mt-2 cursor-pointer transition-colors text-left">
+            <svg class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+            ${attention}
+        </button>` : '';
+
+    return `<div class="mb-5">${headlineHtml}${pillsHtml}${pendingHtml}${attentionHtml}</div>`;
+};
+
 window.generateAssistantCardHTML = function(assistant) {
     const initial = assistant.name ? assistant.name.charAt(0).toUpperCase() : 'A';
     const role = assistant.role || 'Custom Assistant';
@@ -118,27 +212,11 @@ window.generateAssistantCardHTML = function(assistant) {
     const db = window._resolveAssistantBadge(assistant, assistant.opSignals);
     const statusHtml = `<span class="inline-flex items-center gap-1.5 py-1 px-2.5 rounded-md text-xs font-bold ${db.cls}"><span class="w-1.5 h-1.5 rounded-full ${db.dot}"></span> ${db.label}</span>`;
 
-    // SMART Goals AC2.1.1 — "X On Track | Y Off Track" micro-summary.
+    // SMART Goals AC2.1.1 — the goal block: one headline goal with a real progress bar, then what
+    // the remaining goals add up to. See _buildGoalBlock for the layout rules.
     // When no goals exist yet, show a prompt that deep-links to the assistant's Goals tab so the
-    // user is nudged (and able) to set measurable targets. Goals start life as 'pending' until the
-    // run-rate engine assesses them (poll-goal-telemetry, gated by RUN_RATE_THRESHOLDS.minObservationDays),
-    // so a card whose goals are all still pending must say so instead of showing a misleading "0 On
-    // Track | 0 Off Track" (issue #135).
-    const gs = assistant.goalSummary || { onTrack: 0, offTrack: 0, total: 0 };
-    const goalsAssessed = gs.onTrack + gs.offTrack;
-    const goalsHtml = gs.total > 0 ? (goalsAssessed > 0 ? `
-        <div class="flex items-center gap-4 text-xs font-semibold mb-5">
-            <span class="inline-flex items-center gap-1.5 text-emerald-600"><span class="w-2 h-2 rounded-full bg-emerald-500"></span>${gs.onTrack} On Track</span>
-            <span class="inline-flex items-center gap-1.5 text-red-600"><span class="w-2 h-2 rounded-full bg-red-500"></span>${gs.offTrack} Off Track</span>
-        </div>` : `
-        <div class="flex items-center gap-2 text-xs font-semibold text-gray-400 mb-5">
-            <span class="w-2 h-2 rounded-full bg-gray-300"></span>Awaiting first progress check-in
-        </div>`) : `
-        <button type="button" onclick="event.stopPropagation(); window._assistantDetailInitialTab='goals'; window.routeToAssistantDetail('${assistant.id}')"
-            class="flex items-center gap-2 text-xs font-semibold text-gray-400 hover:text-emerald-700 mb-5 cursor-pointer transition-colors text-left">
-            <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v8m4-4H8m13 0a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-            No goals set yet — <span class="underline">add goals to track performance</span>
-        </button>`;
+    // user is nudged (and able) to set measurable targets.
+    const goalsHtml = window._buildAssistantCardGoals(assistant);
 
     // Post metrics strip
     const pm = assistant.postMetrics || {};
@@ -5088,6 +5166,7 @@ const GOALS_API = '/.netlify/functions/manage-goals';
 let _goalsAssistantId = null;
 let _goalMetrics = [];   // available metric catalog entries for this workspace (AC1.1.3)
 let _goalsCache = [];    // last-loaded goals for this assistant (for the header bar + review modal)
+let _goalHeadlineId = null;  // server's pick of which goal represents this assistant (goal-summary.ts)
 let _goalEntitlements = { aiRecommendations: false, magicWand: false, autonomous: false }; // Feature 3 tier gates
 let _autonomousGoalSeeking = false;
 let _autonomousMediaEnabled = false;   // Epic 2 US5
@@ -5156,6 +5235,26 @@ function _fmtGoalValue(n, unit) {
     return `${num} ${unit}`;
 }
 
+/** True when the unit is written tight against the number (£250,000, 45%) rather than after it. */
+function _unitIsTight(unit) {
+    return unit === '%' || /^[£$€]$/.test(unit || '');
+}
+
+/**
+ * The "progress / target" line under a goal bar.
+ *
+ * A word unit is written ONCE, at the end — "12,000 / 20,000 followers", not "12,000 followers /
+ * 20,000 followers". A tight unit has to repeat, because "150,000 / £250,000" reads as though only
+ * one side is money.
+ */
+function _fmtGoalPair(latest, target, unit) {
+    if (_unitIsTight(unit)) {
+        return `${_fmtGoalValue(latest, unit)} / ${_fmtGoalValue(target, unit)}`;
+    }
+    const left = latest == null ? '—' : Number(latest).toLocaleString();
+    return `${left} / ${_fmtGoalValue(target, unit)}`;
+}
+
 async function _fetchAndRenderGoals(assistantId) {
     _goalsAssistantId = parseInt(assistantId);
     const list = document.getElementById('goals-list');
@@ -5167,6 +5266,7 @@ async function _fetchAndRenderGoals(assistantId) {
         if (res.ok) {
             const data = await res.json();
             goals = data.goals || [];
+            _goalHeadlineId = data.headlineGoalId ?? null;
             _goalMetrics = data.availableMetrics || [];
             _goalEntitlements = data.entitlements || _goalEntitlements;
             _autonomousGoalSeeking = !!data.autonomousGoalSeeking;
@@ -5202,11 +5302,17 @@ async function _fetchAndRenderGoals(assistantId) {
     }
 }
 
-// AC2.1.2 — primary goal progress bar in the assistant detail header.
+// AC2.1.2 — headline goal progress bar in the assistant detail header.
 function _renderPrimaryGoalHeader() {
     const box = document.getElementById('detail-primary-goal');
     if (!box) return;
-    const primary = _goalsCache.find(g => g.isPrimary) || _goalsCache[0];
+    // The SERVER picks which goal represents this assistant (src/utils/goal-summary.ts), and the
+    // dashboard card uses the identical pick, so the two surfaces can't disagree. The old client-side
+    // `find(isPrimary) || [0]` fell through to the NEWEST goal whenever no primary was set — which is
+    // every assistant whose goals are all user-reported, since those can never be primary.
+    const primary = (_goalHeadlineId != null && _goalsCache.find(g => Number(g.id) === Number(_goalHeadlineId)))
+        || _goalsCache.find(g => g.isPrimary)
+        || _goalsCache[0];
     if (!primary) { box.classList.add('hidden'); box.innerHTML = ''; return; }
 
     const meta = _GOAL_STATUS_META[primary.status] || _GOAL_STATUS_META.pending;
@@ -5214,18 +5320,28 @@ function _renderPrimaryGoalHeader() {
     const target = Number(primary.targetValue);
     const latest = primary.latestValue != null ? Number(primary.latestValue) : null;
     const pct = (latest != null && target > 0) ? Math.max(0, Math.min(100, Math.round((latest / target) * 100))) : 0;
-    const fmt = (n) => n == null ? '—' : Number(n).toLocaleString();
+
+    // The header slot holds exactly one bar (it is an identity line, in a max-w-xs column), so when
+    // there are others they get a count that jumps to the full list rather than being hidden.
+    const others = _goalsCache.length - 1;
+    const moreHtml = others > 0
+        ? `<button type="button" onclick="window._activateMainTab('goals')"
+             class="text-[11px] font-semibold text-gray-400 hover:text-emerald-700 underline cursor-pointer transition-colors">+${others} more</button>`
+        : '';
 
     box.classList.remove('hidden');
     box.innerHTML = `
-        <div class="flex items-center justify-between text-xs mb-1">
-            <span class="font-bold text-gray-700" title="${_escapeHtml(label)}">${_escapeHtml(primary.title || label)}</span>
-            <span class="inline-flex items-center gap-1.5 font-bold ${meta.text}"><span class="w-2 h-2 rounded-full ${meta.dot}"></span>${meta.label}</span>
+        <div class="flex items-center justify-between gap-2 text-xs mb-1">
+            <span class="font-bold text-gray-700 truncate" title="${_escapeHtml(label)}">${_escapeHtml(primary.title || label)}</span>
+            <span class="inline-flex items-center gap-1.5 font-bold shrink-0 ${meta.text}"><span class="w-2 h-2 rounded-full ${meta.dot}"></span>${meta.label}</span>
         </div>
         <div class="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
             <div class="h-full ${meta.dot} transition-all" style="width:${pct}%"></div>
         </div>
-        <p class="text-[11px] text-gray-400 mt-1">${latest != null ? fmt(latest) : '—'} / ${_escapeHtml(_fmtGoalValue(target, unit))}</p>`;
+        <div class="flex items-center justify-between gap-2 mt-1">
+            <p class="text-[11px] text-gray-400">${_escapeHtml(_fmtGoalPair(latest, target, unit))}</p>
+            ${moreHtml}
+        </div>`;
 }
 
 function _syncReviewButton() {

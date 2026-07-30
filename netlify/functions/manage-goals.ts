@@ -33,6 +33,7 @@ import {
     tierAllows,
 } from '../../src/config/goal-metrics';
 import { assembleBlueprint } from '../../src/utils/blueprint';
+import { summariseGoals, pickHeadlineGoal } from '../../src/utils/goal-summary';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, payload: unknown) => ({
@@ -233,6 +234,13 @@ export default withLambda(async (event) => {
             }
         }
 
+        // Which goal the assistant-detail HEADER should show. Computed here, with the same rule the
+        // dashboard card uses (src/utils/goal-summary.ts), so the two surfaces can never disagree
+        // about which goal represents this assistant. The client used to pick it itself with
+        // `find(isPrimary) || goals[0]` — and since a user-reported metric can never be primary, an
+        // assistant with only revenue goals got whichever was newest.
+        const headlineGoalId = pickHeadlineGoal(rows as any[])?.id ?? null;
+
         return json(200, {
             // Each goal carries its metric's objective, label and unit so the client never has to
             // look them up in `availableMetrics`. A goal can outlive its metric's availability — the
@@ -255,6 +263,8 @@ export default withLambda(async (event) => {
                 };
             }),
             availableMetrics: availableMetricsForRole(roleKey, services),
+            headlineGoalId,
+            goalSummary: summariseGoals(rows as any[]),
             autonomousGoalSeeking: assistant.autonomousGoalSeeking,
             autonomousMediaEnabled: assistant.autonomousMediaEnabled,
             autonomousMediaMonthlyCap: assistant.autonomousMediaMonthlyCap,
