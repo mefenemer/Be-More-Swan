@@ -354,14 +354,16 @@ check('youtube_subscribers gates on the workspace_integrations provider key', ()
     assert.ok(availableMetricsForRole('social_media_manager', ['youtube']).some(x => x.key === 'youtube_subscribers'));
 });
 
-check('x_followers is withheld on a BILLING limit, not a permanent one', () => {
+check('x_followers is offered — our API tier was verified, not assumed', () => {
     const m = getGoalMetric('x_followers')!;
-    // Unlike linkedin_followers, this can become available — /2/users/me is a paid-tier question,
-    // and the poller case is already written. It stays false until goal-metric-selftest.ts says
-    // otherwise, because assuming a written poller works is the linkedin_followers mistake.
-    assert.equal(m.available, false, 'must stay false until the selftest confirms our API tier');
+    // Enabled on 2026-07-30 only after goal-metric-selftest.ts returned `ok` with a real follower
+    // count from a connected X account on prod. It shipped false first: /2/users/me 403s on tiers
+    // that don't include it, and assuming a written poller works is the linkedin_followers mistake.
+    assert.equal(m.available, true);
     assert.equal(m.connectionService, 'x');
-    assert.ok(!availableMetricsForRole('social_media_manager', ['x']).some(x => x.key === 'x_followers'));
+    assert.ok(availableMetricsForRole('social_media_manager', ['x']).some(x => x.key === 'x_followers'));
+    // Still gated on the connection — an X goal must not be offered to a workspace without one.
+    assert.ok(!availableMetricsForRole('social_media_manager', ['instagram']).some(x => x.key === 'x_followers'));
 });
 
 check('LinkedIn remains the only permanently unmeasurable platform', () => {

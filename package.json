@@ -29,6 +29,7 @@
     "test:goal-progress": "tsx tests/goal-progress.test.ts",
     "test:goal-summary": "tsx tests/goal-summary.test.ts",
     "test:facebook-insights": "tsx tests/facebook-insights.test.ts",
+    "test:graph-errors": "tsx tests/graph-error-classification.test.ts",
     "test:roi-period": "tsx tests/roi-period.test.ts",
     "test:blog-destinations": "tsx tests/blog-destinations.test.ts",
     "test:blog-blueprint": "tsx tests/blog-blueprint-injection.test.ts",

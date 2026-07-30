@@ -41,13 +41,71 @@ const json = (statusCode: number, payload: unknown) => ({
 });
 
 /** What the live API did when we asked it for this metric. */
-type Outcome =
+export type Outcome =
     | 'ok'              // returned a usable number — safe to offer
     | 'not_connected'   // the backing account/integration isn't connected in this workspace
-    | 'unauthorised'    // connected, but the token or scopes were rejected (401/403)
+    | 'unauthorised'    // connected, but the token/scopes/app-permissions were refused
     | 'unsupported'     // the API rejected the metric name itself — this metric cannot be measured
     | 'no_data'         // call succeeded but carried no value (new/empty account)
+    | 'error'           // the call failed for a reason that is neither an answer nor a verdict
     | 'skipped';        // nothing to probe (internal metrics read our own database)
+
+// ── Graph error → Outcome ───────────────────────────────────────────────────────
+//
+// WHY THIS EXISTS AS ITS OWN FUNCTION. The Instagram probe used to treat every Graph failure except
+// code 100 as `no_data`, and a live run on prod showed what that costs: all three
+// instagram_profile_views candidates came back `(#10) Application does not have permission for this
+// action`, and were reported as "no data". A permission wall is a definite refusal, not an empty
+// account — and because `shouldDisable` keys off `unsupported`/`unauthorised`, a metric that was
+// OFFERED and permission-blocked would never have been flagged. That is precisely the
+// linkedin_followers class of bug this whole endpoint exists to catch, living inside the endpoint.
+//
+// The opposite mistake is just as bad and less obvious: classifying a RATE LIMIT or a transient
+// Graph blip as a refusal would put a perfectly good metric into `shouldDisable`, and someone would
+// switch off a working metric on the strength of one unlucky run. Anything we cannot confidently
+// call a verdict is therefore `error` — reported, excluded from both summary lists, and re-runnable.
+const GRAPH_BAD_METRIC = new Set([100]);                    // unknown/invalid metric name for this version
+const GRAPH_PERMISSION = new Set([10, 200, 299, 3]);        // the APP lacks the permission (needs app review)
+const GRAPH_TOKEN      = new Set([190, 102, 463, 467]);     // the token expired/was revoked (user reconnects)
+const GRAPH_TRANSIENT  = new Set([1, 2, 4, 17, 32, 341, 613]); // unknown-transient, downtime, rate limits
+
+/**
+ * Classify a Graph error body. Returns null when there was no error at all.
+ *
+ * Unrecognised codes deliberately fall to `error`, not to a verdict: being wrong in the cautious
+ * direction costs one re-run, being wrong in the confident direction disables a working metric.
+ */
+export function classifyGraphError(
+    err: { code?: number; message?: string } | null | undefined,
+    metric?: string,
+): { outcome: Outcome; detail: string } | null {
+    if (!err) return null;
+    const code = err.code;
+    const msg = err.message ?? `Graph error ${code ?? '(no code)'}`;
+    const tag = `(#${code ?? '?'})`;
+
+    if (code != null && GRAPH_BAD_METRIC.has(code)) {
+        return {
+            outcome: 'unsupported',
+            detail: `${msg} — ${metric ? `"${metric}" is` : 'the requested metric is'} not accepted by Graph ${GRAPH_VERSION}.`,
+        };
+    }
+    if (code != null && GRAPH_PERMISSION.has(code)) {
+        // Distinct from a token problem in the ONE way that matters to whoever reads this: no amount
+        // of reconnecting fixes it. The app itself needs the permission granted.
+        return {
+            outcome: 'unauthorised',
+            detail: `${msg} ${tag} — the APP lacks this permission. Reconnecting the account will not help; this needs the permission granted to the app itself.`,
+        };
+    }
+    if (code != null && GRAPH_TOKEN.has(code)) {
+        return { outcome: 'unauthorised', detail: `${msg} ${tag} — the stored token is expired or revoked; the account needs reconnecting.` };
+    }
+    if (code != null && GRAPH_TRANSIENT.has(code)) {
+        return { outcome: 'error', detail: `${msg} ${tag} — transient or rate-limited. Re-run before drawing any conclusion.` };
+    }
+    return { outcome: 'error', detail: `${msg} ${tag} — unrecognised Graph error; treated as inconclusive rather than as a verdict.` };
+}
 
 interface Result {
     metricKey: string;
@@ -69,7 +127,8 @@ async function probeIgAccountMetric(
 
     let res: Response;
     try { res = await fetch(url); } catch (e) {
-        return { outcome: 'no_data', detail: `Network error: ${e instanceof Error ? e.message : String(e)}` };
+        // A network failure is not "this account has no data" — it is no answer at all.
+        return { outcome: 'error', detail: `Network error: ${e instanceof Error ? e.message : String(e)}` };
     }
 
     const body = await res.json().catch(() => null) as {
@@ -77,18 +136,14 @@ async function probeIgAccountMetric(
         error?: { code?: number; message?: string; error_subcode?: number };
     } | null;
 
+    // Graph reports failures in the body, and not always with a matching HTTP status — so classify
+    // the error FIRST, whatever the status line said.
+    const classified = classifyGraphError(body?.error, metric);
+    if (classified) return classified;
     if (res.status === 401 || res.status === 403) {
-        return { outcome: 'unauthorised', detail: body?.error?.message ?? `HTTP ${res.status} — token or scopes rejected.` };
+        return { outcome: 'unauthorised', detail: `HTTP ${res.status} — token or scopes rejected.` };
     }
-    if (!res.ok) {
-        // Graph error 100 on an insights call almost always means "no such metric for this version".
-        const msg = body?.error?.message ?? `HTTP ${res.status}`;
-        const unsupported = body?.error?.code === 100;
-        return {
-            outcome: unsupported ? 'unsupported' : 'no_data',
-            detail: `${msg}${unsupported ? ` — "${metric}" is not accepted by Graph ${GRAPH_VERSION}.` : ''}`,
-        };
-    }
+    if (!res.ok) return { outcome: 'error', detail: `HTTP ${res.status} with no Graph error body — inconclusive.` };
 
     const series = body?.data?.[0]?.values;
     if (!Array.isArray(series) || series.length === 0) {
@@ -110,11 +165,12 @@ async function probeFacebookFollowers(pageId: string, token: string): Promise<{ 
     const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${pageId}?fields=followers_count,fan_count&access_token=${encodeURIComponent(token)}`);
     const body = await res.json().catch(() => null) as
         { followers_count?: number; fan_count?: number; error?: { code?: number; message?: string } } | null;
-    if (res.status === 401 || res.status === 403 || body?.error?.code === 190) {
-        return { outcome: 'unauthorised', detail: `Graph rejected the Page token: ${body?.error?.message ?? `HTTP ${res.status}`}` };
+    const classified = classifyGraphError(body?.error);
+    if (classified) return classified;
+    if (res.status === 401 || res.status === 403) {
+        return { outcome: 'unauthorised', detail: `Graph rejected the Page token (HTTP ${res.status}).` };
     }
-    if (body?.error) return { outcome: 'unsupported', detail: `Graph error ${body.error.code}: ${body.error.message}` };
-    if (!res.ok) return { outcome: 'no_data', detail: `HTTP ${res.status}` };
+    if (!res.ok) return { outcome: 'error', detail: `HTTP ${res.status} with no Graph error body — inconclusive.` };
     const n = body?.followers_count ?? body?.fan_count;
     if (typeof n !== 'number') return { outcome: 'no_data', detail: 'Page returned neither followers_count nor fan_count.' };
     return { outcome: 'ok', value: n, detail: `Page ${pageId} reports ${n} followers.` };
@@ -142,11 +198,13 @@ async function probeFacebookPostInsights(db: any, orgId: number, token: string):
     const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${post.platformPostId}/insights?metric=${metrics}&access_token=${encodeURIComponent(token)}`);
     const body = await res.json().catch(() => null) as
         { data?: { name: string; values?: { value: unknown }[] }[]; error?: { code?: number; message?: string } } | null;
-    if (res.status === 401 || res.status === 403 || body?.error?.code === 190) {
-        return { outcome: 'unauthorised', detail: `Graph rejected the token for post insights: ${body?.error?.message ?? `HTTP ${res.status}`}` };
+    // Error 100 — "one bad metric name kills the whole call" — is the case this probe exists to
+    // catch, and classifyGraphError is what tells it apart from a permission wall or a rate limit.
+    const classified = classifyGraphError(body?.error, metrics);
+    if (classified) return classified;
+    if (res.status === 401 || res.status === 403) {
+        return { outcome: 'unauthorised', detail: `Graph rejected the token for post insights (HTTP ${res.status}).` };
     }
-    // Error 100 is the "one bad metric name kills the whole call" case this probe exists to catch.
-    if (body?.error) return { outcome: 'unsupported', detail: `Graph error ${body.error.code}: ${body.error.message}` };
     const names = (body?.data ?? []).map(d => d.name);
     if (!names.length) return { outcome: 'no_data', detail: 'Graph returned no insight rows for the sampled post.' };
 
@@ -413,6 +471,10 @@ export default withLambda(async (event) => {
     // Actionable summary: the two states that mean the catalog and reality disagree.
     const shouldEnable = results.filter(r => !r.offered && r.outcome === 'ok').map(r => r.metricKey);
     const shouldDisable = results.filter(r => r.offered && (r.outcome === 'unsupported' || r.outcome === 'unauthorised')).map(r => r.metricKey);
+    // Reported separately so two empty action lists can't be misread as "everything checks out".
+    // An `error` is the absence of a verdict — a rate limit, a blip, an unrecognised Graph code —
+    // and the honest response to one is to re-run, not to conclude anything.
+    const inconclusive = results.filter(r => r.outcome === 'error').map(r => r.metricKey);
 
     return json(200, {
         organisationId: orgId,
@@ -421,9 +483,12 @@ export default withLambda(async (event) => {
         summary: {
             shouldEnable,
             shouldDisable,
+            inconclusive,
             note: shouldEnable.length || shouldDisable.length
                 ? 'Update `available` in src/config/goal-metrics.ts for the metrics listed above.'
-                : 'Catalog availability matches what the live APIs return.',
+                : inconclusive.length
+                    ? 'No catalog change indicated, but some probes were inconclusive — re-run before concluding anything about those.'
+                    : 'Catalog availability matches what the live APIs return.',
         },
     });
 });

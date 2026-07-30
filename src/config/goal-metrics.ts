@@ -280,14 +280,13 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         direction: 'increase',
         objective: 'awareness',
         description: 'Followers of your connected X account.',
-        // ⚠️ NOT OFFERED — and unlike LinkedIn this is a BILLING limit, not a permanent one.
-        // `/2/users/me?user.fields=public_metrics` is implemented in get-follower-counts.ts and
-        // returns 403 with the note 'API tier' on plans that don't include it. Whether OUR app's
-        // tier allows it cannot be settled by reading our own source, and shipping it as available
-        // on the assumption that it does is precisely the linkedin_followers mistake.
-        // Run goal-metric-selftest.ts against a connected X account: if it reports `ok`, flip this
-        // single flag to true — the poller case is already written.
-        available: false,
+        // VERIFIED against the live API on 2026-07-30 — goal-metric-selftest.ts, run on prod org 37
+        // with a connected X account, returned `ok` with a real follower count. That settled the one
+        // open question: `/2/users/me?user.fields=public_metrics` 403s on API tiers that don't
+        // include it, and whether OURS does could not be answered by reading our own source.
+        // It does. Shipped false until the probe said otherwise, which is the discipline
+        // linkedin_followers taught — re-run the selftest before changing this.
+        available: true,
         realism: { maxDailyDelta: 5000, maxDailyGrowthPct: 0.25 },
     },
 
