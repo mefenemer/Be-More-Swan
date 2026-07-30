@@ -23,6 +23,7 @@ import {
 import {
     headlineFromCaption, pickVariant, resolveCardPalette, headlineFontSize,
     renderBrandCard, normalizeCardLayout, MAX_HEADLINE_CHARS, DEFAULT_CARD_LAYOUT,
+    estimateWrappedLines,
 } from '../src/lib/brand-card';
 import { pickFaceUrl } from '../src/lib/brand-card-webfont';
 import { rotateSources, resolveMediaForPost } from '../src/utils/media-resolver';
@@ -179,6 +180,76 @@ test('longer headlines get smaller type, and sizes scale with the canvas', () =>
     assert.ok(headlineFontSize(20, 1080) > headlineFontSize(60, 1080));
     assert.ok(headlineFontSize(60, 1080) > headlineFontSize(MAX_HEADLINE_CHARS, 1080));
     assert.ok(headlineFontSize(40, 1920) > headlineFontSize(40, 1080));
+});
+
+// ── Wrapped-line estimate ─────────────────────────────────────────────────────────────────────
+// The headline box is sized from this count and drawn with justifyContent:center + overflow:hidden.
+// Under-counting therefore does not spill off the bottom — it clips the text at BOTH ends, eating
+// the first and last lines. A card shipped to production with "Stop adding tools to" cut off at the
+// top and "instead." cut off at the bottom, because the old estimate divided characters by
+// chars-per-line and ignored word boundaries.
+
+test('line estimate follows word boundaries, not character division', () => {
+    // The exact production case: 66 chars at 23 chars/line. Character packing says 3; greedy word
+    // wrap — what satori actually does — needs 4.
+    const headline = 'Stop adding tools to your stack. Hire someone to use them instead.';
+    assert.equal(Math.ceil(headline.length / 23), 3, 'guard: this is the estimate that was wrong');
+    assert.equal(estimateWrappedLines(headline, 23), 4,
+        'a headline whose words straddle the wrap point needs the line the character count denies it');
+});
+
+test('the estimate never under-counts a real greedy wrap', () => {
+    // Property check across widths and shapes: re-wrap the text the same way a renderer would and
+    // assert the estimate is never optimistic. Equality is the norm; being over is survivable
+    // (a slightly tall box), being under is what clips words away.
+    const samples = [
+        'Stop adding tools to your stack. Hire someone to use them instead.',
+        'One',
+        'Supercalifragilisticexpialidocious antidisestablishmentarianism',
+        'Short words in a long line that has to wrap somewhere sensible for once',
+        'Two\nparagraphs, each\nwrapping on their own',
+        'a b c d e f g h i j k l m n o p q r s t u v w x y z',
+    ];
+    for (const text of samples) {
+        for (const perLine of [8, 12, 17, 23, 40]) {
+            let actual = 0;
+            for (const para of text.split('\n')) {
+                const words = para.split(/\s+/).filter(Boolean);
+                if (!words.length) { actual += 1; continue; }
+                actual += 1;
+                let used = 0;
+                for (const w of words) {
+                    const cand = used === 0 ? w.length : used + 1 + w.length;
+                    if (cand <= perLine || used === 0) used = cand;
+                    else { actual += 1; used = w.length; }
+                }
+            }
+            assert.ok(estimateWrappedLines(text, perLine) >= actual,
+                `under-counted "${text.slice(0, 24)}…" at ${perLine}/line: said ${estimateWrappedLines(text, perLine)}, needs ${actual}`);
+        }
+    }
+});
+
+test('a headline always fits its box — every ratio, longest allowed text', () => {
+    // Shrink-to-fit is the renderer's job because satori has no such thing. The old code clamped the
+    // BOX to the safe area while the text kept its size, which is precisely how text ends up drawn
+    // outside the box it was measured for.
+    const worst = 'W'.repeat(0) + 'Supercalifragilistic expialidocious antidisestablishment '.repeat(4);
+    const headline = worst.slice(0, MAX_HEADLINE_CHARS).trim();
+    for (const [w, h] of [[1080, 1080], [1080, 1350], [1080, 1920], [1920, 1080]] as const) {
+        const pad = Math.round(w * 0.083);
+        const rail = w - pad * 2;
+        const maxHeight = h - pad * 2;
+        const minSize = Math.round(w * 0.03);
+        let size = headlineFontSize(headline.length, w);
+        let lines = estimateWrappedLines(headline, Math.max(1, Math.floor(rail / (size * 0.52))));
+        while (size > minSize && Math.round(lines * size * 1.14) > maxHeight) {
+            size = Math.max(minSize, Math.round(size * 0.94));
+            lines = estimateWrappedLines(headline, Math.max(1, Math.floor(rail / (size * 0.52))));
+        }
+        assert.ok(Math.round(lines * size * 1.14) <= maxHeight,
+            `a ${MAX_HEADLINE_CHARS}-char headline still overflows the safe area at ${w}x${h}`);
+    }
 });
 
 // ── Source rotation ───────────────────────────────────────────────────────────────────────────

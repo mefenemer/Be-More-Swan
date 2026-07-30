@@ -234,6 +234,43 @@ export function headlineFontSize(chars: number, canvasWidth: number): number {
     return Math.round(base * scale);
 }
 
+/**
+ * How many lines this text will occupy when wrapped at `perLine` characters.
+ *
+ * Simulates GREEDY WORD WRAP, which is what satori actually does. The previous estimate was
+ * `ceil(text.length / perLine)` — character packing with no regard for word boundaries — and it
+ * under-counts every time a word straddles the wrap point. That is not a rare edge: a 66-character
+ * headline at 23 chars/line estimated 3 lines and rendered 4.
+ *
+ * Under-counting is destructive rather than merely untidy, because the headline block is sized from
+ * this number and drawn with justifyContent:center + overflow:hidden — so a box one line short does
+ * not spill off the bottom, it clips the text at BOTH ends and eats the first and last lines.
+ *
+ * A word longer than `perLine` (a URL-ish product name) gets its own line and is left to the
+ * renderer's own overflow rule; counting the sub-lines it would break into would over-count far more
+ * often than that case occurs.
+ */
+export function estimateWrappedLines(text: string, perLine: number): number {
+    const width = Math.max(1, perLine);
+    let lines = 0;
+    for (const paragraph of text.split('\n')) {
+        const words = paragraph.split(/\s+/).filter(Boolean);
+        if (words.length === 0) { lines += 1; continue; }
+        lines += 1;
+        let used = 0;
+        for (const word of words) {
+            const candidate = used === 0 ? word.length : used + 1 + word.length;
+            if (candidate <= width || used === 0) {
+                used = candidate;
+            } else {
+                lines += 1;
+                used = word.length;
+            }
+        }
+    }
+    return lines;
+}
+
 /** Fetch a logo and inline it as a data URI. Returns null on any failure — the card falls back to
  *  the wordmark rather than failing, and a slow host must never hold a generation job open. */
 async function inlineLogo(url: string): Promise<string | null> {
@@ -423,11 +460,26 @@ export async function renderBrandCard(opts: {
     // The height is ESTIMATED, because satori only knows the true wrap after it lays the card out
     // and the box has to be decided before that. It only has to be self-consistent: the handle is
     // positioned from this same number, so the band the user grabs is the band the text occupies.
-    const headlineSize = headlineFontSize(headline.length, width);
     // ~0.52em average advance for this weight at display sizes — close enough to count wraps.
-    const perLine = Math.max(1, Math.floor(rail / (headlineSize * 0.52)));
-    const wrapped = headline.split('\n').reduce((n, line) => n + Math.max(1, Math.ceil(line.length / perLine)), 0);
-    const headlineHeight = Math.min(height - pad * 2, Math.round(wrapped * headlineSize * 1.14));
+    const charsPerLine = (size: number) => Math.max(1, Math.floor(rail / (size * 0.52)));
+    const blockHeight = (lines: number, size: number) => Math.round(lines * size * 1.14);
+
+    // Shrink to fit. satori has no such thing, so it is done here: pick the banded size, and while
+    // the wrapped block would be taller than the safe area, step down. Without this the height was
+    // simply CLAMPED to the safe area while the text kept its size — the overflow then clipped away
+    // the first and last lines (see estimateWrappedLines). Clamping hides the symptom; shrinking is
+    // the only thing that actually makes the words fit.
+    const maxHeadlineHeight = height - pad * 2;
+    const minHeadlineSize = Math.round(width * 0.03);
+    let headlineSize = headlineFontSize(headline.length, width);
+    let perLine = charsPerLine(headlineSize);
+    let wrapped = estimateWrappedLines(headline, perLine);
+    while (headlineSize > minHeadlineSize && blockHeight(wrapped, headlineSize) > maxHeadlineHeight) {
+        headlineSize = Math.max(minHeadlineSize, Math.round(headlineSize * 0.94));
+        perLine = charsPerLine(headlineSize);
+        wrapped = estimateWrappedLines(headline, perLine);
+    }
+    const headlineHeight = Math.min(maxHeadlineHeight, blockHeight(wrapped, headlineSize));
     // `free` is simply "has this ever been dragged": a drag writes both axes at once (see
     // _pceDragEnd), so a non-null x is the reliable marker that the reviewer placed this element
     // themselves — and therefore that the safe-area clamp should not overrule them.
