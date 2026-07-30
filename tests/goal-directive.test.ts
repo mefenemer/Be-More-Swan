@@ -14,7 +14,7 @@ import { buildGoalDirective, renderGoalDirective, goalPromptBlock, type Directiv
 import { renderBlueprintPrompt } from '../src/utils/blueprint-prompt';
 import {
     GOAL_METRICS, GOAL_AI_TIERS, DRAFTING_FOCUS, FUNNEL_DIAGNOSTICS,
-    pollCadenceHours, tierAllows, availableMetricsForRole, assessGoalRealism,
+    pollCadenceHours, tierAllows, availableMetricsForRole, assessGoalRealism, getGoalMetric,
 } from '../src/config/goal-metrics';
 
 const NOW = new Date('2026-07-30T12:00:00Z');
@@ -129,26 +129,75 @@ test('the action levers do not invite inventing a lead magnet, and forbid invent
     // The advisory playbook says "lead-magnet promotion". With no lead magnet the model invents one,
     // and content-quality.ts's anti-fabrication rule covers invented STATISTICS only.
     //
-    // Asserted against DRAFTING_FOCUS directly rather than through a goal, because the 'action'
-    // objective is currently UNREACHABLE — no catalog metric maps to it (see the test below), so no
-    // goal can carry it. These levers are staged for when a traffic metric lands.
+    // Asserted against DRAFTING_FOCUS directly as well as through a goal (see the search_clicks test
+    // below), so the levers stay pinned even if the offered action metrics change again.
     const levers = DRAFTING_FOCUS.action.join(' ');
     assert.doesNotMatch(levers, /lead magnet|lead-magnet/i);
     assert.match(levers, /never invent an offer, guide, discount or download/i);
 });
 
-test('KNOWN GAP — "Drive Traffic (Action)" has no measurable metric, so it can never be chosen', () => {
-    // GOAL_OBJECTIVES advertises action, and assistant-detail.html has a placeholder <option> for it,
-    // but zero metrics carry objective:'action' — there is no link-clicks or profile-visits metric in
-    // the catalog. objectivesWithMetrics() therefore filters it out and the dropdown never shows it,
-    // so an SMM user cannot set a traffic goal at all. This test DOCUMENTS the gap rather than
-    // asserting it is fine: when a traffic metric is added, this test should start failing and be
-    // replaced by a real coverage assertion.
-    assert.equal(GOAL_METRICS.filter(m => m.objective === 'action').length, 0,
-        'a traffic metric now exists — delete this test and assert real action coverage instead');
-    // The levers are nonetheless written and reviewed, so nothing has to be invented under time
-    // pressure the day a metric lands.
-    assert.ok(DRAFTING_FOCUS.action.length > 0);
+// ── "Drive Traffic (Action)" coverage ──────────────────────────────────────────
+// This replaces a test that asserted the action objective had ZERO metrics and was written to fail
+// the day one landed. It has landed: `search_clicks`.
+
+test('the action objective is reachable — it has at least one OFFERED metric', () => {
+    const action = GOAL_METRICS.filter(m => m.objective === 'action');
+    assert.ok(action.length > 0, 'action must have metrics or the objective is unreachable');
+    // Being in the catalog is not enough: objectivesWithMetrics() filters on availability, so an
+    // action objective whose only metrics are available:false is still unreachable in the UI.
+    assert.ok(action.some(m => m.available), 'at least one action metric must be available');
+});
+
+test('search_clicks is the offered traffic metric, gated on the Search Console integration', () => {
+    const m = getGoalMetric('search_clicks')!;
+    assert.equal(m.objective, 'action');
+    assert.equal(m.available, true);
+    assert.equal(m.source, 'connection');
+    // Must match workspace_integrations.provider exactly, or connection-gating silently never matches.
+    assert.equal(m.connectionService, 'searchconsole');
+    assert.equal(m.direction, 'increase');
+    assert.ok(m.realism, 'a traffic metric needs an attainability guardrail');
+});
+
+test('search_clicks reaches the roles that own a Search Console connection, and no others', () => {
+    // connection-map.ts gives search_console to blog_writer and seo_content_strategist only.
+    for (const role of ['blog_writer', 'seo_content_strategist']) {
+        assert.ok(availableMetricsForRole(role, ['searchconsole']).some(m => m.key === 'search_clicks'),
+            `${role} should be offered search_clicks`);
+    }
+    // A social assistant must NOT see it: GSC measures SEARCH traffic, so attributing those clicks to
+    // a Social Media Manager would credit the wrong assistant.
+    assert.ok(!availableMetricsForRole('social_media_manager', ['searchconsole']).some(m => m.key === 'search_clicks'));
+    // And it stays hidden until the integration is actually connected.
+    assert.ok(!availableMetricsForRole('blog_writer', []).some(m => m.key === 'search_clicks'));
+});
+
+test('an action goal now renders, with the traffic drafting levers', () => {
+    const out = goalPromptBlock([goal({ metricKey: 'search_clicks', targetValue: 2000, latestValue: 800 })], NOW);
+    assert.match(out, /Search Clicks/);
+    assert.match(out, /bottom of funnel \(Traffic \/ Action\)/);
+    assert.match(out, /ONE unambiguous call to action/i);
+    // The reviewed anti-invention lever must travel with it.
+    assert.match(out, /never invent an offer, guide, discount or download/i);
+});
+
+test('instagram_profile_views exists but is NOT offered until verified against the live API', () => {
+    // The natural SMM traffic metric. Its poller is implemented, but no call in this codebase has
+    // ever hit account-level Instagram insights, and Meta renames those metrics between versions.
+    // Shipping it as available on that assumption is precisely the linkedin_followers mistake.
+    const m = getGoalMetric('instagram_profile_views')!;
+    assert.equal(m.objective, 'action');
+    assert.equal(m.available, false, 'must stay false until goal-metric-selftest.ts confirms it');
+    assert.ok(!availableMetricsForRole('social_media_manager', ['instagram']).some(m2 => m2.key === 'instagram_profile_views'));
+});
+
+test('KNOWN GAP — a Social Media Manager still has no offered action metric', () => {
+    // Honest statement of what is NOT yet solved. search_clicks fixes the objective for the content
+    // roles; SMM stays uncovered until instagram_profile_views is verified and switched on. When that
+    // happens this test fails deliberately — delete it then.
+    const smm = availableMetricsForRole('social_media_manager', ['instagram', 'linkedin', 'searchconsole']);
+    assert.equal(smm.filter(m => m.objective === 'action').length, 0,
+        'SMM now has an action metric — remove this test, the gap is closed');
 });
 
 test('an outcome goal gets drafting levers, not operations advice aimed at the user', () => {

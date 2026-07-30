@@ -23,6 +23,8 @@ import { getSecret } from '../../src/utils/vault';
 import { connectionDisplayName, getGoalMetric, pollCadenceHours, RUN_RATE_THRESHOLDS } from '../../src/config/goal-metrics';
 import { computeGoalProgress } from '../../src/utils/goal-progress';
 import { assembleBlueprint } from '../../src/utils/blueprint';
+import { getFreshAccessToken } from '../../src/utils/workspace-integrations';
+import { gscDateRange } from '../../src/utils/gsc-decay';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const GRAPH_VERSION = 'v19.0';
@@ -112,6 +114,106 @@ async function fetchLinkedInFollowers(db: any, conn: LiConn): Promise<FetchResul
     return { value: typeof net.body?.firstDegreeSize === 'number' ? net.body.firstDegreeSize : null, disconnected: false };
 }
 
+// ── Search Console clicks (the 'action' / traffic metric) ───────────────────────
+// Deliberately mirrors ingest-gsc-metrics.ts: same endpoint, same auth helper, same date window.
+// That function runs daily in production and reads `impressions` out of this response; `clicks` is
+// returned by the very same call for every row, so this adds no new API surface, scope or version
+// risk. Site-wide (no page filter) because a traffic GOAL is about the whole property, whereas the
+// decay detector asks about one post at a time.
+const GSC_LOOKBACK_DAYS = Number(process.env.GSC_LOOKBACK_DAYS || 28);
+const GSC_LAG_DAYS = Number(process.env.GSC_LAG_DAYS || 3);   // GSC data trails ~2-3 days
+// Cap the properties queried per goal. This poller is an hourly cron with NO overall time budget
+// (pre-existing — instagram_followers and linkedin_followers already make live calls), and search
+// clicks cost 1 + N requests rather than 1. Most workspaces verify one or two properties, so a cap
+// bounds the worst case without changing normal behaviour. Properties are sorted for determinism so
+// the same subset is measured on every poll — a goal whose baseline came from a different set of
+// properties each hour would produce meaningless run-rate arithmetic.
+const GSC_MAX_PROPERTIES = Number(process.env.GSC_MAX_PROPERTIES || 5);
+
+async function fetchSearchClicks(db: any, goal: any): Promise<FetchResult> {
+    let token: string;
+    try {
+        ({ accessToken: token } = await getFreshAccessToken(db, goal.organisationId, 'searchconsole'));
+    } catch {
+        // No connection, or the token could not be refreshed → treat as disconnected so a stale goal
+        // eventually flips to data_disconnected and tells the user to reconnect.
+        return { value: null, disconnected: true };
+    }
+
+    const sites = await fetch('https://www.googleapis.com/webmasters/v3/sites', {
+        headers: { Authorization: `Bearer ${token}` },
+    });
+    if (sites.status === 401 || sites.status === 403) return { value: null, disconnected: true };
+    if (!sites.ok) return { value: null, disconnected: false };
+
+    const siteData = (await sites.json().catch(() => ({}))) as {
+        siteEntry?: { siteUrl?: string; permissionLevel?: string }[];
+    };
+    const properties = (siteData.siteEntry ?? [])
+        .filter(s => s.siteUrl && s.permissionLevel && s.permissionLevel !== 'siteUnverifiedUser')
+        .map(s => s.siteUrl!)
+        .sort()                              // deterministic — see GSC_MAX_PROPERTIES
+        .slice(0, GSC_MAX_PROPERTIES);
+    // Verified access but no usable property is a real answer (0), not a failure — otherwise the goal
+    // would sit 'pending' forever with no explanation.
+    if (properties.length === 0) return { value: 0, disconnected: false };
+
+    const range = gscDateRange(GSC_LOOKBACK_DAYS, GSC_LAG_DAYS);
+    let total = 0;
+    let anySucceeded = false;
+
+    for (const property of properties) {
+        const res = await fetch(
+            `https://www.googleapis.com/webmasters/v3/sites/${encodeURIComponent(property)}/searchAnalytics/query`,
+            {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                // No dimensions → one summary row for the whole property in the window.
+                body: JSON.stringify({ startDate: range.startDate, endDate: range.endDate, rowLimit: 1 }),
+            },
+        );
+        if (res.status === 401 || res.status === 403) return { value: null, disconnected: true };
+        if (!res.ok) continue;                    // one bad property must not void the others
+        const data = (await res.json().catch(() => ({}))) as { rows?: { clicks?: number }[] };
+        total += Math.round(data.rows?.[0]?.clicks ?? 0);
+        anySucceeded = true;
+    }
+
+    // Every property errored → report nothing rather than a misleading 0.
+    return anySucceeded ? { value: total, disconnected: false } : { value: null, disconnected: false };
+}
+
+// ── Instagram account-level insights (profile visits) ───────────────────────────
+// Candidate metric names, tried in order until one returns data. Meta renames these: `impressions`
+// became `views`, and `website_clicks` appears to have given way to `profile_links_taps`. Requesting
+// several names in ONE call is not an option — Graph rejects the whole request (error 100) if any
+// single metric name is invalid — so each is attempted separately.
+//
+// This is why `instagram_profile_views` ships `available: false`. The chain below degrades safely,
+// but "degrades safely" is exactly how linkedin_followers looked before it turned out to be
+// permanently unmeasurable. Verify with goal-metric-selftest.ts before flipping the flag.
+const IG_PROFILE_VIEW_METRICS = ['profile_views'] as const;
+
+async function fetchIgProfileViews(igUserId: string, token: string): Promise<FetchResult> {
+    const range = gscDateRange(30, 1);   // same day-window helper; GSC-agnostic date arithmetic
+    for (const metric of IG_PROFILE_VIEW_METRICS) {
+        const url = `https://graph.facebook.com/${GRAPH_VERSION}/${igUserId}/insights`
+            + `?metric=${metric}&period=day&since=${range.startDate}&until=${range.endDate}`
+            + `&access_token=${encodeURIComponent(token)}`;
+        const res = await fetch(url);
+        if (res.status === 401 || res.status === 403) return { value: null, disconnected: true };
+        if (!res.ok) continue;                    // invalid/deprecated metric name → try the next
+        const body = await res.json().catch(() => null) as
+            { data?: { name?: string; values?: { value?: number }[] }[] } | null;
+        const series = body?.data?.[0]?.values;
+        if (!Array.isArray(series)) continue;
+        // period=day returns one point per day; a 30-day total is the comparable figure.
+        const total = series.reduce((sum, p) => sum + (typeof p?.value === 'number' ? p.value : 0), 0);
+        return { value: total, disconnected: false };
+    }
+    return { value: null, disconnected: false };
+}
+
 /**
  * Count of this assistant's records of a given type (optionally status-filtered) — the measurement
  * behind the non-social role outcome metrics (Leads Scored, Tickets Resolved, …). Always org- AND
@@ -168,6 +270,16 @@ async function fetchMetric(
         case 'linkedin_followers': {
             if (!conns.li) return { value: null, disconnected: true };
             return fetchLinkedInFollowers(db, conns.li);
+        }
+        case 'search_clicks': {
+            return fetchSearchClicks(db, goal);
+        }
+        case 'instagram_profile_views': {
+            if (!igConn?.externalUserId || !igConn.vaultRefKey) return { value: null, disconnected: true };
+            const secret = await getSecret(db, igConn.vaultRefKey);
+            const token = (secret?.token as string | undefined) ?? null;
+            if (!token) return { value: null, disconnected: true };
+            return fetchIgProfileViews(igConn.externalUserId, token);
         }
         case 'qualified_leads': {
             // "Qualified" = leads that progressed to a won/converted state for this workspace.

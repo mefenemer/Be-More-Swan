@@ -160,6 +160,58 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         realism: { maxDailyDelta: 50 },
     },
 
+    // ── Traffic / Action ────────────────────────────────────────────────────────
+    // The 'action' objective had ZERO metrics, so "Drive Traffic (Action)" was advertised in
+    // GOAL_OBJECTIVES, filtered out by objectivesWithMetrics(), and unreachable — nobody could set a
+    // traffic goal at all.
+    {
+        key: 'search_clicks',
+        label: 'Search Clicks',
+        unit: 'clicks',
+        source: 'connection',
+        // Google Search Console lives in workspace_integrations (provider 'searchconsole'), not in
+        // system_connections. manage-goals' connectedServices() unions both, so this gates correctly.
+        connectionService: 'searchconsole',
+        direction: 'increase',
+        objective: 'action',
+        roles: ['blog_writer', 'seo_content_strategist'],
+        description: 'Clicks to your site from Google search results over the last 28 days.',
+        // MEASURABLE TODAY, and verifiably so — this is not a new API surface. ingest-gsc-metrics.ts
+        // already queries searchAnalytics/query daily in production and reads `impressions` from the
+        // response; `clicks` is returned by that SAME call, for every row, with no extra scope and no
+        // API-version risk. The poller reuses the identical request shape.
+        available: true,
+        // Search traffic compounds slowly; keep the ceiling generous but bounded.
+        realism: { maxDailyDelta: 20000, maxDailyGrowthPct: 0.5 },
+    },
+    {
+        key: 'instagram_profile_views',
+        label: 'Instagram Profile Visits',
+        unit: 'visits',
+        source: 'connection',
+        connectionService: 'instagram',
+        direction: 'increase',
+        objective: 'action',
+        description: 'Times people opened your Instagram profile — the step before they click through.',
+        // ⚠️ NOT YET VERIFIED AGAINST THE LIVE API, so deliberately NOT offered.
+        //
+        // This is the natural traffic metric for a Social Media Manager, and the poller for it is
+        // implemented and ready. What is missing is evidence: it needs an account-level Graph call
+        // (`{ig-user-id}/insights`) that this codebase has never made — every existing Instagram read
+        // is either media-level insights or the `followers_count` field. Meta has churned these
+        // account metrics repeatedly (`impressions` was replaced by `views`; `website_clicks` appears
+        // to have given way to `profile_links_taps`), and which names a given Graph version accepts
+        // cannot be settled by reading our own source.
+        //
+        // We have been here before: `linkedin_followers` shipped `available: true` on the assumption
+        // that a written poller meant a working one, and users set goals that could never move.
+        // So: run `netlify/functions/goal-metric-selftest.ts` against a real connected account. It
+        // reports exactly which metric names return data. If profile views come back, flip this single
+        // flag to true — nothing else needs to change.
+        available: false,
+        realism: { maxDailyDelta: 100000, maxDailyGrowthPct: 0.5 },
+    },
+
     // ── Non-social role outcomes (objective: 'outcome') ─────────────────────────
     // Counted from assistant_records (db/schema.ts) — the local database each Data Hub role
     // builds as it works. See poll-goal-telemetry.ts for the measurement queries.

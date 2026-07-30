@@ -18,7 +18,7 @@
 import { Handler } from '@netlify/functions';
 import { and, eq, desc, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { goals, aiAssistants, masterAssistants, systemConnections } from '../../db/schema';
+import { goals, aiAssistants, masterAssistants, systemConnections, workspaceIntegrations } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { normalizeMediaSources } from '../../src/utils/media-sources';
@@ -113,7 +113,24 @@ async function connectedServices(db: any, orgId: number): Promise<string[]> {
             eq(systemConnections.status, 'active'),
             eq(systemConnections.isActive, true),
         ));
-    return rows.map((r: any) => String(r.serviceName).toLowerCase());
+
+    // Connections live in TWO tables. Social accounts (instagram, linkedin, x…) are rows in
+    // system_connections; everything OAuthed through the integrations directory — Search Console,
+    // HubSpot, Xero, Gmail… — is a workspace_integrations row keyed by `provider`. Gating only on
+    // system_connections meant a metric backed by an integration could never become available no
+    // matter what the user connected, which is why `search_clicks` needs this union.
+    const integrations = await db
+        .selectDistinct({ provider: workspaceIntegrations.provider })
+        .from(workspaceIntegrations)
+        .where(and(
+            eq(workspaceIntegrations.organisationId, orgId),
+            eq(workspaceIntegrations.status, 'active'),
+        ));
+
+    return [
+        ...rows.map((r: any) => String(r.serviceName).toLowerCase()),
+        ...integrations.map((r: any) => String(r.provider).toLowerCase()),
+    ];
 }
 
 /** Verify the assistant exists and belongs to the caller's org. */
