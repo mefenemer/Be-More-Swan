@@ -2,19 +2,6 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "component-harness-goals",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": [
-        "-m",
-        "http.server",
-        "4221",
-        "--directory",
-        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/23bef4df-5a5d-4876-8d32-da9d4cda506e/scratchpad/goalharness"
-      ],
-      "port": 4221,
-      "autoPort": false
-    },
-    {
       "name": "component-harness-perf-metrics",
       "runtimeExecutable": "npx",
       "runtimeArgs": [

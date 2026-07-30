@@ -247,6 +247,53 @@
       plain: "Goals that are clear enough to actually hit — Specific, Measurable, with a deadline. “Grow my following” is a wish; “reach 1,000 followers by August” is a SMART goal your assistant can aim at.",
       example: 'e.g. "Get 30 discovery-call bookings by the end of Q3."'
     },
+
+    /* ── The Goal Builder fields ──────────────────────────────────────────
+       One entry per field on the Add New Goal form. Each names the letter of
+       SMART it earns, because the form only deserves the name if every letter
+       is actually carried by something the user fills in:
+         S — Goal Name + Why does this matter
+         M — Target Metric + Target Value
+         A — Target Value, checked against the Target Date
+         R — Objective + Why does this matter
+         T — Target Date
+       -------------------------------------------------------------------- */
+    'goal-name': {
+      term: 'Goal Name',
+      emoji: '🏷️',
+      plain: "A short label so you can tell your goals apart at a glance. Write it the way you'd say it out loud to a colleague — what you're going after, and ideally who for. This is the “Specific” in SMART, and it's a useful smell test: if the name comes out vague, the goal underneath it usually is too.",
+      example: 'e.g. "Reach wholesale buyers before the Q4 launch" — rather than "More followers".'
+    },
+    'goal-objective': {
+      term: 'Objective',
+      emoji: '🧭',
+      plain: "What job this goal is doing — growing your audience, getting more interaction, or driving traffic. Pick one and we'll only offer you metrics that genuinely measure it. It also changes how your assistant writes: each objective has its own set of tactics, so an audience-growth goal and an interaction goal produce different posts. This is the “Relevant” in SMART.",
+      example: 'e.g. Choose "Grow my Audience" and you\'ll be offered followers and reach — not engagement rate, which measures something else.'
+    },
+    'goal-metric': {
+      term: 'Target Metric',
+      emoji: '📊',
+      plain: "The exact number we track for you, pulled automatically from your connected accounts — no spreadsheets, no manual updates. This is the “Measurable” in SMART. If a metric you want isn't in the list, it's either waiting on a connection or it's something we can't read honestly yet — and we'd rather not let you set a goal that could never move.",
+      example: 'e.g. "Instagram Followers" refreshes itself from the Instagram account you connected on the Connections tab.'
+    },
+    'goal-target-value': {
+      term: 'Target Value',
+      emoji: '🎯',
+      plain: "The number you want to reach — the total, not the increase. We check it against your deadline and only block the genuinely impossible, so ambitious is welcome; “a million by Friday” isn't. This is the “Achievable” in SMART, and if we do push back we'll suggest a figure that would work.",
+      example: 'e.g. On 8,400 followers and aiming for 20,000? Enter 20000 — not 11600.'
+    },
+    'goal-target-date': {
+      term: 'Target Date',
+      emoji: '📅',
+      plain: "Your deadline — the “Time-bound” in SMART, and the thing that makes progress meaningful. We compare the pace you'd need to hit it against the pace you're actually managing, so you hear “At Risk” with weeks to spare instead of finding out on the last day.",
+      example: 'e.g. Tie it to something real — a launch date, the end of the quarter, a trade show.'
+    },
+    'goal-why': {
+      term: 'Why does this matter?',
+      emoji: '💡',
+      plain: "The most valuable box on this form. Your assistant reads it every single time it drafts, and uses it to pick topics, angles and calls to action. On its own, “reach 20,000 followers” tells it nothing useful — the reason behind the number tells it almost everything. Sharpens both the “Specific” and the “Relevant” in SMART.",
+      example: 'e.g. "We\'re launching a wholesale range in Q4 and need independent retailers to find us. Most of our followers are direct consumers, so we need content aimed at buyers."'
+    },
     'review-queue': {
       term: 'Review',
       emoji: '✅',

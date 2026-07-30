@@ -1627,17 +1627,32 @@
 
       <!-- Add New Goal builder (AC1.1.1 / AC1.1.2) — hidden until "Add New Goal" -->
       <div id="goal-builder" class="hidden mt-5 border border-emerald-100 bg-emerald-50/40 rounded-xl p-5">
+        <!-- Why this form has these six fields and not others: each one carries a letter of SMART.
+             The per-field "i" icons (explainers.js, data-explain=…) name the letter they earn and give
+             a worked example. Kept as a visible strip too, so the reasoning is on screen rather than
+             hidden behind six separate hovers. -->
+        <div class="mb-5 pb-4 border-b border-emerald-100">
+          <p class="text-sm font-bold text-gray-700" data-explain="smart-goals">Every field below makes this goal SMART</p>
+          <p class="text-xs text-gray-500 mt-1 leading-relaxed">
+            <span class="font-bold text-emerald-700">S</span>pecific (name &amp; why) ·
+            <span class="font-bold text-emerald-700">M</span>easurable (metric &amp; value) ·
+            <span class="font-bold text-emerald-700">A</span>chievable (we check the value against your date) ·
+            <span class="font-bold text-emerald-700">R</span>elevant (objective &amp; why) ·
+            <span class="font-bold text-emerald-700">T</span>ime-bound (target date).
+            Hover any <span class="font-bold">i</span> for what to enter and an example.
+          </p>
+        </div>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <!-- SMART "Specific" — the name and the why. The rationale is the single most useful thing
                we hand the content model: it turns "reach 20,000 followers" into a brief it can act on. -->
           <div class="sm:col-span-3">
-            <label for="goal-title" class="block text-sm font-bold text-gray-700 mb-1">Goal Name</label>
+            <label for="goal-title" data-explain="goal-name" class="block text-sm font-bold text-gray-700 mb-1">Goal Name</label>
             <input id="goal-title" type="text" maxlength="120" placeholder="e.g. Reach wholesale buyers before the Q4 launch"
               class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
             <p class="text-xs text-gray-400 mt-1">A short name so you can tell your goals apart at a glance.</p>
           </div>
           <div class="sm:col-span-3">
-            <label for="goal-objective" class="block text-sm font-bold text-gray-700 mb-1">Objective</label>
+            <label for="goal-objective" data-explain="goal-objective" class="block text-sm font-bold text-gray-700 mb-1">Objective</label>
             <select id="goal-objective" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
               <option value="">Select an objective…</option>
               <option value="awareness">Grow my Audience (Awareness)</option>
@@ -1647,19 +1662,19 @@
             <p class="text-xs text-gray-400 mt-1">Choose what this goal is for — we'll show the metrics that measure it.</p>
           </div>
           <div class="sm:col-span-3">
-            <label for="goal-metric" class="block text-sm font-bold text-gray-700 mb-1">Target Metric</label>
+            <label for="goal-metric" data-explain="goal-metric" class="block text-sm font-bold text-gray-700 mb-1">Target Metric</label>
             <select id="goal-metric" disabled class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition disabled:bg-gray-50 disabled:text-gray-400">
               <option value="">Select an objective first…</option>
             </select>
             <p id="goal-metric-help" class="text-xs text-gray-400 mt-1"></p>
           </div>
           <div>
-            <label for="goal-target" class="block text-sm font-bold text-gray-700 mb-1">Target Value</label>
+            <label for="goal-target" data-explain="goal-target-value" class="block text-sm font-bold text-gray-700 mb-1">Target Value</label>
             <input id="goal-target" type="number" min="1" step="any" placeholder="e.g. 20000"
               class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
           </div>
           <div>
-            <label for="goal-date" class="block text-sm font-bold text-gray-700 mb-1">Target Date</label>
+            <label for="goal-date" data-explain="goal-target-date" class="block text-sm font-bold text-gray-700 mb-1">Target Date</label>
             <input id="goal-date" type="date"
               class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
           </div>
@@ -1670,7 +1685,7 @@
             </label>
           </div>
           <div class="sm:col-span-3">
-            <label for="goal-rationale" class="block text-sm font-bold text-gray-700 mb-1">
+            <label for="goal-rationale" data-explain="goal-why" class="block text-sm font-bold text-gray-700 mb-1">
               Why does this matter?
               <span class="font-normal text-emerald-700">— this steers what your assistant writes</span>
             </label>

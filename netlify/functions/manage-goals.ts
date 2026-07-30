@@ -58,6 +58,35 @@ function optionalText(v: unknown, max: number): string | null | undefined {
 }
 
 /**
+ * The best-known current value of a metric for this assistant, for the attainability check.
+ *
+ * WHY THIS MATTERS: `assessGoalRealism` treats a missing baseline as 0, which makes it measure the
+ * wrong distance — it checks "can you reach the whole target from nothing", not "can you close the
+ * remaining gap". That is usually harmlessly lenient, but it misfires badly at the top end: an
+ * account on 19,000 followers asking for 20,000 by tomorrow needs +1,000, yet with no baseline the
+ * check computes 20,000/day, blocks the goal, and tells the user their target "needs about 20,000
+ * followers per day" — a figure that is simply wrong.
+ *
+ * A goal on this metric that has already been polled carries the value on `latestValue`, so reuse it.
+ * Returns null when nothing is known (a genuinely first goal), which is the documented conservative
+ * case. Scoped by organisation AND assistant.
+ */
+async function knownBaseline(db: any, assistantId: number, orgId: number, metricKey: string): Promise<number | null> {
+    const [row] = await db.select({ latestValue: goals.latestValue })
+        .from(goals)
+        .where(and(
+            eq(goals.assistantId, assistantId),
+            eq(goals.organisationId, orgId),
+            eq(goals.metricKey, metricKey),
+            sql`${goals.latestValue} IS NOT NULL`,
+        ))
+        .orderBy(desc(goals.updatedAt))
+        .limit(1);
+    const v = row?.latestValue;
+    return v != null && Number.isFinite(Number(v)) ? Number(v) : null;
+}
+
+/**
  * Recompile the blueprint so a goal change reaches the next generated post (section 12).
  *
  * Best-effort by design — same rationale as content-rules.ts: this is data assembly with no LLM
@@ -198,18 +227,23 @@ export default withLambda(async (event) => {
             return json(400, { error: 'targetDate must be a valid future date.' });
         }
 
+        if (!(await assertOwnedAssistant(db, Number(assistantId), orgId))) {
+            return json(404, { error: 'Assistant not found.' });
+        }
+
         // Attainability guard — reject clearly-impossible targets (e.g. +10M followers in a day).
-        const realism = assessGoalRealism({ metricKey, targetValue: target, targetDate: when });
+        // Runs AFTER the ownership check so the baseline lookup below can only ever read this org's
+        // own rows.
+        const realism = assessGoalRealism({
+            metricKey, targetValue: target, targetDate: when,
+            baseline: await knownBaseline(db, Number(assistantId), orgId, metricKey),
+        });
         if (!realism.ok) {
             return json(422, {
                 error: [realism.reason, realism.suggestion].filter(Boolean).join(' '),
                 code: 'GOAL_UNREALISTIC',
                 attainableTarget: realism.attainableTarget,
             });
-        }
-
-        if (!(await assertOwnedAssistant(db, Number(assistantId), orgId))) {
-            return json(404, { error: 'Assistant not found.' });
         }
 
         // The metric must belong to this assistant's role — stops a client from setting an
@@ -309,7 +343,14 @@ export default withLambda(async (event) => {
         if (targetValue !== undefined || targetDate !== undefined) {
             const effectiveTarget = updates.targetValue !== undefined ? Number(updates.targetValue) : Number(existing.targetValue);
             const effectiveDate = updates.targetDate !== undefined ? updates.targetDate : existing.targetDate;
-            const realism = assessGoalRealism({ metricKey: existing.metricKey, targetValue: effectiveTarget, targetDate: effectiveDate });
+            // Baseline is right here on the row — pass it, or the check measures the wrong distance.
+            const baseline = existing.latestValue ?? existing.startValue;
+            const realism = assessGoalRealism({
+                metricKey: existing.metricKey,
+                targetValue: effectiveTarget,
+                targetDate: effectiveDate,
+                baseline: baseline != null ? Number(baseline) : null,
+            });
             if (!realism.ok) {
                 return json(422, {
                     error: [realism.reason, realism.suggestion].filter(Boolean).join(' '),

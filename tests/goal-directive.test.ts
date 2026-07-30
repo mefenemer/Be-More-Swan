@@ -14,7 +14,7 @@ import { buildGoalDirective, renderGoalDirective, goalPromptBlock, type Directiv
 import { renderBlueprintPrompt } from '../src/utils/blueprint-prompt';
 import {
     GOAL_METRICS, GOAL_AI_TIERS, DRAFTING_FOCUS, FUNNEL_DIAGNOSTICS,
-    pollCadenceHours, tierAllows, availableMetricsForRole,
+    pollCadenceHours, tierAllows, availableMetricsForRole, assessGoalRealism,
 } from '../src/config/goal-metrics';
 
 const NOW = new Date('2026-07-30T12:00:00Z');
@@ -285,6 +285,46 @@ test('unavailable metrics are never offered to a user', () => {
     assert.ok(!offered.some(m => m.key === 'linkedin_followers'), 'an unmeasurable metric must not be offered');
     // ...but the connected, measurable ones still are.
     assert.ok(offered.some(m => m.key === 'instagram_followers'));
+});
+
+// ── Attainability: the "A" in SMART depends on passing a baseline ──────────────
+// The Goal Builder now tells users "Achievable — we check the value against your date", so the check
+// has to measure the right distance. assessGoalRealism treats a missing baseline as 0, which asks
+// "can you reach the target from nothing" instead of "can you close the gap".
+
+test('a near-target goal on a tight deadline passes WITH a baseline and misfires without one', () => {
+    const args = { metricKey: 'instagram_followers', targetValue: 20000, targetDate: new Date('2026-07-31T12:00:00Z'), now: NOW };
+
+    // 19,000 → 20,000 by tomorrow is +1,000 in a day. Well inside the 5,000/day ceiling.
+    const withBaseline = assessGoalRealism({ ...args, baseline: 19000 });
+    assert.equal(withBaseline.ok, true, 'closing a 1,000-follower gap in a day must be allowed');
+
+    // Without a baseline the same goal is rejected, and the reason quotes a nonsense figure.
+    const withoutBaseline = assessGoalRealism(args);
+    assert.equal(withoutBaseline.ok, false);
+    assert.match(withoutBaseline.reason!, /20,000 followers per day/,
+        'documents the misleading message a missing baseline produces');
+});
+
+test('a baseline does not let a genuinely impossible target through', () => {
+    const verdict = assessGoalRealism({
+        metricKey: 'instagram_followers',
+        targetValue: 10_000_000,
+        targetDate: new Date('2026-07-31T12:00:00Z'),
+        baseline: 19000,
+        now: NOW,
+    });
+    assert.equal(verdict.ok, false);
+    assert.ok(verdict.attainableTarget! < 10_000_000, 'and it suggests something reachable instead');
+});
+
+test('a percentage metric is still capped regardless of baseline', () => {
+    const verdict = assessGoalRealism({
+        metricKey: 'instagram_engagement_rate', targetValue: 150,
+        targetDate: new Date('2026-12-01T00:00:00Z'), baseline: 3, now: NOW,
+    });
+    assert.equal(verdict.ok, false);
+    assert.equal(verdict.attainableTarget, 100);
 });
 
 // ── Tier gating (the inverted-plan-keys trap) ──────────────────────────────────
