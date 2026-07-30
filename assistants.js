@@ -118,8 +118,9 @@ window._resolveAssistantBadge = function(data, opSignals) {
  * Nothing caps goals per assistant, so any layout with a row per goal is a layout that breaks at
  * six. The card also sits in a 2-up grid already carrying a status pill, a metrics strip, quick
  * actions and a footer. So: one headline goal drawn properly (the server picks it — see
- * src/utils/goal-summary.ts, so this card and the detail header can never disagree), and everything
- * else collapsed into counts. The full list lives on the Goals tab, one click away.
+ * src/utils/goal-summary.ts, which is also what orders the detail page's Goal Progress card, so the
+ * two can never disagree on which goal leads), and everything else collapsed into counts. The full
+ * list lives on the Goals tab, one click away.
  *
  * ── Why two separate rows of counts ──────────────────────────────────────────────────────
  * On track / at risk / off track are performance verdicts and get colour. `awaiting_update` and
@@ -4917,15 +4918,9 @@ function _setMetricsEmptyState(mode) {
         if (note) note.textContent = '';
     }
 
-    // Only offer the jump if the tab is actually on this page and the app exposes the switcher.
-    // Offered on 'pending' too, so the button doesn't pop in and shift the panel a second later.
-    const link = document.getElementById('metrics-empty-review-link');
-    const hasReviewTab = !!document.querySelector('.main-tab-btn[data-maintab="review-queue"]');
-    if (link) {
-        const show = (mode === 'no-data' || mode === 'pending') && hasReviewTab && typeof window._activateMainTab === 'function';
-        link.classList.toggle('hidden', !show);
-        if (show) link.onclick = () => window._activateMainTab('review-queue');
-    }
+    // The "Open Review Queue" button that used to be wired up here is gone (2026-07-30) — it did
+    // not work, and the panel reads fine as pure explanation. Don't reinstate it without a target
+    // that actually resolves; the review queue was never a route to performance data anyway.
 }
 
 async function _loadAssistantMetrics(assistantId) {
@@ -5420,7 +5415,7 @@ window._confirmCopyRules = async function () {
 const GOALS_API = '/.netlify/functions/manage-goals';
 let _goalsAssistantId = null;
 let _goalMetrics = [];   // available metric catalog entries for this workspace (AC1.1.3)
-let _goalsCache = [];    // last-loaded goals for this assistant (for the header bar + review modal)
+let _goalsCache = [];    // last-loaded goals for this assistant (Goals tab, Goal Progress card, review modal)
 let _goalsLoadFailed = false; // last fetch errored — the Overview card must not call that "no goals"
 let _goalHeadlineId = null;  // server's pick of which goal represents this assistant (goal-summary.ts)
 let _goalEntitlements = { aiRecommendations: false, magicWand: false, autonomous: false }; // Feature 3 tier gates
@@ -5540,7 +5535,8 @@ async function _fetchAndRenderGoals(assistantId) {
     _goalsCache = goals;
     window._goalsCache = goals; // keep window reference in sync for IIFE closures
     _populateGoalMetricDropdown();
-    _renderPrimaryGoalHeader();
+    // No _renderPrimaryGoalHeader() — the header's single-goal bar was removed 2026-07-30. The
+    // Goal Progress card is the one surface for goal progress on this page now.
     _renderGoalProgressCard();
     _syncReviewButton();
     _applyGoalEntitlementsUi();
@@ -5561,47 +5557,15 @@ async function _fetchAndRenderGoals(assistantId) {
     }
 }
 
-// AC2.1.2 — headline goal progress bar in the assistant detail header.
-function _renderPrimaryGoalHeader() {
-    const box = document.getElementById('detail-primary-goal');
-    if (!box) return;
-    // The SERVER picks which goal represents this assistant (src/utils/goal-summary.ts), and the
-    // dashboard card uses the identical pick, so the two surfaces can't disagree. The old client-side
-    // `find(isPrimary) || [0]` fell through to the NEWEST goal whenever no primary was set — which is
-    // every assistant whose goals are all user-reported, since those can never be primary.
-    const primary = (_goalHeadlineId != null && _goalsCache.find(g => Number(g.id) === Number(_goalHeadlineId)))
-        || _goalsCache.find(g => g.isPrimary)
-        || _goalsCache[0];
-    if (!primary) { box.classList.add('hidden'); box.innerHTML = ''; return; }
-
-    const meta = _GOAL_STATUS_META[primary.status] || _GOAL_STATUS_META.pending;
-    const { label, unit } = _goalLabel(primary);
-    const target = Number(primary.targetValue);
-    const latest = primary.latestValue != null ? Number(primary.latestValue) : null;
-    const pct = (latest != null && target > 0) ? Math.max(0, Math.min(100, Math.round((latest / target) * 100))) : 0;
-
-    // The header slot holds exactly one bar (it is an identity line, in a max-w-xs column), so when
-    // there are others they get a count that jumps to the full list rather than being hidden.
-    const others = _goalsCache.length - 1;
-    const moreHtml = others > 0
-        ? `<button type="button" onclick="window._activateMainTab('goals')"
-             class="text-[11px] font-semibold text-gray-400 hover:text-emerald-700 underline cursor-pointer transition-colors">+${others} more</button>`
-        : '';
-
-    box.classList.remove('hidden');
-    box.innerHTML = `
-        <div class="flex items-center justify-between gap-2 text-xs mb-1">
-            <span class="font-bold text-gray-700 truncate" title="${_escapeHtml(label)}">${_escapeHtml(primary.title || label)}</span>
-            <span class="inline-flex items-center gap-1.5 font-bold shrink-0 ${meta.text}"><span class="w-2 h-2 rounded-full ${meta.dot}"></span>${meta.label}</span>
-        </div>
-        <div class="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
-            <div class="h-full ${meta.dot} transition-all" style="width:${pct}%"></div>
-        </div>
-        <div class="flex items-center justify-between gap-2 mt-1">
-            <p class="text-[11px] text-gray-400">${_escapeHtml(_fmtGoalPair(latest, target, unit))}</p>
-            ${moreHtml}
-        </div>`;
-}
+// AC2.1.2's headline goal bar in the assistant-detail header (_renderPrimaryGoalHeader, plus its
+// #detail-primary-goal slot in assistant-detail.html) was removed on 2026-07-30. It compressed one
+// goal's title, status pill, bar, "0 / 100 accounts" pair and a "+N more" link into the identity
+// line next to the role, and _renderGoalProgressCard below now renders every goal in full on
+// Overview — so the header was a cramped duplicate of a better surface.
+//
+// _goalHeadlineId is still read: the server's headline pick (src/utils/goal-summary.ts) is what
+// sorts the Goal Progress card's first tile, so the card and the dashboard still agree on which
+// goal leads. Don't delete it with the bar.
 
 /**
  * Overview "Goal Progress" card — every goal the user has set for this assistant, with its bar.

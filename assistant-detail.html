@@ -126,8 +126,10 @@
                identity, with the status pill/badges now the second row. -->
           <div class="flex items-center gap-3 mt-1">
             <p id="detail-role" class="text-gray-500 font-medium text-xs">Reviewing tasks…</p>
-            <!-- AC2.1.2 — primary goal progress bar (populated by _fetchAndRenderGoals) -->
-            <div id="detail-primary-goal" class="hidden max-w-xs"></div>
+            <!-- The headline goal's progress bar (#detail-primary-goal, AC2.1.2) was removed here on
+                 2026-07-30. It squeezed one goal — title, status pill, bar, "0 / 100 accounts" and a
+                 "+N more" escape hatch — into an identity line beside the role, and the Overview
+                 "Goal Progress" card now shows every goal properly. See #goal-progress-card below. -->
           </div>
           <!-- Issue #162: Brand Protected badge sits to the right of the status pill, not the name. -->
           <div class="flex items-center gap-3 mt-1.5">
@@ -253,9 +255,9 @@
   <div style="display:flex;flex-direction:column">
 
   <!-- ── Goal Progress — the user's own SMART goals for this assistant, surfaced on Overview so
-       progress is visible without opening the Goals tab. The header carries only the single headline
-       goal (#detail-primary-goal, a max-w-xs identity line), so an assistant with several goals had
-       nowhere to show them but the tab. Populated by _renderGoalProgressCard() (assistants.js) from
+       progress is visible without opening the Goals tab. This is now the ONLY goal-progress surface
+       on the page: the header's single-headline-goal bar was removed on 2026-07-30 once this card
+       could show them all. Populated by _renderGoalProgressCard() (assistants.js) from
        the SAME _goalsCache the Goals tab renders, so the two surfaces cannot disagree; every mutation
        path already re-runs _fetchAndRenderGoals, which repaints this too.
        order:-2 pulls it above Performance Metrics within the flex-column wrapper.
@@ -510,10 +512,8 @@
         <div class="min-w-0">
           <p id="metrics-empty-title" class="text-sm font-bold text-gray-700"></p>
           <p id="metrics-empty-body" class="text-xs text-gray-500 mt-1 leading-relaxed"></p>
-          <button type="button" id="metrics-empty-review-link"
-                  class="hidden mt-3 text-xs font-bold text-gray-700 underline underline-offset-2 hover:text-gray-900">
-            Open Review Queue
-          </button>
+          <!-- No "Open Review Queue" button here. It was removed 2026-07-30 because it didn't work:
+               the panel is explanatory, and the jump it offered was not a route to metrics anyway. -->
         </div>
       </div>
     </div>

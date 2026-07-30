@@ -2,6 +2,16 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-detail-removals",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/1a38d467-a891-4f95-8002-dd0a38e7df45/scratchpad/perf2/removals.mts"
+      ],
+      "port": 4232,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-perf-paint",
       "runtimeExecutable": "npx",
       "runtimeArgs": [
