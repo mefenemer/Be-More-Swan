@@ -3,8 +3,23 @@
 // 1. Purges POSTED assets whose retentionDeleteAfter has elapsed (30-day window)
 // 2. Purges REJECTED assets whose retentionDeleteAfter has elapsed (7-day window)
 //
-// Physical file deletion: when S3 is wired, deletes the object by storageKey.
-// Database: strips storageUrl/storageKey and marks purgedAt.
+// Physical file deletion: removes the object from R2 by storageKey.
+// Database: strips storageUrl/storageKey and marks purgedAt — but ONLY once the object is
+// confirmed gone. See below.
+//
+// ── Two bugs this file used to have, both silent and both destructive ────────────────────────────
+// 1. It deleted from AWS S3 (S3_BUCKET_NAME / AWS_ACCESS_KEY_ID / S3_REGION). Nothing else in this
+//    codebase uses those variables — every upload and download path is Cloudflare R2
+//    (R2_BUCKET_NAME, see content-upload-url.ts). So `deleteFromS3` early-returned on every run.
+// 2. It stripped storageKey/storageUrl and stamped purgedAt REGARDLESS. The row then said "purged"
+//    while the R2 object was still there — and because the key was the only record of where the
+//    object lived, it became permanently unreclaimable. Every 6 hours, for every asset reaching its
+//    retention date.
+//
+// The rule that prevents a repeat: purgedAt means "the bytes are gone". Never stamp it on an asset
+// whose object we did not actually delete. An asset with no storageKey (a Pexels hotlink, a link
+// asset, an already-purged row) has no bytes to delete and may be stamped immediately; anything
+// with a key must survive to the next run if the delete failed or storage was unconfigured.
 
 import type { Handler } from '@netlify/functions';
 import { lte, and, isNull, isNotNull, inArray, lt } from 'drizzle-orm';
@@ -12,23 +27,56 @@ import { getDb } from '../../db/client';
 import { contentAssets, integrationApiCalls } from '../../db/schema';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
-const S3_BUCKET  = process.env.S3_BUCKET_NAME;
-const S3_REGION  = process.env.S3_REGION || 'us-east-1';
-const AWS_KEY    = process.env.AWS_ACCESS_KEY_ID;
-const AWS_SECRET = process.env.AWS_SECRET_ACCESS_KEY;
+// Same R2 configuration every other storage path in this app uses (content-upload-url.ts,
+// content-assets.ts, storage-lifecycle-cleanup.ts). Read lazily inside the handler rather than at
+// module scope so a redeploy that adds the vars takes effect without a cold-start dance.
+function r2Config() {
+    return {
+        endpoint:  process.env.R2_ENDPOINT,
+        accessKey: process.env.R2_ACCESS_KEY_ID,
+        secretKey: process.env.R2_SECRET_ACCESS_KEY,
+        bucket:    process.env.R2_BUCKET_NAME,
+    };
+}
 
-async function deleteFromS3(keys: string[]) {
-    if (!S3_BUCKET || !AWS_KEY || !AWS_SECRET || keys.length === 0) return;
-    try {
-        const { S3Client, DeleteObjectsCommand } = await import('@aws-sdk/client-s3');
-        const s3 = new S3Client({ region: S3_REGION });
-        await s3.send(new DeleteObjectsCommand({
-            Bucket: S3_BUCKET,
-            Delete: { Objects: keys.map(k => ({ Key: k })) },
-        }));
-    } catch (err) {
-        console.error('S3 batch delete failed:', err);
+/**
+ * Deletes each key from R2, returning the subset confirmed gone.
+ *
+ * Per-key rather than a single DeleteObjects batch on purpose: a batch reports partial failure in a
+ * per-object Errors array that the old code never inspected, so one bad key would have marked the
+ * whole batch purged. Here a failure is scoped to its own asset and simply retries next run.
+ */
+async function deleteFromR2(keys: string[]): Promise<Set<string>> {
+    const deleted = new Set<string>();
+    if (keys.length === 0) return deleted;
+
+    const { endpoint, accessKey, secretKey, bucket } = r2Config();
+    if (!endpoint || !accessKey || !secretKey || !bucket) {
+        // Deliberately returns nothing rather than pretending success — the callers' assets keep
+        // their storageKey and are retried on the next run.
+        console.warn(`[Retention] R2 not configured — deferring ${keys.length} object deletion(s) to a later run.`);
+        return deleted;
     }
+
+    try {
+        const { S3Client, DeleteObjectCommand } = await import('@aws-sdk/client-s3');
+        const s3 = new S3Client({
+            region: 'auto',
+            endpoint,
+            credentials: { accessKeyId: accessKey, secretAccessKey: secretKey },
+        });
+        for (const key of keys) {
+            try {
+                await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+                deleted.add(key);
+            } catch (err) {
+                console.error(`[Retention] Failed to delete R2 object ${key} — will retry next run:`, err);
+            }
+        }
+    } catch (err) {
+        console.error('[Retention] R2 client unavailable — deferring all object deletions:', err);
+    }
+    return deleted;
 }
 
 const retentionHandler = async () => {
@@ -54,22 +102,31 @@ const retentionHandler = async () => {
             return { statusCode: 200, body: 'No assets to purge.' };
         }
 
-        console.log(`[Retention] Purging ${due.length} assets.`);
+        console.log(`[Retention] ${due.length} asset(s) due for purge.`);
 
-        // 1. Delete physical files from S3
-        const s3Keys = due.map(a => a.storageKey).filter(Boolean) as string[];
-        await deleteFromS3(s3Keys);
+        // 1. Delete the physical objects from R2.
+        const keyed = due.filter((a): a is typeof a & { storageKey: string } => !!a.storageKey);
+        const deletedKeys = await deleteFromR2(keyed.map(a => a.storageKey));
 
-        // 2. Update DB: strip file payload, mark purgedAt
-        const ids = due.map(a => a.id);
-        await db.update(contentAssets).set({
-            storageKey: null,
-            storageUrl: null,
-            purgedAt: now,
-            updatedAt: now,
-        }).where(inArray(contentAssets.id, ids));
+        // 2. Only assets whose bytes are genuinely gone may be stamped purged. Assets with no
+        //    storageKey (Pexels hotlinks, link assets) have nothing to delete and qualify at once;
+        //    keyed assets qualify only on a confirmed delete. The rest keep their key and retry.
+        const purgeable = due.filter(a => !a.storageKey || deletedKeys.has(a.storageKey));
+        const deferred  = due.length - purgeable.length;
 
-        console.log(`[Retention] Purged ${ids.length} assets. IDs: ${ids.join(', ')}`);
+        const ids = purgeable.map(a => a.id);
+        if (ids.length > 0) {
+            await db.update(contentAssets).set({
+                storageKey: null,
+                storageUrl: null,
+                purgedAt: now,
+                updatedAt: now,
+            }).where(inArray(contentAssets.id, ids));
+            console.log(`[Retention] Purged ${ids.length} assets. IDs: ${ids.join(', ')}`);
+        }
+        if (deferred > 0) {
+            console.warn(`[Retention] Deferred ${deferred} asset(s) — object still present in R2; retrying next run.`);
+        }
 
         // US-AUD-4.2.1 SC6: Purge integration_api_calls older than 90 days
         const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);

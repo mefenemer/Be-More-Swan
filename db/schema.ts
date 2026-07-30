@@ -1279,7 +1279,12 @@ export const workspaceAssets = pgTable("workspace_assets", {
       .references(() => users.id, { onDelete: "set null" }),
 
   name: text("name").notNull(),
-  assetType: text("asset_type").notNull(), // 'file', 'url', or 'text'
+  // Written verbatim from the client's `assetType` in storage-request-upload.ts, validated only
+  // against that file's MIME_ALLOWLIST keys: brand_logo | brand_document | social_image |
+  // voice_recording | generated_content | other. (Some older rows hold 'file' | 'url' | 'text'.)
+  // No CHECK constraint, so this list lives in code — do not assume a value cannot occur here.
+  // ⚠️ These ids are NOT content_assets ids; see src/utils/release-post-media.ts.
+  assetType: text("asset_type").notNull(),
   category: text("category").notNull(),
 
   // NEW COLUMNS FOR TEXT RULES ENGINE

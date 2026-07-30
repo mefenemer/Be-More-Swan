@@ -14,9 +14,10 @@ import { Handler } from '@netlify/functions';
 import jwt from 'jsonwebtoken';
 import { eq, and, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts, contentRules, users, aiAssistants, workspaceAssets } from '../../db/schema';
+import { scheduledPosts, contentRules, users, aiAssistants } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { assembleBlueprint } from '../../src/utils/blueprint';
+import { releasePostMedia } from '../../src/utils/release-post-media';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -128,21 +129,24 @@ export default withLambda(async (event) => {
         isRevised: true,
     }).returning({ id: scheduledPosts.id });
 
-    // AC11 STOR-1.1.2: Soft-delete associated social_image assets (30-day grace via lifecycle cleanup)
-    if (post.contentAssetIds && (post.contentAssetIds as number[]).length > 0) {
-        void (async () => {
-            try {
-                const assetIds = post.contentAssetIds as number[];
-                const now2 = new Date();
-                await db.update(workspaceAssets)
-                    .set({ status: 'deleted', deletedAt: now2, updatedAt: now2 })
-                    .where(and(
-                        inArray(workspaceAssets.id, assetIds),
-                        eq(workspaceAssets.assetType, 'social_image'),
-                    ));
-            } catch { /* non-blocking */ }
-        })();
-    }
+    // AC11 STOR-1.1.2: release this post's media to the content-retention pipeline.
+    //
+    // Usually a no-op, and correctly so: the revised clone created just above carries the SAME
+    // contentAssetIds, so the picture is still in use and releasePostMedia leaves it alone. It only
+    // releases when nothing survives that needs it (clone creation failed, or the media was dropped),
+    // and the clone's own media is released later when the clone itself ends.
+    //
+    // This previously soft-deleted `workspace_assets` using `content_assets` ids filtered on
+    // asset_type='social_image' — a different table with its own id sequence, so it reclaimed nothing
+    // and could soft-delete an unrelated upload on an id collision. See
+    // src/utils/release-post-media.ts before touching this.
+    void (async () => {
+        try {
+            await releasePostMedia(db, [postId]);
+        } catch (err) {
+            console.error('[reject-post] media release failed (rejection still stands):', err);
+        }
+    })();
 
     // US-SMM-2.5.1: Notify user that revised post is ready when triggered by voice feedback
     if (voiceFeedback && revised?.id) {
