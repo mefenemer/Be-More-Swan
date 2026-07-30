@@ -3438,9 +3438,9 @@ function _endCardLoading(id) {
     document.getElementById(id)?.querySelector(':scope > .card-loading-overlay')?.remove();
 }
 
-// The Overview cards skeletoned on first load, in the order they resolve. Kept as one list so
-// the reveal (initAssistantDetail) and each fetch's clear stay in sync.
-const _OVERVIEW_SKELETON_KPI_CARDS = ['engagement', 'reach', 'ctr', 'value'];
+// The four KPI cards are no longer skeletoned — the Performance Metrics section paints its final
+// state synchronously (_setMetricsEmptyState('pending')), so there is nothing to wait for. _KPI_KEYS
+// is the surviving list of the same four keys.
 
 window.initAssistantDetail = async function(assistantId, loadViewCb) {
     if (!assistantId) {
@@ -3837,7 +3837,8 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     // The content is revealed above, but the Overview's dynamic cards fill from the async
     // fetches kicked off below and would otherwise pop in one at a time. Skeleton the cards
     // this role actually shows, and clear each where its fetch resolves (below):
-    //   • KPI grid  — present for every role; filled by _loadAssistantMetrics.
+    //   • KPI grid  — NOT skeletoned, and no longer awaited. See the _loadAssistantMetrics call
+    //                 immediately below for why.
     //   • Autopilot — only the posting-schedule roles (SMM, Blog), detected by _applyDashboardRegistry
     //                 having left the card visible; filled by _fetchAndRenderAssistantMetrics.
     //   • Connections — social only. It's the one role where the card is guaranteed to stay on
@@ -3846,8 +3847,17 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     //                 spinner and then vanish. _beginCardLoading un-hides what it skeletons, so we
     //                 must NOT call it on a card a role keeps hidden — hence the explicit guards.
     const _skelAutopilot = !document.getElementById('autopilot-status-card')?.classList.contains('hidden');
-    _OVERVIEW_SKELETON_KPI_CARDS.forEach(k => _beginCardLoading('kpi-card-' + k));
     if (_skelAutopilot) _beginCardLoading('autopilot-status-card');
+    // ── Performance Metrics — paint now, fetch in the background ───
+    // Fired here (early, and deliberately NOT awaited) because it paints its explanatory panel
+    // synchronously on its first line: for every workspace today the honest answer is "not yet",
+    // and there is no reason to spin four skeletons for seconds to arrive at it. post_insights has
+    // no ingester beyond Instagram and no rows in any environment (performance-metrics-build), so
+    // the round-trip almost never changes what is on screen — but it still runs, so the real cards
+    // light up on their own the moment a platform does report back. Nothing below depends on it.
+    // Its own try/catch covers the fetch; this one catches the DOM paint, which is now nobody's
+    // awaited promise and would otherwise surface only as an unhandled rejection.
+    _loadAssistantMetrics(assistantId).catch(err => console.error('[performance-metrics] load failed:', err));
     // Goal Progress — safe to skeleton for every role: the card never hides itself (it has an empty
     // state), and the goals fetch is late in this function's sequence, so without a placeholder the
     // card sits visibly blank while everything below it fills in. Cleared by _renderGoalProgressCard.
@@ -4021,10 +4031,9 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
     // Overview without waiting behind connections/integrations/goals fetches ──────
     _fetchAndRenderAssistantMetrics(assistantId);
 
-    // ── Performance Metrics (post_insights aggregation) ───────────
-    await _loadAssistantMetrics(assistantId);
-    // KPI figures are in (or settled on their "—" placeholders) — clear their skeletons.
-    _OVERVIEW_SKELETON_KPI_CARDS.forEach(k => _endCardLoading('kpi-card-' + k));
+    // Performance Metrics is no longer loaded from here — it is fired, un-awaited, near the top of
+    // this function alongside the other skeleton setup. Awaiting it here put a cold-start plus a
+    // post_insights join in front of Connections, Synced actions and the onboarding answers.
 
     // ── Connections (full connect/manage UI, scoped to this assistant) ──
     await window.initAssistantConnections(assistantId, currentData);
@@ -4867,9 +4876,14 @@ function _setKpiCard(key, { empty, tone = 'brand', series = null } = {}) {
 
 // Swaps the four KPI cards for a single panel that says why they're blank. Four cards reading "—"
 // are indistinguishable from a broken page, and the section stays on screen for every role even
-// where nothing can currently feed it. `mode` is 'cards' (real figures), 'no-data' (nothing
-// published to measure) or 'error' (we genuinely don't know) — the last two are different truths
-// and must not share copy, or a network blip would tell the user they've published nothing.
+// where nothing can currently feed it. `mode` is 'cards' (real figures), 'pending' (painted before
+// the fetch, so nothing spins), 'no-data' (nothing published to measure) or 'error' (we genuinely
+// don't know) — the last two are different truths and must not share copy, or a network blip would
+// tell the user they've published nothing.
+//
+// 'pending' exists so this section can render instantly. It says the same thing as 'no-data' MINUS
+// the claim about the user's own publishing, which we have not checked yet at that point — that
+// sentence is the one part that would be a lie if the fetch turned out to fail. Keep it that way.
 function _setMetricsEmptyState(mode) {
     const grid  = document.getElementById('metrics-kpi-grid');
     const panel = document.getElementById('metrics-empty-state');
@@ -4897,16 +4911,18 @@ function _setMetricsEmptyState(mode) {
         if (note) note.textContent = '';
     } else {
         if (title) title.textContent = 'Performance metrics aren’t available yet';
-        if (body)  body.textContent  = 'These fill in automatically once there’s published activity for this assistant to measure, and the platform reports back on it. Nothing has been published in the last 30 days.';
+        if (body)  body.textContent  = 'These fill in automatically once there’s published activity for this assistant to measure, and the platform reports back on it.'
+            + (mode === 'no-data' ? ' Nothing has been published in the last 30 days.' : '');
         // The panel now says this better than the note did.
         if (note) note.textContent = '';
     }
 
     // Only offer the jump if the tab is actually on this page and the app exposes the switcher.
+    // Offered on 'pending' too, so the button doesn't pop in and shift the panel a second later.
     const link = document.getElementById('metrics-empty-review-link');
     const hasReviewTab = !!document.querySelector('.main-tab-btn[data-maintab="review-queue"]');
     if (link) {
-        const show = mode === 'no-data' && hasReviewTab && typeof window._activateMainTab === 'function';
+        const show = (mode === 'no-data' || mode === 'pending') && hasReviewTab && typeof window._activateMainTab === 'function';
         link.classList.toggle('hidden', !show);
         if (show) link.onclick = () => window._activateMainTab('review-queue');
     }
@@ -4921,6 +4937,11 @@ async function _loadAssistantMetrics(assistantId) {
     // Start muted. Every path out of this function that doesn't produce a figure — fetch
     // failure, no published posts, a metric the platform doesn't report — leaves it that way.
     _KPI_KEYS.forEach(k => _setKpiCard(k, { empty: true }));
+
+    // Show the explanatory panel BEFORE the fetch, synchronously. The overwhelmingly likely answer
+    // is "nothing to report" (see the caller), and the user should not watch a spinner to be told
+    // that. 'cards' below is what makes real figures win, so this can never mask them.
+    _setMetricsEmptyState('pending');
 
     // 0–1 fraction → "12.3%". Null/undefined → "—".
     const pct = (v) => (v === null || v === undefined) ? '—' : `${(v * 100).toFixed(1)}%`;
