@@ -314,3 +314,72 @@ check('every role can set a user-reported goal, with nothing connected', () => {
 });
 
 console.log(`\n${passed} checks passed.`);
+
+// ── Multi-platform coverage ──────────────────────────────────────────────────────
+// The catalog was Instagram-only for one reason: ingest-instagram-insights.ts was the sole writer
+// to post_insights, so every derived metric could only ever be an Instagram one. These lock the
+// shape of the fix, and — more importantly — the honesty rules about what is offered.
+
+check('Facebook has the full metric set Instagram has, plus the one it cannot', () => {
+    for (const key of ['facebook_followers', 'facebook_reach', 'facebook_engagement_rate', 'facebook_link_clicks']) {
+        const m = getGoalMetric(key);
+        assert.ok(m, `${key} missing from the catalog`);
+        assert.equal(m!.connectionService, 'facebook', `${key} must gate on the facebook connection`);
+        assert.equal(m!.source, 'connection');
+        assert.ok(m!.realism, `${key} needs an attainability guardrail`);
+    }
+    // The point of the whole exercise: Instagram cannot report per-post link clicks, Facebook can.
+    assert.equal(getGoalMetric('facebook_link_clicks')!.objective, 'action');
+    assert.equal(getGoalMetric('facebook_link_clicks')!.available, true);
+});
+
+check('platform metrics stay hidden until that platform is connected', () => {
+    const none = availableMetricsForRole('social_media_manager', []).map(m => m.key);
+    for (const key of ['facebook_followers', 'facebook_link_clicks', 'youtube_subscribers', 'instagram_followers']) {
+        assert.ok(!none.includes(key), `${key} must not be offered with nothing connected`);
+    }
+    const fb = availableMetricsForRole('social_media_manager', ['facebook']).map(m => m.key);
+    assert.ok(fb.includes('facebook_followers'));
+    // Connecting Facebook must not conjure Instagram's metrics, or a goal would measure an account
+    // the workspace hasn't linked.
+    assert.ok(!fb.includes('instagram_followers'));
+});
+
+check('youtube_subscribers gates on the workspace_integrations provider key', () => {
+    const m = getGoalMetric('youtube_subscribers')!;
+    // YouTube is a workspace_integrations row, and manage-goals' connectedServices() unions both
+    // stores. The key must match `provider` EXACTLY or the gate silently never opens — the same
+    // trap search_clicks hit with 'searchconsole' vs 'search_console'.
+    assert.equal(m.connectionService, 'youtube');
+    assert.ok(availableMetricsForRole('social_media_manager', ['youtube']).some(x => x.key === 'youtube_subscribers'));
+});
+
+check('x_followers is withheld on a BILLING limit, not a permanent one', () => {
+    const m = getGoalMetric('x_followers')!;
+    // Unlike linkedin_followers, this can become available — /2/users/me is a paid-tier question,
+    // and the poller case is already written. It stays false until goal-metric-selftest.ts says
+    // otherwise, because assuming a written poller works is the linkedin_followers mistake.
+    assert.equal(m.available, false, 'must stay false until the selftest confirms our API tier');
+    assert.equal(m.connectionService, 'x');
+    assert.ok(!availableMetricsForRole('social_media_manager', ['x']).some(x => x.key === 'x_followers'));
+});
+
+check('LinkedIn remains the only permanently unmeasurable platform', () => {
+    // Everything else in the catalog is offered, gated on a connection, or waiting on a selftest.
+    // LinkedIn is different in kind: we hold member-only posting scopes, so no LinkedIn metric is
+    // buildable at all without a new product approval.
+    const linkedin = GOAL_METRICS.filter(m => m.connectionService === 'linkedin');
+    assert.ok(linkedin.length > 0);
+    assert.ok(linkedin.every(m => !m.available), 'no LinkedIn metric can be offered on member-only scopes');
+});
+
+check('every connection metric names a service that can actually be connected', () => {
+    // A typo here is invisible: the metric is simply never offered, with no error anywhere.
+    const KNOWN = new Set(['instagram', 'facebook', 'linkedin', 'x', 'youtube', 'threads', 'searchconsole']);
+    for (const m of GOAL_METRICS.filter(x => x.source === 'connection')) {
+        assert.ok(m.connectionService && KNOWN.has(m.connectionService),
+            `${m.key} gates on unknown service "${m.connectionService}"`);
+        // Every service a metric can gate on needs proper-cased copy for the disconnect alert.
+        assert.ok(connectionDisplayName(m.connectionService), `${m.connectionService} has no display name`);
+    }
+});

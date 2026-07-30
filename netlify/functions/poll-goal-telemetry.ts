@@ -74,6 +74,67 @@ async function fetchIgFollowers(igUserId: string, token: string): Promise<FetchR
     return { value: null, disconnected: false };         // exhausted retries — treat as transient, not disconnected
 }
 
+// ── Facebook Page follower count ───────────────────────────────────────────────
+// The same call get-follower-counts.ts already makes for the workspace Audience block, on the same
+// Page token Instagram uses. `followers_count` is the modern field; `fan_count` is the legacy
+// "likes" number some Pages still report instead, so we accept either.
+async function fetchFacebookFollowers(pageId: string, token: string): Promise<FetchResult> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${pageId}?fields=followers_count,fan_count&access_token=${encodeURIComponent(token)}`);
+        if (res.status === 429) { await sleep(1000 * 2 ** attempt); continue; }   // AC4.3.1 backoff
+        if (res.status === 401 || res.status === 403) return { value: null, disconnected: true };
+        if (!res.ok) return { value: null, disconnected: false };
+        const body = await res.json().catch(() => null) as { followers_count?: number; fan_count?: number } | null;
+        const n = body?.followers_count ?? body?.fan_count;
+        return { value: typeof n === 'number' ? n : null, disconnected: false };
+    }
+    return { value: null, disconnected: false };
+}
+
+// ── YouTube subscriber count ───────────────────────────────────────────────────
+// ⚠️ A channel can HIDE its subscriber count. That comes back as `hiddenSubscriberCount: true` with
+// no number, and it is NOT a disconnection — the token is fine and reconnecting would change
+// nothing. Reported as a plain miss so the goal stays unmeasured rather than nagging the user to
+// re-authenticate something that isn't broken.
+async function fetchYouTubeSubscribers(token: string): Promise<FetchResult> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const res = await fetch('https://www.googleapis.com/youtube/v3/channels?part=statistics&mine=true', {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.status === 429) { await sleep(1000 * 2 ** attempt); continue; }
+        if (res.status === 401 || res.status === 403) return { value: null, disconnected: true };
+        if (!res.ok) return { value: null, disconnected: false };
+        const body = await res.json().catch(() => null) as
+            { items?: Array<{ statistics?: { subscriberCount?: string; hiddenSubscriberCount?: boolean } }> } | null;
+        const stats = body?.items?.[0]?.statistics;
+        if (stats?.hiddenSubscriberCount) return { value: null, disconnected: false };
+        const n = Number(stats?.subscriberCount);
+        return { value: Number.isFinite(n) ? n : null, disconnected: false };
+    }
+    return { value: null, disconnected: false };
+}
+
+// ── X follower count ───────────────────────────────────────────────────────────
+// ⚠️ A 403 here usually means the app's API TIER doesn't include /users/me, not that the user
+// revoked access — which is why `x_followers` ships available:false until goal-metric-selftest.ts
+// confirms otherwise. Treated as disconnected anyway: from this function's position the two are
+// indistinguishable, and the metric isn't offered, so nobody can be alarmed by the classification.
+async function fetchXFollowers(token: string): Promise<FetchResult> {
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const res = await fetch('https://api.twitter.com/2/users/me?user.fields=public_metrics', {
+            headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.status === 429) { await sleep(1000 * 2 ** attempt); continue; }
+        if (res.status === 401 || res.status === 403) return { value: null, disconnected: true };
+        if (!res.ok) return { value: null, disconnected: false };
+        const body = await res.json().catch(() => null) as
+            { data?: { public_metrics?: { followers_count?: number } } } | null;
+        const n = body?.data?.public_metrics?.followers_count;
+        return { value: typeof n === 'number' ? n : null, disconnected: false };
+    }
+    return { value: null, disconnected: false };
+}
+
 type LiConn = { id: number; vaultRefKey: string | null; metadata: any };
 
 // ── LinkedIn GET with the same 429-backoff + auth handling as the IG path ───────
@@ -240,40 +301,107 @@ async function countRecords(db: any, goal: any, recordType: string, statusFilter
     return { value: Number(row?.v ?? 0), disconnected: false };
 }
 
+/**
+ * SUM of one post_insights column over the trailing 30 days, for ONE platform.
+ *
+ * ⚠️ THE `platform` FILTER IS LOAD-BEARING. These aggregates used to omit it, which was harmless
+ * only for as long as ingest-instagram-insights.ts was the table's sole writer. The moment
+ * ingest-facebook-insights.ts started filling the same table, an unfiltered SUM(reach) would have
+ * quietly begun counting Facebook reach toward an INSTAGRAM goal — a goal silently measuring
+ * something other than what it says, with no error anywhere to notice.
+ */
+async function sumInsight(db: any, goal: any, platform: string, column: 'reach' | 'link_clicks'): Promise<FetchResult> {
+    const [row] = await db.execute(sql`
+        SELECT COALESCE(SUM(${sql.raw(column)}), 0)::int AS v FROM post_insights
+        WHERE assistant_id = ${goal.assistantId} AND organisation_id = ${goal.organisationId}
+          AND platform = ${platform}
+          AND published_at >= now() - interval '30 days'`);
+    return { value: Number((row as any)?.v ?? 0), disconnected: false };
+}
+
+/** Interactions ÷ reach over the trailing 30 days, as a percentage, for ONE platform. */
+async function engagementRate(db: any, goal: any, platform: string): Promise<FetchResult> {
+    const [row] = await db.execute(sql`
+        SELECT COALESCE(SUM(total_interactions),0)::float AS inter, COALESCE(SUM(reach),0)::float AS reach
+        FROM post_insights
+        WHERE assistant_id = ${goal.assistantId} AND organisation_id = ${goal.organisationId}
+          AND platform = ${platform}
+          AND published_at >= now() - interval '30 days'`);
+    const r = row as any;
+    const rate = r && r.reach > 0 ? (r.inter / r.reach) * 100 : 0;
+    return { value: Math.round(rate * 100) / 100, disconnected: false };
+}
+
+/** The vault token for one of an org's social connections, or null when it isn't usable. */
+async function tokenForConn(db: any, conn: { vaultRefKey: string | null } | null | undefined): Promise<string | null> {
+    if (!conn?.vaultRefKey) return null;
+    const secret = await getSecret(db, conn.vaultRefKey).catch(() => null);
+    return (secret?.token as string | undefined) ?? null;
+}
+
+type SocialConn = { id: number; externalUserId: string | null; vaultRefKey: string | null; metadata: any };
+
 async function fetchMetric(
     db: any,
     goal: any,
-    conns: { ig: { externalUserId: string | null; vaultRefKey: string | null } | null; li: LiConn | null },
+    conns: { byService: Map<string, SocialConn>; li: LiConn | null },
 ): Promise<FetchResult> {
     const metric = getGoalMetric(goal.metricKey);
     if (!metric) return { value: null, disconnected: false };
-    const igConn = conns.ig;
+    const igConn = conns.byService.get('instagram') ?? null;
 
     switch (goal.metricKey) {
         case 'instagram_followers': {
-            if (!igConn?.externalUserId || !igConn.vaultRefKey) return { value: null, disconnected: true };
-            const secret = await getSecret(db, igConn.vaultRefKey);
-            const token = (secret?.token as string | undefined) ?? null;
+            if (!igConn?.externalUserId) return { value: null, disconnected: true };
+            const token = await tokenForConn(db, igConn);
             if (!token) return { value: null, disconnected: true };
             return fetchIgFollowers(igConn.externalUserId, token);
         }
-        case 'instagram_reach': {
-            const [row] = await db.execute(sql`
-                SELECT COALESCE(SUM(reach), 0)::int AS v FROM post_insights
-                WHERE assistant_id = ${goal.assistantId} AND organisation_id = ${goal.organisationId}
-                  AND published_at >= now() - interval '30 days'`);
-            return { value: Number((row as any)?.v ?? 0), disconnected: false };
+        case 'instagram_reach':
+            return sumInsight(db, goal, 'instagram', 'reach');
+        case 'instagram_engagement_rate':
+            return engagementRate(db, goal, 'instagram');
+
+        // ── Facebook ────────────────────────────────────────────────────────────
+        case 'facebook_followers': {
+            const fb = conns.byService.get('facebook');
+            // The Page id is stashed on the connection metadata at OAuth time; externalUserId is the
+            // fallback for connections made before that was recorded (same order get-follower-counts
+            // uses, so the two agree about which Page a workspace means).
+            const pageId = (fb?.metadata?.fbPageId as string | undefined) || fb?.externalUserId;
+            if (!fb || !pageId) return { value: null, disconnected: true };
+            const token = await tokenForConn(db, fb);
+            if (!token) return { value: null, disconnected: true };
+            return fetchFacebookFollowers(pageId, token);
         }
-        case 'instagram_engagement_rate': {
-            const [row] = await db.execute(sql`
-                SELECT COALESCE(SUM(total_interactions),0)::float AS inter, COALESCE(SUM(reach),0)::float AS reach
-                FROM post_insights
-                WHERE assistant_id = ${goal.assistantId} AND organisation_id = ${goal.organisationId}
-                  AND published_at >= now() - interval '30 days'`);
-            const r = row as any;
-            const rate = r && r.reach > 0 ? (r.inter / r.reach) * 100 : 0;
-            return { value: Math.round(rate * 100) / 100, disconnected: false };
+        case 'facebook_reach':
+            return sumInsight(db, goal, 'facebook', 'reach');
+        case 'facebook_engagement_rate':
+            return engagementRate(db, goal, 'facebook');
+        case 'facebook_link_clicks':
+            // The Social Media Manager's first real 'action' metric. Filled by
+            // ingest-facebook-insights.ts — Instagram hardcodes this column to null.
+            return sumInsight(db, goal, 'facebook', 'link_clicks');
+
+        // ── Other connected platforms ───────────────────────────────────────────
+        case 'youtube_subscribers': {
+            // YouTube lives in workspace_integrations, so its token comes from the integrations
+            // helper (which also refreshes it) rather than from a system_connections vault ref.
+            let token: string;
+            try {
+                ({ accessToken: token } = await getFreshAccessToken(db, goal.organisationId, 'youtube'));
+            } catch {
+                return { value: null, disconnected: true };
+            }
+            return fetchYouTubeSubscribers(token);
         }
+        case 'x_followers': {
+            const x = conns.byService.get('x');
+            const token = await tokenForConn(db, x);
+            if (!token) return { value: null, disconnected: true };
+            return fetchXFollowers(token);
+        }
+
         case 'linkedin_followers': {
             if (!conns.li) return { value: null, disconnected: true };
             return fetchLinkedInFollowers(db, conns.li);
@@ -282,9 +410,8 @@ async function fetchMetric(
             return fetchSearchClicks(db, goal);
         }
         case 'instagram_profile_views': {
-            if (!igConn?.externalUserId || !igConn.vaultRefKey) return { value: null, disconnected: true };
-            const secret = await getSecret(db, igConn.vaultRefKey);
-            const token = (secret?.token as string | undefined) ?? null;
+            if (!igConn?.externalUserId) return { value: null, disconnected: true };
+            const token = await tokenForConn(db, igConn);
             if (!token) return { value: null, disconnected: true };
             return fetchIgProfileViews(igConn.externalUserId, token);
         }
@@ -409,33 +536,36 @@ export async function pollGoalTelemetry(): Promise<{ goals: number; polled: numb
         .where(and(inArray(plans.organisationId, orgIds), eq(plans.status, 'active')));
     const tierByOrg = new Map<number, string | null>(tierRows.map(r => [r.orgId as number, r.tierKey]));
 
-    // One Instagram + one LinkedIn connection per org (for follower polling).
-    const igByOrg = new Map<number, { externalUserId: string | null; vaultRefKey: string | null }>();
-    const liByOrg = new Map<number, LiConn>();
-    for (const orgId of orgIds) {
-        const [ig] = await db
-            .select({ externalUserId: systemConnections.externalUserId, vaultRefKey: systemConnections.vaultRefKey })
-            .from(systemConnections)
-            .where(and(
-                eq(systemConnections.organisationId, orgId),
-                eq(systemConnections.serviceName, 'instagram'),
-                eq(systemConnections.status, 'active'),
-                eq(systemConnections.isActive, true),
-            ))
-            .limit(1);
-        if (ig) igByOrg.set(orgId, ig);
-
-        const [li] = await db
-            .select({ id: systemConnections.id, vaultRefKey: systemConnections.vaultRefKey, metadata: systemConnections.metadata })
-            .from(systemConnections)
-            .where(and(
-                eq(systemConnections.organisationId, orgId),
-                eq(systemConnections.serviceName, 'linkedin'),
-                eq(systemConnections.status, 'active'),
-                eq(systemConnections.isActive, true),
-            ))
-            .limit(1);
-        if (li) liByOrg.set(orgId, li);
+    // Every active social connection for every org in this batch, in ONE query.
+    //
+    // This used to be two `.limit(1)` lookups per org inside a loop — 2N queries to find Instagram
+    // and LinkedIn. Adding Facebook and X would have made it 4N, inside an hourly cron that has no
+    // overall time budget. One query and a map instead: the row count is bounded by connections per
+    // workspace (a handful), and adding a further platform is now free.
+    const connByOrg = new Map<number, Map<string, SocialConn>>();
+    const allConns = await db
+        .select({
+            id: systemConnections.id,
+            organisationId: systemConnections.organisationId,
+            serviceName: systemConnections.serviceName,
+            externalUserId: systemConnections.externalUserId,
+            vaultRefKey: systemConnections.vaultRefKey,
+            metadata: systemConnections.metadata,
+        })
+        .from(systemConnections)
+        .where(and(
+            inArray(systemConnections.organisationId, orgIds),
+            eq(systemConnections.status, 'active'),
+            eq(systemConnections.isActive, true),
+        ));
+    for (const c of allConns) {
+        const service = String(c.serviceName).toLowerCase();
+        const forOrg = connByOrg.get(c.organisationId) ?? new Map<string, SocialConn>();
+        // First wins, matching the old `.limit(1)` behaviour for a workspace with two accounts on
+        // one platform. Which one that is stays arbitrary — unchanged from before, and out of scope
+        // here, but worth knowing if multi-account support ever lands.
+        if (!forOrg.has(service)) forOrg.set(service, c as SocialConn);
+        connByOrg.set(c.organisationId, forOrg);
     }
 
     let polled = 0, disconnectedCount = 0, skipped = 0, awaitingUpdate = 0;
@@ -461,9 +591,10 @@ export async function pollGoalTelemetry(): Promise<{ goals: number; polled: numb
         // Throttle by tier cadence.
         if (lastTelemetryAt && now.getTime() - lastTelemetryAt.getTime() < cadenceMs) { skipped++; return; }
 
+        const byService = connByOrg.get(goal.organisationId) ?? new Map<string, SocialConn>();
         const { value, disconnected } = await fetchMetric(db, goal, {
-            ig: igByOrg.get(goal.organisationId) ?? null,
-            li: liByOrg.get(goal.organisationId) ?? null,
+            byService,
+            li: (byService.get('linkedin') as LiConn | undefined) ?? null,
         });
 
         if (value != null) {

@@ -344,6 +344,12 @@ node_bundler = "esbuild"
 [functions.ingest-instagram-insights]
   schedule = "0 */6 * * *"
 
+# Same for Facebook Page posts. Offset 30 minutes from the Instagram run rather than sharing the
+# slot: both hit the same Graph app, and Meta rate-limits per app, so overlapping the two batches
+# is how you turn two comfortable runs into two throttled ones.
+[functions.ingest-facebook-insights]
+  schedule = "30 */6 * * *"
+
 # SMART Goals AC4.1.1: poll current metric values for active goals — hourly. Each goal is
 # throttled to its tier cadence (premium hourly, others daily) inside the worker.
 [functions.poll-goal-telemetry]

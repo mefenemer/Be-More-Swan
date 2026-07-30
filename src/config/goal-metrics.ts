@@ -185,6 +185,112 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         // B2B follower growth is steadier than IG, but keep the ceiling generous, not blocking.
         realism: { maxDailyDelta: 5000, maxDailyGrowthPct: 0.25 },
     },
+    // ── Facebook ────────────────────────────────────────────────────────────────
+    // Facebook was absent from this catalog for no better reason than that nothing filled
+    // post_insights for it. The table was designed multi-platform from the start (its `platform`
+    // column is documented `instagram | facebook | linkedin | x`), but ingest-instagram-insights.ts
+    // was its only writer, so every derived metric could only ever be an Instagram one.
+    // ingest-facebook-insights.ts now fills the same table for Page posts.
+    {
+        key: 'facebook_followers',
+        label: 'Facebook Followers',
+        unit: 'followers',
+        source: 'connection',
+        connectionService: 'facebook',
+        direction: 'increase',
+        objective: 'awareness',
+        description: 'Total followers of your connected Facebook Page.',
+        // Offered on stronger evidence than a written poller: this EXACT call
+        // (`/{page-id}?fields=followers_count,fan_count`) is already made in production by
+        // get-follower-counts.ts for the workspace Audience block, on the same Graph token
+        // Instagram uses. goal-metric-selftest.ts probes it; flip to false if it reports otherwise.
+        available: true,
+        realism: { maxDailyDelta: 5000, maxDailyGrowthPct: 0.25 },
+    },
+    {
+        key: 'facebook_reach',
+        label: 'Facebook Reach (30-day)',
+        unit: 'people',
+        source: 'connection',
+        connectionService: 'facebook',
+        direction: 'increase',
+        objective: 'awareness',
+        description: 'People who saw your Facebook posts in the trailing 30 days.',
+        available: true,
+        realism: { maxDailyDelta: 500000, maxDailyGrowthPct: 0.5 },
+    },
+    {
+        key: 'facebook_engagement_rate',
+        label: 'Facebook Engagement Rate',
+        unit: '%',
+        source: 'connection',
+        connectionService: 'facebook',
+        direction: 'increase',
+        objective: 'engagement',
+        description: 'Reactions, comments and shares ÷ reach across recent Facebook posts.',
+        available: true,
+        realism: { maxValue: 100 },
+    },
+    {
+        key: 'facebook_link_clicks',
+        label: 'Facebook Link Clicks (30-day)',
+        unit: 'clicks',
+        source: 'connection',
+        connectionService: 'facebook',
+        direction: 'increase',
+        objective: 'action',
+        description: 'Clicks on links in your Facebook posts over the trailing 30 days.',
+        // ⚠️ THIS CLOSES THE SOCIAL MEDIA MANAGER'S ACTION-METRIC GAP, which had stood open because
+        // Instagram genuinely cannot supply one — ingest-instagram-insights.ts hardcodes
+        // `linkClicks: null` with the note "IG organic feed exposes no per-post link clicks", and
+        // `search_clicks` measures SEARCH traffic so it is correctly scoped to the blog roles.
+        // Facebook Page posts DO expose it (`post_clicks_by_type` → "link clicks"), which is why the
+        // Facebook ingester was the highest-value piece of this work rather than a fourth follower
+        // count. Note the gate: an SMM only gets an action metric if Facebook is connected.
+        available: true,
+        realism: { maxDailyDelta: 100000, maxDailyGrowthPct: 0.5 },
+    },
+
+    // ── Other connected platforms ───────────────────────────────────────────────
+    {
+        key: 'youtube_subscribers',
+        label: 'YouTube Subscribers',
+        unit: 'subscribers',
+        source: 'connection',
+        // YouTube is a workspace_integrations row (provider 'youtube'), not a system_connections
+        // one. manage-goals' connectedServices() unions both stores, so this gates correctly —
+        // see the note on search_clicks for the bug that union fixed.
+        connectionService: 'youtube',
+        direction: 'increase',
+        objective: 'awareness',
+        description: 'Subscribers on your connected YouTube channel.',
+        // Same provenance as facebook_followers: `channels?part=statistics&mine=true` already runs
+        // in get-follower-counts.ts. One real caveat the poller handles — a channel can HIDE its
+        // subscriber count, in which case the API returns hiddenSubscriberCount and no number, and
+        // the goal will sit unmeasured until the channel unhides it.
+        available: true,
+        realism: { maxDailyDelta: 5000, maxDailyGrowthPct: 0.25 },
+    },
+    {
+        key: 'x_followers',
+        label: 'X (Twitter) Followers',
+        unit: 'followers',
+        source: 'connection',
+        connectionService: 'x',
+        direction: 'increase',
+        objective: 'awareness',
+        description: 'Followers of your connected X account.',
+        // ⚠️ NOT OFFERED — and unlike LinkedIn this is a BILLING limit, not a permanent one.
+        // `/2/users/me?user.fields=public_metrics` is implemented in get-follower-counts.ts and
+        // returns 403 with the note 'API tier' on plans that don't include it. Whether OUR app's
+        // tier allows it cannot be settled by reading our own source, and shipping it as available
+        // on the assumption that it does is precisely the linkedin_followers mistake.
+        // Run goal-metric-selftest.ts against a connected X account: if it reports `ok`, flip this
+        // single flag to true — the poller case is already written.
+        available: false,
+        realism: { maxDailyDelta: 5000, maxDailyGrowthPct: 0.25 },
+    },
+
     {
         key: 'content_published',
         label: 'Content Published',
@@ -432,6 +538,9 @@ const SERVICE_DISPLAY_NAMES: Record<string, string> = {
     linkedin: 'LinkedIn',
     facebook: 'Facebook',
     x: 'X',
+    youtube: 'YouTube',
+    threads: 'Threads',
+    searchconsole: 'Search Console',
 };
 
 /** Proper-cased display name for a connection service, or undefined when none is given. */

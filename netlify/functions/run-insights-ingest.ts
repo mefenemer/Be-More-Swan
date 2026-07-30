@@ -1,5 +1,6 @@
 // netlify/functions/run-insights-ingest.ts
-// On-demand HTTP trigger for the Instagram insights ingest (see ingest-instagram-insights.ts).
+// On-demand HTTP trigger for the social insights ingests — Instagram
+// (ingest-instagram-insights.ts) and Facebook (ingest-facebook-insights.ts).
 //
 // WHY THIS EXISTS: Netlify runs scheduled functions ONLY on the production deploy — never on
 // branch/preview deploys. Staging (a branch deploy of `staging`) therefore never fires
@@ -19,6 +20,7 @@
 
 import { Handler } from '@netlify/functions';
 import { ingestInstagramInsights } from './ingest-instagram-insights';
+import { ingestFacebookInsights } from './ingest-facebook-insights';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -39,11 +41,26 @@ export default withLambda(async (event) => {
     if (token !== secret) return { statusCode: 401, body: JSON.stringify({ ok: false, error: 'Unauthorized.' }) };
 
     try {
-        const result = await ingestInstagramInsights();
+        // Both ingesters, sequentially. They write the same table on the same Graph app, so running
+        // them in parallel would just contend for Meta's per-app rate limit — the scheduled versions
+        // are deliberately offset for the same reason (netlify.toml).
+        //
+        // Settled independently: a Facebook failure must not hide a successful Instagram run, since
+        // this endpoint is the ONLY thing that fills post_insights on staging.
+        const instagram = await ingestInstagramInsights().catch((err) => {
+            console.error('[run-insights-ingest] instagram', err);
+            return { error: err instanceof Error ? err.message : 'error' };
+        });
+        const facebook = await ingestFacebookInsights().catch((err) => {
+            console.error('[run-insights-ingest] facebook', err);
+            return { error: err instanceof Error ? err.message : 'error' };
+        });
         return {
             statusCode: 200,
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ok: true, ...result }),
+            // `...instagram` is kept at the top level so the existing staging cron's log output and
+            // any check reading `processed`/`updated` keeps working unchanged.
+            body: JSON.stringify({ ok: true, ...instagram, instagram, facebook }),
         };
     } catch (err) {
         console.error('[run-insights-ingest]', err);

@@ -191,13 +191,26 @@ test('instagram_profile_views exists but is NOT offered until verified against t
     assert.ok(!availableMetricsForRole('social_media_manager', ['instagram']).some(m2 => m2.key === 'instagram_profile_views'));
 });
 
-test('KNOWN GAP — a Social Media Manager still has no offered action metric', () => {
-    // Honest statement of what is NOT yet solved. search_clicks fixes the objective for the content
-    // roles; SMM stays uncovered until instagram_profile_views is verified and switched on. When that
-    // happens this test fails deliberately — delete it then.
-    const smm = availableMetricsForRole('social_media_manager', ['instagram', 'linkedin', 'searchconsole']);
-    assert.equal(smm.filter(m => m.objective === 'action').length, 0,
-        'SMM now has an action metric — remove this test, the gap is closed');
+test('a Social Media Manager finally has an action metric — via Facebook', () => {
+    // This replaces the long-standing "KNOWN GAP" assertion. The gap existed because Instagram
+    // genuinely cannot supply link clicks (ingest-instagram-insights.ts hardcodes `linkClicks: null`)
+    // and search_clicks is correctly scoped away from social roles. Facebook Page posts DO expose
+    // clicks by type, so building ingest-facebook-insights.ts is what closed it.
+    const withFb = availableMetricsForRole('social_media_manager', ['instagram', 'facebook']);
+    const action = withFb.filter(m => m.objective === 'action');
+    assert.ok(action.some(m => m.key === 'facebook_link_clicks'),
+        'a Facebook-connected SMM must have an action metric');
+    assert.ok(action.every(m => m.available));
+});
+
+test('REMAINING GAP — an SMM with no Facebook still has no action metric', () => {
+    // The honest limit of what was fixed. An Instagram-only workspace is still uncovered, and the
+    // thing that would close it is instagram_profile_views — which stays available:false until
+    // goal-metric-selftest.ts confirms account-level IG insights actually return data.
+    // When that flag flips, this test fails deliberately: delete it then.
+    const igOnly = availableMetricsForRole('social_media_manager', ['instagram', 'linkedin', 'searchconsole']);
+    assert.equal(igOnly.filter(m => m.objective === 'action').length, 0,
+        'an Instagram-only SMM now has an action metric — remove this test, the gap is fully closed');
 });
 
 test('an outcome goal gets drafting levers, not operations advice aimed at the user', () => {

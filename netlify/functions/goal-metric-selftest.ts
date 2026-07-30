@@ -21,9 +21,10 @@
 //
 // Tenant-scoped: only ever touches the caller's own organisation.
 
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNotNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { systemConnections, workspaceIntegrations } from '../../db/schema';
+import { systemConnections, workspaceIntegrations, scheduledPosts } from '../../db/schema';
+import { linkClicksFrom } from './ingest-facebook-insights';
 import { getSecret } from '../../src/utils/vault';
 import { requireTenant } from '../../src/utils/tenant';
 import { getFreshAccessToken } from '../../src/utils/workspace-integrations';
@@ -95,6 +96,130 @@ async function probeIgAccountMetric(
     }
     const total = series.reduce((s, p) => s + (typeof p?.value === 'number' ? p.value : 0), 0);
     return { outcome: 'ok', value: total, detail: `"${metric}" returned ${series.length} daily points, 30-day total ${total}.` };
+}
+
+/**
+ * Facebook Page followers — the probe behind `facebook_followers`.
+ *
+ * Also the closest available proxy for "does this workspace's Page token work at all", which is what
+ * the three post-insight metrics (reach / engagement rate / link clicks) ultimately depend on: they
+ * read post_insights, and post_insights is only filled if ingest-facebook-insights.ts can call Graph
+ * with this same token.
+ */
+async function probeFacebookFollowers(pageId: string, token: string): Promise<{ outcome: Outcome; value?: number; detail: string }> {
+    const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${pageId}?fields=followers_count,fan_count&access_token=${encodeURIComponent(token)}`);
+    const body = await res.json().catch(() => null) as
+        { followers_count?: number; fan_count?: number; error?: { code?: number; message?: string } } | null;
+    if (res.status === 401 || res.status === 403 || body?.error?.code === 190) {
+        return { outcome: 'unauthorised', detail: `Graph rejected the Page token: ${body?.error?.message ?? `HTTP ${res.status}`}` };
+    }
+    if (body?.error) return { outcome: 'unsupported', detail: `Graph error ${body.error.code}: ${body.error.message}` };
+    if (!res.ok) return { outcome: 'no_data', detail: `HTTP ${res.status}` };
+    const n = body?.followers_count ?? body?.fan_count;
+    if (typeof n !== 'number') return { outcome: 'no_data', detail: 'Page returned neither followers_count nor fan_count.' };
+    return { outcome: 'ok', value: n, detail: `Page ${pageId} reports ${n} followers.` };
+}
+
+/** Facebook post-level insights — proves the columns the three derived metrics are summed from. */
+async function probeFacebookPostInsights(db: any, orgId: number, token: string): Promise<{ outcome: Outcome; value?: number; detail: string }> {
+    // Any published Facebook post with a platform id will do; we only need to know whether Graph
+    // answers for it, not what the number is.
+    const [post] = await db
+        .select({ platformPostId: scheduledPosts.platformPostId })
+        .from(scheduledPosts)
+        .where(and(
+            eq(scheduledPosts.organisationId, orgId),
+            eq(scheduledPosts.platform, 'facebook'),
+            eq(scheduledPosts.status, 'published'),
+            isNotNull(scheduledPosts.platformPostId),
+        ))
+        .limit(1);
+    if (!post?.platformPostId) {
+        return { outcome: 'no_data', detail: 'Facebook is connected but this workspace has published no Facebook posts yet — nothing to measure.' };
+    }
+
+    const metrics = 'post_impressions_unique,post_impressions,post_clicks_by_type';
+    const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${post.platformPostId}/insights?metric=${metrics}&access_token=${encodeURIComponent(token)}`);
+    const body = await res.json().catch(() => null) as
+        { data?: { name: string; values?: { value: unknown }[] }[]; error?: { code?: number; message?: string } } | null;
+    if (res.status === 401 || res.status === 403 || body?.error?.code === 190) {
+        return { outcome: 'unauthorised', detail: `Graph rejected the token for post insights: ${body?.error?.message ?? `HTTP ${res.status}`}` };
+    }
+    // Error 100 is the "one bad metric name kills the whole call" case this probe exists to catch.
+    if (body?.error) return { outcome: 'unsupported', detail: `Graph error ${body.error.code}: ${body.error.message}` };
+    const names = (body?.data ?? []).map(d => d.name);
+    if (!names.length) return { outcome: 'no_data', detail: 'Graph returned no insight rows for the sampled post.' };
+
+    const byType = body!.data!.find(d => d.name === 'post_clicks_by_type')?.values?.[0]?.value;
+    const clicks = linkClicksFrom(byType);
+    return {
+        outcome: 'ok',
+        value: clicks ?? undefined,
+        detail: `Returned ${names.join(', ')}. Link clicks on the sampled post: ${clicks ?? 'not broken out'}.`,
+    };
+}
+
+/** YouTube subscribers — note that a hidden count is a real answer, not a failure. */
+async function probeYouTubeSubscribers(db: any, orgId: number): Promise<{ outcome: Outcome; value?: number; detail: string }> {
+    let token: string;
+    try {
+        ({ accessToken: token } = await getFreshAccessToken(db, orgId, 'youtube'));
+    } catch {
+        return { outcome: 'not_connected', detail: 'No usable YouTube integration in this workspace.' };
+    }
+    const res = await fetch('https://www.googleapis.com/youtube/v3/channels?part=statistics&mine=true', {
+        headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 401 || res.status === 403) return { outcome: 'unauthorised', detail: `YouTube rejected the token (HTTP ${res.status}).` };
+    if (!res.ok) return { outcome: 'no_data', detail: `HTTP ${res.status}` };
+    const body = await res.json().catch(() => null) as
+        { items?: Array<{ statistics?: { subscriberCount?: string; hiddenSubscriberCount?: boolean } }> } | null;
+    const stats = body?.items?.[0]?.statistics;
+    if (stats?.hiddenSubscriberCount) {
+        // NOT unsupported — the API works; this channel has chosen to hide the number. Nothing in
+        // the catalog should change, but a goal on it will never move for THIS workspace.
+        return { outcome: 'no_data', detail: 'This channel hides its subscriber count, so no figure is available for it.' };
+    }
+    const n = Number(stats?.subscriberCount);
+    if (!Number.isFinite(n)) return { outcome: 'no_data', detail: 'Channel returned no subscriberCount.' };
+    return { outcome: 'ok', value: n, detail: `Channel reports ${n} subscribers.` };
+}
+
+/**
+ * X followers — the probe that decides `x_followers`.
+ *
+ * A 403 here is the API TIER, not a revoked grant, and telling those apart is the entire reason this
+ * metric ships available:false. Reported as 'unsupported' rather than 'unauthorised' so the summary
+ * reads as "our plan doesn't include this" rather than "the user needs to reconnect".
+ */
+async function probeXFollowers(db: any, orgId: number): Promise<{ outcome: Outcome; value?: number; detail: string }> {
+    const [conn] = await db
+        .select({ vaultRefKey: systemConnections.vaultRefKey })
+        .from(systemConnections)
+        .where(and(
+            eq(systemConnections.organisationId, orgId),
+            eq(systemConnections.serviceName, 'x'),
+            eq(systemConnections.status, 'active'),
+            eq(systemConnections.isActive, true),
+        ))
+        .limit(1);
+    if (!conn?.vaultRefKey) return { outcome: 'not_connected', detail: 'No active X connection in this workspace.' };
+    const secret = await getSecret(db, conn.vaultRefKey).catch(() => null);
+    const token = (secret?.token as string | undefined) ?? null;
+    if (!token) return { outcome: 'unauthorised', detail: 'X connection has no usable token in the vault.' };
+
+    const res = await fetch('https://api.twitter.com/2/users/me?user.fields=public_metrics', {
+        headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.status === 403) {
+        return { outcome: 'unsupported', detail: 'X returned 403 — /2/users/me is not included in this app\'s API tier. Leave available:false.' };
+    }
+    if (res.status === 401) return { outcome: 'unauthorised', detail: 'X rejected the token (401) — the connection needs re-authorising.' };
+    if (!res.ok) return { outcome: 'no_data', detail: `HTTP ${res.status}` };
+    const body = await res.json().catch(() => null) as { data?: { public_metrics?: { followers_count?: number } } } | null;
+    const n = body?.data?.public_metrics?.followers_count;
+    if (typeof n !== 'number') return { outcome: 'no_data', detail: 'X returned no public_metrics.followers_count.' };
+    return { outcome: 'ok', value: n, detail: `Account reports ${n} followers — this tier DOES allow it, so x_followers can be enabled.` };
 }
 
 /** Search Console — the probe behind `search_clicks`. */
@@ -211,11 +336,54 @@ export default withLambda(async (event) => {
         }
     }
 
+    // ── Facebook: Page followers + post insights ───────────────────────────────
+    // The three derived metrics (reach / engagement rate / link clicks) are summed out of
+    // post_insights, so they cannot be probed directly — what CAN be probed is whether the Graph
+    // calls that fill that table succeed. One probe result is therefore reported against all three.
+    const [fb] = await db
+        .select({ externalUserId: systemConnections.externalUserId, vaultRefKey: systemConnections.vaultRefKey, metadata: systemConnections.metadata })
+        .from(systemConnections)
+        .where(and(
+            eq(systemConnections.organisationId, orgId),
+            eq(systemConnections.serviceName, 'facebook'),
+            eq(systemConnections.status, 'active'),
+            eq(systemConnections.isActive, true),
+        ))
+        .limit(1);
+
+    const FB_INSIGHT_METRICS = ['facebook_reach', 'facebook_engagement_rate', 'facebook_link_clicks'];
+    const fbPageId = ((fb?.metadata as any)?.fbPageId as string | undefined) || fb?.externalUserId;
+    if (!fb || !fbPageId) {
+        const miss = { outcome: 'not_connected' as Outcome, detail: 'No active Facebook Page connection in this workspace.' };
+        push('facebook_followers', miss);
+        for (const k of FB_INSIGHT_METRICS) push(k, miss);
+    } else {
+        const fbSecret = await getSecret(db, fb.vaultRefKey!).catch(() => null);
+        const fbToken = (fbSecret?.token as string | undefined) ?? null;
+        if (!fbToken) {
+            const miss = { outcome: 'unauthorised' as Outcome, detail: 'Facebook connection has no usable token in the vault.' };
+            push('facebook_followers', miss);
+            for (const k of FB_INSIGHT_METRICS) push(k, miss);
+        } else {
+            push('facebook_followers', await probeFacebookFollowers(fbPageId, fbToken));
+            const insights = await probeFacebookPostInsights(db, orgId, fbToken);
+            for (const k of FB_INSIGHT_METRICS) push(k, insights);
+        }
+    }
+
+    // ── YouTube subscribers / X followers ──────────────────────────────────────
+    push('youtube_subscribers', await probeYouTubeSubscribers(db, orgId));
+    push('x_followers', await probeXFollowers(db, orgId));
+
     // ── Search Console clicks ──────────────────────────────────────────────────
     push('search_clicks', await probeSearchClicks(db, orgId));
 
     // ── Everything else: state why it wasn't probed ────────────────────────────
-    const probed = new Set(['instagram_profile_views', 'search_clicks']);
+    const probed = new Set([
+        'instagram_profile_views', 'search_clicks',
+        'facebook_followers', ...FB_INSIGHT_METRICS,
+        'youtube_subscribers', 'x_followers',
+    ]);
     for (const m of GOAL_METRICS) {
         if (probed.has(m.key)) continue;
         if (m.source === 'internal') {
