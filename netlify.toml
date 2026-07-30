@@ -298,6 +298,15 @@ node_bundler = "esbuild"
 [functions.refresh-workspace-tokens]
   schedule = "*/30 * * * *"
 
+# Audience block (assistant-detail): keep every workspace's follower/subscriber counts warm — every 4
+# hours, MATCHING CACHE_TTL_MS in src/utils/follower-counts.ts. Those two must move together: a
+# schedule slower than the TTL leaves gaps where the page falls back to fetching on load, and one
+# faster just burns third-party quota. Without this cron the counts refresh only when someone opens the
+# page, so a workspace nobody visits shows arbitrarily stale figures. Runs at :20 to stay clear of the
+# :00 pile-up (poll-goal-telemetry and friends), since this one fans out to every workspace's APIs.
+[functions.refresh-follower-counts]
+  schedule = "20 */4 * * *"
+
 # US-STOR-1.1.2 AC7: Nightly orphaned file cleanup — 03:00 UTC every day
 [functions.storage-lifecycle-cleanup]
   schedule = "0 3 * * *"

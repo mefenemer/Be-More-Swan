@@ -1,0 +1,61 @@
+# Drives the staging follower-count refresh sweep.
+#
+# Why this exists: Netlify runs scheduled functions ONLY on the production deploy —
+# never on branch/preview deploys. Staging (https://staging--bemoreswan.netlify.app)
+# is a branch deploy of the `staging` branch, so its `refresh-follower-counts` cron
+# never fires there. Without it the Audience block on assistant-detail falls back to
+# refreshing only when someone opens the page, which is exactly the behaviour the cron
+# was added to replace — so the "refreshed automatically every 4 hours in the background"
+# wording on screen would be false on staging.
+#
+# This workflow pokes the staging worker over HTTP so the counts stay warm on staging
+# the same way the native cron does it on production. Same pattern as
+# staging-goal-telemetry-cron.yml / run-goal-telemetry.ts.
+#
+# REQUIRED SETUP: reuses the SAME CRON_TRIGGER_SECRET as the other staging cron
+# workflows (GitHub repo secret + Netlify env var). The wrapper endpoint
+# (run-follower-counts) FAILS CLOSED — it returns 503 until the secret is set, so it can
+# never be an open, cost-incurring endpoint. That matters more here than most: this sweep
+# fans out to every workspace's third-party APIs.
+
+name: Staging follower-count refresh
+
+on:
+  schedule:
+    # Every 4 hours at :20 — must match BOTH the netlify.toml schedule for
+    # refresh-follower-counts AND CACHE_TTL_MS in src/utils/follower-counts.ts.
+    - cron: "20 */4 * * *"
+  workflow_dispatch: {}     # allow manual "Run workflow" from the Actions tab
+
+# If a previous run is still going, don't pile up.
+concurrency:
+  group: staging-follower-counts-cron
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST to staging run-follower-counts
+        env:
+          ENDPOINT: "https://staging--bemoreswan.netlify.app/.netlify/functions/run-follower-counts"
+          CRON_SECRET: ${{ secrets.CRON_TRIGGER_SECRET }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CRON_SECRET:-}" ]; then
+            echo "::error::Repo secret CRON_TRIGGER_SECRET is not set — the endpoint will reject the call (401/503)."
+            exit 1
+          fi
+          echo "POST $ENDPOINT"
+          HTTP_CODE=$(curl -sS -o /tmp/body.txt -w "%{http_code}" \
+            --max-time 120 --retry 2 --retry-delay 5 \
+            -X POST -H "Authorization: Bearer ${CRON_SECRET}" "$ENDPOINT")
+          echo "HTTP $HTTP_CODE"
+          echo "----- response body -----"
+          cat /tmp/body.txt || true
+          echo
+          echo "-------------------------"
+          case "$HTTP_CODE" in
+            2*) echo "OK" ;;
+            *)  echo "::error::Worker returned HTTP $HTTP_CODE"; exit 1 ;;
+          esac

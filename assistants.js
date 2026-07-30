@@ -4090,11 +4090,14 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
             // busiest platform, with the published/created figure alongside. Widths are inline (dynamic);
             // the fill uses bg-emerald-500 (the brand accent) which is present in the compiled CSS.
             const maxCreated = Math.max(1, ...entries.map(([, v]) => v.created));
-            platformEl.innerHTML = entries.map(([p, v]) => {
+            // Row gaps come from the space-y-2.5 wrapper. The per-row `mb-2.5 last:mb-0` this used to
+            // carry was a no-op — neither class is compiled into the committed style.css — so the bars
+            // sat flush against each other.
+            platformEl.innerHTML = `<div class="space-y-2.5">${entries.map(([p, v]) => {
                 const icon = (window._PLATFORM_ICONS || {})[p] || '';
                 const label = (window._PLATFORM_LABEL || {})[p] || p.charAt(0).toUpperCase() + p.slice(1);
                 const pct = Math.round((v.created / maxCreated) * 100);
-                return `<div class="mb-2.5 last:mb-0" title="${label}: ${v.created} created · ${v.scheduled} scheduled · ${v.published} published">
+                return `<div title="${label}: ${v.created} created · ${v.scheduled} scheduled · ${v.published} published">
                     <div class="flex items-center justify-between text-xs font-semibold mb-1">
                         <span class="flex items-center gap-1.5 text-gray-700"><span class="text-gray-400">${icon}</span>${label}</span>
                         <span class="text-gray-500" style="font-variant-numeric:tabular-nums">${v.published}/${v.created}</span>
@@ -4103,7 +4106,7 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
                         <div class="bg-emerald-500 h-full rounded-full" style="width:${pct}%"></div>
                     </div>
                 </div>`;
-            }).join('');
+            }).join('')}</div>`;
         }
     } catch {
         // silently skip — metrics are supplementary
@@ -4129,40 +4132,123 @@ function _formatFollowerCount(n) {
     return n < 100000000 ? short(n / 1000000, 'M') : `${Math.floor(n / 1000000)}M`;
 }
 
+// "3 min ago" / "2 hours ago" / "5 days ago". Floors every unit, so it never claims a figure is
+// fresher than it is. Used for the Audience block's staleness stamp.
+function _audienceTimeAgo(iso) {
+    const then = Date.parse(iso);
+    if (!Number.isFinite(then)) return null;
+    const mins = Math.floor((Date.now() - then) / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins} min ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs} hour${hrs === 1 ? '' : 's'} ago`;
+    const days = Math.floor(hrs / 24);
+    return `${days} day${days === 1 ? '' : 's'} ago`;
+}
+
+const _audienceFullTime = (iso) => new Date(iso).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+/**
+ * Audience block — one horizontal bar per connected platform, plus the freshness of the figures.
+ *
+ * Always reveals the block, whatever comes back: real bars, an empty state when there are no
+ * connections, or an error state. It used to stay `hidden` until at least one row arrived, which made
+ * "you have no connected accounts", "the counts failed to load" and "this feature doesn't exist" all
+ * look identical to the user.
+ *
+ * Bars are drawn the same way as "Content by platform" beside it (8px track, emerald fill, length
+ * normalised to the largest count in the set) so the two read as one chart pair. A platform that
+ * can't report a number keeps its row and its empty track rather than dropping out — the absence is
+ * the information, and hiding the row would silently shrink the chart.
+ */
 async function _fetchAndRenderFollowerCounts() {
     const block = document.getElementById('autopilot-audience');
     const list = document.getElementById('audience-by-platform');
     if (!block || !list) return;
+
+    const updatedNote = document.getElementById('audience-updated-note');
+    const refreshNote = document.getElementById('audience-refresh-note');
+    // Reveal first, populate second: every branch below leaves the user with something to read, so
+    // there's no path where an empty titled box survives.
+    block.classList.remove('hidden');
+    const setNotes = (headerText, headerTitle, footerHtml, footerTitle) => {
+        if (updatedNote) { updatedNote.textContent = headerText; updatedNote.title = headerTitle || ''; }
+        if (refreshNote) {
+            refreshNote.innerHTML = footerHtml || '';
+            refreshNote.title = footerTitle || '';
+            refreshNote.classList.toggle('hidden', !footerHtml);
+        }
+    };
+    // An empty chart still gets its axis-less track row per platform we know about, so the block has
+    // the same shape whether or not there are numbers in it.
+    const emptyState = (msg) => {
+        list.innerHTML = `<p class="text-xs text-gray-400 py-1">${msg}</p>`;
+    };
+
     try {
         const res = await fetch('/.netlify/functions/get-follower-counts');
-        if (!res.ok) return;
-        const { counts } = await res.json();
-        if (!Array.isArray(counts) || !counts.length) return;
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        // backgroundRefresh tells us whether refresh-follower-counts (the hourly cron) is keeping the
+        // cache warm. It drives the footer wording, because the honest sentence differs: with the cron
+        // these refresh on a schedule; without it they only refresh when someone opens the page. The
+        // server owns that fact — never hardcode the optimistic version here.
+        const { counts, cacheTtlMinutes, backgroundRefresh } = await res.json();
+
+        if (!Array.isArray(counts) || !counts.length) {
+            setNotes('Followers & subscribers', '', '');
+            emptyState('No connected accounts yet — connect a platform to track your follower growth here.');
+            return;
+        }
 
         // Platforms that report a number sort to the top, largest first; the "—" rows trail behind
-        // so the useful figures are the first thing read.
+        // so the useful figures are the first thing read (and the bars descend, as a bar chart should).
         const rows = counts.slice().sort((a, b) => (b.available - a.available) || ((b.count || 0) - (a.count || 0)));
-        list.innerHTML = rows.map(r => {
+        // Bar lengths are normalised to the biggest count in the set, exactly like the platform
+        // breakdown. Max(1, …) keeps the divisor safe when every row is unavailable.
+        const maxCount = Math.max(1, ...rows.map(r => (r.available && r.count != null ? r.count : 0)));
+
+        // Row gaps come from a space-y-2.5 wrapper, NOT per-row margins: style.css is prebuilt and
+        // committed, and neither mb-2.5 nor last:mb-0 is compiled into it (space-y-2.5 is).
+        list.innerHTML = `<div class="space-y-2.5">${rows.map(r => {
             const icon = (window._PLATFORM_ICONS || {})[r.platform] || '';
             const label = (window._PLATFORM_LABEL || {})[r.platform] || r.platform.charAt(0).toUpperCase() + r.platform.slice(1);
             const unit = r.platform === 'youtube' ? 'subscribers' : 'followers';
+            const has = r.available && r.count != null;
+            const pct = has ? Math.round((r.count / maxCount) * 100) : 0;
             const labelSpan = `<span class="flex items-center gap-1.5 text-xs font-semibold text-gray-700 min-w-0"><span class="text-gray-400 shrink-0" style="width:14px">${icon}</span><span class="truncate">${label}</span></span>`;
-            const value = r.available && r.count != null
-                ? `<span class="text-sm font-black text-gray-900" style="font-variant-numeric:tabular-nums" title="${r.count.toLocaleString()} ${unit}">${_formatFollowerCount(r.count)}</span>`
-                : `<span class="text-sm font-black text-gray-300" title="Not available${r.note ? ` — ${r.note}` : ''}">—</span>`;
+            const value = has
+                ? `<span class="text-sm font-black text-gray-900" style="font-variant-numeric:tabular-nums">${_formatFollowerCount(r.count)}</span>`
+                : `<span class="text-sm font-black text-gray-300">—</span>`;
+            // Per-row tooltip: the exact figure, and when THIS platform was last checked. Row-level
+            // rather than block-level because a cached row and a just-fetched row can differ by an hour.
+            const rowTitle = [
+                has ? `${label}: ${r.count.toLocaleString()} ${unit}` : `${label}: not available${r.note ? ` — ${r.note}` : ''}`,
+                r.fetchedAt ? `Last checked ${_audienceFullTime(r.fetchedAt)}` : null,
+                r.source === 'manual' ? 'Entered by you' : null,
+            ].filter(Boolean).join(' · ');
+            // A zero-length fill would be invisible, so an unavailable row shows the bare track —
+            // present in the chart, plainly empty. bg-emerald-500 matches the breakdown's fill.
+            const bar = `<div class="rounded-full overflow-hidden" style="height:8px;background:#f3f4f6;">
+                        ${has ? `<div class="bg-emerald-500 h-full rounded-full" style="width:${pct}%"></div>` : ''}
+                    </div>`;
 
             // Manual-entry platforms (LinkedIn): show the last-entered count with its date and an
             // Add/Update input, since the platform's API can't supply a follower count.
             if (r.manualAllowed) {
-                const asOf = r.recordedAt ? `<span class="text-[10px] text-gray-400 ml-1.5">as of ${new Date(r.recordedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>` : '';
+                // "as of {date}" sits UNDER the bar, not in the top row: these columns are ~215px wide
+                // on a desktop Overview, and label + count + date + Update in one line squeezed the
+                // platform name down to an unreadable "L…".
+                const asOf = r.recordedAt ? `<p class="text-[10px] text-gray-400 mt-1">Entered by you, as of ${new Date(r.recordedAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</p>` : '';
                 const cta = r.available ? 'Update' : 'Add';
-                return `<div class="py-1">
-                    <div class="flex items-center justify-between gap-3">
+                return `<div title="${rowTitle}">
+                    <div class="flex items-center justify-between gap-3 mb-1">
                         ${labelSpan}
-                        <span class="flex items-center gap-1.5 shrink-0">${value}${asOf}
+                        <span class="flex items-center gap-1.5 shrink-0">${value}
                             <button type="button" onclick="window._toggleFollowerInput('${r.platform}')" class="text-[11px] font-bold text-emerald-700 hover:underline cursor-pointer">${cta}</button>
                         </span>
                     </div>
+                    ${bar}
+                    ${asOf}
                     <div id="follower-input-${r.platform}" class="hidden mt-1.5 flex items-center gap-2 justify-end">
                         <input type="number" min="0" inputmode="numeric" placeholder="Followers" class="w-28 border border-gray-300 rounded-lg px-2 py-1 text-xs focus:ring-2 focus:ring-emerald-300 focus:outline-none">
                         <button type="button" onclick="window._saveFollowerCount('${r.platform}', this)" class="text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 rounded-lg px-2.5 py-1 cursor-pointer">Save</button>
@@ -4171,14 +4257,74 @@ async function _fetchAndRenderFollowerCounts() {
                 </div>`;
             }
 
-            return `<div class="flex items-center justify-between gap-3 py-1">
-                ${labelSpan}
-                ${value}
+            return `<div title="${rowTitle}">
+                <div class="flex items-center justify-between gap-3 mb-1">
+                    ${labelSpan}
+                    ${value}
+                </div>
+                ${bar}
             </div>`;
-        }).join('');
-        block.classList.remove('hidden');
+        }).join('')}</div>`;
+
+        // ── Freshness. Only API-fetched rows count: a manually-entered LinkedIn figure carries its own
+        // "as of" date and isn't refreshed by anything, so folding it in would misreport the block.
+        // The OLDEST fetch is what gets stamped — saying "updated 2 min ago" because one of five
+        // platforms was just re-checked would overstate the rest.
+        const fetched = rows.map(r => r.fetchedAt).filter(Boolean).sort();
+        if (!fetched.length) {
+            setNotes('Followers & subscribers', '', '');
+            return;
+        }
+        const oldest = fetched[0];
+        // Cadence phrase built from the server's TTL so the sentence stays true if CACHE_TTL_MS moves.
+        // Carries its own article ("once an hour" / "every 4 hours") — a bare unit reads as "an 30 minutes".
+        // The fallback derives from this row's own fetchedAt→nextRefreshAt gap rather than assuming a
+        // number: guessing a cadence the server didn't state is how the copy ends up lying.
+        const gapMins = nextAt0 => nextAt0 ? Math.round((Date.parse(nextAt0) - Date.parse(oldest)) / 60000) : 0;
+        const ttlMins = Number(cacheTtlMinutes) || gapMins(rows.find(r => r.fetchedAt === oldest)?.nextRefreshAt) || 240;
+        const cadence = ttlMins === 60 ? 'once an hour'
+            : ttlMins % 60 === 0 ? `every ${ttlMins / 60} hours`
+            : `every ${ttlMins} minutes`;
+        const nextAt = rows.map(r => r.nextRefreshAt).filter(Boolean).sort()[0];
+        const due = nextAt && Date.parse(nextAt) <= Date.now();
+        const nextLabel = nextAt ? _audienceFullTime(nextAt) : null;
+
+        // Two different truths, and the wrong one is a lie the user can catch:
+        //  • with the cron (refresh-follower-counts, every 4h) these refresh on a schedule whether or
+        //    not anyone visits, so naming a time is fair;
+        //  • without it, get-follower-counts only calls the platform APIs when someone opens the page
+        //    with an expired cache, so the promise has to be a page load — "refreshes at 14:32" would
+        //    be false on a workspace nobody opens.
+        // `due` means the next refresh is already overdue: on the scheduled path that's the gap between
+        // the cache expiring and the cron's next tick (it runs at :20), so don't claim it just happened.
+        // If the background sweep is meant to be running and the newest figure is still hours stale,
+        // the sweep is not reaching this workspace. Don't print an hourly promise directly beneath an
+        // "Updated 2 days ago" that contradicts it — the user can see both lines at once.
+        const wayOverdue = Date.now() - Date.parse(oldest) > ttlMins * 60000 * 3;
+        const footer = backgroundRefresh
+            ? (wayOverdue
+                ? `These should refresh automatically ${cadence}, but haven't for a while — reloading this page will re-check them.`
+                : due
+                    ? `Refreshed automatically ${cadence} in the background — the next refresh is due now.`
+                    : `Refreshed automatically ${cadence} in the background — next refresh around ${nextLabel}.`)
+            : (due
+                ? `Counts refresh at most ${cadence} — due now, so reloading this page will re-check them.`
+                : `Counts refresh at most ${cadence} — these re-check the next time this page is opened after ${nextLabel || 'the hour is up'}.`);
+        setNotes(
+            `Updated ${_audienceTimeAgo(oldest)}`,
+            `Oldest figure last checked ${_audienceFullTime(oldest)}`,
+            footer,
+            backgroundRefresh
+                // Derived from `cadence`, not spelled out — the TTL lives in src/utils/follower-counts.ts
+                // and a hardcoded "hourly" here would quietly become a lie the next time it changes.
+                ? `A background job re-checks every workspace's follower counts ${cadence}, and the page serves the cached figures, so opening it never hammers the platform APIs.`
+                : 'Follower counts are cached so opening this page never hammers the platform APIs. There is no background refresh job — a page load after the cache expires is what triggers the next check.',
+        );
     } catch {
-        // silently skip — the audience block is supplementary
+        // Supplementary data, but the block is already on screen — say so rather than leaving a
+        // titled box with nothing in it.
+        setNotes('Followers & subscribers', '', '');
+        emptyState('Couldn\'t load follower counts just now. Reload the page to try again.');
     }
 }
 

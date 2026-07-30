@@ -357,13 +357,21 @@
            breakdown rather than part of it: the breakdown hides below 2 platforms, but a
            single-connection assistant still has an audience worth showing. Availability varies —
            LinkedIn never exposes personal-profile followers and X depends on the API tier, so those
-           rows render "—" with the reason on hover. Hidden until at least one row comes back. -->
+           rows render "—" with the reason on hover.
+           Rendered as a horizontal bar chart matching "Content by platform" beside it, and NOT
+           hidden when there's nothing to plot: _fetchAndRenderFollowerCounts always reveals the
+           block, falling back to an empty state (no connections) or an error state. A block that
+           only appeared once numbers arrived was indistinguishable from a block that didn't exist.
+           #audience-updated-note (header, right) carries how stale the figures are;
+           #audience-refresh-note (footer) carries the refresh policy — see the renderer for why the
+           next refresh is worded as a page-load condition rather than a scheduled job. -->
       <div id="autopilot-audience" class="mt-4 pt-4 border-t border-gray-100 hidden">
         <div class="flex items-center justify-between gap-3 mb-2">
           <h4 class="text-[11px] font-bold text-gray-400 uppercase tracking-wide shrink-0">Audience</h4>
-          <p class="text-[11px] text-gray-400 shrink-0">Followers &amp; subscribers</p>
+          <p id="audience-updated-note" class="text-[11px] text-gray-400 shrink-0">Followers &amp; subscribers</p>
         </div>
         <div id="audience-by-platform"></div>
+        <p id="audience-refresh-note" class="text-[10px] text-gray-400 mt-2 leading-relaxed hidden"></p>
       </div>
       </div>
     </div>

@@ -2,19 +2,6 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "component-harness-goal-progress-card",
-      "runtimeExecutable": "python3",
-      "runtimeArgs": [
-        "-m",
-        "http.server",
-        "4222",
-        "--directory",
-        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/a0fd1bfe-09fb-4af2-b4fb-6828e5a78763/scratchpad/goalcard"
-      ],
-      "port": 4222,
-      "autoPort": false
-    },
-    {
       "name": "component-harness-goal-manual",
       "runtimeExecutable": "python3",
       "runtimeArgs": [
