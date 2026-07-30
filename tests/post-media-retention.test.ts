@@ -70,6 +70,27 @@ check('R2 is the only object store any storage path targets', () => {
         `these target AWS S3 rather than R2, so their storage operations are no-ops: ${offenders.join(', ')}`);
 });
 
+// ── 1b. …and it has to actually run ─────────────────────────────────────────────────────────────
+// The original file's header said "every 6 hours". netlify.toml listed no schedule for it, so it had
+// never run once — which is the real reason no asset had ever been purged, and why its other bugs
+// stayed invisible. A docstring is not a cron.
+check('content-retention is actually scheduled', () => {
+    const toml = read('netlify.toml');
+    assert.ok(/\[functions\.content-retention\]/.test(toml),
+        'netlify.toml has no [functions.content-retention] block — the reclaimer will never run and post media will never be reclaimed, however correct the code is');
+
+    // It must run after archive-cleanup, which is what releases the media it reclaims.
+    const scheduleAfter = (fn: string) => {
+        const m = toml.match(new RegExp(`\\[functions\\.${fn}\\]\\s*\\n\\s*schedule = "([^"]+)"`));
+        assert.ok(m, `expected a schedule for ${fn}`);
+        const hour = m![1].split(' ')[1];
+        assert.ok(/^\d+$/.test(hour), `${fn} schedule "${m![1]}" is not a plain daily hour — re-check the ordering by hand`);
+        return Number(hour);
+    };
+    assert.ok(scheduleAfter('content-retention') > scheduleAfter('archive-cleanup'),
+        'content-retention must run after archive-cleanup on the same day: archive-cleanup releases a departing post\'s media, and content-retention reclaims the bytes');
+});
+
 // ── 2. purgedAt means the bytes are gone ────────────────────────────────────────────────────────
 check('purgedAt is only stamped on a confirmed physical delete', () => {
     const src = readCode('netlify/functions/content-retention.ts');

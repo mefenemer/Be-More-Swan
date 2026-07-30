@@ -315,6 +315,17 @@ node_bundler = "esbuild"
 [functions.archive-cleanup]
   schedule = "0 4 * * *"
 
+# US4: content_assets retention — purge the R2 objects of posted/rejected media past their window.
+# 05:00 UTC daily, AFTER archive-cleanup (04:00), because that job is what hands media over: it
+# releases a departing post's assets, and this one reclaims the bytes.
+#
+# The function's header claimed "every 6 hours" from the day it was written, but it was never listed
+# here, so it had NEVER run — which is why no content asset had ever been purged. Its own two bugs
+# (deleting from an unconfigured S3, and stamping purged_at regardless) were latent for the same
+# reason. Both are fixed; this line is what makes the reclaimer actually exist.
+[functions.content-retention]
+  schedule = "0 5 * * *"
+
 # Issue #191: hard-delete archived assistants past their 14-day reinstate window — 04:30 UTC daily
 [functions.purge-archived-assistants]
   schedule = "30 4 * * *"

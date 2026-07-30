@@ -1,5 +1,11 @@
 // content-retention.ts — Automated data retention & cost optimization (US4)
-// Runs as a scheduled Netlify function (cron) — every 6 hours
+// Scheduled via netlify.toml: runs daily at 05:00 UTC, after archive-cleanup (04:00) hands over the
+// media of posts leaving the archive.
+//
+// ⚠️ This comment used to claim "every 6 hours" while netlify.toml listed no schedule for it at all,
+// so the function had never once run. Both of the bugs described below were therefore latent rather
+// than active — do not read the docstring as evidence that a cron exists; check netlify.toml.
+//
 // 1. Purges POSTED assets whose retentionDeleteAfter has elapsed (30-day window)
 // 2. Purges REJECTED assets whose retentionDeleteAfter has elapsed (7-day window)
 //
@@ -7,7 +13,7 @@
 // Database: strips storageUrl/storageKey and marks purgedAt — but ONLY once the object is
 // confirmed gone. See below.
 //
-// ── Two bugs this file used to have, both silent and both destructive ────────────────────────────
+// ── Two bugs this file used to have, both silent, both destructive if it had ever run ────────────
 // 1. It deleted from AWS S3 (S3_BUCKET_NAME / AWS_ACCESS_KEY_ID / S3_REGION). Nothing else in this
 //    codebase uses those variables — every upload and download path is Cloudflare R2
 //    (R2_BUCKET_NAME, see content-upload-url.ts). So `deleteFromS3` early-returned on every run.
