@@ -105,6 +105,11 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     ticket_reply: 'informational', billing: 'informational', new_role_availability: 'informational',
     action_rate_limited: 'informational', usage_counter_drift: 'informational', system: 'informational',
     authorization_code: 'informational', page_response: 'informational',
+    // A user-reported goal figure is overdue. Explicitly informational, NOT the critical_action its
+    // sibling goal_data_disconnected gets: nothing is broken, no integration needs re-authenticating,
+    // and the goal keeps its last-known progress until the next figure arrives. It recurs on the
+    // metric's own cadence, so a monthly nudge must never be undismissible.
+    goal_metric_update_due: 'informational',
 };
 
 export const categoryOf = (type: string): NotificationCategory => TYPE_CATEGORY[type] ?? 'informational';

@@ -5113,6 +5113,9 @@ const _GOAL_STATUS_META = {
     at_risk:            { label: 'At Risk',        dot: 'bg-amber-500',   text: 'text-amber-600'  },
     off_track:          { label: 'Off Track',      dot: 'bg-red-500',     text: 'text-red-600'    },
     data_disconnected:  { label: 'Data Disconnected', dot: 'bg-gray-400', text: 'text-gray-500'   },
+    // Manual metrics only. Amber, not red: the goal is fine, we're just waiting on this period's
+    // number. Deliberately worded as a prompt to the user rather than as a fault in the assistant.
+    awaiting_update:    { label: 'Update Due',     dot: 'bg-amber-400',  text: 'text-amber-600'  },
 };
 
 function _goalMetricLabel(key) {
@@ -5120,6 +5123,38 @@ function _goalMetricLabel(key) {
     return m ? { label: m.label, unit: m.unit } : { label: key, unit: '' };
 }
 window._goalMetricLabel = _goalMetricLabel;
+
+/**
+ * Label + unit for a goal, preferring what the SERVER sent on the goal row.
+ *
+ * `_goalMetricLabel` looks the metric up in `availableMetrics`, which is the list of metrics you may
+ * pick RIGHT NOW — a goal can outlive that list (its connection was removed, or the metric was
+ * marked unmeasurable), and then the card fell back to rendering the raw key: "manual_bookings —
+ * target: 400". manage-goals already sends `metricLabel` and `unit` on every goal for exactly this
+ * reason; this just uses them, with the catalog lookup as the fallback rather than the primary.
+ */
+function _goalLabel(g) {
+    const fromCatalog = _goalMetricLabel(g.metricKey);
+    return {
+        label: g.metricLabel || fromCatalog.label,
+        unit: g.unit != null && g.unit !== '' ? g.unit : fromCatalog.unit,
+    };
+}
+
+/**
+ * Format a value with its unit. Currency and percentage units are written the way people write them
+ * — "£250,000", "45%" — not as a suffixed word. The manual metrics made this visible: "250,000 £"
+ * is how a revenue target rendered before, on the card, in the header bar and in the entry field.
+ */
+function _fmtGoalValue(n, unit) {
+    if (n == null) return '—';
+    const num = Number(n).toLocaleString();
+    if (!unit) return num;
+    if (unit === '%') return `${num}%`;
+    // Any leading currency symbol (£, $, €) prefixes rather than suffixes.
+    if (/^[£$€]$/.test(unit)) return `${unit}${num}`;
+    return `${num} ${unit}`;
+}
 
 async function _fetchAndRenderGoals(assistantId) {
     _goalsAssistantId = parseInt(assistantId);
@@ -5175,7 +5210,7 @@ function _renderPrimaryGoalHeader() {
     if (!primary) { box.classList.add('hidden'); box.innerHTML = ''; return; }
 
     const meta = _GOAL_STATUS_META[primary.status] || _GOAL_STATUS_META.pending;
-    const { label, unit } = _goalMetricLabel(primary.metricKey);
+    const { label, unit } = _goalLabel(primary);
     const target = Number(primary.targetValue);
     const latest = primary.latestValue != null ? Number(primary.latestValue) : null;
     const pct = (latest != null && target > 0) ? Math.max(0, Math.min(100, Math.round((latest / target) * 100))) : 0;
@@ -5190,7 +5225,7 @@ function _renderPrimaryGoalHeader() {
         <div class="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
             <div class="h-full ${meta.dot} transition-all" style="width:${pct}%"></div>
         </div>
-        <p class="text-[11px] text-gray-400 mt-1">${latest != null ? fmt(latest) : '—'} / ${fmt(target)} ${_escapeHtml(unit)}</p>`;
+        <p class="text-[11px] text-gray-400 mt-1">${latest != null ? fmt(latest) : '—'} / ${_escapeHtml(_fmtGoalValue(target, unit))}</p>`;
 }
 
 function _syncReviewButton() {
@@ -5258,18 +5293,36 @@ function _populateGoalMetricDropdown() {
     sel.onchange = () => {
         const m = _goalMetrics.find(x => x.key === sel.value);
         if (help) help.textContent = m ? m.description : '';
+        _syncGoalPrimaryGate(m ? m.source === 'manual' : false);
     };
     renderMetrics();
 }
 
+/**
+ * Enable or disable the "Primary goal" checkbox for the metric currently selected.
+ *
+ * A user-reported metric can never be primary (see manualPrimaryError in manage-goals.ts). The
+ * server enforces it; this just stops the user filling in a whole goal before being told. Unchecks
+ * as well as disables, so a box ticked for one metric can't be submitted after switching to another.
+ */
+function _syncGoalPrimaryGate(isManual) {
+    const box = document.getElementById('goal-primary');
+    const note = document.getElementById('goal-primary-note');
+    if (box) {
+        box.disabled = !!isManual;
+        if (isManual) box.checked = false;
+    }
+    if (note) note.classList.toggle('hidden', !isManual);
+}
+
 function _buildGoalCard(g) {
     const meta = _GOAL_STATUS_META[g.status] || _GOAL_STATUS_META.pending;
-    const { label, unit } = _goalMetricLabel(g.metricKey);
+    const { label, unit } = _goalLabel(g);
     const target = Number(g.targetValue);
     const latest = g.latestValue != null ? Number(g.latestValue) : null;
     const pct = (latest != null && target > 0) ? Math.max(0, Math.min(100, Math.round((latest / target) * 100))) : 0;
     const due = g.targetDate ? new Date(g.targetDate).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
-    const fmt = (n) => n == null ? '—' : Number(n).toLocaleString();
+    const fmt = (n) => _fmtGoalValue(n, unit);
 
     return `<div class="border border-gray-200 rounded-xl p-4">
         <div class="flex items-start justify-between gap-3">
@@ -5278,7 +5331,7 @@ function _buildGoalCard(g) {
                     <h4 class="text-sm font-bold text-gray-900">${_escapeHtml(g.title || label)}</h4>
                     ${g.isPrimary ? '<span class="text-[10px] font-bold uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded">Primary</span>' : ''}
                 </div>
-                <p class="text-xs text-gray-500 mt-0.5">${g.title ? _escapeHtml(label) + ' — t' : 'T'}arget: <span class="font-semibold text-gray-700">${fmt(target)} ${_escapeHtml(unit)}</span> by ${due}</p>
+                <p class="text-xs text-gray-500 mt-0.5">${g.title ? _escapeHtml(label) + ' — t' : 'T'}arget: <span class="font-semibold text-gray-700">${_escapeHtml(fmt(target))}</span> by ${due}</p>
                 ${g.rationale ? `<p class="text-xs text-gray-400 mt-1.5 italic border-l-2 border-emerald-100 pl-2">${_escapeHtml(g.rationale)}</p>` : ''}
             </div>
             <div class="flex items-center gap-3 shrink-0">
@@ -5295,15 +5348,99 @@ function _buildGoalCard(g) {
         </div>
         <div class="mt-3">
             <div class="flex items-center justify-between text-[11px] text-gray-400 mb-1">
-                <span>${latest != null ? fmt(latest) + ' ' + _escapeHtml(unit) : 'Awaiting first data sync'}</span>
+                <span>${latest != null ? _escapeHtml(fmt(latest)) : (g.isManual ? 'No figure entered yet' : 'Awaiting first data sync')}</span>
                 <span>${latest != null ? pct + '%' : ''}</span>
             </div>
             <div class="h-2 w-full bg-gray-100 rounded-full overflow-hidden">
                 <div class="h-full ${meta.dot} transition-all" style="width:${pct}%"></div>
             </div>
         </div>
+        ${g.isManual ? _buildManualEntryRow(g) : ''}
     </div>`;
 }
+
+/**
+ * The entry row on a user-reported goal's card.
+ *
+ * A manual goal has to look different from a polled one at a glance, or the user has no way of
+ * knowing the number is theirs to supply — it would just look like a goal that never updates. So the
+ * card states when they last entered a figure, when the next one is due, and gives them the box to
+ * type it in without leaving the tab.
+ */
+function _buildManualEntryRow(g) {
+    const { label, unit } = _goalLabel(g);
+    const last = g.lastEnteredAt ? new Date(g.lastEnteredAt) : null;
+    const due = g.nextDueAt ? new Date(g.nextDueAt) : null;
+    const dateStr = (d) => d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+    const overdue = due && due.getTime() < Date.now();
+
+    const history = last
+        ? `You last updated this on <span class="font-semibold text-gray-600">${dateStr(last)}</span>`
+        : `Enter your first figure to start tracking`;
+    const next = due
+        ? (overdue
+            ? `<span class="font-semibold text-amber-600">Update due</span>`
+            : `Next update due ${dateStr(due)}`)
+        : (g.updateCadenceDays ? `You'll update this every ${g.updateCadenceDays} days` : '');
+
+    return `<div class="mt-3 pt-3 border-t border-dashed border-gray-200">
+        <p class="text-[11px] text-gray-400 mb-2">${history}${next ? ' · ' + next : ''}</p>
+        <div class="flex items-center gap-2">
+            <input type="number" min="0" step="any" id="manual-value-${g.id}"
+                placeholder="${/^[£$€]$/.test(unit) ? `Current amount in ${_escapeHtml(unit)}` : `Current ${_escapeHtml(unit || 'value')}`}"
+                aria-label="Current value for ${_escapeHtml(g.title || label)}"
+                class="flex-1 min-w-0 border border-gray-300 rounded-lg px-2.5 py-1.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+            <button type="button" onclick="window._recordGoalValue(${g.id})" id="manual-save-${g.id}"
+                class="shrink-0 px-3 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg transition cursor-pointer">Save</button>
+        </div>
+        <p id="manual-msg-${g.id}" class="hidden text-xs mt-1.5"></p>
+    </div>`;
+}
+
+const RECORD_GOAL_VALUE_API = '/.netlify/functions/record-goal-value';
+
+/**
+ * Submit a user-reported figure. Re-renders the whole Goals tab on success rather than patching the
+ * card: the server recomputes status, progress and the next due date, and a hand-patched card would
+ * drift from what the next reload shows.
+ */
+window._recordGoalValue = async function (goalId) {
+    const input = document.getElementById(`manual-value-${goalId}`);
+    const btn = document.getElementById(`manual-save-${goalId}`);
+    const msg = document.getElementById(`manual-msg-${goalId}`);
+    if (!input) return;
+
+    const show = (text, ok) => {
+        if (!msg) return;
+        msg.textContent = text;
+        msg.className = `text-xs mt-1.5 font-medium ${ok ? 'text-emerald-600' : 'text-red-600'}`;
+        msg.classList.remove('hidden');
+    };
+    if (msg) msg.classList.add('hidden');
+
+    const value = Number(input.value);
+    // 0 is a valid report ("no bookings this week"), so test for blank rather than falsiness.
+    if (input.value.trim() === '' || !Number.isFinite(value) || value < 0) {
+        return show('Enter a number of 0 or more.', false);
+    }
+
+    if (btn) { btn.disabled = true; btn.classList.add('opacity-60'); }
+    try {
+        const res = await fetch(RECORD_GOAL_VALUE_API, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ goalId, value }),
+        });
+        if (!res.ok) {
+            const e = await res.json().catch(() => ({}));
+            return show(e.error || 'Could not save that figure.', false);
+        }
+        await _fetchAndRenderGoals(_goalsAssistantId);
+    } catch {
+        show('Could not save that figure. Please try again.', false);
+    } finally {
+        if (btn) { btn.disabled = false; btn.classList.remove('opacity-60'); }
+    }
+};
 
 // Which goal the builder is currently editing, or null when it's in "add" mode. The builder is
 // reused for both rather than duplicated into a modal, so the SMART explainers, the validation and
@@ -5347,6 +5484,7 @@ window._toggleGoalBuilder = function (show) {
         const ti = document.getElementById('goal-title'); if (ti) ti.value = '';
         const ra = document.getElementById('goal-rationale'); if (ra) ra.value = '';
         const help = document.getElementById('goal-metric-help'); if (help) help.textContent = '';
+        _syncGoalPrimaryGate(false);    // no metric chosen yet — nothing to gate on
         _setGoalBuilderMode('add');
         // Reset the Metric dropdown back to its "select an objective first" state.
         _populateGoalMetricDropdown();
@@ -5407,6 +5545,9 @@ window._editGoal = function (id) {
         }
         metricSel.value = g.metricKey;
     }
+    // After the metric is settled, not before — the gate is a property of the metric. `isManual`
+    // comes from the server on every goal, so this holds even for a metric missing from _goalMetrics.
+    _syncGoalPrimaryGate(!!g.isManual);
 
     _setGoalBuilderMode('edit');
     builder.classList.remove('hidden');
@@ -5540,6 +5681,8 @@ const _REVIEW_BANNER = {
     off_track:         { tone: 'red',     text: 'Off track — at the current rate this goal will miss its target.' },
     pending:           { tone: 'gray',    text: 'Gathering data. Status appears once a few data points are in.' },
     data_disconnected: { tone: 'gray',    text: 'We lost connection to the data source. Re-authenticate to resume tracking.' },
+    // Not a fault — this goal tracks a figure only you can supply, and one is due.
+    awaiting_update:   { tone: 'gray',    text: 'Waiting on your latest figure. Add it on the Goals tab to bring this up to date.' },
 };
 const _REVIEW_TONE_CLS = {
     emerald: 'bg-emerald-50 border-emerald-200 text-emerald-800',

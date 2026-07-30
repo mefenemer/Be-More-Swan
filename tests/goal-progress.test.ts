@@ -94,4 +94,72 @@ check('decrease goal moving wrong way → off_track', () => {
     assert.equal(r.status, 'off_track');
 });
 
+// ── User-reported (manual) metrics ───────────────────────────────────────────────
+// Three defaults are overridden for a metric the user types in by hand. Each of these tests is a
+// bug that WOULD have shipped by inheriting the polled-metric behaviour unchanged.
+
+check('a manual metric is not stale on the 48h connection rule', () => {
+    // A monthly revenue figure entered 10 days ago is perfectly current. On the default window it
+    // would read as stale and — via poll-goal-telemetry — raise a critical "reconnect your account"
+    // alert about an integration that does not exist.
+    const base = {
+        startValue: 100_000, latestValue: 150_000, targetValue: 200_000,
+        createdAt: daysAgo(40), targetDate: daysAhead(40), direction: 'increase' as const,
+        lastTelemetryAt: daysAgo(10), dataPoints: 3, minDataPoints: 2,
+    };
+    assert.equal(computeGoalProgress(base).status, 'data_disconnected', 'baseline: the 48h default would flag it');
+
+    const r = computeGoalProgress({ ...base, staleAfterHours: 37 * 24, staleStatus: 'awaiting_update' });
+    assert.equal(r.status, 'on_track', 'within its own cadence it is judged normally');
+});
+
+check('an overdue manual figure becomes awaiting_update, never data_disconnected', () => {
+    const r = computeGoalProgress({
+        startValue: 100_000, latestValue: 150_000, targetValue: 200_000,
+        createdAt: daysAgo(120), targetDate: daysAhead(40), direction: 'increase',
+        lastTelemetryAt: daysAgo(60), staleAfterHours: 37 * 24, staleStatus: 'awaiting_update',
+        dataPoints: 3, minDataPoints: 2,
+    });
+    assert.equal(r.status, 'awaiting_update');
+    assert.equal(r.pct, 50, 'the bar the user has been watching still shows last-known progress');
+});
+
+check('silence between entries does not decay the run-rate into off_track', () => {
+    // THE COLLISION THIS PREVENTS. A goal exactly on pace as of its last entry, 25 days ago. Measured
+    // against `now` the same gain is divided by 55 days instead of 30, the ratio falls below the
+    // off_track threshold, and the goal flips — which is what wakes the autonomous optimizer and has
+    // it rewrite the assistant's brand voice. Nothing about the business changed; the user simply
+    // hasn't typed this month's number yet.
+    const base = {
+        startValue: 0, latestValue: 50_000, targetValue: 100_000,
+        createdAt: daysAgo(55), targetDate: daysAhead(5), direction: 'increase' as const,
+        lastTelemetryAt: daysAgo(25), staleAfterHours: 37 * 24, staleStatus: 'awaiting_update' as const,
+        dataPoints: 3, minDataPoints: 2,
+    };
+    assert.equal(computeGoalProgress(base).status, 'off_track', 'baseline: measuring to now punishes the gap');
+    assert.equal(computeGoalProgress({ ...base, rateAsOfLastEntry: true }).status, 'on_track');
+});
+
+check('one data point is not a trend', () => {
+    // With a single entry the "trend" is an artefact of where the baseline landed. A monthly metric
+    // would otherwise be graded — and potentially acted on — a full month before a second reading.
+    const base = {
+        startValue: 0, latestValue: 10, targetValue: 100_000,
+        createdAt: daysAgo(30), targetDate: daysAhead(30), direction: 'increase' as const,
+        lastTelemetryAt: new Date(), rateAsOfLastEntry: true,
+    };
+    assert.equal(computeGoalProgress({ ...base, dataPoints: 1, minDataPoints: 2 }).status, 'pending');
+    assert.equal(computeGoalProgress({ ...base, dataPoints: 2, minDataPoints: 2 }).status, 'off_track');
+});
+
+check('polled metrics are completely unaffected by the manual knobs', () => {
+    // Every new field is optional and defaults to the old behaviour, so no existing caller changes.
+    const r = computeGoalProgress({
+        startValue: 1000, latestValue: 1500, targetValue: 2000,
+        createdAt: daysAgo(10), targetDate: daysAhead(10), direction: 'increase', lastTelemetryAt: new Date(),
+    });
+    assert.equal(r.status, 'on_track');
+    assert.equal(r.pct, 50);
+});
+
 console.log(`\n${passed} checks passed.`);

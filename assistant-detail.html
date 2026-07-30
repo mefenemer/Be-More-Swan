@@ -1607,7 +1607,7 @@
       <div class="flex items-start justify-between mb-2 gap-4 flex-wrap">
         <div>
           <h3 class="text-lg font-bold text-gray-900">Goals</h3>
-          <p class="text-sm text-gray-500 mt-1">Set measurable targets for this assistant. Progress is tracked automatically against the data from your connections.</p>
+          <p class="text-sm text-gray-500 mt-1">Set measurable targets for this assistant. Most are tracked automatically from your connections; the ones marked <span class="font-semibold">you report</span> are figures only you have — enter those on the card and we'll remind you when one is due.</p>
         </div>
         <div class="flex items-center gap-2 shrink-0">
           <!-- Issue #192: moved here from the assistant-detail header. Opens the progress page
@@ -1691,11 +1691,17 @@
             <input id="goal-date" type="date"
               class="w-full border border-gray-300 rounded-lg p-2.5 text-sm bg-white focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
           </div>
-          <div class="flex items-end">
+          <div class="flex flex-col justify-end">
             <label class="inline-flex items-center gap-2 text-sm text-gray-600 cursor-pointer">
-              <input id="goal-primary" type="checkbox" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500">
+              <input id="goal-primary" type="checkbox" class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed">
               Primary goal
             </label>
+            <!-- Shown when a user-reported metric is selected. The primary goal is the one this
+                 assistant is measured on and steered toward, which can't honestly be a number its
+                 own work doesn't move — manage-goals rejects the combination server-side too. -->
+            <p id="goal-primary-note" class="hidden text-xs text-gray-400 mt-1 leading-relaxed">
+              You report this figure yourself, so it can't be the primary goal — this assistant's work isn't what moves it.
+            </p>
           </div>
           <div class="sm:col-span-3">
             <label for="goal-rationale" data-explain="goal-why" class="block text-sm font-bold text-gray-700 mb-1">

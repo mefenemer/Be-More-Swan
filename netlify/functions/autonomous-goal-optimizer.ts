@@ -16,7 +16,7 @@ import { getDb } from '../../db/client';
 import { aiAssistants, goals, auditLogs } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
-import { tierAllows, AUTONOMOUS_TUNABLE_FIELDS, funnelDiagnosticFor } from '../../src/config/goal-metrics';
+import { tierAllows, AUTONOMOUS_TUNABLE_FIELDS, funnelDiagnosticFor, isManualMetric } from '../../src/config/goal-metrics';
 import { isGlobalAiDisabled } from '../../src/utils/platform-config';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -49,7 +49,15 @@ export default withLambda(async () => {
         }
         if (!allowed) continue;
 
-        const offTrack = await db
+        // ⚠️ USER-REPORTED GOALS ARE NOT A TRIGGER. This function's entire premise is that an
+        // off_track status means the CONTENT strategy is underperforming, so it rewrites the brand
+        // voice / audience / strategy / cadence to recover. A manual metric breaks that premise
+        // twice over: its value is a step function (one entry a month), so it oscillates between
+        // on_track and off_track and would churn the brief on a schedule; and nothing this assistant
+        // writes is what moves revenue anyway, so the rewrite would be an unattributable guess
+        // applied to the one thing the user hand-authored. Fetch a few and take the first metric
+        // that is genuinely ours to influence.
+        const offTrackRows = await db
             .select({ id: goals.id, metricKey: goals.metricKey })
             .from(goals)
             .where(and(
@@ -58,7 +66,8 @@ export default withLambda(async () => {
                 eq(goals.status, 'off_track'),
                 eq(goals.isActive, true),
             ))
-            .limit(1);
+            .limit(10);
+        const offTrack = offTrackRows.filter(g => !isManualMetric(g.metricKey));
         if (!offTrack.length) continue;
 
         // The brief fields the UI + generation read/write live in onboardingContext (NOT

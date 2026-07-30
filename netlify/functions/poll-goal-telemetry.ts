@@ -9,6 +9,10 @@
 //   AC4.3.2 stale-data flag     — no fresh data for >48h flips the goal to data_disconnected.
 //   AC4.3.3 alerting            — a critical_action notification fires when that happens.
 //
+// User-reported goals (source: 'manual') pass through here too, but on a separate branch — there is
+// nothing to fetch, so all this cron does for them is notice when the figure is overdue. See
+// handleManualGoal, and the comment there for why they must never take the disconnected path.
+//
 // Owner-path (getDb) + manual org filter, like ingest-instagram-insights.
 
 import { Handler } from '@netlify/functions';
@@ -20,7 +24,10 @@ import {
 } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { getSecret } from '../../src/utils/vault';
-import { connectionDisplayName, getGoalMetric, pollCadenceHours, RUN_RATE_THRESHOLDS } from '../../src/config/goal-metrics';
+import {
+    connectionDisplayName, getGoalMetric, pollCadenceHours, RUN_RATE_THRESHOLDS,
+    isManualMetric, staleWindowHoursFor, staleStatusFor,
+} from '../../src/config/goal-metrics';
 import { computeGoalProgress } from '../../src/utils/goal-progress';
 import { assembleBlueprint } from '../../src/utils/blueprint';
 import { getFreshAccessToken } from '../../src/utils/workspace-integrations';
@@ -341,7 +348,47 @@ async function fetchMetric(
     }
 }
 
-export async function pollGoalTelemetry(): Promise<{ goals: number; polled: number; skipped: number; disconnected: number }> {
+/**
+ * A user-reported goal has nothing to fetch — its value arrives via record-goal-value.ts. All this
+ * cron owes it is the nudge: once the figure is overdue, flip to `awaiting_update` and tell the
+ * person who set the goal.
+ *
+ * It must NOT take the disconnected path below. That path is written for a broken integration:
+ * it fires `goal_data_disconnected`, which notification-actions.ts classes as `critical_action` —
+ * an undismissible red "we lost connection to X, re-authenticate" alert. For a manual metric there
+ * is no X, nothing is broken, and the fix is for the user to type a number. On the 48h connection
+ * window a monthly revenue figure would raise that alarm on day three of every month.
+ *
+ * Returns true when a transition was made (for the run counters).
+ */
+async function handleManualGoal(db: any, goal: any, lastTelemetryAt: Date | null, now: Date): Promise<boolean> {
+    // No entry at all yet — the goal is legitimately 'pending' and the builder just told the user
+    // they'd be entering this themselves. Nagging on day one would be noise.
+    if (!lastTelemetryAt) return false;
+
+    const overdue = now.getTime() - lastTelemetryAt.getTime() > staleWindowHoursFor(goal.metricKey) * 3600_000;
+    if (!overdue || goal.status === 'awaiting_update') return false;
+
+    const nextStatus = staleStatusFor(goal.metricKey);   // 'awaiting_update' for every manual metric
+    await db.update(goals)
+        .set({ status: nextStatus, statusUpdatedAt: now, updatedAt: now })
+        .where(eq(goals.id, goal.id));
+    await recompileForGoalStatus(goal.assistantId, goal.status, nextStatus);
+
+    if (goal.createdByUserId) {
+        const metric = getGoalMetric(goal.metricKey);
+        await createNotification(db, 'goal_metric_update_due', {
+            userId: goal.createdByUserId,
+            context: {
+                goal: { label: goal.title || metric?.label || goal.metricKey },
+                metric: { label: metric?.label ?? goal.metricKey },
+            },
+        });
+    }
+    return true;
+}
+
+export async function pollGoalTelemetry(): Promise<{ goals: number; polled: number; skipped: number; disconnected: number; awaitingUpdate: number }> {
     const db = getDb();
     const now = new Date();
 
@@ -351,7 +398,7 @@ export async function pollGoalTelemetry(): Promise<{ goals: number; polled: numb
         .where(eq(goals.isActive, true))
         .limit(BATCH);
 
-    if (!activeGoals.length) return { goals: 0, polled: 0, skipped: 0, disconnected: 0 };
+    if (!activeGoals.length) return { goals: 0, polled: 0, skipped: 0, disconnected: 0, awaitingUpdate: 0 };
 
     // Per-org polling cadence (AC4.1.1) — one tier lookup per org.
     const orgIds = [...new Set(activeGoals.map(g => g.organisationId))];
@@ -391,7 +438,7 @@ export async function pollGoalTelemetry(): Promise<{ goals: number; polled: numb
         if (li) liByOrg.set(orgId, li);
     }
 
-    let polled = 0, disconnectedCount = 0, skipped = 0;
+    let polled = 0, disconnectedCount = 0, skipped = 0, awaitingUpdate = 0;
 
     await Promise.allSettled(activeGoals.map(async (goal) => {
         const cadenceMs = pollCadenceHours(tierByOrg.get(goal.organisationId)) * 3600_000;
@@ -402,6 +449,14 @@ export async function pollGoalTelemetry(): Promise<{ goals: number; polled: numb
             .orderBy(desc(goalTelemetry.recordedAt))
             .limit(1);
         const lastTelemetryAt: Date | null = lastAt[0]?.recordedAt ?? null;
+
+        // User-reported metric: nothing to fetch, and neither the tier cadence nor the disconnected
+        // path below applies. Handled entirely by its own branch.
+        if (isManualMetric(goal.metricKey)) {
+            if (await handleManualGoal(db, goal, lastTelemetryAt, now)) awaitingUpdate++;
+            else skipped++;
+            return;
+        }
 
         // Throttle by tier cadence.
         if (lastTelemetryAt && now.getTime() - lastTelemetryAt.getTime() < cadenceMs) { skipped++; return; }
@@ -462,7 +517,7 @@ export async function pollGoalTelemetry(): Promise<{ goals: number; polled: numb
         }
     }));
 
-    return { goals: activeGoals.length, polled, skipped, disconnected: disconnectedCount };
+    return { goals: activeGoals.length, polled, skipped, disconnected: disconnectedCount, awaitingUpdate };
 }
 
 export default withLambda(async () => {

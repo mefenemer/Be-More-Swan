@@ -218,6 +218,23 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [v('integration.name', 'Integration name', 'Google Analytics')],
     },
     {
+        // The manual-metric counterpart of goal_data_disconnected, and deliberately NOT that template.
+        // Nothing is broken here and there is no integration to re-authenticate — we are simply waiting
+        // on a figure only the user has. Sending the disconnection alert instead would put an
+        // undismissible red "we lost connection" banner in front of someone whose goal is working
+        // exactly as designed. Categorised 'informational' in notification-actions.ts for the same reason.
+        templateKey: 'goal_metric_update_due',
+        name: 'Goal figure due',
+        category: 'Assistants',
+        type: 'goal_metric_update_due',
+        title: 'Time to update {{metric.label}}',
+        message: 'Your goal "{{goal.label}}" tracks a figure you report yourself. Add this period\'s {{metric.label}} to keep its progress accurate.',
+        variables: [
+            v('goal.label', 'Goal name', 'Grow Q4 wholesale revenue'),
+            v('metric.label', 'Metric name', 'Revenue (you report)'),
+        ],
+    },
+    {
         templateKey: 'orchestration_handoff',
         name: 'Assistant hand-off',
         category: 'Assistants',

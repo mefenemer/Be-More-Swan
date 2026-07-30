@@ -11,7 +11,32 @@
 // see [[smm-golive-readiness]]). HubSpot / Shopify / Salesforce etc. are added later as new
 // catalog entries once their pollers exist.
 
-export type MetricSource = 'connection' | 'internal';
+// 'connection' — polled from a third-party API.  'internal' — counted from our own tables.
+// 'manual'     — the user types the figure in periodically, because nothing we can reach measures it.
+//
+// WHY 'manual' EXISTS. A goal is only offered when the platform can measure it (`available`), which
+// is right — an unmeasurable metric that silently never moves is worse than no metric. But
+// "measurable" and "attributable" are different questions, and conflating them left a real gap: a
+// business whose actual objective is revenue or subscription uptake had nothing to set a goal
+// against, because we cannot see either number. The precedent for the fix already shipped —
+// manual_follower_counts (save-follower-count.ts) accepts a user-typed LinkedIn follower count for
+// exactly this reason ("the API can't supply this, so it's entered manually").
+//
+// A manual metric is USER-SUPPLIED TRUTH on a cadence, and that changes three behaviours it would
+// otherwise inherit, each of which would actively misfire:
+//   1. Staleness. RUN_RATE_THRESHOLDS.staleDataHours (48h) would rot a monthly figure to
+//      data_disconnected on day three and fire a critical "reconnect your account" alert about a
+//      connection that does not exist. Manual metrics use `updateCadenceDays` instead — see
+//      staleWindowHoursFor() / staleStatusFor().
+//   2. Run-rate. Between entries the value is flat only because nobody has typed a number, so
+//      letting elapsed time run on would decay actualRunRate toward zero and drive the goal
+//      off_track on the user's silence. goal-progress.ts measures the trend as of the last ENTRY
+//      (rateAsOfLastEntry) and needs two of them before judging at all.
+//   3. Attribution. Nothing a Social Media Manager drafts can be credited with moving revenue, so a
+//      manual goal must not become the target a drafting prompt is told to chase — there is no
+//      per-post lever for it in DRAFTING_FOCUS, and pointing the model at one invites it to invent
+//      an offer. It steers as CONTEXT only (goal-directive.ts) and can never be the primary goal.
+export type MetricSource = 'connection' | 'internal' | 'manual';
 export type MetricDirection = 'increase' | 'decrease';
 
 // US-01 AC1.1/AC1.2 — the funnel objective a metric serves. The Goal Builder shows an Objective
@@ -57,10 +82,23 @@ export interface GoalMetric {
     label: string;
     /** Unit suffix for display, e.g. 'followers', '%'. */
     unit: string;
-    /** Where the value comes from: a third-party connection, or our own DB. */
+    /** Where the value comes from: a third-party connection, our own DB, or the user (see MetricSource). */
     source: MetricSource;
     /** For source==='connection': the system_connections.serviceName that must be active (AC1.1.3). */
     connectionService?: string;
+    /**
+     * For source==='manual' ONLY (required there, meaningless elsewhere): how often we expect the
+     * user to enter a fresh figure. Drives the "time to update this" nudge and the staleness window
+     * — NOT the 48h connection-staleness rule, which would rot a monthly figure in three days.
+     */
+    updateCadenceDays?: number;
+    /**
+     * Offer this metric to EVERY assistant role, not just the ones named in `roles` (and not just the
+     * social default). Business outcomes the user reports themselves — revenue, subscriptions — are
+     * not owned by any one role, so they are offered everywhere. A role-specific metric must never
+     * set this: it exists so a manual metric doesn't need `roles` listing all 27 catalog entries.
+     */
+    allRoles?: boolean;
     /** Whether progress = value going up or down. */
     direction: MetricDirection;
     /** US-01 AC1.2 — the funnel objective this metric measures (drives the Objective→Metric dropdown). */
@@ -314,6 +352,76 @@ export const GOAL_METRICS: readonly GoalMetric[] = [
         available: true,
         realism: { maxDailyDelta: 100 },
     },
+
+    // ── User-reported business outcomes (source: 'manual') ──────────────────────
+    // The numbers that are the actual point of the business but sit outside every system we can
+    // reach. See the MetricSource doc comment for the three behaviours these deliberately do NOT
+    // inherit from polled metrics.
+    //
+    // `available: true` is honest here for a different reason than everywhere else in this file: the
+    // measurement is the user, and the user is always connected. The linkedin_followers failure mode
+    // (a goal that can never move) cannot occur — the value moves the moment someone types one.
+    //
+    // ⚠️ Every metric in this block MUST be objective 'outcome'. Manual figures are not attributable
+    // to an assistant's output, so one must never be able to satisfy a funnel objective — in
+    // particular it must not close the Social Media Manager's open 'action' coverage gap, which is
+    // waiting on evidence from goal-metric-selftest.ts, not on a workaround. A test asserts this.
+    //
+    // ⚠️ Realism ceilings are proportional only (maxDailyGrowthPct, no maxDailyDelta). We have no
+    // idea what scale a given business trades at — £500/day is absurd for one and a rounding error
+    // for another — and an absolute ceiling here would reject legitimate targets.
+    {
+        key: 'manual_revenue',
+        label: 'Revenue (you report)',
+        unit: '£',
+        source: 'manual',
+        direction: 'increase',
+        objective: 'outcome',
+        allRoles: true,
+        updateCadenceDays: 30,
+        description: 'Total revenue for the period, entered by you each month from your own accounts.',
+        available: true,
+        realism: { maxDailyGrowthPct: 5 },
+    },
+    {
+        key: 'manual_subscriptions',
+        label: 'Subscribers (you report)',
+        unit: 'subscribers',
+        source: 'manual',
+        direction: 'increase',
+        objective: 'outcome',
+        allRoles: true,
+        updateCadenceDays: 30,
+        description: 'Active paying subscribers, entered by you each month from your billing system.',
+        available: true,
+        realism: { maxDailyGrowthPct: 5 },
+    },
+    {
+        key: 'manual_enquiries',
+        label: 'Enquiries (you report)',
+        unit: 'enquiries',
+        source: 'manual',
+        direction: 'increase',
+        objective: 'outcome',
+        allRoles: true,
+        updateCadenceDays: 7,
+        description: 'Inbound enquiries from every channel, entered by you each week.',
+        available: true,
+        realism: { maxDailyGrowthPct: 5 },
+    },
+    {
+        key: 'manual_bookings',
+        label: 'Bookings & Orders (you report)',
+        unit: 'bookings',
+        source: 'manual',
+        direction: 'increase',
+        objective: 'outcome',
+        allRoles: true,
+        updateCadenceDays: 7,
+        description: 'Confirmed bookings or orders taken, entered by you each week.',
+        available: true,
+        realism: { maxDailyGrowthPct: 5 },
+    },
 ];
 
 // Proper-cased display names for the services a metric can be backed by — used in user-facing copy
@@ -344,16 +452,56 @@ export function isValidMetricKey(key: string): boolean {
     return METRIC_BY_KEY.has(key);
 }
 
+/** True when a metric's value comes from the user rather than from a poll or a query. */
+export function isManualMetric(key: string): boolean {
+    return getGoalMetric(key)?.source === 'manual';
+}
+
 /**
- * AC1.1.3 — the metrics a workspace may actually pick: internal metrics are always available;
- * connection-backed metrics only when that service is currently connected.
+ * How long a goal's data may go without a fresh point before it counts as stale.
+ *
+ * Connection- and internal-backed metrics use the 48h AC4.3.2 rule: they refresh on a cron, so two
+ * days of nothing means something is broken. A manual metric refreshes when a human remembers, so
+ * it gets its own cadence plus a grace period — applying 48h to a monthly revenue figure would flag
+ * it on day three, every month, forever.
+ */
+export const MANUAL_UPDATE_GRACE_DAYS = 7;
+
+export function staleWindowHoursFor(metricKey: string): number {
+    const m = getGoalMetric(metricKey);
+    if (m?.source !== 'manual') return RUN_RATE_THRESHOLDS.staleDataHours;
+    return ((m.updateCadenceDays ?? 30) + MANUAL_UPDATE_GRACE_DAYS) * 24;
+}
+
+/**
+ * What a stale goal becomes. These are two genuinely different situations and must not share copy:
+ * `data_disconnected` is "we lost the connection, go re-authenticate" (critical, and there is
+ * nothing the user can type to fix it), while `awaiting_update` is "we're waiting on your number"
+ * (informational, and typing one fixes it immediately). Reusing the first for the second would send
+ * a red re-authentication alert about an integration that was never connected.
+ */
+export function staleStatusFor(metricKey: string): GoalStatus {
+    return isManualMetric(metricKey) ? 'awaiting_update' : 'data_disconnected';
+}
+
+/** When the next manual entry is due, given the last one. Null for non-manual metrics. */
+export function nextUpdateDue(metricKey: string, lastEnteredAt: Date | null): Date | null {
+    const m = getGoalMetric(metricKey);
+    if (m?.source !== 'manual' || !lastEnteredAt) return null;
+    return new Date(lastEnteredAt.getTime() + (m.updateCadenceDays ?? 30) * 86_400_000);
+}
+
+/**
+ * AC1.1.3 — the metrics a workspace may actually pick: internal and manual metrics are always
+ * available (we hold the data, or the user does); connection-backed metrics only when that service
+ * is currently connected.
  * @param connectedServices lowercased system_connections.serviceName values that are active
  */
 export function availableMetricsForConnections(connectedServices: readonly string[]): GoalMetric[] {
     const connected = new Set(connectedServices.map(s => s.toLowerCase()));
     return GOAL_METRICS.filter(m =>
         m.available
-        && (m.source === 'internal' || (m.connectionService != null && connected.has(m.connectionService))),
+        && (m.source !== 'connection' || (m.connectionService != null && connected.has(m.connectionService))),
     );
 }
 
@@ -364,8 +512,9 @@ const SOCIAL_DEFAULT_ROLES = new Set(['social_media_manager']);
 
 /**
  * The metrics a specific assistant may pick, filtered by BOTH its role and its active connections.
+ *   - A metric with `allRoles` is offered to every role (the user-reported business outcomes).
  *   - A metric with `roles` is offered only to assistants of those roles.
- *   - A metric without `roles` is a general marketing metric, offered to the Social Media Manager
+ *   - A metric without either is a general marketing metric, offered to the Social Media Manager
  *     and to legacy assistants (roleKey null/unknown → treated as social).
  *   - Connection-backed metrics still require that service to be connected (AC1.1.3).
  */
@@ -377,9 +526,9 @@ export function availableMetricsForRole(
     const isSocialDefault = !roleKey || SOCIAL_DEFAULT_ROLES.has(roleKey);
     return GOAL_METRICS.filter(m => {
         if (!m.available) return false;   // never offer a metric we cannot measure
-        const roleOk = m.roles ? m.roles.includes(roleKey as string) : isSocialDefault;
+        const roleOk = m.allRoles ? true : (m.roles ? m.roles.includes(roleKey as string) : isSocialDefault);
         if (!roleOk) return false;
-        return m.source === 'internal' || (m.connectionService != null && connected.has(m.connectionService));
+        return m.source !== 'connection' || (m.connectionService != null && connected.has(m.connectionService));
     });
 }
 
@@ -500,10 +649,18 @@ export const DRAFTING_FOCUS: Record<GoalObjective, readonly string[]> = {
     ],
 };
 
-/** The per-post drafting levers for the metric a goal tracks (generation-time; see DRAFTING_FOCUS). */
+/**
+ * The per-post drafting levers for the metric a goal tracks (generation-time; see DRAFTING_FOCUS).
+ *
+ * Returns nothing for a MANUAL metric, and that is the point: a single post cannot be told how to
+ * move revenue. The 'outcome' levers exist for Blog Writer's posts_published — an objective the
+ * assistant genuinely owns — and handing them to a revenue goal would tell the model its draft is
+ * the thing that closes sales. Manual goals reach the prompt as context instead (goal-directive.ts).
+ */
 export function draftingFocusFor(metricKey: string): readonly string[] {
     const m = getGoalMetric(metricKey);
-    return m ? DRAFTING_FOCUS[m.objective] : [];
+    if (!m || m.source === 'manual') return [];
+    return DRAFTING_FOCUS[m.objective];
 }
 
 /** US-02 — the funnel diagnostic playbook for the metric a goal tracks. */
@@ -585,10 +742,16 @@ export function assessGoalRealism(args: {
 // ── Goal status model (AC1.2.3 / AC4.3.2) ───────────────────────────────────────
 // Phase 1 only persists 'pending' (no telemetry yet); the run-rate engine in Phase 2 assigns the
 // rest. Thresholds live here so they stay tunable without touching the engine.
-export type GoalStatus = 'pending' | 'on_track' | 'at_risk' | 'off_track' | 'data_disconnected';
+//
+// `awaiting_update` is the manual-metric counterpart of `data_disconnected`: the figure is overdue
+// and the user is the only one who can supply it. Kept separate because the two need opposite
+// treatment everywhere — copy ("we lost connection" vs "time to update your number"), notification
+// severity (critical_action vs informational), and the autonomous optimizer (which must not read
+// either as a signal that the CONTENT is failing).
+export type GoalStatus = 'pending' | 'on_track' | 'at_risk' | 'off_track' | 'data_disconnected' | 'awaiting_update';
 
 export const GOAL_STATUSES: readonly GoalStatus[] = [
-    'pending', 'on_track', 'at_risk', 'off_track', 'data_disconnected',
+    'pending', 'on_track', 'at_risk', 'off_track', 'data_disconnected', 'awaiting_update',
 ];
 
 export const RUN_RATE_THRESHOLDS = {

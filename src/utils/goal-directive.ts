@@ -13,6 +13,11 @@
 // rather than by whatever the live model happens to do. Callers load goals, call
 // buildGoalDirective(), and splice the returned string into their prompt.
 //
+// NOT EVERY GOAL IS A TARGET. Goals on user-reported metrics (revenue, subscriptions — see
+// MetricSource in goal-metrics.ts) are carried in `context`, not `goals`: the model is told what the
+// business is trying to achieve, and told explicitly not to chase it, because no single post moves
+// revenue and a model asked to move one anyway will invent an offer to do it with.
+//
 // Two consumers, deliberately duplicated at the call site: social generation
 // (process-content-jobs.ts) and blog generation (blog-generate.ts) have SEPARATE generation seams,
 // so an injection added to one does NOT reach the other. Adding a third content role means adding a
@@ -22,6 +27,7 @@ import {
     getGoalMetric,
     funnelDiagnosticFor,
     draftingFocusFor,
+    isManualMetric,
     type GoalObjective,
     type GoalStatus,
 } from '../config/goal-metrics';
@@ -40,34 +46,52 @@ export interface DirectiveGoal {
     isPrimary: boolean;
 }
 
+/** One goal as it appears in the prompt. Shared by the steerable and the context lists. */
+export interface RenderedGoal {
+    label: string;
+    metricKey: string;
+    objective: GoalObjective;
+    title: string | null;
+    rationale: string | null;
+    target: number;
+    /**
+     * Progress toward target as a percentage, DELIBERATELY COARSE (nearest 10%).
+     *
+     * The raw `latestValue` is not carried. Blueprint rows are de-duplicated by section CONTENT
+     * (src/utils/blueprint.ts), so a fast-moving number in here would make every unrelated
+     * recompile trigger — the profile autosave on a 1.2s debounce, a content-rule edit, a post
+     * rejection — produce a brand-new blueprint row just because a follower count ticked by 3.
+     * Rounding to 10% conveys the distance the model actually needs ("about 40% of the way")
+     * while changing rarely enough that dedup keeps working.
+     */
+    progressPct: number | null;
+    unit: string;
+    targetDate: string;
+    daysRemaining: number;
+    status: GoalStatus;
+    isPrimary: boolean;
+}
+
 /** The blueprint-section shape (section 12) and the input to `renderGoalDirective`. */
 export interface GoalDirective {
-    /** The primary goal first, then the rest — the order the model reads them in. */
-    goals: Array<{
-        label: string;
-        metricKey: string;
-        objective: GoalObjective;
-        title: string | null;
-        rationale: string | null;
-        target: number;
-        /**
-         * Progress toward target as a percentage, DELIBERATELY COARSE (nearest 10%).
-         *
-         * The raw `latestValue` is not carried. Blueprint rows are de-duplicated by section CONTENT
-         * (src/utils/blueprint.ts), so a fast-moving number in here would make every unrelated
-         * recompile trigger — the profile autosave on a 1.2s debounce, a content-rule edit, a post
-         * rejection — produce a brand-new blueprint row just because a follower count ticked by 3.
-         * Rounding to 10% conveys the distance the model actually needs ("about 40% of the way")
-         * while changing rarely enough that dedup keeps working.
-         */
-        progressPct: number | null;
-        unit: string;
-        targetDate: string;
-        daysRemaining: number;
-        status: GoalStatus;
-        isPrimary: boolean;
-    }>;
-    /** Funnel stage of the PRIMARY goal — labels the playbook the model should pull from. */
+    /**
+     * The goals this assistant's own output can move: the primary first, then the rest — the order
+     * the model reads them in. User-reported metrics are NOT here; they are in `context`.
+     */
+    goals: RenderedGoal[];
+    /**
+     * User-reported goals (`source: 'manual'` — revenue, subscriptions, bookings). Present so the
+     * model understands what the business is actually trying to achieve, and DELIBERATELY SEPARATE
+     * so it is never told to hit them.
+     *
+     * A drafting call cannot move revenue. DRAFTING_FOCUS holds no lever for it — draftingFocusFor()
+     * returns nothing for a manual metric on purpose — and a model instructed to chase a number it
+     * has no honest route to reaches for the dishonest ones: an invented offer, a discount nobody
+     * authorised, a claim about results. What these goals genuinely contribute is the `rationale`,
+     * which is the one line that tells the model WHY the business cares, and that is worth having.
+     */
+    context: RenderedGoal[];
+    /** Funnel stage of the PRIMARY steerable goal — labels the playbook the model should pull from. */
     stage: string | null;
     /**
      * The per-post levers for that stage, from DRAFTING_FOCUS — NOT from FUNNEL_DIAGNOSTICS.
@@ -84,6 +108,17 @@ const DAY_MS = 86_400_000;
 
 const fmt = (n: number): string =>
     Number.isInteger(n) ? n.toLocaleString('en-GB') : n.toLocaleString('en-GB', { maximumFractionDigits: 2 });
+
+/**
+ * Value + unit, written the way a person would write it. Currency prefixes, percentages suffix
+ * tight, everything else takes a space. The user-reported metrics made this matter: a revenue
+ * target read "250,000 £" to the model, which is not a figure anyone writes.
+ */
+const withUnit = (n: number, unit: string): string => {
+    if (unit === '%') return `${fmt(n)}%`;
+    if (/^[£$€]$/.test(unit)) return `${unit}${fmt(n)}`;
+    return `${fmt(n)} ${unit}`;
+};
 
 /** Statuses that mean "the current approach is not working" → escalate the directive's firmness. */
 const URGENT_STATUSES: readonly GoalStatus[] = ['at_risk', 'off_track'];
@@ -116,7 +151,7 @@ export function buildGoalDirective(goals: readonly DirectiveGoal[], now: Date = 
 
     if (ordered.length === 0) return null;
 
-    const rendered = ordered.map(g => {
+    const render = (g: DirectiveGoal): RenderedGoal => {
         const metric = getGoalMetric(g.metricKey)!;
         return {
             label: metric.label,
@@ -133,17 +168,30 @@ export function buildGoalDirective(goals: readonly DirectiveGoal[], now: Date = 
             status: g.status,
             isPrimary: g.isPrimary,
         };
-    });
+    };
 
-    const primary = ordered[0];
+    // Split by whether this assistant's output is what moves the number. Everything downstream —
+    // which goal sets the funnel stage, which levers are offered, whether the directive escalates —
+    // is derived from the STEERABLE list only. See GoalDirective.context.
+    const steerable = ordered.filter(g => !isManualMetric(g.metricKey));
+    const contextOnly = ordered.filter(g => isManualMetric(g.metricKey));
+
+    // The primary for steering purposes is the first goal we can actually act on. A manual goal can
+    // never be isPrimary (manage-goals rejects it), but this must not depend on that: a legacy row,
+    // a direct DB edit or a metric later reclassified as manual would otherwise hand the funnel
+    // stage and the urgency escalation to a goal with no levers behind it.
+    const primary = steerable[0] ?? null;
 
     return {
-        goals: rendered,
+        goals: steerable.map(render),
+        context: contextOnly.map(render),
         // The stage LABEL comes from the advisory map (it is just a name for the funnel position),
         // but the levers come from DRAFTING_FOCUS — see the `focus` doc comment.
-        stage: funnelDiagnosticFor(primary.metricKey)?.stage ?? null,
-        focus: draftingFocusFor(primary.metricKey),
-        urgent: URGENT_STATUSES.includes(primary.status),
+        stage: primary ? (funnelDiagnosticFor(primary.metricKey)?.stage ?? null) : null,
+        focus: primary ? draftingFocusFor(primary.metricKey) : [],
+        // Only a goal the content owns can make the directive lean harder. A revenue goal slipping
+        // is not evidence that this post should be written more aggressively.
+        urgent: primary ? URGENT_STATUSES.includes(primary.status) : false,
     };
 }
 
@@ -168,23 +216,50 @@ export function buildGoalDirective(goals: readonly DirectiveGoal[], now: Date = 
  */
 export function renderGoalDirective(d: GoalDirective | null): string {
     if (!d) return '';
+    if (!d.goals.length && !d.context.length) return '';
 
-    const lines: string[] = ['ACTIVE BUSINESS GOALS — steer this content toward them:'];
-
-    for (const g of d.goals) {
+    const goalLine = (g: RenderedGoal, opts: { statusSuffix: boolean }): string[] => {
+        const out: string[] = [];
         const name = g.title ? `"${g.title}" — ` : '';
-        const unit = g.unit === '%' ? '%' : ` ${g.unit}`;
+        const value = withUnit(g.target, g.unit);
         const progress = g.progressPct != null
-            ? `target ${fmt(g.target)}${unit} (roughly ${g.progressPct}% of the way there)`
-            : `target ${fmt(g.target)}${unit}`;
+            ? `target ${value} (roughly ${g.progressPct}% of the way there)`
+            : `target ${value}`;
         const when = g.daysRemaining >= 0
             ? `${g.daysRemaining} day${g.daysRemaining === 1 ? '' : 's'} remaining`
             : `deadline passed ${Math.abs(g.daysRemaining)} day${Math.abs(g.daysRemaining) === 1 ? '' : 's'} ago`;
         const tag = g.isPrimary ? '[PRIMARY] ' : '';
-        lines.push(`- ${tag}${name}${g.label}: ${progress} by ${g.targetDate} (${when}; status: ${g.status})`);
+        const tail = opts.statusSuffix ? `${when}; status: ${g.status}` : when;
+        out.push(`- ${tag}${name}${g.label}: ${progress} by ${g.targetDate} (${tail})`);
         // The rationale is the highest-value line in this block — it is the only place the model
         // learns WHY the number matters, which is what lets it choose a relevant topic.
-        if (g.rationale) lines.push(`  Why this matters: ${g.rationale}`);
+        if (g.rationale) out.push(`  Why this matters: ${g.rationale}`);
+        return out;
+    };
+
+    const lines: string[] = [];
+
+    if (d.goals.length) {
+        lines.push('ACTIVE BUSINESS GOALS — steer this content toward them:');
+        for (const g of d.goals) lines.push(...goalLine(g, { statusSuffix: true }));
+    }
+
+    // User-reported goals, kept visibly apart from the steerable ones. The status is omitted on
+    // purpose: 'awaiting_update' means the user hasn't typed this month's figure in yet, which says
+    // nothing whatsoever about the content and would read to the model as a problem to fix.
+    if (d.context.length) {
+        if (lines.length) lines.push('');
+        lines.push(
+            'BUSINESS CONTEXT — targets the business tracks by hand, which this assistant\'s work does ' +
+            'NOT directly move:',
+        );
+        for (const g of d.context) lines.push(...goalLine(g, { statusSuffix: false }));
+        lines.push(
+            'Use these only to understand what the business is trying to achieve, and let that inform ' +
+            'which topics and angles are worth its audience\'s attention. They are NOT a target for ' +
+            'this post: do not try to drive them directly, do not promise or imply results against ' +
+            'them, and never invent an offer, discount, guarantee or claim in pursuit of them.',
+        );
     }
 
     if (d.stage && d.focus.length) {
@@ -201,16 +276,24 @@ export function renderGoalDirective(d: GoalDirective | null): string {
         );
     }
 
+    // The means-not-ends reconciliation only makes sense when there is something to pursue. With
+    // only user-reported goals present, "HOW to pursue these goals" would directly contradict the
+    // "NOT a target for this post" instruction three lines above it.
+    if (d.goals.length) {
+        lines.push(
+            '',
+            // Reconciles this block with CONTENT_QUALITY_STANDARDS' "do NOT optimise for follower count".
+            // Named explicitly so the model treats the two as one instruction, not as a conflict to pick
+            // a side in — see the means-not-ends note in this function's doc comment.
+            'HOW to pursue these goals: through genuinely useful, on-brand content that earns saves, ' +
+            'shares, comments and DMs. The standing quality standards below still apply in full — the ' +
+            'goal above tells you WHAT outcome the business needs, and those standards tell you the only ' +
+            'acceptable way to get there. Never chase the number with engagement bait, follow-for-follow ' +
+            'appeals, vanity formats, manufactured controversy or clickbait.',
+        );
+    }
+
     lines.push(
-        '',
-        // Reconciles this block with CONTENT_QUALITY_STANDARDS' "do NOT optimise for follower count".
-        // Named explicitly so the model treats the two as one instruction, not as a conflict to pick
-        // a side in — see the means-not-ends note in this function\'s doc comment.
-        'HOW to pursue these goals: through genuinely useful, on-brand content that earns saves, ' +
-        'shares, comments and DMs. The standing quality standards below still apply in full — the ' +
-        'goal above tells you WHAT outcome the business needs, and those standards tell you the only ' +
-        'acceptable way to get there. Never chase the number with engagement bait, follow-for-follow ' +
-        'appeals, vanity formats, manufactured controversy or clickbait.',
         '',
         // Finding 5: answers.primary_objective renders a second, independent statement of intent
         // ("Primary objective for this account: …") that can disagree with the live goal. Nothing

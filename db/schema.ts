@@ -2626,7 +2626,9 @@ export const goalTelemetry = pgTable("goal_telemetry", {
   goalId: integer("goal_id").notNull().references(() => goals.id, { onDelete: "cascade" }),
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
   metricValue: numeric("metric_value").notNull(),
-  source: text("source").notNull().default("poll"),        // poll | webhook | rollup | internal
+  source: text("source").notNull().default("poll"),        // poll | webhook | rollup | internal | manual
+  // db/goal-manual-entry.sql — who typed a source='manual' figure in. NULL for every polled row.
+  enteredByUserId: integer("entered_by_user_id").references(() => users.id, { onDelete: "set null" }),
   recordedAt: timestamp("recorded_at").defaultNow().notNull(),
 }, (t) => [
   index("goal_telemetry_goal_idx").on(t.goalId, t.recordedAt),

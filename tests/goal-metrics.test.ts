@@ -19,6 +19,13 @@ import {
     TUNABLE_BRIEF_FIELDS,
     connectionDisplayName,
     GOAL_STATUSES,
+    isManualMetric,
+    staleWindowHoursFor,
+    staleStatusFor,
+    nextUpdateDue,
+    draftingFocusFor,
+    RUN_RATE_THRESHOLDS,
+    MANUAL_UPDATE_GRACE_DAYS,
 } from '../src/config/goal-metrics';
 
 const inDays = (n: number) => new Date(Date.now() + n * 86_400_000);
@@ -61,23 +68,27 @@ check('AC1.1.3 — internal metrics always available, connection metrics gated',
 });
 
 check('role filtering — each assistant only sees metrics for its role', () => {
+    // The user-reported metrics (`allRoles`) are offered to EVERY role by design — revenue belongs
+    // to the business, not to one assistant — so they're excluded here. This test is about the
+    // role-scoped metrics not bleeding across; their universality is asserted separately below.
+    const tracked = (role: string | null, services: string[] = []) =>
+        availableMetricsForRole(role, services).filter(m => m.source !== 'manual').map(m => m.key).sort();
+
     // Social Media Manager (and legacy null role) get the marketing metrics, not the role outcomes.
-    const smm = availableMetricsForRole('social_media_manager', ['instagram']).map(m => m.key);
+    const smm = tracked('social_media_manager', ['instagram']);
     assert.ok(smm.includes('instagram_followers') && smm.includes('content_published'));
     assert.ok(!smm.includes('invoices_chased') && !smm.includes('qualified_leads'), 'SMM sees no role-scoped metrics');
 
-    const legacy = availableMetricsForRole(null, []).map(m => m.key);
-    assert.ok(legacy.includes('content_published'), 'legacy (no roleKey) is treated as social');
+    assert.ok(tracked(null).includes('content_published'), 'legacy (no roleKey) is treated as social');
 
     // Accounts Receivable Clerk sees only its outcome metrics — never Instagram, even if connected.
-    const arc = availableMetricsForRole('accounts_receivable_clerk', ['instagram']).map(m => m.key);
-    assert.deepEqual(arc.sort(), ['cash_recovered', 'invoices_chased']);
+    assert.deepEqual(tracked('accounts_receivable_clerk', ['instagram']), ['cash_recovered', 'invoices_chased']);
 
     // Lead Generator sees its two lead metrics; Support sees tickets; nobody bleeds across.
-    assert.deepEqual(availableMetricsForRole('lead_qualifier', []).map(m => m.key).sort(), ['leads_scored', 'qualified_leads']);
-    assert.deepEqual(availableMetricsForRole('tier1_support_agent', []).map(m => m.key), ['tickets_resolved']);
-    assert.deepEqual(availableMetricsForRole('crm_enricher', []).map(m => m.key), ['records_enriched']);
-    assert.deepEqual(availableMetricsForRole('meeting_note_taker', []).map(m => m.key), ['meetings_summarized']);
+    assert.deepEqual(tracked('lead_qualifier'), ['leads_scored', 'qualified_leads']);
+    assert.deepEqual(tracked('tier1_support_agent'), ['tickets_resolved']);
+    assert.deepEqual(tracked('crm_enricher'), ['records_enriched']);
+    assert.deepEqual(tracked('meeting_note_taker'), ['meetings_summarized']);
 });
 
 check('AC: realism — blocks the egregiously impossible, allows the ambitious', () => {
@@ -223,8 +234,83 @@ check('Blog Writer has a role-scoped outcome metric and does not inherit social 
 });
 
 check('status model includes the four tracked states + pending', () => {
-    for (const s of ['pending', 'on_track', 'at_risk', 'off_track', 'data_disconnected'])
+    for (const s of ['pending', 'on_track', 'at_risk', 'off_track', 'data_disconnected', 'awaiting_update'])
         assert.ok(GOAL_STATUSES.includes(s as any), s);
+});
+
+// ── User-reported (manual) metrics ───────────────────────────────────────────────
+// The gap these close: a business whose real objective is revenue or subscription uptake had
+// nothing to set a goal against, because nothing we can reach measures either. The rules below are
+// what keep that from turning into a lie about what the assistant is achieving.
+
+check('every manual metric declares an update cadence and is offered to all roles', () => {
+    const manual = GOAL_METRICS.filter(m => m.source === 'manual');
+    assert.ok(manual.length > 0, 'the catalog must offer at least one user-reported metric');
+    for (const m of manual) {
+        // Without a cadence, staleWindowHoursFor falls back to a 30-day default and the "update due"
+        // nudge silently fires on the wrong schedule for a weekly metric.
+        assert.ok(
+            typeof m.updateCadenceDays === 'number' && m.updateCadenceDays > 0,
+            `${m.key} must declare updateCadenceDays`,
+        );
+        // Revenue is not a social-media metric. Without allRoles these would be filtered down to the
+        // Social Media Manager by the default role rule and invisible to every other assistant.
+        assert.equal(m.allRoles, true, `${m.key} must be offered to every role`);
+        assert.equal(m.available, true, `${m.key} is measured by the user, so it is always available`);
+    }
+});
+
+check('a manual metric can never occupy a funnel objective', () => {
+    // THE RULE THIS PROTECTS: a user-typed figure must not be able to satisfy a funnel objective,
+    // and specifically must not close the Social Media Manager's open 'action' coverage gap. That
+    // gap is waiting on evidence from goal-metric-selftest.ts that instagram_profile_views works —
+    // not on a metric the user fills in by hand, which would measure nothing about the content.
+    for (const m of GOAL_METRICS.filter(x => x.source === 'manual')) {
+        assert.equal(m.objective, 'outcome', `${m.key} must be a Business Outcome, not a funnel metric`);
+    }
+});
+
+check('manual metrics are stale on their own cadence, not the 48h connection rule', () => {
+    // The collision this prevents: 48h would rot a monthly revenue figure on day three of every
+    // month and fire the critical "reconnect your account" alert about a connection that never existed.
+    const monthly = staleWindowHoursFor('manual_revenue');
+    assert.ok(monthly > RUN_RATE_THRESHOLDS.staleDataHours, 'a monthly figure must outlive the 48h rule');
+    assert.equal(monthly, (30 + MANUAL_UPDATE_GRACE_DAYS) * 24);
+    // A weekly metric gets a shorter window than a monthly one — the cadence is actually read.
+    assert.ok(staleWindowHoursFor('manual_enquiries') < monthly);
+    // Polled metrics are untouched.
+    assert.equal(staleWindowHoursFor('instagram_followers'), RUN_RATE_THRESHOLDS.staleDataHours);
+
+    // …and they become a different status, because the fix is different: type a number, versus
+    // re-authenticate an integration.
+    assert.equal(staleStatusFor('manual_revenue'), 'awaiting_update');
+    assert.equal(staleStatusFor('instagram_followers'), 'data_disconnected');
+});
+
+check('a manual metric offers no per-post drafting levers', () => {
+    // draftingFocusFor is what a drafting prompt is told to pull from. There is no honest per-post
+    // lever for revenue, and a model told to move one anyway invents an offer to do it with — the
+    // exact failure the DRAFTING_FOCUS/FUNNEL_DIAGNOSTICS split was created to stop.
+    assert.deepEqual(draftingFocusFor('manual_revenue'), []);
+    // The 'outcome' levers still exist for the role that genuinely owns them.
+    assert.ok(draftingFocusFor('posts_published').length > 0);
+});
+
+check('next update due is derived from the metric cadence', () => {
+    const last = new Date('2026-07-01T00:00:00Z');
+    const due = nextUpdateDue('manual_revenue', last)!;
+    assert.equal(due.toISOString().slice(0, 10), '2026-07-31');
+    assert.equal(nextUpdateDue('instagram_followers', last), null, 'polled metrics are never "due"');
+    assert.equal(nextUpdateDue('manual_revenue', null), null, 'nothing entered yet ⇒ nothing overdue');
+});
+
+check('every role can set a user-reported goal, with nothing connected', () => {
+    for (const role of ['social_media_manager', 'blog_writer', 'accounts_receivable_clerk', null]) {
+        const keys = availableMetricsForRole(role, []).map(m => m.key);
+        assert.ok(keys.includes('manual_revenue'), `${role ?? 'legacy'} must be able to track revenue`);
+    }
+    assert.ok(isManualMetric('manual_revenue'));
+    assert.ok(!isManualMetric('content_published'));
 });
 
 console.log(`\n${passed} checks passed.`);

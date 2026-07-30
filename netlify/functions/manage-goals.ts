@@ -16,9 +16,9 @@
 // since nothing read goals at all.
 
 import { Handler } from '@netlify/functions';
-import { and, eq, desc, sql } from 'drizzle-orm';
+import { and, eq, desc, sql, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { goals, aiAssistants, masterAssistants, systemConnections, workspaceIntegrations } from '../../db/schema';
+import { goals, goalTelemetry, aiAssistants, masterAssistants, systemConnections, workspaceIntegrations } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { getActiveTierKeyByOrg } from '../../src/utils/plan-features';
 import { normalizeMediaSources } from '../../src/utils/media-sources';
@@ -28,6 +28,8 @@ import {
     availableMetricsForRole,
     getGoalMetric,
     isValidMetricKey,
+    isManualMetric,
+    nextUpdateDue,
     tierAllows,
 } from '../../src/config/goal-metrics';
 import { assembleBlueprint } from '../../src/utils/blueprint';
@@ -101,6 +103,27 @@ async function recompileAfterGoalChange(assistantId: number | null, userId: numb
         console.warn(`[manage-goals] blueprint recompile after ${what} failed (change still saved):`,
             e instanceof Error ? e.message : e);
     }
+}
+
+/**
+ * A user-reported metric can never be an assistant's PRIMARY goal — returns an error payload when
+ * the caller tries, or null when the combination is fine.
+ *
+ * The primary goal is the one the assistant is measured on: it drives the progress bar in the detail
+ * header, it is what the drafting prompt is steered toward, and it is what the autonomous optimizer
+ * reacts to. None of those are honest for a number the assistant cannot move. Revenue is a real goal
+ * and worth tracking beside the work — it is just not this assistant's scoreboard, and promoting it
+ * to primary would quietly reframe "the content is underperforming" as "sales are down".
+ */
+function manualPrimaryError(metricKey: string): { error: string; code: string } | null {
+    if (!isManualMetric(metricKey)) return null;
+    const label = getGoalMetric(metricKey)?.label ?? metricKey;
+    return {
+        error: `"${label}" is a figure you report yourself, so it can't be this assistant's primary goal — `
+            + `its work isn't what moves that number. Keep it as a supporting goal and make something `
+            + `this assistant measurably drives the primary one.`,
+        code: 'MANUAL_METRIC_NOT_PRIMARY',
+    };
 }
 
 /** Active third-party services connected for this org (lowercased serviceName). */
@@ -193,6 +216,23 @@ export default withLambda(async (event) => {
         const tierKey = await getActiveTierKeyByOrg(db, orgId);
         const planMonthlyCredits = await monthlyAllowance(db, orgId);
 
+        // When each user-reported goal was last given a figure. The Goals tab needs it for the "you
+        // last updated this on …" line and to know which cards are overdue; without it a manual goal
+        // renders identically to a polled one and the user has no idea it is waiting on them.
+        // One query for the whole assistant — a per-card fetch would be N round-trips on every render.
+        const manualGoalIds = rows.filter((g: any) => isManualMetric(g.metricKey)).map((g: any) => g.id as number);
+        const lastEntryByGoal = new Map<number, Date>();
+        if (manualGoalIds.length) {
+            const entries = await db
+                .select({ goalId: goalTelemetry.goalId, recordedAt: goalTelemetry.recordedAt })
+                .from(goalTelemetry)
+                .where(and(inArray(goalTelemetry.goalId, manualGoalIds), eq(goalTelemetry.source, 'manual')))
+                .orderBy(desc(goalTelemetry.recordedAt));
+            for (const e of entries) {
+                if (!lastEntryByGoal.has(e.goalId as number)) lastEntryByGoal.set(e.goalId as number, e.recordedAt as Date);
+            }
+        }
+
         return json(200, {
             // Each goal carries its metric's objective, label and unit so the client never has to
             // look them up in `availableMetrics`. A goal can outlive its metric's availability — the
@@ -200,7 +240,19 @@ export default withLambda(async (event) => {
             // the edit form still has to show what the goal tracks rather than rendering blank.
             goals: rows.map((g: any) => {
                 const m = getGoalMetric(g.metricKey);
-                return { ...g, objective: m?.objective ?? null, metricLabel: m?.label ?? g.metricKey, unit: m?.unit ?? '' };
+                const lastEnteredAt = lastEntryByGoal.get(g.id) ?? null;
+                return {
+                    ...g,
+                    objective: m?.objective ?? null,
+                    metricLabel: m?.label ?? g.metricKey,
+                    unit: m?.unit ?? '',
+                    // User-reported goals render a different card: an entry box and a due date rather
+                    // than a "syncing" line. Everything the card needs travels with the goal.
+                    isManual: m?.source === 'manual',
+                    updateCadenceDays: m?.updateCadenceDays ?? null,
+                    lastEnteredAt: lastEnteredAt ? lastEnteredAt.toISOString() : null,
+                    nextDueAt: nextUpdateDue(g.metricKey, lastEnteredAt)?.toISOString() ?? null,
+                };
             }),
             availableMetrics: availableMetricsForRole(roleKey, services),
             autonomousGoalSeeking: assistant.autonomousGoalSeeking,
@@ -291,6 +343,9 @@ export default withLambda(async (event) => {
                 });
             }
         }
+
+        const primaryErr = isPrimary ? manualPrimaryError(metricKey) : null;
+        if (primaryErr) return json(400, primaryErr);
 
         // Only one primary goal per assistant — demote the others first.
         if (isPrimary) {
@@ -385,6 +440,8 @@ export default withLambda(async (event) => {
         }
 
         if (isPrimary === true) {
+            const primaryErr = manualPrimaryError(existing.metricKey);
+            if (primaryErr) return json(400, primaryErr);
             await db.update(goals)
                 .set({ isPrimary: false, updatedAt: new Date() })
                 .where(and(eq(goals.assistantId, existing.assistantId), eq(goals.organisationId, orgId)));

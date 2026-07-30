@@ -400,3 +400,91 @@ test('telemetry polling is faster on paid-up tiers than on the entry tier', () =
     assert.equal(pollCadenceHours('employee'), 1);
     assert.equal(pollCadenceHours(null), 24, 'unknown tier falls back to daily');
 });
+
+// ── User-reported goals are CONTEXT, never a target ─────────────────────────────
+//
+// The distinction these lock down is attribution, not measurability. A revenue goal is perfectly
+// measurable — the user measures it — but no single post moves it, so telling a drafting call to
+// chase one gives the model an instruction it can only satisfy dishonestly: an invented offer, a
+// discount nobody authorised, a claim about results.
+
+test('a user-reported goal never sets the funnel stage, levers or urgency', () => {
+    const d = buildGoalDirective([goal({
+        metricKey: 'manual_revenue', targetValue: 250_000, latestValue: 100_000,
+        status: 'off_track', isPrimary: false,
+    })], NOW)!;
+    assert.equal(d.goals.length, 0, 'it is not a steerable goal');
+    assert.equal(d.context.length, 1, 'it is carried as context');
+    assert.equal(d.stage, null);
+    assert.deepEqual(d.focus, []);
+    // Revenue slipping is not evidence that this post should be written more aggressively.
+    assert.equal(d.urgent, false, 'an off-track revenue figure must not escalate the drafting tone');
+});
+
+test('a steerable goal beside a user-reported one still drives the playbook', () => {
+    const d = buildGoalDirective([
+        goal({ metricKey: 'manual_revenue', targetValue: 250_000, isPrimary: false, status: 'off_track' }),
+        goal({ metricKey: 'instagram_followers', targetValue: 20_000, isPrimary: true, status: 'at_risk' }),
+    ], NOW)!;
+    assert.deepEqual(d.goals.map(g => g.metricKey), ['instagram_followers']);
+    assert.deepEqual(d.context.map(g => g.metricKey), ['manual_revenue']);
+    assert.match(d.stage!, /Awareness/);
+    assert.equal(d.urgent, true, 'the STEERABLE goal decides urgency');
+});
+
+test('a manual goal marked primary still cannot hijack the steering', () => {
+    // manage-goals rejects the combination, but this must not depend on that — a legacy row, a direct
+    // DB edit, or a metric later reclassified as manual would otherwise hand the funnel stage and the
+    // urgency escalation to a goal with no levers behind it.
+    const d = buildGoalDirective([
+        goal({ metricKey: 'manual_revenue', isPrimary: true, status: 'off_track' }),
+        goal({ metricKey: 'instagram_engagement_rate', targetValue: 5, isPrimary: false, status: 'on_track' }),
+    ], NOW)!;
+    assert.deepEqual(d.goals.map(g => g.metricKey), ['instagram_engagement_rate']);
+    assert.match(d.stage!, /Interaction/);
+    assert.equal(d.urgent, false);
+});
+
+test('the prompt tells the model not to chase a user-reported number', () => {
+    const out = goalPromptBlock([goal({
+        metricKey: 'manual_revenue', targetValue: 250_000,
+        title: 'Q4 wholesale revenue', rationale: 'We need independent retailers to find us.',
+    })], NOW);
+    assert.match(out, /BUSINESS CONTEXT/);
+    assert.match(out, /does\s+NOT directly move/);
+    assert.match(out, /NOT a target for this post/);
+    // The rationale is the whole reason to carry these at all — it is what lets the model pick a
+    // topic the business actually cares about.
+    assert.match(out, /We need independent retailers to find us/);
+    // …and the specific dishonest routes are named, because "don't chase it" alone leaves the model
+    // to work out what that rules out.
+    assert.match(out, /never invent an offer, discount, guarantee or claim/i);
+});
+
+test('a context-only directive does not tell the model HOW to pursue the goal', () => {
+    // With no steerable goal the means-not-ends paragraph would directly contradict the "NOT a
+    // target for this post" line three lines above it.
+    const out = goalPromptBlock([goal({ metricKey: 'manual_revenue', targetValue: 250_000 })], NOW);
+    assert.doesNotMatch(out, /HOW to pursue these goals/);
+    assert.doesNotMatch(out, /ACTIVE BUSINESS GOALS/);
+    // The guardrail subordination still applies — it is about every goal in the block.
+    assert.match(out, /never mention the goal/i);
+});
+
+test('a user-reported goal does not leak an awaiting_update status into the prompt', () => {
+    // 'awaiting_update' means the user hasn't typed this month's figure in yet. It says nothing about
+    // the content, and a model reading "status: awaiting_update" would treat it as a problem to fix.
+    const out = goalPromptBlock([goal({ metricKey: 'manual_revenue', status: 'awaiting_update' })], NOW);
+    assert.doesNotMatch(out, /awaiting_update/);
+    // A steerable goal's status is still stated — that one IS about the content.
+    assert.match(goalPromptBlock([goal({ status: 'at_risk' })], NOW), /status: at_risk/);
+});
+
+test('a currency target is written as £250,000, not 250,000 £', () => {
+    const out = goalPromptBlock([goal({ metricKey: 'manual_revenue', targetValue: 250_000, latestValue: null })], NOW);
+    assert.match(out, /£250,000/);
+    assert.doesNotMatch(out, /250,000\s+£/);
+    // Percentages stay tight, counts keep their spaced word.
+    assert.match(goalPromptBlock([goal({ metricKey: 'instagram_engagement_rate', targetValue: 5, latestValue: null })], NOW), /target 5%/);
+    assert.match(goalPromptBlock([goal({ targetValue: 20_000, latestValue: null })], NOW), /20,000 followers/);
+});
