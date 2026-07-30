@@ -72,4 +72,47 @@ check('an unparseable entry in the results does not break the comparison', () =>
     );
 });
 
+// ── Staying inside the request's time budget ────────────────────────────────────────────────────
+// "AI Resolve" reported "Could not run the check." with no explanation, and the wording was the
+// giveaway: it was the BROWSER's fallback string, not the handler's message, which means the
+// response carried no JSON at all. Netlify kills a synchronous function at 26s and its kill has no
+// body, so an overrunning handler cannot report anything — its own try/catch never runs.
+//
+// gatewayGenerateGrounded can make five model calls (primary, failover, three pause_turn resumes)
+// at a 24s client ceiling each. Callers on a request path must therefore bound it, and the bound
+// has to leave room to serialise a reply.
+import fs from 'node:fs';
+import path from 'node:path';
+const ROOT = path.join(__dirname, '..');
+const readSrc = (rel: string) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+
+check('the grounded call is bounded, and bounded well inside the 26s function cap', () => {
+    const fn = readSrc('netlify/functions/verify-compliance-warning.ts');
+    const budget = fn.match(/deadlineMs:\s*([0-9_]+)/);
+    assert.ok(budget, 'verify-compliance-warning must pass a deadlineMs — unbounded, it can outlive the request');
+    const ms = Number(budget![1].replace(/_/g, ''));
+    assert.ok(ms <= 22_000,
+        `a ${ms}ms budget leaves too little of the 26s cap to serialise a reply — the client would get a bodyless 502`);
+
+    const gw = readSrc('src/lib/ai-gateway.ts');
+    assert.match(gw, /deadlineMs\?: number/, 'GatewayRequest must accept a budget');
+    // The budget is worthless unless the OPTIONAL calls consult it: a failover and each resume are
+    // full extra calls, and they are what turn one slow answer into an overrun.
+    const grounded = gw.slice(gw.indexOf('export async function gatewayGenerateGrounded'));
+    assert.match(grounded, /if \(remaining\(\) < MIN_CALL_MS\)[\s\S]{0,400}throw primaryErr/,
+        'a failover with no budget left must surface the original error rather than overrun');
+    assert.match(grounded, /for \([^)]*pause_turn[^)]*\) \{\s*if \(remaining\(\) < MIN_CALL_MS\)/,
+        'each pause_turn resume must check the budget before starting another call');
+});
+
+check('a timeout is reported as itself, not as a generic failure', () => {
+    const fn = readSrc('netlify/functions/verify-compliance-warning.ts');
+    assert.match(fn, /APIConnectionTimeoutError/,
+        'the catch must recognise a timeout — it is a recurring outcome, not an unknown error');
+    assert.match(fn, /VERIFY_TIMEOUT/, 'a timeout needs its own code so the UI can say what happened');
+    // And it must still be JSON: the browser only falls back to its generic string when the body
+    // has no `error` field.
+    assert.match(fn, /json\(504, \{/, 'the timeout branch must return a JSON body, never a bare status');
+});
+
 console.log(`\n${passed} passed, 0 failed\n`);

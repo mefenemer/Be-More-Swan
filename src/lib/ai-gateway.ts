@@ -14,6 +14,18 @@ export interface GatewayRequest {
     system: string;
     messages: Anthropic.MessageParam[];
     maxTokens?: number;
+    /**
+     * Total wall-clock budget for the whole call, in ms — including failover and any `pause_turn`
+     * resumes. Optional, and unbounded when omitted, which is right for a worker that may run for
+     * minutes.
+     *
+     * It matters for a call made inside a REQUEST. A Netlify synchronous function is killed at 26s,
+     * and the platform's kill produces a response with NO BODY — so a handler that overruns cannot
+     * report anything, however careful its own try/catch is. The browser gets an unexplained failure
+     * and the user gets a generic message. Callers on a request path must pass a budget that leaves
+     * room to serialise a reply.
+     */
+    deadlineMs?: number;
 }
 
 export interface GatewayResponse {
@@ -138,13 +150,31 @@ export async function gatewayGenerateGrounded(req: GatewayRequest): Promise<Grou
     let model = PRIMARY_MODEL;
     let usedFallback = false;
 
-    const run = (m: string, messages: Anthropic.MessageParam[]) => client.messages.create({
-        model: m,
-        max_tokens: req.maxTokens ?? 1024,
-        system: req.system,
-        messages,
-        tools: [webSearchTool(m)],
-    });
+    // ── Staying inside the caller's budget ──────────────────────────────────────────────────────
+    // This function can make FIVE model calls: the primary, a failover, and up to three pause_turn
+    // resumes. At the client's 24s ceiling that is ~120s of wall clock — against a 26s cap on the
+    // request paths that call it. Overrunning is not a slow answer, it is a BODYLESS platform 502
+    // the handler never gets to explain (see deadlineMs).
+    //
+    // So each call is given only the time that actually remains, and an optional extra call is only
+    // started when there is enough left to be worth starting. Running out returns what has been
+    // gathered so far — a real, if thinner, answer — rather than throwing away a paid-for search.
+    const startedAt = Date.now();
+    const remaining = () => (req.deadlineMs === undefined ? Infinity : req.deadlineMs - (Date.now() - startedAt));
+    // Below this there is not enough time for a search round trip to return anything useful, and
+    // starting one only risks the overrun this budget exists to prevent.
+    const MIN_CALL_MS = 6_000;
+
+    const run = (m: string, messages: Anthropic.MessageParam[]) => {
+        const left = remaining();
+        return client.messages.create({
+            model: m,
+            max_tokens: req.maxTokens ?? 1024,
+            system: req.system,
+            messages,
+            tools: [webSearchTool(m)],
+        }, left === Infinity ? undefined : { timeout: Math.max(MIN_CALL_MS, left) });
+    };
 
     let messages = [...req.messages];
     let response: Anthropic.Message;
@@ -152,6 +182,12 @@ export async function gatewayGenerateGrounded(req: GatewayRequest): Promise<Grou
         response = await run(model, messages);
     } catch (primaryErr) {
         if (!isFailoverError(primaryErr)) throw primaryErr;
+        // A failover is a second full call. With no room for one, the caller is better served by the
+        // original error than by an overrun that reports nothing at all.
+        if (remaining() < MIN_CALL_MS) {
+            console.warn('[ai-gateway] grounded call: no budget left to fail over, surfacing primary error');
+            throw primaryErr;
+        }
         console.warn('[ai-gateway] primary model error on grounded call, failing over to', FALLBACK_MODEL);
         model = FALLBACK_MODEL;
         usedFallback = true;
@@ -159,9 +195,14 @@ export async function gatewayGenerateGrounded(req: GatewayRequest): Promise<Grou
     }
 
     const allContent: Anthropic.ContentBlock[] = [...response.content];
-    // Resume a paused turn rather than accepting a half-finished search. Bounded — a runaway loop
-    // here would burn search quota on a single click.
+    // Resume a paused turn rather than accepting a half-finished search. Bounded twice — by a fixed
+    // iteration cap so a runaway loop cannot burn search quota on one click, and by the time budget
+    // so a legitimate resume cannot push the request past its deadline.
     for (let i = 0; i < 3 && response.stop_reason === 'pause_turn'; i++) {
+        if (remaining() < MIN_CALL_MS) {
+            console.warn('[ai-gateway] grounded call: budget spent, returning a paused turn unresumed');
+            break;
+        }
         messages = [...messages, { role: 'assistant', content: response.content as any }];
         response = await run(model, messages);
         allContent.push(...response.content);

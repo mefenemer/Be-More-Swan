@@ -1376,7 +1376,7 @@ window.showComplianceModals = function showComplianceModals(force) {
       <div id="post-review-reschedule" class="hidden space-y-1.5">
         <p id="post-review-when-msg" class="hidden text-xs font-semibold"></p>
 
-        <button type="button" onclick="rqReviewApprove()"
+        <button type="button" onclick="rqReviewApprove()" data-rq-commit
           class="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-gray-200 text-left hover:border-emerald-300 hover:bg-emerald-50 transition cursor-pointer">
           <img src="/images/BeMoreSwan_SwanAI.png" alt="" class="w-4 h-4 object-contain shrink-0">
           <span class="min-w-0 flex-1">
@@ -1402,11 +1402,11 @@ window.showComplianceModals = function showComplianceModals(force) {
             placeholder='…or in words: "next Friday at 3pm"'
             class="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-300 resize-none"></textarea>
           <p id="post-review-reschedule-status" class="hidden text-xs text-gray-500 italic"></p>
-          <button type="button" onclick="rqReviewScheduleMyself()"
+          <button type="button" onclick="rqReviewScheduleMyself()" data-rq-commit
             class="w-full py-2 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer">Schedule it</button>
         </div>
 
-        <button type="button" onclick="rqReviewPublishNow()"
+        <button type="button" onclick="rqReviewPublishNow()" data-rq-commit
           class="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-lg border border-gray-200 text-left hover:border-gray-400 hover:bg-gray-50 transition cursor-pointer">
           <svg class="w-4 h-4 text-gray-400 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
           <span class="min-w-0 flex-1">
@@ -10873,13 +10873,48 @@ async function _rqApproveOne(post, action, opts = {}) {
     } catch { return { ok: false, error: 'Network error — please try again.' }; }
 }
 
+// ── "Working…" affordance for the three commit actions ──────────────────────────────────────────
+// Committing a cross-post is one round trip PER PLATFORM, run sequentially, on top of the overlay
+// bake — several seconds during which the button looked completely untouched and a second click was
+// the natural response.
+//
+// Ref-counted rather than a flag because _rqApproveTargets re-enters itself (acknowledge-warnings,
+// publish-now-instead), and the inner frame returning must not clear the outer frame's busy state.
+let _rqCommitBusyDepth = 0;
+function _rqSetCommitBusy(on) {
+    _rqCommitBusyDepth = Math.max(0, _rqCommitBusyDepth + (on ? 1 : -1));
+    const busy = _rqCommitBusyDepth > 0;
+    // `progress` rather than `wait`: the page is still interactive, something is just running.
+    document.body.style.cursor = busy ? 'progress' : '';
+    for (const el of document.querySelectorAll('[data-rq-commit]')) {
+        el.disabled = busy;
+        el.classList.toggle('opacity-60', busy);
+        el.classList.toggle('pointer-events-none', busy);
+    }
+}
+
+/** Run a blocking confirm() without the busy cursor — it is the user's turn, nothing is working. */
+function _rqConfirmIdle(message) {
+    _rqSetCommitBusy(false);
+    try { return confirm(message); } finally { _rqSetCommitBusy(true); }
+}
+
 async function _rqApproveTargets(targets, action, opts = {}) {
+    _rqSetCommitBusy(true);
+    try {
+        return await _rqApproveTargetsInner(targets, action, opts);
+    } finally {
+        _rqSetCommitBusy(false);
+    }
+}
+
+async function _rqApproveTargetsInner(targets, action, opts = {}) {
     const [first, ...rest] = targets;
     const r0 = await _rqApproveOne(first, action, opts);
     if (r0.complianceBlocked) {
         // Siblings of a cross-post share one caption, so one acknowledgement covers the group.
         const list = r0.warnings.map(w => `\n  • ${w}`).join('');
-        const ok = confirm(
+        const ok = _rqConfirmIdle(
             `This post has ${r0.warnings.length} compliance warning${r0.warnings.length === 1 ? '' : 's'}:${list}` +
             `\n\nThese are flagged for a human to check — a price, a claim, or a required disclosure.` +
             `\n\nApprove anyway? Your decision and these warnings are recorded in the audit log.`
@@ -10890,7 +10925,7 @@ async function _rqApproveTargets(targets, action, opts = {}) {
     if (r0.pastSchedule) {
         // The whole group shares this slot — offer to publish everything now instead. (Nothing was
         // approved: a past-schedule 409 leaves the first post untouched, so re-running is clean.)
-        if (confirm((r0.message || 'The scheduled time has passed.') + '\n\nPublish now instead?')) {
+        if (_rqConfirmIdle((r0.message || 'The scheduled time has passed.') + '\n\nPublish now instead?')) {
             return _rqApproveTargets(targets, 'publish_now');
         }
         return;

@@ -173,10 +173,16 @@ Rules:
   example a required disclosure, or an internal pricing decision only this business can confirm).
 - Never claim you verified something you did not.`;
 
+        // This runs inside a request, and Netlify kills a synchronous function at 26s with a
+        // BODYLESS response — the browser then shows its own generic fallback and the user is told
+        // nothing about what happened, having already been charged the task credit above. The
+        // grounded call is capable of five model calls (primary, failover, three pause_turn
+        // resumes), so it gets an explicit budget that leaves room to serialise a reply.
         const gw = await gatewayGenerateGrounded({
             system: 'You are a fact-checker for marketing copy. You search before you answer, you cite only pages you actually found, and you say plainly when something cannot be substantiated. Respond with valid JSON only.',
             messages: [{ role: 'user', content: prompt }],
             maxTokens: 2000,
+            deadlineMs: 20_000,
         });
 
         const parsed = parseModelJson<{
@@ -233,6 +239,16 @@ Rules:
         });
     } catch (err: any) {
         console.error('[verify-compliance-warning]', err);
-        return json(500, { error: 'Could not run the check. Please try again.' });
+        // A timeout is not "something went wrong" — it is a specific, recurring outcome (four web
+        // searches is simply slow sometimes) and it leaves the user with a warning they still have
+        // to clear. Say which it was, and point at the two things that always work.
+        const timedOut = err?.name === 'APIConnectionTimeoutError'
+            || /timed? ?out/i.test(String(err?.message ?? ''));
+        return timedOut
+            ? json(504, {
+                error: 'The search took too long to come back. Add a source yourself, or edit the claim out of the caption.',
+                code: 'VERIFY_TIMEOUT',
+            })
+            : json(500, { error: 'Could not run the check. Please try again.' });
     }
 });

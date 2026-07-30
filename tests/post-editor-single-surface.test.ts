@@ -231,6 +231,34 @@ check('closing the editor refreshes the calendar', () => {
         'calendar.js must expose the refresh hook closePostReview calls');
 });
 
+// Committing a cross-post is one round trip PER PLATFORM, run sequentially, on top of the overlay
+// bake — several seconds in which the button looked untouched, so clicking again was the natural
+// response. All three commit routes go through _rqApproveTargets, which is where the affordance has
+// to live: putting it on one onclick would leave the other two silent.
+check('the commit actions show they are working, and cannot be double-fired', () => {
+    assert.match(workspace, /function _rqSetCommitBusy\(/, 'there must be one busy affordance for the commit actions');
+
+    const wrap = workspace.slice(workspace.indexOf('async function _rqApproveTargets('));
+    assert.match(wrap.slice(0, 400), /_rqSetCommitBusy\(true\)[\s\S]*finally[\s\S]*_rqSetCommitBusy\(false\)/,
+        'busy must be released in a finally, or one failed approval leaves the panel dead');
+
+    // Ref-counted: _rqApproveTargets re-enters itself for acknowledge-warnings and publish-now, and
+    // a plain boolean would be cleared by the inner frame returning while the outer still runs.
+    assert.match(workspace, /_rqCommitBusyDepth/, 'the busy state must be ref-counted, not a flag');
+
+    // A blocking confirm() is the user's turn, not work in progress.
+    assert.match(workspace, /function _rqConfirmIdle\(/, 'a confirm() must not sit behind a busy cursor');
+
+    // Every commit button opts in, so none of them is left clickable mid-flight.
+    for (const fn of ['rqReviewApprove()', 'rqReviewScheduleMyself()', 'rqReviewPublishNow()']) {
+        const at = workspace.indexOf(`onclick="${fn}"`);
+        assert.ok(at !== -1, `expected a button wired to ${fn}`);
+        const tag = workspace.slice(at, workspace.indexOf('>', at));
+        assert.ok(tag.includes('data-rq-commit'),
+            `${fn} must carry data-rq-commit, or it stays clickable while a commit is in flight`);
+    }
+});
+
 // A card edit waits ~900ms on a debounce and then renders and re-uploads, so it can be seconds
 // behind the click. Clicking away in that window used to DISCARD it: _pceSyncForPost reseeds from
 // _rqPostCache, which still held the pre-edit render_params, so the card snapped back to its
