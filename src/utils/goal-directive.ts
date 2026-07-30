@@ -21,6 +21,7 @@
 import {
     getGoalMetric,
     funnelDiagnosticFor,
+    draftingFocusFor,
     type GoalObjective,
     type GoalStatus,
 } from '../config/goal-metrics';
@@ -66,9 +67,14 @@ export interface GoalDirective {
         status: GoalStatus;
         isPrimary: boolean;
     }>;
-    /** Funnel stage of the PRIMARY goal — the tactical playbook the model should pull from. */
+    /** Funnel stage of the PRIMARY goal — labels the playbook the model should pull from. */
     stage: string | null;
-    /** The specific levers for that stage (from FUNNEL_DIAGNOSTICS). */
+    /**
+     * The per-post levers for that stage, from DRAFTING_FOCUS — NOT from FUNNEL_DIAGNOSTICS.
+     * The advisory playbook is written for a human strategist and contains calendar-, format- and
+     * operations-level advice a single drafting call cannot act on. See DRAFTING_FOCUS for the three
+     * tests every item here has to pass.
+     */
     focus: readonly string[];
     /** True when the primary goal is at_risk/off_track — the model is told to lean harder. */
     urgent: boolean;
@@ -130,12 +136,13 @@ export function buildGoalDirective(goals: readonly DirectiveGoal[], now: Date = 
     });
 
     const primary = ordered[0];
-    const diagnostic = funnelDiagnosticFor(primary.metricKey);
 
     return {
         goals: rendered,
-        stage: diagnostic?.stage ?? null,
-        focus: diagnostic?.focus ?? [],
+        // The stage LABEL comes from the advisory map (it is just a name for the funnel position),
+        // but the levers come from DRAFTING_FOCUS — see the `focus` doc comment.
+        stage: funnelDiagnosticFor(primary.metricKey)?.stage ?? null,
+        focus: draftingFocusFor(primary.metricKey),
         urgent: URGENT_STATUSES.includes(primary.status),
     };
 }
@@ -143,10 +150,21 @@ export function buildGoalDirective(goals: readonly DirectiveGoal[], now: Date = 
 /**
  * Serialise the directive into the prompt block.
  *
- * Deliberately framed as STEERING, not as a guardrail: it biases topic, format, hook and CTA toward
+ * Deliberately framed as STEERING, not as a guardrail: it biases topic, angle, hook and CTA toward
  * the goal's funnel stage, and it never overrides content rules, brand knowledge or the compliance
  * disclosure. Those are strict rules elsewhere in the brief and a goal must not be able to argue
  * with them — an off-track follower target is not a licence to ignore a prohibited-claims rule.
+ * (It does not bias FORMAT: format is fixed before generation, so an instruction to change it would
+ * contradict the prompt's own "This is an IMAGE post" line.)
+ *
+ * MEANS-NOT-ENDS RECONCILIATION. CONTENT_QUALITY_STANDARDS says "Do NOT optimise for Likes or
+ * follower count. Meaningful engagement (saves, shares, comments, DMs) is the goal." A follower or
+ * reach goal says the literal opposite, and — because the standards are appended AFTER this block in
+ * process-content-jobs.ts — the contradiction lands later in the prompt and would partly cancel the
+ * goal out. Rather than weakening either side, the block below tells the model HOW the two fit
+ * together: the target is legitimate, and the route to it is real value, never engagement bait or a
+ * vanity format. That keeps the standards' actual intent (no cheap tactics) intact while honouring
+ * what the user explicitly asked for.
  */
 export function renderGoalDirective(d: GoalDirective | null): string {
     if (!d) return '';
@@ -169,21 +187,36 @@ export function renderGoalDirective(d: GoalDirective | null): string {
         if (g.rationale) lines.push(`  Why this matters: ${g.rationale}`);
     }
 
-    if (d.stage) {
-        lines.push('', `The primary goal sits at the ${d.stage}. Favour these tactics:`);
+    if (d.stage && d.focus.length) {
+        lines.push('', `The primary goal sits at the ${d.stage}. In THIS post:`);
         for (const f of d.focus) lines.push(`- ${f}`);
     }
 
     if (d.urgent) {
         lines.push(
             '',
-            'This goal is NOT on track. Apply the tactics above decisively in this post rather than ' +
-            'playing it safe — a stronger hook, a clearer single call to action, and a format suited ' +
-            'to the stage above.',
+            'This goal is NOT on track. Apply the points above decisively in this post rather than ' +
+            'playing it safe — a more specific hook and one clearer call to action. Do not compensate ' +
+            'by reaching for engagement bait, outrage, false urgency or clickbait.',
         );
     }
 
     lines.push(
+        '',
+        // Reconciles this block with CONTENT_QUALITY_STANDARDS' "do NOT optimise for follower count".
+        // Named explicitly so the model treats the two as one instruction, not as a conflict to pick
+        // a side in — see the means-not-ends note in this function\'s doc comment.
+        'HOW to pursue these goals: through genuinely useful, on-brand content that earns saves, ' +
+        'shares, comments and DMs. The standing quality standards below still apply in full — the ' +
+        'goal above tells you WHAT outcome the business needs, and those standards tell you the only ' +
+        'acceptable way to get there. Never chase the number with engagement bait, follow-for-follow ' +
+        'appeals, vanity formats, manufactured controversy or clickbait.',
+        '',
+        // Finding 5: answers.primary_objective renders a second, independent statement of intent
+        // ("Primary objective for this account: …") that can disagree with the live goal. Nothing
+        // previously said which won, so state it.
+        'Where any other stated objective in this brief disagrees with the goals above, the goals ' +
+        'above win — they are the live, user-maintained target.',
         '',
         'These goals steer WHAT you talk about and HOW you frame the call to action. They never ' +
         'override the content rules, business knowledge, or required disclosure above — if a goal ' +

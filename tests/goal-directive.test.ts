@@ -12,7 +12,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildGoalDirective, renderGoalDirective, goalPromptBlock, type DirectiveGoal } from '../src/utils/goal-directive';
 import { renderBlueprintPrompt } from '../src/utils/blueprint-prompt';
-import { GOAL_METRICS, GOAL_AI_TIERS, pollCadenceHours, tierAllows, availableMetricsForRole } from '../src/config/goal-metrics';
+import {
+    GOAL_METRICS, GOAL_AI_TIERS, DRAFTING_FOCUS, FUNNEL_DIAGNOSTICS,
+    pollCadenceHours, tierAllows, availableMetricsForRole,
+} from '../src/config/goal-metrics';
 
 const NOW = new Date('2026-07-30T12:00:00Z');
 
@@ -76,17 +79,17 @@ test('no telemetry yet → progress omitted rather than reported as 0%', () => {
 
 // ── Funnel steering (the "helpful" part) ────────────────────────────────────────
 
-test('an awareness goal pulls the top-of-funnel playbook', () => {
+test('an awareness goal pulls the top-of-funnel drafting levers', () => {
     const out = goalPromptBlock([goal({ metricKey: 'instagram_followers' })], NOW);
     assert.match(out, /top of funnel \(Awareness\)/);
-    assert.match(out, /short-form video/i);
+    assert.match(out, /specific, concrete hook/i);
 });
 
-test('an engagement goal pulls the mid-funnel playbook, not the awareness one', () => {
+test('an engagement goal pulls the mid-funnel levers, not the awareness ones', () => {
     const out = goalPromptBlock([goal({ metricKey: 'instagram_engagement_rate', targetValue: 5 })], NOW);
     assert.match(out, /middle of funnel \(Interaction\)/);
-    assert.match(out, /conversational prompts/i);
-    assert.doesNotMatch(out, /short-form video/i);
+    assert.match(out, /invite a genuine reply/i);
+    assert.doesNotMatch(out, /concrete hook/i);
 });
 
 test('the PRIMARY goal decides the playbook, whatever order goals arrive in', () => {
@@ -96,6 +99,113 @@ test('the PRIMARY goal decides the playbook, whatever order goals arrive in', ()
     ], NOW);
     assert.match(out, /middle of funnel/);
     assert.match(out, /\[PRIMARY\] Instagram Engagement Rate/);
+});
+
+// ── Playbook review (2026-07-30): the drafting prompt must never carry advisory-only levers ─────
+// FUNNEL_DIAGNOSTICS is written for a human strategist reading an off-track diagnosis, so it reaches
+// for calendar-, format- and operations-level advice. It was briefly used as the generation-time
+// playbook, which put instructions into every post that the model cannot act on or that contradict
+// other parts of the same prompt. These tests pin the separation.
+
+test('the drafting prompt never instructs a FORMAT change (format is fixed before generation)', () => {
+    // process-content-jobs.ts sets format from job.post_format / answers.preferred_format and states
+    // it flatly ("This is an IMAGE post"), so "pivot to Reels" is self-contradictory in-prompt.
+    for (const metricKey of GOAL_METRICS.filter(m => m.available).map(m => m.key)) {
+        const out = goalPromptBlock([goal({ metricKey, targetValue: 5 })], NOW);
+        assert.doesNotMatch(out, /reels?|shorts|short-form video|format pivot/i, `${metricKey} leaks a format instruction`);
+    }
+});
+
+test('the drafting prompt never instructs an episodic series (contradicts the variety block)', () => {
+    // buildVarietyBlock: "Bring a genuinely DIFFERENT angle. Do NOT reuse the opening hook, core
+    // premise, or overall structure" — a series requires exactly the continuity that forbids.
+    for (const metricKey of GOAL_METRICS.filter(m => m.available).map(m => m.key)) {
+        const out = goalPromptBlock([goal({ metricKey, targetValue: 5 })], NOW);
+        assert.doesNotMatch(out, /episodic|\bseries\b/i, `${metricKey} leaks a series instruction`);
+    }
+});
+
+test('the action levers do not invite inventing a lead magnet, and forbid invented offers', () => {
+    // The advisory playbook says "lead-magnet promotion". With no lead magnet the model invents one,
+    // and content-quality.ts's anti-fabrication rule covers invented STATISTICS only.
+    //
+    // Asserted against DRAFTING_FOCUS directly rather than through a goal, because the 'action'
+    // objective is currently UNREACHABLE — no catalog metric maps to it (see the test below), so no
+    // goal can carry it. These levers are staged for when a traffic metric lands.
+    const levers = DRAFTING_FOCUS.action.join(' ');
+    assert.doesNotMatch(levers, /lead magnet|lead-magnet/i);
+    assert.match(levers, /never invent an offer, guide, discount or download/i);
+});
+
+test('KNOWN GAP — "Drive Traffic (Action)" has no measurable metric, so it can never be chosen', () => {
+    // GOAL_OBJECTIVES advertises action, and assistant-detail.html has a placeholder <option> for it,
+    // but zero metrics carry objective:'action' — there is no link-clicks or profile-visits metric in
+    // the catalog. objectivesWithMetrics() therefore filters it out and the dropdown never shows it,
+    // so an SMM user cannot set a traffic goal at all. This test DOCUMENTS the gap rather than
+    // asserting it is fine: when a traffic metric is added, this test should start failing and be
+    // replaced by a real coverage assertion.
+    assert.equal(GOAL_METRICS.filter(m => m.objective === 'action').length, 0,
+        'a traffic metric now exists — delete this test and assert real action coverage instead');
+    // The levers are nonetheless written and reviewed, so nothing has to be invented under time
+    // pressure the day a metric lands.
+    assert.ok(DRAFTING_FOCUS.action.length > 0);
+});
+
+test('an outcome goal gets drafting levers, not operations advice aimed at the user', () => {
+    // Blog Writer's posts_published is objective 'outcome' AND it drafts content, so this path is
+    // live. "Import more source data so the assistant has more to process" is meaningless mid-draft.
+    const out = goalPromptBlock([goal({ metricKey: 'posts_published', targetValue: 40 })], NOW);
+    assert.doesNotMatch(out, /import(ing)? more source data|queue|unactioned|escalated/i);
+    assert.match(out, /publishable draft|tightly scoped/i);
+});
+
+test('every objective has at least one drafting lever, so no goal steers with an empty list', () => {
+    for (const objective of Object.keys(DRAFTING_FOCUS) as Array<keyof typeof DRAFTING_FOCUS>) {
+        assert.ok(DRAFTING_FOCUS[objective].length > 0, `${objective} has no drafting levers`);
+    }
+});
+
+test('the two playbooks stay separate — the advisory one keeps its strategy-level advice', () => {
+    // The advisory playbook is CORRECT for its own audience (a human deciding what to change after a
+    // goal goes off track), so the fix was to stop feeding it to the drafting prompt, NOT to strip
+    // the calendar/format advice out of it. Guard against a well-meaning "cleanup" merging the two.
+    assert.ok(FUNNEL_DIAGNOSTICS.awareness.focus.some(f => /Reels/i.test(f)),
+        'the advisory playbook should still recommend format pivots to a human');
+    assert.ok(FUNNEL_DIAGNOSTICS.outcome.focus.some(f => /source data/i.test(f)),
+        'the advisory playbook should still recommend importing source data to a human');
+    // ...and the drafting playbook must share no item with it.
+    for (const objective of Object.keys(DRAFTING_FOCUS) as Array<keyof typeof DRAFTING_FOCUS>) {
+        const advisory = new Set(FUNNEL_DIAGNOSTICS[objective].focus);
+        for (const lever of DRAFTING_FOCUS[objective]) {
+            assert.ok(!advisory.has(lever), `"${lever}" is copied verbatim from the advisory playbook`);
+        }
+    }
+});
+
+// ── The vanity-metric reconciliation ───────────────────────────────────────────
+// CONTENT_QUALITY_STANDARDS: "Do NOT optimise for Likes or follower count." A follower goal says the
+// opposite, and the standards are appended AFTER this block, so the contradiction would land later
+// in the prompt and partly cancel the goal. The block must reconcile the two, not pick a side.
+
+test('a follower goal reconciles with the no-vanity-metrics standard instead of contradicting it', () => {
+    const out = goalPromptBlock([goal({ metricKey: 'instagram_followers' })], NOW);
+    assert.match(out, /standing quality standards below still apply in full/i);
+    assert.match(out, /saves, shares, comments and DMs/i);
+    assert.match(out, /Never chase the number with engagement bait/i);
+});
+
+test('an off-track goal is told not to compensate with bait', () => {
+    // The escalation ("apply the tactics decisively") is the most likely place for the model to reach
+    // for a cheap tactic, so the prohibition has to be attached to the escalation itself.
+    const out = goalPromptBlock([goal({ status: 'off_track' })], NOW);
+    assert.match(out, /Do not compensate by reaching for engagement bait, outrage, false urgency or clickbait/i);
+});
+
+test('the live goal is declared to win over any other stated objective', () => {
+    // answers.primary_objective renders "Primary objective for this account: …" independently, and
+    // the two can disagree. Precedence has to be stated or the model arbitrates silently.
+    const out = goalPromptBlock([goal()], NOW);
+    assert.match(out, /any other stated objective in this brief disagrees.*the goals above win/is);
 });
 
 // ── Escalation ─────────────────────────────────────────────────────────────────

@@ -341,6 +341,18 @@ export function objectivesWithMetrics(connectedServices: readonly string[]): Goa
 // steered by the metric's funnel stage. `focus` is the playbook the evaluation model must draw
 // from for that stage. SoT here so the playbook stays tunable + testable (never inlined in the
 // prompt at the call site).
+//
+// ⚠️ THIS IS THE ADVISORY PLAYBOOK — read by the DIAGNOSTIC path, where the audience is a human
+// strategist reading "your goal is off track, here's what to change". That is why it legitimately
+// reaches for calendar-level, format-level and operations-level levers ("pivot to Reels", "run a
+// series", "import more source data") — all sensible advice for a person, none of it executable by
+// a single drafting call.
+//
+// Do NOT feed this to a content-generation prompt. Use DRAFTING_FOCUS below. Doing otherwise put
+// three unexecutable instructions into every generated post: a format pivot the drafting job cannot
+// make (format is fixed before generation from job.post_format), an episodic-series instruction that
+// contradicts the anti-repetition variety block, and — for a Blog Writer, whose posts_published
+// metric is objective 'outcome' — an instruction to go and import more source data mid-draft.
 export interface FunnelDiagnostic {
     /** Human label of the funnel position, e.g. "top of funnel (Awareness)". */
     stage: string;
@@ -388,6 +400,59 @@ export const FUNNEL_DIAGNOSTICS: Record<GoalObjective, FunnelDiagnostic> = {
         ],
     },
 };
+
+// ── Per-post drafting playbook (the generation-time counterpart) ─────────────────
+//
+// What a SINGLE drafting call can actually change. Every item here has to pass three tests, because
+// each was failed by at least one FUNNEL_DIAGNOSTICS item when that map was briefly used here:
+//
+//   1. The drafting model CONTROLS it. Format is not a lever — process-content-jobs.ts fixes it from
+//      job.post_format / answers.preferred_format and states it flatly ("This is an IMAGE post"), so
+//      "pivot to Reels" is an instruction the same prompt forbids.
+//   2. It applies to ONE post. "Run an episodic series" spans a calendar, and it contradicts the
+//      variety block's "do NOT reuse the opening hook, core premise, or overall structure".
+//   3. It cannot be satisfied by INVENTING something. "Promote a lead magnet" presumes one exists;
+//      with no lead magnet the model makes one up, and the anti-fabrication rule in
+//      content-quality.ts covers invented STATISTICS only — not an invented free guide.
+//
+// Wording is imperative and post-scoped so it reads as a directive, not as strategy advice.
+export const DRAFTING_FOCUS: Record<GoalObjective, readonly string[]> = {
+    // Reach / impressions / followers. Levers that survive: relevance and specificity of the hook
+    // and the angle. Format and cadence are decided elsewhere, so they are deliberately absent.
+    awareness: [
+        'open with a specific, concrete hook rather than a general statement — the first line decides whether the rest is read',
+        'aim the post squarely at the target audience\'s own words and problems, not at a general audience',
+        'make the angle distinctive enough to be worth sharing onward to someone who does not follow this account yet',
+    ],
+    // Saves / shares / comments / DMs. This set came through the review unchanged — every item is
+    // already post-scoped and executable.
+    engagement: [
+        'invite a genuine reply — ask something specific the audience actually has an opinion about',
+        'give practical, self-contained value the reader would save to come back to (a how-to, a checklist, a concrete tip)',
+        'frame it so the reader recognises their own situation and wants to send it to a colleague',
+    ],
+    // Link clicks / profile visits / leads. CTA levers stay; lead-magnet promotion is gone — see
+    // test 3 above. The last item is what replaces it safely.
+    action: [
+        'end on ONE unambiguous call to action, not a list of options',
+        'word the call to action around what the reader gets, not what the business wants',
+        'point only at something that genuinely exists in the provided business context — never invent an offer, guide, discount or download to click toward',
+    ],
+    // Non-marketing roles (Blog Writer's posts_published is the one that reaches a drafting prompt).
+    // The advisory version of this was pure operations advice aimed at the USER, which is meaningless
+    // mid-draft; these are the equivalent levers a drafting call actually holds.
+    outcome: [
+        'keep the piece tightly scoped and finishable rather than sprawling — a complete, publishable draft beats an ambitious unfinished one',
+        'lead with the single most useful thing the reader came for',
+        'stay strictly within the provided business context; where information is missing, write around the gap rather than filling it with invention',
+    ],
+};
+
+/** The per-post drafting levers for the metric a goal tracks (generation-time; see DRAFTING_FOCUS). */
+export function draftingFocusFor(metricKey: string): readonly string[] {
+    const m = getGoalMetric(metricKey);
+    return m ? DRAFTING_FOCUS[m.objective] : [];
+}
 
 /** US-02 — the funnel diagnostic playbook for the metric a goal tracks. */
 export function funnelDiagnosticFor(metricKey: string): FunnelDiagnostic | undefined {
