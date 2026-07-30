@@ -337,6 +337,18 @@ window.generateAddAssistantPlaceholderHTML = function(index) {
 // ==========================================
 // 2. FETCH & RENDER ENGINE
 // ==========================================
+// THE SINGLE renderer for both team grids — the Dashboard's #dashboard-assistants-grid and My
+// Assistants' #directory-assistants-grid.
+//
+// ⚠️ workspace.html used to carry a SECOND copy of this function (plus its own
+// generateAssistantCardHTML / initDashboard / initAssistantsDirectory). Because assistants.js loads
+// after workspace.html's inline script, these window.* assignments silently overwrote that copy — so
+// which half of the behaviour a user actually got was decided by nothing more than the order of two
+// <script> tags. Each copy had features the other lacked, so the live product was missing whichever
+// features happened to live in the losing file (the setup-wizard auto-open, the in-progress cards
+// and the provisioning re-poll among them). The copies were merged here and deleted there. Do not
+// reintroduce a definition of any of these four functions in workspace.html.
+//
 // options.placeholders — render inviting "Add New Assistant" cards (My Assistants page).
 window.fetchAndRenderAssistants = async function(containerId, options) {
     const opts = options || {};
@@ -349,14 +361,45 @@ window.fetchAndRenderAssistants = async function(containerId, options) {
         // month (see _fetchAndRenderAssistantMetrics). With no period the server defaulted
         // to 'week', so a card and the detail tab reported the same assistant over different
         // windows and disagreed — early in a month the week can even exceed the month.
-        const res = await fetch('/.netlify/functions/get-assistants?period=month');
+        // (The merged-away workspace.html copy omitted the period, which is how the two grids could
+        // flip back to a week window after an archive/pause re-render.)
+        const [res, ipRes] = await Promise.all([
+            fetch('/.netlify/functions/get-assistants?period=month'),
+            fetch('/.netlify/functions/get-in-progress-assistants'),
+        ]);
         if (!res.ok) throw new Error("Failed to fetch");
 
         const data = await res.json();
+        const ipData = ipRes.ok ? await ipRes.json() : { items: [] };
+        const inProgress = ipData.items || [];
         container.innerHTML = ''; // Clear the "Gathering your team..." placeholder
 
+        // AC1.4: any assistant at all — even one still provisioning — means onboarding is done, so
+        // unlock the nav live rather than waiting for the next page load.
+        if ((data.assistants || []).length > 0) window.markOnboardingComplete?.();
+
+        // US1 AC1.1: in-progress "Onboarding" cards render at the TOP of both grids. Their markup and
+        // action handlers stay in workspace.html (window.generateInProgressCardHTML / _inProgressItems).
+        window._inProgressItems = window._inProgressItems || {};
+        inProgress.forEach(it => {
+            const key = it.kind === 'draft' ? `draft-${it.draftId}` : `val-${it.assistantId}`;
+            window._inProgressItems[key] = it;
+            if (window.generateInProgressCardHTML) {
+                container.insertAdjacentHTML('beforeend', window.generateInProgressCardHTML(it, key));
+            }
+        });
+
         // US6 AC5.3: archived assistants are removed from active views (history kept server-side).
-        const visible = (data.assistants || []).filter(a => a.lifecycleStatus !== 'archived' && a.status !== 'cancelled');
+        // pending/failed/blocked are excluded because they render as in-progress cards above — without
+        // that filter a provisioning assistant appears TWICE, once in each form.
+        const visible = (data.assistants || []).filter(a =>
+            a.lifecycleStatus !== 'archived' && a.status !== 'cancelled' &&
+            a.status !== 'pending' && a.status !== 'failed' && a.status !== 'blocked');
+
+        // US4: keep polling while anything is still validating, and toast when one goes ready. Lives in
+        // workspace.html because it owns the toast + validation-meta state; called here because this is
+        // the render it needs to re-trigger.
+        const startPoll = () => window._maybeStartProvisioningPoll?.(containerId, inProgress);
 
         if (opts.placeholders) {
             // My Assistants always guides the user with placeholder cards instead of empty text.
@@ -370,10 +413,14 @@ window.fetchAndRenderAssistants = async function(containerId, options) {
             for (let i = 0; i < placeholderCount; i++) {
                 container.insertAdjacentHTML('beforeend', window.generateAddAssistantPlaceholderHTML(i));
             }
+            startPoll();
             return;
         }
 
-        if (visible.length === 0) {
+        // "Your team is empty" only when there is genuinely nothing to show. An assistant mid-setup is
+        // NOT an empty team, and this branch assigns innerHTML — writing it here would wipe the
+        // in-progress cards inserted above and tell the user they have no team while one is provisioning.
+        if (visible.length === 0 && inProgress.length === 0) {
             container.innerHTML = `
               <div class="col-span-full py-12 text-center text-gray-500 font-medium bg-white rounded-2xl border border-gray-100 shadow-sm">
                   Your team is currently empty. <a href="#" onclick="loadView('catalog')" class="text-emerald-600 hover:underline">Hire an assistant</a>.
@@ -384,6 +431,7 @@ window.fetchAndRenderAssistants = async function(containerId, options) {
         visible.forEach(assistant => {
             container.insertAdjacentHTML('beforeend', window.generateAssistantCardHTML(assistant));
         });
+        startPoll();
     } catch (error) {
         container.innerHTML = `<div class="col-span-full text-center text-red-500">Could not connect to the database to load your team.</div>`;
     }
@@ -392,16 +440,52 @@ window.fetchAndRenderAssistants = async function(containerId, options) {
 // ==========================================
 // 3. SPA ROUTER INITIALIZATION HOOKS
 // ==========================================
+// Merged from the shadowed workspace.html copy — see the note on fetchAndRenderAssistants above. The
+// engagement widget, the welcome heading and the setup-wizard auto-open all lived ONLY in that copy,
+// so while it was being overwritten none of the three ran on the dashboard.
 window.initDashboard = async function() {
+    await window._renderDashboardEngagement?.();
     await window.fetchAndRenderAssistants('dashboard-assistants-grid');
+
+    // Show "Welcome." for first-time visitors; "Welcome back." for returning users.
+    const welcomeEl = document.getElementById('dash-welcome-heading');
+    if (welcomeEl) {
+        if (!window._firstLoginWelcomeSeen) {
+            welcomeEl.textContent = 'Welcome.';
+            // Mark as seen so subsequent visits show "Welcome back."
+            window._firstLoginWelcomeSeen = true;
+            fetch('/.netlify/functions/update-profile', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fieldKey: 'firstLoginWelcomeSeen', value: true }),
+            }).catch(() => {});
+        } else {
+            welcomeEl.textContent = 'Welcome back.';
+        }
+    }
+
+    // US1 AC1 — the setup wizard auto-slides in for users still onboarding when the dashboard loads
+    // (unless they've collapsed it or already finished).
+    if (window.SetupWizard && typeof window.SetupWizard.refresh === 'function') {
+        window.SetupWizard.refresh({ autoOpen: true });
+    }
 };
 
 window.initAssistantsDirectory = async function(loadViewCb) {
     await window.fetchAndRenderAssistants('directory-assistants-grid', { placeholders: true });
 
     const catalogBtn = document.getElementById('route-to-catalog-from-dir');
-    if (catalogBtn) {
-        catalogBtn.addEventListener('click', () => loadViewCb('catalog'));
+    // dataset.bound, from the merged-away copy: this initialiser re-runs on every navigation to My
+    // Assistants, and addEventListener stacks — without the guard the wizard opened once per visit
+    // the user had made this session.
+    if (catalogBtn && !catalogBtn.dataset.bound) {
+        catalogBtn.dataset.bound = 'true';
+        // US8 AC3 — "Hire New Assistant" re-opens the wizard at Step 6 (secondary onboarding), and
+        // only falls back to the catalog when the wizard isn't available.
+        catalogBtn.addEventListener('click', () => {
+            if (window.SetupWizard?.openForNewAssistant) window.SetupWizard.openForNewAssistant();
+            else loadViewCb('catalog');
+        });
     }
 
     // Issue #134: disabled ("coming soon") in the markup — no click routing to wire up.

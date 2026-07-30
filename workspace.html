@@ -4323,108 +4323,10 @@ function formatCurrency(amount, currency) {
       }
     }
   }
-  // NOTE: the dashboard initialiser lives at window.initDashboard (defined below). It renders
-  // the engagement widget + team grid AND auto-opens the setup wizard. A duplicate local
-  // initDashboard used to sit here and silently shadowed it (so the wizard never opened on
-  // login) — it was removed; do not reintroduce it.
-  // 1. Shared Card Generator
-  window.generateAssistantCardHTML = function(assistant) {
-    const initial = assistant.name ? assistant.name.charAt(0).toUpperCase() : 'A';
-    const role = assistant.role || 'Custom Assistant';
-
-    // Lifecycle state machine (assistant-lifecycle-epic). Fall back to the legacy
-    // (status, isActive) pair when the backend hasn't surfaced lifecycleStatus yet.
-    const lifecycle = assistant.lifecycleStatus
-      || (assistant.status === 'pending' ? 'provisioning' : (!assistant.isActive ? 'paused' : 'working'));
-    const STATUS_BADGES = {
-      provisioning:   { cls: 'bg-amber-50 text-amber-700 border-amber-200',       dot: 'bg-amber-500 animate-pulse',   label: 'Setup in Progress' },
-      ready_for_work: { cls: 'bg-blue-50 text-blue-700 border-blue-200',           dot: 'bg-blue-500',                  label: 'Ready for Work' },
-      working:        { cls: 'bg-emerald-50 text-emerald-700 border-emerald-200',  dot: 'bg-emerald-500 animate-pulse', label: 'Working' },
-      paused:         { cls: 'bg-gray-100 text-gray-600 border-gray-200',          dot: 'bg-gray-400',                  label: 'Paused' },
-      system_paused:  { cls: 'bg-red-50 text-red-700 border-red-200',              dot: 'bg-red-500 animate-pulse',     label: 'Attention Required' },
-      archived:       { cls: 'bg-gray-100 text-gray-500 border-gray-200',          dot: 'bg-gray-300',                  label: 'Archived' },
-    };
-    const badge = STATUS_BADGES[lifecycle] || STATUS_BADGES.working;
-    const statusHtml = `<div class="flex items-center gap-2 ${badge.cls} px-3 py-1 rounded-full text-xs font-bold border"><span class="w-2 h-2 rounded-full ${badge.dot}"></span>${badge.label}</div>`;
-
-    // Cards: header + body are clickable (Board Room); footer has management actions.
-    const readyForWork  = lifecycle === 'ready_for_work';
-    const systemPaused  = lifecycle === 'system_paused';
-    // Only a user-paused assistant resumes (via Kick-Off); system_paused gets a Fix Issue CTA.
-    const isPaused = lifecycle === 'paused';
-
-    // US2 AC2.2 / US5 AC5.2: tailor the card body to the lifecycle state.
-    const bodyHtml = readyForWork
-      ? `<div class="flex items-start gap-3">
-              <span class="text-emerald-500 mt-0.5">✅</span>
-              <p class="text-sm text-gray-600">Setup complete — review the Kick-Off checklist, then put your assistant to work.</p>
-         </div>`
-      : systemPaused
-      ? `<div class="flex items-start gap-3">
-              <span class="text-red-500 mt-0.5">⚠️</span>
-              <p class="text-sm text-gray-600">This assistant was paused automatically and needs attention. Open it to resolve the issue.</p>
-         </div>`
-      : `<h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Recent Wins</h3>
-         <div class="flex items-start gap-3">
-              <span class="text-gray-400 mt-0.5">⏳</span>
-              <p class="text-sm text-gray-500 italic">Awaiting first automated task completion...</p>
-         </div>`;
-
-    const editBtn = `<button onclick="window._assistantEdit('${assistant.id}')"
-                    class="px-2.5 py-1.5 text-xs font-semibold text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-100 transition">✏️ Edit</button>`;
-    const deleteBtn = `<button onclick="window._assistantDelete('${assistant.id}', '${(assistant.name || '').replace(/'/g, '&#39;')}')"
-                    class="px-2.5 py-1.5 text-xs font-semibold text-red-600 bg-red-50 border border-red-200 rounded-lg hover:opacity-80 transition">🗑</button>`;
-    const footerActions = readyForWork
-      ? `<div class="flex items-center gap-1.5 flex-wrap">
-              <button onclick="window.routeToAssistantDetail('${assistant.id}')"
-                class="px-3.5 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition">🚀 Initiate Kick-Off</button>
-              ${editBtn}${deleteBtn}
-         </div>`
-      : systemPaused
-      ? `<div class="flex items-center gap-1.5 flex-wrap">
-              <button onclick="window.routeToAssistantDetail('${assistant.id}')"
-                class="px-3.5 py-1.5 text-xs font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg shadow-sm transition">⚠ Fix Issue</button>
-              ${editBtn}${deleteBtn}
-         </div>`
-      : (assistant.status !== 'pending' ? `
-         <div class="flex items-center gap-1.5">
-              ${editBtn}
-              <button onclick="window._assistantTogglePause('${assistant.id}', ${isPaused})"
-                class="px-2.5 py-1.5 text-xs font-semibold ${isPaused ? 'text-emerald-700 bg-emerald-50 border-emerald-200' : 'text-amber-700 bg-amber-50 border-amber-200'} border rounded-lg hover:opacity-80 transition">
-                ${isPaused ? '▶ Resume' : '⏸ Pause'}
-              </button>
-              ${deleteBtn}
-         </div>` : '');
-    return `
-      <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col hover:shadow-md transition-all">
-          <div class="p-6 border-b border-gray-100 bg-gray-50/50 flex justify-between items-start cursor-pointer" onclick="window.routeToAssistantDetail('${assistant.id}')">
-              <div class="flex items-center gap-4">
-                  <div class="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center text-emerald-700 text-2xl font-bold">
-                      ${initial}
-                  </div>
-                  <div>
-                      <h2 class="text-xl font-bold text-gray-900">${assistant.name}</h2>
-                      <p class="text-sm text-gray-500 font-medium">${role}</p>
-                  </div>
-              </div>
-              ${statusHtml}
-          </div>
-
-          <div class="p-6 flex-grow cursor-pointer" onclick="window.routeToAssistantDetail('${assistant.id}')">
-              ${bodyHtml}
-          </div>
-
-          <div class="p-4 bg-gray-50 border-t border-gray-100 flex justify-between items-center gap-2 flex-wrap">
-              <div class="flex items-center gap-3">
-                  <button class="text-sm font-semibold text-emerald-700 hover:text-emerald-800 transition cursor-pointer" onclick="window.routeToAssistantDetail('${assistant.id}')">View Details &rarr;</button>
-                  ${lifecycle !== 'provisioning' && lifecycle !== 'archived' ? `
-                  <button type="button" onclick="window.openAssistantChatModal('${assistant.id}', '${(assistant.name || 'Your assistant').replace(/'/g, '&#39;')}', '${role.replace(/'/g, '&#39;')}', '${(assistant.roleKey || '').replace(/'/g, '&#39;')}')"
-                     class="px-3.5 py-1.5 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition cursor-pointer">💬 Chat</button>` : ''}
-              </div>
-              ${footerActions}
-          </div>
-      </div>`;
-  };
+  // generateAssistantCardHTML now lives in assistants.js — see the note on
+  // fetchAndRenderAssistants there for why a second copy here was actively harmful. The copy
+  // removed from here had no goal block at all, so whether a user saw goal progress on their
+  // team cards came down to <script> tag order.
 
   // 2. Fetch Logic Helper
   // ═══════════════════════════════════════════════════════════════════
@@ -4583,7 +4485,9 @@ function formatCurrency(amount, currency) {
   let _knownValidationIds = new Set();
   window._lastValidationMeta = window._lastValidationMeta || {};
 
-  function _maybeStartProvisioningPoll(containerId, inProgress) {
+  // On window because the renderer that re-triggers it now lives in assistants.js. Kept here
+  // rather than moved because it owns the toast and the _lastValidationMeta state below.
+  window._maybeStartProvisioningPoll = function (containerId, inProgress) {
     const pending = inProgress.filter(i => i.kind === 'validation' && i.provisioningStatus === 'pending');
     const validationIds = new Set(pending.map(i => i.assistantId));
 
@@ -4601,60 +4505,15 @@ function formatCurrency(amount, currency) {
     clearTimeout(_provPollTimer);
     if (validationIds.size > 0) {
       // Re-render in 15s; self-stops once the view changes (container disappears) or nothing is pending.
-      _provPollTimer = setTimeout(() => fetchAndRenderAssistants(containerId), 15000);
+      _provPollTimer = setTimeout(() => window.fetchAndRenderAssistants(containerId), 15000);
     }
-  }
+  };
 
-  async function fetchAndRenderAssistants(containerId) {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-
-    try {
-      const [aRes, ipRes] = await Promise.all([
-        fetch('/.netlify/functions/get-assistants'),
-        fetch('/.netlify/functions/get-in-progress-assistants'),
-      ]);
-      if (!aRes.ok) throw new Error('Failed to fetch');
-      const aData  = await aRes.json();
-      const ipData = ipRes.ok ? await ipRes.json() : { items: [] };
-
-      const allAssistants = aData.assistants || [];
-      const inProgress    = ipData.items || [];
-
-      // AC1.4: any assistant (even provisioning) means onboarding is complete — unlock nav live.
-      if (allAssistants.length > 0) window.markOnboardingComplete?.();
-
-      container.innerHTML = ''; // Clear loading state
-
-      // US1 AC1.1: in-progress "Onboarding" cards render at the top on Dashboard + My Team.
-      inProgress.forEach(it => {
-        const key = it.kind === 'draft' ? `draft-${it.draftId}` : `val-${it.assistantId}`;
-        window._inProgressItems[key] = it;
-        container.insertAdjacentHTML('beforeend', window.generateInProgressCardHTML(it, key));
-      });
-
-      // Active assistants: exclude those still provisioning/failed (rendered as in-progress above).
-      // US6 AC5.3: archived assistants are removed from the active dashboard (history is kept
-      // server-side). Provisioning/failed render as in-progress cards above.
-      const activeAssistants = allAssistants.filter(a =>
-        a.status !== 'pending' && a.status !== 'failed' && a.status !== 'blocked' &&
-        a.lifecycleStatus !== 'archived' && a.status !== 'cancelled');
-      activeAssistants.forEach(assistant => {
-        container.insertAdjacentHTML('beforeend', window.generateAssistantCardHTML(assistant));
-      });
-
-      if (inProgress.length === 0 && activeAssistants.length === 0) {
-        container.innerHTML = `
-                <div class="col-span-full py-12 text-center text-gray-500 font-medium bg-white rounded-2xl border border-gray-100 shadow-sm">
-                    You haven't hired any assistants yet. <a href="#" onclick="loadView('catalog')" class="text-emerald-600 hover:underline">Browse the catalog</a>.
-                </div>`;
-      }
-
-      _maybeStartProvisioningPoll(containerId, inProgress);
-    } catch (error) {
-      container.innerHTML = `<div class="col-span-full text-center text-red-500">Failed to load team data.</div>`;
-    }
-  }
+  // fetchAndRenderAssistants now lives in assistants.js — ONE renderer for both team grids.
+  // The copy that was here rendered the in-progress cards, called markOnboardingComplete and
+  // drove _maybeStartProvisioningPoll, but fetched without ?period=month and drew cards with no
+  // goal block. All of it is merged there now; _maybeStartProvisioningPoll stays below because it
+  // owns the toast + validation-meta state.
 
   // ═══════════════════════════════════════════════════════════════════
   //  US2: Assistant Setup Checklist UI  +  US3: deep-linking to a step
@@ -5012,47 +4871,16 @@ function formatCurrency(amount, currency) {
     window.checkMilestoneCelebration?.();
   };
 
-  window.initDashboard = async function() {
-    await window._renderDashboardEngagement();
-    await fetchAndRenderAssistants('dashboard-assistants-grid');
+  // initDashboard now lives in assistants.js (merged — see the note on fetchAndRenderAssistants
+  // there). It keeps this copy's engagement widget, welcome heading and setup-wizard auto-open,
+  // and adds the goal block + month-window ROI on the cards.
+  // ⚠️ Do NOT define window.initDashboard here again: assistants.js loads after this inline
+  // script, so a definition here is silently overwritten — which is exactly how the wizard
+  // auto-open stopped running.
 
-    // Show "Welcome." for first-time visitors; "Welcome back." for returning users.
-    const welcomeEl = document.getElementById('dash-welcome-heading');
-    if (welcomeEl) {
-      if (!window._firstLoginWelcomeSeen) {
-        welcomeEl.textContent = 'Welcome.';
-        // Mark as seen so subsequent visits show "Welcome back."
-        window._firstLoginWelcomeSeen = true;
-        fetch('/.netlify/functions/update-profile', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ fieldKey: 'firstLoginWelcomeSeen', value: true }),
-        }).catch(() => {});
-      } else {
-        welcomeEl.textContent = 'Welcome back.';
-      }
-    }
-
-    // US1 AC1 — the setup wizard auto-slides in for users still onboarding when the
-    // dashboard loads (unless they've collapsed it or already finished).
-    if (window.SetupWizard && typeof window.SetupWizard.refresh === 'function') {
-      window.SetupWizard.refresh({ autoOpen: true });
-    }
-  };
-
-  window.initAssistantsDirectory = async function(loadViewCb) {
-    await fetchAndRenderAssistants('directory-assistants-grid');
-
-    const routeToCatalogBtn = document.getElementById('route-to-catalog-from-dir');
-    if (routeToCatalogBtn && !routeToCatalogBtn.dataset.bound) {
-      routeToCatalogBtn.dataset.bound = 'true';
-      // US8 AC3 — "Hire New Assistant" re-opens the wizard at Step 6 (secondary onboarding).
-      routeToCatalogBtn.addEventListener('click', () => {
-        if (window.SetupWizard?.openForNewAssistant) window.SetupWizard.openForNewAssistant();
-        else loadViewCb('catalog');
-      });
-    }
-  };
+  // initAssistantsDirectory now lives in assistants.js (merged — see the note on
+  // fetchAndRenderAssistants there). It keeps this copy's dataset.bound guard and the
+  // SetupWizard.openForNewAssistant path, and adds the My Assistants placeholder cards.
 
   // ── Assistant management actions ──────────────────────────────────────
   window._assistantEdit = function(id) {
@@ -5081,8 +4909,8 @@ function formatCurrency(amount, currency) {
         return;
       }
       // Refresh both grids
-      await fetchAndRenderAssistants('dashboard-assistants-grid');
-      await fetchAndRenderAssistants('directory-assistants-grid');
+      await window.fetchAndRenderAssistants('dashboard-assistants-grid');
+      await window.fetchAndRenderAssistants('directory-assistants-grid', { placeholders: true });
     } catch (e) {
       alert('Network error — please try again.');
     }
@@ -5099,8 +4927,8 @@ function formatCurrency(amount, currency) {
         return;
       }
       window.showToast?.('Assistant archived.');
-      await fetchAndRenderAssistants('dashboard-assistants-grid');
-      await fetchAndRenderAssistants('directory-assistants-grid');
+      await window.fetchAndRenderAssistants('dashboard-assistants-grid');
+      await window.fetchAndRenderAssistants('directory-assistants-grid', { placeholders: true });
     } catch (e) {
       alert('Network error — please try again.');
     }
