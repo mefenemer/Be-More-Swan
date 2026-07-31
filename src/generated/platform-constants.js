@@ -60,6 +60,14 @@
   var scheduleActive = {};
   for (var s = 0; s < SCHEDULE_ACTIVE_STATUSES.length; s++) scheduleActive[SCHEDULE_ACTIVE_STATUSES[s]] = true;
 
+  // system_connections statuses that mean "reconnect required", from
+  // src/config/connection-status.ts. The hand-written copy of this list in integrations.js omitted
+  // 'token_expired' — the value the Meta paths write — so a dead Facebook connection rendered as
+  // "Connected" until someone noticed posts had stopped going out.
+  var DEAD_CONNECTION_STATUSES = ["token_expired","token_refresh_failed","revoked","expired","failed"];
+  var deadStatus = {};
+  for (var d = 0; d < DEAD_CONNECTION_STATUSES.length; d++) deadStatus[DEAD_CONNECTION_STATUSES[d]] = true;
+
   var byId = {};
   for (var i = 0; i < PLATFORMS.length; i++) byId[PLATFORMS[i].id] = PLATFORMS[i];
 
@@ -72,6 +80,17 @@
 
     /** scheduled_posts statuses that mean "committed to publish", in canonical order. */
     scheduleActiveStatuses: SCHEDULE_ACTIVE_STATUSES,
+
+    /** system_connections statuses that mean the credential is dead and must be reconnected. */
+    deadConnectionStatuses: DEAD_CONNECTION_STATUSES,
+
+    /**
+     * True when a connection's status means "reconnect required". Test the status against THIS
+     * rather than listing values inline: the vocabulary is per-writer and has already drifted once.
+     */
+    isConnectionDead: function (status) {
+      return deadStatus[String(status == null ? '' : status)] === true;
+    },
 
     /**
      * True when a post is committed to publish — i.e. it belongs on the Content Calendar. Drafts

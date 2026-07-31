@@ -8,8 +8,9 @@
 // SC7: Deduplication — skips re-sending if same userId+signalType within 7 days.
 
 import { HandlerEvent } from '@netlify/functions';
-import { eq, and, lt, gte, isNull, count, or } from 'drizzle-orm';
+import { eq, and, lt, gte, isNull, count, or, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
+import { DEAD_CONNECTION_STATUSES } from '../../src/config/connection-status';
 import {
     users,
     plans,
@@ -130,11 +131,9 @@ async function detectIntegrationDisconnected(db: any) {
         .from(systemConnections)
         .where(
             and(
-                or(
-                    eq(systemConnections.status, 'failed'),
-                    eq(systemConnections.status, 'expired'),
-                    eq(systemConnections.status, 'revoked')
-                ),
+                // Shared vocabulary — the hand-written list here missed 'token_expired' (what the
+                // Meta paths write), so the churn signal never fired for the most common breakage.
+                inArray(systemConnections.status, DEAD_CONNECTION_STATUSES),
                 lt(systemConnections.updatedAt, fortyEightHoursAgo)
             )
         )

@@ -979,7 +979,11 @@ function _blogDestStatusRow(d) {
 // `problem`: the connection exists but needs the user's attention.
 function _connHealth(conn) {
     if (!conn) return { key: 'none', label: 'Not connected', problem: false };
-    if (conn.status === 'expired' || conn.status === 'failed' || conn.status === 'revoked' || conn.status === 'token_refresh_failed') {
+    // The dead-status list is GENERATED (window.PlatformConstants ← src/config/connection-status.ts).
+    // It used to be written out here, and the hand copy omitted 'token_expired' — the status the
+    // Meta publish/insights paths write — so a disconnected Facebook account kept rendering as
+    // "Connected" while the assistant had already stopped drafting for it.
+    if (window.PlatformConstants && window.PlatformConstants.isConnectionDead(conn.status)) {
         return { key: 'bad', label: 'Disconnected', problem: true };
     }
     // Connections that carry an offline refresh token are renewed silently (the

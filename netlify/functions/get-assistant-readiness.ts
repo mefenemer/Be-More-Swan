@@ -12,6 +12,7 @@ import type { MissingField } from '../../src/utils/blueprint';
 import { requireTenant } from '../../src/utils/tenant';
 import { provisioningBlockInfo } from '../../src/utils/assistant-lifecycle';
 import { resolveLiveSocialPlatforms } from '../../src/utils/live-social-connections';
+import { DEAD_CONNECTION_STATUSES } from '../../src/config/connection-status';
 import { checkProhibitedUsePatterns } from '../../src/utils/tos-gate';
 import { CURRENT_TOS_VERSION } from './accept-tos';
 import { CURRENT_DPA_VERSION } from './accept-dpa';
@@ -102,7 +103,9 @@ export async function computeAssistantReadiness(db: Db, orgId: number, assistant
                 .from(systemConnections)
                 .where(and(
                     eq(systemConnections.organisationId, orgId),
-                    inArray(systemConnections.status, ['expired', 'failed', 'revoked', 'token_refresh_failed']),
+                    // Hand-written, and it omitted 'token_expired' — the status the Meta paths write
+                    // — so a dead Facebook/Instagram connection never raised the diagnostic.
+                    inArray(systemConnections.status, DEAD_CONNECTION_STATUSES),
                 ));
             const brokenConnections = [...new Set(brokenRows.map(r => r.serviceName).filter(Boolean))];
             return { assistant, hasHealthyConnection, hasRule, connections, brokenConnections };

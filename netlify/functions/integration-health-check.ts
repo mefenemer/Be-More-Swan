@@ -13,6 +13,7 @@ import { eq, and, or, lte, isNotNull, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { users, systemConnections, workspaceIntegrations, processedWebhookEvents } from '../../db/schema';
 import { normalizePlatform, PLATFORM_FORMATS } from '../../src/config/platform-formats';
+import { DEAD_CONNECTION_STATUSES, isConnectionDead } from '../../src/config/connection-status';
 import { createNotification } from '../../src/utils/notify';
 import { sendEmail } from '../../src/utils/email';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -42,9 +43,11 @@ async function runIntegrationHealthCheck() {
                 isNotNull(systemConnections.tokenExpiresAt),
                 lte(systemConnections.tokenExpiresAt, in7d),
             ),
-            // Already expired or failed
-            eq(systemConnections.status, 'expired'),
-            eq(systemConnections.status, 'failed'),
+            // Already broken. This used to be eq('expired') OR eq('failed') — two values NOTHING
+            // writes to this table — while the value the Meta paths actually write, 'token_expired',
+            // matched neither branch. A dead Facebook/Instagram connection therefore produced no
+            // alert and no email, ever. See src/config/connection-status.ts.
+            inArray(systemConnections.status, DEAD_CONNECTION_STATUSES),
         ));
 
     // The other credential store. Threads, YouTube and the Google connectors authenticate into
@@ -97,7 +100,7 @@ async function runIntegrationHealthCheck() {
             ? (conn.tokenExpiresAt instanceof Date ? conn.tokenExpiresAt : new Date(conn.tokenExpiresAt as string))
             : null;
 
-        const isExpired = conn.status === 'expired' || conn.status === 'failed' || (expiry && expiry <= now);
+        const isExpired = isConnectionDead(conn.status) || (expiry && expiry <= now);
         const daysLeft  = expiry && !isExpired
             ? Math.max(0, Math.ceil((expiry.getTime() - now.getTime()) / (24 * 60 * 60 * 1000)))
             : 0;
