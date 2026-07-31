@@ -9,6 +9,48 @@
 -- purged_at. This script's single write sets `retention_delete_after`, i.e. it starts a clock. Rows
 -- stay fully intact and recoverable until that date passes and the cron confirms each delete.
 --
+-- ══ ⚠️ READ THIS FIRST: SECTION 3 IS A CONFIRMED NO-OP IN BOTH ENVIRONMENTS (2026-07-31) ═════════
+--
+-- Measured fingerprint coverage across ALL content_assets rows:
+--
+--                        overlay_bakes   brand_cards   dangling scheduled_post_id   with storage_key   total
+--   PROD                       0             26                    0                      30           115
+--   STAGING                    0              0                    0                       3            33
+--
+-- Tier 1 needs a dangling `scheduled_post_id`; NO row in either database has that column set at all
+-- (current code only ever CLEARS it, on detach — it is written by nothing). Tier 2 needs an
+-- `overlay_bake` render_params; there are none. So the section 3 UPDATE matches zero rows on prod and
+-- zero on staging. Running it is harmless but pointless — do not read a "0 rows" result as success.
+--
+-- Where prod's R2-backed rows actually are: 26 of 30 are brand cards, and those are NOT invisible
+-- orphans. content-assets.ts (GET) lists every content_assets row the user owns, hides only
+-- purged_at rows, and resolves a display URL for each — so an unreferenced brand card is sitting in
+-- that user's "My Content" library as a reusable asset under a derived status. Reclaiming it would
+-- delete something the user can currently see. That is a PRODUCT decision about whether
+-- auto-generated cards accumulate in a library forever, not a storage bug, which is why brand cards
+-- stay in the review tier and out of the UPDATE.
+--
+-- NET: the code fixes stop new leaks. The accumulated debt this script was written to reclaim is,
+-- as measured, approximately nothing — most post media is Pexels hotlinks with no R2 bytes to leak
+-- (85 of prod's 115 rows have no storage_key). Keep the script as the diagnostic; re-run section 1
+-- after a few archive-cleanup cycles, when rows carrying the new fingerprints have had time to appear.
+--
+--
+-- ── STAGING DRY RUN, 2026-07-31 (ep-blue-truth, assistant1_org=10) ──────────────────────────────
+-- Every query below EXECUTED cleanly, and all four columns the reclaimer needs are present on the
+-- live table (retention_delete_after, purged_at, render_params, storage_key) — so there is no DDL to
+-- apply. But the run found NOTHING to remediate, and could not validate the predicate:
+--
+--   section 2 (the rows the UPDATE would clock)  →  0
+--   overlay_bakes = 0   brand_cards = 0   rows with a dangling scheduled_post_id = 0
+--   only 3 of 33 content_assets rows have a storage_key at all (the rest are Pexels hotlinks)
+--   tier 4 "origin unprovable" = 2 rows / 1.48 MB — the bucket this script deliberately leaves alone
+--
+-- So staging proved the SQL runs and does not over-match. It did NOT prove tiers 1-2 select the right
+-- rows, because staging holds no row exhibiting either fingerprint. PROD (115 content_assets vs
+-- staging's 33) is where the debt is, which makes prod's section 2 the FIRST real dry run — read it
+-- row by row before committing section 3, and do not treat "staging was clean" as reassurance.
+--
 -- RUN ORDER: staging first — sections 0 → 1 → 2 → 3 → 4, checking the output of each before the next
 -- — then repeat the whole thing on prod once staging's numbers look right. Section 0 tells you which
 -- DB you are in. Every statement is idempotent: re-running changes nothing it has already done.
@@ -56,10 +98,22 @@
 
 
 -- ══ 0. PREFLIGHT — confirm the environment and the columns ════════════════════════════════════════
--- Which database is this? Assistant #1's organisation is the prod tell.
-SELECT current_database(),
-       (SELECT count(*) FROM content_assets)   AS content_assets_rows,
-       (SELECT count(*) FROM scheduled_posts)  AS scheduled_posts_rows;
+-- ⚠️ WHICH DATABASE IS THIS? `current_database()` is USELESS here — staging and prod are BOTH named
+-- `neondb`. Identify the environment from the DATA, and do it before section 3 writes anything.
+--
+--   PROD     assistant1_org = 37    orgs ≈ 3-4    ← prod is the SMALL one. Counter-intuitive.
+--   STAGING  assistant1_org = 10    orgs ≈ 54     ← the big messy one, incl. the Willowbrook demo org
+--
+-- Read `assistant1_org`, NOT the org count: prod went 3 → 4 orgs in a single day (2026-07-31), so the
+-- count drifts and proves nothing by itself. Prod also holds only ~115 content_assets / ~91
+-- scheduled_posts, so a small row count is NOT evidence that you are in staging.
+--
+-- If assistant1_org is neither 37 nor 10, STOP and establish where you are — a previous session ran a
+-- 118-row delete against prod believing it was a test environment.
+SELECT (SELECT count(*) FROM organisations)                        AS orgs,
+       (SELECT organisation_id FROM ai_assistants WHERE id = 1)    AS assistant1_org,
+       (SELECT count(*) FROM content_assets)                       AS content_assets_rows,
+       (SELECT count(*) FROM scheduled_posts)                      AS scheduled_posts_rows;
 
 -- The live schema is the authority, never the TypeScript. All of these must be present; if
 -- retention_delete_after / purged_at / render_params are missing, STOP — the reclaimer cannot work
