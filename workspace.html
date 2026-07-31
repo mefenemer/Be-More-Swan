@@ -9340,6 +9340,11 @@ async function _pceClearOverlays() {
         if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Could not remove the text.'); }
         if (_rqPostCache[postId]) _rqPostCache[postId].overlays = [];
         _gpOverlayCountByPost[postId] = 0;
+        // Clearing the text also swaps the PICTURE back to the clean original, because a baked post's
+        // attached image has the words burnt into it (see save-post-overlays). The cached thumbnail
+        // still points at the flattened copy, so without this refetch the canvas keeps showing the
+        // text the user just deleted — and it would be right, because that is what would publish.
+        await _pceRefetchPostGroup(_rqPostCache[postId]);
         _rqReviewRenderActive();
         _pceSelect('overlays');
         _pceSetOverlayMsg('Text removed.', 'ok');
@@ -13175,9 +13180,17 @@ async function _pceOpenOverlayEditor(postId) {
                 if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Could not save your text.'); }
                 if (_rqPostCache[postId]) _rqPostCache[postId].overlays = overlays;
                 _gpOverlayCountByPost[postId] = overlays.length;
-                // Burn the text in NOW, while the reviewer is still here and a second costs nothing —
-                // rather than at approval, where it was the slowest part of the one click they wait on.
-                _pceScheduleOverlayBake(postId);
+                if (overlays.length) {
+                    // Burn the text in NOW, while the reviewer is still here and a second costs
+                    // nothing — rather than at approval, where it was the slowest part of the one
+                    // click they wait on.
+                    _pceScheduleOverlayBake(postId);
+                } else {
+                    // Deleting every box swaps the picture back to the clean original server-side,
+                    // so the cached flattened thumbnail has to go — otherwise the canvas shows text
+                    // that no longer exists. Nothing to bake, so no bake is scheduled.
+                    await _pceRefetchPostGroup(_rqPostCache[postId]);
+                }
                 // Repaint the canvas + inspector for the post on screen, then land back on this layer.
                 if (postId === _rqReviewPostId) { _rqReviewRenderActive(); _pceSelect('overlays'); }
                 _pceSetOverlayMsg(overlays.length

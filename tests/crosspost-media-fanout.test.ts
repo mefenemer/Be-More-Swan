@@ -203,6 +203,32 @@ check('nothing-to-bake is answered without a round trip', () => {
         'baking on edit is for photos only — video would queue a render per keystroke-pause');
 });
 
+// Deleting every text box must take the words off the PICTURE, not just out of the design. A baked
+// post's attached asset IS the flattened image, so clearing the overlay list used to leave the
+// burnt-in copy attached and the post published the text the user had just removed. Nothing
+// downstream caught it: approve-post's guard is skipped when there are no overlays, and the base pin
+// — the only record of the clean original — was nulled in the same write.
+check('clearing the text restores the clean image', () => {
+    const save = fn('netlify/functions/save-post-overlays.ts');
+    assert.match(save, /if \(!overlays\.length && baseAssetId != null\)/,
+        'clearing overlays on a post with a pinned base must undo the bake');
+    assert.match(save, /contentAssetIds: \[baseAssetId\]/,
+        'the deprecated array is what publish-social-posts reads — restoring only the junction table still publishes the flattened image');
+
+    // Order is the whole trick: the pin is the only pointer to the clean original, so it cannot be
+    // released until the restore has used it.
+    const restore = save.indexOf('if (!overlays.length && baseAssetId != null)');
+    const release = save.indexOf('overlayBaseAssetId: nextBase');
+    assert.ok(restore !== -1 && release !== -1, 'expected both the restore and the pin release');
+    assert.ok(restore < release, 'the base pin must not be cleared before the restore that needs it');
+
+    // Same scope as the bake it undoes: one post, never the cross-post siblings.
+    const block = save.slice(restore, release);
+    assert.match(block, /eq\(scheduledPostAssets\.scheduledPostId, postId\)/,
+        'the undo is per-post, exactly like the bake that created the flattened image');
+    assert.ok(!/mediaTargetPostIds/.test(block), 'the undo must not fan out across the group');
+});
+
 check('the editor sends the scope it showed, and can narrow it', () => {
     const ws = fn('workspace.html');
     // Every user-facing attach states its scope rather than relying on the server default.

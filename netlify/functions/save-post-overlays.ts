@@ -9,7 +9,7 @@
 
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts, contentAssets } from '../../db/schema';
+import { scheduledPosts, scheduledPostAssets, contentAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -89,7 +89,12 @@ export default withLambda(async (event) => {
 
     // Ownership: the post must belong to this org.
     const [post] = await db
-        .select({ id: scheduledPosts.id, overlayBaseAssetId: scheduledPosts.overlayBaseAssetId })
+        .select({
+            id: scheduledPosts.id,
+            overlayBaseAssetId: scheduledPosts.overlayBaseAssetId,
+            // Needed to tell a baked post from an un-baked one when the overlays are cleared.
+            contentAssetIds: scheduledPosts.contentAssetIds,
+        })
         .from(scheduledPosts)
         .where(and(eq(scheduledPosts.id, postId), eq(scheduledPosts.organisationId, orgId)))
         .limit(1);
@@ -112,6 +117,43 @@ export default withLambda(async (event) => {
     }
     // Clearing all overlays also releases the base pin, so the next overlay session re-pins fresh.
     const nextBase = overlays.length ? baseAssetId : null;
+
+    // ── Removing the text has to remove it from the PICTURE too ─────────────────────────────────
+    // Once a design has been baked, the post's attached asset IS the flattened image — the words are
+    // pixels in it, not a layer over it. Clearing the overlay list therefore emptied the editable
+    // design while leaving the burnt-in copy attached, and the post published the very text the user
+    // had just deleted. Nothing downstream caught it: approve-post's bake guard is skipped when there
+    // are no overlays, and the base pin — the only record of which asset was the clean original —
+    // was being nulled in the same write.
+    //
+    // So restore the original FIRST, then release the pin. Order matters: once the pin is gone the
+    // clean image is unfindable.
+    //
+    // This post only, never the cross-post siblings. The flattened image was made against ONE
+    // platform's design (which is why attach-draft-media opts the bake out of the fan-out), so its
+    // undo has exactly the same scope.
+    if (!overlays.length && baseAssetId != null) {
+        const [attached] = await db
+            .select({ id: scheduledPostAssets.contentAssetId })
+            .from(scheduledPostAssets)
+            .where(eq(scheduledPostAssets.scheduledPostId, postId))
+            .orderBy(scheduledPostAssets.position)
+            .limit(1);
+        const current = attached?.id ?? (post.contentAssetIds as number[] | null)?.[0] ?? null;
+        // Equal means nothing was ever baked — the post still carries its original, so there is
+        // nothing to undo and re-attaching would be a pointless write.
+        if (current !== baseAssetId) {
+            await db.delete(scheduledPostAssets).where(eq(scheduledPostAssets.scheduledPostId, postId));
+            await db.insert(scheduledPostAssets)
+                .values({ scheduledPostId: postId, contentAssetId: baseAssetId, position: 0 })
+                .onConflictDoNothing();
+            // publish-social-posts.ts still reads media from the deprecated array, so a post restored
+            // in the junction table alone would publish the flattened image regardless.
+            await db.update(scheduledPosts)
+                .set({ contentAssetIds: [baseAssetId], updatedAt: new Date() })
+                .where(eq(scheduledPosts.id, postId));
+        }
+    }
 
     await db.update(scheduledPosts)
         .set({ imageOverlays: overlays, overlayBaseAssetId: nextBase, updatedAt: new Date() })

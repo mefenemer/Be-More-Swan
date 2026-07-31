@@ -25,6 +25,7 @@ import {
     renderBrandCard, normalizeCardLayout, MAX_HEADLINE_CHARS, DEFAULT_CARD_LAYOUT,
     estimateWrappedLines,
 } from '../src/lib/brand-card';
+import { overlaysFingerprint, isBakedFor } from '../src/lib/post-render';
 import { pickFaceUrl } from '../src/lib/brand-card-webfont';
 import { rotateSources, resolveMediaForPost } from '../src/utils/media-resolver';
 import { normalizeMediaSources, DEFAULT_ORDER } from '../src/utils/media-sources';
@@ -180,6 +181,82 @@ test('longer headlines get smaller type, and sizes scale with the canvas', () =>
     assert.ok(headlineFontSize(20, 1080) > headlineFontSize(60, 1080));
     assert.ok(headlineFontSize(60, 1080) > headlineFontSize(MAX_HEADLINE_CHARS, 1080));
     assert.ok(headlineFontSize(40, 1920) > headlineFontSize(40, 1080));
+});
+
+// ── Overlay fingerprint ───────────────────────────────────────────────────────────────────────
+// A photo's text overlays are flattened by the browser and the result is attached as a new asset,
+// stamped with a fingerprint of the design it came from. approve-post refuses to publish unless that
+// stamp matches the post's CURRENT design — so anything the fingerprint fails to notice is a change
+// that publishes with the old pixels on it.
+//
+// This is written field-by-field on purpose. The first version of overlaysFingerprint was written
+// from memory and hashed fontSize/fontWeight/align/w/h (none of which exist on Overlay) while
+// missing fontSizePct, boxStroke, boxFill and boxOpacity — every one of the restyling controls. It
+// looked completely reasonable and would have shipped stale images the moment anyone recoloured a
+// caption box.
+
+const BASE_OVERLAY = {
+    id: 'a', text: 'Hello', x: 0.5, y: 0.5,
+    fontFamily: 'Arial', fontSizePct: 0.07, color: '#ffffff',
+    boxStroke: null, boxFill: '#000000', boxOpacity: 0.5,
+};
+
+test('every drawn property of an overlay changes its fingerprint', () => {
+    // Mirrors Overlay in src/lib/overlay-geometry.ts. If a property is added there and not here,
+    // this list is the reminder — and the assertion below is what fails if it is not hashed.
+    const variations: Array<[string, unknown]> = [
+        ['text', 'Goodbye'],
+        ['x', 0.25], ['y', 0.75],
+        ['fontFamily', 'Georgia'],
+        ['fontSizePct', 0.12],
+        ['color', '#ff0000'],
+        ['boxStroke', '#00ff00'],
+        ['boxFill', '#123456'],
+        ['boxOpacity', 0.9],
+        ['startS', 2], ['endS', 5],
+    ];
+    const base = overlaysFingerprint([BASE_OVERLAY]);
+    for (const [field, value] of variations) {
+        const changed = overlaysFingerprint([{ ...BASE_OVERLAY, [field]: value }]);
+        assert.notEqual(changed, base,
+            `changing '${field}' did not change the fingerprint — a post restyled this way would publish its OLD flattened image`);
+    }
+});
+
+test('the fingerprint ignores what does not affect the picture', () => {
+    const base = overlaysFingerprint([BASE_OVERLAY]);
+    // `id` is a client-generated handle. Hashing it would force a needless re-bake on every reopen.
+    assert.equal(overlaysFingerprint([{ ...BASE_OVERLAY, id: 'totally-different' }]), base,
+        'the overlay id is not drawn, so it must not invalidate a good bake');
+    // An empty box is invisible, so it is not part of the design (renderableOverlays drops it).
+    assert.equal(overlaysFingerprint([BASE_OVERLAY, { ...BASE_OVERLAY, id: 'b', text: '   ' }]), base,
+        'a blank text box draws nothing and must not count');
+});
+
+test('the fingerprint separates fields, so a shift cannot look identical', () => {
+    // Concatenating without a separator would make {x:1,y:12} and {x:11,y:2} the same string — two
+    // genuinely different designs sharing a fingerprint, which is a stale image that never re-bakes.
+    const a = overlaysFingerprint([{ ...BASE_OVERLAY, x: 1, y: 12 }]);
+    const b = overlaysFingerprint([{ ...BASE_OVERLAY, x: 11, y: 2 }]);
+    assert.notEqual(a, b, 'adjacent values must not be able to run together');
+    // Order is part of the design: overlays paint in array order, so a reorder changes what covers what.
+    const one = { ...BASE_OVERLAY, id: 'one', text: 'One' };
+    const two = { ...BASE_OVERLAY, id: 'two', text: 'Two' };
+    assert.notEqual(overlaysFingerprint([one, two]), overlaysFingerprint([two, one]),
+        'reordering overlays changes which one is on top');
+});
+
+test('isBakedFor fails closed on anything but a current, matching stamp', () => {
+    const overlays = [BASE_OVERLAY];
+    const good = { kind: 'overlay_bake', postId: 7, overlaysHash: overlaysFingerprint(overlays), at: 'now' };
+    assert.equal(isBakedFor(good, 7, overlays), true, 'a current stamp for this post is the one accepted case');
+
+    assert.equal(isBakedFor(null, 7, overlays), false, 'an unstamped asset is not baked');
+    assert.equal(isBakedFor({ kind: 'brand_card' }, 7, overlays), false, 'a brand card is not an overlay bake');
+    assert.equal(isBakedFor({ ...good, postId: 8 }, 7, overlays), false, "another post's bake does not count");
+    // The stale case — baked, then the design was edited. This is the one identity alone cannot catch.
+    assert.equal(isBakedFor(good, 7, [{ ...BASE_OVERLAY, text: 'Edited after baking' }]), false,
+        'a stamp from an older design must read as NOT baked, or the edit never reaches the picture');
 });
 
 // ── Wrapped-line estimate ─────────────────────────────────────────────────────────────────────

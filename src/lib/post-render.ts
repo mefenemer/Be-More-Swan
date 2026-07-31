@@ -58,21 +58,28 @@ export function renderableOverlays(raw: unknown): Overlay[] {
  * approve-post compares it against the post's current design. Equal means the attached image really
  * is this design flattened; anything else — absent, or from an older design — means it is not.
  *
- * Deliberately NOT a hash of the whole overlay object: `id` is a client-generated handle that can
+ * The field list is the Overlay interface in overlay-geometry.ts, MINUS `id`. Take it from that
+ * interface rather than from memory: a field omitted here is a change the bake silently ignores, so
+ * restyling a box leaves the stale flattened image reading as current and the old pixels publish.
+ * Written from memory the first time, this hashed fontSize/fontWeight/align/w/h — none of which
+ * exist — while missing fontSizePct, boxStroke, boxFill and boxOpacity, which are precisely the
+ * restyling controls. tests/brand-card.test.ts now varies each field on its own.
+ *
+ * `id` is excluded because it is a client-generated handle that can
  * change without the picture changing, and including it would force a re-bake on every reopen.
  * Everything that alters a pixel is in, and nothing else is.
  */
 export function overlaysFingerprint(raw: unknown): string {
     const parts = renderableOverlays(raw).map((o: any) => [
         String(o.text ?? ''),
-        o.x ?? '', o.y ?? '', o.w ?? '', o.h ?? '',
-        o.fontFamily ?? '', o.fontSize ?? '', o.fontWeight ?? '',
-        o.color ?? '', o.background ?? '', o.align ?? '', o.rotation ?? '',
+        o.x ?? '', o.y ?? '',
+        o.fontFamily ?? '', o.fontSizePct ?? '', o.color ?? '',
+        o.boxStroke ?? '', o.boxFill ?? '', o.boxOpacity ?? '',
         // Timing changes nothing on a still, but a photo+audio post renders as video where it does.
         o.startS ?? '', o.endS ?? '',
-    ].join(''));
+    ].join('\u001f'));
     // Order matters — overlays paint in array order, so a reorder can change what covers what.
-    const src = parts.join('');
+    const src = parts.join('\u001e');
     // Same cheap stable hash as hashCaption in post-quality-review.ts; this only has to detect
     // CHANGE, and it is compared against a value produced by this very function.
     let h = 0;
