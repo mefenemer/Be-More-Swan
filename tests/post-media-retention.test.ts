@@ -24,6 +24,7 @@
 import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
+import { mayRun } from '../netlify/functions/content-retention';
 
 let passed = 0;
 let total = 0;
@@ -89,6 +90,81 @@ check('content-retention is actually scheduled', () => {
     };
     assert.ok(scheduleAfter('content-retention') > scheduleAfter('archive-cleanup'),
         'content-retention must run after archive-cleanup on the same day: archive-cleanup releases a departing post\'s media, and content-retention reclaims the bytes');
+});
+
+// ── 1c. …and not by just anyone ─────────────────────────────────────────────────────────────────
+// The job deletes R2 objects, and every Netlify function is routable by name — a scheduled one
+// included — so publishing the schedule publishes the URL. The guard therefore has an unusual shape:
+// fail-OPEN for the scheduler, fail-CLOSED for everyone else. Refusing an unauthenticated manual
+// call costs an attacker some time; refusing the SCHEDULER would silently switch off the only thing
+// that reclaims post media, which is the bug this file exists to have fixed.
+check('the retention job refuses manual callers but never blocks its own schedule', () => {
+    const src = readCode('netlify/functions/content-retention.ts');
+    assert.match(src, /function mayRun\(/, 'the destructive entry point needs a guard');
+    assert.match(src, /CRON_TRIGGER_SECRET/, 'manual runs must present the shared cron secret');
+
+    // The scheduler must still get through even with no secret configured — otherwise adding this
+    // guard would quietly disable retention on any deploy that has not set the variable yet.
+    assert.match(src, /if \(raw == null \|\| raw === ''\) scheduled = true/,
+        'an empty body must count as a scheduled tick, or the guard can disable the cron it protects');
+    assert.match(src, /next_run/, "Netlify's scheduled invocation marker is what identifies the cron");
+
+    // And the pass has to stay callable from the guarded HTTP trigger.
+    assert.match(src, /export const runContentRetention/,
+        'the logic must be exported so run-content-retention can drive it on staging');
+});
+
+// Run the guard, don't just read it. The assertions above prove the code says the right words; these
+// prove it behaves. A guard is the one place where the difference matters.
+check('the guard admits the scheduler and turns everyone else away', () => {
+    const saved = process.env.CRON_TRIGGER_SECRET;
+    try {
+        const sched = (body: unknown) => ({ headers: {}, body });
+        const bearer = (t: string) => ({ headers: { authorization: `Bearer ${t}` }, body: '{}' });
+
+        process.env.CRON_TRIGGER_SECRET = 's3cret';
+
+        // The scheduler, in both shapes the runtime has used.
+        assert.equal(mayRun(sched(JSON.stringify({ next_run: '2026-08-01T05:00:00Z' }))).ok, true,
+            "Netlify's scheduled tick must always be allowed");
+        assert.equal(mayRun(sched(null)).ok, true, 'an empty body is a scheduled tick too');
+        assert.equal(mayRun(sched('')).ok, true, 'an empty string body is a scheduled tick too');
+
+        // A human with the secret.
+        assert.equal(mayRun(bearer('s3cret')).ok, true, 'the right token runs the job');
+
+        // Everyone else.
+        const bad = mayRun(bearer('wrong')) as { ok: false; status: number };
+        assert.equal(bad.ok, false, 'a wrong token must not run a destructive job');
+        assert.equal(bad.status, 401);
+
+        const anon = mayRun({ headers: {}, body: '{"hello":"world"}' }) as { ok: false; status: number };
+        assert.equal(anon.ok, false, 'a POST with a body that is not a scheduled tick is not the scheduler');
+        assert.equal(anon.status, 401);
+
+        // With no secret configured the scheduler must STILL run — this is the property that stops
+        // the guard disabling retention on a deploy that has not set the variable.
+        delete process.env.CRON_TRIGGER_SECRET;
+        assert.equal(mayRun(sched(null)).ok, true, 'no secret configured must never stop the cron');
+        const manual = mayRun({ headers: {}, body: '{"hello":"world"}' }) as { ok: false; status: number };
+        assert.equal(manual.ok, false, 'manual runs stay closed when no secret is configured');
+        assert.equal(manual.status, 403, '403 distinguishes "not configured" from "wrong token"');
+        assert.equal((mayRun(bearer('anything')) as { ok: false }).ok, false,
+            'a token cannot authorise anything while no secret is configured');
+    } finally {
+        if (saved === undefined) delete process.env.CRON_TRIGGER_SECRET;
+        else process.env.CRON_TRIGGER_SECRET = saved;
+    }
+});
+
+check('the manual trigger is closed by default', () => {
+    const src = readCode('netlify/functions/run-content-retention.ts');
+    // Fail closed: an unconfigured deploy must refuse, not run. 503 (not 401) so a probe can tell
+    // "not configured" from "wrong token" — see the deploy-probe note in the project memory.
+    assert.match(src, /if \(!secret\)[\s\S]{0,200}statusCode: 503/,
+        'without CRON_TRIGGER_SECRET this endpoint must disable itself rather than run open');
+    assert.match(src, /token !== secret[\s\S]{0,80}401/, 'a bad token is a 401');
+    assert.match(src, /httpMethod !== 'POST'/, 'a destructive trigger should not be reachable by GET');
 });
 
 // ── 2. purgedAt means the bytes are gone ────────────────────────────────────────────────────────

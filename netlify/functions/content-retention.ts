@@ -85,7 +85,11 @@ async function deleteFromR2(keys: string[]): Promise<Set<string>> {
     return deleted;
 }
 
-const retentionHandler = async () => {
+/**
+ * The retention pass itself. Exported so a guarded HTTP trigger can drive it on staging (branch
+ * deploys never fire scheduled functions), matching pollGoalTelemetry / run-goal-telemetry.
+ */
+export const runContentRetention = async () => {
     const db = getDb();
     const now = new Date();
 
@@ -152,5 +156,65 @@ const retentionHandler = async () => {
     }
 };
 
-// Run every 6 hours
-export default withLambda(retentionHandler);
+// ── Who may run this ────────────────────────────────────────────────────────────────────────────
+// This function DELETES R2 objects, and every Netlify function is routable by name — a scheduled one
+// included. There is no way to publish a schedule without also publishing the URL, so the guard has
+// to distinguish an invocation by the scheduler from an invocation by anyone else.
+//
+// Netlify marks a scheduled run by POSTing a body carrying `next_run`. That is a marker, NOT proof:
+// it can be typed by hand. So be clear about what this is and is not:
+//
+//   • It stops scanners, crawlers, and an idle curl of a URL someone found in a bundle.
+//   • It does NOT stop someone who has read this file. For that, set CRON_TRIGGER_SECRET and the
+//     bearer token becomes the real boundary for every manual call.
+//   • The standing mitigation is the query, not the guard: this job can only purge rows the DATABASE
+//     says are past their retention date. A caller cannot choose a target, name an asset, or reach
+//     anything inside its grace window — at worst they make a purge that was already due happen
+//     sooner, and burn some R2 calls doing it.
+//
+// Exported for tests: this is the only thing standing between a destructive job and the open
+// internet, so it needs coverage that runs it rather than coverage that reads it.
+//
+// Fail-OPEN for the scheduler, fail-CLOSED for everyone else. Deliberate, and the opposite of the
+// usual rule: refusing an unauthenticated manual call costs an attacker a little time, while refusing
+// the scheduler would silently switch off the only thing that reclaims post media — which is the bug
+// this file was just fixed for. A guard that can disable the job it protects is not an improvement.
+export function mayRun(event: any): { ok: true } | { ok: false; status: number; reason: string } {
+    const secret = process.env.CRON_TRIGGER_SECRET;
+    const auth = String(event?.headers?.['authorization'] ?? event?.headers?.['Authorization'] ?? '');
+    const token = auth.replace(/^Bearer\s+/i, '').trim();
+    if (secret && token && token === secret) return { ok: true };
+
+    // Netlify's scheduled invocation. Checked on the BODY rather than a header because that is what
+    // the platform actually sends; an empty body is treated as scheduled too, since that is how the
+    // runtime has delivered ticks in the past and a stricter test would risk the false negative that
+    // silently disables the job.
+    let scheduled = false;
+    const raw = event?.body;
+    if (raw == null || raw === '') scheduled = true;
+    else {
+        try { scheduled = typeof JSON.parse(String(raw))?.next_run === 'string'; } catch { scheduled = false; }
+    }
+    if (scheduled) return { ok: true };
+
+    if (token) return { ok: false, status: 401, reason: 'Bad token.' };
+    return {
+        ok: false,
+        status: secret ? 401 : 403,
+        reason: secret ? 'Unauthorized.' : 'Manual triggering is not configured on this deploy.',
+    };
+}
+
+// Scheduled via netlify.toml (05:00 UTC daily). Also callable by hand with CRON_TRIGGER_SECRET.
+export default withLambda(async (event: any) => {
+    const verdict = mayRun(event);
+    if (!verdict.ok) {
+        console.warn(`[Retention] refused a manual invocation: ${verdict.reason}`);
+        return {
+            statusCode: verdict.status,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ok: false, error: verdict.reason }),
+        };
+    }
+    return runContentRetention();
+});
