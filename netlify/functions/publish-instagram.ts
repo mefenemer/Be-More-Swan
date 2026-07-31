@@ -28,11 +28,55 @@ const GRAPH_VERSION = 'v19.0';
 // Comfortably beyond the 120s video-processing poll so we never reclaim a live in-progress post.
 const STALE_PUBLISHING_MINS = 10;
 
-type FailureReason = { errorCode: number | null; errorMessage: string; errorSubcode?: number; isRetryable: boolean };
+type FailureReason = { httpStatus: number | null; errorCode: number | null; errorMessage: string; errorSubcode?: number; isRetryable: boolean };
 
-function isRetryable(code: number): boolean {
-    // 429 rate limit, 5xx server errors, and Meta's transient error code 2
-    return code === 429 || code >= 500 || code === 2;
+/**
+ * Meta application error codes that mean "ask again later", not "this post is bad".
+ *
+ * These are NOT HTTP statuses. Graph answers a throttle with HTTP 200 or 400 and puts the real
+ * verdict in `error.code`, so a classifier that only looks at numbers ≥500 sees a rate limit as a
+ * permanent rejection. 4/17/32/613 are the documented app-, user- and page-level limits (the same
+ * set goal-metric-selftest treats as inconclusive — see tests/graph-error-classification.test.ts),
+ * 341 is the app-level limit, and 1/2 are Graph's transient "unknown error"/"downtime" pair.
+ */
+const META_THROTTLE_CODES = new Set([4, 17, 32, 341, 613]);
+const META_TRANSIENT_CODES = new Set([1, 2]);
+
+/**
+ * Is this failure worth another attempt?
+ *
+ * Reads BOTH the HTTP status and Meta's application code, because either one alone gets it wrong:
+ *
+ *   • This used to take `code` only, and callers passed `err?.code ?? 0`. A 500/502/503 from
+ *     Meta's edge carries no `error` object at all, so `code` was 0 → PERMANENT. The post burned
+ *     on attempt 1 over a blip, and stored `{"errorCode": null, "errorMessage": "Unknown error",
+ *     "isRetryable": false}` — the same unactionable row the X and LinkedIn media paths produced.
+ *   • Reading the status alone is equally wrong here: Graph reports its rate limits as an
+ *     application code under a 200/400, so every throttle would classify as permanent.
+ *
+ * The old `code >= 500` test was checking an application code against an HTTP range — a comparison
+ * that matched nothing Meta actually sends. Real throttles (4/17/32/613) all fell through it.
+ */
+export function isRetryable(httpStatus: number | null, code: number | null): boolean {
+    if (httpStatus === 429 || (httpStatus != null && httpStatus >= 500)) return true;
+    if (code == null) return false;
+    return META_THROTTLE_CODES.has(code) || META_TRANSIENT_CODES.has(code);
+}
+
+/** A throttle defers every post for the org, not just this one — see handlePublishFailure. */
+export function isThrottle(httpStatus: number | null, code: number | null): boolean {
+    return httpStatus === 429 || (code != null && META_THROTTLE_CODES.has(code));
+}
+
+/**
+ * Read a Graph response body without letting a non-JSON edge page throw.
+ *
+ * Meta's edge answers a 502 with HTML, and a bare `await res.json()` on that rejects — which used
+ * to land in the outer catch and report a JSON parse error as the publishing failure. The status is
+ * what matters there, so parse defensively and let the caller classify.
+ */
+async function graphJson<T>(res: Response): Promise<T> {
+    return (await res.json().catch(() => ({}))) as T;
 }
 
 function userMessage(reason: FailureReason): string {
@@ -161,6 +205,7 @@ export default withLambda(async () => {
                 // approved — rather than here, where it can be said plainly.
                 if (slides.some(s => s.kind === 'video')) {
                     await handlePublishFailure(db, post, {
+                        httpStatus: null,
                         errorCode: null,
                         errorMessage: 'Instagram carousels with video slides aren’t supported yet — use images only, or post the video on its own as a Reel.',
                         isRetryable: false,
@@ -188,14 +233,15 @@ export default withLambda(async () => {
                         `https://graph.facebook.com/${GRAPH_VERSION}/${igUserId}/media`,
                         { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(childBody) }
                     );
-                    const childData: { id?: string; error?: { code: number; message: string; error_subcode?: number } } = await childRes.json();
+                    const childData = await graphJson<{ id?: string; error?: { code: number; message: string; error_subcode?: number } }>(childRes);
                     if (!childData.id) {
                         const err = childData.error;
                         childFailure = {
+                            httpStatus: childRes.status,
                             errorCode: err?.code ?? null,
-                            errorMessage: `Slide ${i + 1}: ${err?.message ?? 'could not be prepared'}`,
+                            errorMessage: `Slide ${i + 1}: ${err?.message ?? `could not be prepared (${childRes.status})`}`,
                             errorSubcode: err?.error_subcode,
-                            isRetryable: isRetryable(err?.code ?? 0),
+                            isRetryable: isRetryable(childRes.status, err?.code ?? null),
                         };
                         break;
                     }
@@ -223,13 +269,14 @@ export default withLambda(async () => {
                         }),
                     }
                 );
-                const parentData: { id?: string; error?: { code: number; message: string; error_subcode?: number } } = await parentRes.json();
+                const parentData = await graphJson<{ id?: string; error?: { code: number; message: string; error_subcode?: number } }>(parentRes);
                 if (!parentData.id) {
                     const err = parentData.error;
-                    const retryable = isRetryable(err?.code ?? 0);
+                    const retryable = isRetryable(parentRes.status, err?.code ?? null);
                     await handlePublishFailure(db, post, {
+                        httpStatus: parentRes.status,
                         errorCode: err?.code ?? null,
-                        errorMessage: err?.message ?? 'Could not assemble the carousel.',
+                        errorMessage: err?.message ?? `Could not assemble the carousel (${parentRes.status}).`,
                         errorSubcode: err?.error_subcode,
                         isRetryable: retryable,
                     }, now);
@@ -256,12 +303,12 @@ export default withLambda(async () => {
                 `https://graph.facebook.com/${GRAPH_VERSION}/${igUserId}/media`,
                 { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(containerBody) }
             );
-            const mediaData: { id?: string; error?: { code: number; message: string; error_subcode?: number } } = await mediaRes.json();
+            const mediaData = await graphJson<{ id?: string; error?: { code: number; message: string; error_subcode?: number } }>(mediaRes);
 
             if (!mediaData.id) {
                 const err = mediaData.error;
-                const retryable = isRetryable(err?.code ?? 0);
-                const reason: FailureReason = { errorCode: err?.code ?? null, errorMessage: err?.message ?? 'Unknown error', errorSubcode: err?.error_subcode, isRetryable: retryable };
+                const retryable = isRetryable(mediaRes.status, err?.code ?? null);
+                const reason: FailureReason = { httpStatus: mediaRes.status, errorCode: err?.code ?? null, errorMessage: err?.message ?? `Instagram container error (${mediaRes.status})`, errorSubcode: err?.error_subcode, isRetryable: retryable };
                 await handlePublishFailure(db, post, reason, now);
                 if (!retryable) failed++;
                 return;
@@ -281,7 +328,7 @@ export default withLambda(async () => {
                 let statusCode = 'IN_PROGRESS';
                 while (statusCode !== 'FINISHED') {
                     if (Date.now() - pollStart > POLL_TIMEOUT_MS) {
-                        const reason: FailureReason = { errorCode: null, errorMessage: 'Video processing timed out after 120s', isRetryable: true };
+                        const reason: FailureReason = { httpStatus: null, errorCode: null, errorMessage: 'Video processing timed out after 120s', isRetryable: true };
                         await handlePublishFailure(db, post, reason, now);
                         return;
                     }
@@ -289,13 +336,18 @@ export default withLambda(async () => {
                     const pollRes = await fetch(
                         `https://graph.facebook.com/${GRAPH_VERSION}/${containerId}?fields=status_code&access_token=${token}`
                     );
-                    const pollData: { status_code?: string; error?: { code: number; message: string; error_subcode?: number } } = await pollRes.json();
+                    const pollData = await graphJson<{ status_code?: string; error?: { code: number; message: string; error_subcode?: number } }>(pollRes);
                     statusCode = pollData.status_code ?? 'ERROR';
                     if (statusCode === 'ERROR') {
                         const err = pollData.error;
-                        const reason: FailureReason = { errorCode: err?.code ?? null, errorMessage: err?.message ?? 'Video processing failed', errorSubcode: err?.error_subcode, isRetryable: false };
+                        // A container Instagram rejected outright stays permanent — re-uploading the
+                        // identical file cannot succeed. But a poll that merely failed to REACH Graph
+                        // (a 5xx on the status read) says nothing about the container, so it must not
+                        // be mistaken for a rejection.
+                        const retryable = isRetryable(pollRes.status, err?.code ?? null);
+                        const reason: FailureReason = { httpStatus: pollRes.status, errorCode: err?.code ?? null, errorMessage: err?.message ?? `Video processing failed (${pollRes.status})`, errorSubcode: err?.error_subcode, isRetryable: retryable };
                         await handlePublishFailure(db, post, reason, now);
-                        failed++;
+                        if (!retryable) failed++;
                         return;
                     }
                 }
@@ -310,12 +362,12 @@ export default withLambda(async () => {
                     body: JSON.stringify({ creation_id: containerId, access_token: token }),
                 }
             );
-            const publishData: { id?: string; error?: { code: number; message: string; error_subcode?: number } } = await publishRes.json();
+            const publishData = await graphJson<{ id?: string; error?: { code: number; message: string; error_subcode?: number } }>(publishRes);
 
             if (!publishData.id) {
                 const err = publishData.error;
-                const retryable = isRetryable(err?.code ?? 0);
-                const reason: FailureReason = { errorCode: err?.code ?? null, errorMessage: err?.message ?? 'Unknown error', errorSubcode: err?.error_subcode, isRetryable: retryable };
+                const retryable = isRetryable(publishRes.status, err?.code ?? null);
+                const reason: FailureReason = { httpStatus: publishRes.status, errorCode: err?.code ?? null, errorMessage: err?.message ?? `Instagram publish error (${publishRes.status})`, errorSubcode: err?.error_subcode, isRetryable: retryable };
                 await handlePublishFailure(db, post, reason, now);
                 if (!retryable) failed++;
                 return;
@@ -341,7 +393,7 @@ export default withLambda(async () => {
         } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             console.error(`[publish-instagram] post ${post.id} error:`, msg);
-            const reason: FailureReason = { errorCode: null, errorMessage: msg, isRetryable: true };
+            const reason: FailureReason = { httpStatus: null, errorCode: null, errorMessage: msg, isRetryable: true };
             await handlePublishFailure(db, post, reason, now);
         }
     }));
@@ -367,8 +419,14 @@ async function handlePublishFailure(
 ) {
     const attempt = post.attempt_count + 1;
 
-    // Handle 429 rate limit: defer ALL posts for this org
-    if (reason.errorCode === 429) {
+    // Handle a rate limit: defer ALL posts for this org, not just this one — the limit is on the
+    // app/page/user, so the next post in the batch would hit the same wall.
+    //
+    // This used to test `reason.errorCode === 429`, which could never be true: 429 is an HTTP
+    // status and errorCode holds Meta's APPLICATION code, which is 4/17/32/613 for a throttle. The
+    // whole rate_limit_states mechanism below — and the instagram_rate_limited notification — was
+    // therefore unreachable, and throttled posts fell through to the permanent-failure branch.
+    if (isThrottle(reason.httpStatus, reason.errorCode)) {
         const rateLimitedUntil = new Date(now.getTime() + 60 * 60 * 1000); // 1 hour
         await db.execute(
             `INSERT INTO rate_limit_states (organisation_id, platform, rate_limited_until, updated_at)

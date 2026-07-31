@@ -656,8 +656,16 @@ export async function publishLinkedIn(text: string, token: string, authorId: str
     return { ok: false, status: res.status, error: data?.message || `LinkedIn API error (${res.status})` };
 }
 
-// registerUpload → PUT bytes → return the asset URN (or null, which the caller turns into a
-// media-dropped failure rather than a bare text post).
+// registerUpload → PUT bytes → return the asset URN, or throw a MediaUploadError carrying
+// LinkedIn's own message and HTTP status, which the caller turns into a media-dropped failure
+// rather than a bare text post.
+//
+// This used to `return null` on every failure — a rejected registerUpload and a rejected byte
+// upload were indistinguishable, and both discarded the status and the body. That is the same
+// defect the X image path had, with the same two consequences: LinkedIn's reason (expired token,
+// missing w_member_social scope, oversized file, unsupported recipe) never reached the Review
+// Queue, and the null status classified every transient 429/5xx as PERMANENT, so a rate-limited
+// upload burned the post on attempt 1 instead of backing off.
 //
 // Video uses the identical mechanism with a different RECIPE — feedshare-video instead of
 // feedshare-image — which is why one function serves both rather than two near-copies.
@@ -677,17 +685,38 @@ async function uploadLinkedInImage(image: PostImage, token: string, owner: strin
         }),
     });
     const regData: any = await reg.json().catch(() => ({}));
+    if (!reg.ok) {
+        throw new MediaUploadError(
+            regData?.message || regData?.errorDetails?.message || `LinkedIn upload registration failed (${reg.status})`,
+            reg.status,
+        );
+    }
     const asset: string | undefined = regData?.value?.asset;
     const uploadUrl: string | undefined =
         regData?.value?.uploadMechanism?.['com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest']?.uploadUrl;
-    if (!asset || !uploadUrl) return null;
+    // A 2xx registration missing either half is LinkedIn breaking its own contract. Surface the
+    // status rather than a bare null so the queue shows "(200)" instead of nothing.
+    if (!asset || !uploadUrl) {
+        throw new MediaUploadError(
+            `LinkedIn registered the upload but returned no ${asset ? 'upload URL' : 'asset URN'} (${reg.status})`,
+            reg.status,
+        );
+    }
 
     const put = await fetch(uploadUrl, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': image.mimeType },
         body: await fetchImageBytes(image.url),
     });
-    return put.ok ? asset : null;
+    if (!put.ok) {
+        // The media host answers with JSON on some rejections and plain text/HTML on others (it is
+        // not the same service as api.linkedin.com), so read it as text and only then try JSON.
+        const raw = await put.text().catch(() => '');
+        let message = '';
+        try { message = JSON.parse(raw)?.message || ''; } catch { /* not JSON — fall through */ }
+        throw new MediaUploadError(message || `LinkedIn media upload failed (${put.status})`, put.status);
+    }
+    return asset;
 }
 
 // Resolve the member's author URN via OpenID userinfo (preferred; needs the 'openid'/'profile'
