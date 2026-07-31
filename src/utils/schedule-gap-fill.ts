@@ -17,6 +17,8 @@ import { resolvePostingSchedule, computeScheduleSlots } from '../config/posting-
 import { assembleBlueprint } from './blueprint';
 import { resolveConnectedDraftPlatforms } from './auto-publish-runtime';
 import { resolveLiveSocialConnections } from './live-social-connections';
+import { remotionConfigured } from '../lib/remotion-lambda';
+import { r2IsConfigured } from '../lib/media-persist';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -259,6 +261,15 @@ async function resolveWeeklyShortSlot(
     slots: Date[],
     now: Date,
 ): Promise<Date | null> {
+    // No renderer, no Short. A Short's whole existence depends on turning its card into an mp4, and
+    // the render is the LAST step — so without this the assistant would spend a model call writing a
+    // caption, draw a card, gate the post on a render that can never run, and leave a permanently
+    // unpublishable draft in the queue every single week. trigger-post-render refuses up front for
+    // exactly this reason (503 RENDER_UNAVAILABLE); refusing at ENQUEUE is the cheaper version of the
+    // same decision. When the Lambda is deployed this starts returning true on its own — nothing to
+    // switch on.
+    if (!remotionConfigured() || !r2IsConfigured()) return null;
+
     const live = await resolveLiveSocialConnections(db, assistant.organisationId);
     if (!live.has('youtube')) return null;
 

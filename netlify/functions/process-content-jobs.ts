@@ -19,7 +19,7 @@ import { CONTENT_QUALITY_STANDARDS } from '../../src/constants/content-quality';
 import { creditLine } from '../../src/utils/pexels';
 import { resolveMediaForPost } from '../../src/utils/media-resolver';
 import { holdCredits, settleHold, IMAGE_CREDIT_COST } from '../../src/utils/ai-credits';
-import { generateAndPersistImage, renderAndPersistBrandCard } from '../../src/lib/media-persist';
+import { generateAndPersistImage, renderAndPersistBrandCard, r2IsConfigured } from '../../src/lib/media-persist';
 import { headlineFromCaption, MAX_HEADLINE_CHARS } from '../../src/lib/brand-card';
 import { resolveBrandKitForOrg } from '../../src/lib/brand-extract-fetch';
 import { FalContentPolicyError } from '../../src/lib/fal-gateway';
@@ -38,6 +38,7 @@ import {
     SHORT_DURATION_S, SHORT_FORMAT_KEY, SHORT_HEIGHT, SHORT_MEDIA_SOURCES, SHORT_POST_FORMAT, SHORT_WIDTH,
 } from '../../src/config/youtube-short';
 import { queuePostRender, RENDER_FPS } from '../../src/lib/post-render';
+import { remotionConfigured } from '../../src/lib/remotion-lambda';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { formatPlatformStrategyBrief, platformStrategyFor, type PlatformStrategy } from '../../src/utils/platform-strategy-brief';
 import { parseModelJson } from '../../src/utils/model-json';
@@ -786,7 +787,16 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // VISIBLE and the reviewer can act on it, which is the right failure for something that runs
         // unattended once a week. Never let it throw: a render problem must not fail the whole job
         // and lose the caption we already paid a model to write.
-        if (isYoutubeShort && attachedMediaSource) {
+        //
+        // The configuration check is not belt-and-braces, it is the difference between a visible
+        // failure and an invisible one. render_status gates every publisher on `IS NULL OR 'done'`,
+        // and a render that cannot run settles the post at 'failed' — so queueing without a renderer
+        // produces a draft that looks approvable, accepts the approval, and then never publishes,
+        // with the reason buried in a render job. Not queueing at all leaves an honest card-only
+        // draft that fails later with "This YouTube post has no video attached". Both are wrong; only
+        // one of them is legible. (The enqueuer already refuses in this state — this catches the
+        // window where the environment loses its Remotion config after a job was queued.)
+        if (isYoutubeShort && attachedMediaSource && remotionConfigured() && r2IsConfigured()) {
             try {
                 const queued = await queuePostRender(db, {
                     orgId: job.organisation_id,

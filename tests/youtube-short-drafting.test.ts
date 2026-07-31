@@ -164,6 +164,26 @@ test('a video is never auto-published, whatever the policy says', () => {
     );
 });
 
+test('no renderer means no Short — never a draft gated on a render that cannot run', () => {
+    // render_status gates every publisher on `IS NULL OR 'done'`, and a render that cannot run
+    // settles the post at 'failed'. Queueing without a renderer therefore produces a draft that
+    // looks approvable, accepts the approval, and then never publishes. Both ends refuse instead:
+    // the enqueuer (no wasted model call) and the drafter (the environment could lose its config
+    // between the two).
+    const enq = src('src/utils/schedule-gap-fill.ts');
+    const fn = enq.slice(enq.indexOf('async function resolveWeeklyShortSlot'));
+    assert.ok(
+        /if \(!remotionConfigured\(\) \|\| !r2IsConfigured\(\)\) return null;/.test(fn),
+        'the weekly slot must not be claimed when there is no renderer',
+    );
+
+    const drafter = src('netlify/functions/process-content-jobs.ts');
+    assert.ok(
+        /isYoutubeShort && attachedMediaSource && remotionConfigured\(\) && r2IsConfigured\(\)/.test(drafter),
+        'the drafter must not queue a render it cannot run',
+    );
+});
+
 test('an autonomous Short uploads unlisted', () => {
     const s = src('netlify/functions/publish-youtube-background.ts');
     assert.ok(/privacyStatus: 'unlisted'/.test(s));
