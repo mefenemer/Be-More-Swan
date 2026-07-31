@@ -19,6 +19,7 @@ import { scheduledPosts, scheduledPostAssets, contentAssets } from '../../db/sch
 import { requireTenant } from '../../src/utils/tenant';
 import { presignR2Get } from '../../src/utils/social-publish';
 import { mediaTargetPostIds } from '../../src/utils/crosspost-media';
+import { overlaysFingerprint, type OverlayBakeStamp } from '../../src/lib/post-render';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 export default withLambda(async (event) => {
@@ -83,6 +84,29 @@ export default withLambda(async (event) => {
     await db.update(scheduledPosts)
         .set({ contentAssetIds: [assetId], mediaMissing: false, mediaMissingNote: null, updatedAt: new Date(), ...overlayReset })
         .where(inArray(scheduledPosts.id, targetIds));
+
+    // keepOverlays is the overlay bake announcing itself — this asset is the post's overlay design
+    // flattened into pixels. Stamp it with a fingerprint of the design it was made from, so
+    // approve-post can tell a CURRENT bake from a stale one.
+    //
+    // Without the stamp that question is unanswerable: a baked post and an un-baked one both carry
+    // overlays and a base pin, and a post baked then edited looks baked too. The fingerprint is read
+    // from the post row here rather than trusted from the request, so a client cannot certify its own
+    // bake. See overlaysFingerprint in src/lib/post-render.ts.
+    if (body.keepOverlays) {
+        const [src] = await db
+            .select({ imageOverlays: scheduledPosts.imageOverlays })
+            .from(scheduledPosts).where(eq(scheduledPosts.id, postId)).limit(1);
+        const stamp: OverlayBakeStamp = {
+            kind: 'overlay_bake',
+            postId,
+            overlaysHash: overlaysFingerprint(src?.imageOverlays),
+            at: new Date().toISOString(),
+        };
+        await db.update(contentAssets)
+            .set({ renderParams: stamp, updatedAt: new Date() })
+            .where(and(eq(contentAssets.id, assetId), eq(contentAssets.organisationId, orgId)));
+    }
 
     // An HOUR, not the ten-minute default. This URL is not a thumbnail for a video: it is what the
     // editor's <video> element streams from, and a clip is fetched in byte ranges ACROSS the whole

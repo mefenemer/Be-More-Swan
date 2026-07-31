@@ -10632,9 +10632,10 @@ function closePostReview() {
     const modal = document.getElementById('post-review-modal');
     modal.classList.add('hidden');
     modal.classList.remove('flex');
-    // Land any card edit still on its debounce; see _pceFlushCardSave. Before the ids are cleared,
-    // and not awaited — the modal must shut instantly.
+    // Land any card edit or overlay bake still on its debounce; see _pceFlushCardSave. Before the ids
+    // are cleared, and not awaited — the modal must shut instantly.
     void _pceFlushCardSave();
+    void _pceFlushOverlayBake();
     _rqReviewPostId = null;
     _rqReviewGroupIds = [];
     // The Content Calendar opens posts through this editor now, so its copy of them is stale by the
@@ -10841,13 +10842,14 @@ async function rqReviewPublishNow() {
 // orchestrator can decide how to handle each outcome across the group.
 async function _rqApproveOne(post, action, opts = {}) {
     try {
-        // Bake any user-authored text overlays into the image before it enters the publish queue.
-        // Fail-closed: if baking fails we do NOT approve, so the un-overlaid image can never publish.
+        // The bake normally happened while the user was still editing (_pceScheduleOverlayBake), so
+        // this is a no-op that costs nothing. It stays as a safety net for a post whose overlays were
+        // written by some other path, and returns immediately when there is nothing to bake.
         if (action !== 'reject') {
             try { await gpApplyOverlaysBeforeApprove(post.id); }
             catch (e) { return { ok: false, error: e && e.message ? e.message : 'Could not apply your text overlays.' }; }
         }
-        const res = await fetch('/.netlify/functions/approve-post', {
+        const send = () => fetch('/.netlify/functions/approve-post', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 postId: post.id,
@@ -10859,6 +10861,24 @@ async function _rqApproveOne(post, action, opts = {}) {
                 ...(opts.rescheduleAt ? { rescheduleAt: opts.rescheduleAt } : {}),
             }),
         });
+
+        let res = await send();
+        // The server now REFUSES a photo whose overlays are not burned into the attached image —
+        // the guarantee used to live only in this browser, which is no place for it. Heal it rather
+        // than report it: we are the thing that can bake, so bake and go again. The user sees a
+        // slower approval, not an error. One retry only — a second refusal means the bake is not
+        // doing what it claims, and that is worth surfacing.
+        if (res.status === 409 && (await res.clone().json().catch(() => ({}))).code === 'OVERLAYS_NOT_BAKED') {
+            try {
+                await gpApplyOverlaysBeforeApprove(post.id, { force: true });
+            } catch (e) {
+                return { ok: false, error: e && e.message ? e.message : 'Could not apply your text overlays.' };
+            }
+            res = await send();
+            if (res.status === 409 && (await res.clone().json().catch(() => ({}))).code === 'OVERLAYS_NOT_BAKED') {
+                return { ok: false, error: 'Your text could not be applied to the image. Reopen the post and check the text boxes.' };
+            }
+        }
         const d = await res.json().catch(() => ({}));
         if (res.status === 409 && d.pastSchedule) return { pastSchedule: true, message: d.message };
         // The compliance gate is now enforced server-side (approve-post). It is an acknowledgement,
@@ -10932,13 +10952,20 @@ async function _rqApproveTargetsInner(targets, action, opts = {}) {
     }
     if (r0.handled) return;
     if (!r0.ok) { alert(r0.error || 'Failed to approve.'); return; }
-    for (const p of rest) {
-        // opts carries rescheduleAt, and the siblings share the slot — dropping it here would
-        // approve the rest of the group at their old proposed times.
-        const r = await _rqApproveOne(p, action, opts);
-        if (r.handled) return;
-        if (!r.ok) { alert(r.error || 'Failed to approve.'); return; }
-    }
+    // The siblings go together, not one after another. Sequential was costing a full round trip per
+    // platform on the one click the reviewer waits on — and it bought nothing, because the gates that
+    // must stop a group before it half-commits (past-schedule, compliance, connections) have ALREADY
+    // been answered by the first post above. Whatever those would say about a sibling, they have said.
+    //
+    // opts carries rescheduleAt, and the siblings share the slot — dropping it here would approve the
+    // rest of the group at their old proposed times.
+    const results = await Promise.all(rest.map(p => _rqApproveOne(p, action, opts)));
+    if (results.some(r => r.handled)) return;
+    // Report the first failure, having let the others finish: with the group already committed by
+    // the first post, abandoning the remaining calls mid-flight would leave MORE of it half-done, not
+    // less. (Promise.all resolves them all — _rqApproveOne returns its errors rather than throwing.)
+    const failed = results.find(r => !r.ok);
+    if (failed) { alert(failed.error || 'Failed to approve.'); return; }
     // Say what the assistant is going to do about it, in the modal, and let the user close it. A
     // toast was the only confirmation before, so "approved" and "what happens next" were both gone
     // in three seconds — on the one action in the queue that hands work to somebody else.
@@ -13148,6 +13175,9 @@ async function _pceOpenOverlayEditor(postId) {
                 if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || 'Could not save your text.'); }
                 if (_rqPostCache[postId]) _rqPostCache[postId].overlays = overlays;
                 _gpOverlayCountByPost[postId] = overlays.length;
+                // Burn the text in NOW, while the reviewer is still here and a second costs nothing —
+                // rather than at approval, where it was the slowest part of the one click they wait on.
+                _pceScheduleOverlayBake(postId);
                 // Repaint the canvas + inspector for the post on screen, then land back on this layer.
                 if (postId === _rqReviewPostId) { _rqReviewRenderActive(); _pceSelect('overlays'); }
                 _pceSetOverlayMsg(overlays.length
@@ -13230,8 +13260,77 @@ async function gpQueueVideoRender(postId) {
     throw new Error(d.error || 'Could not start the video render for your text overlays.');
 }
 
-async function gpApplyOverlaysBeforeApprove(postId) {
+// ── Baking early, so committing is fast ─────────────────────────────────────────────────────────
+// Flattening the text into the picture used to happen at approval, on the one click the reviewer
+// actually waits on. It is the same work either way — so it now runs when they finish editing the
+// text, where a second passes unnoticed, and the commit finds the job already done.
+//
+// PHOTOS ONLY. A video's overlays are rendered on Lambda (trigger-post-render), and baking on every
+// edit would queue a paid render per keystroke-pause. Video keeps its render at approval, where it is
+// already asynchronous and gated by render_status.
+//
+// The commit path is faster for a second reason too: it no longer ASKS whether there is anything to
+// bake. That question used to cost two round trips per platform even for a plain photo with no text
+// — trigger-post-render replying {skipped}, and get-post-image shipping the whole image back as a
+// base64 dataURL so the client could read `overlays.length` and discard it. On a three-platform
+// cross-post that was six wasted requests and three full image transfers, which was most of the
+// several seconds. The cached post already knows its overlays and its media kind, so it is answered
+// locally now.
+let _pceOverlayBakeTimer = null;
+let _pceOverlayBakeBusy = false;
+
+function _pceScheduleOverlayBake(postId) {
+    const cached = (typeof _rqPostCache !== 'undefined' && _rqPostCache[postId]) || null;
+    const looksVideo = !!cached && (cached.mediaType === 'video' || /video|reel/i.test(cached.postFormat || ''));
+    if (looksVideo) return;
+    clearTimeout(_pceOverlayBakeTimer);
+    _pceOverlayBakeTimer = setTimeout(() => { _pceOverlayBakeTimer = null; void _pceRunOverlayBake(postId); }, 800);
+}
+
+async function _pceRunOverlayBake(postId) {
+    if (_pceOverlayBakeBusy) { _pceScheduleOverlayBake(postId); return; }
+    _pceOverlayBakeBusy = true;
+    try {
+        await gpApplyOverlaysBeforeApprove(postId, { force: true });
+    } catch (e) {
+        // Deliberately quiet: this is opportunistic pre-work, and the approval path still bakes and
+        // still refuses to publish an unbaked image (approve-post's OVERLAYS_NOT_BAKED). Shouting
+        // here would report a problem the user has not hit and may never hit.
+        console.warn('[overlay-bake] early bake failed, will retry at approval:', e);
+    } finally {
+        _pceOverlayBakeBusy = false;
+    }
+}
+
+/**
+ * True when this post provably has nothing to flatten, answered from the cache alone.
+ *
+ * Only a SILENT PHOTO WITH NO TEXT qualifies. Audio forces a server render even on a still, because
+ * no platform accepts a photo with sound, and a video's text is rendered rather than baked.
+ */
+function _pceNothingToBake(postId) {
+    const cached = (typeof _rqPostCache !== 'undefined' && _rqPostCache[postId]) || null;
+    if (!cached) return false;   // unknown post — ask the server, as before
+    const hasOverlays = (cached.overlays || []).some(o => o && String(o.text || '').trim());
+    // `audio`, not `audioOverlays` — get-social-drafts resolves each clip to a playable url and emits
+    // it under that name (see _pceAudioClips, which reads the same field).
+    const hasAudio = _pceAudioClips(cached).length > 0;
+    const looksVideo = cached.mediaType === 'video' || /video|reel/i.test(cached.postFormat || '');
+    return !hasOverlays && !hasAudio && !looksVideo;
+}
+
+/** Land a pending early bake before the editor goes away. Mirrors _pceFlushCardSave. */
+async function _pceFlushOverlayBake() {
+    if (_pceOverlayBakeTimer !== null) { clearTimeout(_pceOverlayBakeTimer); _pceOverlayBakeTimer = null; }
+    for (let i = 0; i < 60 && _pceOverlayBakeBusy; i++) await new Promise(r => setTimeout(r, 50));
+}
+
+async function gpApplyOverlaysBeforeApprove(postId, opts = {}) {
     if (!postId || !window.ImageOverlayEditor) return;
+
+    // Nothing to bake, answered from the cache instead of two round trips (see _pceNothingToBake).
+    if (!opts.force && _pceNothingToBake(postId)) return;
+
     // Video posts render server-side; only a photo continues to the browser bake below.
     if (await gpQueueVideoRender(postId)) return;
     const res = await fetch(`/.netlify/functions/get-post-image?postId=${encodeURIComponent(postId)}`);

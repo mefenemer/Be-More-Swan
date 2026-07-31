@@ -132,8 +132,75 @@ check('the approve-time overlay bake still writes ONE post', () => {
         /applyToGroup: body\.applyToGroup \?\? !body\.keepOverlays/,
         'the bake must not inherit the fan-out default');
     const ws = fn('workspace.html');
-    const bake = ws.slice(ws.indexOf('async function gpApplyOverlaysBeforeApprove('));
-    assert.match(bake.slice(0, 1400), /keepOverlays: true/, 'the bake is identified by keepOverlays');
+    // Bounded by the NEXT function rather than a byte count. The old `slice(0, 1400)` was measuring
+    // how much prose sits above the attach call, so ordinary edits to the function broke it while a
+    // dropped keepOverlays would not have — the opposite of what it is for.
+    const from = ws.indexOf('async function gpApplyOverlaysBeforeApprove(');
+    assert.ok(from !== -1, 'expected the approve-time bake to exist');
+    const after = ws.indexOf('\nasync function ', from + 1);
+    const bake = ws.slice(from, after === -1 ? ws.length : after);
+    assert.match(bake, /keepOverlays: true/, 'the bake is identified by keepOverlays');
+    assert.ok(!/applyToGroup:\s*true/.test(bake), 'the bake must never opt INTO the fan-out');
+});
+
+// ── The overlay bake moved off the commit path ──────────────────────────────────────────────────
+// Flattening the reviewer's text into the picture used to run at approval, on the one click they
+// wait on, and cost two round trips PER PLATFORM even for a plain photo with no text — one asking
+// whether a video render was needed, one shipping the whole image back as base64 so the client could
+// read `overlays.length` and discard it.
+//
+// It now runs while they are still editing, and the commit answers "is there anything to bake?"
+// from the cache. That is only safe because the server stopped trusting the browser: approve-post
+// independently refuses a photo whose overlays are not flattened into the attached asset.
+check('an unbaked photo cannot be approved, whatever the client believes', () => {
+    const approve = fn('netlify/functions/approve-post.ts');
+    assert.match(approve, /OVERLAYS_NOT_BAKED/,
+        'approve-post must refuse a photo whose text is not baked in — the guarantee cannot live only in the browser');
+    assert.match(approve, /isBakedFor\(/, 'the check must compare the attached asset against the CURRENT design');
+    assert.match(approve, /!willBeVideo && renderableOverlays\(/,
+        'video is exempt: its overlays are rendered on Lambda and gated by render_status instead');
+
+    // A stale bake must fail the check too — a post baked and then edited still carries overlays and
+    // a base pin, so identity alone cannot tell it from a current one.
+    const render = fn('src/lib/post-render.ts');
+    assert.match(render, /export function overlaysFingerprint\(/, 'the design needs a fingerprint to compare against');
+    assert.match(render, /rp\.kind !== 'overlay_bake'/, 'an unstamped asset must read as NOT baked');
+    assert.match(render, /Number\(rp\.postId\) !== Number\(postId\)/, "another post's bake must not count as this one's");
+
+    // And the stamp has to be written from the SERVER's copy of the design, not the request body,
+    // or a client could certify its own bake.
+    const attach = fn('netlify/functions/attach-draft-media.ts');
+    assert.match(attach, /kind: 'overlay_bake'/, 'the bake must stamp its output asset');
+    assert.match(attach, /overlaysHash: overlaysFingerprint\(src\?\.imageOverlays\)/,
+        'the fingerprint must come from the post row, never from the caller');
+});
+
+check('the client heals an unbaked post instead of reporting it', () => {
+    const ws = fn('workspace.html');
+    const one = ws.slice(ws.indexOf('async function _rqApproveOne('));
+    const body = one.slice(0, one.indexOf('\nasync function ') === -1 ? one.length : one.indexOf('\nasync function '));
+    assert.match(body, /OVERLAYS_NOT_BAKED/, 'the 409 must be recognised, not shown as a generic failure');
+    assert.match(body, /gpApplyOverlaysBeforeApprove\(post\.id, \{ force: true \}\)/,
+        'the client is the thing that can bake — so it should bake and retry, not ask the user to');
+    // Exactly one retry: a second refusal means the bake is not doing what it claims.
+    const attempts = body.match(/OVERLAYS_NOT_BAKED/g) || [];
+    assert.equal(attempts.length, 2, 'expected one retry — check, heal, check again, then give up');
+});
+
+check('nothing-to-bake is answered without a round trip', () => {
+    const ws = fn('workspace.html');
+    assert.match(ws, /function _pceNothingToBake\(/, 'the commit path must answer this from the cache');
+    // Audio makes a still render as video (no platform takes a photo with sound), so a silent photo
+    // with no text is the ONLY thing that may skip out early.
+    const helper = ws.slice(ws.indexOf('function _pceNothingToBake('));
+    assert.match(helper.slice(0, 900), /hasAudio/, 'a photo with sound still needs a server render');
+    assert.match(helper.slice(0, 900), /looksVideo/, 'a video still needs its Lambda render');
+    assert.match(helper.slice(0, 900), /if \(!cached\) return false/, 'an unknown post must ask the server, as before');
+
+    // The early bake must not fire for video, or every edit queues a paid Lambda render.
+    const sched = ws.slice(ws.indexOf('function _pceScheduleOverlayBake('));
+    assert.match(sched.slice(0, 600), /if \(looksVideo\) return/,
+        'baking on edit is for photos only — video would queue a render per keystroke-pause');
 });
 
 check('the editor sends the scope it showed, and can narrow it', () => {

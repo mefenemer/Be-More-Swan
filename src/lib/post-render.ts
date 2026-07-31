@@ -42,6 +42,67 @@ export function renderableOverlays(raw: unknown): Overlay[] {
 }
 
 /**
+ * A stable fingerprint of an overlay design — "which words, where, in what style".
+ *
+ * ── What this is for ────────────────────────────────────────────────────────────────────────────
+ * A PHOTO's overlays are burned in by the browser (see trigger-post-render.ts: the canvas has the
+ * fonts, so it is faster, free and font-perfect). The result is uploaded as a NEW flattened asset
+ * and attached with keepOverlays:true, which leaves `image_overlays` and the `overlay_base_asset_id`
+ * pin in place so the design stays editable.
+ *
+ * That is what makes "has this been baked?" unanswerable from the post row alone: a baked post and
+ * an un-baked one look identical — both carry overlays and a base pin. Worse, a post baked and THEN
+ * edited also looks baked, so a stale flattened image would publish with the old words on it.
+ *
+ * So the bake stamps its output asset with this fingerprint (content_assets.render_params), and
+ * approve-post compares it against the post's current design. Equal means the attached image really
+ * is this design flattened; anything else — absent, or from an older design — means it is not.
+ *
+ * Deliberately NOT a hash of the whole overlay object: `id` is a client-generated handle that can
+ * change without the picture changing, and including it would force a re-bake on every reopen.
+ * Everything that alters a pixel is in, and nothing else is.
+ */
+export function overlaysFingerprint(raw: unknown): string {
+    const parts = renderableOverlays(raw).map((o: any) => [
+        String(o.text ?? ''),
+        o.x ?? '', o.y ?? '', o.w ?? '', o.h ?? '',
+        o.fontFamily ?? '', o.fontSize ?? '', o.fontWeight ?? '',
+        o.color ?? '', o.background ?? '', o.align ?? '', o.rotation ?? '',
+        // Timing changes nothing on a still, but a photo+audio post renders as video where it does.
+        o.startS ?? '', o.endS ?? '',
+    ].join(''));
+    // Order matters — overlays paint in array order, so a reorder can change what covers what.
+    const src = parts.join('');
+    // Same cheap stable hash as hashCaption in post-quality-review.ts; this only has to detect
+    // CHANGE, and it is compared against a value produced by this very function.
+    let h = 0;
+    for (let i = 0; i < src.length; i++) { h = (Math.imul(31, h) + src.charCodeAt(i)) | 0; }
+    return `${renderableOverlays(raw).length}:${(h >>> 0).toString(36)}`;
+}
+
+/** What the overlay bake writes into its flattened asset's render_params. */
+export interface OverlayBakeStamp {
+    kind: 'overlay_bake';
+    postId: number;
+    overlaysHash: string;
+    at: string;
+}
+
+/**
+ * True when `renderParams` says this asset is the given post's CURRENT overlay design, flattened.
+ *
+ * Fails closed on anything unexpected: an asset with no stamp, a stamp for another post, or a stamp
+ * from an older design all return false, because every one of them means the pixels on screen are
+ * not the pixels the reviewer approved.
+ */
+export function isBakedFor(renderParams: unknown, postId: number, overlays: unknown): boolean {
+    const rp = renderParams as Partial<OverlayBakeStamp> | null | undefined;
+    if (!rp || rp.kind !== 'overlay_bake') return false;
+    if (Number(rp.postId) !== Number(postId)) return false;
+    return rp.overlaysHash === overlaysFingerprint(overlays);
+}
+
+/**
  * The post's CLEAN base video — the clip the overlays were designed against.
  *
  * Mirrors get-post-image's resolution rule exactly: the pinned overlay_base_asset_id wins when set

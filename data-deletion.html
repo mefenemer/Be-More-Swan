@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Deletion Instructions | Be More Swan</title>
+    <meta name="description" content="How to disconnect a social account from Be More Swan and request deletion of the data obtained through it.">
+    <link href="./style.css" rel="stylesheet">
+    <link rel="icon" href="/favicon/favicon.ico" sizes="any">
+    <link rel="apple-touch-icon" href="/favicon/apple-touch-icon.png">
+    <link rel="manifest" href="/favicon/manifest.json">
+</head>
+<body class="font-sans text-gray-800 antialiased bg-gray-50 flex flex-col min-h-screen">
+
+<div id="nav-placeholder"></div>
+
+    <!-- Main Content -->
+    <main class="flex-grow max-w-3xl mx-auto px-4 py-16">
+        <h1 class="text-4xl font-extrabold text-gray-900 mb-8">Data Deletion Instructions</h1>
+        <p class="text-gray-500 mb-8">Last updated: July 31, 2026</p>
+
+        <div class="prose prose-emerald max-w-none text-gray-600 space-y-6">
+            <section>
+                <p>This page explains how to remove a connected social account from Be More Swan and how to have the data we obtained through that account deleted. It covers Facebook, Instagram, Threads, LinkedIn, X and YouTube connections.</p>
+                <p class="mt-2">If you want to delete your whole Be More Swan account rather than a single connection, see <a href="#full-account" class="text-blue-600 underline">Deleting your entire account</a> below.</p>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-bold text-gray-900">1. What we hold from a connected account</h2>
+                <p>When you connect a social account, we store only what is needed to publish and report on your behalf:</p>
+                <ul class="list-disc pl-6 space-y-1 mt-2">
+                    <li>An access token, held encrypted, which we use to publish approved posts and read back their performance.</li>
+                    <li>The account identifiers the platform gives us — for Facebook, the Page ID; for Instagram, the business account ID and username; plus your app-scoped user ID.</li>
+                    <li>Aggregate performance figures for posts we published for you, such as impressions and engagement counts.</li>
+                    <li>Follower counts, cached for up to four hours at a time.</li>
+                </ul>
+                <p class="mt-2">We do not store your platform password, your private messages, or the contents of your inbox. We do not use your data to train public AI models.</p>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-bold text-gray-900">2. Removing a connection from within Be More Swan</h2>
+                <p>This is the fastest route and takes effect immediately.</p>
+                <ol class="list-decimal pl-6 space-y-1 mt-2">
+                    <li>Sign in and open the assistant that holds the connection.</li>
+                    <li>Go to the <strong>Connections</strong> section.</li>
+                    <li>Select the account you want to remove and choose <strong>Disconnect</strong>.</li>
+                </ol>
+                <p class="mt-2">Disconnecting deletes the stored access token straight away and stops all further publishing and reporting for that account.</p>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-bold text-gray-900">3. Removing Be More Swan from Facebook or Instagram</h2>
+                <p>You can also revoke access from Meta's side, without signing in to Be More Swan:</p>
+                <ol class="list-decimal pl-6 space-y-1 mt-2">
+                    <li>Go to <a href="https://www.facebook.com/settings?tab=applications" class="text-blue-600 underline" target="_blank" rel="noopener noreferrer">Facebook Settings &rarr; Apps and Websites</a>.</li>
+                    <li>Find <strong>Be More Swan</strong> in the list of active apps.</li>
+                    <li>Choose <strong>Remove</strong>, and tick the option to delete the activity associated with the app.</li>
+                </ol>
+                <p class="mt-2">Facebook notifies us automatically when you do this. We then revoke the connection and delete the stored access token for both the Facebook and Instagram accounts covered by that permission, without any further action from you. If you asked Facebook for deletion rather than plain removal, it will show you a confirmation code and a link to a page confirming the deletion has completed.</p>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-bold text-gray-900">4. Asking us directly</h2>
+                <p>If you cannot sign in, or you would rather we handled it, email <a href="mailto:hello@bemoreswan.com" class="text-blue-600 underline">hello@bemoreswan.com</a> from the address on your account with the subject <strong>Data deletion request</strong>. Tell us which platform and which account name or handle you want removed.</p>
+                <p class="mt-2">We will confirm the request within 5 working days and complete it within 30 days, as required under UK GDPR. If we need to verify your identity first, we will say so in our reply.</p>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-bold text-gray-900">5. What happens after deletion</h2>
+                <ul class="list-disc pl-6 space-y-1 mt-2">
+                    <li>The encrypted access token is deleted. We can no longer reach the platform on your behalf.</li>
+                    <li>The account identifiers and cached metrics obtained from that platform are removed.</li>
+                    <li>Posts that were already published to your account stay live on the platform. Only you can delete those, from the platform itself.</li>
+                    <li>Drafts and content held in your Be More Swan workspace are unaffected, since they are yours rather than the platform's. Delete them in the app, or ask us to remove your whole account.</li>
+                    <li>We retain audit records of the deletion itself, and any records we are legally required to keep, such as billing history.</li>
+                </ul>
+            </section>
+
+            <section id="full-account">
+                <h2 class="text-xl font-bold text-gray-900">6. Deleting your entire account</h2>
+                <p>To close your Be More Swan account and erase your workspace, open <strong>Settings &rarr; Account</strong> and choose <strong>Delete account</strong>, or email <a href="mailto:hello@bemoreswan.com" class="text-blue-600 underline">hello@bemoreswan.com</a>. This removes your assistants, connections, drafts and published-post records. It cannot be undone.</p>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-bold text-gray-900">7. Questions</h2>
+                <p>For anything about how we handle your data, contact <a href="mailto:hello@bemoreswan.com" class="text-blue-600 underline">hello@bemoreswan.com</a>. Our full <a href="./privacy.html" class="text-blue-600 underline">Privacy Policy</a> sets out our wider commitments.</p>
+            </section>
+        </div>
+    </main>
+
+<script>
+    // Component Loader Engine
+    async function loadComponent(placeholderId, filePath) {
+        try {
+            const response = await fetch(filePath);
+            if (response.ok) {
+                document.getElementById(placeholderId).innerHTML = await response.text();
+            }
+        } catch (error) {
+            console.error(`Error loading component ${filePath}:`, error);
+        }
+    }
+
+    document.addEventListener("DOMContentLoaded", async () => {
+        await loadComponent("nav-placeholder", "./components/nav.html");
+        loadComponent("footer-placeholder", "./components/footer.html");
+
+        // Meta's reviewers open this URL directly and unauthenticated, so the nav must stay in its
+        // public shape — no dashboard/billing swap, unlike privacy.html which is also opened from
+        // inside the workspace.
+        const targetTitleSpan = document.getElementById("nav-page-title");
+        if (targetTitleSpan) targetTitleSpan.innerText = "| Data Deletion";
+    });
+</script>
+<script src="./mobileMenu.js"></script>
+<div id="footer-placeholder"></div>
+
+</body>
+</html>

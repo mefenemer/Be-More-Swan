@@ -164,7 +164,10 @@ check('step 7 is the decision, with three ways to commit', () => {
         'setting the time and committing the post are one action');
     assert.match(workspace, /\.\.\.\(opts\.rescheduleAt \? \{ rescheduleAt: opts\.rescheduleAt \} : \{\}\)/,
         'approve-post needs the chosen time');
-    assert.match(workspace, /const r = await _rqApproveOne\(p, action, opts\);/,
+    // Shape-agnostic on purpose: the siblings are committed in PARALLEL now (they used to run one
+    // after another, which cost a round trip per platform on the click the reviewer waits on). What
+    // must not change is that each one is still handed `opts`.
+    assert.match(workspace, /_rqApproveOne\(p, action, opts\)/,
         'siblings share the slot — dropping opts would approve them at their old times');
     // The footer's Approve is gone entirely — two Approve buttons on screen at once was the bug.
     assert.ok(!workspace.includes('id="post-review-approve-btn"'),

@@ -43,9 +43,10 @@
   to = "/.netlify/functions/sync-action"
   status = 200
 
-# Meta Platform compliance callbacks for the Threads app (uninstall + data deletion), plus the
-# public deletion-status page. Meta calls these unauthenticated server-to-server, so the URLs are
-# registered on the Threads use case Settings screen and meta-callbacks.ts verifies signed_request.
+# Meta Platform compliance callbacks for BOTH Meta apps — /api/meta/threads/* and
+# /api/meta/facebook/* (uninstall + data deletion) — plus the public deletion-status page. Meta
+# calls these unauthenticated server-to-server; meta-callbacks.ts verifies signed_request against
+# the secret belonging to the app named in the path, so the splat must keep the segment intact.
 [[redirects]]
   from = "/api/meta/*"
   to = "/.netlify/functions/meta-callbacks"

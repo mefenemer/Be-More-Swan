@@ -1,15 +1,22 @@
 // netlify/functions/meta-callbacks.ts
-// Meta Platform compliance callbacks for the Threads app (Platform Terms 3(d)(i)).
+// Meta Platform compliance callbacks (Platform Terms 3(d)(i)) for BOTH Meta apps we operate:
+// the Threads app and the Facebook/Instagram app. They are separate apps with separate secrets,
+// so the route decides which secret verifies the request and which grants get revoked.
 //
 // Routed via netlify.toml rewrites so the public URLs are:
-//   POST /api/meta/threads/uninstall  → user deauthorized the app → drop the grant
-//   POST /api/meta/threads/delete     → user requested data deletion → drop the grant + issue a receipt
-//   GET  /api/meta/deletion-status    → ?code=… human-readable status page Meta links the user to
+//   POST /api/meta/threads/uninstall   → user deauthorized the Threads app  → drop the grant
+//   POST /api/meta/threads/delete      → Threads data deletion request      → drop the grant + receipt
+//   POST /api/meta/facebook/uninstall  → user removed the FB/IG app         → revoke the connections
+//   POST /api/meta/facebook/delete     → FB/IG data deletion request        → revoke + receipt
+//   GET  /api/meta/deletion-status     → ?code=… human-readable status page Meta links the user to
 //
-// These are the two URLs configured on the Threads use case Settings screen
-// (Uninstall Callback URL / Delete Callback URL). Meta calls them server-to-server with
-// NO session and NO bearer token — the only authentication is the signed_request HMAC,
-// so verifySignedRequest is the whole security boundary. Never trust the payload before it.
+// An /api/meta/{uninstall,delete} with no app segment is treated as Threads — that is the shape
+// registered on the Threads dashboard before the Facebook routes existed, and it must keep working.
+//
+// Meta calls these server-to-server with NO session and NO bearer token — the only authentication
+// is the signed_request HMAC, so verifySignedRequest is the whole security boundary. Never trust
+// the payload before it. Each app signs with its OWN secret: verifying a Facebook callback against
+// THREADS_CLIENT_SECRET fails the HMAC and 400s, which is exactly the bug this file used to have.
 //
 // ── Threads app dashboard setup (developers.facebook.com → the THREADS_CLIENT_ID app) ──
 // Use case "Access the Threads API" → Settings. ALL FOUR fields below must be filled or the
@@ -25,20 +32,28 @@
 // Client OAuth Login + Web OAuth Login must both be ON. Meta accepts only ONE value each for the
 // uninstall/delete callbacks, so they point at prod (staging rides the same handlers if needed).
 //
+// ── Facebook/Instagram app dashboard setup (the META_APP_ID app) ──────────────────────────────
+//   Settings → Basic → "User data deletion" → Data Deletion Request URL:
+//                            https://bemoreswan.com/api/meta/facebook/delete
+//   Facebook Login → Settings → Deauthorize Callback URL:
+//                            https://bemoreswan.com/api/meta/facebook/uninstall
+// The human-readable alternative Meta offers for that first field is data-deletion.html; we
+// register the callback instead because it actually revokes, and link the page from the policy.
+//
 // Meta posts application/x-www-form-urlencoded with a single `signed_request` field:
 //   <base64url(HMAC-SHA256(payload, APP_SECRET))>.<base64url(JSON payload)>
 // The payload's `user_id` is the Threads user id, which is exactly what the OAuth callback
 // persisted as workspace_integrations.tenant_id — that column is the join back to the org.
 //
-// Scope note: this deletes the THREADS CONNECTION, not the user's Be More Swan account.
+// Scope note: this deletes the PLATFORM CONNECTION, not the user's Be More Swan account.
 // Meta's requirement is that we delete the data obtained via their platform; the customer's
-// own workspace, posts and billing are unrelated to their Threads grant and stay put.
+// own workspace, posts and billing are unrelated to their Meta grant and stay put.
 
 import { createHmac, timingSafeEqual, randomBytes } from 'crypto';
-import { eq, and } from 'drizzle-orm';
+import { eq, and, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { workspaceIntegrations } from '../../db/schema';
-import { storeSecret, getSecret } from '../../src/utils/vault';
+import { workspaceIntegrations, systemConnections } from '../../db/schema';
+import { storeSecret, getSecret, deleteSecret } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { deleteIntegration } from '../../src/utils/workspace-integrations';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -133,6 +148,43 @@ async function revokeThreadsGrants(threadsUserId: string): Promise<number> {
     return rows.length;
 }
 
+/**
+ * Drop every Facebook/Instagram connection belonging to the given Facebook app-scoped user id.
+ *
+ * The join is on metadata->>'fbUserId', NOT external_user_id: the latter holds a Page id
+ * (facebook) or an Instagram business account id (instagram), and Meta's callback only ever
+ * sends the app-scoped id of the PERSON. meta-oauth.ts captures it at connect time for exactly
+ * this lookup — rows written before that landed have no fbUserId and cannot be matched here,
+ * which is a silent no-op rather than a wrong deletion (see the unmatched-callback warning below).
+ *
+ * Both products are revoked together: one Meta grant backs both, so a person removing the app
+ * has withdrawn consent for both regardless of which one the callback names.
+ */
+async function revokeMetaConnections(fbUserId: string): Promise<number> {
+    const db = getDb();
+    const rows = await db
+        .select({ id: systemConnections.id, vaultRefKey: systemConnections.vaultRefKey })
+        .from(systemConnections)
+        .where(and(
+            inArray(systemConnections.serviceName, ['facebook', 'instagram']),
+            sql`${systemConnections.metadata}->>'fbUserId' = ${fbUserId}`,
+        ));
+
+    // Each product stores its own vault ref (aura/org-<id>/<service>-token), so deleting per row
+    // never strips the other product's token.
+    for (const row of rows) {
+        if (row.vaultRefKey) await deleteSecret(db, row.vaultRefKey);
+    }
+
+    if (rows.length > 0) {
+        await db
+            .update(systemConnections)
+            .set({ status: 'revoked', isActive: false, vaultRefKey: null, updatedAt: new Date() })
+            .where(inArray(systemConnections.id, rows.map(r => r.id)));
+    }
+    return rows.length;
+}
+
 function html(statusCode: number, body: string) {
     return {
         statusCode,
@@ -157,8 +209,13 @@ export default withLambda(async (event) => {
     try {
         path = new URL(event.rawUrl).pathname;
     } catch { /* direct invocation — fall through to the action query param */ }
-    const action = path.match(/\/api\/meta\/(?:threads\/)?([a-z-]+)\/?$/i)?.[1]
-        ?? (event.queryStringParameters?.action ?? '');
+    // The optional app segment picks the secret and the revoke target. Absent → 'threads', which
+    // preserves the /api/meta/{uninstall,delete} shape already registered on the Threads dashboard.
+    const routeMatch = path.match(/\/api\/meta\/(?:(threads|facebook)\/)?([a-z-]+)\/?$/i);
+    const app: 'threads' | 'facebook' =
+        (routeMatch?.[1]?.toLowerCase() as 'threads' | 'facebook' | undefined)
+        ?? (event.queryStringParameters?.app === 'facebook' ? 'facebook' : 'threads');
+    const action = routeMatch?.[2] ?? (event.queryStringParameters?.action ?? '');
 
     // ── STATUS: the page Meta links the user to after a deletion request ──────────
     if (action === 'deletion-status') {
@@ -169,19 +226,25 @@ export default withLambda(async (event) => {
 <h1>Unknown confirmation code</h1>
 <p>We have no record of this deletion request. Codes expire ${RECEIPT_TTL_DAYS} days after the request.</p>`);
         }
+        // The receipt records which app the request came from; rows written before that was stored
+        // are Threads by definition, since it was the only app with a callback at the time.
+        const label = receipt.app === 'facebook' ? 'Facebook and Instagram' : 'Threads';
         return html(200, `<!doctype html><meta charset="utf-8"><title>Deletion status</title>
 <h1>Data deletion complete</h1>
 <p>Confirmation code: <code>${code.replace(/[^a-f0-9]/gi, '')}</code></p>
-<p>Your Threads connection to Be More Swan was removed on ${String(receipt.completedAt ?? '')}, along with the
-access tokens it held. No further Threads data is retained.</p>`);
+<p>Your ${label} connection to Be More Swan was removed on ${String(receipt.completedAt ?? '')}, along with the
+access tokens it held. No further ${label} data is retained.</p>`);
     }
 
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
     if (action !== 'uninstall' && action !== 'delete') return json(404, { error: 'Unknown callback.' });
 
-    const appSecret = process.env.THREADS_CLIENT_SECRET;
+    // Each Meta app signs with its own secret. Selecting the wrong one is indistinguishable from a
+    // forged request — it just fails the HMAC — so the route must decide this, never a default.
+    const secretVar = app === 'facebook' ? 'META_APP_SECRET' : 'THREADS_CLIENT_SECRET';
+    const appSecret = process.env[secretVar];
     if (!appSecret) {
-        console.error('[meta-callbacks] THREADS_CLIENT_SECRET is not set — cannot verify signed_request');
+        console.error(`[meta-callbacks] ${secretVar} is not set — cannot verify signed_request`);
         return json(500, { error: 'Server misconfigured.' });
     }
 
@@ -190,12 +253,21 @@ access tokens it held. No further Threads data is retained.</p>`);
 
     const payload = verifySignedRequest(signedRequest, appSecret);
     if (!payload?.user_id) {
-        console.warn('[meta-callbacks] rejected an unverifiable signed_request');
+        console.warn(`[meta-callbacks] rejected an unverifiable signed_request for the ${app} app`);
         return json(400, { error: 'Invalid signed_request.' });
     }
 
-    const revoked = await revokeThreadsGrants(payload.user_id);
-    console.log(`[meta-callbacks] ${action}: revoked ${revoked} Threads grant(s)`);
+    const revoked = app === 'facebook'
+        ? await revokeMetaConnections(payload.user_id)
+        : await revokeThreadsGrants(payload.user_id);
+    console.log(`[meta-callbacks] ${app}/${action}: revoked ${revoked} grant(s)`);
+
+    // A verified callback that matches nothing means we hold data we cannot attribute — most
+    // likely a connection made before meta-oauth.ts began storing fbUserId. Meta still gets its
+    // 200 (the request was honoured as far as we can honour it), but this needs to be visible.
+    if (revoked === 0) {
+        console.warn(`[meta-callbacks] ${app}/${action}: verified callback matched NO rows for user ${payload.user_id}`);
+    }
 
     // Uninstall expects nothing but a 200; Meta does not read the body.
     if (action === 'uninstall') return json(200, { ok: true });
@@ -204,7 +276,8 @@ access tokens it held. No further Threads data is retained.</p>`);
     // `confirmation_code` for audit. Both fields are mandatory; omitting either fails review.
     const confirmationCode = randomBytes(12).toString('hex');
     await storeSecret(getDb(), receiptKey(confirmationCode), {
-        threadsUserId: payload.user_id,
+        app,
+        metaUserId: payload.user_id,
         revoked,
         completedAt: new Date().toISOString(),
     });

@@ -157,6 +157,22 @@ export default withLambda(async (event) => {
         }
         const longLivedToken = llData.access_token;
 
+        // Meta's deauthorize/delete callbacks identify the person by their APP-SCOPED USER ID and
+        // nothing else. We key connections on the Page id (facebook) or the Instagram business
+        // account id (instagram) — neither of which Meta sends — so without this stored on the row
+        // there is no join back from a "delete my data" callback to the connection it must revoke.
+        // Captured here, while the token is definitely valid: by the time a deletion callback
+        // fires the grant is already gone and /me would fail.
+        let fbUserId: string | null = null;
+        try {
+            const meRes = await fetch(`https://graph.facebook.com/v19.0/me?fields=id&access_token=${longLivedToken}`);
+            const me: { id?: string; error?: { message: string } } = await meRes.json();
+            fbUserId = me.id ?? null;
+            if (!fbUserId) console.error('[meta-oauth] /me returned no id:', me.error?.message ?? 'unknown');
+        } catch (e) {
+            console.error('[meta-oauth] /me lookup failed — deletion callbacks cannot match this row:', e);
+        }
+
         // Resolve the Instagram account via the user's PAGES.
         //
         // `instagram_business_account` is an edge on the Page node, not on the User node — asking
@@ -292,7 +308,7 @@ export default withLambda(async (event) => {
             igUsername = fbPage.instagram_business_account?.username ?? null;
         }
         const accountType = 'BUSINESS';
-        const connMetadata = { accountType, fbPageId, igUsername, pageName };
+        const connMetadata = { accountType, fbPageId, igUsername, pageName, fbUserId };
 
         // US1 AC1.3: block if this tenant is already live in a different workspace. Checked before
         // any token is persisted, so nothing is stored on rejection.

@@ -13,7 +13,8 @@ import { Handler } from '@netlify/functions';
 import { and, eq, gte, lte, ne, sql } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
-import { aiAssistants, auditLogs, contentRules, postIdeaSuggestions, scheduledPosts, systemConnections } from '../../db/schema';
+import { aiAssistants, auditLogs, contentAssets, contentRules, postIdeaSuggestions, scheduledPosts, scheduledPostAssets, systemConnections } from '../../db/schema';
+import { isBakedFor, renderableOverlays } from '../../src/lib/post-render';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { resolvePostImage, resolvePostVideo } from '../../src/utils/social-publish';
 import { resolvePostingSchedule, computeScheduleSlots, intervalHoursFor } from '../../src/config/posting-cadence';
@@ -348,6 +349,50 @@ export default withLambda(async (event) => {
             ?? await resolvePostVideo(db, post.contentAssetIds).catch(() => null);
         if (!media) {
             return { statusCode: 400, body: JSON.stringify({ error: 'Instagram requires an image or a video. Add media to this post before approving.' }) };
+        }
+    }
+
+    // ── The reviewer's text must actually be ON the picture ─────────────────────────────────────
+    // A photo's overlays are burned in by the BROWSER (trigger-post-render.ts explains why: the
+    // canvas has the fonts). That made the guarantee "an un-overlaid image never publishes" a purely
+    // client-side one — nothing here checked it, and the publishers only gate on render_status, which
+    // is the video path. A client that skipped the bake for any reason published the bare photo, with
+    // the reviewer's words missing and nothing recorded anywhere.
+    //
+    // Video is exempt: its overlays are rendered on Lambda and gated by render_status instead.
+    //
+    // This is a 409 with a code rather than a flat refusal because the client can FIX it — it bakes
+    // and retries, so in the normal case nobody ever sees this. It only becomes a visible error when
+    // the bake itself genuinely fails, which is worth telling someone about.
+    if (!willBeVideo && renderableOverlays(post.imageOverlays).length > 0) {
+        // The attached asset, junction table first with the deprecated array as the migration
+        // fallback — the same resolution order as get-post-image and resolveOverlayVideoBase.
+        const [joined] = await db
+            .select({ id: contentAssets.id, renderParams: contentAssets.renderParams })
+            .from(scheduledPostAssets)
+            .innerJoin(contentAssets, eq(contentAssets.id, scheduledPostAssets.contentAssetId))
+            .where(eq(scheduledPostAssets.scheduledPostId, postId))
+            .orderBy(scheduledPostAssets.position)
+            .limit(1);
+        let attached = joined ?? null;
+        if (!attached) {
+            const legacy = (post.contentAssetIds as number[] | null)?.[0];
+            if (legacy) {
+                const [row] = await db
+                    .select({ id: contentAssets.id, renderParams: contentAssets.renderParams })
+                    .from(contentAssets).where(eq(contentAssets.id, legacy)).limit(1);
+                attached = row ?? null;
+            }
+        }
+        if (!attached || !isBakedFor(attached.renderParams, postId, post.imageOverlays)) {
+            return {
+                statusCode: 409,
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    error: 'The text on this image has not been applied yet.',
+                    code: 'OVERLAYS_NOT_BAKED',
+                }),
+            };
         }
     }
 
