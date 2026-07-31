@@ -225,6 +225,54 @@ check('every path that destroys posts releases their media first', () => {
         'reject-post no longer releases the rejected post\'s media');
 });
 
+// The two assertions above name their files by hand, which is how set-post-platforms.ts went unnoticed:
+// it deletes cross-post siblings when the user unticks a platform, and released nothing. Shared media
+// survived (the other siblings still reference it), but save-post-overlays bakes its flattened image
+// as a NEW asset attached to that ONE post, so those bytes leaked. Enumerate the paths instead.
+check('EVERY function that deletes scheduled_posts releases media', () => {
+    const dir = path.join(ROOT, 'netlify/functions');
+    const offenders: string[] = [];
+    for (const f of fs.readdirSync(dir).filter(n => n.endsWith('.ts'))) {
+        const code = stripComments(fs.readFileSync(path.join(dir, f), 'utf8'));
+        if (!/db\s*\.\s*delete\s*\(\s*scheduledPosts\s*\)|DELETE\s+FROM\s+scheduled_posts/i.test(code)) continue;
+        // Either helper is acceptable: releasePostMedia for a post that is simply going away,
+        // collectPostAssetIds + releaseAssets when replacement rows carry the same media.
+        if (!/releasePostMedia|releaseAssets/.test(code)) offenders.push(`netlify/functions/${f}`);
+    }
+    assert.deepStrictEqual(offenders, [],
+        `these delete posts without releasing their media — every R2 object held only by a deleted post leaks permanently: ${offenders.join(', ')}`);
+});
+
+// The ordering trap that makes the asset-scoped variant necessary at all. set-post-platforms deletes
+// some siblings and CREATES others copying the anchor's contentAssetIds; a release taken before those
+// additions exist would see shared assets as unreferenced and start a 7-day purge clock on media a
+// live post is about to use. Collect before the delete, release after the adds.
+check('set-post-platforms releases after it re-attaches, not before', () => {
+    const src = stripComments(read('netlify/functions/set-post-platforms.ts'));
+    const collect = src.indexOf('collectPostAssetIds');
+    const destroy = src.search(/db\s*\.\s*delete\s*\(\s*scheduledPosts\s*\)/);
+    const reattach = src.lastIndexOf('scheduledPostAssets)\n');
+    const release = src.indexOf('releaseAssets(db');
+    assert.ok(collect !== -1 && destroy !== -1 && release !== -1,
+        'expected a collect, a post delete and a release in set-post-platforms');
+    assert.ok(collect < destroy,
+        'collectPostAssetIds must run BEFORE the delete — scheduled_post_assets goes with the post, taking the only record of its media');
+    assert.ok(release > destroy && (reattach === -1 || release > reattach),
+        'releaseAssets must run AFTER the new siblings are inserted, or shared media gets a purge clock while a live post still uses it');
+});
+
+// releaseAssets takes an exclusion list that is empty at the set-post-platforms call site. Empty must
+// mean "exclude nothing", not `NOT IN ()` — which is a syntax error that would fail the release.
+check('an empty exclusion list does not become NOT IN ()', () => {
+    const src = stripComments(read('src/utils/release-post-media.ts'));
+    const notInUses = src.match(/NOT IN \(\$\{idList/g)?.length ?? 0;
+    const guards = src.match(/excludePostIds\.length/g)?.length ?? 0;
+    assert.ok(notInUses > 0 && guards >= notInUses,
+        `every NOT IN (${'${idList…}'}) fragment must be guarded by an excludePostIds.length check — found ${notInUses} fragment(s) and ${guards} guard(s)`);
+    assert.ok(/excludePostIds:\s*number\[\]\s*=\s*\[\]/.test(src),
+        'releaseAssets should default its exclusion list to empty for post-delete callers');
+});
+
 // ── 5. Shared media must survive ────────────────────────────────────────────────────────────────
 // reject-post creates a revised clone carrying the SAME contentAssetIds, and cross-post siblings
 // share one picture across platforms. Releasing on a per-post basis without checking for surviving

@@ -22,6 +22,7 @@ import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { collectPostAssetIds, releaseAssets } from '../../src/utils/release-post-media';
 import { SOCIAL_PLATFORMS, platformFormat } from '../../src/config/platform-formats';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -74,6 +75,20 @@ export default withLambda(async (event) => {
     const toDelete = siblings.filter(s => s.platform && !wanted.includes(s.platform));
     const deletable = toDelete.filter(s => MUTABLE.includes(s.status));
     for (const s of toDelete) if (!MUTABLE.includes(s.status)) locked.push(s.platform!);
+    // Media of the rows about to go. Collected BEFORE the delete because scheduled_post_assets is
+    // destroyed with them (explicitly on the next line, and by cascade anyway), and afterwards there
+    // is no way left to discover which assets they held. Released at the very END of this handler —
+    // see the release step below for why it cannot happen here.
+    const deletedPostIds = deletable.map(s => s.id);
+    let orphanedAssetIds: number[] = [];
+    if (deletedPostIds.length) {
+        try {
+            orphanedAssetIds = await collectPostAssetIds(db, deletedPostIds);
+        } catch (err) {
+            console.error('[set-post-platforms] could not collect media of removed siblings (their R2 objects may leak):', err);
+        }
+    }
+
     if (deletable.length) {
         const ids = deletable.map(s => s.id);
         await db.delete(scheduledPostAssets).where(inArray(scheduledPostAssets.scheduledPostId, ids));
@@ -135,6 +150,32 @@ export default withLambda(async (event) => {
             await db.update(scheduledPosts)
                 .set({ crosspostGroupId: sharedGroupId, updatedAt: new Date() })
                 .where(inArray(scheduledPosts.id, ids));
+        }
+    }
+
+    // ── Release the media of the rows we removed ────────────────────────────────────────────────
+    // Deliberately the LAST thing this handler does, and deliberately not releasePostMedia().
+    //
+    // Unticking a platform normally takes away a row whose picture the other siblings still use, and
+    // releaseAssets skips anything a surviving post references — so in the common case this releases
+    // nothing, which is correct. What it does catch is media only the removed row held: save-post-
+    // overlays bakes its flattened image as a NEW asset attached to that ONE post, so deleting the
+    // sibling used to strand those bytes in R2 forever.
+    //
+    // It has to run here rather than next to the delete because the additions above COPY the anchor's
+    // contentAssetIds. Released before they exist, a shared asset would look unreferenced and get a
+    // 7-day purge clock while a live post depended on it — deleting the user's picture out from under
+    // a scheduled post, which is worse than the leak. By now the new rows are in place and count as
+    // surviving references. The deleted posts are already gone, so no exclusion list is needed.
+    //
+    // Best-effort and logged, never swallowed: the platform change is already committed and must
+    // stand, but a silent catch is exactly how this class of bug stayed invisible for so long.
+    if (orphanedAssetIds.length) {
+        try {
+            const released = await releaseAssets(db, orphanedAssetIds);
+            if (released) console.log(`[set-post-platforms] released ${released} asset(s) held only by removed sibling(s)`);
+        } catch (err) {
+            console.error('[set-post-platforms] media release failed (platform change still stands):', err);
         }
     }
 

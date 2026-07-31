@@ -31,6 +31,16 @@
 // rejected — the clone is a surviving reference, so the media stays, and is released later when the
 // clone itself ends. Cross-post siblings work the same way: rejecting one platform's row must not
 // pull the picture out from under the other three.
+//
+// ── Why the collect and release halves are separately exported ───────────────────────────────────
+// releasePostMedia() reads a post's assets and releases them in one call, which is right when the
+// post is going away and nothing will take its place. set-post-platforms is the other shape: it
+// deletes some sibling rows and CREATES others carrying the same media, so a release taken before
+// the additions exist would see the shared assets as unreferenced and start a 7-day purge clock on
+// media a live post is about to depend on — a worse bug than the leak it was fixing. That caller
+// therefore collects the ids first, deletes, adds, and releases last, when the surviving-reference
+// check can see the new rows. The ordering is the whole point: collect BEFORE the delete (the
+// junction cascades away with the post), release AFTER the adds.
 
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
@@ -47,15 +57,14 @@ function idList(ids: number[]) {
 }
 
 /**
- * Marks the media of `postIds` for retention, skipping anything another post still uses.
+ * Every content_assets id that `postIds` reference, from both the junction table and the deprecated
+ * array column.
  *
  * MUST be called BEFORE the posts are deleted: `scheduled_post_assets` cascades on post delete, so
  * once the rows are gone there is no way left to discover which assets they held.
- *
- * @returns how many content_assets rows had their retention clock started.
  */
-export async function releasePostMedia(db: Db, postIds: number[]): Promise<number> {
-    if (postIds.length === 0) return 0;
+export async function collectPostAssetIds(db: Db, postIds: number[]): Promise<number[]> {
+    if (postIds.length === 0) return [];
 
     // ── Candidates: every asset these posts reference ───────────────────────────────────────────
     // Both sources are read. scheduled_post_assets is the source of truth, but the deprecated
@@ -79,18 +88,37 @@ export async function releasePostMedia(db: Db, postIds: number[]): Promise<numbe
             }
         }
     }
-    if (candidates.size === 0) return 0;
+    return [...candidates];
+}
+
+/**
+ * Starts the retention clock on `assetIds`, skipping anything a post still references.
+ *
+ * @param excludePostIds posts whose references don't count as "still used" — the ones going away.
+ *        Pass them when the release runs BEFORE the delete; leave empty when it runs after, since
+ *        the rows (and their cascaded junction entries) are gone by then.
+ * @returns how many content_assets rows had their retention clock started.
+ */
+export async function releaseAssets(db: Db, assetIds: number[], excludePostIds: number[] = []): Promise<number> {
+    if (assetIds.length === 0) return 0;
 
     // ── Exclude anything a surviving post still references ──────────────────────────────────────
-    const candidateIds = [...candidates];
+    const candidateIds = [...new Set(assetIds)];
     const stillUsed = new Set<number>();
+
+    // An empty exclusion list must not become `NOT IN ()` — that is a syntax error, not a no-op.
+    const notExcluded = excludePostIds.length
+        ? sql`AND sp.id NOT IN (${idList(excludePostIds)})`
+        : sql``;
 
     const otherJunction = await db
         .select({ assetId: scheduledPostAssets.contentAssetId })
         .from(scheduledPostAssets)
         .where(and(
             inArray(scheduledPostAssets.contentAssetId, candidateIds),
-            sql`${scheduledPostAssets.scheduledPostId} NOT IN (${idList(postIds)})`,
+            excludePostIds.length
+                ? sql`${scheduledPostAssets.scheduledPostId} NOT IN (${idList(excludePostIds)})`
+                : undefined,
         ));
     for (const r of otherJunction) stillUsed.add(r.assetId);
 
@@ -104,7 +132,7 @@ export async function releasePostMedia(db: Db, postIds: number[]): Promise<numbe
         ) x
         WHERE sp.content_asset_ids IS NOT NULL
           AND sp.content_asset_ids <> '[]'::jsonb
-          AND sp.id NOT IN (${idList(postIds)})
+          ${notExcluded}
           AND x.id IN (${idList(candidateIds)})
     `);
     for (const r of otherLegacy) stillUsed.add(r.id);
@@ -131,4 +159,18 @@ export async function releasePostMedia(db: Db, postIds: number[]): Promise<numbe
         .returning({ id: contentAssets.id });
 
     return released.length;
+}
+
+/**
+ * Marks the media of `postIds` for retention, skipping anything another post still uses.
+ *
+ * MUST be called BEFORE the posts are deleted — see collectPostAssetIds. Callers that replace the
+ * deleted posts with new rows carrying the same media must NOT use this; they collect first and call
+ * releaseAssets once the replacements exist (see the header).
+ *
+ * @returns how many content_assets rows had their retention clock started.
+ */
+export async function releasePostMedia(db: Db, postIds: number[]): Promise<number> {
+    const assetIds = await collectPostAssetIds(db, postIds);
+    return releaseAssets(db, assetIds, postIds);
 }
