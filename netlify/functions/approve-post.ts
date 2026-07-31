@@ -29,18 +29,23 @@ import { withLambda } from '@netlify/aws-lambda-compat';
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret';
 
 /**
- * Optimal-slot scheduling on approval: the assistant "picks the task up and schedules it" into the
- * next free slot of its posting cadence rather than reusing the draft's (possibly stale/past) date.
+ * Optimal-slot scheduling on approval: the assistant "picks the task up and schedules it" into a
+ * free slot of its posting cadence rather than reusing a stale or already-passed draft date.
  * Mirrors the slot maths in src/utils/schedule-gap-fill.ts. Returns null for on-demand cadences
  * (no slots) so the caller can fall back to the draft's own publishDate.
+ *
+ * "A free slot", not "the first free slot" — see the keep-its-slot check below. Approving used to
+ * relocate every draft to the earliest opening, which churned the whole calendar; the gap-filler
+ * then re-drafted the slot it had just vacated, and round it went.
  */
 async function pickOptimalSlot(
     db: ReturnType<typeof getDb>,
     assistant: { id: number; onboardingContext: unknown; draftHorizonDays: number | null },
-    postId: number,
-    crosspostGroupId: string | null,
+    post: { id: number; publishDate: Date | string | null; crosspostGroupId: string | null },
     now: Date,
 ): Promise<Date | null> {
+    const postId = post.id;
+    const crosspostGroupId = post.crosspostGroupId;
     const ctx = (assistant.onboardingContext as Record<string, unknown>) ?? {};
     const schedule = resolvePostingSchedule(ctx);
     const horizonDays = assistant.draftHorizonDays ?? 7;
@@ -78,6 +83,25 @@ async function pickOptimalSlot(
     // A cross-post group legitimately shares one instant, so "taken" means "has at least one active
     // post on it" — we only need to know whether the slot is free, not how many sit there.
     const takenMs = new Set(taken.map(r => new Date(r.publishDate).getTime()));
+
+    // Keep the slot it is already on, when that slot is a real future cadence slot and nothing else
+    // has claimed it. An autopilot draft was created BY the gap-filler, ON a slot the gap-filler
+    // chose, so moving it is not scheduling — it is churn: `slots.find` below returns the EARLIEST
+    // opening, which is almost never the draft's own, so approving relocated the post and left its
+    // slot uncovered. The hourly gap-fill then drafted a replacement into that hole, the user
+    // approved that one too, and the loop turned once an hour. Prod had four separate jobs targeting
+    // a single 10 August slot this way.
+    //
+    // This deliberately does NOT weaken the stale-date case the function exists for: a date in the
+    // past, or one that is not a cadence slot at all (an on-demand draft, a hand-picked time that no
+    // longer fits the schedule), still falls through and gets rehomed.
+    const ownMs = post.publishDate ? new Date(post.publishDate).getTime() : NaN;
+    const keepsItsSlot = Number.isFinite(ownMs)
+        && ownMs > now.getTime()
+        && slots.some(s => s.getTime() === ownMs)   // it IS one of this cadence's slots
+        && !takenMs.has(ownMs);                     // and no OTHER logical post is on it
+    if (keepsItsSlot) return new Date(ownMs);
+
     const free = slots.find(s => !takenMs.has(s.getTime()));
     if (free) return free;
 
@@ -481,7 +505,7 @@ export default withLambda(async (event) => {
                 .limit(1);
             if (assistant) {
                 assistantName = assistant.name;
-                optimal = await pickOptimalSlot(db, assistant, postId, post.crosspostGroupId ?? null, now).catch(() => null);
+                optimal = await pickOptimalSlot(db, assistant, post, now).catch(() => null);
             }
         }
         if (optimal) {
