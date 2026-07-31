@@ -25,6 +25,7 @@ import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import { mayRun } from '../netlify/functions/content-retention';
+import { MEDIA_PENDING_STATUSES, mediaStillNeeded } from '../src/config/post-status';
 
 let passed = 0;
 let total = 0;
@@ -285,6 +286,107 @@ check('release skips assets a surviving post still references', () => {
         'the surviving-reference check must consult BOTH scheduled_post_assets and the deprecated content_asset_ids column, or the oldest assets leak');
     assert.ok(/isNull\(contentAssets\.purgedAt\)/.test(src),
         'already-purged assets must not have their retention clock restarted');
+});
+
+// ── 6. A PUBLISHED post must hand its media over too ────────────────────────────────────────────
+// Everything above is about posts that go AWAY. The other half of retention is posts that succeed,
+// and it had never once fired: content-retention.ts selects on retentionDeleteAfter alone, and
+// nothing set that column for a published post. Its documented "POSTED assets, 30-day window" half
+// therefore had an empty result set for the life of the feature, and every image, video and audio
+// file that published stayed in R2 for good.
+//
+// The transition existed on paper — scheduled-posts.ts calls propagateAssetStatuses(…, 'scheduled',
+// 'posted') on a PATCH to 'published' — and could not fire, for three independent reasons: no real
+// publisher goes through that endpoint, it reads only the deprecated array, and it demands the asset
+// already sit on 'scheduled', which the equally-broken previous hop never achieved.
+check('every function that publishes a post starts its media retention clock', () => {
+    const dir = path.join(ROOT, 'netlify/functions');
+    const offenders: string[] = [];
+    for (const f of fs.readdirSync(dir).filter(n => n.endsWith('.ts'))) {
+        const code = stripComments(fs.readFileSync(path.join(dir, f), 'utf8'));
+        // Both shapes are in use: a raw UPDATE (the three social publishers) and a drizzle .set()
+        // spanning several lines (publish-youtube-background). A read such as
+        // `SELECT … WHERE status='published'` must not count, hence the scheduled_posts SET anchor.
+        const raw = /UPDATE\s+scheduled_posts\s+SET[\s\S]{0,120}?status\s*=\s*'published'/.test(code);
+        const orm = /update\s*\(\s*scheduledPosts\s*\)[\s\S]{0,300}?status:\s*'published'/.test(code);
+        if (!raw && !orm) continue;
+        if (!/markPostMediaPosted/.test(code)) offenders.push(`netlify/functions/${f}`);
+    }
+    assert.deepStrictEqual(offenders, [],
+        `these publish a post without starting its media retention clock, so its R2 bytes are never reclaimed: ${offenders.join(', ')}`);
+});
+
+// The reclaimer must keep selecting on the retention date ALONE. Adding a status filter here would
+// re-break the posted half the moment any transition upstream is missed — which is the entire
+// history of this feature.
+check('the reclaimer selects on the retention date, not on a status', () => {
+    const src = stripComments(read('netlify/functions/content-retention.ts'));
+    assert.ok(/isNotNull\(contentAssets\.retentionDeleteAfter\)/.test(src) &&
+              /lte\(contentAssets\.retentionDeleteAfter/.test(src),
+        'content-retention must select assets by their retention date');
+    // Selecting the column is fine (it is logged); FILTERING on it is the regression. The column is
+    // a hand-maintained denormalisation, and every gap in it silently switches a whole retention
+    // window off — which is precisely how the posted half stayed dead.
+    assert.ok(!/(eq|inArray|ne|notInArray)\(\s*contentAssets\.status/.test(src),
+        'content-retention must NOT filter on contentAssets.status — a status filter re-couples the reclaimer to a denormalised column that no upstream transition maintains reliably');
+});
+
+// The write side must not repeat the mistake it is fixing. A fromStatus gate is what made
+// propagateAssetStatuses unable to fire: one missed hop upstream and the asset is stranded for ever.
+check('the posted transition does not gate on the asset\'s current status', () => {
+    const src = stripComments(read('src/utils/release-post-media.ts'));
+    const fn = src.slice(src.indexOf('export async function markPostMediaPosted'));
+    assert.ok(fn.length > 0, 'markPostMediaPosted must exist');
+    assert.ok(!/eq\(contentAssets\.status/.test(fn),
+        'markPostMediaPosted must not require the asset to already hold a particular status — that is the exact gate that stopped propagateAssetStatuses ever firing');
+    assert.ok(/isNull\(contentAssets\.retentionDeleteAfter\)/.test(fn),
+        'an existing (possibly shorter) retention window must win — a rejection\'s 7-day clock must not be pushed out to 30 days, and a re-run must be a no-op');
+    assert.ok(/isNull\(contentAssets\.purgedAt\)/.test(fn),
+        'assets whose bytes are already gone must not have a clock restarted');
+});
+
+// Cross-post siblings share one asset and publish minutes apart. Starting the clock on the first
+// platform's success would put a purge timer on a picture the next platform has yet to upload.
+check('a published post does not start the clock on media a sibling still needs', () => {
+    const src = stripComments(read('src/utils/release-post-media.ts'));
+    const fn = src.slice(src.indexOf('export async function markPostMediaPosted'));
+    assert.ok(/stillNeeded/.test(fn),
+        'markPostMediaPosted must exclude assets that an unpublished post still references');
+    assert.ok(/scheduled_post_assets/.test(fn) && /content_asset_ids|assetIdsLateral/.test(fn),
+        'the still-needed check must consult BOTH the junction table and the deprecated array — resolvePostImage reads the array at publish time, so ignoring it purges media a publisher is about to want');
+    assert.ok(/MEDIA_PENDING_STATUSES/.test(fn),
+        'the set of "still needs its bytes" statuses must come from src/config/post-status.ts, not be retyped here');
+});
+
+// 'publishing' and 'failed' are the trap: MEDIA_EDITABLE_STATUSES excludes them (you may not swap a
+// mid-flight post's picture) but they absolutely still need the BYTES — failed posts are retried by
+// retry-failed-post.ts. Reusing the editable list as the retention list would purge media out from
+// under a post that is about to publish.
+check('retention keeps media for posts that are mid-flight or awaiting retry', () => {
+    for (const s of ['publishing', 'failed', 'paused', 'paused_credits', 'scheduled', 'approved', 'draft']) {
+        assert.ok(mediaStillNeeded(s),
+            `a '${s}' post has not published yet — purging its media would leave it with nothing to publish`);
+    }
+    for (const s of ['published', 'rejected', 'cancelled', 'missed']) {
+        assert.ok(!mediaStillNeeded(s),
+            `a '${s}' post will never read its media again — treating it as needed means the bytes are never reclaimed`);
+    }
+    assert.ok(!MEDIA_PENDING_STATUSES.includes('published' as never),
+        'published must be the ONLY status removed from the union — it is the one that starts the clock');
+});
+
+// The set-returning function trap. jsonb_array_elements_text() sits in the FROM list, so it runs
+// before WHERE can filter anything: one row whose content_asset_ids is an object, a scalar or a JSON
+// null aborts the entire query. A `WHERE content_asset_ids <> '[]'` guard reads like protection and
+// gives none — the CASE has to be inside the call.
+check('every jsonb_array_elements_text call is guarded inside the call', () => {
+    const src = stripComments(read('src/utils/release-post-media.ts'));
+    const calls = src.match(/jsonb_array_elements_text\([\s\S]{0,200}?\)\)/g) ?? [];
+    assert.ok(calls.length > 0, 'expected the legacy array to be expanded somewhere');
+    for (const call of calls) {
+        assert.ok(/jsonb_typeof\([\s\S]*?\)\s*=\s*'array'/.test(call),
+            `a jsonb_array_elements_text call expands content_asset_ids without a CASE jsonb_typeof(...) = 'array' guard INSIDE the call — a single non-array row will abort the whole query, not skip that row:\n${call}`);
+    }
 });
 
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);

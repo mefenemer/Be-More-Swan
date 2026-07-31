@@ -13,6 +13,7 @@ import {
 import { createNotification } from '../../src/utils/notify';
 import { getSecret } from '../../src/utils/vault';
 import { recordPostedAssets } from '../../src/utils/pexels';
+import { markPostMediaPosted } from '../../src/utils/release-post-media';
 import { resolvePostMediaList } from '../../src/utils/social-publish';
 import { composePostText } from '../../src/utils/post-link';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -382,6 +383,12 @@ export default withLambda(async () => {
             // US2 AC2.5: burn any Pexels asset on this post so it is never reused (idempotent).
             await recordPostedAssets(db, { orgId: post.organisation_id, userId: post.user_id, scheduledPostId: post.id })
                 .catch(e => console.warn(`[publish-instagram] recordPostedAssets failed for post ${post.id}:`, e?.message || e));
+
+            // Media has gone live — start its 30-day retention clock so content-retention.ts can
+            // reclaim the R2 bytes. Instagram fetched its own copy from the URL we handed the Graph
+            // API, so the published post does not depend on ours surviving.
+            await markPostMediaPosted(db, [post.id])
+                .catch(e => console.warn(`[publish-instagram] markPostMediaPosted failed for post ${post.id}:`, e?.message || e));
 
             await createNotification(db, 'post_published_instagram', {
                 userId: post.user_id,

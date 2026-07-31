@@ -114,3 +114,37 @@ const MEDIA_EDITABLE = new Set<string>(MEDIA_EDITABLE_STATUSES);
 export function isMediaEditable(status: string | null | undefined): boolean {
     return MEDIA_EDITABLE.has(String(status ?? ''));
 }
+
+/**
+ * Statuses whose post has NOT gone out yet but still might — its media must stay in R2.
+ *
+ * This is the retention rule, and it is the mirror image of MEDIA_EDITABLE_STATUSES rather than a
+ * copy of it: a 'publishing' or 'failed' post may not have its picture SWAPPED, but it absolutely
+ * still needs the bytes, because the publisher is about to read storageKey (or will on the retry
+ * that retry-failed-post.ts sets up). Conflating "editable" with "needed" would purge the media out
+ * from under a post that was mid-flight.
+ *
+ * Everything absent from this list is a post that will never read its media again: 'published'
+ * (done — the platform hosts its own copy from here), 'rejected'/'cancelled' (released on their own
+ * 7-day clock by release-post-media.ts), 'missed', 'admin_test'.
+ *
+ * Kept as the union of the two lists above minus 'published' so a status added to either one is
+ * retained by default. Getting that wrong deletes a live post's picture; getting it wrong the other
+ * way merely delays a reclaim, so the union is deliberately the safe direction.
+ */
+export const MEDIA_PENDING_STATUSES = [
+    ...new Set<string>([...MEDIA_EDITABLE_STATUSES, ...SCHEDULE_ACTIVE_STATUSES]),
+].filter(s => s !== 'published') as PostStatus[];
+
+const MEDIA_PENDING = new Set<string>(MEDIA_PENDING_STATUSES);
+
+/**
+ * True when this post has yet to publish, so its media may not be reclaimed.
+ *
+ * Used by markPostMediaPosted (src/utils/release-post-media.ts) to hold the 30-day clock back on an
+ * asset that cross-post siblings still share: Instagram publishing at 09:00 must not start a purge
+ * timer on the picture LinkedIn is going to publish at 10:00.
+ */
+export function mediaStillNeeded(status: string | null | undefined): boolean {
+    return MEDIA_PENDING.has(String(status ?? ''));
+}

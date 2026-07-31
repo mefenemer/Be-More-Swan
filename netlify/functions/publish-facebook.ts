@@ -21,6 +21,7 @@ import { scheduledPosts, publishCronLog } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { resolvePostMediaList, hasAttachedMedia, publishFacebook, resolveFacebookPageCredentials, type DriverResult } from '../../src/utils/social-publish';
 import { recordPostedAssets } from '../../src/utils/pexels';
+import { markPostMediaPosted } from '../../src/utils/release-post-media';
 import { composePostText } from '../../src/utils/post-link';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -122,6 +123,9 @@ export default withLambda(async () => {
             );
             await recordPostedAssets(db, { orgId: post.organisation_id, userId: post.user_id, scheduledPostId: post.id })
                 .catch(e => console.warn(`[publish-facebook] recordPostedAssets failed for post ${post.id}:`, e?.message || e));
+            // Published — hand the media to the 30-day retention window (content-retention.ts).
+            await markPostMediaPosted(db, [post.id])
+                .catch(e => console.warn(`[publish-facebook] markPostMediaPosted failed for post ${post.id}:`, e?.message || e));
             await createNotification(db, 'post_published', {
                 userId: post.user_id,
                 context: { platform: { label: 'Facebook' } },

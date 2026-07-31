@@ -17,6 +17,7 @@ import { createNotification } from '../../src/utils/notify';
 import { resolvePostMediaList, hasAttachedMedia, resolveSocialCredentials, publishX, publishLinkedIn, publishThreads, type DriverResult } from '../../src/utils/social-publish';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { recordPostedAssets } from '../../src/utils/pexels';
+import { markPostMediaPosted } from '../../src/utils/release-post-media';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { holdXCredits, settleXHold, xPostCost, xPostHasLink } from '../../src/utils/ai-credits';
 import { composePostText } from '../../src/utils/post-link';
@@ -244,6 +245,12 @@ export default withLambda(async () => {
             // covers autonomous posts that bypass manual approval). Never blocks publish success.
             await recordPostedAssets(db, { orgId: post.organisation_id, userId: post.user_id, scheduledPostId: post.id })
                 .catch(e => console.warn(`[publish-social-posts] recordPostedAssets failed for post ${post.id}:`, e?.message || e));
+            // The post has gone out, so its media enters the 30-day retention window and
+            // content-retention.ts can finally reclaim the R2 bytes. Skips anything a cross-post
+            // sibling is still waiting to publish. Best-effort: a publish that succeeded must never
+            // be reported as failed because a housekeeping clock did not get set.
+            await markPostMediaPosted(db, [post.id])
+                .catch(e => console.warn(`[publish-social-posts] markPostMediaPosted failed for post ${post.id}:`, e?.message || e));
             await createNotification(db, 'post_published', {
                 userId: post.user_id,
                 context: { platform: { label: LABEL[post.platform] } },

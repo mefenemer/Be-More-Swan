@@ -26,6 +26,7 @@ import {
     type YouTubeResumeState,
 } from '../../src/utils/social-publish';
 import { recordPostedAssets } from '../../src/utils/pexels';
+import { markPostMediaPosted } from '../../src/utils/release-post-media';
 import { postLinkLine } from '../../src/utils/post-link';
 import { isYoutubeShortFormat } from '../../src/config/youtube-short';
 import { fireOrchestrations } from '../../src/utils/orchestration';
@@ -120,6 +121,11 @@ export default withLambda(async (event: HandlerEvent) => {
 
         await recordPostedAssets(db, { orgId: post.organisationId!, userId: post.userId, scheduledPostId: post.id })
             .catch(e => console.warn(`[publish-youtube-background] recordPostedAssets failed for post ${post.id}:`, e?.message || e));
+        // Uploaded and live — start the 30-day retention clock so content-retention.ts reclaims the
+        // R2 bytes. Video is the largest media this app stores, so this is the path that matters
+        // most for storage; YouTube holds its own transcode from here.
+        await markPostMediaPosted(db, [post.id])
+            .catch(e => console.warn(`[publish-youtube-background] markPostMediaPosted failed for post ${post.id}:`, e?.message || e));
         await createNotification(db, 'post_published', {
             userId: post.userId,
             context: { platform: { label: 'YouTube' } },

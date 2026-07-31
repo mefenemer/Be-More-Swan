@@ -45,16 +45,43 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { contentAssets, scheduledPostAssets, scheduledPosts } from '../../db/schema';
+import { MEDIA_PENDING_STATUSES } from '../config/post-status';
 
 type Db = ReturnType<typeof getDb>;
 
 /** Matches REJECTED_RETENTION_MS in content-assets.ts — a released asset gets the 7-day window. */
 const REJECTED_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
+/** Matches POSTED_RETENTION_MS in content-assets.ts — a published post's media gets 30 days. */
+const POSTED_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
 /** Binds each id as its own parameter. Avoids passing a JS array into a raw template. */
 function idList(ids: number[]) {
     return sql.join(ids.map(id => sql`${id}`), sql`, `);
 }
+
+/** The same, for the status lists — these are text, so they must be bound, never interpolated. */
+function textList(values: readonly string[]) {
+    return sql.join(values.map(v => sql`${v}`), sql`, `);
+}
+
+/**
+ * `scheduled_posts.content_asset_ids` expanded to a set of ints, safely.
+ *
+ * The CASE has to live INSIDE the jsonb_array_elements_text() call, not in a WHERE clause. This is
+ * a set-returning function in the FROM list: it runs before WHERE can filter anything, so a single
+ * row holding a non-array value (an object, a bare scalar, a JSON `null`) aborts the WHOLE query
+ * rather than being skipped. A `WHERE content_asset_ids <> '[]'` guard reads like protection and
+ * provides none.
+ */
+const assetIdsLateral = sql`
+    CROSS JOIN LATERAL (
+        SELECT (jsonb_array_elements_text(
+            CASE WHEN jsonb_typeof(sp.content_asset_ids) = 'array'
+                 THEN sp.content_asset_ids ELSE '[]'::jsonb END
+        ))::int AS id
+    ) x
+`;
 
 /**
  * Every content_assets id that `postIds` reference, from both the junction table and the deprecated
@@ -127,11 +154,8 @@ export async function releaseAssets(db: Db, assetIds: number[], excludePostIds: 
     const otherLegacy = await db.execute<{ id: number }>(sql`
         SELECT DISTINCT x.id
         FROM scheduled_posts sp
-        CROSS JOIN LATERAL (
-            SELECT (jsonb_array_elements_text(sp.content_asset_ids))::int AS id
-        ) x
-        WHERE sp.content_asset_ids IS NOT NULL
-          AND sp.content_asset_ids <> '[]'::jsonb
+        ${assetIdsLateral}
+        WHERE TRUE
           ${notExcluded}
           AND x.id IN (${idList(candidateIds)})
     `);
@@ -173,4 +197,103 @@ export async function releaseAssets(db: Db, assetIds: number[], excludePostIds: 
 export async function releasePostMedia(db: Db, postIds: number[]): Promise<number> {
     const assetIds = await collectPostAssetIds(db, postIds);
     return releaseAssets(db, assetIds, postIds);
+}
+
+/**
+ * Starts the 30-day POSTED retention clock on the media of posts that have just gone live.
+ *
+ * ── The bug this closes ─────────────────────────────────────────────────────────────────────────
+ * content-retention.ts selects purely on `retentionDeleteAfter <= now AND purgedAt IS NULL`. It has
+ * no status filter, so its documented "purges POSTED assets on a 30-day window" half was never
+ * gated by the status column — it simply had nothing to select, because NOTHING EVER SET
+ * retentionDeleteAfter for a published post's media.
+ *
+ * The transition did exist on paper: scheduled-posts.ts calls propagateAssetStatuses(...,
+ * 'scheduled', 'posted') when a PATCH moves a post to 'published'. It cannot fire for a real
+ * publish, for three independent reasons:
+ *
+ *   1. Nothing publishes through that endpoint. Every actual publisher writes the row itself —
+ *      publish-social-posts.ts, publish-instagram.ts and publish-facebook.ts with a raw
+ *      `UPDATE scheduled_posts SET status = 'published'`, publish-youtube-background.ts with its
+ *      own db.update. None of them goes near an asset.
+ *   2. It reads only the deprecated `contentAssetIds` array, so media attached through the
+ *      `scheduled_post_assets` junction — the source of truth — is invisible to it.
+ *   3. It requires the asset to be sitting on exactly 'scheduled' (`eq(status, fromStatus)`), and
+ *      the step that was supposed to put it there has the same two problems. edit-brand-card.ts
+ *      inserts 'scheduled' directly; everything else stays 'pending' for ever.
+ *
+ * So the reclaimer only ever saw REJECTED assets, on their 7-day clock. Every image, video and
+ * audio file that successfully published stayed in R2 for good.
+ *
+ * ── Why this deliberately ignores the asset's current status ────────────────────────────────────
+ * No `fromStatus` gate. Reason 3 above is what a status-chain fix looks like when it rots: each
+ * hop is a hand-maintained denormalisation, and one missed transition anywhere strands the asset
+ * for ever. The truth is the posts, which is exactly why the READ side already derives the badge
+ * from live rows instead of trusting the column (deriveAssetStatus in content-assets.ts). This is
+ * that same rule on the write side, so the two agree by construction.
+ *
+ * ── The rule that keeps it safe ─────────────────────────────────────────────────────────────────
+ * An asset's clock starts only when NO post still needs its bytes (mediaStillNeeded). Cross-post
+ * siblings share one asset and publish minutes apart, so Instagram going out at 09:00 must not
+ * start a purge timer on the picture LinkedIn publishes at 10:00. Same shape as releaseAssets, but
+ * it cannot reuse that exclusion: this one has to consider posts by STATUS rather than by a
+ * caller-supplied exclusion list, because the posts in question are all still very much alive.
+ *
+ * Callers pass the post that just published; the siblings are found from the assets, not the
+ * caller. Idempotent — `retentionDeleteAfter IS NULL` means a second call is a no-op, and it never
+ * overwrites a shorter window a rejection already set.
+ *
+ * @returns how many content_assets rows had their 30-day clock started.
+ */
+export async function markPostMediaPosted(db: Db, postIds: number[]): Promise<number> {
+    if (postIds.length === 0) return 0;
+
+    const candidateIds = await collectPostAssetIds(db, postIds);
+    if (candidateIds.length === 0) return 0;
+
+    const statuses = textList(MEDIA_PENDING_STATUSES);
+    const stillNeeded = new Set<number>();
+
+    // Junction table — the source of truth for which post holds which asset.
+    const viaJunction = await db.execute<{ id: number }>(sql`
+        SELECT DISTINCT spa.content_asset_id AS id
+        FROM scheduled_post_assets spa
+        JOIN scheduled_posts sp ON sp.id = spa.scheduled_post_id
+        WHERE spa.content_asset_id IN (${idList(candidateIds)})
+          AND sp.status IN (${statuses})
+    `);
+    for (const r of viaJunction) stillNeeded.add(r.id);
+
+    // …and the deprecated array, which still carries the oldest rows and is what resolvePostImage
+    // actually reads at publish time. Skipping it would purge media a publisher is about to want.
+    const viaLegacy = await db.execute<{ id: number }>(sql`
+        SELECT DISTINCT x.id
+        FROM scheduled_posts sp
+        ${assetIdsLateral}
+        WHERE sp.status IN (${statuses})
+          AND x.id IN (${idList(candidateIds)})
+    `);
+    for (const r of viaLegacy) stillNeeded.add(r.id);
+
+    const reclaimable = candidateIds.filter(id => !stillNeeded.has(id));
+    if (reclaimable.length === 0) return 0;
+
+    const now = new Date();
+    const marked = await db.update(contentAssets)
+        .set({
+            status: 'posted',
+            postedAt: now,
+            retentionDeleteAfter: new Date(now.getTime() + POSTED_RETENTION_MS),
+            updatedAt: now,
+        })
+        .where(and(
+            inArray(contentAssets.id, reclaimable),
+            isNull(contentAssets.purgedAt),
+            // Never push an existing window back. A rejection's 7-day clock is SHORTER and must
+            // win; re-running this on an already-marked asset must not buy it another 30 days.
+            isNull(contentAssets.retentionDeleteAfter),
+        ))
+        .returning({ id: contentAssets.id });
+
+    return marked.length;
 }
