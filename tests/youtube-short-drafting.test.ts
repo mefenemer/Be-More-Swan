@@ -58,11 +58,19 @@ test('the weekly Short is excluded from cross-post coverage', () => {
 });
 
 test('the Short is enqueued as a standalone job, never as a fan-out', () => {
+    // The shape lives in enqueueYoutubeShortJob, shared by the weekly cron and the on-demand
+    // trigger. All three fields matter and none is self-explanatory: `platform` set with
+    // `platforms` NULL is what process-content-jobs reads as "one post, this platform" (and so
+    // takes the Short branch), and a null group id is what keeps it out of the cross-post card.
     const s = src('src/utils/schedule-gap-fill.ts');
-    const block = s.slice(s.indexOf('if (shortSlot)'), s.indexOf('for (const slot of uncovered)'));
-    assert.ok(/platform: 'youtube'/.test(block), 'the job must name its platform');
-    assert.ok(/platforms: null/.test(block), 'a platforms list would turn this into a fan-out');
-    assert.ok(/crosspostGroupId: null/.test(block), 'a group id would collapse it into the cross-post card');
+    const helper = s.slice(s.indexOf('export async function enqueueYoutubeShortJob'));
+    assert.ok(/platform: 'youtube'/.test(helper), 'the job must name its platform');
+    assert.ok(/platforms: null/.test(helper), 'a platforms list would turn this into a fan-out');
+    assert.ok(/crosspostGroupId: null/.test(helper), 'a group id would collapse it into the cross-post card');
+
+    // ...and the weekly path must go through it rather than writing its own row.
+    const weekly = s.slice(s.indexOf('if (shortSlot)'), s.indexOf('for (const slot of uncovered)'));
+    assert.ok(/enqueueYoutubeShortJob\(db, \{/.test(weekly), 'the weekly enqueue must use the shared helper');
 });
 
 // ── 2. The Short's own invariants ────────────────────────────────────────────
@@ -191,6 +199,50 @@ test('an autonomous Short uploads unlisted', () => {
         /post\.triggerType !== 'manual'/.test(s),
         'a human-composed YouTube post must keep the normal privacy default',
     );
+});
+
+// ── 3. The on-demand trigger ─────────────────────────────────────────────────
+
+test('the trigger and the weekly cron enqueue through the SAME helper', () => {
+    // The job shape is load-bearing and looks unremarkable: platform set, platforms NULL, no group
+    // id is what makes the drafter take the Short branch. A second hand-written copy that said
+    // `platforms: ['youtube']` would read identically and would quietly draft an ordinary 16:9
+    // YouTube post that can never publish.
+    const gap = src('src/utils/schedule-gap-fill.ts');
+    assert.ok(/export async function enqueueYoutubeShortJob/.test(gap), 'the shape must have one definition');
+    assert.equal(
+        (gap.match(/platform: 'youtube'/g) || []).length, 1,
+        'schedule-gap-fill should name the platform exactly once — inside the shared helper',
+    );
+
+    const trigger = src('netlify/functions/trigger-youtube-short.ts');
+    assert.ok(/enqueueYoutubeShortJob\(/.test(trigger), 'the trigger must reuse the helper, not rebuild the job');
+    assert.ok(
+        !/insert\(contentGenerationJobs\)/.test(trigger),
+        'the trigger must not write its own job row',
+    );
+});
+
+test('the trigger refuses when there is no renderer or no YouTube', () => {
+    const s = src('netlify/functions/trigger-youtube-short.ts');
+    assert.ok(/RENDER_UNAVAILABLE/.test(s), 'must refuse before drafting when Remotion/R2 are unset');
+    assert.ok(/YOUTUBE_NOT_CONNECTED/.test(s));
+    // Order matters: both refusals must precede the enqueue, or the caller pays for a model call
+    // to produce a draft that cannot publish.
+    assert.ok(
+        s.indexOf('RENDER_UNAVAILABLE') < s.indexOf('enqueueYoutubeShortJob(db, {'),
+        'the render check must come before the enqueue',
+    );
+});
+
+test('the queue poke is awaited, and an abort still counts as sent', () => {
+    // An un-awaited fetch never leaves a frozen Lambda — the documented way to strand a job. But we
+    // also refuse to block on a full drain, so the client aborts at 5s and reports success: the
+    // request has already left, and aborting our end does not stop the server.
+    const s = src('netlify/functions/trigger-youtube-short.ts');
+    const fn = s.slice(s.indexOf('async function pokeQueue'), s.indexOf('export default'));
+    assert.ok(/await fetch\(/.test(fn), 'the poke must be awaited');
+    assert.ok(/AbortError/.test(fn), 'an abort means the drain is running, not that it failed');
 });
 
 console.log(`\n${passed} checks passed\n`);

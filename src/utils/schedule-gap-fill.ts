@@ -195,23 +195,13 @@ export async function enqueueScheduleGapFill(
     let enqueued = 0;
 
     if (shortSlot) {
-        await db.insert(contentGenerationJobs).values({
-            jobId: randomUUID(),
+        await enqueueYoutubeShortJob(db, {
             blueprintId: bp.id,
             assistantId: assistant.id,
             organisationId: assistant.organisationId,
             userId: assistant.userId,
-            status: 'queued',
-            attempt: 0,
-            maxAttempts: 3,
-            triggerType: 'scheduled',
-            // Standalone by construction: `platform` set, `platforms` null, no crosspost group. That
-            // combination is what the worker reads as "one post, this platform" — and what keeps the
-            // Short out of the cross-post card in the Review Queue.
-            platform: 'youtube',
-            platforms: null,
             targetPublishDate: shortSlot,
-            crosspostGroupId: null,
+            triggerType: 'scheduled',
         });
         enqueued++;
     }
@@ -241,6 +231,43 @@ export async function enqueueScheduleGapFill(
 }
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Enqueue ONE YouTube Short job. The single definition of what a Short job looks like.
+ *
+ * Shared by the weekly cron and the on-demand trigger, because the shape is load-bearing and not
+ * obvious from reading it: `platform` set, `platforms` NULL and no `crosspost_group_id` is what
+ * process-content-jobs reads as "one post, this platform" — which is what makes the drafter take the
+ * Short branch (9:16 card, yt_short, rendered to video) instead of treating it as a cross-post.
+ * A second hand-written copy of this object that set `platforms: ['youtube']` would look identical
+ * at a glance and would silently draft an ordinary 16:9 YouTube post that can never publish.
+ */
+export async function enqueueYoutubeShortJob(db: Db, args: {
+    blueprintId: number;
+    assistantId: number;
+    organisationId: number;
+    userId: number;
+    targetPublishDate: Date;
+    triggerType: 'scheduled' | 'on_demand';
+}): Promise<string> {
+    const jobId = randomUUID();
+    await db.insert(contentGenerationJobs).values({
+        jobId,
+        blueprintId: args.blueprintId,
+        assistantId: args.assistantId,
+        organisationId: args.organisationId,
+        userId: args.userId,
+        status: 'queued',
+        attempt: 0,
+        maxAttempts: 3,
+        triggerType: args.triggerType,
+        platform: 'youtube',
+        platforms: null,
+        targetPublishDate: args.targetPublishDate,
+        crosspostGroupId: null,
+    });
+    return jobId;
+}
 
 /**
  * When the assistant's next weekly YouTube Short should be drafted, or null if it shouldn't.
