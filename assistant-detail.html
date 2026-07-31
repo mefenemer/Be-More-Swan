@@ -337,6 +337,14 @@
           <p class="text-2xl font-black text-emerald-700 leading-tight" id="metrics-total-published">—</p>
         </div>
       </div>
+      <!-- Failed posts. Deliberately a line rather than a fourth tile: it is usually zero, and a
+           permanently-empty tile trains people to ignore that corner of the card. A 'failed' post
+           appears in no other count and (until the Review Queue's Needs attention column) had no
+           screen of its own, so three of them sat unnoticed for a week. Click-through goes to the
+           column that can act on them. Hidden while the count is 0. -->
+      <button type="button" id="metrics-needs-attention"
+        onclick="window._activateMainTab && window._activateMainTab('review-queue'); window.detailRqOpenStatus && window.detailRqOpenStatus('attention')"
+        class="hidden mt-2 w-full text-left text-xs font-bold text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2 hover:bg-red-100 transition cursor-pointer"></button>
       <!-- Content by platform — relocated here from the standalone "Impact & ROI" card so the
            per-platform split sits with the Created/Scheduled/Published totals it breaks down.
            _fetchAndRenderAssistantMetrics shows this block only when the assistant has posted to
@@ -350,7 +358,7 @@
       <div id="autopilot-platform-breakdown" class="mt-4 pt-4 border-t border-gray-100 hidden">
         <div class="flex items-center justify-between gap-3 mb-2">
           <h4 class="text-[11px] font-bold text-gray-400 uppercase tracking-wide shrink-0" id="metrics-breakdown-label">Content by platform</h4>
-          <p class="text-[11px] text-gray-400 shrink-0">All-time posts</p>
+          <p class="text-[11px] text-gray-400 shrink-0" id="metrics-breakdown-note">All-time, per platform</p>
         </div>
         <div id="metrics-by-platform"></div>
       </div>
@@ -654,6 +662,15 @@
           data-status="posted" onclick="detailRqOpenStatus('posted', this)">Posted
           <span id="detail-rq-col-count-posted" class="ml-1 bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
         </button>
+        <!-- Posts that tried to publish and stopped. 'failed' is not 'rejected', so Archived never
+             showed them and no other column did either — they were reachable only from the calendar.
+             The Autopilot card's "N posts failed to publish" line deep-links here. -->
+        <button class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
+          data-status="attention" onclick="detailRqOpenStatus('attention', this)">Needs attention
+          <span id="detail-rq-col-count-attention" class="ml-1 bg-red-100 text-red-700 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
+        </button>
+        <!-- Archived covers rejected AND cancelled (expanded server-side): both mean "not going out",
+             differing only in who stopped it. Cancelled posts previously appeared nowhere. -->
         <button class="detail-rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
           data-status="archived" onclick="detailRqOpenStatus('archived', this)">Archived
           <span id="detail-rq-col-count-archived" class="ml-1 bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded-full hidden"></span>

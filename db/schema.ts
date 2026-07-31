@@ -1930,7 +1930,11 @@ export const scheduledPosts = pgTable("scheduled_posts", {
   index("scheduled_posts_user_idx").on(t.userId),
   // US-SMM-3.3.1: Partial index for publish queue polling
   index("scheduled_posts_publish_queue_idx").on(t.publishDate).where(sql`status = 'scheduled' AND platform = 'instagram'`),
-  check("scheduled_posts_status_check", sql`${t.status} IN ('draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'publishing', 'published', 'paused', 'failed', 'rejected', 'cancelled', 'missed', 'admin_test')`),
+  // 'paused_credits' is NOT a synonym for 'paused': it is the X quota park, written by
+  // pauseForXCredits and selected back out by the monthly reset sweep and stripe-webhook's
+  // credit-pack top-up. It was missing here and from the live constraint, which made every pause
+  // a constraint violation — see db/scheduled-posts-paused-credits-status.sql.
+  check("scheduled_posts_status_check", sql`${t.status} IN ('draft', 'pending_approval', 'in_review', 'approved', 'scheduled', 'publishing', 'published', 'paused', 'paused_credits', 'failed', 'rejected', 'cancelled', 'missed', 'admin_test')`),
 ]);
 
 // US-SMM-PERF: Per-post social performance snapshot.

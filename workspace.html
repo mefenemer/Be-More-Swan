@@ -5108,12 +5108,16 @@ async function refreshPendingBadge() {
 // is "Posts"; other assistant types can define their own groups later.
 
 // Column = a lifecycle stage. postStatus filters scheduled_posts.
+// Kept in step with _DETAIL_RQ_COLUMNS in assistants.js — the same queue, scoped to one assistant
+// there and org-wide here, so a post must not be reachable in one and invisible in the other.
+// 'scheduled' and 'archived' are status FAMILIES expanded server-side (get-social-drafts.ts).
 const RQ_COLUMNS = {
     review:    { label: 'Review',    postStatus: 'pending_approval' },
     approved:  { label: 'Approved',  postStatus: 'approved' },
     scheduled: { label: 'Scheduled', postStatus: 'scheduled' },
     posted:    { label: 'Posted',    postStatus: 'published' },
-    archived:  { label: 'Archived',  postStatus: 'rejected' },
+    attention: { label: 'Needs attention', postStatus: 'failed' },
+    archived:  { label: 'Archived',  postStatus: 'archived' },
 };
 
 // Content groups for this assistant type. Each: how to fetch its items for a column + how to render.
@@ -5409,7 +5413,10 @@ function rqRenderSocialCard(draft) {
     rqCachePost(draft);
     const ago = rqTimeAgo(draft.generatedAt || draft.rejectedAt);
     const origin = rqOriginPill(draft);
-    const isArchived = draft.status === 'rejected';
+    // Drives the struck-through, de-emphasised treatment for work that is not going out. Covers
+    // 'cancelled' as well as 'rejected' now that the Archived column shows both — keying on
+    // 'rejected' alone left a cancelled post styled like a live one.
+    const isArchived = draft.status === 'rejected' || draft.status === 'cancelled';
     const isVideo = _rqMediaIsVideo(draft);
     const thumb = draft.thumbnailUrl
         ? (isVideo
@@ -5424,6 +5431,10 @@ function rqRenderSocialCard(draft) {
         scheduled:        { cls: 'bg-blue-50 border-blue-200 text-blue-700',          label: 'Scheduled' },
         paused_credits:   { cls: 'bg-amber-50 border-amber-200 text-amber-700',       label: 'Paused · X credits' },
         published:        { cls: 'bg-emerald-50 border-emerald-200 text-emerald-700', label: 'Posted' },
+        // Both new, alongside the 'Needs attention' and widened 'Archived' columns. Without an entry
+        // the chip renders empty, so a failed post would show a card with no state on it at all.
+        failed:           { cls: 'bg-red-50 border-red-200 text-red-700',             label: 'Failed to publish' },
+        cancelled:        { cls: 'bg-gray-100 border-gray-200 text-gray-500',         label: 'Cancelled' },
         rejected:         { cls: 'bg-gray-100 border-gray-200 text-gray-500',         label: `Archived${draft.daysRemaining != null ? ` · ${draft.daysRemaining}d left` : ''}` },
     };
     // A pending/rendering/failed video render OVERRIDES the status chip. The post's own status still
@@ -6770,7 +6781,12 @@ window.rqAcceptVerifyRewrite = async function (index) {
         if (window.showToast) window.showToast('Caption updated', { icon: '✏️' });
         if (typeof rqLoadItems === 'function') rqLoadItems();
         window.detailRqRefresh?.();
-        openPostReview(_prqPostId);
+        // `refresh: true` is load-bearing. The canvas renders from _rqPostCache, and this post is
+        // already IN that cache — so a plain re-open skips the refetch entirely and repaints the
+        // caption we just replaced. The server also applies the new caption to the cross-post
+        // siblings, so patching one cached row would not be enough either; refetching rebuilds the
+        // whole group.
+        openPostReview(_prqPostId, { refresh: true });
     } catch { alert('Network error — please try again.'); }
 };
 
@@ -6851,7 +6867,12 @@ window.rqApplySuggestions = async function () {
         // Re-open so the new caption shows in the post body. The quality panel reloads with it and
         // hits the cache — the server persisted this verdict a moment ago, so the captionHash
         // matches and no model call happens.
-        openPostReview(_prqPostId);
+        //
+        // `refresh: true` for the POST cache, which is a different cache and was the bug: the canvas
+        // renders from _rqPostCache, this post is already in it, and a plain re-open therefore skips
+        // its refetch and repaints the caption we just replaced. Same defect the verify-rewrite path
+        // had — both write a new caption, so both have to invalidate.
+        openPostReview(_prqPostId, { refresh: true });
     } catch { alert('Network error — please try again.'); }
     finally { if (btn) { btn.disabled = false; btn.textContent = 'Save this version'; } }
 };

@@ -35,6 +35,15 @@
         data-status="scheduled" onclick="_rqSafeOpenStatus('scheduled', this)">Scheduled</button>
       <button class="rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
         data-status="posted" onclick="_rqSafeOpenStatus('posted', this)">Posted</button>
+      <!-- Posts that tried to publish and stopped. Until this column existed they were in no
+           lifecycle view at all: 'failed' is not 'rejected', so Archived never showed them, and the
+           calendar was the only surface that rendered one. -->
+      <button class="rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
+        data-status="attention" onclick="_rqSafeOpenStatus('attention', this)">Needs attention
+        <span id="rq-col-count-attention" class="ml-1 bg-red-100 text-red-700 text-xs px-1.5 py-0.5 rounded-full hidden"></span>
+      </button>
+      <!-- Archived now covers rejected AND cancelled (expanded server-side) — both mean "not going
+           out", and cancelled posts previously appeared nowhere. -->
       <button class="rq-col px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 rounded-t whitespace-nowrap"
         data-status="archived" onclick="_rqSafeOpenStatus('archived', this)">Archived</button>
     </div>

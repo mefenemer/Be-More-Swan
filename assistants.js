@@ -705,12 +705,21 @@ window._activateMainTab = function(name) {
 // Mirrors the global rqOpenStatus/rqRenderGroups in workspace.html but scopes all
 // fetches to window._currentAssistantId so only this assistant's content shows.
 
+// Every column maps to a `status` value get-social-drafts understands. Two of these are FAMILIES
+// rather than single statuses (the server expands them, see its statusFilter switch):
+//   scheduled → scheduled + paused_credits   (a post parked on X quota is still booked)
+//   archived  → rejected + cancelled         (both mean "not going out", from different actors)
+//
+// 'attention' (failed) and the cancelled half of 'archived' are new. Before them, a post that
+// failed to publish or was cancelled appeared in NO column — on this assistant, 3 failed and 16
+// cancelled rows were reachable from nowhere in the product while still inflating the Created tile.
 const _DETAIL_RQ_COLUMNS = {
     review:    { postStatus: 'pending_approval' },
     approved:  { postStatus: 'approved' },
     scheduled: { postStatus: 'scheduled' },
     posted:    { postStatus: 'published' },
-    archived:  { postStatus: 'rejected' },
+    attention: { postStatus: 'failed' },
+    archived:  { postStatus: 'archived' },
 };
 
 let _detailRqCurrentStatus = 'review';
@@ -4155,9 +4164,29 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
         const note = el('metrics-period-note');
         note.textContent = `Time & money saved ${periodLabel}`;
         note.title = `Time & money saved ${periodLabel} (matches the dashboard's ${period === 'month' ? 'This Month' : 'This Week'} view)`;
+        // These three now count POSTS, not per-platform rows, and 'Scheduled' no longer includes
+        // work still awaiting review — so they reconcile with the Review Queue's Scheduled tab and
+        // the calendar instead of contradicting both. The titles say which statuses each rolls up,
+        // because "Created 18" against a Review Queue showing 6 cards is only obvious once you know
+        // Created spans the whole lifecycle.
         el('metrics-total-created').textContent = d.totalCreated.toLocaleString();
+        el('metrics-total-created').title = 'Posts this assistant has produced, excluding ones you rejected or cancelled. Cross-posts count once.';
         el('metrics-total-scheduled').textContent = d.totalScheduled.toLocaleString();
+        el('metrics-total-scheduled').title = 'Posts committed to go out and not yet published. Excludes anything still awaiting your review. Cross-posts count once.';
         el('metrics-total-published').textContent = d.totalPublished.toLocaleString();
+        el('metrics-total-published').title = 'Posts that have gone live. Cross-posts count once, even when they reached several platforms.';
+
+        // Awaiting review + needs attention. The pending figure already has a home in the Autopilot
+        // card ("Waiting for your review"), so it is reconciled there rather than given a fourth
+        // tile; failures had no home at all, which is why 3 failed posts were invisible everywhere.
+        _syncAutopilotPending(d.totalAwaitingReview ?? 0);
+        const attention = el('metrics-needs-attention');
+        if (attention) {
+            const n = d.totalNeedsAttention || 0;
+            attention.textContent = n === 1 ? '1 post failed to publish' : `${n} posts failed to publish`;
+            attention.classList.toggle('hidden', !n);
+        }
+
         el('metrics-hours-saved').textContent = `~${d.hoursSaved}h`;
         if (d.minutesPerPost != null) el('metrics-hours-note').textContent = `Based on ~${d.minutesPerPost} min per post`;
 
@@ -4180,6 +4209,14 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
                 .sort(([, a], [, b]) => b.created - a.created);
             card.classList.toggle('hidden', entries.length < 2);
             el('metrics-breakdown-label').textContent = `Content by platform (${entries.length})`;
+            // These bars are per-platform SENDS, so they deliberately sum higher than the tiles above:
+            // one cross-post to four platforms is 1 there and 4 here. Saying so is the difference
+            // between a breakdown and an apparent contradiction.
+            const bdNote = el('metrics-breakdown-note');
+            if (bdNote) {
+                bdNote.textContent = 'All-time, per platform';
+                bdNote.title = 'Counts each platform a post went to, so a cross-post appears once per platform. The totals above count each post once.';
+            }
             // Horizontal bar chart: bar length is each platform's created count, normalised to the
             // busiest platform, with the published/created figure alongside. Widths are inline (dynamic);
             // the fill uses bg-emerald-500 (the brand accent) which is present in the compiled CSS.
@@ -4191,7 +4228,7 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
                 const icon = (window._PLATFORM_ICONS || {})[p] || '';
                 const label = (window._PLATFORM_LABEL || {})[p] || p.charAt(0).toUpperCase() + p.slice(1);
                 const pct = Math.round((v.created / maxCreated) * 100);
-                return `<div title="${label}: ${v.created} created · ${v.scheduled} scheduled · ${v.published} published">
+                return `<div title="${label}: ${v.created} sent or queued · ${v.scheduled} scheduled · ${v.published} published (per-platform, so a cross-post counts here once per platform)">
                     <div class="flex items-center justify-between text-xs font-semibold mb-1">
                         <span class="flex items-center gap-1.5 text-gray-700"><span class="text-gray-400">${icon}</span>${label}</span>
                         <span class="text-gray-500" style="font-variant-numeric:tabular-nums">${v.published}/${v.created}</span>

@@ -48,11 +48,22 @@ export default withLambda(async (event) => {
         const pageSize = paged ? Math.min(50, Math.max(1, Number(rawLimit) || 10)) : 0;
         const pageOffset = Math.max(0, Number(event.queryStringParameters?.offset) || 0);
 
+        // Two filters are FAMILIES, not statuses — the Review Queue column they back covers more
+        // than one lifecycle value, and the expansion belongs here so every caller gets it:
+        //   'scheduled' → committed work, including a post parked on X quota (paused_credits),
+        //                 which is still booked and must not vanish from the Scheduled tab.
+        //   'archived'  → rejected + cancelled. Both mean "not going out"; they differ only in who
+        //                 stopped it. The column read 'rejected' alone, so cancelled posts were
+        //                 reachable from nowhere in the product.
+        // Anything else is an exact status match, as before.
+        const STATUS_FAMILIES: Record<string, string[]> = {
+            scheduled: ['scheduled', 'paused_credits'],
+            archived: ['rejected', 'cancelled'],
+        };
+        const family = STATUS_FAMILIES[statusFilter];
         const baseWhere = and(
             eq(scheduledPosts.organisationId, organisationId),
-            statusFilter === 'scheduled'
-                ? inArray(scheduledPosts.status, ['scheduled', 'paused_credits'])
-                : eq(scheduledPosts.status, statusFilter),
+            family ? inArray(scheduledPosts.status, family) : eq(scheduledPosts.status, statusFilter),
             ...(assistantIdFilter ? [eq(scheduledPosts.assistantId, assistantIdFilter)] : []),
         );
 

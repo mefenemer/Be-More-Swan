@@ -873,4 +873,18 @@ check('the footer stops inviting a published post to schedule itself', () => {
         'its button targets a rail step that is hidden for these posts, so it could only do nothing');
 });
 
+check('saving a new caption invalidates the post cache it repaints from', () => {
+    // The canvas renders from _rqPostCache. Both accept paths re-opened the editor to show the new
+    // caption — and a plain re-open SKIPS its refetch when the post is already cached, which it
+    // always is here, so the editor faithfully repainted the caption that had just been replaced.
+    // The server applies the accepted caption to the cross-post siblings too, so patching a single
+    // cached row is not a fix either; only refetching rebuilds the group.
+    for (const fn of ['rqAcceptVerifyRewrite', 'rqApplySuggestions']) {
+        const body = workspace.slice(workspace.indexOf(`window.${fn} = async function`));
+        assert.ok(body.length, `${fn} must exist`);
+        assert.match(body.slice(0, 2200), /openPostReview\(_prqPostId, \{ refresh: true \}\)/,
+            `${fn} writes a new caption, so it must invalidate the cache the canvas renders from`);
+    }
+});
+
 console.log(`\n${passed} passed${total - passed ? `, ${total - passed} failed` : ''}\n`);

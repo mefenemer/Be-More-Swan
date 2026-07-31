@@ -56,7 +56,7 @@
   // scheduled_posts statuses whose schedule is LIVE, from src/config/post-status.ts. A draft's
   // publish_date is only a proposal until someone presses Schedule, so the calendar renders these
   // and nothing else.
-  var SCHEDULE_ACTIVE_STATUSES = ["approved","scheduled","publishing","published","paused","failed"];
+  var SCHEDULE_ACTIVE_STATUSES = ["approved","scheduled","publishing","published","paused","paused_credits","failed"];
   var scheduleActive = {};
   for (var s = 0; s < SCHEDULE_ACTIVE_STATUSES.length; s++) scheduleActive[SCHEDULE_ACTIVE_STATUSES[s]] = true;
 

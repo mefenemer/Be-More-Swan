@@ -204,6 +204,25 @@ export default withLambda(async () => {
                         console.warn(`[publish-social-posts] X credit settle failed for post ${post.id}:`, (e as Error)?.message || e);
                     }
                 }
+                // 402 = quota, not failure. Our pre-flight hold above passed, so the ledger thought
+                // there was credit and only X knows better — the connected X account has hit its own
+                // API quota. Route to the SAME paused_credits destination the ledger path uses, so
+                // the monthly sweep and a credit top-up can both resurrect the post. Falling through
+                // to handleFailure() marks it 'failed', which no sweep and no Review Queue column
+                // ever selects again.
+                //
+                // Deliberately AFTER the settle: the post did not go out, so the hold must be
+                // refunded first (settle sees result.ok === false and refunds). Pausing before that
+                // would leak the hold on every 402.
+                //
+                // Note this can re-pause monthly if the X account's quota is structurally zero
+                // rather than merely spent. That is the honest outcome — the post is genuinely
+                // still pending — and each pause re-notifies, so it stays visible rather than
+                // silently dying. It never burns an attempt.
+                if (!result.ok && result.status === 402) {
+                    await pauseForXCredits(db, post, xPausedOrgs, now, 'api', result.error);
+                    return;
+                }
             } else if (post.platform === 'linkedin') {
                 result = await publishLinkedIn(text, token, creds.externalUserId, image);
             } else if (post.platform === 'threads') {
@@ -312,25 +331,62 @@ async function handleFailure(db: ReturnType<typeof getDb>, post: PostRow, reason
     }
 }
 
-// The org has spent its monthly X allowance. Move the post to the distinct 'paused_credits' status
-// (never picked up by the publisher, never counted as a failure or an attempt) and stamp retry_at
-// at the first of next month, when the allowance resets and the resume sweep re-queues it. Notify
-// the org at most once per tick. This is NOT a failure — no attempt_count bump, no post_publish_failed.
-async function pauseForXCredits(db: ReturnType<typeof getDb>, post: PostRow, notifiedOrgs: Set<number>, now: Date) {
+// X posting has stopped because a quota is spent. Move the post to the distinct 'paused_credits'
+// status (never picked up by the publisher, never counted as a failure or an attempt) and stamp
+// retry_at at the first of next month, when the allowance resets and the resume sweep re-queues it.
+// Notify the org at most once per tick. This is NOT a failure — no attempt_count bump, no
+// post_publish_failed.
+//
+// ── Two detection sides, one destination ────────────────────────────────────────────────────────
+// 'ledger'  — our own X allowance is spent. holdXCredits refused BEFORE any API call, so no spend
+//             and no request. This is the cheap, expected path.
+// 'api'     — our ledger said there was credit, we called X, and X answered 402. The two disagree:
+//             the connected X developer account has hit ITS quota, which our allowance knows
+//             nothing about.
+//
+// The API side used to fall through to handleFailure and land on 'failed', which is a one-way door:
+// BOTH resume sweeps (the monthly reset above, and stripe-webhook.ts on a credit top-up) select
+// `status = 'paused_credits' AND platform = 'x'`, and 'failed' has no Review Queue column either.
+// A post that was merely out of quota became permanently unrecoverable and invisible — exactly what
+// happened to the 2026-07-23 post whose LinkedIn sibling went out fine.
+type XPauseSource = 'ledger' | 'api';
+async function pauseForXCredits(
+    db: ReturnType<typeof getDb>,
+    post: PostRow,
+    notifiedOrgs: Set<number>,
+    now: Date,
+    source: XPauseSource = 'ledger',
+    apiDetail?: string,
+) {
     const resumeAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 5, 0));
+    // The reviewer has to be able to tell these apart from the row alone: one is resolved by
+    // upgrading here, the other only at X. `reason` stays machine-readable and distinct.
+    const reason = source === 'api'
+        ? {
+            httpStatus: 402,
+            errorMessage: `X declined the post — the connected X account has reached its own API posting quota${apiDetail ? `: ${apiDetail}` : '.'} Paused until the quota resets.`,
+            isRetryable: false,
+            reason: 'x_api_quota_exhausted',
+        }
+        : {
+            httpStatus: null,
+            errorMessage: 'X monthly posting allowance reached — paused until it resets.',
+            isRetryable: false,
+            reason: 'x_credits_exhausted',
+        };
     await db.execute(
         `UPDATE scheduled_posts
             SET status = 'paused_credits',
                 retry_at = '${resumeAt.toISOString()}',
-                failure_reason = '${esc(JSON.stringify({ httpStatus: null, errorMessage: 'X monthly posting allowance reached — paused until it resets.', isRetryable: false, reason: 'x_credits_exhausted' }))}',
+                failure_reason = '${esc(JSON.stringify(reason))}',
                 updated_at = now()
           WHERE id = ${post.id}`
     );
     if (!notifiedOrgs.has(post.organisation_id)) {
         notifiedOrgs.add(post.organisation_id);
-        await createNotification(db, 'x_credits_exhausted', {
+        await createNotification(db, source === 'api' ? 'x_api_quota_exhausted' : 'x_credits_exhausted', {
             userId: post.user_id,
-            metadata: { postId: post.id, platform: 'x', assistantId: post.assistant_id },
+            metadata: { postId: post.id, platform: 'x', assistantId: post.assistant_id, source },
         });
     }
 }

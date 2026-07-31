@@ -27,6 +27,16 @@ export type PostStatus =
     | 'publishing'
     | 'published'
     | 'paused'
+    /**
+     * NOT a synonym for 'paused'. This is the X quota park: the post is committed and due, but
+     * either our monthly X allowance or the connected X account's own API quota is spent, so it
+     * waits rather than burning a publish attempt (publish-social-posts.ts → pauseForXCredits).
+     * Two sweeps select it back out — the monthly reset, and a credit-pack purchase in
+     * stripe-webhook.ts. It was missing from this union AND from the database CHECK constraint,
+     * which meant every pause was a constraint violation that degraded into a permanent 'failed'.
+     * See db/scheduled-posts-paused-credits-status.sql.
+     */
+    | 'paused_credits'
     | 'failed'
     | 'rejected'
     | 'cancelled'
@@ -39,8 +49,10 @@ export type PostStatus =
  * may be measured against.
  *
  * 'approved' and 'scheduled' are both here because approval is the commit point and the SMM flow
- * writes 'scheduled' directly; 'paused' and 'failed' are posts that WERE scheduled and now need
- * attention, so hiding them would lose work silently.
+ * writes 'scheduled' directly; 'paused', 'paused_credits' and 'failed' are posts that WERE
+ * scheduled and now need attention, so hiding them would lose work silently — which is exactly
+ * what happened to 'paused_credits' while it was absent from both lists: a post parked on quota
+ * fell off the calendar with no badge, no column and no chip anywhere in the product.
  */
 export const SCHEDULE_ACTIVE_STATUSES = [
     'approved',
@@ -48,6 +60,7 @@ export const SCHEDULE_ACTIVE_STATUSES = [
     'publishing',
     'published',
     'paused',
+    'paused_credits',
     'failed',
 ] as const satisfies readonly PostStatus[];
 

@@ -46,6 +46,11 @@ const STATUS_META = {
     publishing:      { label: 'Publishing',  badge: 'bg-blue-100 text-blue-700 border-blue-300',   chipBorder: 'border-blue-500',    dot: 'bg-blue-500' },
     published:       { label: 'Published',   badge: 'bg-emerald-100 text-emerald-700 border-emerald-300', chipBorder: 'border-emerald-500', dot: 'bg-emerald-500' },
     paused:          { label: 'Paused',      badge: 'bg-gray-100 text-gray-500 border-gray-300',   chipBorder: 'border-gray-400',    dot: 'bg-gray-400' },
+    // The X quota park. Amber, not grey: unlike 'paused' this one is waiting on something the user
+    // may need to act on, and it resumes by itself only when the quota resets. Without an entry
+    // here every lookup falls back to STATUS_META.draft, so a committed post parked on quota would
+    // render on the calendar labelled "Draft" — the one word that is certainly wrong.
+    paused_credits:  { label: 'Paused · X credits', badge: 'bg-amber-100 text-amber-700 border-amber-300', chipBorder: 'border-amber-400', dot: 'bg-amber-500' },
     failed:          { label: 'Failed',      badge: 'bg-red-100 text-red-700 border-red-300',      chipBorder: 'border-red-500',     dot: 'bg-red-500' },
     missed:          { label: 'Missed',      badge: 'bg-orange-100 text-orange-700 border-orange-300', chipBorder: 'border-orange-300', dot: 'bg-amber-500' },
     rejected:        { label: 'Rejected',    badge: 'bg-red-100 text-red-700 border-red-300',      chipBorder: 'border-red-500',     dot: 'bg-red-500' },
@@ -111,7 +116,7 @@ function _groupPosts(posts) {
 // The status a grouped chip reports. Ordered "needs attention first, done last" so a group is never
 // shown as finished while a sibling is still queued, and a single failed platform is never hidden
 // behind three successes.
-const _GROUP_STATUS_PRIORITY = ['failed', 'paused', 'publishing', 'scheduled', 'approved', 'published'];
+const _GROUP_STATUS_PRIORITY = ['failed', 'paused', 'paused_credits', 'publishing', 'scheduled', 'approved', 'published'];
 function _groupStatus(members) {
     for (const s of _GROUP_STATUS_PRIORITY) {
         if (members.some(m => m.status === s)) return s;

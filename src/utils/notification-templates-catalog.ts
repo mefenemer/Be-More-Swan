@@ -633,6 +633,22 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [],
     },
     {
+        // The OTHER way X posting stops, and it needs different words. 'x_credits_exhausted' above
+        // is our own ledger saying the workspace has spent its allowance — the user fixes that by
+        // waiting for the reset or upgrading. This one is X's API answering 402 while our ledger
+        // still showed credit: the X developer account itself is out of quota, which no plan
+        // upgrade here can resolve. Telling the user to upgrade would send them to buy something
+        // that cannot fix it. Same `type` so category routing and resolve-on-reconnect matching are
+        // unchanged.
+        templateKey: 'x_api_quota_exhausted',
+        name: 'X API quota reached',
+        category: 'Connections',
+        type: 'x_credits_exhausted',
+        title: 'X posting paused — X rejected the post',
+        message: 'X declined the post because the connected X account has reached its own API posting quota. Your posts are paused and will retry automatically at the start of next month. If this is unexpected, check the X developer account’s plan and usage.',
+        variables: [],
+    },
+    {
         templateKey: 'x_credits_purchased',
         name: 'X credits added',
         category: 'Connections',
