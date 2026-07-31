@@ -73,6 +73,9 @@ export default withLambda(async (event) => {
         .select({
             id: contentAssets.id, provider: contentAssets.provider, prompt: contentAssets.prompt,
             aspectRatio: contentAssets.aspectRatio, renderParams: contentAssets.renderParams,
+            // Read so a re-edit does not keep re-stamping it — the date should be when the user
+            // FIRST took ownership of this card, not the last time they nudged a font.
+            libraryKeptAt: contentAssets.libraryKeptAt,
         })
         .from(contentAssets)
         .innerJoin(scheduledPostAssets, eq(scheduledPostAssets.contentAssetId, contentAssets.id))
@@ -98,6 +101,7 @@ export default withLambda(async (event) => {
         prompt: '',
         aspectRatio: platformFormat(post.platform ?? 'instagram').aspectRatio as string,
         renderParams: null as unknown,
+        libraryKeptAt: null as Date | null,
     };
 
     // Seed from what this card was LAST rendered with, so reopening the editor shows the user's own
@@ -199,6 +203,12 @@ export default withLambda(async (event) => {
             height: card.height,
             renderParams,
             status: 'scheduled',
+            // A human sat in the editor and saved this. That exempts it from the unused-card expiry
+            // for good (src/utils/brand-card-lifecycle.ts) — the rule removes machine output nobody
+            // touched, never work someone adjusted by hand. Stamped even though this card is being
+            // attached to a post right now, because "attached" can stop being true later and the
+            // edit cannot.
+            libraryKeptAt: new Date(),
         }).returning({ id: contentAssets.id });
 
         await db.insert(scheduledPostAssets)
@@ -226,6 +236,14 @@ export default withLambda(async (event) => {
         name: `Brand card — ${card.headline.slice(0, 60)}`,
         prompt: card.headline,
         renderParams,
+        // Same exemption as the insert path above: re-rendering through the editor is a human edit,
+        // so this card stops being transient machine output. Also clears any clock the retention
+        // sweep had already started on it — editing a card is the clearest possible statement that
+        // the user still wants it. Clearing the clock unconditionally is safe HERE and only here:
+        // this handler already 409s on a published post (see above), so the clock it wipes can only
+        // ever be the unused-card one, never a posted asset's 30-day window.
+        libraryKeptAt: asset.libraryKeptAt ?? new Date(),
+        retentionDeleteAfter: null,
         updatedAt: new Date(),
     }).where(eq(contentAssets.id, asset.id));
 

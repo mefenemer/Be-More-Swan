@@ -30,6 +30,16 @@
 -- auto-generated cards accumulate in a library forever, not a storage bug, which is why brand cards
 -- stay in the review tier and out of the UPDATE.
 --
+-- ── DECIDED 2026-07-31 → db/brand-card-lifecycle.sql ────────────────────────────────────────────
+-- The rule is now "unused expires, edited is kept": a card never attached to a post and never
+-- opened in the card editor is removed 30 days after it was generated, with the countdown and a
+-- Keep button shown on the card in My Content the whole time. Anything a human touched is exempt
+-- for good (content_assets.library_kept_at).
+--
+-- So the reclaiming of these 26 rows happens THERE, through content-retention.ts and a rule the
+-- user can see and cancel — not here. This script's stance is unchanged and still correct: brand
+-- cards stay in its review tier and out of its UPDATE. Do not add them.
+--
 -- NET: the code fixes stop new leaks. The accumulated debt this script was written to reclaim is,
 -- as measured, approximately nothing — most post media is Pexels hotlinks with no R2 bytes to leak
 -- (85 of prod's 115 rows have no storage_key). Keep the script as the diagnostic; re-run section 1

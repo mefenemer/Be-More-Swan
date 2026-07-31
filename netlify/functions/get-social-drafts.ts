@@ -9,6 +9,8 @@ import { resolvePostMedia, isVideoMedia, presignR2Get, resolvePostMediaList } fr
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { displayCaption } from '../../src/utils/model-json';
+import { diagnosePostFailure } from '../../src/utils/post-failure-diagnosis';
+import { PLATFORM_FORMATS } from '../../src/config/platform-formats';
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'GET') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -339,10 +341,22 @@ export default withLambda(async (event) => {
                     ? fr
                     : (typeof fr?.errorMessage === 'string' ? fr.errorMessage : null);
             }
+            // …and the same blob classified into a cause the reviewer can act on. failureMessage is
+            // the platform's own words and stays exactly as it was (the Data Hub renders it); this is
+            // the plain-English "what happened / what to do", which is what the Review Queue's
+            // Needs-attention column needs to offer buttons at all. Computed for every failed post,
+            // including one whose failure_reason is null — diagnosePostFailure has a branch for that
+            // rather than leaving the card blank.
+            const failure = d.status === 'failed'
+                ? diagnosePostFailure(
+                    d.failureReason as Parameters<typeof diagnosePostFailure>[0],
+                    PLATFORM_FORMATS[d.platform as keyof typeof PLATFORM_FORMATS]?.label || 'The platform',
+                  )
+                : null;
             // Older rows can hold a raw model reply (fenced JSON) in `caption` — unwrap it so the
             // editor shows the copy, and an edit-and-save persists the repair.
             // brandCard non-null ⇒ the review UI offers "Edit card" for this draft.
-            return { ...d, caption: displayCaption(d.caption), thumbnailUrl, mediaType, archiveDeletesAt, daysRemaining, failureMessage,
+            return { ...d, caption: displayCaption(d.caption), thumbnailUrl, mediaType, archiveDeletesAt, daysRemaining, failureMessage, failure,
                 // Why the video render failed, when it did — null in every other state.
                 renderError: d.renderStatus === 'failed' ? (renderErrors.get(d.id) ?? null) : null,
                 brandCard: brandCards.get(d.id) ?? null,

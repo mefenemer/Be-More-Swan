@@ -11,6 +11,11 @@ import { getDb } from '../../db/client';
 import { users, contentAssets, userOrganisations, scheduledPosts, aiAssistants } from '../../db/schema';
 import { resolveAssetDisplayUrl } from '../../src/utils/social-publish';
 import { SCHEDULE_ACTIVE_STATUSES, isScheduleActive } from '../../src/config/post-status';
+import {
+    BRAND_CARD_PROVIDER,
+    brandCardExpiresAt,
+    findEverAttachedAssetIds,
+} from '../../src/utils/brand-card-lifecycle';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -272,6 +277,9 @@ export default withLambda(async (event) => {
                 usedInPosts?: AssetUsage[];
                 scheduledPostId: number | null;
                 assistantName: string | null;
+                /** When an unused generated card will be removed — null for everything else. The
+                 *  UI's countdown; see the lifecycle note below. */
+                libraryExpiresAt?: string | null;
             };
             const grouped: Record<string, AssetWithUsage[]> = {
                 pending: [], scheduled: [], posted: [], rejected: [],
@@ -285,6 +293,24 @@ export default withLambda(async (event) => {
             // One read covering drafts AND committed posts: the delete warning wants the drafts,
             // the status derivation wants both. Asking twice would be two scans of the same table.
             const usageMap = await findActivePostsByAsset(db, orgId, enriched.map(r => r.id), RELEVANT_POST_STATUSES);
+
+            // ── Unused-brand-card countdown ─────────────────────────────────────────────────────
+            // A generated card that was never attached to a post and never opened in the card
+            // editor is removed 30 days after it was made, so the library stops accumulating
+            // machine output for ever. The user has to be able to SEE that before it happens,
+            // which is what libraryExpiresAt is for — the row carries its own removal date and
+            // My Content renders the countdown and a Keep button next to it.
+            //
+            // "Ever attached" is asked separately from usageMap on purpose. usageMap is scoped to
+            // RELEVANT_POST_STATUSES (drafts, live schedules, published) because that is what the
+            // status badge and the delete warning are about. Expiry is a different question — a
+            // card attached to a post that was later cancelled was still USED, and must not expire
+            // as though it had been generated into a void. findEverAttachedAssetIds is the same
+            // helper content-retention.ts purges by, so the badge and the purge always agree.
+            const cardIds = enriched.filter(r => r.provider === BRAND_CARD_PROVIDER && !r.purgedAt).map(r => r.id);
+            const everAttached = cardIds.length
+                ? await findEverAttachedAssetIds(db, orgId ? [orgId] : [], cardIds)
+                : new Set<number>();
 
             enriched.forEach(r => {
                 if (r.purgedAt) return; // hide physically purged records
@@ -311,12 +337,14 @@ export default withLambda(async (event) => {
                 // usedInPosts drives the "this is in use" delete warning, which is about work that
                 // would BREAK — a published post is done with, so it stays out of that list.
                 const bucket = grouped[status] ?? [];
+                const expiresAt = brandCardExpiresAt(r, everAttached.has(r.id));
                 bucket.push({
                     ...r,
                     status,
                     scheduledPostId: livePost?.id ?? null,
                     assistantName,
                     usedInPosts: usage.filter(u => ACTIVE_POST_STATUSES.includes(u.status)),
+                    libraryExpiresAt: expiresAt ? expiresAt.toISOString() : null,
                 });
                 grouped[status] = bucket;
             });
@@ -440,6 +468,29 @@ export default withLambda(async (event) => {
                 return { statusCode: 200, body: JSON.stringify({ asset: measured, filled: Object.keys(fill) }) };
             }
 
+            // Special action: keep an expiring generated card in the library for good.
+            //
+            // The other half of the unused-brand-card rule. A card on the 30-day clock shows a
+            // countdown in My Content with a Keep button, and this is what that button calls —
+            // stamping libraryKeptAt, which brand-card-lifecycle.ts reads as a permanent exemption.
+            // The same stamp is written by edit-brand-card.ts on save, so "I adjusted this card" and
+            // "I said keep this card" are one state rather than two rules to keep in step.
+            //
+            // Deliberately one-way: there is no un-keep. Putting a card a user has explicitly
+            // rescued back onto a deletion clock is not a feature, and Delete already exists for
+            // someone who has changed their mind.
+            if (action === 'keep') {
+                const [kept] = await db.update(contentAssets).set({
+                    libraryKeptAt: existing.libraryKeptAt ?? new Date(),
+                    // Cancels a clock the sweep has already started. Safe for any asset reachable
+                    // here: only a brand card can be given one by that sweep, and a posted or
+                    // rejected asset is never offered a Keep button.
+                    retentionDeleteAfter: null,
+                    updatedAt: new Date(),
+                }).where(and(eq(contentAssets.id, assetId), eq(contentAssets.userId, userId))).returning();
+                return { statusCode: 200, body: JSON.stringify({ asset: kept }) };
+            }
+
             // Special action: detach from scheduled post (US3)
             if (action === 'detach') {
                 const [updated] = await db.update(contentAssets).set({
@@ -520,8 +571,13 @@ export default withLambda(async (event) => {
 
     } catch (err: any) {
         const msg: string = err?.message || '';
-        if (msg.includes('relation') && msg.includes('does not exist')) {
-            console.warn('[content-assets] Table missing — run db:push to apply migrations.');
+        // A missing COLUMN is treated the same way as a missing table, because it has the same
+        // cause: DDL that has not been applied to this environment yet (library_kept_at ships as
+        // db/brand-card-lifecycle.sql, applied by hand). Without this the whole media hub 500s on
+        // a deploy that lands before the migration, which is a far worse failure than an empty
+        // library — and the empty library is loud enough that nobody mistakes it for working.
+        if (msg.includes('does not exist') && (msg.includes('relation') || msg.includes('column'))) {
+            console.warn('[content-assets] Table or column missing — apply the pending db/*.sql migrations.');
             if (event.httpMethod === 'GET') {
                 return { statusCode: 200, body: JSON.stringify({ assets: { pending: [], scheduled: [], posted: [], rejected: [] } }) };
             }

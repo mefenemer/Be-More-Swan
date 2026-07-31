@@ -28,9 +28,14 @@
 // with a key must survive to the next run if the delete failed or storage was unconfigured.
 
 import type { Handler } from '@netlify/functions';
-import { lte, and, isNull, isNotNull, inArray, lt } from 'drizzle-orm';
+import { lte, and, eq, isNull, isNotNull, inArray, lt, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { contentAssets, integrationApiCalls } from '../../db/schema';
+import {
+    BRAND_CARD_PROVIDER,
+    BRAND_CARD_UNUSED_RETENTION_MS,
+    findEverAttachedAssetIds,
+} from '../../src/utils/brand-card-lifecycle';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 // Same R2 configuration every other storage path in this app uses (content-upload-url.ts,
@@ -86,12 +91,92 @@ async function deleteFromR2(keys: string[]): Promise<Set<string>> {
 }
 
 /**
+ * Put unused, never-edited brand cards on the retention clock.
+ *
+ * Generated cards were the one kind of post media with no lifecycle at all: both creation paths
+ * make a card FOR a post, but content-assets.ts lists every row the user owns, so a card whose post
+ * was deleted, replaced, or never published sat in My Content for ever with no
+ * retention_delete_after — which is why 26 of prod's 30 R2-backed assets were brand cards.
+ *
+ * This does NOT delete anything. It stamps a clock and hands the row to the audited reclaimer
+ * below, which deletes the R2 object and only then stamps purgedAt. The rule and the exemptions
+ * live in src/utils/brand-card-lifecycle.ts — the SAME module content-assets.ts reads to draw the
+ * countdown, so the badge a user sees and the purge that eventually happens cannot disagree.
+ *
+ * The clock is set to createdAt + 30 days rather than now + 30 days on purpose. My Content shows
+ * the user that exact date from the moment the card appears, so the stamped value has to be the
+ * date they were shown — stamping "now + 30" would silently double the advertised window and make
+ * the badge a lie. A card already past that date becomes due in this same run, which is correct:
+ * its countdown has been visible and running since it was created.
+ *
+ * Failures here are logged and swallowed. This is an additive sweep; it must never take down the
+ * purge pass that reclaims posted and rejected media.
+ */
+async function clockUnusedBrandCards(db: any, now: Date): Promise<number> {
+    const cutoff = new Date(now.getTime() - BRAND_CARD_UNUSED_RETENTION_MS);
+
+    // retentionDeleteAfter IS NULL keeps this idempotent — a card already on a clock (from here, or
+    // from its post being published or rejected) is never re-stamped. libraryKeptAt IS NULL is the
+    // exemption: a card saved in the editor or explicitly Kept is permanent library content.
+    const candidates = await db.select({
+        id: contentAssets.id,
+        organisationId: contentAssets.organisationId,
+    }).from(contentAssets).where(
+        and(
+            eq(contentAssets.provider, BRAND_CARD_PROVIDER),
+            isNull(contentAssets.purgedAt),
+            isNull(contentAssets.libraryKeptAt),
+            isNull(contentAssets.retentionDeleteAfter),
+            lte(contentAssets.createdAt, cutoff),
+        )
+    );
+    if (candidates.length === 0) return 0;
+
+    // "Ever attached" is checked against live post rows rather than trusted from the asset's own
+    // status column, which drifts (see deriveAssetStatus in content-assets.ts for the four ways).
+    const orgIds: number[] = [...new Set<number>(
+        candidates.map((c: any) => c.organisationId).filter((o: any): o is number => typeof o === 'number')
+    )];
+    const assetIds: number[] = candidates.map((c: any) => Number(c.id));
+    const attached = await findEverAttachedAssetIds(db, orgIds, assetIds);
+
+    // A card with no organisation cannot have its legacy contentAssetIds usage checked (that lookup
+    // is org-scoped), so it is left alone rather than guessed at. There should be none.
+    const expiring = candidates
+        .filter((c: any) => !!c.organisationId && !attached.has(c.id))
+        .map((c: any) => c.id);
+    if (expiring.length === 0) return 0;
+
+    // The interval is derived from the shared constant rather than written out, so the SQL cannot
+    // drift from the number My Content puts on the badge. Interpolated as a bare literal because a
+    // bound parameter is not accepted in an INTERVAL position — it is arithmetic on a constant this
+    // module owns, never anything reaching the database from a request.
+    const windowDays = Math.round(BRAND_CARD_UNUSED_RETENTION_MS / (24 * 60 * 60 * 1000));
+    await db.update(contentAssets).set({
+        retentionDeleteAfter: sql`${contentAssets.createdAt} + (${sql.raw(String(windowDays))} * interval '1 day')`,
+        updatedAt: now,
+    }).where(inArray(contentAssets.id, expiring));
+
+    console.log(`[Retention] Clocked ${expiring.length} unused brand card(s) for removal. IDs: ${expiring.join(', ')}`);
+    return expiring.length;
+}
+
+/**
  * The retention pass itself. Exported so a guarded HTTP trigger can drive it on staging (branch
  * deploys never fire scheduled functions), matching pollGoalTelemetry / run-goal-telemetry.
  */
 export const runContentRetention = async () => {
     const db = getDb();
     const now = new Date();
+
+    // Before the purge query, not after: a card clocked here is already past its date, so running
+    // this first lets the same pass reclaim it instead of leaving it for tomorrow.
+    let clockedCards = 0;
+    try {
+        clockedCards = await clockUnusedBrandCards(db, now);
+    } catch (err) {
+        console.error('[Retention] Brand-card sweep failed — continuing with the purge pass:', err);
+    }
 
     try {
         // Find all assets past their retention window that haven't been purged yet
@@ -108,8 +193,8 @@ export const runContentRetention = async () => {
         );
 
         if (due.length === 0) {
-            console.log('[Retention] No assets due for purge.');
-            return { statusCode: 200, body: 'No assets to purge.' };
+            console.log(`[Retention] No assets due for purge. (${clockedCards} brand card(s) clocked this run.)`);
+            return { statusCode: 200, body: `No assets to purge; clocked ${clockedCards} unused brand card(s).` };
         }
 
         console.log(`[Retention] ${due.length} asset(s) due for purge.`);
@@ -148,7 +233,7 @@ export const runContentRetention = async () => {
             console.log(`[Retention] Purged ${deletedCalls.length} integration API call log rows older than 90 days.`);
         }
 
-        return { statusCode: 200, body: `Purged ${ids.length} assets; ${deletedCalls.length} API call log rows.` };
+        return { statusCode: 200, body: `Purged ${ids.length} assets; clocked ${clockedCards} unused brand card(s); ${deletedCalls.length} API call log rows.` };
 
     } catch (err) {
         console.error('[Retention] Error:', err);

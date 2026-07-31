@@ -450,7 +450,22 @@ function _assetRow(asset, sec) {
 
     // Actions depend on status
     let actions = '';
-    if (asset.status === 'pending') {
+    if (asset.status === 'pending' && asset.libraryExpiresAt) {
+        // An unused generated card on its 30-day clock. Keep comes FIRST and reads as the primary
+        // action, because the countdown next to it is a deadline the user did not choose — the row
+        // has to offer the way out before it offers the bin.
+        actions = `
+          <button type="button" onclick="window._mcKeepAsset(${asset.id})"
+            title="Keep this card in your library permanently"
+            class="text-xs font-bold text-emerald-600 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-lg transition cursor-pointer">
+            Keep
+          </button>
+          <button type="button" onclick="window._mcPromptDelete(${asset.id})"
+            title="Delete"
+            class="p-1.5 text-gray-400 hover:text-red-500 transition cursor-pointer rounded-lg hover:bg-red-50">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </button>`;
+    } else if (asset.status === 'pending') {
         actions = `
           <button type="button" onclick="window._mcPromptDelete(${asset.id})"
             title="Delete"
@@ -475,6 +490,27 @@ function _assetRow(asset, sec) {
         ? `<div class="flex items-start gap-1.5 mt-1.5 px-2.5 py-1.5 bg-red-50 border border-red-200 rounded-lg">
              <svg class="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/></svg>
              <span class="text-xs text-red-700 font-medium leading-snug select-none">${_escHtml(asset.rejectionReason)}</span>
+           </div>`
+        : '';
+
+    // ── Unused-card expiry notice ────────────────────────────────────────────────────────────────
+    // Generated brand cards used to pile up in the library for ever — nothing attached them to a
+    // lifecycle, so a card whose post was deleted, replaced or never published stayed a "reusable
+    // asset" indefinitely. They now expire 30 days after they are made IF they were never used on a
+    // post and never opened in the card editor. This line is the whole reason that is acceptable:
+    // the rule is only fair if the user can see the clock and stop it, so the date is stated in
+    // words next to a Keep button rather than being a silent background delete.
+    //
+    // libraryExpiresAt is server-computed (content-assets.ts) from the same predicate
+    // content-retention.ts purges by, so this countdown cannot promise a date the sweep disagrees
+    // with. It is null for everything that is not an expiring card, which is what keeps this block
+    // off every other row in the library.
+    const expiryNotice = asset.libraryExpiresAt
+        ? `<div class="flex items-start gap-1.5 mt-1.5 px-2.5 py-1.5 bg-amber-50 border border-amber-200 rounded-lg">
+             <svg class="w-3.5 h-3.5 text-amber-500 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+             <span class="text-xs text-amber-800 font-medium leading-snug">
+               Unused card — removed in ${_daysUntilPurge(asset.libraryExpiresAt)}. Press Keep, or use it on a post, to keep it for good.
+             </span>
            </div>`
         : '';
 
@@ -532,6 +568,7 @@ function _assetRow(asset, sec) {
           ${scheduledBadge}
         </div>
         <p class="text-xs text-gray-400 mt-0.5">${_typeLabel(asset.assetType)}${fileSize ? ' · ' + fileSize : ''} · ${date}</p>
+        ${expiryNotice}
         ${rejectionBadge}
       </div>
       <div class="shrink-0 flex items-center gap-2">${viewBtn}${actions}</div>
@@ -1212,6 +1249,29 @@ async function _doDelete() {
         }
     } catch { alert('Could not delete. Please try again.'); }
 }
+
+// ── Keep an expiring generated card ──────────────────────────────
+// Cancels the 30-day clock on an unused brand card, for good. No confirmation modal on purpose:
+// this is the SAFE direction — it prevents a deletion rather than causing one — and putting a
+// dialog in front of "don't delete my thing" would be the product arguing with the user.
+window._mcKeepAsset = async function (assetId) {
+    try {
+        const res = await fetch(`/.netlify/functions/content-assets?id=${assetId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'keep' }),
+        });
+        if (!res.ok) throw new Error('keep failed');
+        // Reload rather than patching the row in place: the server owns libraryExpiresAt, and the
+        // notice disappearing is the confirmation that the clock is actually gone.
+        await _loadAssets();
+        const msg = 'Kept. This card will stay in your library.';
+        window.showToast ? window.showToast(msg, { icon: '📌' }) : null;
+    } catch {
+        const msg = 'Could not keep that card. Please try again.';
+        window.showToast ? window.showToast(msg, { icon: '⚠️' }) : alert(msg);
+    }
+};
 
 // ── Detach from scheduled post (US3) ─────────────────────────────
 window._mcPromptDetach = function (assetId) {

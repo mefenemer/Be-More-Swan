@@ -1690,6 +1690,14 @@ export const contentAssets = pgTable("content_assets", {
   // Data retention — populated when status changes to posted/rejected
   retentionDeleteAfter: timestamp("retention_delete_after"),
   purgedAt: timestamp("purged_at"),
+  // "A human touched this, so it lives in the library for good." Stamped when the user saves a
+  // brand card in the review-time editor (edit-brand-card.ts) or presses Keep in My Content, and
+  // read ONLY as an exemption from the unused-brand-card expiry — see
+  // src/utils/brand-card-lifecycle.ts for the rule and why the exemption has to exist. NULL means
+  // "never touched", which for a generated card is what puts it on the 30-day clock; for every
+  // other kind of asset NULL means nothing at all, because nothing else expires this way.
+  // Apply db/brand-card-lifecycle.sql by hand BEFORE deploying the code that reads this.
+  libraryKeptAt: timestamp("library_kept_at"),
 
   // Epic 1 (AI Media Generation): provider 'fal' rows are AI-generated. These columns power
   // the "My AI Uploads" library (US3) — prompt memory + the originating generation job.

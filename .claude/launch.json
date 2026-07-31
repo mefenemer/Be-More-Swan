@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-failed-posts",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4234",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/b942823b-af1a-4e9b-8522-af708c5ca0bc/scratchpad/failharness"
+      ],
+      "port": 4234,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-calendar-nav",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

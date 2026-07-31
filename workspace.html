@@ -5076,7 +5076,15 @@ document.addEventListener('visibilitychange', () => {
  */
 async function refreshPendingBadge() {
     try {
-        const socialRes = await fetch('/.netlify/functions/get-social-drafts?status=pending_approval&limit=1&offset=0');
+        // Two counts, same trick (limit=1 → read `total` only, no media presigning): posts awaiting
+        // review for the sidebar pill, and posts that FAILED to publish for the Needs-attention
+        // column. The second one is polled here rather than computed when the column is opened,
+        // because a badge you only see after clicking the tab tells you nothing you didn't already
+        // learn by clicking it.
+        const [socialRes, failedRes] = await Promise.all([
+            fetch('/.netlify/functions/get-social-drafts?status=pending_approval&limit=1&offset=0'),
+            fetch('/.netlify/functions/get-social-drafts?status=failed&limit=1&offset=0'),
+        ]);
         const body = socialRes.ok ? await socialRes.json() : {};
         // `total` is the grouped count. Fall back to grouping the page only if it is missing.
         const socialCount = typeof body.total === 'number'
@@ -5087,6 +5095,11 @@ async function refreshPendingBadge() {
             el.textContent = socialCount || '';
             el.classList.toggle('hidden', !socialCount);
         });
+
+        if (failedRes.ok) {
+            const fb = await failedRes.json();
+            _rqSetAttentionBadge(typeof fb.total === 'number' ? fb.total : rqGroupSocialDrafts(fb.drafts || []).length);
+        }
 
         // A newly-drafted post landing while the user is ALREADY looking at the review list used to
         // update only the badge — the list itself sat stale until a manual reload, so the
@@ -5100,6 +5113,19 @@ async function refreshPendingBadge() {
         }
         _rqLastSocialCount = socialCount;
     } catch { /* non-blocking */ }
+}
+
+/**
+ * Write the "Needs attention" column counter.
+ *
+ * Tolerates the element being absent: the Review page's markup is injected by loadView, so the poll
+ * that calls this runs on every view in the workspace, most of which have no such element.
+ */
+function _rqSetAttentionBadge(count) {
+    const badge = document.getElementById('rq-col-count-attention');
+    if (!badge) return;
+    badge.textContent = count || '';
+    badge.classList.toggle('hidden', !count);
 }
 
 // ── Review Queue ─────────────────────────────────────────────────────────────
@@ -5219,6 +5245,12 @@ async function rqRenderGroups(statusKey) {
     // Collapse per-platform rows into one representative per logical post before counting/rendering,
     // so "3 posts across 3 platforms" reads as 3 cards, not 9.
     const postGroups = rqGroupSocialDrafts(posts);
+
+    // Needs-attention badge. The markup has declared this counter since the column shipped and
+    // nothing ever wrote to it, so a workspace with three failed posts looked exactly like one with
+    // none. refreshPendingBadge polls the count so it is right before you ever open the column; this
+    // corrects it from the authoritative number the moment you do.
+    if (statusKey === 'attention') _rqSetAttentionBadge(_rqPostsTotal ?? postGroups.length);
 
     // Keep the Review column badge in sync with the number of posts awaiting review (grouped count).
     if (statusKey === 'review') {
@@ -5463,6 +5495,13 @@ function rqRenderSocialCard(draft) {
               `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-gray-100 text-gray-600">${_rqEsc(rqPlatformLabel(p))}</span>`).join('')}</div>`
         : '';
     const anyMediaMissing = group.some(g => g.mediaMissing);
+    // Why it failed, on the card. "Failed to publish" alone made the Needs-attention column a list
+    // of identical red chips: the user had to open every one to find out which was a dead connection
+    // and which was a rejected picture. One line of the diagnosis (get-social-drafts → the `failure`
+    // object) is enough to triage the column without opening anything.
+    const failureLine = draft.status === 'failed' && (draft.failure?.title || draft.failureMessage)
+        ? `<p class="text-xs text-red-600 truncate mt-0.5">${_rqEsc(draft.failure?.title || draft.failureMessage)}</p>`
+        : '';
     return `<div onclick="openPostReview(${draft.id})" class="py-3.5 flex items-center gap-3 cursor-pointer hover:bg-gray-50 -mx-4 px-4 transition" data-post-id="${draft.id}">
       ${thumb}
       <div class="flex-1 min-w-0">
@@ -5472,6 +5511,7 @@ function rqRenderSocialCard(draft) {
         </div>
         <p class="text-xs text-gray-500 truncate">${isArchived ? _rqEsc(draft.assistantName || 'AI Assistant') + ' · ' : ''}${ago}</p>
         ${draft.caption ? `<p class="text-xs text-gray-600 truncate mt-0.5 ${isArchived ? 'line-through opacity-60' : ''}">${_rqEsc(draft.caption)}</p>` : ''}
+        ${failureLine}
         ${chips}
       </div>
       ${anyMediaMissing ? '<span class="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border bg-red-50 border-red-200 text-red-700">⚠ Media deleted</span>' : ''}
@@ -6287,7 +6327,9 @@ async function openPostReview(postId, opts = {}) {
         // Same class of bug as the comment above describes for approved/scheduled, and the same fix:
         // ask for the statuses the editor actually accepts. Ordered cheapest-first — the loop stops
         // at the first status that yields the post, so the common cases still cost one request.
-        for (const status of (known ? [known] : ['draft', 'pending_approval', 'scheduled', 'approved', 'published', 'posted'])) {
+        // 'failed' is here for the same reason: the modal is now where a failed post is explained and
+        // recovered, and the dashboard's attention list deep-links straight into it.
+        for (const status of (known ? [known] : ['draft', 'pending_approval', 'scheduled', 'approved', 'published', 'posted', 'failed'])) {
             try {
                 const res = await fetch(`/.netlify/functions/get-social-drafts?status=${status}`);
                 if (res.ok) rqGroupSocialDrafts((await res.json()).drafts || []);
@@ -6964,6 +7006,244 @@ async function rqRetryRender(postId) {
     } catch (err) {
         if (el) el.innerHTML = `<p class="font-semibold">⚠️ ${_rqEsc(err.message || 'Could not start the render.')}</p>
           <button onclick="rqRetryRender(${postId})" class="mt-2 py-1.5 px-3 text-xs font-bold border border-red-400 text-red-700 hover:bg-red-100 rounded-lg cursor-pointer">Try again</button>`;
+    }
+}
+
+// ── Failed post: why, and the way out ────────────────────────────────────────
+// A post that tried to publish and stopped ends up in the Review page's "Needs attention" column.
+// Until this block existed that column was a viewing gallery: the card said "Failed to publish",
+// opening it showed the post with no explanation and no controls (see the 'failed' branch in
+// _rqReviewRenderActive for why every other affordance is switched off), and the ONLY place in the
+// product that could recover one was a banner buried in the Data Hub's Content Library.
+//
+// Four ways out, and all four are always offered, whatever the failure — a diagnosis we got wrong
+// must never be able to strip the user of the option they actually needed:
+//
+//   Reconnect      the connection is dead; nothing else can work until it is fixed
+//   Publish again  re-queue the identical post for the next publisher tick
+//   Fix the post   back to pending_approval, fully editable, approve re-schedules it
+//   Reschedule     re-queue it for a chosen time
+//   Reject         archive it, with a reason that feeds the assistant's content rules
+//
+// What the DIAGNOSIS changes is only which one leads (filled, primary) — see the `kind` switch
+// below and src/utils/post-failure-diagnosis.ts, which is where the classification lives so the
+// Review Queue and the Content Library can never disagree about why a post died.
+
+// Escaped-once, id-safe helpers for the panel. The platform's own error text is rendered as TEXT
+// only and never interpolated into an onclick — it is remote content and could carry a quote.
+function _rqFailurePrimary(kind, retryable) {
+    if (kind === 'connection') return 'reconnect';
+    if (kind === 'media' || kind === 'content') return 'edit';
+    if (kind === 'rate_limit') return 'reschedule';
+    if (kind === 'account') return 'reject';
+    return retryable ? 'retry' : 'edit';
+}
+
+function _rqFailureRecoveryHtml(post) {
+    // The server classifies (get-social-drafts → diagnosePostFailure). Fall back to something
+    // honest if an older payload arrives without it, rather than rendering an empty red box.
+    const f = post.failure || {
+        kind: 'unknown',
+        title: 'This post didn’t publish.',
+        remedy: 'Publish it again, or reschedule it for later.',
+        raw: post.failureMessage || null,
+        retryable: true,
+        needsReconnect: false,
+    };
+    const id = post.id;
+    const platform = rqPlatformLabel(post.platform);
+    const primary = _rqFailurePrimary(f.kind, f.retryable);
+
+    const PRIMARY = 'px-3 py-1.5 rounded-lg text-xs font-bold bg-red-600 hover:bg-red-700 text-white transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed';
+    const SECOND  = 'px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-red-300 text-red-700 hover:bg-red-100 transition cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed';
+    const cls = which => which === primary ? PRIMARY : SECOND;
+
+    const attempts = Number(post.attemptCount) || 0;
+    // publishDate is when it was DUE — the attempt itself isn't timestamped separately, and saying
+    // "tried at" of a slot time would be a small lie. "Due" is what the column actually knows.
+    const due = post.publishDate ? new Date(post.publishDate).toLocaleString() : null;
+    const meta = [
+        attempts ? `Tried ${attempts} time${attempts === 1 ? '' : 's'}` : null,
+        due ? `due ${due}` : null,
+    ].filter(Boolean).join(' · ');
+
+    return `<div class="rounded-lg border border-red-200 bg-red-50 px-3 py-3 text-xs text-red-800" data-failure-panel="${id}">
+      <p class="font-bold text-red-700 uppercase tracking-wide text-[10px]">Didn’t publish to ${_rqEsc(platform)}</p>
+      <p class="font-semibold text-sm mt-1 text-red-900">${_rqEsc(f.title)}</p>
+      <p class="mt-1">${_rqEsc(f.remedy)}</p>
+      ${meta ? `<p class="mt-1 text-red-500">${_rqEsc(meta)}</p>` : ''}
+      ${f.raw ? `<details class="mt-2">
+        <summary class="cursor-pointer text-red-500 hover:text-red-700 select-none">What ${_rqEsc(platform)} said</summary>
+        <p class="mt-1 font-mono text-[11px] bg-white/70 rounded px-2 py-1.5 border border-red-200 break-words">${_rqEsc(f.raw)}</p>
+      </details>` : ''}
+
+      <div class="flex flex-wrap items-center gap-1.5 mt-3">
+        ${f.needsReconnect ? `<button onclick="rqFailedReconnect(${id})" class="${cls('reconnect')}">Reconnect ${_rqEsc(platform)}</button>` : ''}
+        <button data-failure-btn onclick="rqFailedRetry(${id})" class="${cls('retry')}">Publish again now</button>
+        <button data-failure-btn onclick="rqFailedFix(${id})" class="${cls('edit')}">Fix the post</button>
+        <button data-failure-btn onclick="_rqFailedToggle(${id},'when')" class="${cls('reschedule')}">Reschedule…</button>
+        <button data-failure-btn onclick="_rqFailedToggle(${id},'reject')" class="px-3 py-1.5 rounded-lg text-xs font-bold text-red-600 hover:bg-red-100 transition cursor-pointer">Reject &amp; archive</button>
+      </div>
+
+      <!-- Reschedule. Inline display:none as well as the hidden class, because hidden and flex are
+           the same specificity and whichever lands last in the compiled sheet wins — the row would
+           otherwise render open. _rqFailedToggle drives the same inline style.
+           (No backticks in this comment: it lives inside a template literal.) -->
+      <div data-failure-when style="display:none" class="hidden mt-2 flex flex-wrap items-center gap-1.5">
+        <input type="datetime-local" data-failure-when-input
+          class="px-2 py-1.5 bg-white border border-red-200 text-xs text-gray-700 rounded-lg">
+        <button data-failure-btn onclick="rqFailedRetryAt(${id})" class="${SECOND}">Re-queue for then</button>
+      </div>
+
+      <!-- Reject. The reason is not optional (approve-post refuses a blank one) and it is not
+           throwaway: it becomes a content rule so the assistant stops producing the same post. -->
+      <div data-failure-reject style="display:none" class="hidden mt-2">
+        <input type="text" data-failure-reject-input maxlength="300"
+          placeholder="Why are you archiving this? Your assistant learns from it."
+          class="w-full px-2 py-1.5 bg-white border border-red-200 text-xs text-gray-700 rounded-lg">
+        <button data-failure-btn onclick="rqFailedReject(${id})" class="${SECOND} mt-1.5">Archive this post</button>
+      </div>
+
+      <p data-failure-status class="hidden font-semibold mt-2"></p>
+    </div>`;
+}
+
+/**
+ * Repaint after a post leaves 'failed'.
+ *
+ * rqRefreshVisibleReviewSurface rather than rqLoadItems, because this modal is reachable from BOTH
+ * review surfaces — the Review page and the Review tab inside Assistant Details — and rqLoadItems
+ * only knows about the first. refreshPendingBadge re-counts the Needs-attention column, which has
+ * just gone down by one and would otherwise keep advertising work that is no longer there.
+ */
+function _rqAfterFailureAction() {
+    try { rqRefreshVisibleReviewSurface(); } catch { /* non-blocking */ }
+    try { refreshPendingBadge(); } catch { /* non-blocking */ }
+}
+
+/** The panel currently on screen for `postId`, or null if the modal has moved on. */
+function _rqFailurePanel(postId) {
+    return document.querySelector(`[data-failure-panel="${postId}"]`);
+}
+
+function _rqFailedToggle(postId, which) {
+    const panel = _rqFailurePanel(postId);
+    if (!panel) return;
+    const sel = which === 'when' ? '[data-failure-when]' : '[data-failure-reject]';
+    const el = panel.querySelector(sel);
+    if (!el) return;
+    const showing = el.classList.toggle('hidden') === false;
+    // Both rows are `flex`/block containers, so `hidden` alone loses to the display utility on the
+    // reschedule row — clear it explicitly (the same trap as the draft-actions footer).
+    el.style.display = showing ? '' : 'none';
+    if (showing) el.querySelector('input')?.focus();
+}
+
+function _rqFailedBusy(postId, message, tone) {
+    const panel = _rqFailurePanel(postId);
+    if (!panel) return;
+    panel.querySelectorAll('[data-failure-btn]').forEach(b => { b.disabled = tone === 'busy'; });
+    const status = panel.querySelector('[data-failure-status]');
+    if (!status) return;
+    status.classList.toggle('hidden', !message);
+    status.className = `font-semibold mt-2 ${message ? '' : 'hidden'} ${
+        tone === 'error' ? 'text-red-700' : tone === 'ok' ? 'text-emerald-700' : 'text-red-500'}`;
+    status.textContent = message || '';
+}
+
+/**
+ * Re-queue the post exactly as it stands.
+ *
+ * Only THIS row: a cross-post's platforms fail independently (Instagram can reject a picture
+ * LinkedIn published happily an hour earlier), so retrying the group would re-publish the siblings
+ * that already went out.
+ */
+async function rqFailedRetry(postId, publishDate) {
+    _rqFailedBusy(postId, 'Putting it back in the queue…', 'busy');
+    try {
+        const res = await fetch('/.netlify/functions/retry-failed-post', {
+            method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId, ...(publishDate ? { publishDate } : {}) }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || 'Could not re-queue this post.');
+        window.showToast?.(publishDate
+            ? `Re-queued for ${new Date(d.publishDate).toLocaleString()}.`
+            : 'Back in the queue — it goes out on the next publishing run.', { icon: '🔁' });
+        closePostReview();
+        _rqAfterFailureAction();
+    } catch (err) {
+        _rqFailedBusy(postId, err.message || 'Could not re-queue this post.', 'error');
+    }
+}
+
+async function rqFailedRetryAt(postId) {
+    const panel = _rqFailurePanel(postId);
+    const when = panel?.querySelector('[data-failure-when-input]')?.value;
+    if (!when) { _rqFailedBusy(postId, 'Pick a date and time first.', 'error'); return; }
+    await rqFailedRetry(postId, new Date(when).toISOString());
+}
+
+/**
+ * Send the post back to pending_approval so it can be CHANGED before it goes out again.
+ *
+ * The common failures — wrong aspect ratio, a caption the platform's policy refused, media that no
+ * longer resolves — all fail identically on a plain retry. This is the only route that lets the
+ * user act on the remedy the panel just gave them, because 'failed' is not an editable status
+ * (_pceIsEditablePost, and MEDIA_EDITABLE_STATUSES server-side).
+ *
+ * The cache is updated to the NEW status before reopening: openPostReview({refresh:true}) refetches
+ * using the cached status as the hint, and asking for status=failed would come back empty and leave
+ * the modal on a stale, still-locked copy.
+ */
+async function rqFailedFix(postId) {
+    _rqFailedBusy(postId, 'Reopening the post for editing…', 'busy');
+    try {
+        const res = await fetch('/.netlify/functions/retry-failed-post', {
+            method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId, mode: 'edit' }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || 'Could not reopen this post.');
+        if (_rqPostCache[postId]) {
+            _rqPostCache[postId].status = d.status || 'pending_approval';
+            _rqPostCache[postId].failure = null;
+            _rqPostCache[postId].failureMessage = null;
+            _rqPostCache[postId].attemptCount = 0;
+        }
+        window.showToast?.('Reopened for editing — approve it when you’re happy and it goes back out.', { icon: '✏️' });
+        await openPostReview(postId, { refresh: true });
+        _rqAfterFailureAction();
+    } catch (err) {
+        _rqFailedBusy(postId, err.message || 'Could not reopen this post.', 'error');
+    }
+}
+
+/** Straight to the assistant's Connections, which is where a dead link is re-authorised.
+ *  rqGoConnect closes this modal itself, so don't close it first — the id has to be read while the
+ *  post is still the one on screen. */
+function rqFailedReconnect(postId) {
+    rqGoConnect(_rqPostCache[postId]?.assistantId);
+}
+
+/** Archive it. Same endpoint and same content-rule side effect as rejecting a draft. */
+async function rqFailedReject(postId) {
+    const panel = _rqFailurePanel(postId);
+    const reason = (panel?.querySelector('[data-failure-reject-input]')?.value || '').trim();
+    if (!reason) { _rqFailedBusy(postId, 'Give a reason so your assistant can learn from it.', 'error'); return; }
+    _rqFailedBusy(postId, 'Archiving…', 'busy');
+    try {
+        const res = await fetch('/.netlify/functions/approve-post', {
+            method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId, action: 'reject', rejectionReason: reason }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || 'Could not archive this post.');
+        window.showToast?.('Archived. Your assistant will avoid this in future drafts.', { icon: '🗄️' });
+        closePostReview();
+        _rqAfterFailureAction();
+    } catch (err) {
+        _rqFailedBusy(postId, err.message || 'Could not archive this post.', 'error');
     }
 }
 
@@ -10696,6 +10976,14 @@ function _rqReviewRenderActive() {
         noteEl.innerHTML = `<p class="font-semibold">Posted</p>
           <p class="mt-0.5">${when ? `Published ${_rqEsc(when)}.` : 'Published.'}</p>
           ${post.platformPostUrl ? `<a href="${_rqEsc(post.platformPostUrl)}" target="_blank" rel="noopener" class="mt-1 inline-block font-semibold underline">View live post →</a>` : ''}`;
+        noteEl.classList.remove('hidden');
+    } else if (post.status === 'failed') {
+        // A failed post reached this modal with NOTHING: no reason (this branch didn't exist, so the
+        // note stayed hidden), no action footer (`reviewable` excludes 'failed'), and no editing rail
+        // (_pceIsEditablePost excludes it too). You could look at the post that didn't go out and
+        // that was all. This panel is the whole way back out — see _rqFailureRecoveryHtml.
+        noteEl.className = 'mt-4';
+        noteEl.innerHTML = _rqFailureRecoveryHtml(post);
         noteEl.classList.remove('hidden');
     } else {
         noteEl.classList.add('hidden');
