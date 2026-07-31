@@ -32,9 +32,13 @@ export type PostStatus =
      * either our monthly X allowance or the connected X account's own API quota is spent, so it
      * waits rather than burning a publish attempt (publish-social-posts.ts → pauseForXCredits).
      * Two sweeps select it back out — the monthly reset, and a credit-pack purchase in
-     * stripe-webhook.ts. It was missing from this union AND from the database CHECK constraint,
-     * which meant every pause was a constraint violation that degraded into a permanent 'failed'.
-     * See db/scheduled-posts-paused-credits-status.sql.
+     * stripe-webhook.ts.
+     *
+     * The live CHECK constraint has always allowed it (introspected 2026-07-31); it was this union,
+     * db/scheduled-posts-status-check.sql, db/schema.ts, both lists below and calendar.js STATUS_META
+     * that omitted it. The DB was AHEAD of the code, so the writes succeeded and the rows then went
+     * invisible — not schedule-active, hence off the calendar, and rendered "Draft" by the
+     * STATUS_META[s] || STATUS_META.draft fallback.
      */
     | 'paused_credits'
     | 'failed'
@@ -52,7 +56,8 @@ export type PostStatus =
  * writes 'scheduled' directly; 'paused', 'paused_credits' and 'failed' are posts that WERE
  * scheduled and now need attention, so hiding them would lose work silently — which is exactly
  * what happened to 'paused_credits' while it was absent from both lists: a post parked on quota
- * fell off the calendar with no badge, no column and no chip anywhere in the product.
+ * fell off the calendar and, on the surfaces that did show it, was mislabelled. Only the Review
+ * Queue ("Paused · X credits") and get-social-drafts' Scheduled count ever handled it.
  */
 export const SCHEDULE_ACTIVE_STATUSES = [
     'approved',

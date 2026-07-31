@@ -4,9 +4,10 @@
 //
 // This status is a one-way door if any link is missing, and every link failed independently:
 //
-//   • It was absent from the DATABASE CHECK CONSTRAINT, so `UPDATE … SET status='paused_credits'`
-//     raised a constraint violation. publish-social-posts catches that as a generic retryable
-//     publish error, so the pause degraded into the permanent 'failed' it exists to prevent.
+//   • The LIVE DATABASE always allowed it (constraint introspected 2026-07-31) — the drift ran
+//     DB-ahead-of-code, which is the direction that hides itself. The writes succeeded and the rows
+//     then went invisible, rather than erroring where anyone would notice. Every file below carried
+//     a stale copy of the constraint, including db/scheduled-posts-status-check.sql itself.
 //   • It was absent from PostStatus and from BOTH lists in src/config/post-status.ts, so nothing
 //     could reason about it — a parked post fell off the calendar entirely.
 //   • It had no STATUS_META entry in calendar.js, where every lookup falls back to
@@ -64,8 +65,9 @@ check('paused_credits is a real PostStatus, and is schedule-ACTIVE', () => {
 });
 
 check('the DB constraint and db/schema.ts agree that paused_credits is allowed', () => {
-    // These two disagreeing is precisely the original bug: the code wrote a status the database
-    // rejected, and the rejection surfaced as an unrelated "publish failed".
+    // These two disagreeing is precisely the original bug — in the DB-ahead direction: the live
+    // constraint allowed the status while every checked-in copy of it omitted it, so nothing
+    // errored and the rows simply went missing from the surfaces that filter on status.
     //
     // tests/schedule-visibility.test.ts already proves the constraint file and src/config are a
     // one-to-one match; what it does NOT check is db/schema.ts, which carries its own copy of the
