@@ -10,7 +10,7 @@
 //   409 { pastSchedule: true, scheduledFor, platform } — scheduled time in past, awaiting user action
 
 import { Handler } from '@netlify/functions';
-import { and, eq, gte, lte, ne, sql } from 'drizzle-orm';
+import { and, eq, gte, ne, sql } from 'drizzle-orm';
 import jwt from 'jsonwebtoken';
 import { getDb } from '../../db/client';
 import { aiAssistants, auditLogs, contentAssets, contentRules, postIdeaSuggestions, scheduledPosts, scheduledPostAssets, systemConnections } from '../../db/schema';
@@ -38,6 +38,7 @@ async function pickOptimalSlot(
     db: ReturnType<typeof getDb>,
     assistant: { id: number; onboardingContext: unknown; draftHorizonDays: number | null },
     postId: number,
+    crosspostGroupId: string | null,
     now: Date,
 ): Promise<Date | null> {
     const ctx = (assistant.onboardingContext as Record<string, unknown>) ?? {};
@@ -51,15 +52,27 @@ async function pickOptimalSlot(
     const slots = computeScheduleSlots({ schedule, horizonDays: searchDays, now });
     if (!slots.length) return null;
 
-    const windowEnd = slots[slots.length - 1];
+    // Deliberately NOT capped at the last slot. The overflow branch below hunts for a free instant
+    // PAST the window, so bounding this query by windowEnd made every one of those candidates look
+    // unoccupied: the guard loop could never fire, and the branch degenerated into a pure function of
+    // (now, cadence) — the same instant for every approval. That is the exact pile-up the branch was
+    // written to prevent, just moved from the front of the window to one step off the end, where it
+    // was harder to spot. Every future active post counts as taken, wherever it sits.
+    // The whole cross-post group is excluded, not just this row. Committing a cross-post is one
+    // approve-post call PER PLATFORM (workspace.html → _rqApproveTargets, sequential), and its rows
+    // are one logical post sharing one instant. Excluding only `postId` would let sibling #2 see
+    // sibling #1's freshly written date as occupied and step a day past it, tearing a four-platform
+    // post across four days. Siblings must all see the same picture and reach the same answer.
+    const notThisPost = crosspostGroupId
+        ? sql`crosspost_group_id IS DISTINCT FROM ${crosspostGroupId}`
+        : ne(scheduledPosts.id, postId);
     const taken = await db
         .select({ publishDate: scheduledPosts.publishDate })
         .from(scheduledPosts)
         .where(and(
             eq(scheduledPosts.assistantId, assistant.id),
-            ne(scheduledPosts.id, postId),
+            notThisPost,
             gte(scheduledPosts.publishDate, now),
-            lte(scheduledPosts.publishDate, windowEnd),
             sql`status IN ('draft','pending_approval','in_review','approved','scheduled')`,
         ));
     // A cross-post group legitimately shares one instant, so "taken" means "has at least one active
@@ -68,13 +81,29 @@ async function pickOptimalSlot(
     const free = slots.find(s => !takenMs.has(s.getTime()));
     if (free) return free;
 
-    // Every slot in the search window is occupied. Returning slots[0] here (the old behaviour) piled
-    // every approval onto the same instant — approving a batch against a full calendar stacked five
-    // posts on one 09:00. Extend past the last slot by the cadence interval instead, so a busy
-    // calendar pushes work forward in cadence rather than collapsing it onto the front.
+    // Every slot in the search window is occupied, so the post has to go past the end of it.
+    //
+    // Roll the SAME slot machinery forward — ask computeScheduleSlots for the next window, starting
+    // where this one ended — rather than doing arithmetic on the last slot. The arithmetic version
+    // (lastSlot + 168/perWeek hours) produced instants that were not posting slots at all: on a
+    // 4-a-week cadence the step is 42h, so a 09:00 slot became 03:00 the day after next. Prod had 22
+    // posts queued for 03:00 because of it. Real slots respect the assistant's posting days, its
+    // preferred times and its timezone (including DST), which is the whole point of having a cadence.
+    let cursor = slots[slots.length - 1];
+    for (let round = 0; round < 6; round++) {
+        const next = computeScheduleSlots({ schedule, horizonDays: searchDays, now: cursor });
+        if (!next.length) break;
+        const nextFree = next.find(s => s.getTime() > cursor.getTime() && !takenMs.has(s.getTime()));
+        if (nextFree) return nextFree;
+        const last = next[next.length - 1];
+        if (last.getTime() <= cursor.getTime()) break;   // no forward progress; don't spin
+        cursor = last;
+    }
+
+    // Roughly six months out and every slot still taken. Fall back to the cadence interval so the
+    // function always returns something schedulable; in practice unreachable.
     const stepHours = intervalHoursFor(schedule.frequency) ?? 24;
-    let candidate = new Date(slots[slots.length - 1].getTime() + stepHours * 3600 * 1000);
-    // Don't land on top of something already out past the window.
+    let candidate = new Date(cursor.getTime() + stepHours * 3600 * 1000);
     for (let guard = 0; guard < 60 && takenMs.has(candidate.getTime()); guard++) {
         candidate = new Date(candidate.getTime() + stepHours * 3600 * 1000);
     }
@@ -452,7 +481,7 @@ export default withLambda(async (event) => {
                 .limit(1);
             if (assistant) {
                 assistantName = assistant.name;
-                optimal = await pickOptimalSlot(db, assistant, postId, now).catch(() => null);
+                optimal = await pickOptimalSlot(db, assistant, postId, post.crosspostGroupId ?? null, now).catch(() => null);
             }
         }
         if (optimal) {
