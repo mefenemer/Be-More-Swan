@@ -219,21 +219,43 @@ window.initCalendar = async function (opts = {}) {
 };
 
 // ── Navigation ────────────────────────────────────────────────────
-function _navPrev() {
-    if (_view === 'month') _anchor.setMonth(_anchor.getMonth() - 1);
-    else if (_view === 'week') _anchor.setDate(_anchor.getDate() - 7);
-    else _anchor.setMonth(_anchor.getMonth() - 1);
+// Changing the anchor or the view changes the DATE RANGE, and the range is what every loader is
+// keyed on: _loadAndRender fetches exactly _getDateRange(), so _posts/_activities/_blogPosts only
+// ever hold the one month (or week) that was last fetched. Navigating with a bare _render()
+// therefore drew the new range out of data that could not contain it — the grid came up empty,
+// most visibly on the FUTURE months, which is precisely where scheduled work lives. Every nav
+// control has to reload.
+//
+// Order matters: paint first so the title and grid move under the user's click without waiting on
+// the network, then fill in when the fetch lands. The interim paint can only ever be empty for the
+// new range (chips are matched by date key), never wrong.
+function _navRefresh() {
     _render();
+    void _loadAndRender();
+}
+// Month steps land on the 1st rather than doing setMonth() in place. setMonth() keeps the day of
+// month, so from an anchor sitting on the 29th/30th/31st it OVERFLOWS: on the 31st of July,
+// setMonth(8) asks for "31 September", which JS rolls forward to 1 October — September is skipped
+// and never renders at all. The anchor's day is meaningless in month/list view (only its year and
+// month are read), so normalising it here costs nothing; week view steps by 7 days, which cannot
+// overflow, and keeps its exact date.
+function _stepMonth(delta) {
+    _anchor = new Date(_anchor.getFullYear(), _anchor.getMonth() + delta, 1);
+    _anchor.setHours(0, 0, 0, 0);
+}
+function _navPrev() {
+    if (_view === 'week') _anchor.setDate(_anchor.getDate() - 7);
+    else _stepMonth(-1);
+    _navRefresh();
 }
 function _navNext() {
-    if (_view === 'month') _anchor.setMonth(_anchor.getMonth() + 1);
-    else if (_view === 'week') _anchor.setDate(_anchor.getDate() + 7);
-    else _anchor.setMonth(_anchor.getMonth() + 1);
-    _render();
+    if (_view === 'week') _anchor.setDate(_anchor.getDate() + 7);
+    else _stepMonth(1);
+    _navRefresh();
 }
 function _navToday() {
     _anchor = new Date(); _anchor.setHours(0,0,0,0);
-    _render();
+    _navRefresh();
 }
 function _setView(v) {
     _view = v;
@@ -241,11 +263,20 @@ function _setView(v) {
         const active = btn.dataset.view === v;
         btn.className = `cal-view-btn px-3 py-1.5 text-sm font-bold rounded-lg transition cursor-pointer ${active ? 'bg-white shadow text-gray-900' : 'text-gray-500 hover:text-gray-700'}`;
     });
-    _render();
+    // Month/list ⇄ week are different ranges (a week view of a month-loaded range is a subset, but
+    // week→month is not), so this reloads too rather than guessing which direction is safe.
+    _navRefresh();
 }
 
 // ── Load posts + assistant activity from API ──────────────────────
+// Now that every nav control reloads, a user clicking "next" three times has three loads in flight
+// for three different ranges. Each one stamps a token and only commits to module state if it is
+// still the newest — otherwise a slow response for March could land after February's and repaint
+// the grid with the wrong month's posts.
+let _loadToken = 0;
+
 async function _loadAndRender() {
+    const token = ++_loadToken;
     try {
         const { from, to } = _getDateRange();
         // Posts, completed assistant activity, and the assistant list (for colours/filter) in parallel.
@@ -256,32 +287,43 @@ async function _loadAndRender() {
             fetch(`/.netlify/functions/blog-posts?from=${from.toISOString()}&to=${to.toISOString()}`),
         ]);
 
+        // null = "no definitive answer" (a 500, say) — leave the previous value alone rather than
+        // blanking the grid on a transient failure. [] is a real, empty answer.
+        let posts = null, activities = null, assistants = null, blogPosts = null, records = [];
+
         if (postsRes.ok) {
-            _posts = (await postsRes.json()).posts || [];
+            posts = (await postsRes.json()).posts || [];
         } else if (postsRes.status === 403) {
             // US3 AC3.3: onboarding guard rejected this — surface it gracefully, don't crash.
             const body = await postsRes.json().catch(() => ({}));
             if (body.error === 'onboarding_incomplete') {
                 window.showToast?.(body.message || 'Please complete your onboarding checklist to unlock this feature.');
             }
-            _posts = [];
+            posts = [];
         }
 
-        if (actRes && actRes.ok) _activities = (await actRes.json()).activities || [];
-        if (asstRes && asstRes.ok) _assistants = (await asstRes.json()).assistants || [];
-        if (blogRes && blogRes.ok) _blogPosts = (await blogRes.json()).posts || [];
+        if (actRes && actRes.ok) activities = (await actRes.json()).activities || [];
+        if (asstRes && asstRes.ok) assistants = (await asstRes.json()).assistants || [];
+        if (blogRes && blogRes.ok) blogPosts = (await blogRes.json()).posts || [];
 
         // Assistant Calendar tab only: overlay this assistant's scheduled Data Hub records so
         // "Approve & Schedule" in the Review Queue shows up here as scheduled work.
         if (_lockedAssistant && _assistantFilter !== 'all') {
             try {
                 const rr = await fetch(`/.netlify/functions/assistant-records?scheduled=1&assistantId=${_assistantFilter}&from=${from.toISOString()}&to=${to.toISOString()}`);
-                _scheduledRecords = rr.ok ? ((await rr.json()).records || []) : [];
-            } catch { _scheduledRecords = []; }
-        } else {
-            _scheduledRecords = [];
+                records = rr.ok ? ((await rr.json()).records || []) : [];
+            } catch { records = []; }
         }
+
+        if (token !== _loadToken) return;   // superseded by a newer navigation
+
+        if (posts) _posts = posts;
+        if (activities) _activities = activities;
+        if (assistants) _assistants = assistants;
+        if (blogPosts) _blogPosts = blogPosts;
+        _scheduledRecords = records;
     } catch (e) { console.warn('Calendar load error:', e); }
+    if (token !== _loadToken) return;
     // Always (re)populate the toolbar controls — the calendar.html fragment (and its fresh
     // <select>) is re-injected on every view entry, even though _assistants is cached here.
     _renderAssistantControls();
@@ -471,7 +513,11 @@ function _renderList() {
         all:       null,
         scheduled: new Set(['approved', 'scheduled', 'publishing']),
         published: new Set(['published']),
-        attention: new Set(['failed', 'paused']),
+        // 'paused_credits' belongs here, not under Scheduled: the post is committed but parked on
+        // spent X quota, which is the definition of needing attention. Omitting it left a parked
+        // post reachable only from the All tab — the same silent disappearance that the status
+        // itself caused before it was added to SCHEDULE_ACTIVE_STATUSES.
+        attention: new Set(['failed', 'paused', 'paused_credits']),
     };
     const allowedStatuses = statusSets[_listFilter];
 

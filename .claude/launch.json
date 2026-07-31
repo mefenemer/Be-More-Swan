@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-calendar-nav",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4233",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/2bb93ebf-8846-4d41-a925-d16ff3763e17/scratchpad/calharness"
+      ],
+      "port": 4233,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-detail-removals",
       "runtimeExecutable": "npx",
       "runtimeArgs": [
