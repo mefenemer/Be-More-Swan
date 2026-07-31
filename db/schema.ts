@@ -2824,6 +2824,11 @@ export const contentGenerationJobs = pgTable("content_generation_jobs", {
   // job carries the SAME uuid it will stamp on every sibling post so process-content-jobs marks the
   // resulting scheduled_posts rows as one logical cross-post. NULL ⇒ standalone (single platform).
   crosspostGroupId: text("crosspost_group_id"),
+  // Rejection → regeneration (db/reject-regeneration.sql). The rejected scheduled_posts.id this job
+  // is a revision of. Set by reject-post.ts; process-content-jobs stamps is_revised /
+  // revised_from_post_id on the draft it produces so the Review Queue badges it "Revised".
+  // NULL ⇒ an ordinary generation job.
+  revisedFromPostId: integer("revised_from_post_id"),
   // One-idea cross-post fan-out (db/crosspost-fanout-platforms.sql). When set, process-content-jobs
   // generates ONE caption/media for this job and creates a scheduled_posts row for EACH platform in
   // this list (sharing crosspost_group_id). NULL/empty ⇒ legacy single-platform job (uses `platform`).

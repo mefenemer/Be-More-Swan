@@ -1,0 +1,32 @@
+-- db/reject-regeneration.sql
+-- Rejection → regeneration: let a content-generation job say which post it is a revision OF, so the
+-- draft it produces can be stamped `is_revised` / `revised_from_post_id` and badged in the UI.
+--
+-- Background: reject-post.ts used to write its own clone of the rejected post at status 'draft',
+-- commented "Create a revised draft (clone of original) for AI regeneration". Nothing regenerated it
+-- and nothing displayed it: the Review Queue's five columns are pending_approval / approved /
+-- scheduled / published / rejected (no draft column, and get-social-drafts filters on exact status
+-- equality), and the Content Calendar excludes 'draft' via SCHEDULE_INACTIVE_STATUSES. Every
+-- rejection therefore wrote an unread, un-GC'd row carrying the SAME caption the user had just
+-- rejected, while both callers (voice feedback, and the tuning session's "Revise post") told the
+-- user a revised draft was on its way.
+--
+-- reject-post now enqueues a real regeneration job instead — the same contentGenerationJobs +
+-- process-content-jobs pipeline request-post-changes.ts uses — and the resulting draft lands in the
+-- Review Queue as pending_approval, having actually been redrafted against the rejection feedback
+-- (and against the content rule the same request may have just compiled into the blueprint).
+--
+-- One nullable column, mirroring how crosspost_group_id carries fan-out identity from enqueue time
+-- through to the resulting scheduled_posts row (db/crosspost-group-id.sql):
+--   content_generation_jobs.revised_from_post_id — the rejected scheduled_posts.id this job revises.
+--                                                  NULL ⇒ an ordinary generation job (the default).
+--
+-- No backfill: NULL is the correct value for every existing row, and the only reader treats NULL as
+-- "not a revision". Purely additive and idempotent — safe to run repeatedly.
+-- Apply manually as the table owner (no drizzle-kit push — see project convention).
+--
+-- ⚠️ APPLY THIS BEFORE DEPLOYING THE ACCOMPANYING CODE. reject-post.ts inserts this column on every
+-- rejection; without it the INSERT fails and the rejection returns 500.
+
+ALTER TABLE content_generation_jobs
+  ADD COLUMN IF NOT EXISTS revised_from_post_id integer;

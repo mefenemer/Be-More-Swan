@@ -101,11 +101,11 @@ export async function drainContentJobs(): Promise<number> {
         organisation_id: number; user_id: number; attempt: number; max_attempts: number;
         context_prompt: string | null; trigger_type: string | null; platform: string | null;
         admin_id: number | null; target_publish_date: string | null; crosspost_group_id: string | null;
-        platforms: string[] | null;
+        platforms: string[] | null; revised_from_post_id: number | null;
     }>(
         `SELECT id, job_id, blueprint_id, assistant_id, organisation_id, user_id, attempt, max_attempts,
                 context_prompt, trigger_type, platform, admin_id, target_publish_date, crosspost_group_id,
-                platforms
+                platforms, revised_from_post_id
          FROM content_generation_jobs
          WHERE status = 'queued'
            AND content_type = 'social'
@@ -147,7 +147,7 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
     organisation_id: number; user_id: number; attempt: number; max_attempts: number;
     context_prompt: string | null; trigger_type: string | null; platform: string | null;
     admin_id: number | null; target_publish_date: string | null; crosspost_group_id: string | null;
-    platforms: string[] | null;
+    platforms: string[] | null; revised_from_post_id: number | null;
 }, now: Date) {
     await db.execute(
         `UPDATE content_generation_jobs SET status = 'processing', attempt = attempt + 1, updated_at = now() WHERE id = ${job.id}`
@@ -605,6 +605,12 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             // Siblings of one autopilot cross-post share the group id stamped at enqueue time, so the
             // Review Queue collapses them into a single card. Null ⇒ standalone (single-platform slot).
             crosspostGroupId: job.crosspost_group_id,
+            // Rejection → regeneration (db/reject-regeneration.sql). reject-post enqueues this job
+            // carrying the id of the post the user rejected; carrying it through to the draft is what
+            // makes the Review Queue's "Revised" badge mean something.
+            ...(job.revised_from_post_id
+                ? { isRevised: true, revisedFromPostId: job.revised_from_post_id }
+                : {}),
         }).returning({ id: scheduledPosts.id });
 
         // Link the already-claimed idea (status was flipped to 'in_review' when we claimed it above)
@@ -873,6 +879,9 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                             suggestedMediaDescription: primary?.suggestedMediaDescription ?? null,
                             status: 'pending_approval', generatedAt: now, triggerType: job.trigger_type ?? 'scheduled',
                             crosspostGroupId: primary?.crosspostGroupId ?? job.crosspost_group_id,
+                            ...(job.revised_from_post_id
+                                ? { isRevised: true, revisedFromPostId: job.revised_from_post_id }
+                                : {}),
                         }).returning({ id: scheduledPosts.id });
 
                         for (const aid of sharedAssetIds) await attachAssetToPost(db, sibling.id, aid);
@@ -955,6 +964,21 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                     userId: job.user_id,
                     context: { assistant: { name: assistantLabel }, platform: { label: platformLabel } },
                     metadata: { jobId: job.job_id, postId: post.id, reason: mediaExhaustedReason, assistantId: job.assistant_id },
+                });
+            } else if (job.revised_from_post_id) {
+                // A redraft the user asked for by rejecting the previous version. 'post_revised' is
+                // the template that says so ("your revised post is ready to review") — it used to be
+                // sent by reject-post the instant the rejection was recorded, which was a promise
+                // nothing kept. Sent here it is simply true: the revised draft exists and is in the
+                // queue.
+                await createNotification(db, 'post_revised', {
+                    userId: job.user_id,
+                    context: { assistant: { name: assistantLabel }, platform: { label: platformLabel } },
+                    metadata: {
+                        jobId: job.job_id, postId: post.id,
+                        revisedPostId: post.id, originalPostId: job.revised_from_post_id,
+                        assistantId: job.assistant_id,
+                    },
                 });
             } else {
                 await createNotification(db, job.trigger_type === 'on_demand' ? 'post_draft_ready_on_demand' : 'post_draft_ready', {

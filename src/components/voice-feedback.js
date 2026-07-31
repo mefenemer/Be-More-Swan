@@ -10,7 +10,7 @@
  *     postId: 123,
  *     assistantId: 45,
  *     container: document.getElementById('voice-feedback-root'),
- *     onFeedbackApplied: ({ postSpecific, rules, revisedPostId }) => { ... }
+ *     onFeedbackApplied: ({ postSpecific, rules, revisionJobId }) => { ... }
  *   });
  *   vf.render();
  */
@@ -347,7 +347,10 @@ ${itemsHtml}
         const postSpecific = items.filter(i => i.classification === 'post_specific').map(i => i.text).join('\n');
         const rules        = items.filter(i => i.classification === 'overarching_rule');
 
-        let revisedPostId = null;
+        // The rewrite is generated asynchronously, so there is no post id to hand back here — only
+        // the id of the job that will produce it. The revised draft arrives in the Review Queue on
+        // its own, and reject-post's 'post_revised' notification announces it.
+        let revisionJobId = null;
 
         // Apply post-specific feedback as a rejection
         if (postSpecific) {
@@ -365,7 +368,7 @@ ${itemsHtml}
                 });
                 if (res.ok) {
                     const data = await res.json();
-                    revisedPostId = data.revisedPostId;
+                    revisionJobId = data.revisionJobId || null;
                 }
             } catch {}
         }
@@ -396,7 +399,7 @@ ${itemsHtml}
         this._setStatus(`✓ Got it. ${parts.join(' and ')}.`);
         this._hide('#vf-summary-panel');
 
-        this.onFeedbackApplied({ postSpecific: !!postSpecific, rules: savedRules, revisedPostId });
+        this.onFeedbackApplied({ postSpecific: !!postSpecific, rules: savedRules, revisionJobId });
     }
 
     _showTextFallback() {
