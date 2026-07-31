@@ -383,6 +383,23 @@ export { isDriverRetryable };
 // text-only tweet if media upload fails (best-effort media has always been the behaviour). Host
 // canonicalised to api.x.com (api.twitter.com still resolves, but x.com is the documented host).
 /**
+ * A media upload that failed against the platform's API, carrying the HTTP status it failed with.
+ *
+ * The status is the whole point. `mediaDropped` below turns a thrown error into a DriverResult, and
+ * the publisher classifies retryability purely from `DriverResult.status` (isDriverRetryable, and
+ * the identical isRetryable in publish-social-posts.ts). An uploader that throws a bare Error
+ * therefore reports `status: null`, which classifies as PERMANENT — so a 429 or a 503 from the
+ * media endpoint burned the post on attempt 1 instead of backing off. Anything that fails an HTTP
+ * request in an upload path must throw this, not Error.
+ */
+class MediaUploadError extends Error {
+    constructor(message: string, readonly status: number | null = null) {
+        super(message);
+        this.name = 'MediaUploadError';
+    }
+}
+
+/**
  * The result for "we had media for this post and could not send it".
  *
  * This used to be swallowed — both X and LinkedIn caught an upload failure and published the caption
@@ -391,14 +408,16 @@ export { isDriverRetryable };
  * is recoverable (the post stays in the queue and can be retried); a bare caption on a live feed is
  * not.
  *
- * Deliberately NOT retryable-by-default at the driver level — the caller classifies that — but it
- * always carries the underlying reason so the Review Queue can show something actionable.
+ * Carries BOTH the platform's own message and its HTTP status: the message is what makes the Review
+ * Queue actionable (a rejected codec and an expired token need different actions from the user, and
+ * only the platform's text distinguishes them), and the status is what makes the retry decision
+ * correct. Losing either one is what made an X image failure both undiagnosable and unretryable.
  */
 function mediaDropped(platform: string, err?: unknown): DriverResult {
     const detail = err instanceof Error ? err.message : typeof err === 'string' ? err : null;
     return {
         ok: false,
-        status: null,
+        status: err instanceof MediaUploadError ? err.status : null,
         error: `The media could not be uploaded to ${platform}, so the post was not sent`
             + (detail ? `: ${detail}` : '. Try again, or replace the media.'),
     };
@@ -452,8 +471,17 @@ export async function publishX(text: string, token: string, image: PostImage | P
     return { ok: false, status: res.status, error: data?.detail || data?.title || `X API error (${res.status})` };
 }
 
-// Upload media to X via the v2 endpoint (multipart form-data). Returns the media id or null, which
-// the caller turns into a media-dropped failure.
+// Upload media to X via the v2 endpoint (multipart form-data). Returns the media id, or throws a
+// MediaUploadError carrying X's own message and HTTP status, which the caller turns into a
+// media-dropped failure.
+//
+// This used to `return null` on any non-2xx, discarding both the response body and the status. That
+// produced the one failure shape you cannot act on: failure_reason `{"httpStatus": null,
+// "errorMessage": "The media could not be uploaded to X…", "isRetryable": false}` — X had said
+// whether this was an expired token, a missing media.write scope, an oversized file or a rejected
+// format, and none of it survived. The null status also classified every transient 429/5xx as
+// PERMANENT, so a rate-limited upload killed the post on its first attempt. The video path below
+// has always thrown with X's message; this is the image path catching up.
 //
 // Images go up in a single request. VIDEO cannot: X requires the chunked INIT → APPEND* → FINALIZE
 // sequence and then a processing wait, so it takes the separate path below.
@@ -470,8 +498,18 @@ async function uploadXMedia(image: PostImage, token: string): Promise<string | n
         body: form,
     });
     const data: any = await res.json().catch(() => ({}));
-    // v2 returns { data: { id } }; tolerate the legacy media_id_string shape too.
-    return res.ok ? (data?.data?.id ?? data?.media_id_string ?? null) : null;
+    if (!res.ok) {
+        throw new MediaUploadError(
+            data?.detail || data?.title || data?.errors?.[0]?.message || `X image upload failed (${res.status})`,
+            res.status,
+        );
+    }
+    // v2 returns { data: { id } }; tolerate the legacy media_id_string shape too. A 2xx with no id
+    // anywhere in it is X breaking its own contract — surface the status rather than a bare null,
+    // so the queue shows "(200)" instead of nothing.
+    const id = data?.data?.id ?? data?.media_id_string ?? null;
+    if (!id) throw new MediaUploadError(`X accepted the image but returned no media id (${res.status})`, res.status);
+    return String(id);
 }
 
 /** X's chunked video upload: 5 MB segments, which is comfortably under its per-request ceiling. */
@@ -491,7 +529,10 @@ async function uploadXVideo(video: PostImage, token: string): Promise<string | n
     const bytes = new Uint8Array(await fetchImageBytes(video.url));
     const auth = { Authorization: `Bearer ${token}` };
     const fail = (stage: string, data: any, status: number): never => {
-        throw new Error(data?.detail || data?.title || data?.errors?.[0]?.message || `X ${stage} failed (${status})`);
+        throw new MediaUploadError(
+            data?.detail || data?.title || data?.errors?.[0]?.message || `X ${stage} failed (${status})`,
+            status,
+        );
     };
 
     // INIT — declare the total size up front; X allocates the media id here.
@@ -530,7 +571,9 @@ async function uploadXVideo(video: PostImage, token: string): Promise<string | n
     let info = finData?.data?.processing_info ?? finData?.processing_info ?? null;
     for (let poll = 0; info && info.state && info.state !== 'succeeded' && poll < X_VIDEO_MAX_POLLS; poll++) {
         if (info.state === 'failed') {
-            throw new Error(info?.error?.message || 'X could not process the video.');
+            // X rejected the video itself (codec, duration, dimensions). Retrying the identical file
+            // cannot succeed, so this stays status-less and classifies as permanent.
+            throw new MediaUploadError(info?.error?.message || 'X could not process the video.');
         }
         await sleep(Math.max(X_VIDEO_POLL_MS, (info.check_after_secs ?? 0) * 1000));
         const statusRes = await fetch(
@@ -541,7 +584,11 @@ async function uploadXVideo(video: PostImage, token: string): Promise<string | n
         info = statusData?.data?.processing_info ?? statusData?.processing_info ?? null;
     }
     if (info && info.state && info.state !== 'succeeded') {
-        throw new Error('X is still processing the video. It will be retried shortly.');
+        // Transcoding outlasted our poll budget — the upload is fine, we just stopped waiting. This
+        // message has always promised a retry; as a bare Error it reported status null and got a
+        // PERMANENT classification instead, so the promise was never kept. 503 is the status that
+        // makes isDriverRetryable/isRetryable agree with the sentence.
+        throw new MediaUploadError('X is still processing the video. It will be retried shortly.', 503);
     }
     return String(mediaId);
 }

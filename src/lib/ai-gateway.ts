@@ -50,6 +50,16 @@ const client = new Anthropic({
     timeout: 24_000,
 });
 
+/**
+ * Did this call run out of time? Callers on a request path need to tell a timeout apart from a real
+ * failure, and they cannot do it by name: the SDK never sets `.name` on its error classes, so
+ * `err.name === 'APIConnectionTimeoutError'` is inherited `'Error'` and never matches. Ask the
+ * class itself, here, so the SDK stays behind this module.
+ */
+export function isTimeoutError(err: unknown): boolean {
+    return err instanceof Anthropic.APIConnectionTimeoutError;
+}
+
 function isFailoverError(err: unknown): boolean {
     if (err instanceof Anthropic.RateLimitError)     return true;  // 429
     if (err instanceof Anthropic.APIError && err.status === 503) return true;
@@ -173,7 +183,14 @@ export async function gatewayGenerateGrounded(req: GatewayRequest): Promise<Grou
             system: req.system,
             messages,
             tools: [webSearchTool(m)],
-        }, left === Infinity ? undefined : { timeout: Math.max(MIN_CALL_MS, left) });
+        }, left === Infinity ? undefined : {
+            timeout: Math.max(MIN_CALL_MS, left),
+            // A `timeout` is per ATTEMPT, not per call: the SDK retries a connection timeout
+            // maxRetries times (default 2) before it ever throws, so a 20s budget silently became
+            // ~61s of wall clock — past the 26s function cap, which is a BODYLESS kill the caller
+            // cannot report. When a deadline is given, the deadline has to be the whole story.
+            maxRetries: 0,
+        });
     };
 
     let messages = [...req.messages];

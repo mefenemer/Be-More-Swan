@@ -69,6 +69,38 @@ export interface WarningDisposition {
     captionHashAtDisposition: string;
 }
 
+/**
+ * An assistant-led verification of ONE warning — what "AI Resolve" produced, or is still producing.
+ *
+ * This is a PROPOSAL, never a disposition. Nothing here clears a warning: the human still presses
+ * "Use this source" or "Save this version", which goes through the normal disposition path so the
+ * audit trail always has a person behind it. Kept beside `dispositions` and keyed the same way (by
+ * exact warning text) so both die together when the caption changes — a proposal about a sentence
+ * that no longer exists is worse than no proposal.
+ */
+export type WarningVerification =
+    | { status: 'running'; startedAt: string; userId: number }
+    | { status: 'sourced'; sourceUrl: string; note: string; searchCount: number; finishedAt: string }
+    | { status: 'rewrite'; before: string; after: string; reason: string; searchCount: number; finishedAt: string }
+    | { status: 'inconclusive'; reason: string; searchCount: number; finishedAt: string }
+    | { status: 'failed'; error: string; finishedAt: string };
+
+/**
+ * How long a 'running' marker is believed before it is treated as abandoned.
+ *
+ * A background worker that dies — OOM, a deploy mid-run, an unhandled throw before its own catch —
+ * writes nothing, and without an expiry the warning would show a spinner forever and refuse to let
+ * the user retry. Comfortably longer than the ~124s a real run takes, plus the worker's own budget.
+ */
+export const VERIFICATION_STALE_MS = 6 * 60_000;
+
+/** True while a verification is genuinely in flight (running AND not abandoned). */
+export function isVerificationInFlight(v: WarningVerification | undefined | null): boolean {
+    if (!v || v.status !== 'running') return false;
+    const started = Date.parse(v.startedAt);
+    return Number.isFinite(started) && (Date.now() - started) < VERIFICATION_STALE_MS;
+}
+
 export interface QualityReview {
     /**
      * 0-100, or NULL when the reviewer did not return one.
@@ -87,6 +119,13 @@ export interface QualityReview {
     captionHash: string;
     /** Per-warning human dispositions, keyed by the exact warning text. */
     dispositions?: Record<string, WarningDisposition>;
+    /**
+     * Per-warning assistant verifications, keyed by the exact warning text. Deliberately NOT carried
+     * across a re-review (unlike dispositions): a disposition is a human judgement worth preserving,
+     * a verification is a machine proposal about one exact caption, and re-proposing it against text
+     * that has changed is how you get a citation attached to a claim it never supported.
+     */
+    verifications?: Record<string, WarningVerification>;
     /** Explicit suggestion rounds spent on this caption. Reset when the caption changes. */
     suggestionRounds?: number;
 }
@@ -472,6 +511,40 @@ export async function recordDisposition(
             ))
             .catch(() => {});
     }
+    return updated;
+}
+
+/**
+ * Record the state of an assistant verification against one warning.
+ *
+ * Always re-reads immediately before writing, and never from a copy the caller has been holding.
+ * The whole point of this record is that it is written by a background worker minutes after the
+ * request that started it — by then the human may well have disposed of a different warning, and
+ * persisting a stale in-memory review would erase that decision. Only the one key changes.
+ *
+ * Returns null when there is nothing to attach to: no current review, or the caption moved on while
+ * the worker was running (in which case the proposal is about text that no longer exists and must
+ * be dropped, not filed).
+ */
+export async function recordVerification(
+    db: Db,
+    args: {
+        postId: number;
+        /** The caption the verification was started against — the staleness check. */
+        caption: string | null;
+        warning: string;
+        verification: WarningVerification;
+    },
+): Promise<QualityReview | null> {
+    const review = readCachedReview(await readStoredReview(db, args.postId), args.caption);
+    if (!review) return null;
+    if (!review.complianceWarnings.includes(args.warning)) return null;
+
+    const updated: QualityReview = {
+        ...review,
+        verifications: { ...(review.verifications || {}), [args.warning]: args.verification },
+    };
+    await persistReview(db, args.postId, updated);
     return updated;
 }
 

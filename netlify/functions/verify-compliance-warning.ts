@@ -1,41 +1,48 @@
 // netlify/functions/verify-compliance-warning.ts
-// Ask the assistant to settle ONE compliance warning: find a real source, or rewrite the claim away.
+// Start — or read the progress of — an assistant-led verification of ONE compliance warning.
 //
-// POST { postId, warning } → one of
-//   { outcome: 'sourced',  sourceUrl, note, searchCount }   — a citation the SEARCH TOOL returned
-//   { outcome: 'rewrite',  before, after, reason }          — nothing credible found; drop the claim
-//   { outcome: 'inconclusive', reason }                     — neither; the human decides
+// POST { postId, warning }          → 202 { status: 'running' }        (starts the work)
+// POST { postId, warning, poll: 1 } → 200 { status: ... }              (reads it back, no charge)
 //
-// ── The fabrication problem this is built around ──────────────────────────────────────────────
-// The obvious version of "let the assistant verify it" is the dangerous one. A model asked to
-// verify "the average small business runs 8.2 software subscriptions" with no ability to look
-// anything up will produce a confident, plausible, correctly-formatted citation to a study that
-// does not exist. In a compliance control that is strictly worse than the dead end it replaces: it
-// launders an unverified claim into a filed one, and the audit trail now contains a fake source
-// with a real human's name against it.
+// Terminal states returned by either call:
+//   { status: 'sourced',      sourceUrl, note, searchCount }   — a citation the SEARCH TOOL returned
+//   { status: 'rewrite',      before, after, reason, searchCount } — drop the claim instead
+//   { status: 'inconclusive', reason, searchCount }            — the human decides
+//   { status: 'failed',       error }                          — the run itself did not complete
 //
-// So verification here is grounded in the actual web_search server tool, and the model's own prose
-// is never trusted for the URL:
+// ── Why this does not do the work ─────────────────────────────────────────────────────────────
+// It used to. A measured verification takes ~124 SECONDS — four web searches, dynamic filtering,
+// and the model's own reasoning — against a 26-second cap on a synchronous Netlify function. The
+// platform's kill produces a response with NO BODY, so the handler could not report what happened
+// however careful its own try/catch was; the browser fell back to its generic string and the user
+// was told nothing, having already been charged the task credit.
 //
-//   1. The URL must appear in `searchedUrls` — the list collected from the search tool's own result
-//      blocks (see ai-gateway.ts). A URL the model wrote but did not find is discarded outright.
-//   2. If no search ran at all, the result cannot be 'sourced' regardless of what the model says.
-//   3. The human still confirms. This proposes a disposition; it never records one. Recording
-//      happens through resolve-compliance-warning.ts with the user's own click behind it.
+// (Two earlier attempts to bound the call inside the request are worth not repeating. A `deadlineMs`
+// alone does not bound anything: the SDK's `timeout` is PER ATTEMPT and it retries a connection
+// timeout twice, so a 20s budget measured 61s of wall clock. And even bounded perfectly, a budget
+// that fits in 26s cannot finish work that needs 124s — it only converts a mysterious failure into
+// a reliable one.)
 //
-// And when verification honestly fails, the answer is not to try harder — it is to stop making the
-// claim. That is the 'rewrite' outcome: the caption is amended to remove or soften the unsupported
-// assertion, previewed for the human like any other rewrite.
+// So the work runs in verify-compliance-warning-background.ts, which has a 15-minute ceiling, and
+// this endpoint owns the parts that genuinely belong in the request: authorisation, the plan gate,
+// the task credit, and the state the panel polls.
+//
+// What this endpoint still refuses to do is RECORD a disposition. Verification proposes; the human
+// accepts through resolve-compliance-warning.ts with their own click behind it.
 
 import jwt from 'jsonwebtoken';
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, userOrganisations } from '../../db/schema';
-import { gatewayGenerateGrounded } from '../../src/lib/ai-gateway';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
 import { consumeTaskCredit } from '../../src/utils/task-credit';
-import { readCachedReview } from '../../src/utils/post-quality-review';
-import { parseModelJson } from '../../src/utils/model-json';
+import {
+    isVerificationInFlight,
+    readCachedReview,
+    recordVerification,
+    type WarningVerification,
+} from '../../src/utils/post-quality-review';
+import { triggerWarningVerification } from '../../src/utils/trigger-verification';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -46,27 +53,12 @@ const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
 });
 
-/**
- * Resolve a model-proposed URL against the URLs the search tool actually returned. Returns the
- * matching SEARCHED url (never the model's version), or null if it wasn't found.
- *
- * Exported for tests: this is the single check standing between a real citation and a fabricated
- * one, so it needs coverage independent of the endpoint around it.
- */
-export function matchesSearchedUrl(candidate: string, searched: string[]): string | null {
-    let cand: URL;
-    try { cand = new URL(candidate); } catch { return null; }
-    if (cand.protocol !== 'http:' && cand.protocol !== 'https:') return null;
-    // Exact match first, then same host + same path — enough to tolerate a stripped query string
-    // without accepting "some other page on a domain that happened to appear in the results".
-    for (const s of searched) {
-        if (s === candidate) return s;
-        try {
-            const u = new URL(s);
-            if (u.host === cand.host && u.pathname.replace(/\/$/, '') === cand.pathname.replace(/\/$/, '')) return s;
-        } catch { /* skip unparseable */ }
-    }
-    return null;
+/** The stored verification, shaped for the panel. `idle` means nothing has been started. */
+function stateFor(
+    review: { verifications?: Record<string, WarningVerification> } | null,
+    warning: string,
+): WarningVerification | { status: 'idle' } {
+    return review?.verifications?.[warning] ?? { status: 'idle' };
 }
 
 export default withLambda(async (event) => {
@@ -80,11 +72,12 @@ export default withLambda(async (event) => {
         try { userId = (jwt.verify(cookie, JWT_SECRET) as { userId: number }).userId; }
         catch { return json(401, { error: 'Invalid session.' }); }
 
-        let body: { postId?: number; warning?: string };
+        let body: { postId?: number; warning?: string; poll?: unknown };
         try { body = JSON.parse(event.body || '{}'); }
         catch { return json(400, { error: 'Invalid JSON.' }); }
 
         const { postId, warning } = body;
+        const isPoll = Boolean(body.poll);
         if (!postId) return json(400, { error: 'postId required.' });
         if (!warning) return json(400, { error: 'warning required.' });
 
@@ -94,7 +87,6 @@ export default withLambda(async (event) => {
                 id: scheduledPosts.id,
                 organisationId: scheduledPosts.organisationId,
                 caption: scheduledPosts.caption,
-                platform: scheduledPosts.platform,
                 status: scheduledPosts.status,
                 qualityReview: scheduledPosts.qualityReview,
             })
@@ -111,13 +103,6 @@ export default withLambda(async (event) => {
             .limit(1);
         if (!membership) return json(403, { error: 'Forbidden.' });
 
-        if (!VERIFIABLE.includes(post.status)) {
-            return json(409, { error: `A post in '${post.status}' state can no longer be amended.` });
-        }
-        if (!await hasFeatureByOrg(db, post.organisationId!, QUALITY_REVIEW_FEATURE)) {
-            return json(403, { error: 'tier_required', feature: QUALITY_REVIEW_FEATURE });
-        }
-
         const review = readCachedReview(post.qualityReview, post.caption);
         if (!review) {
             return json(409, {
@@ -129,126 +114,79 @@ export default withLambda(async (event) => {
             return json(409, { error: 'That warning is not on this post any more. Reload to see the latest.', code: 'UNKNOWN_WARNING' });
         }
 
+        // ── Polling: cheap, unmetered, and gated by nothing beyond ownership ──────────────────
+        // Deliberately ahead of the plan gate and the credit. A poll is a read of work already paid
+        // for, and a user whose plan lapsed mid-run should still be told how their run ended.
+        if (isPoll) {
+            const stored = stateFor(review, warning);
+            // A 'running' marker older than the staleness window belongs to a worker that died.
+            // Report it as failed rather than spinning forever — the user needs to be able to retry.
+            if (stored.status === 'running' && !isVerificationInFlight(stored)) {
+                return json(200, {
+                    status: 'failed',
+                    error: 'The check stopped before it finished. Try again, or add a source yourself.',
+                });
+            }
+            return json(200, stored);
+        }
+
+        if (!VERIFIABLE.includes(post.status)) {
+            return json(409, { error: `A post in '${post.status}' state can no longer be amended.` });
+        }
+        if (!await hasFeatureByOrg(db, post.organisationId!, QUALITY_REVIEW_FEATURE)) {
+            return json(403, { error: 'tier_required', feature: QUALITY_REVIEW_FEATURE });
+        }
+
+        // Already working on this exact warning: join the run in progress rather than starting a
+        // second one. Two workers would double-charge, race each other's writes, and produce two
+        // answers for one question.
+        if (isVerificationInFlight(review.verifications?.[warning])) {
+            return json(202, { status: 'running' });
+        }
+
         // Web search is real spend on top of the model call, and this is a user-initiated action.
         const credit = await consumeTaskCredit(db, post.organisationId!);
         if (!credit.allowed) return json(429, { error: credit.limitMessage, code: 'TASK_LIMIT' });
 
-        const caption = post.caption || '';
-        const platform = post.platform || 'instagram';
-
-        const prompt = `A compliance reviewer flagged this social post. Establish whether the flagged claim
-can be substantiated, using web search.
-
-The warning:
-"""
-${warning}
-"""
-
-The caption:
-"""
-${caption}
-"""
-
-Search for a credible, primary source for the specific factual claim the warning is about.
-Prefer original research, official statistics, regulatory guidance, or the company's own published
-figures. A blog post restating someone else's number is not a source; find what it cites.
-
-Then return ONLY a JSON object, no markdown:
-{
-  "outcome": "sourced" | "rewrite" | "inconclusive",
-  "sourceUrl": "<the exact URL of the supporting page, from your search results>",
-  "note": "<one sentence: what the source says and how it supports the claim>",
-  "rewrittenCaption": "<the full caption with the unsupportable claim removed or softened>",
-  "reason": "<one sentence explaining the outcome>"
-}
-
-Rules:
-- "sourced" ONLY if a search result genuinely supports the claim as written. sourceUrl must be a
-  URL you actually found in your search results — never one you recall or reconstruct.
-- If you cannot find real support, use "rewrite" and supply rewrittenCaption: the same caption with
-  the unsupported claim removed, or softened to something defensible ("many small businesses juggle
-  a stack of subscriptions" rather than a fabricated statistic). Preserve the author's voice, the
-  structure, and everything the warning did not concern. Keep it suitable for ${platform}.
-- Use "inconclusive" only when the warning is not about a checkable external fact at all (for
-  example a required disclosure, or an internal pricing decision only this business can confirm).
-- Never claim you verified something you did not.`;
-
-        // This runs inside a request, and Netlify kills a synchronous function at 26s with a
-        // BODYLESS response — the browser then shows its own generic fallback and the user is told
-        // nothing about what happened, having already been charged the task credit above. The
-        // grounded call is capable of five model calls (primary, failover, three pause_turn
-        // resumes), so it gets an explicit budget that leaves room to serialise a reply.
-        const gw = await gatewayGenerateGrounded({
-            system: 'You are a fact-checker for marketing copy. You search before you answer, you cite only pages you actually found, and you say plainly when something cannot be substantiated. Respond with valid JSON only.',
-            messages: [{ role: 'user', content: prompt }],
-            maxTokens: 2000,
-            deadlineMs: 20_000,
+        // Claim the slot BEFORE dispatching. If the trigger fails we overwrite this with a failure
+        // below; if it succeeds, a second click between here and the worker's first write is caught
+        // by the in-flight check above.
+        const claimed = await recordVerification(db, {
+            postId: post.id,
+            caption: post.caption,
+            warning,
+            verification: { status: 'running', startedAt: new Date().toISOString(), userId },
         });
-
-        const parsed = parseModelJson<{
-            outcome?: string; sourceUrl?: string; note?: string; rewrittenCaption?: string; reason?: string;
-        }>(gw.text);
-        if (!parsed) return json(502, { error: 'The assistant could not complete the check. Please try again.' });
-
-        // ── The grounding check ──────────────────────────────────────────────────────────────
-        // Everything above is the model's opinion. This is where it gets held to the evidence.
-        if (parsed.outcome === 'sourced') {
-            const matched = parsed.sourceUrl ? matchesSearchedUrl(parsed.sourceUrl, gw.searchedUrls) : null;
-            if (gw.searchCount === 0 || !matched) {
-                // It asserted a source it did not find. Downgrade rather than pass it on — and do
-                // NOT fall through to its rewrite either, since the same answer is now suspect.
-                console.warn(`[verify-compliance-warning] post ${postId}: ungrounded citation discarded`,
-                    { searchCount: gw.searchCount, claimed: parsed.sourceUrl });
-                return json(200, {
-                    outcome: 'inconclusive',
-                    reason: 'The assistant could not point to a source it actually found, so nothing has been verified. Add a source yourself, or edit the claim out.',
-                    searchCount: gw.searchCount,
-                });
-            }
-            return json(200, {
-                outcome: 'sourced',
-                sourceUrl: matched,
-                note: (parsed.note || '').slice(0, 500),
-                searchCount: gw.searchCount,
+        if (!claimed) {
+            return json(409, {
+                error: 'This post has no current quality review — its caption changed. Reload to see the latest warnings.',
+                code: 'REVIEW_STALE',
             });
         }
 
-        if (parsed.outcome === 'rewrite') {
-            const after = (parsed.rewrittenCaption || '').trim();
-            // A "rewrite" that changes nothing has not removed the claim.
-            if (!after || after === caption) {
-                return json(200, {
-                    outcome: 'inconclusive',
-                    reason: parsed.reason || 'The assistant could not substantiate the claim or propose a safe rewrite.',
-                    searchCount: gw.searchCount,
-                });
-            }
-            return json(200, {
-                outcome: 'rewrite',
-                before: caption,
-                after,
-                reason: (parsed.reason || 'No credible source found for this claim.').slice(0, 500),
-                searchCount: gw.searchCount,
+        const dispatched = await triggerWarningVerification(event.headers as never, post.id, warning);
+        if (!dispatched.ok) {
+            // Nothing is going to run, so do not leave a spinner behind. The credit is already spent
+            // and there is no refund path — say so plainly rather than hiding it.
+            await recordVerification(db, {
+                postId: post.id,
+                caption: post.caption,
+                warning,
+                verification: { status: 'failed', error: dispatched.reason, finishedAt: new Date().toISOString() },
             });
+            return json(503, { error: dispatched.reason, code: 'VERIFY_NOT_DISPATCHED' });
         }
 
-        return json(200, {
-            outcome: 'inconclusive',
-            reason: (parsed.reason || 'This needs a human judgement.').slice(0, 500),
-            searchCount: gw.searchCount,
-        });
+        return json(202, { status: 'running' });
     } catch (err: any) {
         console.error('[verify-compliance-warning]', err);
-        // A timeout is not "something went wrong" — it is a specific, recurring outcome (four web
-        // searches is simply slow sometimes) and it leaves the user with a warning they still have
-        // to clear. Say which it was, and point at the two things that always work.
-        const timedOut = err?.name === 'APIConnectionTimeoutError'
-            || /timed? ?out/i.test(String(err?.message ?? ''));
-        return timedOut
-            ? json(504, {
-                error: 'The search took too long to come back. Add a source yourself, or edit the claim out of the caption.',
-                code: 'VERIFY_TIMEOUT',
-            })
-            : json(500, { error: 'Could not run the check. Please try again.' });
+        return json(500, { error: 'Could not start the check. Please try again.' });
     }
 });
+
+/**
+ * Re-exported so the existing import path keeps working. The implementation moved to
+ * src/utils/compliance-verification.ts when the work moved to the background worker — it is the one
+ * check standing between a real citation and a fabricated one, and it must not exist twice.
+ */
+export { matchesSearchedUrl } from '../../src/utils/compliance-verification';

@@ -6387,6 +6387,13 @@ async function _rqLoadQualityReview(postId) {
 function _prqRenderReview(data) {
     _prqReview = data;
 
+    // The warning rows below are rebuilt from scratch, so any poll still pointing at the old ones is
+    // now aimed at a detached node. Cancel first, then re-attach from the server's own state —
+    // verifications live on the review, so a run survives closing the panel, and reopening either
+    // shows the answer or picks the polling back up.
+    Object.keys(_prqPolls).forEach(_prqStopPoll);
+    setTimeout(() => _prqRestoreVerifications(data), 0);
+
     // A score of null means the reviewer did not return one — NOT that the post scored nothing.
     // The two were the same value until now, so a post nobody had scored showed "Brand voice 0/100"
     // in red, which reads as a verdict on the writing rather than an absence of one. Say "not
@@ -6545,13 +6552,57 @@ window.rqReopenWarning = function (index) {
 // The assistant searches the web for a real source. It PROPOSES an outcome; the human accepts it.
 // Nothing here records a disposition on its own — the accept buttons below route back through
 // rqSourceWarning / the normal rewrite path, so the audit trail always has a human behind it.
+//
+// It is ASYNCHRONOUS, and has to be. A real verification takes around two minutes — four web
+// searches plus the model's reasoning — against a 26-second ceiling on the request that starts it.
+// So the click starts a background worker and this polls for the answer. Anything that assumes one
+// request returns the result is the bug that made this button report "Could not run the check."
+const PRQ_POLL_MS = 4000;
+// ~4 minutes. Longer than a slow run, short enough that a dead worker stops spinning. The server
+// expires its own 'running' marker too — this is the client-side half of the same guarantee.
+const PRQ_POLL_MAX = 60;
+const _prqPolls = {};
+
+/** Stop polling for one warning — on completion, on a new run, or when the panel closes. */
+function _prqStopPoll(index) {
+    if (_prqPolls[index]) { clearTimeout(_prqPolls[index]); delete _prqPolls[index]; }
+}
+
+/**
+ * Re-attach to verifications the server already knows about, whenever the warning list is redrawn.
+ *
+ * Without this, a two-minute run is only visible for as long as the user leaves the panel open —
+ * close it and the answer they paid for is invisible, and clicking again starts (and charges for) a
+ * second run. The state lives on the review, so it can simply be read back.
+ */
+function _prqRestoreVerifications(data) {
+    const warnings = data?.complianceWarnings || [];
+    const verifications = data?.verifications || {};
+    warnings.forEach((warning, index) => {
+        const v = verifications[warning];
+        if (!v) return;
+        const host = document.querySelector(`[data-prq-verify="${index}"]`);
+        if (!host) return;
+        host.classList.remove('hidden');
+        if (v.status === 'running') {
+            // Matches the server's own expiry — a marker older than this belongs to a worker that
+            // died, and the next poll will say so rather than spinning indefinitely.
+            _prqRenderVerifyRunning(host);
+            _prqPollVerify(index, warning, 0);
+            return;
+        }
+        _prqRenderVerification(index, v);
+    });
+}
+
 window.rqVerifyWarning = async function (index) {
     const warning = _prqWarningAt(index);
     const host = document.querySelector(`[data-prq-verify="${index}"]`);
     if (!warning || !host || !_prqPostId) return;
 
+    _prqStopPoll(index);
     host.classList.remove('hidden');
-    host.innerHTML = `<p class="text-[11px] text-gray-500 italic">Searching for a source…</p>`;
+    _prqRenderVerifyRunning(host);
 
     let d;
     try {
@@ -6561,7 +6612,7 @@ window.rqVerifyWarning = async function (index) {
         });
         d = await res.json().catch(() => ({}));
         if (!res.ok) {
-            host.innerHTML = `<p class="text-[11px] text-red-600">${_prqEsc(d.error || 'Could not run the check.')}</p>`;
+            host.innerHTML = `<p class="text-[11px] text-red-600">${_prqEsc(d.error || 'Could not start the check.')}</p>`;
             return;
         }
     } catch {
@@ -6569,9 +6620,80 @@ window.rqVerifyWarning = async function (index) {
         return;
     }
 
+    // 202 { status: 'running' } is the normal answer. A terminal status can come straight back when
+    // the answer was already sitting there.
+    if (d.status === 'running') { _prqPollVerify(index, warning, 0); return; }
+    _prqRenderVerification(index, d);
+};
+
+/** The "still working" state. Says how long this takes, because two minutes of silence reads as broken. */
+function _prqRenderVerifyRunning(host) {
+    host.innerHTML = `
+      <div class="rounded-lg border border-gray-200 bg-gray-50 p-2">
+        <p class="text-[11px] text-gray-600 italic">Searching the web for a source…</p>
+        <p class="mt-1 text-[10px] text-gray-500">This usually takes a minute or two. You can carry on working — the answer appears here.</p>
+      </div>`;
+}
+
+/** Ask the server how the run is going, until it stops being 'running'. */
+function _prqPollVerify(index, warning, attempt) {
+    _prqPolls[index] = setTimeout(async () => {
+        // The panel may have been closed, or a different post opened, since this was scheduled.
+        const host = document.querySelector(`[data-prq-verify="${index}"]`);
+        if (!host || !_prqPostId) { _prqStopPoll(index); return; }
+
+        let d;
+        try {
+            const res = await fetch('/.netlify/functions/verify-compliance-warning', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ postId: _prqPostId, warning, poll: 1 }),
+            });
+            d = await res.json().catch(() => ({}));
+            if (!res.ok) {
+                _prqStopPoll(index);
+                host.innerHTML = `<p class="text-[11px] text-red-600">${_prqEsc(d.error || 'Lost track of the check. Reload to see the latest.')}</p>`;
+                return;
+            }
+        } catch {
+            // A single failed poll is not a failed run — the work continues on the server. Keep
+            // trying; only the attempt cap ends it.
+            if (attempt + 1 >= PRQ_POLL_MAX) {
+                _prqStopPoll(index);
+                host.innerHTML = `<p class="text-[11px] text-red-600">Lost connection while checking. Reopen this warning to see the result.</p>`;
+                return;
+            }
+            _prqPollVerify(index, warning, attempt + 1);
+            return;
+        }
+
+        if (d.status === 'running') {
+            if (attempt + 1 >= PRQ_POLL_MAX) {
+                _prqStopPoll(index);
+                host.innerHTML = `<p class="text-[11px] text-red-600">This is taking longer than expected. Add a source yourself, or edit the claim out of the caption.</p>`;
+                return;
+            }
+            _prqPollVerify(index, warning, attempt + 1);
+            return;
+        }
+
+        _prqStopPoll(index);
+        _prqRenderVerification(index, d);
+    }, PRQ_POLL_MS);
+}
+
+/** Render a terminal verification state. Same three outcomes the panel has always shown. */
+function _prqRenderVerification(index, d) {
+    const host = document.querySelector(`[data-prq-verify="${index}"]`);
+    if (!host) return;
+
     const searched = d.searchCount ? `Checked ${d.searchCount} search${d.searchCount === 1 ? '' : 'es'}.` : '';
 
-    if (d.outcome === 'sourced') {
+    if (d.status === 'failed' || d.status === 'idle') {
+        host.innerHTML = `<p class="text-[11px] text-red-600">${_prqEsc(d.error || 'The check did not complete. Please try again.')}</p>`;
+        return;
+    }
+
+    if (d.status === 'sourced') {
         // The URL came from the search tool's own results — the server discards anything the model
         // merely asserted. Still shown for the human to open and accept, never auto-filed.
         _prqVerified[index] = { sourceUrl: d.sourceUrl, note: d.note };
@@ -6588,7 +6710,7 @@ window.rqVerifyWarning = async function (index) {
         return;
     }
 
-    if (d.outcome === 'rewrite') {
+    if (d.status === 'rewrite') {
         // Nothing credible found, so the honest fix is to stop making the claim. Editable, like
         // every other rewrite in this panel.
         host.innerHTML = `
@@ -6614,9 +6736,10 @@ window.rqVerifyWarning = async function (index) {
         <p class="text-[11px] font-bold text-gray-600">Needs your judgement</p>
         <p class="mt-1 text-[11px] text-gray-600">${_prqEsc(d.reason || '')} ${_prqEsc(searched)}</p>
       </div>`;
-};
+}
 
 window.rqDiscardVerify = function (index) {
+    _prqStopPoll(index);
     document.querySelector(`[data-prq-verify="${index}"]`)?.classList.add('hidden');
 };
 
