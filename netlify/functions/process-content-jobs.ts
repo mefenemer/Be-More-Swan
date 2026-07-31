@@ -34,6 +34,11 @@ import {
 } from '../../src/utils/draft-variety';
 import { decideAutoPublish, describeDecision, resolveConnectedDraftPlatforms } from '../../src/utils/auto-publish-runtime';
 import { platformFormat } from '../../src/config/platform-formats';
+import {
+    SHORT_DURATION_S, SHORT_FORMAT_KEY, SHORT_HEIGHT, SHORT_MEDIA_SOURCES, SHORT_POST_FORMAT, SHORT_WIDTH,
+} from '../../src/config/youtube-short';
+import { queuePostRender, RENDER_FPS } from '../../src/lib/post-render';
+import { resolveBaseUrl } from '../../src/utils/base-url';
 import { formatPlatformStrategyBrief, platformStrategyFor, type PlatformStrategy } from '../../src/utils/platform-strategy-brief';
 import { parseModelJson } from '../../src/utils/model-json';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
@@ -344,7 +349,16 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
         // script and on-screen text overlays, not just a caption. Default to a single image.
         const requestedFormat = ((job as { post_format?: string }).post_format || answers['preferred_format'] || 'image')
             .toString().toLowerCase();
-        const format = ['image', 'carousel', 'reel', 'video', 'story'].includes(requestedFormat) ? requestedFormat : 'image';
+
+        // The weekly YouTube Short (see src/config/youtube-short.ts). It is drafted as an IMAGE post
+        // and becomes a video afterwards: the creative IS a brand card, so what we need from the
+        // model is a cardHeadline — the same thing every still post asks for — not the shot-by-shot
+        // reelScript the video branch produces for a human to film. The still is then rendered to a
+        // 10s 9:16 mp4 further down, which is where it turns into something YouTube will take.
+        const isYoutubeShort = platform === 'youtube' && !fanOut;
+        const format = isYoutubeShort
+            ? 'image'
+            : ['image', 'carousel', 'reel', 'video', 'story'].includes(requestedFormat) ? requestedFormat : 'image';
         const isVideo = format === 'reel' || format === 'video';
 
         // The standing strategic principles (saves/shares, no vanity metrics, avoid fleeting trends)
@@ -570,7 +584,12 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             blueprintId: job.blueprint_id,
             jobId: job.job_id,
             platform,
-            postFormat: format,
+            // The Short was DRAFTED as an image and PUBLISHES as a video. post_format is the loose
+            // descriptor the publishers branch on, format_key is the catalogue entry the format
+            // router validates against (9:16, video-mandatory, ≤180s) — both have to say video from
+            // the start, or the post spends its life in the queue describing itself as a photo.
+            postFormat: isYoutubeShort ? SHORT_POST_FORMAT : format,
+            ...(isYoutubeShort ? { formatKey: SHORT_FORMAT_KEY } : {}),
             pillar: resolvedPillar,
             // Scheduled jobs carry the exact slot to publish at (from the posting schedule); other
             // jobs (on-demand, conversion, admin-test) keep the legacy "tomorrow" default.
@@ -646,7 +665,10 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 // autonomous cap). holdCredits refuses when the balance is short — the throw makes the
                 // resolver treat AI as unavailable and fall through (or report exhausted → no media).
                 // Only fires for image posts: the resolver skips 'ai' for video (async gen path).
-                const aspect = format === 'story' ? '9:16' : platformFormat(platform).aspectRatio;
+                // A Short is 9:16 even though platformFormat('youtube') says 16:9 — that entry
+                // describes a standard YouTube video, and the composition letterboxes a still that
+                // doesn't match the frame. Generate the card at the ratio it will be rendered into.
+                const aspect = (isYoutubeShort || format === 'story') ? '9:16' : platformFormat(platform).aspectRatio;
                 const generateAi = async (): Promise<number> => {
                     const hold = await holdCredits(db, { orgId: job.organisation_id, amount: IMAGE_CREDIT_COST });
                     if (!hold.ok) throw new Error('insufficient_ai_credits');
@@ -703,7 +725,12 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
                 };
 
                 const resolved = await resolveMediaForPost(db, {
-                    assistant: { mediaSources: asst?.mediaSources },
+                    // A Short overrides the assistant's source order: stock and AI images arrive at
+                    // whatever ratio the provider chose, and a 16:9 photo inside a 9:16 frame is a
+                    // postage stamp on a black field. The card is the only source we can ask for 9:16
+                    // and actually get it. No card (nothing to headline) → no media, reported through
+                    // the normal exhausted path rather than published as a black rectangle.
+                    assistant: { mediaSources: isYoutubeShort ? [...SHORT_MEDIA_SOURCES] : asst?.mediaSources },
                     orgId: job.organisation_id,
                     userId: job.user_id,
                     // Stock keywords come from the literal subject; AI generation uses the full brief
@@ -747,6 +774,45 @@ async function processJob(db: ReturnType<typeof getDb>, job: {
             }
         } catch (imgErr) {
             console.warn(`[process-content-jobs] job ${job.job_id} media sourcing skipped:`, imgErr instanceof Error ? imgErr.message : imgErr);
+        }
+
+        // ── The Short's still becomes a video ─────────────────────────────────────────────────
+        // YouTube has no image post, so the brand card has to be rendered into an mp4 before this
+        // draft is publishable at all. queuePostRender gates the post on render_status and dispatches
+        // the Lambda; the worker swaps the mp4 in and clears the gate.
+        //
+        // A failure here leaves a card-only draft in the queue with render_status cleared (the helper
+        // rolls back rather than stranding it). That draft cannot publish to YouTube — but it is
+        // VISIBLE and the reviewer can act on it, which is the right failure for something that runs
+        // unattended once a week. Never let it throw: a render problem must not fail the whole job
+        // and lose the caption we already paid a model to write.
+        if (isYoutubeShort && attachedMediaSource) {
+            try {
+                const queued = await queuePostRender(db, {
+                    orgId: job.organisation_id,
+                    postId: post.id,
+                    userId: job.user_id,
+                    input: {
+                        width: SHORT_WIDTH,
+                        height: SHORT_HEIGHT,
+                        fps: RENDER_FPS,
+                        durationInFrames: SHORT_DURATION_S * RENDER_FPS,
+                        // Nothing is burned in — the card already carries the words. Without this the
+                        // worker would treat "no overlays" as "nothing to do" and clear the gate,
+                        // leaving a still attached to a video-only platform.
+                        forceVideo: true,
+                    },
+                    // No request headers here — this is a cron. resolveBaseUrl falls back to
+                    // BASE_URL / DEPLOY_PRIME_URL, which are set in every deploy context.
+                    baseUrl: resolveBaseUrl(),
+                });
+                if (!queued.ok) {
+                    console.error(`[process-content-jobs] job ${job.job_id} Short render not queued: ${queued.error}`);
+                }
+            } catch (renderErr) {
+                console.error(`[process-content-jobs] job ${job.job_id} Short render threw:`,
+                    renderErr instanceof Error ? renderErr.message : renderErr);
+            }
         }
 
         // ── Autopilot: publish mode ───────────────────────────────────────────────────────────

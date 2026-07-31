@@ -23,10 +23,10 @@
 
 import { and, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { postRenderJobs, scheduledPosts } from '../../db/schema';
+import { scheduledPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { resolveBaseUrl } from '../../src/utils/base-url';
-import { frameMeta, renderableOverlays, resolveOverlayVideoBase } from '../../src/lib/post-render';
+import { frameMeta, queuePostRender, renderableOverlays, resolveOverlayVideoBase } from '../../src/lib/post-render';
 import { needsVideoRender, renderableAudio } from '../../src/lib/audio-overlays';
 import { remotionConfigured } from '../../src/lib/remotion-lambda';
 import { r2IsConfigured } from '../../src/lib/media-persist';
@@ -36,30 +36,9 @@ function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
 }
 
-// MUST be awaited — see the same note in canva-import.ts. Lambda freezes the execution environment
-// the moment the handler returns, so an un-awaited trigger never leaves the box and the job sits
-// 'queued' forever with the post gated behind it. Posting to a -background function returns 202
-// immediately, so awaiting costs only the round-trip.
-async function triggerWorker(headers: Record<string, string | undefined>, jobId: number): Promise<boolean> {
-    const baseUrl = resolveBaseUrl(headers);
-    if (!baseUrl) { console.error('[trigger-post-render] no base URL — worker not triggered for job', jobId); return false; }
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5_000);
-    try {
-        const res = await fetch(`${baseUrl}/.netlify/functions/render-post-video-background`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ jobId }),
-            signal: controller.signal,
-        });
-        return res.ok;
-    } catch (err) {
-        console.error('[trigger-post-render] failed to trigger worker:', err);
-        return false;
-    } finally {
-        clearTimeout(timer);
-    }
-}
+// Queueing + dispatch + the un-gate-on-failure rollback live in queuePostRender (post-render.ts),
+// shared with the autonomous Short drafter. Both paths must fail the same way: a post left at
+// render_status 'pending' with no worker behind it can never publish.
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return json(405, { error: 'Method Not Allowed' });
@@ -122,32 +101,14 @@ export default withLambda(async (event) => {
         });
     }
 
-    const meta = frameMeta(body, base);
-
-    const [job] = await db.insert(postRenderJobs).values({
-        organisationId: orgId,
+    const queued = await queuePostRender(db, {
+        orgId,
         postId,
         userId,
-        status: 'queued',
-        renderInput: meta,
-    }).returning({ id: postRenderJobs.id });
+        input: frameMeta(body, base),
+        baseUrl: resolveBaseUrl(event.headers as Record<string, string | undefined>),
+    });
+    if (!queued.ok) return json(502, { error: 'Could not start the video render — please try again in a moment.' });
 
-    await db.update(scheduledPosts)
-        .set({ renderStatus: 'pending', updatedAt: new Date() })
-        .where(eq(scheduledPosts.id, postId));
-
-    const dispatched = await triggerWorker(event.headers as Record<string, string | undefined>, job.id);
-    if (!dispatched) {
-        // Nothing will ever process the row, so un-gate the post and report the failure rather than
-        // approving it into a permanent 'pending' render.
-        await db.update(postRenderJobs)
-            .set({ status: 'failed', errorMessage: 'The render worker could not be reached.', updatedAt: new Date() })
-            .where(eq(postRenderJobs.id, job.id));
-        await db.update(scheduledPosts)
-            .set({ renderStatus: null, updatedAt: new Date() })
-            .where(eq(scheduledPosts.id, postId));
-        return json(502, { error: 'Could not start the video render — please try again in a moment.' });
-    }
-
-    return json(202, { jobId: job.id, renderStatus: 'pending', overlays: overlays.length });
+    return json(202, { jobId: queued.jobId, renderStatus: 'pending', overlays: overlays.length });
 });

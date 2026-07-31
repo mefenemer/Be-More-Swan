@@ -16,6 +16,7 @@ import { createNotification } from './notify';
 import { resolvePostingSchedule, computeScheduleSlots } from '../config/posting-cadence';
 import { assembleBlueprint } from './blueprint';
 import { resolveConnectedDraftPlatforms } from './auto-publish-runtime';
+import { resolveLiveSocialConnections } from './live-social-connections';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -97,6 +98,7 @@ export async function enqueueScheduleGapFill(
     const plannedRows = await db
         .select({
             id: scheduledPosts.id,
+            platform: scheduledPosts.platform,
             publishDate: scheduledPosts.publishDate,
             crosspostGroupId: scheduledPosts.crosspostGroupId,
         })
@@ -110,6 +112,7 @@ export async function enqueueScheduleGapFill(
     const inflightRows = await db
         .select({
             jobId: contentGenerationJobs.jobId,
+            platform: contentGenerationJobs.platform,
             targetPublishDate: contentGenerationJobs.targetPublishDate,
         })
         .from(contentGenerationJobs)
@@ -117,6 +120,13 @@ export async function enqueueScheduleGapFill(
             eq(contentGenerationJobs.assistantId, assistant.id),
             inArray(contentGenerationJobs.status, ['queued', 'processing']),
         ));
+
+    // The weekly YouTube Short is a SEPARATE stream, and it must not be counted as cross-post
+    // coverage. It shares a slot time with the day's cross-post (both take the first slot), and
+    // coverage is tallied per DAY — so without this exclusion one Short would make its day look
+    // covered and silently cancel that day's Instagram/LinkedIn/X post.
+    const isWeeklyShort = (platform: string | null, crosspostGroupId?: string | null) =>
+        platform === 'youtube' && !crosspostGroupId;
 
     // Count DISTINCT LOGICAL posts per day. A cross-post's per-platform rows share one
     // crosspost_group_id and one publish_date, so they collapse to a single unit — but two
@@ -134,11 +144,11 @@ export async function enqueueScheduleGapFill(
         coverage.set(key, (coverage.get(key) ?? 0) + 1);
     };
     plannedRows.forEach(r => {
-        if (!r.publishDate) return;
+        if (!r.publishDate || isWeeklyShort(r.platform, r.crosspostGroupId)) return;
         addCoverage(r.publishDate, r.crosspostGroupId ? `grp:${r.crosspostGroupId}` : `post:${r.id}`);
     });
     inflightRows.forEach(r => {
-        if (!r.targetPublishDate) return;
+        if (!r.targetPublishDate || isWeeklyShort(r.platform)) return;
         addCoverage(r.targetPublishDate, `job:${r.jobId}`);
     });
 
@@ -150,7 +160,13 @@ export async function enqueueScheduleGapFill(
         if (remaining > 0) { coverage.set(key, remaining - 1); continue; } // already covered
         uncovered.push(slot);
     }
-    if (!uncovered.length) return { enqueued: 0, reason: 'fully_covered' };
+    // The weekly YouTube Short rides alongside the cross-post stream rather than inside it: a
+    // different format (9:16 video), different media (a brand card rendered to an mp4) and a
+    // different cadence. Keeping it as its own standalone job is what lets all three differ without
+    // touching the one-idea fan-out every other assistant depends on.
+    const shortSlot = await resolveWeeklyShortSlot(db, assistant, slots, now);
+
+    if (!uncovered.length && !shortSlot) return { enqueued: 0, reason: 'fully_covered' };
 
     // Empty-Library Draft Fallback (assistant-detail toggle). When ENABLED (default), the assistant
     // always drafts for uncovered slots — the drafts use AI/stock media and still route to the Review
@@ -175,6 +191,29 @@ export async function enqueueScheduleGapFill(
     const isCrossPost = targetPlatforms.length > 1;
 
     let enqueued = 0;
+
+    if (shortSlot) {
+        await db.insert(contentGenerationJobs).values({
+            jobId: randomUUID(),
+            blueprintId: bp.id,
+            assistantId: assistant.id,
+            organisationId: assistant.organisationId,
+            userId: assistant.userId,
+            status: 'queued',
+            attempt: 0,
+            maxAttempts: 3,
+            triggerType: 'scheduled',
+            // Standalone by construction: `platform` set, `platforms` null, no crosspost group. That
+            // combination is what the worker reads as "one post, this platform" — and what keeps the
+            // Short out of the cross-post card in the Review Queue.
+            platform: 'youtube',
+            platforms: null,
+            targetPublishDate: shortSlot,
+            crosspostGroupId: null,
+        });
+        enqueued++;
+    }
+
     for (const slot of uncovered) {
         await db.insert(contentGenerationJobs).values({
             jobId: randomUUID(),
@@ -197,6 +236,59 @@ export async function enqueueScheduleGapFill(
     }
 
     return { enqueued, reason: enqueued ? 'ok' : 'fully_covered' };
+}
+
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * When the assistant's next weekly YouTube Short should be drafted, or null if it shouldn't.
+ *
+ * Due when the org has a LIVE YouTube connection and there is no Short already planned or in flight
+ * in the next seven days. The lookahead is a fixed week rather than the draft horizon deliberately:
+ * an assistant with a 3-day horizon would otherwise never see the Short it queued for day five and
+ * would enqueue another every hour the cron ran.
+ *
+ * The slot is the first one of the week, per the cadence decision — it shares an instant with that
+ * day's cross-post, which is fine (two independent posts to different platforms) as long as the
+ * coverage tally excludes it. See isWeeklyShort above; that exclusion is what stops the Short from
+ * cannibalising the day's ordinary post.
+ */
+async function resolveWeeklyShortSlot(
+    db: Db,
+    assistant: GapFillAssistant,
+    slots: Date[],
+    now: Date,
+): Promise<Date | null> {
+    const live = await resolveLiveSocialConnections(db, assistant.organisationId);
+    if (!live.has('youtube')) return null;
+
+    const weekEnd = new Date(now.getTime() + WEEK_MS);
+
+    const [plannedShort] = await db
+        .select({ id: scheduledPosts.id })
+        .from(scheduledPosts)
+        .where(and(
+            eq(scheduledPosts.assistantId, assistant.id),
+            eq(scheduledPosts.platform, 'youtube'),
+            gte(scheduledPosts.publishDate, now),
+            lte(scheduledPosts.publishDate, weekEnd),
+            sql`status IN ('draft','pending_approval','in_review','approved','scheduled','publishing')`,
+        ))
+        .limit(1);
+    if (plannedShort) return null;
+
+    const [inflightShort] = await db
+        .select({ id: contentGenerationJobs.id })
+        .from(contentGenerationJobs)
+        .where(and(
+            eq(contentGenerationJobs.assistantId, assistant.id),
+            eq(contentGenerationJobs.platform, 'youtube'),
+            inArray(contentGenerationJobs.status, ['queued', 'processing']),
+        ))
+        .limit(1);
+    if (inflightShort) return null;
+
+    return slots.find(s => s > now && s <= weekEnd) ?? null;
 }
 
 /**

@@ -13,7 +13,7 @@
 
 import { and, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { contentAssets, scheduledPosts, scheduledPostAssets } from '../../db/schema';
+import { contentAssets, postRenderJobs, scheduledPosts, scheduledPostAssets } from '../../db/schema';
 import type { Overlay } from './overlay-geometry';
 import { renderableAudio } from './audio-overlays';
 
@@ -242,6 +242,22 @@ export const MAX_RENDER_SECONDS = 600;     // 10 min — well past any social cl
 
 export interface FrameMeta { width: number; height: number; fps: number; durationInFrames: number; }
 
+/**
+ * The render job's snapshot: the frame metadata, plus WHY the render exists.
+ *
+ * `forceVideo` marks a render whose point is the container, not the burn-in. An autonomous YouTube
+ * Short is a brand card — a still, with its words already drawn into the image — and YouTube has no
+ * image post, so the still must become an mp4 even though there is nothing to overlay onto it. The
+ * worker's "no overlays, nothing to do" bail-out is correct for every other caller and fatal for
+ * this one, so the reason has to travel with the job rather than be re-derived from the post.
+ */
+export interface RenderJobInput extends FrameMeta { forceVideo?: boolean }
+
+/** True when this job must produce a video even with nothing to burn in. Defensive: old rows have no flag. */
+export function readForceVideo(raw: unknown): boolean {
+    return !!(raw && typeof raw === 'object' && (raw as Record<string, unknown>).forceVideo === true);
+}
+
 // Even dimensions only: h264 chroma subsampling requires them, and an odd width fails the encode at
 // the very end of an otherwise successful render.
 const even = (n: number) => (n % 2 === 0 ? n : n + 1);
@@ -309,4 +325,69 @@ export async function attachRenderedVideo(db: Db, postId: number, assetId: numbe
             updatedAt: new Date(),
         })
         .where(eq(scheduledPosts.id, postId));
+}
+
+/**
+ * Queue a Remotion render for a post and dispatch the worker.
+ *
+ * Shared by trigger-post-render.ts (a reviewer pressing approve on a video with text) and the
+ * autonomous Short drafter, which has no HTTP session to ride on. Both need the SAME failure
+ * handling, and that is the real reason this is shared rather than copied: setting render_status
+ * with nothing behind it strands the post permanently unpublishable — the publishers hold anything
+ * that isn't 'done'. So a failed dispatch must un-gate the post, and a caller that forgets is a
+ * silent, unrecoverable bug rather than a visible one.
+ */
+export async function queuePostRender(db: Db, opts: {
+    orgId: number;
+    postId: number;
+    userId: number | null;
+    input: RenderJobInput;
+    /** Origin for the worker call. Null ⇒ nothing can be dispatched, so we refuse before gating. */
+    baseUrl: string | null;
+}): Promise<{ ok: true; jobId: number } | { ok: false; error: string }> {
+    if (!opts.baseUrl) return { ok: false, error: 'No base URL — the render worker cannot be reached.' };
+
+    const [job] = await db.insert(postRenderJobs).values({
+        organisationId: opts.orgId,
+        postId: opts.postId,
+        userId: opts.userId,
+        status: 'queued',
+        renderInput: opts.input,
+    }).returning({ id: postRenderJobs.id });
+
+    await db.update(scheduledPosts)
+        .set({ renderStatus: 'pending', updatedAt: new Date() })
+        .where(eq(scheduledPosts.id, opts.postId));
+
+    // MUST be awaited: Lambda freezes the execution environment when the handler returns, so an
+    // un-awaited fetch never leaves the box and the job sits 'queued' forever behind a gated post.
+    // The -background function returns 202 immediately, so awaiting costs only the round trip.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5_000);
+    let dispatched = false;
+    try {
+        const res = await fetch(`${opts.baseUrl}/.netlify/functions/render-post-video-background`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ jobId: job.id }),
+            signal: controller.signal,
+        });
+        dispatched = res.ok;
+    } catch (err) {
+        console.error('[queuePostRender] failed to trigger worker:', err);
+    } finally {
+        clearTimeout(timer);
+    }
+
+    if (!dispatched) {
+        await db.update(postRenderJobs)
+            .set({ status: 'failed', errorMessage: 'The render worker could not be reached.', updatedAt: new Date() })
+            .where(eq(postRenderJobs.id, job.id));
+        await db.update(scheduledPosts)
+            .set({ renderStatus: null, updatedAt: new Date() })
+            .where(eq(scheduledPosts.id, opts.postId));
+        return { ok: false, error: 'Could not start the video render.' };
+    }
+
+    return { ok: true, jobId: job.id };
 }

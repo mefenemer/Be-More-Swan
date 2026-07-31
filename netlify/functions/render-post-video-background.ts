@@ -20,7 +20,7 @@ import { getDb } from '../../db/client';
 import { contentAssets, postRenderJobs, scheduledPosts } from '../../db/schema';
 import { presignR2Get } from '../../src/utils/social-publish';
 import { persistRemoteMediaToR2, r2IsConfigured } from '../../src/lib/media-persist';
-import { attachRenderedVideo, frameMeta, frameMetaFromJson, renderableOverlays, resolveAudioTracks, resolveOverlayVideoBase } from '../../src/lib/post-render';
+import { attachRenderedVideo, frameMeta, frameMetaFromJson, readForceVideo, renderableOverlays, resolveAudioTracks, resolveOverlayVideoBase } from '../../src/lib/post-render';
 import { remotionConfigured, renderProgress, startRender, type StartedRender } from '../../src/lib/remotion-lambda';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -98,7 +98,11 @@ export default withLambda(async (event: HandlerEvent) => {
         // Audio counts here as much as text: a photo post with a voice note is ONLY publishable as a
         // render, so if the voice note goes away the post reverts to an ordinary photo and needs no
         // render at all.
-        if (!overlays.length && !audio.length) {
+        // ...unless the render IS the point. An autonomous YouTube Short is a brand card — a still
+        // whose words are already drawn into the image — and YouTube has no image post, so the still
+        // has to become an mp4 with nothing burned on top. Bailing here would clear the gate and
+        // leave a video-only platform holding a photo it can never publish.
+        if (!overlays.length && !audio.length && !readForceVideo(job.renderInput)) {
             await db.update(postRenderJobs)
                 .set({ status: 'completed', updatedAt: new Date() })
                 .where(eq(postRenderJobs.id, jobId));
@@ -163,6 +167,10 @@ export default withLambda(async (event: HandlerEvent) => {
             storageKey: stored.storageKey,
             width: meta.width,
             height: meta.height,
+            // We KNOW this clip's length — we chose it. Everywhere else duration is read off a
+            // <video> in the browser and never stored, which is why validateAgainstFormat can only
+            // wave posts through; a render is the one path that can answer honestly, so it should.
+            durationS: Math.round(meta.durationInFrames / meta.fps),
             provider: 'remotion',
             status: 'pending',
         }).returning({ id: contentAssets.id });

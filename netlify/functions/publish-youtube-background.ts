@@ -27,6 +27,7 @@ import {
 } from '../../src/utils/social-publish';
 import { recordPostedAssets } from '../../src/utils/pexels';
 import { postLinkLine } from '../../src/utils/post-link';
+import { isYoutubeShortFormat } from '../../src/config/youtube-short';
 import { fireOrchestrations } from '../../src/utils/orchestration';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -73,9 +74,19 @@ export default withLambda(async (event: HandlerEvent) => {
             postLinkLine({ caption: post.caption, linkUrl: post.linkUrl, ctaText: post.ctaText }),
         );
 
+        // An autonomously drafted Short lands UNLISTED regardless of the platform default.
+        //
+        // The reviewer approved a still and a caption in a queue; the thing that goes to the channel
+        // is a video they have not watched, and a public upload is announced to subscribers and
+        // indexed the moment it lands. Unlisted keeps the link shareable while making "publish" a
+        // step someone takes on YouTube, with the video in front of them. A human-composed YouTube
+        // post is unaffected — that person chose the video themselves.
+        const isAutonomousShort = isYoutubeShortFormat(post.formatKey) && post.triggerType !== 'manual';
+
         const outcome = await publishYouTubeResumable(meta, creds.token, video, {
             deadlineMs: Date.now() + UPLOAD_BUDGET_MS,
             resume: prior ?? undefined,
+            ...(isAutonomousShort ? { privacyStatus: 'unlisted' as const } : {}),
         });
 
         if (outcome.kind === 'incomplete') {

@@ -4,6 +4,13 @@
 `trigger-post-render` / `render-post-video-background` drive when a reviewer approves a video post
 carrying timed text overlays.
 
+**Second consumer, added later: the weekly YouTube Short.** The same function and bundle turn a
+brand card into a 10-second 1080×1920 mp4 — see [The Short's render](#the-shorts-render) below.
+That path has *no overlays at all*, which is why the worker's "nothing to burn in" bail-out is
+conditional. Until the steps here are done, Shorts are drafted and then fail to queue a render:
+the draft stays visible in the Review Queue as a card with no video, and the log carries
+`Short render not queued`.
+
 A browser has no video encoder, so a video post's overlays cannot bake locally the way a photo's do.
 They are burned in by Remotion Lambda instead, and the post is held out of the publish queue
 (`scheduled_posts.render_status`) until the overlaid clip is attached. Until the steps below are
@@ -248,6 +255,32 @@ function version) → update `REMOTION_LAMBDA_FUNCTION_NAME` and that context's 
 redeploy Netlify → verify → then delete the old function (`npx remotion lambda functions ls` / `rm`)
 once **both** contexts are off it. Renders in flight during the swap keep using whichever function
 they started on.
+
+## The Short's render
+
+The weekly YouTube Short (`src/config/youtube-short.ts`) is the second thing driving this Lambda,
+and it uses it differently enough to be worth stating plainly.
+
+| | Overlay render (original) | Short render |
+|---|---|---|
+| Triggered by | a reviewer approving a video post with text | `process-content-jobs`, unattended, weekly |
+| Base | the post's video (`videoSrc`) | a brand card, a still (`imageSrc`) |
+| Overlays | one or more — the point of the render | **none** — the card already carries the words |
+| Frame | the clip's own dimensions | always 1080×1920, 10s |
+| Why render at all | to burn the text in | YouTube has no image post; the still must become an mp4 |
+
+Two consequences fall out of the "no overlays" column, and both are load-bearing:
+
+- **`renderInput.forceVideo`.** The worker treats "no overlays and no audio" as nothing to do — it
+  clears `render_status` and lets the original media publish. Correct for every other caller, fatal
+  here: it would leave a video-only platform holding a photo. The flag travels on the job because
+  the reason for the render cannot be re-derived from the post.
+- **Fonts are not a risk on this path.** The card is drawn server-side by satori/resvg from the
+  org's brand kit before it ever reaches Lambda, so the [font substitution gap](#fonts--the-one-place-render-and-preview-can-still-diverge)
+  below does not apply to Shorts. It still applies to everything with a text overlay.
+
+Cost is one 10-second 1080×1920 render per assistant per week — negligible next to the per-post
+renders, and worth remembering only if the cadence ever changes.
 
 ## Known gaps and decisions
 

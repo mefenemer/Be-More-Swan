@@ -163,6 +163,18 @@ export async function gateAutonomousDraft(args: {
     /** From resolveMediaForPost(). AI-generated media can never auto-publish — see below. */
     mediaSource: MediaSource;
 }): Promise<GateDecision> {
+    // A platform with no autonomous drafter can never auto-publish, whatever the policy says.
+    //
+    // This is aimed at the weekly YouTube Short and is deliberately blunt. The Short's media is a
+    // brand card, and brand_card is NOT in the AI-media hold below — it is deterministic, drawn from
+    // the org's own kit, and for a still that reasoning is sound. It stops being sound when the
+    // output is a VIDEO on a public channel: nobody would have watched it, the caption scorer reads
+    // text and cannot see a frame of it, and an unwatched video on a real channel is not a mistake
+    // you can quietly delete. Video goes to a human, full stop.
+    if (!(AUTONOMOUS_DRAFT_PLATFORMS as readonly string[]).includes(args.platform)) {
+        return { status: 'pending_approval', reason: 'platform_in_review_mode', confidence: null };
+    }
+
     if (getPlatformMode(args.onboardingContext, args.platform) !== 'auto_publish') {
         return { status: 'pending_approval', reason: 'platform_in_review_mode', confidence: null };
     }
