@@ -11,6 +11,7 @@ import { aiAssistants, systemConnections, contentRules, tosAcceptances, dpaAccep
 import type { MissingField } from '../../src/utils/blueprint';
 import { requireTenant } from '../../src/utils/tenant';
 import { provisioningBlockInfo } from '../../src/utils/assistant-lifecycle';
+import { resolveLiveSocialPlatforms } from '../../src/utils/live-social-connections';
 import { checkProhibitedUsePatterns } from '../../src/utils/tos-gate';
 import { CURRENT_TOS_VERSION } from './accept-tos';
 import { CURRENT_DPA_VERSION } from './accept-dpa';
@@ -70,7 +71,11 @@ export async function computeAssistantReadiness(db: Db, orgId: number, assistant
             if (!assistant) return null;
 
             const exists = async (rows: Promise<{ id: number }[]>) => (await rows).length > 0;
-            const [hasHealthyConnection, hasRule] = await Promise.all([
+            // Platforms whose token lives in workspace_integrations (Threads, YouTube). They have no
+            // system_connections row, so an org connected ONLY to Threads read as having nothing
+            // connected: this item stayed red and kick-off 422'd NO_CONNECTION on a live account.
+            const liveSocial = await resolveLiveSocialPlatforms(tx, orgId);
+            const [hasSystemConnection, hasRule] = await Promise.all([
                 // ≥1 *healthy* connection (active + status='active', not expired/failed). Mirrors the
                 // kick-off gate (kickoff-assistant.ts) so this item can't read green while kick-off
                 // would 422 NO_CONNECTION on a stale token.
@@ -85,11 +90,12 @@ export async function computeAssistantReadiness(db: Db, orgId: number, assistant
                     eq(contentRules.isActive, true),
                 )).limit(1)),
             ]);
+            const hasHealthyConnection = hasSystemConnection || liveSocial.length > 0;
             // US3 AC3.1: active connection service names for the Kick-Off summary screen.
             const connRows = await tx.select({ serviceName: systemConnections.serviceName })
                 .from(systemConnections)
                 .where(and(eq(systemConnections.organisationId, orgId), eq(systemConnections.isActive, true)));
-            const connections = connRows.map(r => r.serviceName).filter(Boolean);
+            const connections = [...new Set([...connRows.map(r => r.serviceName).filter(Boolean), ...liveSocial])];
 
             // US5 AC5.2: connections that need reconnecting (drives the system_paused diagnostic).
             const brokenRows = await tx.select({ serviceName: systemConnections.serviceName })

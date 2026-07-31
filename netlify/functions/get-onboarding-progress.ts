@@ -10,6 +10,7 @@ import { getDb } from '../../db/client';
 import { createNotification } from '../../src/utils/notify';
 import { organisations, systemConnections, aiAssistants, notifications, onboardingDrafts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
+import { resolveLiveSocialPlatforms } from '../../src/utils/live-social-connections';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
@@ -53,8 +54,11 @@ export default withLambda(async (event) => {
     const businessProfile = Boolean(org?.industry && org?.businessDescription && org?.targetAudience);
 
     const exists = async (rows: Promise<{ id: number | string }[]>) => (await rows).length > 0;
-    const [connection, firstAssistant, draftInProgress, activeAssistant] = await Promise.all([
+    const [systemConnection, liveSocial, firstAssistant, draftInProgress, activeAssistant] = await Promise.all([
         exists(db.select({ id: systemConnections.id }).from(systemConnections).where(eq(systemConnections.organisationId, orgId)).limit(1)),
+        // Threads/YouTube land in workspace_integrations instead, so connecting one of those left
+        // this step showing "not done" with an account already connected.
+        resolveLiveSocialPlatforms(db, orgId),
         exists(db.select({ id: aiAssistants.id }).from(aiAssistants).where(eq(aiAssistants.organisationId, orgId)).limit(1)),
         // An onboarding draft only exists while the wizard is still in progress — it is
         // removed once the assistant is provisioned, so "no draft" = the form is finished.
@@ -66,6 +70,7 @@ export default withLambda(async (event) => {
             eq(aiAssistants.isActive, true),
         )).limit(1)),
     ]);
+    const connection = systemConnection || liveSocial.length > 0;
 
     // The onboarding form is complete once an assistant exists and no draft is still open.
     const onboardAssistant = firstAssistant && !draftInProgress;

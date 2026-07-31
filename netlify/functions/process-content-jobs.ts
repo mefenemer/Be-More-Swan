@@ -9,7 +9,7 @@ import { getDb } from '../../db/client';
 import {
     contentGenerationJobs, aiBlueprints, aiAssistants,
     scheduledPosts, scheduledPostAssets, contentAssets, mediaGenerationJobs,
-    auditLogs, organisations, systemConnections,
+    auditLogs, organisations,
 } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { gatewayGenerate } from '../../src/lib/ai-gateway';
@@ -32,8 +32,8 @@ import {
     buildVarietyBlock, VARIETY_LOOKBACK, findNearDuplicate, nearDuplicateRetryPrompt,
     type PriorPost,
 } from '../../src/utils/draft-variety';
-import { decideAutoPublish, describeDecision } from '../../src/utils/auto-publish-runtime';
-import { platformFormat, SOCIAL_PLATFORMS } from '../../src/config/platform-formats';
+import { decideAutoPublish, describeDecision, resolveConnectedDraftPlatforms } from '../../src/utils/auto-publish-runtime';
+import { platformFormat } from '../../src/config/platform-formats';
 import { formatPlatformStrategyBrief, platformStrategyFor, type PlatformStrategy } from '../../src/utils/platform-strategy-brief';
 import { parseModelJson } from '../../src/utils/model-json';
 import { hasFeatureByOrg } from '../../src/utils/plan-features';
@@ -53,19 +53,16 @@ const BACKOFF_SECS = [10, 30, 90];
 // The candidate list is the shared catalogue, NOT a local array. It used to be a hand-written
 // four — instagram/facebook/linkedin/x — which meant an org connected only to Threads or YouTube
 // matched nothing here and fell through to the 'instagram' default, drafting every autopilot and
-// conversion post for a platform it cannot publish to.
+// conversion post for a platform it cannot publish to. Reading the catalogue was only half the fix:
+// the lookup also queried system_connections alone, so a Threads-only org (token in
+// workspace_integrations) still matched nothing. resolveConnectedDraftPlatforms spans both stores.
+//
+// It also answers with DRAFTER platforms rather than any connected one, which keeps YouTube out:
+// every drafter here produces stills, so a YouTube fallback would draft posts that can never
+// publish (video-mandatory).
 async function resolveFallbackPlatform(db: ReturnType<typeof getDb>, organisationId: number): Promise<string> {
-    const [conn] = await db
-        .select({ serviceName: systemConnections.serviceName })
-        .from(systemConnections)
-        .where(and(
-            eq(systemConnections.organisationId, organisationId),
-            eq(systemConnections.isActive, true),
-            inArray(systemConnections.serviceName, SOCIAL_PLATFORMS as unknown as string[]),
-        ))
-        .orderBy(systemConnections.createdAt)
-        .limit(1);
-    return conn?.serviceName ?? 'instagram';
+    const [platform] = await resolveConnectedDraftPlatforms(db, organisationId);
+    return platform ?? 'instagram';
 }
 
 // Core queue drain: reset stuck jobs, claim up to 20 queued jobs, generate each. Returns the

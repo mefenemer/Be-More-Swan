@@ -20,7 +20,8 @@ import { resolvePostImage, resolvePostVideo } from '../../src/utils/social-publi
 import { resolvePostingSchedule, computeScheduleSlots, intervalHoursFor } from '../../src/config/posting-cadence';
 import { formatBlockedReason, postFormatSpec } from '../../src/config/post-formats';
 import { loadAssetMetrics, validateAgainstFormat } from '../../src/utils/format-router';
-import { platformFormat } from '../../src/config/platform-formats';
+import { platformFormat, normalizePlatform, PLATFORM_FORMATS } from '../../src/config/platform-formats';
+import { resolveLiveSocialConnections } from '../../src/utils/live-social-connections';
 import { needsVideoRender, renderableAudio } from '../../src/lib/audio-overlays';
 import { readCachedReview, openWarnings } from '../../src/utils/post-quality-review';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -183,20 +184,38 @@ export default withLambda(async (event) => {
     // post's platform. Setup no longer requires connecting accounts, so this is THE gate: without a
     // healthy connection the publish would just fail later, so refuse now with a code the client
     // turns into a "connect this platform" prompt. (Publisher matches serviceName === platform.)
+    //
+    // Threads/YouTube hold their token in workspace_integrations, so this cannot ask
+    // system_connections alone: it refused a connected Threads account with "Connect your threads
+    // account", which is both wrong and unfixable — reconnecting writes to the store it wasn't
+    // reading. resolveLiveSocialConnections spans both, and mirrors what the publisher resolves.
     if (post.platform) {
-        const connScope = post.organisationId
-            ? eq(systemConnections.organisationId, post.organisationId)
-            : eq(systemConnections.userId, userId);
-        const [conn] = await db.select({ id: systemConnections.id }).from(systemConnections)
-            .where(and(
-                connScope,
-                eq(systemConnections.serviceName, post.platform),
-                eq(systemConnections.isActive, true),
-                eq(systemConnections.status, 'active'),
-            ))
-            .limit(1);
-        if (!conn) {
-            const label = { instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X' }[post.platform] || post.platform;
+        const key = normalizePlatform(post.platform);
+        let connected: boolean;
+        if (post.organisationId && key) {
+            connected = (await resolveLiveSocialConnections(db, post.organisationId)).has(key);
+        } else {
+            // Two cases keep the original lookup. A legacy user-scoped post (no organisation):
+            // workspace_integrations is org-keyed and has nothing to match on. And a platform
+            // outside the social catalogue (an old 'tiktok'/'pinterest' row): the bridge knows
+            // nothing about it, and answering "not connected" would newly block a post that used
+            // to approve fine.
+            const [conn] = await db.select({ id: systemConnections.id }).from(systemConnections)
+                .where(and(
+                    post.organisationId
+                        ? eq(systemConnections.organisationId, post.organisationId)
+                        : eq(systemConnections.userId, userId),
+                    eq(systemConnections.serviceName, post.platform),
+                    eq(systemConnections.isActive, true),
+                    eq(systemConnections.status, 'active'),
+                ))
+                .limit(1);
+            connected = !!conn;
+        }
+        if (!connected) {
+            // Catalogue label, but only for a platform the catalogue knows: platformFormat() falls
+            // back to Instagram's entry for an unknown key, which would name the wrong network.
+            const label = key ? PLATFORM_FORMATS[key].label : post.platform;
             return {
                 statusCode: 422,
                 headers: { 'Content-Type': 'application/json' },

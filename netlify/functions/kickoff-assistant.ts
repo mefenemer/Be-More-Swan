@@ -14,9 +14,16 @@ import { aiAssistants, systemConnections } from '../../db/schema';
 import { createNotification } from '../../src/utils/notify';
 import { requireTenant } from '../../src/utils/tenant';
 import { transitionAssistantStatus, provisioningBlockInfo } from '../../src/utils/assistant-lifecycle';
+import { resolveLiveSocialPlatforms } from '../../src/utils/live-social-connections';
+import { PLATFORM_FORMATS } from '../../src/config/platform-formats';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
-const CONN_LABELS: Record<string, string> = { x: 'X (Twitter)', instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn' };
+// Display names for the "Connected accounts:" line. Social platforms come from the catalogue so a
+// new one can never arrive here unlabelled; non-social services (Canva, Gmail, …) fall through to
+// the capitalised service name.
+const CONN_LABELS: Record<string, string> = Object.fromEntries(
+    Object.entries(PLATFORM_FORMATS).map(([id, f]) => [id, f.label]),
+);
 
 const json = (statusCode: number, body: unknown) => ({
     statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -58,12 +65,19 @@ export default withLambda(async (event) => {
                 eq(systemConnections.status, 'active'),
             ))
             .limit(1);
+        // Threads/YouTube authenticate into workspace_integrations and never appear above, so an org
+        // connected only to those was refused NO_CONNECTION with a live, publishable account. Kept in
+        // step with the same lookup in get-assistant-readiness.ts, which gates the button.
+        const liveSocial = await resolveLiveSocialPlatforms(tx, orgId);
         // Same active-connection list the Kick Off Meeting summary panel shows (US3 AC3.1) — kept
         // so the notification below carries identical detail rather than a bare "it's working" ping.
         const connRows = await tx.select({ serviceName: systemConnections.serviceName }).from(systemConnections)
             .where(and(eq(systemConnections.organisationId, orgId), eq(systemConnections.isActive, true)));
-        const connections = connRows.map(r => r.serviceName).filter(Boolean) as string[];
-        return { a, hasConnection: !!conn, connections };
+        const connections = [...new Set([
+            ...connRows.map(r => r.serviceName).filter(Boolean) as string[],
+            ...liveSocial,
+        ])];
+        return { a, hasConnection: !!conn || liveSocial.length > 0, connections };
     });
 
     if (!gate) return json(404, { error: 'Assistant not found.' });

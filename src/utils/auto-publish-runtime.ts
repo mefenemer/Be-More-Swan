@@ -16,7 +16,7 @@
 
 import { and, eq, gte, sql } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts, systemConnections } from '../../db/schema';
+import { scheduledPosts } from '../../db/schema';
 import {
     gateAutonomousDraft,
     autoPublishWeeklyCeiling,
@@ -26,31 +26,26 @@ import {
     type MediaSource,
 } from './publish-policy';
 import { normalizePlatform } from '../config/platform-formats';
+import { resolveLiveSocialConnections } from './live-social-connections';
 
 type Db = ReturnType<typeof getDb>;
 
 /**
- * The platforms an assistant should autonomously DRAFT for: the org's LIVE connections
- * (status='active', isActive) intersected with the platforms a drafter actually exists for. This
- * mirrors findLiveConnection's liveness filter exactly, so we only ever draft for a platform the
- * post could genuinely publish to — connecting a platform is all it takes, no onboarding config to
- * keep in sync. Order follows AUTONOMOUS_DRAFT_PLATFORMS for determinism. Empty when the org has no
- * live connection on any drafter platform — callers fall back to their legacy single-stream default.
+ * The platforms an assistant should autonomously DRAFT for: the org's LIVE connections intersected
+ * with the platforms a drafter actually exists for. This mirrors findLiveConnection's liveness
+ * filter exactly, so we only ever draft for a platform the post could genuinely publish to —
+ * connecting a platform is all it takes, no onboarding config to keep in sync. Order follows
+ * AUTONOMOUS_DRAFT_PLATFORMS for determinism. Empty when the org has no live connection on any
+ * drafter platform — callers fall back to their legacy single-stream default.
+ *
+ * Liveness comes from resolveLiveSocialConnections, which reads BOTH credential stores. It used to
+ * query system_connections directly, which meant a connected Threads account — whose token lives in
+ * workspace_integrations — was invisible here: Autopilot fanned every cross-post across the four
+ * legacy platforms and dropped Threads with no error to explain the missing post.
  */
 export async function resolveConnectedDraftPlatforms(db: Db, orgId: number): Promise<AutonomousDraftPlatform[]> {
-    const rows = await db
-        .select({ serviceName: systemConnections.serviceName })
-        .from(systemConnections)
-        .where(and(
-            eq(systemConnections.organisationId, orgId),
-            eq(systemConnections.status, 'active'),
-            eq(systemConnections.isActive, true),
-        ));
-    const connected = new Set(
-        rows.map(r => normalizePlatform(r.serviceName))
-            .filter((p): p is AutonomousDraftPlatform => p !== null && (AUTONOMOUS_DRAFT_PLATFORMS as readonly string[]).includes(p)),
-    );
-    return AUTONOMOUS_DRAFT_PLATFORMS.filter(p => connected.has(p));
+    const live = await resolveLiveSocialConnections(db, orgId);
+    return AUTONOMOUS_DRAFT_PLATFORMS.filter(p => live.has(p));
 }
 
 export interface AutoPublishDecision extends GateDecision {
@@ -58,19 +53,21 @@ export interface AutoPublishDecision extends GateDecision {
     connectionId: number | null;
 }
 
-/** The org's live connection for a platform, or null. Mirrors publish-social-posts' resolution. */
-async function findLiveConnection(db: Db, orgId: number, platform: string): Promise<number | null> {
-    const [conn] = await db
-        .select({ id: systemConnections.id })
-        .from(systemConnections)
-        .where(and(
-            eq(systemConnections.organisationId, orgId),
-            eq(systemConnections.serviceName, platform),
-            eq(systemConnections.status, 'active'),
-            eq(systemConnections.isActive, true),
-        ))
-        .limit(1);
-    return conn?.id ?? null;
+/**
+ * The org's live connection for a platform. Mirrors publish-social-posts' resolution, including its
+ * two-store lookup.
+ *
+ * `live` and `connectionId` are SEPARATE answers, and conflating them was a bug: a workspace-backed
+ * platform (Threads) is genuinely connected while having no system_connections row to point at, so
+ * a bare `number | null` read as "not connected" and forced every Threads draft to review with
+ * reason 'no_live_connection'. A null connectionId is fine downstream — scheduled_posts.connection_id
+ * is nullable and the publisher falls back to resolving by (organisation, platform).
+ */
+async function findLiveConnection(db: Db, orgId: number, platform: string): Promise<{ live: boolean; connectionId: number | null }> {
+    const key = normalizePlatform(platform);
+    if (!key) return { live: false, connectionId: null };
+    const conn = (await resolveLiveSocialConnections(db, orgId)).get(key);
+    return { live: !!conn, connectionId: conn?.connectionId ?? null };
 }
 
 /** Posts this assistant has already published unattended inside the trailing 7 days. */
@@ -113,11 +110,11 @@ export async function decideAutoPublish(db: Db, args: {
 
     // The connection is stamped on the row either way: a review-bound post still needs it to publish
     // once a human approves, and nothing else in the codebase ever sets scheduled_posts.connection_id.
-    const connectionId = await findLiveConnection(db, args.organisationId, args.platform);
+    const { live, connectionId } = await findLiveConnection(db, args.organisationId, args.platform);
 
     if (gate.status !== 'scheduled') return { ...gate, connectionId };
 
-    if (connectionId === null) {
+    if (!live) {
         return { ...gate, status: 'pending_approval', reason: 'no_live_connection', connectionId };
     }
 

@@ -30,6 +30,7 @@ import { plans, masterPlans, planPrices, aiAssistants, taskRuns, usageCounters, 
 import { getPeriodStart } from '../../src/utils/atomic-cap-check';
 import { effectiveLimit, effectiveFeatures, type FeatureOverrides } from '../../src/utils/plan-features';
 import { SOCIAL_PLATFORMS } from '../../src/config/platform-formats';
+import { resolveLiveSocialPlatforms } from '../../src/utils/live-social-connections';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const stripe = process.env.STRIPE_SECRET_KEY
@@ -249,15 +250,23 @@ export default withLambda(async (event) => {
             // they were reported as connected platforms a post could never actually go out on.
             // 'twitter' is normalised to 'x' rather than listed separately — same account, and the
             // catalogue's key is 'x'.
+            //
+            // Reading the catalogue fixed the NAMES; the STORE was the other half. Threads and
+            // YouTube keep their tokens in workspace_integrations, so no amount of filtering
+            // system_connections would ever surface them — hence the union below. Same symptom as
+            // before (Threads missing from the editor's tabs, refused at approve time), different
+            // cause, so both halves have to stay.
             const publishable = new Set<string>(SOCIAL_PLATFORMS);
-            connectedPlatforms = [...new Set(
-                connRows
+            const workspaceBacked = await resolveLiveSocialPlatforms(db, orgId);
+            connectedPlatforms = [...new Set([
+                ...connRows
                     .map(r => {
                         const name = r.serviceName.toLowerCase();
                         return name === 'twitter' ? 'x' : name;
                     })
-                    .filter(s => publishable.has(s))
-            )];
+                    .filter(s => publishable.has(s)),
+                ...workspaceBacked,
+            ])];
         }
 
         // ── 4. Compute percentages ──────────────────────────────────

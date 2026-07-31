@@ -2,15 +2,17 @@
 // US-GAP-10.1.1: Integration Token Expiry Alert
 //
 // Scheduled daily at 08:30 UTC (schedule: "30 8 * * *")
-// SC1: Checks all systemConnections where tokenExpiresAt is within 7 days OR status='expired'/'failed'
+// SC1: Checks all systemConnections where tokenExpiresAt is within 7 days OR status='expired'/'failed',
+//      plus workspace_integrations rows whose refresh grant has died (status expired/revoked/error)
 // SC2: In-app alert for expiring tokens (< 7 days)
 // SC3: Email alert for already-expired tokens
 // SC6: 24-hour dedup per connection using processedWebhookEvents
 
 import type { Handler } from '@netlify/functions';
-import { eq, and, or, lte, isNotNull } from 'drizzle-orm';
+import { eq, and, or, lte, isNotNull, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { users, systemConnections, processedWebhookEvents } from '../../db/schema';
+import { users, systemConnections, workspaceIntegrations, processedWebhookEvents } from '../../db/schema';
+import { normalizePlatform, PLATFORM_FORMATS } from '../../src/config/platform-formats';
 import { createNotification } from '../../src/utils/notify';
 import { sendEmail } from '../../src/utils/email';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -45,7 +47,50 @@ async function runIntegrationHealthCheck() {
             eq(systemConnections.status, 'failed'),
         ));
 
-    for (const conn of atRiskConnections) {
+    // The other credential store. Threads, YouTube and the Google connectors authenticate into
+    // workspace_integrations, so this cron never saw them: a dead Threads grant produced no alert
+    // and no email — the user's first sign was Autopilot quietly drafting for one platform fewer.
+    //
+    // Only DEAD statuses qualify, never an imminent expiresAt: these tokens are renewed
+    // automatically (getFreshAccessToken + refresh-workspace-tokens), and a Google access token
+    // lapses hourly by design, so an expiry-window alert here would fire every single day on a
+    // perfectly healthy connection. getFreshAccessToken writes 'expired' when the refresh grant
+    // itself is rejected, which is the honest "you must reconnect" signal.
+    const DEAD_WORKSPACE_STATUSES = ['expired', 'revoked', 'error'];
+    const atRiskWorkspace = await db
+        .select({
+            id: workspaceIntegrations.id,
+            userId: workspaceIntegrations.connectedBy,
+            provider: workspaceIntegrations.provider,
+            status: workspaceIntegrations.status,
+        })
+        .from(workspaceIntegrations)
+        .where(inArray(workspaceIntegrations.status, DEAD_WORKSPACE_STATUSES));
+
+    type AtRisk = {
+        /** Namespaced so a workspace_integrations id can't collide with a system_connections one. */
+        dedupeId: string;
+        userId: number | null;
+        assistantId: number | null;
+        connectionId: number | null;
+        serviceName: string;
+        status: string;
+        tokenExpiresAt: Date | string | null;
+    };
+    const atRisk: AtRisk[] = [
+        ...atRiskConnections.map(c => ({
+            dedupeId: String(c.id), userId: c.userId, assistantId: c.assistantId,
+            connectionId: c.id, serviceName: c.serviceName, status: c.status,
+            tokenExpiresAt: c.tokenExpiresAt,
+        })),
+        ...atRiskWorkspace.map(w => ({
+            dedupeId: `ws:${w.id}`, userId: w.userId, assistantId: null,
+            connectionId: null, serviceName: w.provider, status: 'expired',
+            tokenExpiresAt: null,
+        })),
+    ];
+
+    for (const conn of atRisk) {
         if (!conn.userId) continue;
 
         const expiry = conn.tokenExpiresAt
@@ -58,7 +103,7 @@ async function runIntegrationHealthCheck() {
             : 0;
 
         const alertType  = isExpired ? 'expired' : 'expiring';
-        const dedupeKey  = `integration-alert:${conn.id}:${alertType}:${new Date().toISOString().slice(0, 10)}`; // daily dedup
+        const dedupeKey  = `integration-alert:${conn.dedupeId}:${alertType}:${new Date().toISOString().slice(0, 10)}`; // daily dedup
 
         // SC6: 24-hour dedup
         const [alreadySent] = await db
@@ -72,7 +117,12 @@ async function runIntegrationHealthCheck() {
             .values({ stripeEventId: dedupeKey, eventType: `integration_${alertType}_alert` })
             .onConflictDoNothing();
 
-        const displayName = conn.serviceName.charAt(0).toUpperCase() + conn.serviceName.slice(1);
+        // Catalogue label for a social platform ("X (Twitter)", not "X"), capitalised service name
+        // for everything else (Canva, Gmail, …).
+        const platformKey = normalizePlatform(conn.serviceName);
+        const displayName = platformKey
+            ? PLATFORM_FORMATS[platformKey].label
+            : conn.serviceName.charAt(0).toUpperCase() + conn.serviceName.slice(1);
 
         // SC2: In-app alert for both expiring and expired.
         await createNotification(db, isExpired ? 'integration_alert_expired' : 'integration_alert_expiring', {
@@ -81,7 +131,7 @@ async function runIntegrationHealthCheck() {
                 platform: { label: displayName },
                 expiry: { days_left: `${daysLeft} day${daysLeft === 1 ? '' : 's'}` },
             },
-            metadata: { connectionId: conn.id, serviceName: conn.serviceName, alertType, assistantId: conn.assistantId },
+            metadata: { connectionId: conn.connectionId, serviceName: conn.serviceName, alertType, assistantId: conn.assistantId },
         });
 
         // SC3: Email only for already-expired connections

@@ -12,6 +12,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { and, eq, inArray } from 'drizzle-orm';
 import { contentAssets, systemConnections } from '../../db/schema';
 import { getSecret, storeSecret } from './vault';
+import { WORKSPACE_BACKED_PLATFORMS } from './live-social-connections';
 import { getFreshAccessToken, IntegrationError, type IntegrationProvider } from './workspace-integrations';
 
 function r2Client(): S3Client {
@@ -240,8 +241,13 @@ export async function refreshXToken(db: any, vaultRefKey: string): Promise<strin
 // workspace_integrations.
 // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
-/** Platforms whose tokens live in workspace_integrations rather than system_connections. */
-export const WORKSPACE_BACKED_PLATFORMS = new Set<string>(['threads', 'youtube']);
+/**
+ * Platforms whose tokens live in workspace_integrations rather than system_connections.
+ * Defined in live-social-connections.ts — the read-side twin of this bridge needs the same set,
+ * and that module is cheap to import (no vault/S3), so it owns the constant and this re-export
+ * keeps the publish path's existing import path working.
+ */
+export { WORKSPACE_BACKED_PLATFORMS };
 
 export interface SocialCredentials {
     token: string;
