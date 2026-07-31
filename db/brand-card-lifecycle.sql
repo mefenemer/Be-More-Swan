@@ -36,8 +36,15 @@
 -- first run after this ships — READ IT before you deploy, because every card older than 30 days
 -- becomes due immediately (see section 4 for how to give existing cards a fresh window instead).
 --
--- RUN ORDER: staging first, sections 1 → 2 → 3, then repeat on prod. Section 4 is optional and is a
--- judgement call, not a step. Every statement is idempotent.
+-- RUN ORDER: staging first, sections 1 → 2 → 3, then repeat on prod. Every statement is idempotent.
+--
+-- ── DRY RUN RESULTS, 2026-07-31 ─────────────────────────────────────────────────────────────────
+-- STAGING (ep-blue-truth, assistant1_org=10): 33 content_assets, 3 with a storage_key, and ZERO
+--   brand cards. Section 3 executed cleanly and returned all zeros — which proves the SQL parses
+--   and does not over-match, and proves nothing else. Do not read it as reassurance.
+-- PROD (assistant1_org=37): 7 unused cards out of 26 brand cards; 19 correctly excluded by the
+--   attachment checks; NONE due on the first sweep (earliest expiry 2026-08-23). This was the only
+--   real dry run. See section 4 — it is not needed, and why.
 
 
 -- ═══ SECTION 0 — which database am I in? ════════════════════════════════════════════════════════
@@ -117,19 +124,36 @@ FROM candidates
 ORDER BY created_at;
 
 
--- ═══ SECTION 4 — OPTIONAL: give the existing backlog a fresh 30 days ════════════════════════════
--- A judgement call, not a required step, and the reason section 3 exists.
+-- ═══ SECTION 4 — NOT NEEDED. Measured on PROD 2026-07-31 — do not run. ═════════════════════════
 --
--- The rule promises a 30-day visible countdown. Cards that already exist have never had one — they
--- were created under the old "keeps for ever" behaviour, so a user who saw one in their library had
--- no reason to think it was temporary. If section 3's due_now is anything other than a handful of
--- obvious throwaways, run this ONCE, on the day you deploy, to stamp the backlog as kept. They then
--- behave exactly like a card the user pressed Keep on: permanent, and the new rule applies only to
--- cards generated from here on.
+-- This section existed as a safety valve: the rule promises a 30-day VISIBLE countdown, and cards
+-- created under the old "keeps for ever" behaviour never had one, so anything already past 30 days
+-- would have been deleted with no warning ever shown. The fix would have been to stamp the whole
+-- backlog as kept.
 --
--- The conservative choice, and reversible in one statement (set library_kept_at back to NULL for
--- the ids you stamped). The alternative — letting the backlog go on the first run — reclaims
--- prod's ~26 cards immediately but removes assets nobody was warned about.
+-- ── The prod dry run says that cannot happen ────────────────────────────────────────────────────
+-- Section 3, run against prod (organisation_id 37) on 2026-07-31:
+--
+--   7 unused cards, ALL with due_on_first_run = false
+--   created 2026-07-24 → 2026-07-27, expiring 2026-08-23 → 2026-08-26
+--
+-- Not one is due on the first sweep. The earliest removal is 23 days after the decision date, so
+-- every existing card gets a full countdown in My Content from the moment the code ships — which is
+-- exactly the fairness condition this section was written to guarantee. Running it anyway would
+-- make 7 cards permanently exempt to prevent a harm that cannot occur.
+--
+-- ── The other thing that run established ────────────────────────────────────────────────────────
+-- 7 of prod's 26 brand cards matched; 19 were excluded by the two NOT EXISTS attachment checks. The
+-- predicate DISCRIMINATES — it is not just selecting every row with provider='brand_card'. Staging
+-- could never show this (it holds 0 brand cards, so its section 3 returned zeros that proved only
+-- that the SQL parses). Prod was the first and only real dry run.
+--
+-- ⚠️ RE-RUN SECTION 3 BEFORE DEPLOYING if that is more than a few weeks after 2026-07-31. The
+-- "nothing is due" finding has a shelf life measured in days: these cards start becoming due on
+-- 2026-08-23. Deploy after that date and the first sweep WILL reclaim some of them, and the
+-- judgement below has to be made again on fresh numbers.
+--
+-- The statement is kept, commented, for that case only.
 --
 -- UPDATE content_assets
 -- SET library_kept_at = now(), updated_at = now()
