@@ -34,14 +34,14 @@ unbuildable without outcome labels — which is why Phase 0 exists and everythin
 
 1. **"Zero-touch close" vs. `approval_status`.** Human-in-the-loop is *structural* — every AI record
    enters `pending_approval` and the Review Queue is shared UI across all assistant roles. Zero-touch
-   is not a feature flag; it needs an explicit **autonomy level** (§5.2) or you fork the record
+   is not a feature flag; it needs an explicit **autonomy level** (§6.2) or you fork the record
    lifecycle for one role and break the shared template.
 2. **"Anti-CRM" vs. the four-tab template.** Everything renders through
    Overview / Data Hub / Review Queue / Calendar. **Decision: build the memory layer as the new
    source of truth and keep the tables as a projection over it.** Same disruptive capability,
-   zero regression, and the conversational surface ships as an *addition* (§4.4).
+   zero regression, and the conversational surface ships as an *addition* (§5.5).
 3. **Autonomous negotiation + payment collection is regulated.** An AI agreeing commercial terms and
-   taking payment needs the guardrail table (§5.1) designed in from day one, plus an immutable
+   taking payment needs the guardrail table (§6.1) designed in from day one, plus an immutable
    decision log. Not a blocker; must not be retrofitted.
 4. **Runtime ceiling.** Netlify functions have ~10s (sync) / 26s (background) wall clock. Every new
    stage is a **cursor-resumable queue** modelled on `discovery_jobs`. No long-running agent loops,
@@ -80,17 +80,162 @@ unbuildable without outcome labels — which is why Phase 0 exists and everythin
    between pre-approved concessions is a classifier. This is the same inversion that fixed lead
    fabrication in discovery (LLM emits *queries*, not companies).
 
-6. **Promote, don't replace.** Exactly as discovery does today: new tables own the typed pipeline,
+6. **No feature may require two assistants to be useful.** Assistants are hired individually and
+   priced individually, so any capability that only works when a *second* assistant is also active is
+   a capability most orgs will never see. Cross-assistant orchestration is therefore always an
+   **enhancement of a standalone feature, never its precondition**. Applied here: the Signal Inbox
+   works fully on saved searches with only the Lead Generator hired (§4.1a); the social feed adds a
+   second source to a surface that already works. The same test applies to every later phase.
+
+7. **Promote, don't replace.** Exactly as discovery does today: new tables own the typed pipeline,
    and rows are *mirrored* into `assistant_records` so the shared Data Hub / Review Queue / Calendar
    UI renders them with no rebuild. Adding a `deal` record type is cheaper than a parallel UI.
 
+8. **Gate on consequence, not on step.** The approval gate is currently placed uniformly at every
+   step, which makes it simultaneously too heavy where actions are reversible and absent where they
+   are not. Approval fatigue is a safety problem, not just a UX one — habituation trained on fifty
+   low-stakes prompts fires on the one that mattered. **§2 sets this out in full and governs every
+   phase below.**
+
 ---
 
-## 2. Phase 0 — The outcome ledger (keystone)
+## 2. Human-in-the-loop placement (governing rule)
+
+**Read this before any phase.** It determines where every approval gate in the system goes, and
+several phases below are shaped by it rather than the other way round.
+
+### 2.1 Where the gate sits today
+
+| Moment | Mechanism | Character |
+|---|---|---|
+| An assistant produces any record | `approval_status='pending_approval'` → Review Queue | Uniform, per-item |
+| Sending to a scraped personal inbox | `send_outreach` refuses without `confirmPersonal` (`lead-generation.ts:282`) | Conditional, consequence-triggered |
+| A discovery run | `discovery_guardrails.requireHumanApproval` (default true) | Per-campaign policy |
+| A brief rewrite | **none** — `autonomous-goal-optimizer.ts:110-125` writes the change, *then* audits, *then* notifies | Apply-then-tell |
+
+### 2.2 The failure this creates
+
+The gate is placed **by step, uniformly**, but consequence is distributed **very unevenly**. That
+produces the worst of both outcomes simultaneously.
+
+**Too heavy where it doesn't matter.** `maxLeadsPerRun` defaults to 50. A user clicking Approve fifty
+times is not exercising judgment — they are clearing a queue. Each item is individually reversible
+and low-stakes (one cold email). This is precisely the volume at which habituation sets in, and
+habituation does not stay local: it trains the reflex that then fires on the approval that *did*
+matter. **Approval fatigue does not merely waste attention, it actively degrades the gates you care
+about.**
+
+**Too light where it matters most.** Nothing gates a strategy pivot. One ICP rewrite silently changes
+every subsequent search, every outreach, and every objection response — thousands of downstream
+actions authorised by a single unreviewed decision.
+
+### 2.3 The rule
+
+> **Gate on consequence and reversibility, not on step.**
+
+Every AI action falls into one of three classes, and conflating them is the design error:
+
+| Class | Examples | Gate design |
+|---|---|---|
+| **A · Reversible, high-volume** | signal → lead promotion, sequence steps | **Batch + sample.** Auto-approve above a confidence threshold; gate anomalies only. Never one prompt per item. |
+| **B · Irreversible, outward-facing** | first send to a stranger, concession, payment link, contract terms | **Hard gate, per instance, always.** You cannot unsend an email or un-form a contract. Not removable by autonomy level without explicit informed opt-in. |
+| **C · Policy-setting, low-volume, high-leverage** | ICP pivot, playbook rewrite, guardrail change, autonomy level | **Hard gate with evidence and rollback.** One decision governs thousands of downstream actions. |
+
+The best-designed gate already in the codebase works exactly this way: the personal-inbox check fires
+*only* when the address is both scraped **and** belongs to a named individual, and it is enforced
+server-side so it holds for any caller. It does not ask fifty times; it asks once, when it matters.
+That is the pattern to generalise.
+
+### 2.4 The single crucial moment
+
+**Switching on autonomy** — `deal_guardrails.autonomy_level = 'autonomous'`. It is the one human
+action that removes every other gate in the system. Everything else is a decision *within* the
+system; this is the decision *about* the system.
+
+It must not ship as a dropdown with a tier check. Required ceremony:
+
+1. floor price, non-negotiables and allowed concessions all populated and explicitly confirmed
+2. a **dry-run report** showing what the agent *would* have sent across the last N closed deals
+3. a scope limit — value ceiling, or a named subset of campaigns
+4. a review date, surfaced as a notification when it arrives
+5. an audit row capturing who enabled it, when, and against which guardrail snapshot
+
+The runner-up, and the one that will be hit far sooner: **applying a strategy pivot** (§7.1). If it
+inherits the goal optimizer's apply-then-notify precedent it ships fully autonomous by default. For a
+content-tone change that is defensible. For an ICP rewrite that redirects cold outreach at real
+strangers it is not — the blast radius is external and the error mode is systematic rather than
+one-off.
+
+### 2.5 Gate placement per phase
+
+| Moment | Class | Gate |
+|---|---|---|
+| Signal → lead promotion | A | Batch approve; auto-approve above confidence threshold; gate anomalies |
+| Lead → **first** outbound touch per account | B | Hard gate (keeps today's behaviour) |
+| Subsequent sequence steps | A | **No gate** — the human already approved this relationship |
+| Reply → objection response | A | No gate within guardrails |
+| Any concession | B | Hard gate until explicit opt-out with guardrails populated |
+| Payment link issuance | B | Hard gate, always |
+| Strategy pivot applied | C | Hard gate with evidence + rollback — **never** apply-then-notify |
+| Autonomy level change | C | Ceremony (§2.4) |
+| Guardrail / suppression / spend change | C | Human-only — the agent may never write these (§7.3) |
+
+**Net effect: fewer total interruptions than today**, concentrated where a human decision actually
+changes the outcome. If a phase adds a gate not in this table, it needs a justification in the phase
+section — the default is no new gate.
+
+### 2.6 Editing at review time — the three scopes
+
+A gate that only offers Approve / Reject wastes the most valuable thing about a human review: the
+human usually knows *what would make it right*. When they open a drafted message they have one of two
+quite different intentions, and collapsing them is a design error in exactly the way §2.3 describes.
+
+> **"This wording is wrong for this prospect"** → one-off, reversible → **class A**
+> **"This wording is wrong for everyone"** → governs every future message → **class C**
+
+So the review surface offers three save actions, not one:
+
+| Action | Scope | Class | Writes to |
+|---|---|---|---|
+| **Use this version** | This message only | A | the `lead_messages` row; template untouched |
+| **Save as the new default** | Every future prospect | **C** | outreach playbook section → `ai_blueprints` recompile |
+| **Use this version + flag the pattern** ⭐ | This message now; evidence for later | A (+ signal) | message row **and** a `template_feedback` row |
+
+**⭐ is the recommended default.** Here is why the middle option is a trap taken alone: "save as
+default" generalises from **n = 1**. The Strategy Agent is forbidden from pivoting without
+`MIN_SAMPLE` terminal outcomes (§7.1) precisely because one data point is noise — yet a human clicking
+"save for all" after one edit does exactly that, with no evidence gate at all. That is the user's call
+to make and must not be blocked; but it should be **labelled honestly as a policy change, audited, and
+reversible**, not presented as an innocuous checkbox.
+
+The third option resolves the tension. The edit ships immediately for this prospect, and the *reason
+for the edit* is captured as evidence. After N similar edits the Strategy Agent proposes the template
+change through the normal §7.1 proposal flow — with a sample size behind it. Human edits become
+training signal instead of being thrown away.
+
+**A human "save as default" and an agent strategy pivot are the same operation.** Same store, same
+audit row, same `previousValue` rollback, same blueprint recompile — one is human-initiated, the other
+agent-proposed. Do not build two mechanisms.
+
+**Which messages get reviewed.** Per §2.5, the **first outbound touch per account** is gated, so a
+human always sees the opening message before it reaches a stranger. Sequence steps 2+ are ungated at
+*instance* level — but their templates are reviewed once at enrolment. The principle: **review the
+policy once, not each execution of it.**
+
+> ⚠️ **Scope note — DMs.** Reviewing outbound *email* is specified above and rests on the existing
+> `send_outreach` path. Sending a **DM to a specific prospect is not currently a capability** anywhere
+> in the codebase: `social-auto-responder.ts` configures platform-level auto-replies, not per-prospect
+> outbound messages, and no `sync-action.ts` handler sends one. Outbound DM is a new capability with
+> its own platform permissions and rate limits — scope it explicitly if wanted; it is not implied by
+> Phase 1b, which only *ingests* social messages.
+
+---
+
+## 3. Phase 0 — The outcome ledger (keystone)
 
 **Nothing else in this document works without this. Build it first.**
 
-### 2.1 `revenue_events` — append-only fact stream
+### 3.1 `revenue_events` — append-only fact stream
 
 ```ts
 export const revenueEvents = pgTable("revenue_events", {
@@ -147,13 +292,13 @@ Strategy Agent would be reduced to summarising prose:
 `price` · `timing` · `no_budget` · `competitor` · `no_response` · `wrong_contact` ·
 `not_icp` · `feature_gap` · `went_silent` · `other`
 
-### 2.2 Terminal outcomes on the record lifecycle
+### 3.2 Terminal outcomes on the record lifecycle
 
 `assistant_records.approval_status` stays exactly as-is (it is the *approval* gate). Deal outcome is a
 separate axis, stored on the mirrored record's `data` and denormalised into `revenue_events`. Do not
 overload `approval_status` with `won`/`lost` — five other assistant roles read that column.
 
-### 2.3 Backfill
+### 3.3 Backfill
 
 `db/revenue-events.sql` (manual apply — see `docs/db-migrations.md`) creates the table and backfills
 from existing history so the Strategy Agent has data on day one:
@@ -167,7 +312,7 @@ from existing history so the Strategy Agent has data on day one:
 Backfilled rows get `actor='system'` and a NULL `blueprintVersion` — the analyser must tolerate NULL
 there and treat those as unattributable (they predate strategy versioning).
 
-### 2.4 Files
+### 3.4 Files
 
 | File | Change |
 |---|---|
@@ -184,15 +329,145 @@ verified by count parity against `discovered_leads`, and `recordEvent()` is the 
 
 ---
 
-## 3. Phase 1 — Social → Lead handoff (the gap the brief assumes closed)
+## 4. Phase 1 — The Signal Inbox
 
-### 3.1 `social_engagements` — inbound signal capture
+The Signal Inbox is **one surface with two independent feeds**. This is the load-bearing decision of
+the phase:
+
+| Feed | Source | Requires | Category shown |
+|---|---|---|---|
+| **1a · Saved searches** | `discovery_campaigns` → `discovered_leads` | Lead Generator only | `<Assistant name> Search` |
+| **1b · Social signals** | `signals` (webhook ingest) | Lead Generator **+** Social Media Assistant | `Instagram · DM`, `Facebook · comment`, … |
+
+**A user with only a Lead Generator must get a fully populated Signal Inbox.** The social feed is
+additive. If 1b is absent the inbox is not empty and does not nag — it shows saved-search signals and
+offers the social feed as an optional upgrade.
+
+> **Sequencing consequence: build 1a first.** It has *no external dependency* — the discovery engine
+> is already live. 1b is gated on Meta app review, which is dashboard state we do not control. Do not
+> let the blocked half hold up the unblocked half.
+
+### 4.0 What already exists (do not rebuild)
+
+The "describe what you want your assistant to search for, saved as a search" flow **is built and live
+on staging**:
+
+- `discovery_campaigns.idea` — the free-text description ("Who to find" textarea in
+  `assistant-discovery-campaigns.js`, placeholder *"Boutique hotels in Southern Europe that don't
+  have a modern online booking app"*)
+- cadence (`one_off | daily | weekly`) via `discovery_schedules`, dispatched by
+  `dispatch-discovery-runs.ts` — no per-campaign cron
+- guardrails: max leads/run, max spend/run, exclusions, human-approval toggle
+- full CRUD in `discovery-campaigns.ts`: `create · list · run_now · list_leads · pause · resume ·
+  archive · edit · cancel_run`
+
+**The gap is surfacing, not capability.** Discovery output goes straight to the Leads tab / Review
+Queue. Nothing presents it as an *inbound signal*, and the ~42% of candidates the domain filter drops
+are invisible to the user entirely.
+
+### 4.1a Saved searches → Signal Inbox
+
+Two small schema changes; the engine is untouched.
 
 ```ts
-export const socialEngagements = pgTable("social_engagements", {
+// discovery_campaigns — ADD. Campaigns are currently identified only by their idea text,
+// which is a paragraph. The inbox needs a short label for the per-search sub-filter.
+name: text("name"),   // nullable; UI falls back to a truncated `idea` when unset
+```
+
+```ts
+// discovery_jobs — ADD. Drives the "search completed → inbox updated" notification
+// and stops a redelivered/resumed job notifying twice.
+signalsPublishedAt: timestamp("signals_published_at"),
+```
+
+**Category label — resolve at read time, never store it.** The category is
+`` `${assistant.name} Search` `` derived from `ai_assistants.name` on every read. Denormalising the
+string means renaming an assistant leaves historical signals labelled with the old name — and this
+codebase already has a documented role-label-vs-instance-name trap. The correct read is the existing
+`coalesce(master_assistants.name, jobRole)` pattern.
+
+**What counts as a saved-search signal.** `discovered_leads` already carries the exact lifecycle
+(`discovered → qualified → promoted → discarded`), so the inbox is a *view over rows that already
+exist* — including the filtered-out ones. Default filter shows `qualified` + `promoted`; a
+**"Show filtered (42)"** toggle reveals what the domain filter and scorer rejected, with the reason.
+That toggle is a genuine product win: it makes the funnel legible and gives the user a way to catch a
+filter that is over-rejecting, which is currently only discoverable by reading the database.
+
+### 4.2a Read model — projection, not duplication
+
+`netlify/functions/signal-inbox.ts` returns one normalised wire shape from both feeds:
+
+```ts
+interface Signal {
+  id: string;                 // 'social:412' | 'search:1188' — feed-prefixed, never a bare int
+  sourceKind: 'social' | 'saved_search';
+  sourceLabel: string;        // 'Instagram · DM' | 'Nadia Search'  ← resolved at read time
+  savedSearchId?: number;     // discovery_campaigns.id, for the sub-filter
+  title: string;              // handle / company name
+  excerpt: string;            // comment text / matched snippet
+  intent: 'buying' | 'question' | 'support' | 'noise' | null;   // social only
+  rating: 'hot' | 'warm' | 'cold' | null;                        // saved search only
+  confidence: number | null;
+  handoffStatus: 'none' | 'queued' | 'promoted' | 'ignored' | 'filtered';
+  occurredAt: string;
+}
+```
+
+> **Deliberately NOT writing a `signals` row per discovered lead.** A dual-write would need the two
+> stores kept in sync on every status change, and this codebase has repeatedly been bitten by exactly
+> that shape — the Threads/YouTube dual-store bridge and the two asset tables that get confused. The
+> `signals` table owns social engagements *because nothing else stores them*; saved-search signals are
+> projected from `discovered_leads`, which stays their single source of truth.
+>
+> Cost of this choice: pagination across a union needs a composite cursor `(occurredAt, id)` rather
+> than an offset. That is a contained, one-time cost in one function. Accepted.
+
+`src/config/signal-sources.ts` is the single definition of the `Signal` shape, the `sourceKind`
+vocabulary and `resolveSourceLabel()` — imported by the function and mirrored in the component, the
+same way `PlatformConstants` is generated for the client. Never hand-copy the label format.
+
+### 4.3a Completion → inbox update
+
+When `process-discovery-jobs.ts` finishes a run (`status='completed'`), it:
+
+1. stamps `signalsPublishedAt` (idempotency — a resumed or redelivered job must not re-notify)
+2. writes `revenue_events` rows: `signal_captured` per qualified lead
+3. raises one grouped notification via `notify.ts` (the single write path):
+   *"Nadia's search 'Boutique hotels…' found 14 new signals"* → deep-links to the Signal Inbox
+   filtered to that search
+
+One notification per run, never per lead — a 50-lead run must not produce 50 notifications.
+
+### 4.4a Conditional UI
+
+The source filter renders only the feeds the org actually has. Detect the social feed with an active
+`ai_assistants` row joined to `master_assistants.roleKey = 'social_media_manager'`:
+
+- **Lead Generator only** → chips: `All · <Name> Search · Filtered`. A dismissible one-line footer
+  offers social capture as an upgrade. No empty state, no nag.
+- **Both active** → chips: `All · <Name> Search · Instagram · Facebook · …`, plus the intent filters.
+
+> ⚠️ Use `SOCIAL_PLATFORMS` for the platform chips. A hardcoded list is exactly how Threads and
+> YouTube got silently dropped elsewhere.
+
+---
+
+### 4.1b `signals` — social engagement capture *(requires the Social Media Assistant)*
+
+Named `signals`, not `social_engagements`: the table is the inbox's own store and a later feed
+(inbound email, web form, partner referral) should not need a rename. **Nothing here is built yet, so
+generalising now is free** — doing it after Phase 1 ships would be a migration.
+
+```ts
+export const signals = pgTable("signals", {
   id: serial().primaryKey(),
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
   aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  // Discriminator. Only 'social' is stored here today — saved-search signals are PROJECTED from
+  // discovered_leads (§4.2a) and never written as rows. The column exists so a future non-social,
+  // non-projectable feed (web form, partner referral) needs no migration.
+  sourceKind: text("source_kind").notNull().default("social"),
   platform: text("platform").notNull(),                   // use SOCIAL_PLATFORMS, never a literal list
   kind: text("kind").notNull(),                           // 'comment' | 'dm' | 'mention' | 'reaction'
   // Platform-native ids — the dedupe key. Webhooks redeliver; this makes ingest idempotent.
@@ -215,17 +490,20 @@ export const socialEngagements = pgTable("social_engagements", {
   occurredAt: timestamp("occurred_at").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
-  uniqueIndex("social_engagements_platform_ext_uidx").on(t.platform, t.externalId),
-  index("social_engagements_intent_idx").on(t.organisationId, t.intent, t.handoffStatus),
-  check("social_engagements_kind_check", sql`${t.kind} IN ('comment','dm','mention','reaction')`),
-  check("social_engagements_handoff_check", sql`${t.handoffStatus} IN ('none','queued','promoted','ignored')`),
+  uniqueIndex("signals_platform_ext_uidx").on(t.platform, t.externalId),
+  // The inbox's hot path is a time-ordered page for one org across feeds — the composite cursor
+  // in §4.2a sorts on (occurredAt, id), so the index must match or every page becomes a sort.
+  index("signals_org_occurred_idx").on(t.organisationId, t.occurredAt, t.id),
+  index("signals_intent_idx").on(t.organisationId, t.intent, t.handoffStatus),
+  check("signals_kind_check", sql`${t.kind} IN ('comment','dm','mention','reaction')`),
+  check("signals_handoff_check", sql`${t.handoffStatus} IN ('none','queued','promoted','ignored')`),
 ]);
 ```
 
 > ⚠️ **Do not hardcode the platform list.** Use `SOCIAL_PLATFORMS` — stale 4-platform literals are
 > exactly how Threads and YouTube got silently dropped elsewhere in the codebase.
 
-### 3.2 Ingestion
+### 4.2b Ingestion
 
 `netlify/functions/social-engagement-webhook.ts` — public endpoint, Meta-style
 `hub.challenge` verification + `X-Hub-Signature-256` HMAC validation. Reuse the shape of
@@ -241,7 +519,7 @@ buckets. Buying intent above a confidence threshold → `handoffStatus='queued'`
 > approved products, so **LinkedIn is polling-only or out of scope for Phase 1**. Ship Instagram +
 > Facebook first.
 
-### 3.3 Extending the handoff runtime
+### 4.3b Extending the handoff runtime
 
 `src/utils/orchestration.ts` currently hardcodes a content-generation payload. Two changes:
 
@@ -263,22 +541,42 @@ and a **payload discriminator** so a handoff can enqueue something other than a
 Preserve all three existing safety properties: the per-org daily cap, `UNIQUE(link_id, source_post_id)`
 idempotency (extend to `source_engagement_id`), and **never throw to the caller**.
 
-### 3.4 Files
+### 4.4 Files
+
+**Phase 1a — saved searches (no external dependency, ship first)**
 
 | File | Change |
 |---|---|
-| `db/schema.ts`, `db/social-engagements.sql` | + `socialEngagements` (manual apply) |
+| `db/schema.ts`, `db/signal-inbox-1a.sql` | + `discovery_campaigns.name`, + `discovery_jobs.signals_published_at` (manual apply) |
+| `src/config/signal-sources.ts` | **new** — `Signal` shape, `sourceKind` vocabulary, `resolveSourceLabel()` |
+| `netlify/functions/signal-inbox.ts` | **new** — union read + composite cursor + source counts |
+| `netlify/functions/process-discovery-jobs.ts` | on completion: stamp `signalsPublishedAt`, emit `signal_captured`, one grouped notification |
+| `netlify/functions/discovery-campaigns.ts` | `create`/`edit` accept `name`; `list` returns it |
+| `src/components/assistant-discovery-campaigns.js` | + "Name this search" field; reframe as **Saved searches** |
+| `src/components/assistant-signal-inbox.js` | **new** — inbox tab, source chips, "Show filtered" toggle |
+| `assistant-detail.html`, `assistants.js` | + Signal Inbox tab, registry entry (`lead_qualifier`) |
+
+**Phase 1b — social feed (gated on Meta app review)**
+
+| File | Change |
+|---|---|
+| `db/schema.ts`, `db/signals.sql` | + `signals` (manual apply) |
 | `netlify/functions/social-engagement-webhook.ts` | **new** — signed ingest |
 | `netlify/functions/classify-engagement-jobs.ts` | **new** — intent classifier drain |
+| `netlify/functions/signal-inbox.ts` | + social feed in the union (shape already defined in 1a) |
 | `src/utils/orchestration.ts` | + `identifies_intent`, + target-role payload branch |
 | `src/lib/intent-classify.ts` | **new** — prompt + normaliser |
 | `netlify.toml` | + classifier cron |
 
+**Exit criteria (1a):** an org with *only* a Lead Generator can describe a search, save it, run it, and
+see the results in the Signal Inbox categorised under `<Assistant name> Search` — with no social
+assistant present and no empty state.
+
 ---
 
-## 4. Phases 2-3 — Engagement loop and the Anti-CRM memory
+## 5. Phases 2-3 — Engagement loop and the Anti-CRM memory
 
-### 4.1 `lead_threads` / `lead_messages` — conversation state
+### 5.1 `lead_threads` / `lead_messages` — conversation state
 
 Outreach today is fire-and-forget: `send_outreach` sends one email and sets a calendar reminder.
 There is no record of the conversation and **no reply detection**, so the system cannot know it
@@ -302,7 +600,33 @@ export const leadThreads = pgTable("lead_threads", {
 ```
 
 `lead_messages` stores one row per message (`direction`, `subject`, `body`, `classification`,
-`sentiment`, `objections jsonb`).
+`sentiment`, `objections jsonb`), plus the review-time edit fields from §2.6:
+
+```ts
+// On lead_messages — what the agent wrote vs what the human sent.
+generatedBody: text("generated_body"),        // the agent's draft, kept verbatim
+body: text("body").notNull(),                 // what actually went out
+editedBy: integer("edited_by").references(() => users.id, { onDelete: "set null" }),
+templateVersion: text("template_version"),    // ai_blueprints.blueprintVersion the draft came from
+```
+
+Keeping `generatedBody` alongside `body` is what makes the diff computable — without it you cannot
+tell an edited message from an unedited one, and the whole feedback path in §2.6 has no input.
+
+```ts
+// Human edits as evidence (§2.6, option ⭐). Accumulates until the Strategy Agent has
+// MIN_SAMPLE similar edits, then proposes the template change through the §7.1 flow.
+export const templateFeedback = pgTable("template_feedback", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  leadMessageId: integer("lead_message_id").references(() => leadMessages.id, { onDelete: "cascade" }),
+  templateVersion: text("template_version"),
+  editReason: text("edit_reason"),             // closed vocabulary, mirrors REJECT_REASONS' rationale
+  diffSummary: text("diff_summary"),           // LLM-summarised, one line
+  appliedToTemplate: boolean("applied_to_template").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+```
 
 **Reply routing.** `inbound-email.ts` already terminates SendGrid Inbound Parse at
 `parse.bemoreswan.com`, but writes to BMS's *own* admin `leads` table. Add a discriminator **at the
@@ -313,7 +637,7 @@ the MX, token auth, spam gate and multipart parsing all already work.
 > ⚠️ Do **not** overload BMS's `leads`/`lead_replies` tables for tenant lead data. They are the
 > platform's own trial/upgrade pipeline and are surfaced in Admin → Contacts.
 
-### 4.2 `outreach_sequences` / `sequence_steps` / `sequence_enrolments`
+### 5.2 `outreach_sequences` / `sequence_steps` / `sequence_enrolments`
 
 Declarative multi-step cadence with a dispatcher, **cloned wholesale from
 `discovery_schedules` + `dispatch-discovery-runs.ts`** — that pattern is proven and already carries
@@ -326,7 +650,7 @@ Non-negotiable rules, enforced in the worker:
 - Global suppression check before every send — `suppression-sync.ts` already exists; use it.
 - Every send and every halt writes a `revenue_events` row.
 
-### 4.3 The account graph + memory (Anti-CRM)
+### 5.3 The account graph + memory (Anti-CRM)
 
 ```ts
 // Nodes: the durable entities the memory is *about*.
@@ -386,7 +710,153 @@ one indexed read. Introduce a cache only when a measured query proves it necessa
 `account-delete-execute.ts` already read that table — skipping the insert silently orphans vectors
 through a deletion request.
 
-### 4.4 Conversational query surface
+### 5.4 Outbound DM — scoped as **windowed reply**, not cold outreach
+
+> **The headline finding: "outbound DM" as a peer to cold email does not exist on any platform we
+> integrate.** Every major network prohibits messaging a person who has not messaged you first. What
+> *is* available is a **reply inside a platform-enforced time window** that the prospect opens by
+> contacting us. That is a different capability with a different shape, a hard clock, and — critically
+> — a different human-gate design.
+>
+> ⚠️ Platform messaging terms change frequently and are the single most volatile area of these APIs.
+> **Re-verify every row below against current developer docs before committing engineering time.**
+
+#### 5.4.1 What each platform actually permits
+
+| Platform | Outbound DM to a stranger | What *is* possible | Scope status in our code |
+|---|---|---|---|
+| **Facebook Messenger** | ❌ Prohibited | Reply within **24h** of the user's last message; `HUMAN_AGENT` tag extends to 7 days (needs approval) | ✅ `pages_messaging` **already granted** (`meta-oauth.ts:31`) |
+| **Instagram** | ❌ Prohibited | Same 24h window; IG professional account linked to a Page | ❌ `instagram_manage_messages` **not requested** — see drift note below |
+| **X** | ⚠️ Only if the recipient follows us or has open DMs | `POST /2/dm_conversations/…/messages` | ❌ `dm.write` not requested; needs a **paid API tier** |
+| **LinkedIn** | ❌ No general member-messaging API | Sponsored Messaging only — an *ad product* via Campaign Manager, not a per-prospect API send | ❌ Partner-gated; our approved products are member posting only |
+| **Threads** | ❌ No DM API | — (Threads has no native DM; it hands off to Instagram) | n/a |
+| **TikTok** | ❌ No public DM API | — | n/a |
+| **YouTube** | ❌ No DM | — | n/a |
+
+> ✅ **Scope drift found while scoping this — FIXED.** `integrations.ts` listed `pages_messaging`
+> under the `instagram` allow-list, but that is a *Facebook Page* permission and does not authorise
+> Instagram DMs — those need `instagram_manage_messages`, which `meta-oauth.ts:31` never requests. The
+> allow-list implied a capability the grant does not confer (same class of bug as the connector secret
+> name mismatch: a declaration that looks right and a request that doesn't match it).
+> `pages_messaging` is now removed from `instagram` and kept on `facebook`, where it is both granted
+> and correct. The guard is a **hard 400** (`SCOPE_NOT_PERMITTED`) on the manual connection path;
+> no client sends `scopes` and no test covered it, so this is purely tightening.
+>
+> ⚠️ **Related drift NOT fixed — needs a decision.** `meta-oauth.ts:31` requests
+> `business_management`, which appears in **neither** allow-list. Adding it would *widen* a security
+> guard with a powerful permission, so it is deliberately left alone: if the manual path ever needs to
+> declare it, that should be an explicit call, not a silent side effect of this fix.
+
+**Net achievable scope:** Facebook Messenger today; Instagram after a scope addition + Meta App
+Review; X only with a paid tier and only to followers. **Everything else is out, and cold DM is out
+everywhere.**
+
+#### 5.4.2 The window collides with the human gate
+
+This is the part that changes the design rather than just the integration.
+
+§2.5 gates the **first outbound touch per account** (class B). For email that is free — a draft can
+wait three days for approval and lose nothing. For a DM it is **destructive**: a signal arriving 18:00
+Friday has a window that expires 18:00 Saturday. If the human approves on Monday, the reply **cannot
+be sent at all** — not "sent late", but permanently impossible, and the prospect is left on read.
+
+Per-instance review is therefore actively harmful here, and the resolution is already in the doc:
+
+> **§2.6 — review the policy once, not each execution.**
+
+So the DM gate inverts relative to email:
+
+| | Email | DM (windowed) |
+|---|---|---|
+| Reviewed per message | ✅ first touch | ❌ would burn the window |
+| Reviewed per template | at enrolment | **✅ the primary gate** — pre-approved reply set |
+| On expiry risk | n/a | escalating notification at 50% / 80% of window |
+| Fallback when window closes | n/a | **fall back to email** if an address is known; else mark `window_expired` |
+
+Pre-approved DM replies are a **class C** decision (they govern every future conversation), reviewed
+once and versioned in `ai_blueprints` like any other playbook. An individual send inside that approved
+set is class A.
+
+#### 5.4.3 Schema
+
+`lead_threads.channel` already allows `'dm'` — no change. Add the window clock:
+
+```ts
+export const dmWindows = pgTable("dm_windows", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  leadThreadId: integer("lead_thread_id").notNull().references(() => leadThreads.id, { onDelete: "cascade" }),
+  platform: text("platform").notNull(),
+  // Platform-scoped conversation identity — NOT the connection id. Conflating the two is how
+  // Threads silently vanished from cross-posts; keep the participant ref explicit.
+  externalConversationId: text("external_conversation_id").notNull(),
+  participantExternalId: text("participant_external_id").notNull(),
+  // The clock. Reset on every INBOUND message; never extended by an outbound one.
+  lastInboundAt: timestamp("last_inbound_at").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),          // lastInboundAt + platform window
+  windowKind: text("window_kind").notNull().default("standard"), // 'standard' (24h) | 'human_agent' (7d)
+  state: text("state").notNull().default("open"),        // open | replied | expired | closed
+}, (t) => [
+  uniqueIndex("dm_windows_thread_uidx").on(t.leadThreadId),
+  // The dispatcher's hot path: windows about to expire that still have no reply.
+  index("dm_windows_expiry_idx").on(t.state, t.expiresAt),
+  check("dm_windows_state_check", sql`${t.state} IN ('open','replied','expired','closed')`),
+]);
+```
+
+**`expiresAt` is computed from the platform's rule, never assumed to be 24h.** Store the window kind
+so a `HUMAN_AGENT`-tagged thread gets the correct 7-day clock rather than being expired early.
+
+#### 5.4.4 Send path
+
+`netlify/functions/send-dm.ts`, following the `sync-action.ts` pattern exactly — `requireTenant`,
+token via `getFreshAccessToken`, `integration_api_calls` audit row (endpoint paths only).
+
+Refusal contract mirrors `send_outreach`: **every non-send returns HTTP 200 with a `reason`**, never
+an error the user must act on —
+`no_window` · `window_expired` · `not_connected` · `scope_missing` · `platform_unsupported` ·
+`no_approved_template`.
+
+> ⚠️ The silent-failure trap applies here too: a 200 with `reason` looks like nothing happened.
+> Check `reason` before assuming a bug.
+
+Window enforcement is **server-side and checked immediately before the API call**, not at enqueue
+time — a queued reply can sit long enough for the window to close between claim and send.
+
+#### 5.4.5 Files
+
+| File | Change |
+|---|---|
+| `db/schema.ts`, `db/dm-windows.sql` | + `dmWindows` (manual apply) |
+| `netlify/functions/social-engagement-webhook.ts` | open/reset a window on every inbound DM |
+| `netlify/functions/send-dm.ts` | **new** — per-platform send with server-side window check |
+| `netlify/functions/dispatch-dm-replies.ts` | **new** — expiry-ordered drain + escalating notifications |
+| `netlify/functions/meta-oauth.ts` | + `instagram_manage_messages` (triggers **re-consent** for every connected account) |
+| ~~`netlify/functions/integrations.ts`~~ | ~~fix the allow-list drift~~ — **done**, shipped ahead of this phase |
+| `src/config/dm-capability.ts` | **new** — per-platform capability + window rules, single source of truth |
+
+#### 5.4.6 Cost, blockers and non-goals
+
+**Blockers (none are code):** Meta App Review for `instagram_manage_messages`; adding it forces
+**re-consent for every already-connected Meta account** — an existing-user migration, not a deploy.
+X requires a paid API tier. Both are decisions before engineering, not after.
+
+**Explicit non-goals — do not build:**
+- cold DM to anyone who hasn't messaged first (prohibited everywhere; also the fastest route to an
+  app ban)
+- LinkedIn DM automation (partner-gated; automating it violates their terms)
+- reopening an expired window by any means
+- treating DM as a sequence channel — sequences assume *we* control the cadence; a window means the
+  prospect does
+
+**Recommendation: sequence this after Phase 2, and ship Facebook-only first.** It is the one platform
+where the scope is already granted, so it validates the window mechanic with **zero permission
+work**. Instagram follows only if the App Review and re-consent cost is judged worth it. Given that
+the achievable capability is "reply faster to people already talking to us" rather than a new
+acquisition channel, it is a **retention/conversion improvement, not a growth channel** — price the
+effort accordingly.
+
+### 5.5 Conversational query surface
 
 `netlify/functions/memory-query.ts` — natural-language question → hybrid retrieval (vector kNN over
 `account_memory` + graph expansion over `account_edges` + aggregate over `revenue_events`) →
@@ -397,7 +867,7 @@ know; the disruption is that both now read from the same memory layer.
 
 ---
 
-## 5. Phase 4 — The Closing Agent
+## 6. Phase 4 — The Closing Agent
 
 New role key **`deal_closer`** in `db/seed-catalog.ts`.
 
@@ -406,7 +876,7 @@ New role key **`deal_closer`** in `db/seed-catalog.ts`.
 > `mandate-suggestions.js`, `assistant-starter-prompts.js` and `assistant-dashboard-registry.js` —
 > see the Assistant Onboarding Checklist. Skipping any one of them ships a half-wired assistant.
 
-### 5.1 `deal_guardrails` — the negotiation envelope
+### 6.1 `deal_guardrails` — the negotiation envelope
 
 ```ts
 export const dealGuardrails = pgTable("deal_guardrails", {
@@ -433,27 +903,39 @@ export const dealGuardrails = pgTable("deal_guardrails", {
 instruction is a request; a code check is a guarantee. Same principle that makes the disclosure
 footer deterministic rather than LLM-appended.
 
-### 5.2 Autonomy levels
+### 6.2 Autonomy levels
 
-| Level | Behaviour | Approval gate |
-|---|---|---|
-| `suggest` | Drafts a response, sends nothing | `pending_approval` (today's behaviour) |
-| `approve_each` | Drafts and queues each reply | `pending_approval` |
-| `approve_exceptions` | Sends within guardrails autonomously; queues anything at the floor, past max rounds, or over `escalateAboveGbp` | conditional |
-| `autonomous` | Full zero-touch including payment link | bypassed, everything logged |
+The level governs **class A** actions only. Per §2.3, class B actions (concession, payment link) keep
+their hard gate at *every* level except `autonomous`, and reaching `autonomous` requires the ceremony
+in §2.4 — not merely selecting it.
 
-This is how zero-touch coexists with the shared Review Queue: the gate is *conditional*, not removed.
-`autonomous` should be tier-gated, off by default, and require explicit opt-in with the guardrails
-fully populated.
+| Level | Class A (replies, sequence steps) | Class B (concession, payment link) | Class C |
+|---|---|---|---|
+| `suggest` | Drafts, sends nothing | Hard gate | Hard gate |
+| `approve_each` | Queues every reply | Hard gate | Hard gate |
+| `approve_exceptions` | **Sends within guardrails**; queues at floor, past max rounds, or over `escalateAboveGbp` | Hard gate | Hard gate |
+| `autonomous` | Sends | **Sends — requires §2.4 ceremony** | Hard gate, always |
 
-### 5.3 Payment links
+Two properties this table is designed to guarantee:
+
+1. **Class C is never delegable.** No autonomy level lets the agent change its own guardrails,
+   suppression lists, spend caps or autonomy level. That column reads "hard gate" at every level on
+   purpose — see §7.3.
+2. **The step from `approve_exceptions` to `autonomous` is the only one that changes class B
+   behaviour**, which is why it is the crucial moment (§2.4) and why it is a workflow rather than a
+   dropdown.
+
+`approve_exceptions` is the intended default for most orgs: it removes the high-volume class A
+prompts (the fatigue source) while keeping every irreversible action gated.
+
+### 6.3 Payment links
 
 Stripe payment links on the **tenant's connected account** (Stripe Connect) — not BMS's own account,
 which is what `create-plan-checkout-intent.ts` uses. This is a new Stripe integration surface, not an
 extension of billing. Amount always derives from the guardrail-validated figure, never from model
 output. Never bypass the floor check.
 
-### 5.4 Objection handling
+### 6.4 Objection handling
 
 `objection_playbooks` — per-org, per-objection-category responses, seeded from onboarding's existing
 `sales_objections` answer (already collected by the social assistant's schema) and thereafter
@@ -461,12 +943,12 @@ output. Never bypass the floor check.
 
 ---
 
-## 6. Phase 5 — Autonomous strategy pivoting
+## 7. Phase 5 — Autonomous strategy pivoting
 
 `netlify/functions/autonomous-strategy-agent.ts`, structurally cloned from
 `autonomous-goal-optimizer.ts`.
 
-### 6.1 The loop
+### 7.1 The loop
 
 ```
 weekly cron
@@ -475,13 +957,70 @@ weekly cron
      → compute per-segment: win rate, mean cycleDays, mean valueGbp, top lossReason
      → require MIN_SAMPLE terminal outcomes per segment, else SKIP (no pivot on noise)
      → LLM proposes ONE change from the allow-list, with evidence citations
-     → validate against the change envelope (§6.3)
-     → write proposal → audit_logs → notify
-     → apply (or queue for approval, per autonomy level)
-     → applying an ICP/playbook change triggers the existing ai_blueprints recompile
+     → validate against the change envelope (§7.3)
+     → PERSIST as strategy_proposals row (status='pending')  ← never applied here
+     → audit_logs + ONE notification linking to the proposal
+     ─────────────── the run ends. Nothing has changed. ───────────────
+  human reviews the proposal (Strategy tab)
+     → Apply  → write the change, stamp applied_at + prior value, recompile ai_blueprints
+     → Reject → status='rejected', reason captured and fed to the next run's prompt
+     → Ignore → expires after N days, never auto-applies
 ```
 
-### 6.2 What the Closing Agent must pass back
+**The proposal is persisted, not applied. This is a class C gate (§2.3) and it is deliberate.**
+
+`autonomous-goal-optimizer.ts:110-125` sets the opposite precedent — it writes, then audits, then
+notifies. Do **not** clone that half. The difference is blast radius: the optimizer rewrites a brand
+voice affecting the org's own content, whereas an ICP pivot redirects cold outreach at real strangers.
+Systematic, external, and hard to walk back.
+
+```ts
+export const strategyProposals = pgTable("strategy_proposals", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "cascade" }),
+  targetField: text("target_field").notNull(),      // must be on the §7.3 allow-list
+  previousValue: jsonb("previous_value"),           // ← makes Apply reversible
+  proposedValue: jsonb("proposed_value").notNull(),
+  evidence: jsonb("evidence").notNull(),            // { sampleSize, segments[], metrics{}, eventIds[] }
+  status: text("status").notNull().default("pending"),  // pending | applied | rejected | expired
+  // Reject capture — a CLOSED vocabulary, for the same reason as LOSS_REASONS: free text
+  // is unclusterable, so the next run could not learn from it.
+  rejectReason: text("reject_reason"),
+  rejectNote: text("reject_note"),                  // optional free text, for humans not the model
+  decidedBy: integer("decided_by").references(() => users.id, { onDelete: "set null" }),
+  decidedAt: timestamp("decided_at"),
+  expiresAt: timestamp("expires_at").notNull(),     // never auto-applies; lapses instead
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("strategy_proposals_org_status_idx").on(t.organisationId, t.status, t.createdAt),
+  check("strategy_proposals_status_check", sql`${t.status} IN ('pending','applied','rejected','expired')`),
+]);
+```
+
+**`REJECT_REASONS`** (`src/config/strategy-proposals.ts`):
+
+| Key | Meaning | Effect on the next run |
+|---|---|---|
+| `sample_unrepresentative` | The segment is skewed (one big client, one campaign) | Raise `MIN_SAMPLE` for that segment |
+| `already_tried` | We tested this; it didn't work | Suppress this change permanently |
+| `wrong_causation` | The correlation isn't causal | Feed back as a counter-example |
+| `off_brand` | Conflicts with positioning | Add as a standing constraint |
+| `bad_timing` | Seasonal or temporary effect | Re-propose after the window |
+| `too_narrow` / `too_broad` | Right direction, wrong scope | Re-propose rescoped |
+| `other` + note | — | Note shown to humans, not fed to the model |
+
+`previousValue` makes Apply reversible — a pivot that turns out wrong must be undoable without
+reconstructing what the field used to say. **Reject reasons are structured because they are an
+input, not a record**: the next run's prompt receives prior rejections so declining a proposal
+teaches the loop rather than being a dead end. `other` is deliberately excluded from the model
+feedback — unstructured text would poison the prompt with one org's idiosyncratic phrasing.
+
+> Once a body of applied proposals exists and their outcomes are measurable, an
+> `auto_apply_below_confidence` threshold could be revisited for low-risk changes. Not at launch —
+> that decision needs the evidence this loop is designed to produce.
+
+### 7.2 What the Closing Agent must pass back
 
 The analyser is only as good as its inputs. Every terminal event **must** carry:
 
@@ -495,7 +1034,7 @@ The analyser is only as good as its inputs. Every terminal event **must** carry:
 That last field is what makes the brief's motivating example computable: *"we target CMOs but CFOs
 close faster"* is a `GROUP BY payload->>'contactRole'` over `cycleDays` and win rate.
 
-### 6.3 The change envelope (safety)
+### 7.3 The change envelope (safety)
 
 Reuse `AUTONOMOUS_TUNABLE_FIELDS`' discipline with a sales-specific allow-list:
 
@@ -511,7 +1050,7 @@ Reuse `AUTONOMOUS_TUNABLE_FIELDS`' discipline with a sales-specific allow-list:
 
 ---
 
-## 7. Phase 6 — Swarm scaling (deliberately last)
+## 8. Phase 6 — Swarm scaling (deliberately last)
 
 Sequenced last because it multiplies the cost of every preceding phase, and because a fleet of agents
 running against a **hard** monthly task cap is a support incident, not a feature.
@@ -528,21 +1067,35 @@ running against a **hard** monthly task cap is a support incident, not a feature
 
 ---
 
-## 8. Sequencing summary
+## 9. Sequencing summary
 
-| Phase | Scope | Est. | Gates |
-|---|---|---|---|
-| 0 | `revenue_events` + backfill + `recordEvent()` | ~1 wk | none — start here |
-| 1 | Social engagement ingest + intent + handoff | 1-2 wks | Meta permissions |
-| 2 | Threads, reply ingest, sequence engine | ~2 wks | Phase 0 |
-| 3 | Account graph + memory + conversational query | 2-3 wks | Phase 2 (needs messages) |
-| 4 | Closing Agent + guardrails + payment links | ~3 wks | Stripe Connect; legal review |
-| 5 | Autonomous strategy agent | ~2 wks | **Phases 0 + 4** — needs real outcomes |
-| 6 | Swarm scaling | TBD | cost model |
+"Blocked by" is a build dependency. "HITL gate" is the approval this phase introduces, per §2.5 —
+class in brackets.
+
+| Phase | Scope | Est. | Blocked by | HITL gate introduced |
+|---|---|---|---|---|
+| 0 | `revenue_events` + backfill + `recordEvent()` | ~1 wk | none — start here | none (ledger only) |
+| **1a** | **Signal Inbox over saved searches** | **~1 wk** | **none — engine already live** | batch approve + anomaly gate **[A]** |
+| 1b | Social ingest + intent + handoff | 1-2 wks | Meta app review | none new — same batch gate |
+| 2 | Threads, reply ingest, sequence engine | ~2 wks | Phase 0 | first touch per account **[B]**; steps 2+ ungated **[A]** |
+| 2b | **DM windowed reply** — Facebook only (§5.4) | ~1 wk | Phase 1b + Phase 2 | pre-approved reply set **[C]**; sends ungated **[A]** |
+| 3 | Account graph + memory + conversational query | 2-3 wks | Phase 2 (needs messages) | none — read-only surface |
+| 4 | Closing Agent + guardrails + payment links | ~3 wks | Stripe Connect; legal review | concession + payment link **[B]**; autonomy ceremony **[C]** §2.4 |
+| 5 | Autonomous strategy agent | ~2 wks | **Phases 0 + 4** — needs real outcomes | proposal review, never apply-then-notify **[C]** §7.1 |
+| 6 | Swarm scaling | TBD | cost model | per-swarm spend ceiling **[C]** |
+
+Only three phases add a gate a user will feel day to day — 1a (batched), 2 (first touch), and 4
+(irreversible actions). Phases 3 and 5 add none and one respectively, and **1a removes** per-item lead
+approval in exchange for a batch action.
 
 Phases 1 and 2 are independent of each other and can run in parallel after Phase 0.
 
-## 9. Migration notes
+**1a is the only phase with no dependency of any kind** — the discovery engine, the saved-search CRUD
+and the cadence dispatcher are already live on staging. It is the cheapest path to a visible, working
+Signal Inbox and it must not be sequenced behind 1b, whose blocker (Meta app review) is dashboard
+state outside our control.
+
+## 10. Migration notes
 
 - Every `db/*.sql` here is a **manual apply** — `scripts/db-migrate.mjs`, not `drizzle-kit push`,
   and `psql` is not installed on this machine. See `docs/db-migrations.md`.

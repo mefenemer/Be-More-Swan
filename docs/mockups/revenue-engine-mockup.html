@@ -17,6 +17,9 @@
     --red-wash:#fef2f2; --red-border:#fecaca; --red-text:#991b1b;
   }
   *{box-sizing:border-box}
+  /* A class that sets `display` beats the UA [hidden] rule — .banner/.scope-opt are flex,
+     so `el.hidden = true` would silently do nothing. Make hidden always win. */
+  [hidden]{display:none !important}
   body{margin:0;background:var(--g50);color:var(--g900);
     font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
     font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
@@ -135,6 +138,22 @@
     border-right:1px solid var(--g200);background:#fff}
   .seg span:last-child{border-right:none}
   .seg span.on{background:var(--accent);color:#fff}
+
+  /* inline diff marks */
+  .ins{background:var(--green-wash);color:var(--green-text);border-radius:.2rem;
+    box-shadow:inset 0 -1px 0 var(--green-border)}
+  .del{background:var(--red-wash);color:var(--red-text);text-decoration:line-through;
+    border-radius:.2rem;opacity:.8}
+  .diff-off .ins{background:none;color:inherit;box-shadow:none}
+  .diff-off .del{display:none}
+
+  /* edit-scope radio cards */
+  .scope-opt{display:flex;gap:.6rem;align-items:flex-start;padding:.7rem .85rem;cursor:pointer;
+    border:1px solid var(--g200);border-radius:.75rem;background:#fff}
+  .scope-opt:hover{border-color:var(--g300);background:var(--g50)}
+  .scope-opt.on{border-color:var(--accent);background:var(--accent-wash)}
+  .scope-opt.on[data-class="C"]{border-color:#f87171;background:var(--red-wash)}
+  .scope-opt input{margin-top:.2rem;flex-shrink:0}
 </style>
 </head>
 <body>
@@ -163,6 +182,7 @@
     <button class="active" data-s="signals">Signal Inbox <span class="chip c-hot" style="margin-left:.3rem">7</span></button>
     <button data-s="pipeline">Pipeline</button>
     <button data-s="thread">Deal Thread</button>
+    <button data-s="review">Message Review</button>
     <button data-s="memory">Ask Your Data</button>
     <button data-s="strategy">Strategy <span class="chip c-warm" style="margin-left:.3rem">1</span></button>
     <button data-s="closer">Closing Agent</button>
@@ -171,51 +191,165 @@
   <!-- ══════════════════ 1. SIGNAL INBOX ══════════════════ -->
   <section class="screen on" id="s-signals">
     <div class="note" style="margin-bottom:1rem">
-      <strong>Phase 1.</strong> New surface. Backed by <span class="mono">social_engagements</span> — the ingest + intent classifier
-      the brief assumed existed. Buying intent hands off to a lead via the extended
-      <span class="mono">identifies_intent</span> orchestration event.
+      <strong>Phase 1.</strong> One surface, two independent feeds.
+      <strong>1a · Saved searches</strong> works with the Lead Generator alone (projected from
+      <span class="mono">discovered_leads</span> — engine already live).
+      <strong>1b · Social</strong> adds a second feed only when the Social Media Assistant is also hired.
+      Toggle below to see the standalone state.
+    </div>
+
+    <div class="card card-pad" style="margin-bottom:1rem;background:var(--g900);color:#fff;border-color:var(--g900)">
+      <div class="between" style="align-items:center">
+        <div>
+          <div style="font-weight:600;font-size:.9rem">Mockup control · which assistants are hired?</div>
+          <div class="tiny" style="opacity:.7;margin-top:.15rem">The inbox must be fully useful in both states — no empty state when social is absent.</div>
+        </div>
+        <div class="seg" id="hire-toggle" style="border-color:#000">
+          <span class="on" data-mode="both">Lead Gen + Social</span>
+          <span data-mode="solo">Lead Gen only</span>
+        </div>
+      </div>
     </div>
 
     <div class="grid g4" style="margin-bottom:1rem">
-      <div class="card card-pad kpi"><div class="n">142</div><div class="l">Signals captured (7d)</div><div class="delta up">▲ 18%</div></div>
-      <div class="card card-pad kpi"><div class="n">23</div><div class="l">Buying intent</div><div class="delta up">▲ 4</div></div>
-      <div class="card card-pad kpi"><div class="n">16</div><div class="l">Handed off to leads</div><div class="delta">70% of intent</div></div>
-      <div class="card card-pad kpi"><div class="n">2.4<span style="font-size:.9rem">m</span></div><div class="l">Median time to handoff</div><div class="delta up">▼ 41%</div></div>
+      <div class="card card-pad kpi"><div class="n" data-k="total">142</div><div class="l">Signals captured (7d)</div><div class="delta up">▲ 18%</div></div>
+      <div class="card card-pad kpi"><div class="n" data-k="hot">23</div><div class="l">Buying intent / hot</div><div class="delta up">▲ 4</div></div>
+      <div class="card card-pad kpi"><div class="n" data-k="promoted">16</div><div class="l">Promoted to leads</div><div class="delta">70% of intent</div></div>
+      <div class="card card-pad kpi"><div class="n" data-k="filtered">76</div><div class="l">Filtered as noise</div><div class="delta">visible on toggle</div></div>
     </div>
 
-    <div class="card">
+    <div class="card" style="margin-bottom:1rem">
       <div class="card-head">
         <h2>Inbound signals</h2>
         <div class="row">
-          <div class="seg"><span class="on">Buying</span><span>Question</span><span>Support</span><span>Noise</span></div>
-          <button class="btn btn-ghost">All platforms ▾</button>
+          <div class="seg" id="src-chips">
+            <span class="on">All</span>
+            <span class="src-search">Nadia Search</span>
+            <span class="src-social">Instagram</span>
+            <span class="src-social">Facebook</span>
+          </div>
+          <label class="row small muted" style="gap:.35rem;cursor:pointer">
+            <input type="checkbox" id="show-filtered"> Show filtered (76)
+          </label>
         </div>
       </div>
+
+      <!-- Class A gate (plan §2.5): batch approve, auto-approve above threshold, gate anomalies.
+           Deliberately NOT one approval prompt per lead — that volume is what causes habituation. -->
+      <div class="card-pad" style="border-bottom:1px solid var(--g200);background:var(--accent-wash)">
+        <div class="between" style="align-items:center">
+          <div class="row" style="gap:.6rem">
+            <label class="row small" style="gap:.4rem;cursor:pointer;font-weight:600">
+              <input type="checkbox" id="sel-all"> <span id="sel-count">2 ready to approve</span>
+            </label>
+            <span class="chip c-cold">1 needs individual review</span>
+          </div>
+          <div class="row">
+            <button class="btn btn-primary" id="bulk-approve">Approve 2</button>
+            <button class="btn">Reject</button>
+            <button class="btn btn-ghost">Auto-approve above 75 ▾</button>
+          </div>
+        </div>
+      </div>
+
       <div class="tscroll">
       <table>
-        <thead><tr><th>Signal</th><th>Source</th><th>Intent</th><th>Handoff</th><th></th></tr></thead>
+        <thead><tr><th style="width:2.5rem"></th><th>Signal</th><th>Source</th><th>Rating</th><th>Handoff</th><th></th></tr></thead>
         <tbody>
-          <tr>
+          <!-- ── saved-search feed: works with Lead Generator alone ── -->
+          <tr class="r-search">
+            <td></td>
+            <td>
+              <div class="lead-name">Broughton Sanctuary</div>
+              <div class="small muted">“…140-acre estate hosting corporate retreats and offsites in the Yorkshire Dales”</div>
+              <div class="tiny srcref">broughtonsanctuary.co.uk · matched “corporate retreat venue yorkshire”</div>
+            </td>
+            <td><span class="chip c-hot">Nadia Search</span><div class="tiny muted" style="margin-top:.25rem">“UK retreat venues” · 20 min ago</div></td>
+            <td><span class="chip c-hot">Hot · 85</span></td>
+            <td><span class="chip c-ok">Auto-promoted · 85 &gt; 75</span><div class="tiny muted" style="margin-top:.25rem">lead #421</div></td>
+            <td><button class="btn">View lead</button></td>
+          </tr>
+          <tr class="r-search">
+            <td><input type="checkbox" class="sel" checked></td>
+            <td>
+              <div class="lead-name">Quendon Hall</div>
+              <div class="small muted">“…Grade I listed country house, 40 bedrooms, exclusive-use events”</div>
+              <div class="tiny srcref">quendonhall.co.uk · matched “exclusive use venue essex”</div>
+            </td>
+            <td><span class="chip c-hot">Nadia Search</span><div class="tiny muted" style="margin-top:.25rem">“UK retreat venues” · 20 min ago</div></td>
+            <td><span class="chip c-hot">Hot · 80</span></td>
+            <td><span class="chip c-warm">Ready to approve</span></td>
+            <td><span class="tiny muted">in batch</span></td>
+          </tr>
+          <tr class="r-search">
+            <td><input type="checkbox" class="sel" checked></td>
+            <td>
+              <div class="lead-name">Alnwick Barns</div>
+              <div class="small muted">“…converted farm buildings, team away-days and small conferences”</div>
+              <div class="tiny srcref">alnwickbarns.co.uk · matched “team away day venue northumberland”</div>
+            </td>
+            <td><span class="chip c-hot">Nadia Search</span><div class="tiny muted" style="margin-top:.25rem">“UK retreat venues” · 20 min ago</div></td>
+            <td><span class="chip c-warm">Warm · 62</span></td>
+            <td><span class="chip c-warm">Ready to approve</span></td>
+            <td><span class="tiny muted">in batch</span></td>
+          </tr>
+
+          <!-- ANOMALY — excluded from the batch on purpose. This is the class B carve-out:
+               a scraped address belonging to a NAMED individual. Same rule the live
+               personal-inbox gate already enforces server-side in send_outreach. -->
+          <tr class="r-search" style="background:var(--amber-wash)">
+            <td><span title="excluded from batch">⚠️</span></td>
+            <td>
+              <div class="lead-name">The Wolds Retreat</div>
+              <div class="small muted">“…boutique wellness retreat, 12 rooms, Lincolnshire”</div>
+              <div class="tiny" style="color:var(--amber-text)">Only contact found is <strong>s.harding@woldsretreat.co.uk</strong> — a named individual, scraped. Needs your decision.</div>
+            </td>
+            <td><span class="chip c-hot">Nadia Search</span><div class="tiny muted" style="margin-top:.25rem">“UK retreat venues” · 20 min ago</div></td>
+            <td><span class="chip c-hot">Hot · 78</span></td>
+            <td><span class="chip c-warm">Individual review</span></td>
+            <td><button class="btn btn-primary">Review</button></td>
+          </tr>
+
+          <!-- filtered rows — hidden until the toggle is on -->
+          <tr class="r-search r-filtered" hidden style="background:var(--g50)">
+            <td></td>
+            <td>
+              <div class="lead-name muted">conferencehotelfinder.com</div>
+              <div class="small muted">“Compare 400+ UK conference hotels”</div>
+              <div class="tiny srcref">dropped by the scorer — “directory, not an operating business”</div>
+            </td>
+            <td><span class="chip c-cold">Nadia Search</span></td>
+            <td><span class="chip c-cold">Cold · 0</span></td>
+            <td><span class="chip c-cold">Filtered</span></td>
+            <td><button class="btn">Keep anyway</button></td>
+          </tr>
+          <tr class="r-search r-filtered" hidden style="background:var(--g50)">
+            <td></td>
+            <td>
+              <div class="lead-name muted">careers.marriott.com</div>
+              <div class="small muted">“Event Coordinator vacancies”</div>
+              <div class="tiny srcref">dropped by the domain filter — publishing subdomain (careers.)</div>
+            </td>
+            <td><span class="chip c-cold">Nadia Search</span></td>
+            <td><span class="chip c-cold">—</span></td>
+            <td><span class="chip c-cold">Filtered</span></td>
+            <td><button class="btn">Keep anyway</button></td>
+          </tr>
+
+          <!-- ── social feed: requires the Social Media Assistant too ── -->
+          <tr class="r-social">
+            <td></td>
             <td>
               <div class="lead-name">@harpermills_ops</div>
               <div class="small muted">“do you do this for multi-site venues? we run 4 properties and the booking side is a mess”</div>
             </td>
             <td><span class="chip c-info">Instagram · DM</span><div class="tiny muted" style="margin-top:.25rem">14 min ago</div></td>
             <td><span class="chip c-hot">Buying · 94</span></td>
-            <td><span class="chip c-ok">Promoted → lead #418</span></td>
+            <td><span class="chip c-ok">Auto-promoted · 94 &gt; 75</span><div class="tiny muted" style="margin-top:.25rem">lead #418</div></td>
             <td><button class="btn">View lead</button></td>
           </tr>
-          <tr>
-            <td>
-              <div class="lead-name">Quendon Hall</div>
-              <div class="small muted">“What's pricing like for a 40-room property?”</div>
-            </td>
-            <td><span class="chip c-info">Facebook · comment</span><div class="tiny muted" style="margin-top:.25rem">1 h ago</div></td>
-            <td><span class="chip c-hot">Buying · 88</span></td>
-            <td><span class="chip c-warm">Queued</span></td>
-            <td><button class="btn btn-primary">Promote</button></td>
-          </tr>
-          <tr>
+          <tr class="r-social">
+            <td></td>
             <td>
               <div class="lead-name">@retreat_collective</div>
               <div class="small muted">“is there an integration with our PMS?”</div>
@@ -225,7 +359,8 @@
             <td><span class="chip c-cold">Not queued</span></td>
             <td><button class="btn">Promote anyway</button></td>
           </tr>
-          <tr>
+          <tr class="r-social">
+            <td></td>
             <td>
               <div class="lead-name">@dan_w</div>
               <div class="small muted">“🔥🔥”</div>
@@ -237,6 +372,52 @@
           </tr>
         </tbody>
       </table>
+      </div>
+      <!-- standalone footer: an OFFER, not an empty state or a nag -->
+      <div class="card-pad" id="social-upsell" hidden style="border-top:1px solid var(--g200);background:var(--g50);border-radius:0 0 1rem 1rem">
+        <div class="between" style="align-items:center">
+          <div class="small muted">Also capture comments, DMs and mentions as signals — needs a Social Media Assistant.</div>
+          <div class="row"><button class="btn">Learn more</button><button class="btn btn-ghost">Dismiss</button></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>Saved searches</h2>
+        <button class="btn btn-primary">+ New search</button>
+      </div>
+      <div class="card-pad stack">
+        <div class="note">
+          Already built — this is <span class="mono">discovery_campaigns</span> and the existing “Find New Leads”
+          modal, reframed. The only additions are a <strong>name</strong> for the search and publishing its
+          results into the inbox above.
+        </div>
+        <div class="card" style="box-shadow:none">
+          <div class="card-pad between">
+            <div style="min-width:15rem">
+              <div class="row" style="gap:.5rem"><strong class="small">UK retreat venues</strong><span class="chip c-ok">Active · weekly</span></div>
+              <div class="small muted" style="margin-top:.2rem">“Country-house and estate venues in the UK hosting corporate retreats, 20-200 staff, no online booking”</div>
+              <div class="tiny muted" style="margin-top:.3rem">Last run 20 min ago · 31 found · 3 qualified · 2 filtered · £0.01</div>
+            </div>
+            <div class="row"><button class="btn">Run now</button><button class="btn">Edit</button><button class="btn btn-ghost">Pause</button></div>
+          </div>
+        </div>
+        <div class="card" style="box-shadow:none">
+          <div class="card-pad between">
+            <div style="min-width:15rem">
+              <div class="row" style="gap:.5rem"><strong class="small">Multi-site hospitality groups</strong><span class="chip c-warm">Paused</span></div>
+              <div class="small muted" style="margin-top:.2rem">“Operators running 3+ properties on separate booking systems”</div>
+              <div class="tiny muted" style="margin-top:.3rem">Last run 6 d ago · 24 found · 7 qualified</div>
+            </div>
+            <div class="row"><button class="btn">Run now</button><button class="btn">Edit</button><button class="btn btn-ghost">Resume</button></div>
+          </div>
+        </div>
+        <div class="banner b-blue">
+          <div>🔔</div>
+          <div class="small"><strong>On completion</strong> the run stamps <span class="mono">signals_published_at</span> and raises
+          <em>one</em> grouped notification — “Nadia's search ‘UK retreat venues’ found 14 new signals” — never one per lead.</div>
+        </div>
       </div>
     </div>
   </section>
@@ -401,6 +582,190 @@
     </div>
   </section>
 
+  <!-- ══════════════════ 3b. MESSAGE REVIEW ══════════════════ -->
+  <section class="screen" id="s-review">
+    <div class="note" style="margin-bottom:1rem">
+      <strong>Plan §2.6.</strong> The class B gate on the <em>first outbound touch per account</em>. The human sees the
+      message before it reaches a stranger — and gets three save scopes, because “wrong for this prospect” and
+      “wrong for everyone” are different decisions of different classes.
+    </div>
+
+    <div class="grid" style="grid-template-columns:minmax(0,1.55fr) minmax(0,1fr)">
+      <div class="stack">
+        <div class="card">
+          <div class="card-head">
+            <h2>First outreach · Quendon Hall</h2>
+            <span class="chip c-warm">Awaiting your approval</span>
+          </div>
+          <div class="card-pad stack">
+            <div class="row small muted" style="gap:.5rem">
+              <span>To</span><strong style="color:var(--g900)">events@quendonhall.co.uk</strong>
+              <span class="chip c-ok">Role inbox</span>
+            </div>
+            <div class="row small muted" style="gap:.5rem">
+              <span>Template</span>
+              <span class="mono">Outreach playbook · v7a3f…c21</span>
+              <span class="chip c-info">edited</span>
+            </div>
+
+            <div>
+              <div class="tiny muted" style="margin-bottom:.3rem">SUBJECT</div>
+              <div class="askbar"><input value="A quicker booking path for Quendon Hall" style="font-weight:600"></div>
+            </div>
+
+            <div>
+              <div class="between" style="margin-bottom:.3rem">
+                <div class="tiny muted">BODY</div>
+                <label class="row tiny muted" style="gap:.3rem;cursor:pointer"><input type="checkbox" id="show-diff" checked> Show changes vs template</label>
+              </div>
+              <div class="card" style="box-shadow:none;padding:.85rem;font-size:13px;line-height:1.65">
+                <p style="margin:0 0 .7rem">Hi there,</p>
+                <p style="margin:0 0 .7rem">I came across Quendon Hall while looking at
+                  <span class="ins">Grade I listed venues running exclusive-use events in Essex</span><span class="del"> country house venues in the UK</span>.</p>
+                <p style="margin:0 0 .7rem">Most venues your size are still taking enquiries by phone and email, then re-keying them into a diary. We close that gap — enquiry to confirmed booking without the double entry.<span class="ins"> For a 40-bedroom property that's usually the difference between losing a weekend enquiry and converting it.</span></p>
+                <p style="margin:0 0 .7rem"><span class="del">Would you be interested in a call to discuss how we can help transform your booking operations and drive revenue growth?</span><span class="ins">Worth a 15-minute look?</span></p>
+                <p style="margin:0">Best,<br>Nadia</p>
+              </div>
+              <div class="tiny muted" style="margin-top:.35rem">
+                <span class="ins" style="padding:0 .2rem">added</span> · <span class="del" style="padding:0 .2rem">removed</span> ·
+                the agent's original is kept in <span class="mono">generated_body</span>, which is what makes this diff computable.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- THE THREE SCOPES -->
+        <div class="card">
+          <div class="card-head"><h2>Save this edit as…</h2></div>
+          <div class="card-pad stack" style="gap:.6rem">
+            <label class="scope-opt" data-class="A">
+              <input type="radio" name="scope" value="once">
+              <div>
+                <div class="row" style="gap:.4rem"><strong class="small">Use this version</strong><span class="chip c-cold">Class A</span></div>
+                <div class="tiny muted">This message only. The template is untouched.</div>
+              </div>
+            </label>
+
+            <label class="scope-opt" data-class="C">
+              <input type="radio" name="scope" value="default">
+              <div>
+                <div class="row" style="gap:.4rem"><strong class="small">Save as the new default</strong><span class="chip c-risk">Class C · policy change</span></div>
+                <div class="tiny muted">Rewrites the outreach playbook for <strong>every future prospect</strong> and triggers a blueprint recompile.</div>
+              </div>
+            </label>
+
+            <label class="scope-opt on" data-class="A">
+              <input type="radio" name="scope" value="flag" checked>
+              <div>
+                <div class="row" style="gap:.4rem"><strong class="small">Use this version + flag the pattern</strong><span class="chip c-hot">⭐ Recommended</span></div>
+                <div class="tiny muted">Sends now, and records <em>why</em> you edited it. After enough similar edits the Strategy Agent proposes the template change — with a sample size behind it.</div>
+              </div>
+            </label>
+
+            <div id="scope-warn" hidden class="banner b-amber">
+              <div>⚠️</div>
+              <div class="small">
+                <strong>This generalises from one message.</strong> The Strategy Agent is forbidden from pivoting
+                without <span class="mono">MIN_SAMPLE</span> outcomes — a “save for all” after a single edit has no
+                evidence gate at all. It's your call and it's reversible, but it will be logged as a policy change,
+                not a wording tweak.
+              </div>
+            </div>
+
+            <div id="scope-reason" class="stack" style="gap:.4rem">
+              <div class="tiny muted">WHY DID YOU EDIT IT? <span style="opacity:.7">— becomes evidence for the template proposal</span></div>
+              <div class="seg" style="flex-wrap:wrap">
+                <span class="on">too generic</span><span>too long</span><span>wrong tone</span><span>missed the specifics</span><span>wrong CTA</span>
+              </div>
+            </div>
+
+            <div class="between" style="align-items:center;border-top:1px solid var(--g100);padding-top:.75rem">
+              <div class="tiny muted" id="scope-note">Sends to <strong>events@quendonhall.co.uk</strong> and records the edit reason.</div>
+              <div class="row"><button class="btn">Discard</button><button class="btn btn-primary">Approve &amp; send</button></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="stack">
+        <div class="card">
+          <div class="card-head"><h2>Which messages get reviewed</h2></div>
+          <div class="card-pad stack" style="gap:.6rem">
+            <div class="row" style="gap:.5rem"><span class="chip c-risk">Gated</span><span class="small">First touch per account</span></div>
+            <div class="row" style="gap:.5rem"><span class="chip c-ok">Ungated</span><span class="small">Sequence steps 2-4</span></div>
+            <div class="row" style="gap:.5rem"><span class="chip c-ok">Ungated</span><span class="small">Objection replies within guardrails</span></div>
+            <div class="row" style="gap:.5rem"><span class="chip c-risk">Gated</span><span class="small">Any concession · payment link</span></div>
+            <div class="note" style="margin-top:.3rem">
+              Steps 2-4 aren't reviewed individually — their templates are reviewed <strong>once at enrolment</strong>.
+              Review the policy once, not each execution of it.
+            </div>
+            <button class="btn" style="width:100%">Review sequence templates</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Edit signal building up</h2></div>
+          <div class="card-pad stack" style="gap:.55rem">
+            <div class="small muted">Recent edits to this template, by reason:</div>
+            <div><div class="between small"><span>too generic</span><strong>6</strong></div><div class="bar"><i style="width:60%"></i></div></div>
+            <div><div class="between small"><span>too long</span><strong>3</strong></div><div class="bar"><i style="width:30%"></i></div></div>
+            <div><div class="between small"><span>wrong CTA</span><strong>2</strong></div><div class="bar"><i style="width:20%"></i></div></div>
+            <div class="banner b-accent" style="margin-top:.3rem">
+              <div>💡</div>
+              <div class="small"><strong>6 of 10 needed.</strong> At 10 edits citing “too generic”, the Strategy Agent will
+              propose rewriting the opening line — through the normal proposal flow, with evidence.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>DM works differently</h2><span class="chip c-warm">§5.4</span></div>
+          <div class="card-pad stack" style="gap:.6rem">
+            <div class="small muted">
+              This screen reviews <strong>email</strong>. <strong>Cold DM does not exist</strong> on any platform we
+              integrate — every network prohibits messaging someone who hasn't messaged first.
+            </div>
+            <div class="banner b-amber">
+              <div>⏱</div>
+              <div class="small">What <em>is</em> possible is a reply inside a <strong>24-hour window</strong> the prospect
+              opens by messaging us. A hard clock, so the gate inverts.</div>
+            </div>
+            <table style="font-size:12px">
+              <tbody>
+                <tr><td style="padding:.4rem 0">Facebook</td><td><span class="chip c-ok">Scope granted</span></td></tr>
+                <tr><td style="padding:.4rem 0">Instagram</td><td><span class="chip c-warm">Needs App Review</span></td></tr>
+                <tr><td style="padding:.4rem 0">X</td><td><span class="chip c-warm">Paid tier · followers only</span></td></tr>
+                <tr><td style="padding:.4rem 0">LinkedIn</td><td><span class="chip c-risk">No API</span></td></tr>
+                <tr><td style="padding:.4rem 0">Threads · TikTok · YouTube</td><td><span class="chip c-risk">No DM</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- The window/gate collision — the design consequence, not just an integration note. -->
+        <div class="card" style="border-color:var(--amber-border)">
+          <div class="card-head" style="background:var(--amber-wash);border-radius:1rem 1rem 0 0">
+            <h2>Why DM can't use this screen</h2>
+          </div>
+          <div class="card-pad stack" style="gap:.6rem">
+            <div class="small">
+              A signal arriving <strong>18:00 Friday</strong> expires <strong>18:00 Saturday</strong>. Approve it Monday and
+              the reply <em>cannot be sent at all</em> — not late, impossible. The prospect is left on read.
+            </div>
+            <div class="small muted">So per-message review is descoped for DM. Instead:</div>
+            <div class="stack" style="gap:.45rem">
+              <div class="row" style="gap:.5rem"><span class="chip c-risk">Class C</span><span class="small">Pre-approved reply set, reviewed <strong>once</strong> and versioned</span></div>
+              <div class="row" style="gap:.5rem"><span class="chip c-cold">Class A</span><span class="small">Individual sends inside that set — ungated</span></div>
+              <div class="row" style="gap:.5rem"><span class="chip c-warm">⏱</span><span class="small">Escalating nudge at 50% / 80% of window</span></div>
+              <div class="row" style="gap:.5rem"><span class="chip c-info">↩</span><span class="small">Window closed → fall back to email if an address is known</span></div>
+            </div>
+            <div class="note">Same principle as sequence steps: <strong>review the policy once, not each execution.</strong></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <!-- ══════════════════ 4. ASK YOUR DATA ══════════════════ -->
   <section class="screen" id="s-memory">
     <div class="note" style="margin-bottom:1rem">
@@ -473,7 +838,42 @@
             <div style="font-weight:600;font-size:1rem">Shift primary persona from CMO to CFO / Finance Director</div>
             <div class="small muted">Proposed 2 days ago · weekly run · blueprint <span class="mono">v7a3f…c21</span></div>
           </div>
-          <div class="row"><button class="btn">Reject</button><button class="btn btn-primary">Apply &amp; recompile</button></div>
+          <div class="row"><button class="btn" id="btn-reject">Reject</button><button class="btn btn-primary">Apply &amp; recompile</button></div>
+        </div>
+
+        <!-- Reject reason capture. Closed vocabulary for the same reason as LOSS_REASONS:
+             free text is unclusterable, so the next run could not learn from it. -->
+        <div id="reject-panel" hidden class="card" style="box-shadow:none;border-color:var(--amber-border);background:var(--amber-wash)">
+          <div class="card-pad stack">
+            <div class="between" style="align-items:flex-start">
+              <div>
+                <div style="font-weight:600;font-size:.85rem;color:var(--amber-text)">Why are you rejecting this?</div>
+                <div class="tiny" style="color:var(--amber-text);opacity:.85">This is an input, not a record — the next run's prompt receives it, so a rejection teaches the loop.</div>
+              </div>
+              <button class="btn btn-ghost" id="btn-reject-cancel">Cancel</button>
+            </div>
+            <div class="stack" style="gap:.4rem" id="reject-reasons">
+              <label class="row small" style="gap:.5rem;cursor:pointer"><input type="radio" name="rr" value="sample_unrepresentative">
+                <span><span class="mono">sample_unrepresentative</span> — skewed by one client or campaign <span class="tiny muted">→ raises MIN_SAMPLE for this segment</span></span></label>
+              <label class="row small" style="gap:.5rem;cursor:pointer"><input type="radio" name="rr" value="already_tried">
+                <span><span class="mono">already_tried</span> — we tested this, it didn't work <span class="tiny muted">→ suppressed permanently</span></span></label>
+              <label class="row small" style="gap:.5rem;cursor:pointer"><input type="radio" name="rr" value="wrong_causation">
+                <span><span class="mono">wrong_causation</span> — the correlation isn't causal <span class="tiny muted">→ fed back as a counter-example</span></span></label>
+              <label class="row small" style="gap:.5rem;cursor:pointer"><input type="radio" name="rr" value="off_brand">
+                <span><span class="mono">off_brand</span> — conflicts with our positioning <span class="tiny muted">→ becomes a standing constraint</span></span></label>
+              <label class="row small" style="gap:.5rem;cursor:pointer"><input type="radio" name="rr" value="bad_timing">
+                <span><span class="mono">bad_timing</span> — seasonal or temporary <span class="tiny muted">→ re-proposed after the window</span></span></label>
+              <label class="row small" style="gap:.5rem;cursor:pointer"><input type="radio" name="rr" value="too_narrow">
+                <span><span class="mono">too_narrow</span> / <span class="mono">too_broad</span> — right direction, wrong scope <span class="tiny muted">→ re-proposed rescoped</span></span></label>
+              <label class="row small" style="gap:.5rem;cursor:pointer"><input type="radio" name="rr" value="other">
+                <span><span class="mono">other</span> <span class="tiny muted">→ note shown to humans, never fed to the model</span></span></label>
+            </div>
+            <input type="text" class="askbar" style="font-size:12px" placeholder="Optional note for your team (not sent to the model)…">
+            <div class="between" style="align-items:center">
+              <div class="tiny" id="reject-effect" style="color:var(--amber-text)">Pick a reason to see what it changes.</div>
+              <button class="btn btn-primary" id="btn-reject-confirm" style="opacity:.45" disabled>Confirm rejection</button>
+            </div>
+          </div>
         </div>
 
         <div class="grid g3">
@@ -553,22 +953,86 @@
     </div>
 
     <div class="card" style="margin-bottom:1rem">
-      <div class="card-head"><h2>Autonomy level</h2><span class="chip c-hot">Zero-touch is tier-gated &amp; opt-in</span></div>
+      <div class="card-head">
+        <h2>Autonomy level</h2>
+        <span class="chip c-hot">Governs class A only</span>
+      </div>
       <div class="card-pad tscroll">
         <table>
-          <thead><tr><th>Level</th><th>Behaviour</th><th>Approval gate</th><th></th></tr></thead>
+          <thead><tr>
+            <th>Level</th>
+            <th>A · reversible<div class="tiny" style="text-transform:none;font-weight:400">replies, sequence steps</div></th>
+            <th>B · irreversible<div class="tiny" style="text-transform:none;font-weight:400">concession, payment link</div></th>
+            <th>C · policy<div class="tiny" style="text-transform:none;font-weight:400">guardrails, autonomy</div></th>
+            <th></th>
+          </tr></thead>
           <tbody>
-            <tr><td><span class="mono">suggest</span></td><td>Drafts a response, sends nothing</td><td>pending_approval</td><td class="small muted">today's behaviour</td></tr>
-            <tr><td><span class="mono">approve_each</span></td><td>Drafts and queues every reply</td><td>pending_approval</td><td></td></tr>
+            <tr>
+              <td><span class="mono">suggest</span></td>
+              <td class="small">Drafts, sends nothing</td>
+              <td><span class="chip c-risk">Hard gate</span></td>
+              <td><span class="chip c-risk">Hard gate</span></td>
+              <td class="small muted">today's behaviour</td>
+            </tr>
+            <tr>
+              <td><span class="mono">approve_each</span></td>
+              <td class="small">Queues every reply</td>
+              <td><span class="chip c-risk">Hard gate</span></td>
+              <td><span class="chip c-risk">Hard gate</span></td>
+              <td class="small muted">approval fatigue lives here</td>
+            </tr>
             <tr style="background:var(--accent-wash)">
               <td><span class="mono"><strong>approve_exceptions</strong></span></td>
-              <td>Sends within guardrails; queues at floor, past max rounds, or over escalation threshold</td>
-              <td>conditional</td>
-              <td><span class="chip c-hot">Active</span></td>
+              <td class="small"><strong>Sends within guardrails</strong>; queues at floor, past max rounds, or over escalation</td>
+              <td><span class="chip c-risk">Hard gate</span></td>
+              <td><span class="chip c-risk">Hard gate</span></td>
+              <td><span class="chip c-hot">Active</span><div class="tiny muted" style="margin-top:.2rem">intended default</div></td>
             </tr>
-            <tr><td><span class="mono">autonomous</span></td><td>Full zero-touch including payment link</td><td>bypassed, all logged</td><td class="small muted">requires full guardrails</td></tr>
+            <tr>
+              <td><span class="mono">autonomous</span></td>
+              <td class="small">Sends</td>
+              <td><span class="chip c-warm">Sends — ceremony required</span></td>
+              <td><span class="chip c-risk">Hard gate</span></td>
+              <td class="small muted">see below</td>
+            </tr>
           </tbody>
         </table>
+      </div>
+      <div class="card-pad" style="border-top:1px solid var(--g200)">
+        <div class="banner b-blue">
+          <div>🔒</div>
+          <div class="small">
+            <strong>Class C is never delegable.</strong> That column reads “hard gate” at every level on purpose —
+            no autonomy setting lets the agent change its own guardrails, suppression lists, spend caps or
+            autonomy level. The only step that changes class B behaviour is
+            <span class="mono">approve_exceptions → autonomous</span>, which is why it is a workflow, not a dropdown.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- The crucial HITL moment (plan §2.4) — the one action that removes every other gate. -->
+    <div class="card" style="margin-bottom:1rem;border-color:var(--accent-border)">
+      <div class="card-head" style="background:var(--accent-wash);border-radius:1rem 1rem 0 0">
+        <h2>Enable zero-touch closing</h2>
+        <span class="chip c-hot">The crucial moment</span>
+      </div>
+      <div class="card-pad stack">
+        <div class="small muted">
+          Switching to <span class="mono">autonomous</span> is the one human decision that removes every other gate
+          in the system. It is a five-step workflow, not a setting.
+        </div>
+        <div class="stack" style="gap:.55rem">
+          <div class="row"><span class="chip c-ok">✓ 1</span><span class="small">Floor price, non-negotiables and allowed concessions populated &amp; confirmed</span></div>
+          <div class="row"><span class="chip c-ok">✓ 2</span><span class="small"><strong>Dry-run report</strong> — what the agent <em>would</em> have sent across your last 20 closed deals <button class="btn" style="margin-left:.4rem">View report</button></span></div>
+          <div class="row"><span class="chip c-warm">3</span><span class="small">Scope limit — <span class="mono">deals under £20,000</span> or a named subset of campaigns</span></div>
+          <div class="row"><span class="chip c-cold">4</span><span class="small">Review date — surfaced as a notification when it arrives</span></div>
+          <div class="row"><span class="chip c-cold">5</span><span class="small">Audit row: who enabled it, when, against which guardrail snapshot</span></div>
+        </div>
+        <div class="between" style="align-items:center;border-top:1px solid var(--g100);padding-top:.85rem">
+          <div class="small muted">Steps 3-5 outstanding.</div>
+          <button class="btn" style="opacity:.45">Enable zero-touch</button>
+        </div>
       </div>
     </div>
 
@@ -628,6 +1092,104 @@
 </div>
 
 <script>
+  // ── Signal Inbox: hired-assistants toggle ──────────────────────────────────
+  // Demonstrates the rule from §1.6 of the plan: the inbox must be fully useful with
+  // only a Lead Generator. Social is an additive second feed, never a precondition.
+  const COUNTS = {
+    both: { total: 142, hot: 23, promoted: 16, filtered: 76 },
+    solo: { total:  55, hot:  8, promoted:  6, filtered: 76 },
+  };
+  const showFiltered = document.getElementById('show-filtered');
+  let mode = 'both';
+
+  function renderInbox() {
+    const solo = mode === 'solo';
+    document.querySelectorAll('.r-social').forEach(el => el.hidden = solo);
+    document.querySelectorAll('.src-social').forEach(el => el.hidden = solo);
+    document.getElementById('social-upsell').hidden = !solo;
+    document.querySelectorAll('.r-filtered').forEach(el => el.hidden = !showFiltered.checked);
+    const c = COUNTS[mode];
+    Object.keys(c).forEach(k => {
+      const el = document.querySelector('[data-k="' + k + '"]');
+      if (el) el.textContent = c[k];
+    });
+  }
+
+  document.querySelectorAll('#hire-toggle span').forEach(s => s.addEventListener('click', () => {
+    document.querySelectorAll('#hire-toggle span').forEach(x => x.classList.remove('on'));
+    s.classList.add('on');
+    mode = s.dataset.mode;
+    renderInbox();
+  }));
+  showFiltered.addEventListener('change', renderInbox);
+
+  // Batch selection (class A gate). The anomaly row has no checkbox by design —
+  // it can never be swept into a bulk approve.
+  const selAll = document.getElementById('sel-all');
+  function syncBatch() {
+    const boxes = [...document.querySelectorAll('.sel')];
+    const n = boxes.filter(b => b.checked).length;
+    document.getElementById('sel-count').textContent =
+      n === 0 ? 'none selected' : n + ' ready to approve';
+    const btn = document.getElementById('bulk-approve');
+    btn.textContent = n === 0 ? 'Approve' : 'Approve ' + n;
+    btn.disabled = n === 0;
+    btn.style.opacity = n === 0 ? '.45' : '';
+    selAll.checked = n > 0 && n === boxes.length;
+    selAll.indeterminate = n > 0 && n < boxes.length;
+  }
+  selAll.addEventListener('change', () => {
+    document.querySelectorAll('.sel').forEach(b => b.checked = selAll.checked);
+    syncBatch();
+  });
+  document.querySelectorAll('.sel').forEach(b => b.addEventListener('change', syncBatch));
+  syncBatch();
+  document.querySelectorAll('#src-chips span').forEach(s => s.addEventListener('click', () => {
+    document.querySelectorAll('#src-chips span').forEach(x => x.classList.remove('on'));
+    s.classList.add('on');
+  }));
+  renderInbox();
+
+  // ── Strategy: reject reason capture ───────────────────────────────────────
+  const REJECT_EFFECT = {
+    sample_unrepresentative: 'Raises MIN_SAMPLE for this segment before it can be proposed again.',
+    already_tried: 'Suppresses this change permanently — it will not be re-proposed.',
+    wrong_causation: 'Fed to the next run as a counter-example.',
+    off_brand: 'Becomes a standing constraint on every future proposal.',
+    bad_timing: 'Re-proposed after the seasonal window closes.',
+    too_narrow: 'Re-proposed with a rescoped segment.',
+    other: 'Your note is shown to your team only — never fed to the model.',
+  };
+  const rejectPanel = document.getElementById('reject-panel');
+  document.getElementById('btn-reject').addEventListener('click', () => { rejectPanel.hidden = false; });
+  document.getElementById('btn-reject-cancel').addEventListener('click', () => { rejectPanel.hidden = true; });
+  document.querySelectorAll('#reject-reasons input[name="rr"]').forEach(r => r.addEventListener('change', () => {
+    document.getElementById('reject-effect').textContent = REJECT_EFFECT[r.value] || '';
+    const c = document.getElementById('btn-reject-confirm');
+    c.disabled = false; c.style.opacity = '';
+  }));
+
+  // ── Message Review: the three edit scopes (§2.6) ──────────────────────────
+  const SCOPE_NOTE = {
+    once:    'Sends to <strong>events@quendonhall.co.uk</strong>. The template is untouched.',
+    default: 'Sends, <strong>rewrites the playbook for every future prospect</strong>, and recompiles the blueprint.',
+    flag:    'Sends to <strong>events@quendonhall.co.uk</strong> and records the edit reason.',
+  };
+  document.querySelectorAll('input[name="scope"]').forEach(r => r.addEventListener('change', () => {
+    document.querySelectorAll('.scope-opt').forEach(o => o.classList.toggle('on', o.contains(r) && r.checked));
+    document.getElementById('scope-warn').hidden = r.value !== 'default';
+    document.getElementById('scope-reason').hidden = r.value === 'once';
+    document.getElementById('scope-note').innerHTML = SCOPE_NOTE[r.value];
+  }));
+  const diffBox = document.getElementById('show-diff');
+  diffBox.addEventListener('change', () => {
+    diffBox.closest('.card-pad').classList.toggle('diff-off', !diffBox.checked);
+  });
+  document.querySelectorAll('#scope-reason .seg span').forEach(s => s.addEventListener('click', () => {
+    document.querySelectorAll('#scope-reason .seg span').forEach(x => x.classList.remove('on'));
+    s.classList.add('on');
+  }));
+
   const tabs = document.querySelectorAll('nav.tabs button');
   tabs.forEach(b => b.addEventListener('click', () => {
     tabs.forEach(x => x.classList.remove('active'));

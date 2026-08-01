@@ -223,9 +223,23 @@ export default withLambda(async (event) => {
             // If scopes are provided, validate them against the allowed set to
             // prevent over-privileged OAuth grants (e.g., requesting write access
             // when only read is needed for the connected workflow).
+            //
+            // ⚠️ This list governs the MANUAL connection path only (POST here with a token +
+            // declared scopes). The Meta OAuth flow writes its rows in meta-oauth.ts and never
+            // passes through this guard, so the two lists can drift silently — they have before.
+            // A scope belongs here only if we both REQUEST it (meta-oauth.ts SCOPES) and have a
+            // capability that uses it. Listing anything else is the over-privilege this exists
+            // to stop.
             const ALLOWED_SCOPES: Record<string, string[]> = {
+                // pages_messaging is correct here: Messenger send is a Page-level permission and
+                // it IS in the Meta grant (meta-oauth.ts SCOPES).
                 facebook:      ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'publish_to_groups', 'pages_manage_metadata', 'pages_messaging'],
-                instagram:     ['instagram_basic', 'instagram_content_publish', 'instagram_manage_insights', 'pages_manage_metadata', 'pages_messaging', 'pages_manage_posts'],
+                // pages_messaging deliberately NOT listed for Instagram. It is a Facebook Page
+                // permission and does not authorise Instagram DMs — that needs
+                // instagram_manage_messages, which we neither request nor have a capability for.
+                // Listing it implied a DM capability the grant never conferred. Do not re-add it
+                // without both the scope in meta-oauth.ts AND a send path that uses it.
+                instagram:     ['instagram_basic', 'instagram_content_publish', 'instagram_manage_insights', 'pages_manage_metadata', 'pages_manage_posts'],
                 linkedin:      ['r_liteprofile', 'r_emailaddress', 'w_member_social', 'r_organization_social', 'w_organization_social'],
                 twitter:       [...X_OAUTH_SCOPE_LIST],
                 google:        ['https://www.googleapis.com/auth/drive.readonly', 'https://www.googleapis.com/auth/spreadsheets'],
