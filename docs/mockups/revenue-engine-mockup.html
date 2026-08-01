@@ -1,0 +1,641 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Revenue Engine — page mockups</title>
+<style>
+  /* Standalone mockup. Tokens copied from input.css so it reads as the real product,
+     but NOT dependent on style.css — nothing here can trigger a Tailwind rebuild. */
+  :root{
+    --accent:#ff007f; --accent-hover:#d6006b; --accent-wash:#fff0f5; --accent-border:#ffd6e8;
+    --g50:#f9fafb; --g100:#f3f4f6; --g200:#e5e7eb; --g300:#d1d5db; --g400:#9ca3af;
+    --g500:#6b7280; --g600:#4b5563; --g700:#374151; --g900:#111827;
+    --amber-wash:#fffbeb; --amber-border:#fde68a; --amber-text:#92400e;
+    --green-wash:#f0fdf4; --green-border:#bbf7d0; --green-text:#166534;
+    --blue-wash:#eff6ff; --blue-border:#bfdbfe; --blue-text:#1e40af;
+    --red-wash:#fef2f2; --red-border:#fecaca; --red-text:#991b1b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--g50);color:var(--g900);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:72rem;margin:0 auto;padding:2rem 1.5rem 5rem}
+  .muted{color:var(--g500)}
+  .small{font-size:12px}
+  .tiny{font-size:11px}
+
+  /* ── mockup chrome ─────────────────────────────────────────── */
+  .mockbar{background:var(--g900);color:#fff;padding:.6rem 1.5rem;font-size:12px;
+    display:flex;gap:.75rem;align-items:center;flex-wrap:wrap}
+  .mockbar strong{font-weight:600}
+  .mockbar .pill{background:rgba(255,255,255,.12);border-radius:999px;padding:.15rem .55rem;font-size:11px}
+
+  /* ── page header ───────────────────────────────────────────── */
+  .crumb{display:flex;align-items:center;gap:.35rem;color:var(--g500);font-weight:500;margin-bottom:1.5rem}
+  .idcard{background:#fff;border:1px solid var(--g200);border-radius:1rem;box-shadow:0 1px 2px rgba(0,0,0,.05);
+    padding:1rem 1.25rem;margin-bottom:1.5rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
+  .avatar{width:2.75rem;height:2.75rem;border-radius:.75rem;background:var(--accent-wash);
+    border:1px solid var(--accent-border);display:grid;place-items:center;font-size:1.15rem;flex-shrink:0}
+  .idcard h1{font-size:1rem;font-weight:600;margin:0}
+
+  /* ── tabs ──────────────────────────────────────────────────── */
+  nav.tabs{border-bottom:1px solid var(--g200);display:flex;gap:2rem;margin-bottom:1.5rem;overflow-x:auto}
+  nav.tabs button{background:none;border:none;border-bottom:2px solid transparent;padding:0 0 .75rem;
+    font:inherit;font-weight:500;color:var(--g500);cursor:pointer;white-space:nowrap}
+  nav.tabs button:hover{color:var(--g900);border-bottom-color:var(--g300)}
+  nav.tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+  .screen{display:none}
+  .screen.on{display:block}
+
+  /* ── primitives ────────────────────────────────────────────── */
+  .card{background:#fff;border:1px solid var(--g200);border-radius:1rem;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+  .card-pad{padding:1.25rem}
+  .card-head{padding:1rem 1.25rem;border-bottom:1px solid var(--g200);display:flex;
+    align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+  .card-head h2{font-size:.9rem;font-weight:600;margin:0}
+  .grid{display:grid;gap:1rem}
+  .g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .g4{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .stack{display:flex;flex-direction:column;gap:1rem}
+  .row{display:flex;gap:.75rem;align-items:center;flex-wrap:wrap}
+  .between{display:flex;gap:1rem;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+  @media(max-width:860px){.g4{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .g3,.g2{grid-template-columns:minmax(0,1fr)}}
+
+  .kpi .n{font-size:1.6rem;font-weight:600;letter-spacing:-.02em;line-height:1.2}
+  .kpi .l{font-size:12px;color:var(--g500);margin-top:.15rem}
+  .delta{font-size:11px;font-weight:600}
+  .up{color:var(--green-text)} .down{color:var(--red-text)}
+
+  .chip{display:inline-flex;align-items:center;gap:.3rem;border-radius:999px;padding:.15rem .55rem;
+    font-size:11px;font-weight:600;border:1px solid}
+  .c-hot{background:var(--accent-wash);border-color:var(--accent-border);color:var(--accent-hover)}
+  .c-warm{background:var(--amber-wash);border-color:var(--amber-border);color:var(--amber-text)}
+  .c-cold{background:var(--g100);border-color:var(--g200);color:var(--g600)}
+  .c-ok{background:var(--green-wash);border-color:var(--green-border);color:var(--green-text)}
+  .c-info{background:var(--blue-wash);border-color:var(--blue-border);color:var(--blue-text)}
+  .c-risk{background:var(--red-wash);border-color:var(--red-border);color:var(--red-text)}
+
+  .btn{border-radius:.5rem;padding:.4rem .8rem;font-size:12px;font-weight:600;cursor:pointer;
+    border:1px solid var(--g300);background:#fff;color:var(--g700);font-family:inherit}
+  .btn:hover{background:var(--g50)}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn-primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+  .btn-ghost{border-color:transparent;color:var(--g500)}
+
+  .banner{border-radius:.75rem;padding:.85rem 1rem;border:1px solid;display:flex;gap:.75rem;align-items:flex-start}
+  .b-amber{background:var(--amber-wash);border-color:var(--amber-border);color:var(--amber-text)}
+  .b-accent{background:var(--accent-wash);border-color:var(--accent-border);color:var(--accent-hover)}
+  .b-blue{background:var(--blue-wash);border-color:var(--blue-border);color:var(--blue-text)}
+
+  /* Wide content scrolls inside its own container — the page body never scrolls sideways. */
+  .tscroll{overflow-x:auto;border-radius:0 0 1rem 1rem}
+  .tscroll table{min-width:40rem}
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--g500);
+    font-weight:600;padding:.6rem 1.25rem;background:var(--g50);border-bottom:1px solid var(--g200)}
+  td{padding:.75rem 1.25rem;border-bottom:1px solid var(--g100);vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+  .lead-name{font-weight:600}
+
+  .bar{height:6px;border-radius:999px;background:var(--g100);overflow:hidden}
+  .bar>i{display:block;height:100%;background:var(--accent);border-radius:999px}
+
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+  .srcref{color:var(--g400);font-size:11px}
+  .note{border-left:3px solid var(--accent-border);background:var(--accent-wash);
+    padding:.6rem .85rem;border-radius:0 .5rem .5rem 0;font-size:12px;color:var(--g700)}
+
+  /* timeline */
+  .tl{position:relative;padding-left:1.4rem}
+  .tl:before{content:"";position:absolute;left:.32rem;top:.4rem;bottom:.4rem;width:2px;background:var(--g200)}
+  .tl-item{position:relative;padding-bottom:1rem}
+  .tl-item:last-child{padding-bottom:0}
+  .tl-item:before{content:"";position:absolute;left:-1.18rem;top:.35rem;width:.55rem;height:.55rem;
+    border-radius:999px;background:var(--g300);border:2px solid #fff;box-shadow:0 0 0 1px var(--g200)}
+  .tl-item.hi:before{background:var(--accent);box-shadow:0 0 0 1px var(--accent-border)}
+
+  /* chat */
+  .msg{max-width:80%;padding:.6rem .85rem;border-radius:.85rem;font-size:13px}
+  .msg-user{margin-left:auto;background:var(--g900);color:#fff;border-bottom-right-radius:.25rem}
+  .msg-ai{background:#fff;border:1px solid var(--g200);border-bottom-left-radius:.25rem}
+  .askbar{display:flex;gap:.5rem;align-items:center;background:#fff;border:1px solid var(--g300);
+    border-radius:.75rem;padding:.55rem .75rem}
+  .askbar input{flex:1;border:none;outline:none;font:inherit;background:none}
+
+  .kv{display:flex;justify-content:space-between;gap:1rem;padding:.5rem 0;border-bottom:1px solid var(--g100)}
+  .kv:last-child{border-bottom:none}
+  .kv dt{color:var(--g500);font-size:12px}
+  .kv dd{margin:0;font-weight:600;font-size:12px;text-align:right}
+
+  .seg{display:flex;border:1px solid var(--g300);border-radius:.5rem;overflow:hidden;width:fit-content}
+  .seg span{padding:.35rem .7rem;font-size:11px;font-weight:600;color:var(--g500);
+    border-right:1px solid var(--g200);background:#fff}
+  .seg span:last-child{border-right:none}
+  .seg span.on{background:var(--accent);color:#fff}
+</style>
+</head>
+<body>
+
+<div class="mockbar">
+  <strong>MOCKUP</strong>
+  <span class="pill">not wired</span>
+  <span style="opacity:.75">Lead Generator → Autonomous Revenue Engine · surfaces from <span class="mono">docs/lead-generator-revenue-engine-plan.md</span></span>
+</div>
+
+<div class="wrap">
+
+  <div class="crumb">← Back to Team</div>
+
+  <div class="idcard">
+    <div class="avatar">🎯</div>
+    <div style="flex:1;min-width:180px">
+      <h1>Nadia · Lead Generator</h1>
+      <div class="small muted">Revenue engine · 3 campaigns active · <span class="c-ok chip">Autonomy: approve exceptions</span></div>
+    </div>
+    <button class="btn">Find New Leads</button>
+    <button class="btn btn-primary">Ask the memory</button>
+  </div>
+
+  <nav class="tabs">
+    <button class="active" data-s="signals">Signal Inbox <span class="chip c-hot" style="margin-left:.3rem">7</span></button>
+    <button data-s="pipeline">Pipeline</button>
+    <button data-s="thread">Deal Thread</button>
+    <button data-s="memory">Ask Your Data</button>
+    <button data-s="strategy">Strategy <span class="chip c-warm" style="margin-left:.3rem">1</span></button>
+    <button data-s="closer">Closing Agent</button>
+  </nav>
+
+  <!-- ══════════════════ 1. SIGNAL INBOX ══════════════════ -->
+  <section class="screen on" id="s-signals">
+    <div class="note" style="margin-bottom:1rem">
+      <strong>Phase 1.</strong> New surface. Backed by <span class="mono">social_engagements</span> — the ingest + intent classifier
+      the brief assumed existed. Buying intent hands off to a lead via the extended
+      <span class="mono">identifies_intent</span> orchestration event.
+    </div>
+
+    <div class="grid g4" style="margin-bottom:1rem">
+      <div class="card card-pad kpi"><div class="n">142</div><div class="l">Signals captured (7d)</div><div class="delta up">▲ 18%</div></div>
+      <div class="card card-pad kpi"><div class="n">23</div><div class="l">Buying intent</div><div class="delta up">▲ 4</div></div>
+      <div class="card card-pad kpi"><div class="n">16</div><div class="l">Handed off to leads</div><div class="delta">70% of intent</div></div>
+      <div class="card card-pad kpi"><div class="n">2.4<span style="font-size:.9rem">m</span></div><div class="l">Median time to handoff</div><div class="delta up">▼ 41%</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>Inbound signals</h2>
+        <div class="row">
+          <div class="seg"><span class="on">Buying</span><span>Question</span><span>Support</span><span>Noise</span></div>
+          <button class="btn btn-ghost">All platforms ▾</button>
+        </div>
+      </div>
+      <div class="tscroll">
+      <table>
+        <thead><tr><th>Signal</th><th>Source</th><th>Intent</th><th>Handoff</th><th></th></tr></thead>
+        <tbody>
+          <tr>
+            <td>
+              <div class="lead-name">@harpermills_ops</div>
+              <div class="small muted">“do you do this for multi-site venues? we run 4 properties and the booking side is a mess”</div>
+            </td>
+            <td><span class="chip c-info">Instagram · DM</span><div class="tiny muted" style="margin-top:.25rem">14 min ago</div></td>
+            <td><span class="chip c-hot">Buying · 94</span></td>
+            <td><span class="chip c-ok">Promoted → lead #418</span></td>
+            <td><button class="btn">View lead</button></td>
+          </tr>
+          <tr>
+            <td>
+              <div class="lead-name">Quendon Hall</div>
+              <div class="small muted">“What's pricing like for a 40-room property?”</div>
+            </td>
+            <td><span class="chip c-info">Facebook · comment</span><div class="tiny muted" style="margin-top:.25rem">1 h ago</div></td>
+            <td><span class="chip c-hot">Buying · 88</span></td>
+            <td><span class="chip c-warm">Queued</span></td>
+            <td><button class="btn btn-primary">Promote</button></td>
+          </tr>
+          <tr>
+            <td>
+              <div class="lead-name">@retreat_collective</div>
+              <div class="small muted">“is there an integration with our PMS?”</div>
+            </td>
+            <td><span class="chip c-info">Instagram · comment</span><div class="tiny muted" style="margin-top:.25rem">3 h ago</div></td>
+            <td><span class="chip c-warm">Question · 61</span></td>
+            <td><span class="chip c-cold">Not queued</span></td>
+            <td><button class="btn">Promote anyway</button></td>
+          </tr>
+          <tr>
+            <td>
+              <div class="lead-name">@dan_w</div>
+              <div class="small muted">“🔥🔥”</div>
+            </td>
+            <td><span class="chip c-info">Instagram · reaction</span><div class="tiny muted" style="margin-top:.25rem">3 h ago</div></td>
+            <td><span class="chip c-cold">Noise · 8</span></td>
+            <td><span class="chip c-cold">Ignored</span></td>
+            <td></td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════ 2. PIPELINE ══════════════════ -->
+  <section class="screen" id="s-pipeline">
+    <div class="note" style="margin-bottom:1rem">
+      <strong>Phase 0 + 2.</strong> Today's Data Hub table, extended with the <em>outcome</em> axis
+      (<span class="mono">revenue_events</span>) and sequence state. Outcome is a separate axis from
+      <span class="mono">approval_status</span> — five other roles read that column.
+    </div>
+
+    <div class="grid g4" style="margin-bottom:1rem">
+      <div class="card card-pad kpi"><div class="n">£48.2k</div><div class="l">Pipeline value</div><div class="delta up">▲ £6.1k</div></div>
+      <div class="card card-pad kpi"><div class="n">31%</div><div class="l">Win rate (90d)</div><div class="delta up">▲ 4 pts</div></div>
+      <div class="card card-pad kpi"><div class="n">18d</div><div class="l">Median cycle</div><div class="delta up">▼ 5d</div></div>
+      <div class="card card-pad kpi"><div class="n">62%</div><div class="l">Autonomous touches</div><div class="delta">no human in loop</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>Leads &amp; deals</h2>
+        <div class="row">
+          <div class="seg"><span class="on">All</span><span>In sequence</span><span>Replied</span><span>Closing</span><span>Won</span></div>
+        </div>
+      </div>
+      <div class="tscroll">
+      <table>
+        <thead><tr><th>Account</th><th>Score</th><th>Stage</th><th>Sequence</th><th>Value</th><th>Last event</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><div class="lead-name">Harper Mills Group</div><div class="tiny muted">harpermills.co.uk · from Instagram DM</div></td>
+            <td><span class="chip c-hot">Hot · 91</span></td>
+            <td><span class="chip c-info">Negotiating</span></td>
+            <td><span class="small muted">halted — replied</span></td>
+            <td><strong>£12,400</strong></td>
+            <td><div class="small">Objection: price</div><div class="tiny muted">2 h ago · agent</div></td>
+          </tr>
+          <tr>
+            <td><div class="lead-name">Broughton Sanctuary</div><div class="tiny muted">broughtonsanctuary.co.uk · discovery</div></td>
+            <td><span class="chip c-hot">Hot · 85</span></td>
+            <td><span class="chip c-warm">In sequence</span></td>
+            <td>
+              <div class="small">Step 2 of 4</div>
+              <div class="bar" style="width:80px;margin-top:.3rem"><i style="width:50%"></i></div>
+            </td>
+            <td><span class="muted">—</span></td>
+            <td><div class="small">Follow-up sent</div><div class="tiny muted">yesterday · agent</div></td>
+          </tr>
+          <tr>
+            <td><div class="lead-name">Emory Conference Center</div><div class="tiny muted">emoryconferencecenter.com · discovery</div></td>
+            <td><span class="chip c-warm">Warm · 68</span></td>
+            <td><span class="chip c-ok">Won</span></td>
+            <td><span class="small muted">complete</span></td>
+            <td><strong>£8,900</strong></td>
+            <td><div class="small">Payment link paid</div><div class="tiny muted">4 d ago · agent</div></td>
+          </tr>
+          <tr>
+            <td><div class="lead-name">Lake Junaluska</div><div class="tiny muted">lakejunaluska.com · discovery</div></td>
+            <td><span class="chip c-warm">Warm · 55</span></td>
+            <td><span class="chip c-risk">Lost</span></td>
+            <td><span class="small muted">halted</span></td>
+            <td><span class="muted">—</span></td>
+            <td><div class="small">Loss: <span class="mono">no_budget</span></div><div class="tiny muted">6 d ago · user</div></td>
+          </tr>
+          <tr>
+            <td><div class="lead-name">Quendon Hall</div><div class="tiny muted">quendonhall.co.uk · Facebook comment</div></td>
+            <td><span class="chip c-hot">Hot · 80</span></td>
+            <td><span class="chip c-cold">Pending approval</span></td>
+            <td><span class="small muted">not enrolled</span></td>
+            <td><span class="muted">—</span></td>
+            <td><div class="small">Scored</div><div class="tiny muted">1 h ago · agent</div></td>
+          </tr>
+        </tbody>
+      </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════ 3. DEAL THREAD ══════════════════ -->
+  <section class="screen" id="s-thread">
+    <div class="note" style="margin-bottom:1rem">
+      <strong>Phases 2 + 4.</strong> The stateful conversation that does not exist today — outreach is currently
+      fire-and-forget with a calendar reminder. Reply detection routes through the existing SendGrid Parse MX via a
+      per-thread <span class="mono">reply+&lt;token&gt;@</span> alias.
+    </div>
+
+    <div class="grid" style="grid-template-columns:minmax(0,1.6fr) minmax(0,1fr)">
+      <div class="card">
+        <div class="card-head">
+          <h2>Harper Mills Group · email thread</h2>
+          <span class="chip c-info">Replied — sequence halted</span>
+        </div>
+        <div class="card-pad">
+          <div class="tl">
+            <div class="tl-item">
+              <div class="row" style="gap:.5rem"><strong class="small">Outreach sent</strong><span class="chip c-cold">agent</span><span class="tiny muted">5 d ago</span></div>
+              <div class="small muted">“Noticed you're running four properties on separate booking systems…”</div>
+              <div class="tiny srcref">→ revenue_events: outreach_sent</div>
+            </div>
+            <div class="tl-item hi">
+              <div class="row" style="gap:.5rem"><strong class="small">Reply received</strong><span class="chip c-ok">inbound</span><span class="tiny muted">3 d ago</span></div>
+              <div class="small muted">“Interesting — but we've been quoted about half this by [competitor]. What justifies the difference?”</div>
+              <div class="tiny srcref">→ reply_received · sequence halted automatically</div>
+            </div>
+            <div class="tl-item hi">
+              <div class="row" style="gap:.5rem"><strong class="small">Objection classified</strong><span class="chip c-warm">price</span><span class="tiny muted">3 d ago</span></div>
+              <div class="small muted">Matched playbook: <em>“Price — competitor undercut”</em> · confidence 89</div>
+              <div class="tiny srcref">→ objection_raised</div>
+            </div>
+            <div class="tl-item hi">
+              <div class="row" style="gap:.5rem"><strong class="small">Closing Agent responded</strong><span class="chip c-hot">autonomous</span><span class="tiny muted">3 d ago</span></div>
+              <div class="small muted">Held list price. Offered pre-approved concession <span class="mono">extended_onboarding</span> (within guardrails — no approval needed).</div>
+              <div class="tiny srcref">→ objection_handled · negotiation_opened · round 1 of 3</div>
+            </div>
+            <div class="tl-item">
+              <div class="row" style="gap:.5rem"><strong class="small">Awaiting reply</strong><span class="tiny muted">2 d</span></div>
+              <div class="small muted">Next nudge scheduled in 1 day.</div>
+            </div>
+          </div>
+
+          <div class="banner b-amber" style="margin-top:1rem">
+            <div>⚠️</div>
+            <div>
+              <strong>Escalation armed.</strong> A further concession would breach <span class="mono">maxDiscountPercent (10%)</span>.
+              Round 2 will be queued for your approval rather than sent.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="stack">
+        <div class="card">
+          <div class="card-head"><h2>Deal envelope</h2></div>
+          <div class="card-pad">
+            <dl style="margin:0">
+              <div class="kv"><dt>List price</dt><dd>£12,400</dd></div>
+              <div class="kv"><dt>Floor price</dt><dd style="color:var(--red-text)">£11,160</dd></div>
+              <div class="kv"><dt>Offered</dt><dd>£12,400</dd></div>
+              <div class="kv"><dt>Rounds used</dt><dd>1 of 3</dd></div>
+              <div class="kv"><dt>Autonomy</dt><dd>approve_exceptions</dd></div>
+            </dl>
+            <div class="bar" style="margin-top:.85rem"><i style="width:100%"></i></div>
+            <div class="tiny muted" style="margin-top:.35rem">Headroom to floor: £1,240 (10%)</div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head"><h2>Account memory</h2></div>
+          <div class="card-pad small stack" style="gap:.6rem">
+            <div>· 4 properties, Cotswolds + Cornwall <span class="tiny srcref">from DM</span></div>
+            <div>· Evaluating against a named competitor <span class="tiny srcref">from reply</span></div>
+            <div>· Contact role: <strong>Operations Director</strong> <span class="tiny srcref">enriched</span></div>
+            <div>· Similar won deal: Emory (£8.9k, 14d cycle) <span class="tiny srcref">vector match 0.83</span></div>
+          </div>
+        </div>
+
+        <div class="card card-pad">
+          <div class="row"><button class="btn btn-primary">Take over thread</button><button class="btn">Pause agent</button></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════ 4. ASK YOUR DATA ══════════════════ -->
+  <section class="screen" id="s-memory">
+    <div class="note" style="margin-bottom:1rem">
+      <strong>Phase 3 — the Anti-CRM surface.</strong> Ships <em>alongside</em> the Pipeline table, not instead of it.
+      Both read the same memory layer: vector kNN over <span class="mono">account_memory</span> + graph expansion over
+      <span class="mono">account_edges</span> + aggregates over <span class="mono">revenue_events</span>. Answers cite source rows.
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-head"><h2>Ask your revenue memory</h2><span class="chip c-info">grounded · cited</span></div>
+      <div class="card-pad stack">
+        <div class="msg msg-user">Which accounts went quiet after a price objection this quarter?</div>
+        <div class="msg msg-ai">
+          <strong>Four accounts.</strong> All raised <span class="mono">price</span> then had no inbound for 14+ days:
+          <div style="margin:.5rem 0 .25rem">
+            · Lake Junaluska — lost, <span class="mono">no_budget</span> <span class="tiny srcref">[revenue_events #2841]</span><br>
+            · Ridgeway Estate — still open, 19 d silent <span class="tiny srcref">[lead_threads #77]</span><br>
+            · Trelowarren — lost, <span class="mono">competitor</span> <span class="tiny srcref">[revenue_events #2903]</span><br>
+            · Alnwick Barns — still open, 16 d silent <span class="tiny srcref">[lead_threads #91]</span>
+          </div>
+          <div class="small muted">Common thread: all four were quoted above £10k and all four contacts were
+          <strong>Marketing</strong> titles, not Finance or Operations.</div>
+        </div>
+        <div class="msg msg-user">Why are CFO contacts closing faster?</div>
+        <div class="msg msg-ai">
+          Across 34 terminal outcomes since March:
+          <div class="grid g3" style="margin:.6rem 0">
+            <div><div class="kpi"><div class="n" style="font-size:1.2rem">11 d</div><div class="l">CFO median cycle</div></div></div>
+            <div><div class="kpi"><div class="n" style="font-size:1.2rem">24 d</div><div class="l">CMO median cycle</div></div></div>
+            <div><div class="kpi"><div class="n" style="font-size:1.2rem">2.1×</div><div class="l">CFO win rate</div></div></div>
+          </div>
+          <div class="small muted">CFO-led deals raise <span class="mono">price</span> objections earlier (round 1 vs round 2) but
+          concede on <span class="mono">extended_onboarding</span> rather than discount. CMO-led deals stall at budget approval.
+          <span class="tiny srcref">[GROUP BY payload→contactRole over revenue_events]</span></div>
+          <div class="banner b-accent" style="margin-top:.75rem">
+            <div>💡</div><div>The Strategy Agent has drafted an ICP pivot from this. <strong>1 proposal awaiting review →</strong></div>
+          </div>
+        </div>
+        <div class="askbar">
+          <span class="muted">💬</span>
+          <input placeholder="Ask anything about your accounts, deals or outcomes…" disabled>
+          <button class="btn btn-primary">Ask</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid g3">
+      <div class="card card-pad"><div class="small muted">Short-term / working</div><div style="font-weight:600;margin:.2rem 0">lead_threads + lead_messages</div><div class="tiny muted">Direct FK read. Bounded — no embedding, no search.</div></div>
+      <div class="card card-pad"><div class="small muted">Long-term semantic</div><div style="font-weight:600;margin:.2rem 0">account_memory + pgvector</div><div class="tiny muted">HNSW cosine · voyage-3.5-lite · matches kb_chunks.</div></div>
+      <div class="card card-pad"><div class="small muted">Structural</div><div style="font-weight:600;margin:.2rem 0">account_nodes + account_edges</div><div class="tiny muted">Recursive CTE, depth-capped at 4. No Neo4j.</div></div>
+    </div>
+  </section>
+
+  <!-- ══════════════════ 5. STRATEGY ══════════════════ -->
+  <section class="screen" id="s-strategy">
+    <div class="note" style="margin-bottom:1rem">
+      <strong>Phase 5.</strong> Structurally cloned from the shipped <span class="mono">autonomous-goal-optimizer.ts</span> —
+      same allow-list, single-change-per-run, audit row, notification, tier gate. New input: win/loss from
+      <span class="mono">revenue_events</span>. New output: campaign ICP + blueprint playbook sections.
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-head">
+        <h2>Proposed strategy pivot</h2>
+        <span class="chip c-warm">Awaiting review</span>
+      </div>
+      <div class="card-pad stack">
+        <div class="between">
+          <div>
+            <div style="font-weight:600;font-size:1rem">Shift primary persona from CMO to CFO / Finance Director</div>
+            <div class="small muted">Proposed 2 days ago · weekly run · blueprint <span class="mono">v7a3f…c21</span></div>
+          </div>
+          <div class="row"><button class="btn">Reject</button><button class="btn btn-primary">Apply &amp; recompile</button></div>
+        </div>
+
+        <div class="grid g3">
+          <div class="card card-pad" style="box-shadow:none;background:var(--g50)">
+            <div class="tiny muted">EVIDENCE · sample size</div>
+            <div style="font-weight:600">34 terminal outcomes</div>
+            <div class="tiny muted">above MIN_SAMPLE (20) ✓</div>
+          </div>
+          <div class="card card-pad" style="box-shadow:none;background:var(--g50)">
+            <div class="tiny muted">EVIDENCE · win rate</div>
+            <div style="font-weight:600">CFO 47% vs CMO 22%</div>
+            <div class="tiny muted">trailing 90 days</div>
+          </div>
+          <div class="card card-pad" style="box-shadow:none;background:var(--g50)">
+            <div class="tiny muted">EVIDENCE · cycle</div>
+            <div style="font-weight:600">11 d vs 24 d median</div>
+            <div class="tiny muted">first touch → terminal</div>
+          </div>
+        </div>
+
+        <div>
+          <div class="small" style="font-weight:600;margin-bottom:.4rem">Change (one field, per run)</div>
+          <div class="card" style="box-shadow:none">
+            <div class="card-pad" style="border-bottom:1px solid var(--g100)">
+              <div class="tiny muted">BEFORE · discovery_campaigns.targetPersona.decisionMaker</div>
+              <div class="mono">"Marketing Director / CMO at 20-200 staff hospitality groups"</div>
+            </div>
+            <div class="card-pad" style="background:var(--accent-wash)">
+              <div class="tiny" style="color:var(--accent-hover)">AFTER</div>
+              <div class="mono">"Finance Director / CFO at 20-200 staff hospitality groups; lead with cost-per-property and payback period"</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="banner b-blue">
+          <div>🔒</div>
+          <div>
+            <strong>Outside the envelope — not proposed.</strong> The agent cannot alter deal guardrails
+            (floor price, concessions, non-negotiables), autonomy level, suppression lists or spend caps.
+            <em>An agent must never widen its own financial or safety envelope.</em>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid g2">
+      <div class="card">
+        <div class="card-head"><h2>Win / loss by segment</h2></div>
+        <div class="card-pad stack" style="gap:.85rem">
+          <div><div class="between small"><span>CFO / Finance</span><strong>47%</strong></div><div class="bar"><i style="width:47%"></i></div></div>
+          <div><div class="between small"><span>Operations</span><strong>38%</strong></div><div class="bar"><i style="width:38%"></i></div></div>
+          <div><div class="between small"><span>Owner / MD</span><strong>29%</strong></div><div class="bar"><i style="width:29%"></i></div></div>
+          <div><div class="between small"><span>CMO / Marketing</span><strong>22%</strong></div><div class="bar"><i style="width:22%"></i></div></div>
+          <div class="tiny muted">Segments below MIN_SAMPLE are excluded — no pivot on noise.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Loss reasons (closed vocabulary)</h2></div>
+        <div class="card-pad stack" style="gap:.85rem">
+          <div><div class="between small"><span class="mono">price</span><strong>31%</strong></div><div class="bar"><i style="width:31%"></i></div></div>
+          <div><div class="between small"><span class="mono">no_budget</span><strong>24%</strong></div><div class="bar"><i style="width:24%"></i></div></div>
+          <div><div class="between small"><span class="mono">went_silent</span><strong>19%</strong></div><div class="bar"><i style="width:19%"></i></div></div>
+          <div><div class="between small"><span class="mono">competitor</span><strong>14%</strong></div><div class="bar"><i style="width:14%"></i></div></div>
+          <div><div class="between small"><span class="mono">not_icp</span><strong>12%</strong></div><div class="bar"><i style="width:12%"></i></div></div>
+          <div class="tiny muted">Free-text reasons are unclusterable — the vocabulary is fixed on purpose.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════════ 6. CLOSING AGENT ══════════════════ -->
+  <section class="screen" id="s-closer">
+    <div class="note" style="margin-bottom:1rem">
+      <strong>Phase 4.</strong> New role <span class="mono">deal_closer</span>. The floor price is enforced in code
+      <em>after</em> the model returns — never in the prompt. The agent selects from pre-approved concessions; it never
+      authors one.
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-head"><h2>Autonomy level</h2><span class="chip c-hot">Zero-touch is tier-gated &amp; opt-in</span></div>
+      <div class="card-pad tscroll">
+        <table>
+          <thead><tr><th>Level</th><th>Behaviour</th><th>Approval gate</th><th></th></tr></thead>
+          <tbody>
+            <tr><td><span class="mono">suggest</span></td><td>Drafts a response, sends nothing</td><td>pending_approval</td><td class="small muted">today's behaviour</td></tr>
+            <tr><td><span class="mono">approve_each</span></td><td>Drafts and queues every reply</td><td>pending_approval</td><td></td></tr>
+            <tr style="background:var(--accent-wash)">
+              <td><span class="mono"><strong>approve_exceptions</strong></span></td>
+              <td>Sends within guardrails; queues at floor, past max rounds, or over escalation threshold</td>
+              <td>conditional</td>
+              <td><span class="chip c-hot">Active</span></td>
+            </tr>
+            <tr><td><span class="mono">autonomous</span></td><td>Full zero-touch including payment link</td><td>bypassed, all logged</td><td class="small muted">requires full guardrails</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="grid g2">
+      <div class="card">
+        <div class="card-head"><h2>Negotiation guardrails</h2><button class="btn">Edit</button></div>
+        <div class="card-pad">
+          <dl style="margin:0">
+            <div class="kv"><dt>List price</dt><dd>£12,400</dd></div>
+            <div class="kv"><dt>Floor price (hard stop)</dt><dd style="color:var(--red-text)">£11,160</dd></div>
+            <div class="kv"><dt>Max discount</dt><dd>10%</dd></div>
+            <div class="kv"><dt>Max rounds</dt><dd>3</dd></div>
+            <div class="kv"><dt>Escalate above</dt><dd>£20,000</dd></div>
+          </dl>
+          <div class="banner b-amber" style="margin-top:.85rem">
+            <div>🔒</div><div class="small">These fields are <strong>never</strong> writable by the Strategy Agent.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="stack">
+        <div class="card">
+          <div class="card-head"><h2>Pre-approved concessions</h2></div>
+          <div class="card-pad stack" style="gap:.55rem">
+            <div class="row"><span class="chip c-ok">✓</span><span class="small"><span class="mono">extended_onboarding</span> — 60 days included setup</span></div>
+            <div class="row"><span class="chip c-ok">✓</span><span class="small"><span class="mono">quarterly_billing</span> — split payment terms</span></div>
+            <div class="row"><span class="chip c-ok">✓</span><span class="small"><span class="mono">volume_5pct</span> — 5% at 3+ properties</span></div>
+            <div class="tiny muted" style="margin-top:.3rem">The agent picks from this list. It cannot invent a new concession.</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Non-negotiable</h2></div>
+          <div class="card-pad stack" style="gap:.55rem">
+            <div class="row"><span class="chip c-risk">✕</span><span class="small">Contract length below 12 months</span></div>
+            <div class="row"><span class="chip c-risk">✕</span><span class="small">Custom SLA terms</span></div>
+            <div class="row"><span class="chip c-risk">✕</span><span class="small">Data residency outside UK/EU</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:1rem">
+      <div class="card-head"><h2>Payment link</h2><span class="chip c-info">Stripe Connect · tenant account</span></div>
+      <div class="card-pad between">
+        <div class="small muted" style="max-width:38rem">
+          Issued on the <strong>tenant's</strong> connected Stripe account — not Be More Swan's, which is what plan
+          checkout uses. The amount always derives from the guardrail-validated figure, never from model output.
+        </div>
+        <div class="row">
+          <span class="chip c-ok">Floor check passed</span>
+          <button class="btn btn-primary">Preview link</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  const tabs = document.querySelectorAll('nav.tabs button');
+  tabs.forEach(b => b.addEventListener('click', () => {
+    tabs.forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    document.querySelectorAll('.screen').forEach(s => s.classList.remove('on'));
+    document.getElementById('s-' + b.dataset.s).classList.add('on');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }));
+</script>
+</body>
+</html>
