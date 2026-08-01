@@ -131,18 +131,26 @@ check('the endpoint routes per row, and scopes siblings to the tenant', () => {
     const src = readFileSync(path.join(ROOT, 'netlify/functions/route-post-formats.ts'), 'utf8');
     assert.ok(!/routeAcross\(platforms, assets\)/.test(src),
         'routing every platform from one row is the bug');
-    assert.match(src, /for \(const \[platform, row\] of rowFor\)/, 'each platform needs its own row');
-    assert.match(src, /routeAsset\(platform, orderMetrics\(assetIdList\(row\.contentAssetIds\), metrics\)\)/,
-        'and must be routed from THAT row\'s media');
+    // Keyed by row ID now, not by platform. Same invariant, stricter: one entry per ROW means two
+    // destinations on one platform — a Reel and a carousel — each get their own answer, where the
+    // platform map could only hold whichever was written last.
+    assert.match(src, /for \(const \[id, row\] of rows\)/, 'each row needs its own route');
+    assert.match(src, /routeAsset\(row\.platform, orderMetrics\(assetIdList\(row\.contentAssetIds\), metrics\), row\.formatKey\)/,
+        'and must be routed from THAT row\'s media, against THAT row\'s declared format');
     // The sibling read used to have no org filter at all; a crosspost_group_id is not a secret.
-    const sibling = src.slice(src.indexOf('const siblings = groupId'), src.indexOf('// One row per platform'));
+    const sibling = src.slice(src.indexOf('const siblings = groupId'), src.indexOf('// ── Keyed by ROW'));
     assert.match(sibling, /me\.organisationId/, 'the sibling query must be tenant-scoped');
+    assert.match(sibling, /formatKey: scheduledPosts\.formatKey/, 'the declared format must be read for every sibling');
 });
 
 check('the queried row still describes its own platform', () => {
     const src = readFileSync(path.join(ROOT, 'netlify/functions/route-post-formats.ts'), 'utf8');
-    // Two rows for one platform would otherwise be resolved arbitrarily by row order.
-    assert.match(src, /\|\| s\.id === post\.id/, 'the post you asked about wins for its platform');
+    // The by-platform map is a fallback for callers that have only a platform. Where two rows share
+    // one, it can hold just one of them — so the queried post must be the one that wins, and the
+    // composer must read the by-id map instead (which it does).
+    assert.match(src, /if \(!byPlatform\[row\.platform\] \|\| id === post\.id\)/,
+        'the post you asked about wins for its platform');
+    assert.match(src, /routesByPlatform/, 'the fallback map must still be returned');
 });
 
 (async () => {

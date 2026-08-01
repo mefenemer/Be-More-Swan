@@ -95,12 +95,22 @@ check('the rail steps run content first, with no Platforms step', () => {
 });
 
 check('a new post is seeded across every connected platform', () => {
-    const fn = workspace.slice(workspace.indexOf('async function openGeneratePostSheet()'));
-    const body = fn.slice(0, 2200);
-    assert.match(body, /\.filter\(p => connected\.some\(c => c\.includes\(p\.id\)\)\)/,
+    // Create Post now ASKS, via the destination picker — but the picker opens pre-ticked with
+    // exactly what this used to create silently, so the everyday post is still one click and the
+    // seeding rule is unchanged. It just moved into pceOpenDestinationsForCreate.
+    const open = workspace.slice(workspace.indexOf('async function openGeneratePostSheet()'), workspace.indexOf('// Lowercase service names'));
+    assert.match(open, /await pceOpenDestinationsForCreate\(assistantId\)/, 'Create Post must open the picker');
+    assert.ok(!/create-manual-post/.test(open), 'creating before asking is what the picker replaces');
+
+    const seed = workspace.slice(workspace.indexOf('async function pceOpenDestinationsForCreate('));
+    const body = seed.slice(0, 1800);
+    assert.match(body, /\.filter\(id => connected\.some\(c => c\.includes\(id\)\)\)/,
         'seeding one platform is what made a Platforms step necessary');
-    assert.match(body, /platforms, blank: true/, 'the whole set goes to create-manual-post');
+    assert.match(body, /_pceDefaultLiveFormat\(id\)/, 'each seeded platform gets its default LIVE format');
     assert.ok(!/const first = /.test(body), 'the first-connected-only seed must be gone');
+    // The row is still created with the whole set, just on confirm rather than on open.
+    const confirm = workspace.slice(workspace.indexOf('async function pceConfirmDestinations()'));
+    assert.match(confirm.slice(0, 1600), /destinations, blank: true/, 'the whole set goes to create-manual-post');
 });
 
 check('step 3 is video-only and says so, and stills keep their text and sound', () => {

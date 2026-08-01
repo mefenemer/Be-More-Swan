@@ -44,11 +44,27 @@ check('every platform tab carries a × that removes that platform', () => {
 check('the × is a sibling of the tab, never nested inside it', () => {
     // A <button> inside a <button> is invalid HTML, and browsers reparent it — the × would end up
     // outside the strip, or its click would be swallowed by the tab switch underneath.
-    const opensTab = tabs.indexOf('onclick="rqReviewSwitchPlatform(${p.id})"');
+    const opensTab = tabs.indexOf('rqReviewSwitchPlatform(${p.id})');
     const closesTab = tabs.indexOf('</button>', opensTab);
     const opensX = tabs.indexOf('onclick="rqReviewRemovePlatform(${p.id})"');
     assert.ok(opensTab > -1 && closesTab > -1 && opensX > -1, 'both buttons must be in the tab template');
     assert.ok(opensX > closesTab, 'the × must come after the tab button closes, not inside it');
+});
+
+check('the tab names the destination and offers its format menu', () => {
+    assert.match(tabs, /const declaredFmt = _pceFormat\(p\.formatKey\)/,
+        'the DECLARED format is what the tab names — before any media exists');
+    assert.match(tabs, /rqReviewOpenFormatMenu\(\$\{p\.id\}, event\)/, 'the active tab opens the format menu');
+    // The chevron is the affordance for that menu, so it must appear under exactly the same
+    // condition — a chevron on a tab that does nothing is worse than no chevron.
+    const opensMenu = /active && _RQ_PLATFORM_REMOVABLE\.includes\(p\.status\) \? `rqReviewOpenFormatMenu/.test(tabs);
+    const showsChevron = /active && _RQ_PLATFORM_REMOVABLE\.includes\(p\.status\) \? '<span class="ml-0\.5 opacity-50">&#9662;/.test(tabs);
+    assert.ok(opensMenu && showsChevron, 'the chevron and the menu must be gated on the same condition');
+});
+
+check('+ Destination is offered whenever the list can still change', () => {
+    assert.match(tabs, /rqReviewAddDestination\(\)/, 'the counterpart to the × must exist');
+    assert.match(tabs, /_rqCanEditDestinations\(group\)/, 'and be gated on the group still being editable');
 });
 
 check('removal is offered only where the server would allow it', () => {
@@ -67,12 +83,19 @@ check('the removable statuses match the server\'s own list', () => {
         'the editor and the endpoint disagree about which rows may be deleted');
 });
 
-check('the surviving set is derived from the group, not from the tab clicked', () => {
+check('the surviving set is derived from the group by ROW, not by platform', () => {
     const fn = ws.slice(ws.indexOf('async function rqReviewRemovePlatform('), ws.indexOf('\n/**\n * Why this platform cannot publish'));
-    assert.match(fn, /const remaining = \[\.\.\.new Set\(group\.map\(p => p\.platform\)\.filter\(p => p && p !== post\.platform\)\)\]/,
-        'sending anything other than "the group minus this one" can drop a platform the user never touched');
-    assert.match(fn, /if \(!remaining\.length\)/, 'the last platform must be refused before the request, not by a 400');
-    assert.match(fn, /confirm\(/, 'removal deletes that platform\'s caption, media and overlays — it has to ask');
+    // Filtering on platform would take out every destination that platform has: closing an
+    // Instagram Reel would silently delete the Instagram carousel sitting next to it.
+    assert.match(fn, /group\.filter\(p => p\.id !== id && p\.platform\)/,
+        'the removed row is identified by id — filtering by platform drops its siblings too');
+    // Comments stripped first: this function EXPLAINS the bug it replaced, and the explanation
+    // quotes the very expression being banned.
+    const code = fn.split('\n').filter(l => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
+    assert.ok(!/p\.platform !== post\.platform/.test(code), 'platform-wise filtering is the bug this replaces');
+    assert.match(fn, /formatKey: p\.formatKey \?\? null/, 'survivors must keep their declared formats');
+    assert.match(fn, /if \(!remaining\.length\)/, 'the last destination must be refused before the request, not by a 400');
+    assert.match(fn, /confirm\(/, 'removal deletes that destination\'s caption, media and overlays — it has to ask');
 });
 
 check('set-post-platforms is called from exactly one place', () => {
@@ -82,7 +105,22 @@ check('set-post-platforms is called from exactly one place', () => {
     assert.strictEqual(calls.length, 1, `expected 1 fetch of set-post-platforms, found ${calls.length}`);
     assert.ok(ws.includes('async function _pceApplyPlatforms('), 'the shared commit helper is gone');
     assert.match(ws, /const d = await _pceApplyPlatforms\(remaining\)/, 'the tab × must go through the helper');
-    assert.match(ws, /const d = await _pceApplyPlatforms\(\[\.\.\.current\]\)/, 'the chip picker must go through the helper too');
+    assert.match(ws, /const d = await _pceApplyPlatforms\(next\)/, 'the chip picker must go through the helper too');
+    assert.match(ws, /const d = await _pceApplyPlatforms\(destinations\)/, 'and so must the destination picker');
+    // Everything it sends is a destination, never a bare platform id — the server keys its sibling
+    // map on (platform, formatKey), so a string would land as "the format-less destination" and
+    // delete a declared one to make it.
+    const helper = ws.slice(ws.indexOf('async function _pceApplyPlatforms('), ws.indexOf('async function _pceTogglePostPlatform('));
+    assert.match(helper, /destinations: destinations\.map\(d => \(\{ platform: d\.platform, formatKey: d\.formatKey \?\? null \}\)\)/,
+        'the request body must carry destinations');
+});
+
+check('the picker and the endpoint agree on what a destination is', () => {
+    const shared = readFileSync(path.join(ROOT, 'src/utils/post-destinations.ts'), 'utf8');
+    // Client and server each build the key; they must build the same one, or a round trip through
+    // the picker would silently re-create every row.
+    assert.match(shared, /\$\{canonicalPlatform\(d\.platform\)\}\|\$\{d\.formatKey \?\? ''\}/, 'server key shape');
+    assert.match(ws, /const _pceDestKey = \(platform, formatKey\) => `\$\{platform\}\|\$\{formatKey \|\| ''\}`/, 'client key shape');
 });
 
 check('the busy flag clears before the reopen, not after', () => {

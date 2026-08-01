@@ -40,14 +40,26 @@ test('the composer derives its chips instead of listing them', () => {
 });
 
 test('neither drafting endpoint carries its own hand-written list any more', () => {
+    // create-manual-post no longer names SOCIAL_PLATFORMS itself: it takes destinations and hands
+    // them to parseDestinations, which is the thing that holds the allow-list. The invariant is
+    // unchanged — one list, checked once — so the check follows it rather than being relaxed.
+    const VALIDATOR = { 'create-manual-post.ts': 'parseDestinations' } as Record<string, string>;
     for (const f of ['generate-post.ts', 'create-manual-post.ts']) {
         const src = readFileSync(new URL(`../netlify/functions/${f}`, import.meta.url), 'utf8');
-        assert.ok(src.includes('SOCIAL_PLATFORMS'), `${f} should use SOCIAL_PLATFORMS`);
+        const delegate = VALIDATOR[f];
+        assert.ok(
+            src.includes('SOCIAL_PLATFORMS') || (delegate && src.includes(delegate)),
+            `${f} should use SOCIAL_PLATFORMS${delegate ? ` or delegate to ${delegate}` : ''}`,
+        );
         assert.ok(
             !/\[\s*'instagram',\s*'facebook',\s*'linkedin',\s*'x'\s*\]/.test(src),
             `${f} still hardcodes the stale four-platform list`,
         );
     }
+    // …and the delegate really is backed by the canonical list, or the redirect above would be a
+    // way to lose the guarantee rather than move it.
+    const shared = readFileSync(new URL('../src/utils/post-destinations.ts', import.meta.url), 'utf8');
+    assert.ok(shared.includes('SOCIAL_PLATFORMS'), 'post-destinations.ts must validate against SOCIAL_PLATFORMS');
 });
 
 test('no other endpoint reintroduces the stale four either', () => {

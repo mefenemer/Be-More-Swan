@@ -607,6 +607,50 @@ window.showComplianceModals = function showComplianceModals(force) {
      Tailwind to add one utility churns unrelated selectors across the whole sheet. #gp-ai-media is MOVED in here on open and put
      back on close (_pceOpenMediaPicker / _pceCloseMediaPicker) — the same borrow-and-return the rail
      uses, because that panel is shared with the generate-post sheet and must not be duplicated. -->
+<!-- ── Destinations: where this post goes, and what it goes out AS ───────────────────────────────
+     One modal, two doors. "Create Post" opens it to choose a new post's destinations; "+ Destination"
+     on the tab strip opens the same thing pre-filled with the ones the post already has. They differ
+     only in what happens on confirm (create rows vs. sync rows), so they share every piece of the
+     picking — a second copy of a format list is exactly the drift this codebase keeps paying for.
+
+     z-index is INLINE for the same reason #pce-media-modal's is: z-[96] is not in the compiled
+     style.css, so the class would resolve to `auto` and the sheet would render underneath the editor
+     it was opened from. Compiled arbitrary z utilities are 51/55/60/70/71/75/80/81/90/100/9999/10000.
+     95 is the media modal's, so this sits one above it — it can be opened from the editor while that
+     one is closed, and never the other way round. -->
+<div id="pce-dest-modal" class="hidden fixed inset-0 items-center justify-center p-4 bg-gray-900/70 backdrop-blur-sm" style="z-index:96" role="dialog" aria-modal="true" aria-labelledby="pce-dest-title">
+  <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[88vh] flex flex-col overflow-hidden">
+    <div class="flex items-center justify-between gap-3 px-5 py-3 border-b border-gray-100 shrink-0">
+      <div class="min-w-0">
+        <h2 id="pce-dest-title" class="text-base font-extrabold text-gray-900">Where should this go?</h2>
+        <p id="pce-dest-sub" class="text-xs text-gray-500">Pick a platform and what to post there.</p>
+      </div>
+      <button onclick="pceCloseDestinations()" aria-label="Close" class="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 cursor-pointer">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    </div>
+    <div class="flex-1 overflow-y-auto px-5 py-4" style="overscroll-behavior:contain">
+      <div id="pce-dest-list" class="space-y-2"></div>
+    </div>
+    <div class="border-t border-gray-100 px-5 py-3 shrink-0">
+      <p id="pce-dest-chips-label" class="text-[10px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">This post will be created as</p>
+      <div id="pce-dest-chips" class="flex flex-wrap gap-1.5 items-center min-h-[26px]"></div>
+      <p id="pce-dest-note" class="text-[11px] text-gray-400 mt-1.5"></p>
+      <div class="flex gap-2 mt-3">
+        <button type="button" id="pce-dest-confirm" onclick="pceConfirmDestinations()"
+          class="px-4 py-2 text-sm font-bold bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg transition cursor-pointer">Start writing</button>
+        <button type="button" onclick="pceCloseDestinations()"
+          class="px-4 py-2 text-sm font-semibold border border-gray-300 text-gray-700 hover:bg-gray-50 rounded-lg transition cursor-pointer">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- The format menu for the tab you are on. A popover rather than a step: changing what a post goes
+     out as is a one-click decision about the tab under the cursor, and the rail step it used to live
+     in was deleted precisely because it made a journey out of one. -->
+<div id="pce-format-menu" class="hidden fixed" style="z-index:97"></div>
+
 <div id="pce-media-modal" class="hidden fixed inset-0 items-center justify-center p-4 bg-gray-900/70 backdrop-blur-sm" style="z-index:95" role="dialog" aria-modal="true" aria-labelledby="pce-media-modal-title">
   <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full max-h-[88vh] flex flex-col overflow-hidden">
     <div class="flex items-center justify-between gap-3 px-5 py-3 border-b border-gray-100 shrink-0">
@@ -1097,6 +1141,15 @@ window.showComplianceModals = function showComplianceModals(force) {
             </div>
 
             <div id="pce-insp-media" class="pce-insp" data-insp="media">
+              <!-- ── The brief ──────────────────────────────────────────────────────────────────
+                   What this destination NEEDS, stated before there is any media to judge. Only
+                   possible because the format is declared: with a derived format there was nothing
+                   to state until something had been attached, so the step accepted anything and the
+                   mismatch turned up afterwards on the tabs. Painted by _pceRenderMediaBrief. -->
+              <div id="pce-media-brief" class="hidden mb-2.5 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
+                <p id="pce-media-brief-title" class="text-xs font-bold text-gray-800"></p>
+                <p id="pce-media-brief-spec" class="text-[10px] font-semibold text-gray-500 mt-0.5"></p>
+              </div>
               <!-- Media that is NOT a branded card: choosing what the picture is. The shared
                    sourcing panel is mounted here on demand (see _inspMountMediaPanel). -->
               <!-- ── Photo or video: what is attached, and the one way to change it ──────────────
@@ -7247,25 +7300,41 @@ async function rqFailedReject(postId) {
     }
 }
 
-// The platform tab bar. Hidden for a single-platform post; one tab per platform otherwise. A red dot
-// flags a platform that still needs an image before it can be approved.
-// Routes for the post on screen, keyed by platform, as route-post-formats returned them. Null
-// until the first answer lands — the tabs render without a format line rather than guessing one.
+// The destination tab bar — one tab per row in the cross-post group. A red dot flags a destination
+// that still needs an image before it can be approved.
+//
+// Routes as route-post-formats returned them, keyed by POST ID. Keyed by platform until destinations
+// existed, which stopped being enough the moment a post could hold two rows on one platform: a Reel
+// and a carousel, both Instagram, route differently and the platform key answered for whichever came
+// last. Null until the first answer lands — the tabs render without a format line rather than
+// guessing one.
 let _rqRoutes = null;
 let _rqRoutesFor = null;   // the post id the cached routes belong to
 
+/** This row's route. By id; the platform map is the fallback for a row the answer predates. */
+function _rqRouteFor(post) {
+    if (!post || !_rqRoutes) return null;
+    return _rqRoutes[String(post.id)] || (_rqRoutesByPlatform && _rqRoutesByPlatform[post.platform]) || null;
+}
+let _rqRoutesByPlatform = null;
+
 /**
- * Ask the server which format each platform would publish this post as.
+ * Ask the server what each destination in this group would publish as.
  *
  * Deliberately not computed here. The rules live in src/utils/format-router.ts and depend on
  * POST_FORMATS; a copy in this page is the drift that has bitten every shared rule the composer
  * has ever needed — and unlike the platform constants, LOGIC cannot be mirrored by a generator.
  * It also reads the STORED asset metrics, so the answer is the same one approve-post will use.
  *
+ * `force` is for after the media changes. Without it this answers once per post and never again,
+ * which was survivable while the format was derived FROM the media (the answer moved with it) and is
+ * not now: a declared Reel that has just been given a photo has a conflict to report, and reporting
+ * it depends on asking again.
+ *
  * Best-effort: a failure leaves the tabs as they were, with no format line.
  */
-async function _rqLoadRoutes(postId) {
-    if (!postId || _rqRoutesFor === postId) return;
+async function _rqLoadRoutes(postId, { force = false } = {}) {
+    if (!postId || (!force && _rqRoutesFor === postId)) return;
     _rqRoutesFor = postId;
     try {
         const res = await fetch(`/.netlify/functions/route-post-formats?postId=${postId}`);
@@ -7274,7 +7343,10 @@ async function _rqLoadRoutes(postId) {
         // The post may have moved on while this was in flight.
         if (_rqRoutesFor !== postId) return;
         _rqRoutes = d.routes || null;
+        _rqRoutesByPlatform = d.routesByPlatform || null;
         _rqReviewRenderTabs();
+        // The conflict panel reads the same answer, so it has to repaint when the answer changes.
+        _pceRenderFormats();
     } catch { /* leave the tabs alone */ }
 }
 
@@ -7324,10 +7396,15 @@ function _rqReviewRenderTabs() {
         // not added a picture yet". The Media step asks for the picture; these tabs report what will
         // happen to it. Once media IS attached and still wrong for a platform, the strike-through is
         // exactly right and comes back.
-        const route = _rqRoutes && _rqRoutes[p.platform];
+        const route = _rqRouteFor(p);
         const blocked = !p.thumbnailUrl ? null
                       : route ? (route.state === 'none' ? (route.reason || 'Cannot publish here.') : null)
                               : _rqPlatformBlockedReason(p);
+        // The format the tab NAMES: the declared one where there is one, else whatever the router
+        // worked out. A declared format is shown before any media exists — it is the instruction,
+        // not a verdict on an empty post — which is why this does not wait for `route`.
+        const declaredFmt = _pceFormat(p.formatKey);
+        const shownFmt = declaredFmt || (route && route.formatKey ? _pceFormat(route.formatKey) : null);
         // Split in two because the tab is no longer one element: the BORDER belongs to the wrapper
         // that holds the label and the ×, the TEXT tone belongs to the label alone. `line-through`
         // in particular has to stay off the wrapper — text-decoration does not propagate into an
@@ -7345,10 +7422,15 @@ function _rqReviewRenderTabs() {
         // never on the last platform — a post has to go somewhere.
         const removable = group.length > 1 && _RQ_PLATFORM_REMOVABLE.includes(p.status);
         return `<div class="relative inline-flex items-stretch -mb-px border-b-2 transition ${active && blocked ? 'border-gray-300' : ''} ${borderTone}">
-        <button type="button" onclick="rqReviewSwitchPlatform(${p.id})"
-          ${blocked ? `title="${_rqEsc(blocked)}"` : ''}
+        <button type="button" onclick="${active && _RQ_PLATFORM_REMOVABLE.includes(p.status) ? `rqReviewOpenFormatMenu(${p.id}, event)` : `rqReviewSwitchPlatform(${p.id})`}"
+          ${blocked ? `title="${_rqEsc(blocked)}"` : `title="${_rqEsc(active ? 'Change what this goes out as' : 'Look at the ' + rqPlatformLabel(p.platform) + ' version')}"`}
           class="${removable ? 'pl-3' : 'px-3'} py-1.5 text-xs font-bold text-left transition cursor-pointer ${textTone}">
-          <span class="block">${_rqEsc(rqPlatformLabel(p.platform))}${flag && !blocked ? '<span class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-red-500 align-middle" title="Needs an image"></span>' : ''}</span>
+          <span class="block">${_rqEsc(rqPlatformLabel(p.platform))}${shownFmt ? ` <span class="font-semibold opacity-60">&middot;</span> ${_rqEsc(shownFmt.n)}` : ''}${
+            // The chevron is an affordance, so it appears only where it does something: on the tab
+            // you are ON, and only while the row is still editable. A published post's format is a
+            // fact about something already sent.
+            active && _RQ_PLATFORM_REMOVABLE.includes(p.status) ? '<span class="ml-0.5 opacity-50">&#9662;</span>' : ''
+          }${flag && !blocked ? '<span class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-red-500 align-middle" title="Needs an image"></span>' : ''}</span>
           ${route && p.thumbnailUrl ? (() => {
             // Only once there is MEDIA to route. A brand-new post has none, so the router has
             // nothing to derive a format from and answered `state: 'none'` — which rendered as
@@ -7366,10 +7448,16 @@ function _rqReviewRenderTabs() {
             // only 'none' blocks — and the platform does the cropping itself. So the label states
             // the outcome, and the tooltip below says it publishes and where to change the framing
             // if it matters.
-            const label = route.state === 'none' ? 'no format'
+            // With a DECLARED format the tab title already names it, so repeating it underneath says
+            // nothing. The line reports the STATE instead — and on a declared format that is the
+            // whole point of the line: "this is what you asked for, and here is what is wrong".
+            // "doesn't fit" rather than "no format": with a declaration there IS a format, it is the
+            // media that disagrees with it, and "no format" would read as our failure to find one.
+            const label = route.state === 'none' ? (route.declared ? 'doesn’t fit' : 'no format')
                         : route.state === 'crop' ? 'auto-cropped'
                         : route.state === 'trim' ? 'too long'
-                        : (route.formatLabel || '');
+                        : (route.declared ? '' : (route.formatLabel || ''));
+            if (!label) return '';
             const provisional = route.verified === false && route.state === 'ok';
             const tone = route.state === 'ok' ? 'text-gray-400' : 'text-amber-600';
             const title = provisional
@@ -7377,7 +7465,7 @@ function _rqReviewRenderTabs() {
               : route.state === 'crop'
                 ? `${route.reason || ''} This still publishes — ${rqPlatformLabel(p.platform)} crops it to fit. Swap the picture in Media if the framing matters.`
                 : route.state === 'trim'
-                  ? `${route.reason || ''} Shorten the clip in Media, or it goes out cut off.`
+                  ? `${route.reason || ''} Open Media to settle it.`
                   : (route.reason || '');
             return `<span class="block text-[9px] font-semibold ${tone}${provisional ? ' italic' : ''}"
               title="${_rqEsc(title)}">${_rqEsc(label)}</span>`;
@@ -7387,7 +7475,15 @@ function _rqReviewRenderTabs() {
           title="Don't post this to ${_rqEsc(rqPlatformLabel(p.platform))} — its caption, media and any text you have placed on it are deleted"
           aria-label="Stop posting this to ${_rqEsc(rqPlatformLabel(p.platform))}"
           class="px-1.5 text-sm leading-none text-gray-300 hover:text-red-600 transition cursor-pointer ${_pcePlatformBusy ? 'opacity-40 cursor-not-allowed' : ''}">×</button>` : ''}</div>`;
-    }).join('')}${solo}</div>`;
+    }).join('')}${_rqCanEditDestinations(group) ? `<button type="button" onclick="rqReviewAddDestination()"
+      ${_pcePlatformBusy ? 'disabled' : ''}
+      title="Send this post somewhere else as well"
+      class="ml-1.5 mb-1 px-2 py-1 text-[10px] font-bold rounded-lg border border-dashed border-gray-300 text-gray-400 hover:text-emerald-700 hover:border-emerald-300 transition cursor-pointer ${_pcePlatformBusy ? 'opacity-40 cursor-not-allowed' : ''}">+ Destination</button>` : ''}${solo}</div>`;
+}
+
+/** Can this group's destination list still be changed? False once every row is committed. */
+function _rqCanEditDestinations(group) {
+    return (group || []).some(p => _RQ_PLATFORM_REMOVABLE.includes(p.status));
 }
 
 // Statuses whose row may still be created or destroyed by changing the platform list. The server's
@@ -7411,15 +7507,19 @@ async function rqReviewRemovePlatform(id) {
     const post = _rqPostCache[id];
     if (!post || !post.platform) return;
 
+    // Removed by ROW, not by platform. Filtering on `p.platform !== post.platform` would take out
+    // every destination that platform has — dropping an Instagram carousel because you closed the
+    // Instagram Reel beside it.
     const group = _rqReviewGroupIds.map(i => _rqPostCache[i]).filter(Boolean);
-    const remaining = [...new Set(group.map(p => p.platform).filter(p => p && p !== post.platform))];
-    const label = rqPlatformLabel(post.platform);
+    const remaining = group.filter(p => p.id !== id && p.platform)
+        .map(p => ({ platform: p.platform, formatKey: p.formatKey ?? null }));
+    const label = _pceDestLabel(post.platform, post.formatKey);
     if (!remaining.length) {
         window.showToast?.('A post has to go out somewhere. Discard it instead if you don\'t want it.', { icon: '⚠️' });
         return;
     }
     // "Instagram, X are untouched" reads as a list of columns. Same join rqReviewSetConnectGate uses.
-    const labels = remaining.map(rqPlatformLabel);
+    const labels = remaining.map(d => _pceDestLabel(d.platform, d.formatKey));
     const others = labels.length > 1
         ? labels.slice(0, -1).join(', ') + ' and ' + labels[labels.length - 1]
         : labels[0];
@@ -7428,11 +7528,11 @@ async function rqReviewRemovePlatform(id) {
     try {
         const d = await _pceApplyPlatforms(remaining);
         if (!d) return;
-        // `locked` means the server kept a platform this asked to remove, because that one is
+        // `locked` means the server kept a destination this asked to remove, because that one is
         // already committed. Saying "removed" would be a lie the tab strip is about to contradict.
         window.showToast?.(
             d.locked?.length
-                ? `${d.locked.map(pl => rqPlatformLabel(pl)).join(', ')} is already scheduled, so it stays. Reschedule it first if you want it gone.`
+                ? `${d.locked.join(', ')} is already scheduled, so it stays. Reschedule it first if you want it gone.`
                 : `No longer posting this to ${label}.`,
             { icon: d.locked?.length ? '⚠️' : '✅' },
         );
@@ -9130,18 +9230,23 @@ function _pceSetPlatformMsg(text, kind) {
  * Throws on failure, having already put both surfaces back to what is actually stored. Callers only
  * decide where to say so — a toast for the tab strip, the panel's own line for the chips.
  */
-async function _pceApplyPlatforms(platforms) {
+async function _pceApplyPlatforms(destinations) {
     const postId = _rqReviewPostId;
     if (postId == null) return null;
 
     _pcePlatformBusy = true;
-    _pcePendingPlatforms = new Set(platforms);   // paint the answer now, reconcile when it lands
+    // Platform ids only: the parked chip picker paints from this and thinks in platforms. The
+    // REQUEST carries the full destinations — the pending set is a spinner, not the payload.
+    _pcePendingPlatforms = new Set(destinations.map(d => d.platform));
     _pceRenderPlatformPicker();
     _rqReviewRenderTabs();
     try {
         const res = await fetch('/.netlify/functions/set-post-platforms', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ postId, platforms: [...platforms] }),
+            body: JSON.stringify({
+                postId,
+                destinations: destinations.map(d => ({ platform: d.platform, formatKey: d.formatKey ?? null })),
+            }),
         });
         const d = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(d.error || 'Could not change the platforms.');
@@ -9167,32 +9272,368 @@ async function _pceApplyPlatforms(platforms) {
     }
 }
 
+/** The group's destinations as the server wants them, preserving each row's declared format. */
+function _pceCurrentDestinations() {
+    const group = _rqReviewGroupIds.map(id => _rqPostCache[id]).filter(Boolean);
+    const out = group.filter(p => p.platform).map(p => ({ platform: p.platform, formatKey: p.formatKey ?? null }));
+    const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
+    if (post?.platform && !out.some(d => d.platform === post.platform && (d.formatKey ?? null) === (post.formatKey ?? null))) {
+        out.push({ platform: post.platform, formatKey: post.formatKey ?? null });
+    }
+    return out;
+}
+
 async function _pceTogglePostPlatform(platformId) {
     if (_pcePlatformBusy) return;
     const postId = _rqReviewPostId;
     const post = postId != null ? _rqPostCache[postId] : null;
     if (!post) return;
 
-    const current = new Set(_rqReviewGroupIds.map(id => _rqPostCache[id]?.platform).filter(Boolean));
-    if (post.platform) current.add(post.platform);
-    if (current.has(platformId)) current.delete(platformId); else current.add(platformId);
+    // Toggling a PLATFORM keeps every destination that platform already has, and drops all of them
+    // when it goes. That is what a platform-level chip can mean now that a platform may hold more
+    // than one destination — the per-destination control is the tab strip.
+    const current = _pceCurrentDestinations();
+    const has = current.some(d => d.platform === platformId);
+    const next = has
+        ? current.filter(d => d.platform !== platformId)
+        : [...current, { platform: platformId, formatKey: (_pceDefaultLiveFormat(platformId)?.k ?? null) }];
     // A post has to go somewhere. Refuse in the panel rather than letting the server 400 — the last
     // chip is the one people click by accident when they mean "only this one".
-    if (!current.size) { _pceSetPlatformMsg('A post needs at least one platform.', 'error'); return; }
+    if (!next.length) { _pceSetPlatformMsg('A post needs at least one platform.', 'error'); return; }
 
     _pceSetPlatformMsg('Updating…');
     try {
-        const d = await _pceApplyPlatforms([...current]);
+        const d = await _pceApplyPlatforms(next);
         if (!d) return;
         _pceSetPlatformMsg(
+            // `locked` now arrives as written labels ("Instagram Reel"), because a bare platform id
+            // could not say WHICH of a platform's destinations was the committed one.
             d.locked?.length
-                ? `${d.locked.map(p => window.PlatformConstants.label(p)).join(', ')} already scheduled — not removed.`
+                ? `${d.locked.join(', ')} already scheduled — not removed.`
                 : 'Platforms updated.',
             d.locked?.length ? 'error' : 'ok',
         );
     } catch (err) {
         _pceSetPlatformMsg(err.message || 'Could not change the platforms.', 'error');
     }
+}
+
+// ── Destinations: the picker, and the tab's format menu ─────────────────────────────────────────
+// Everything below is the answer to "Instagram, Reel, nothing else". A destination is a platform AND
+// a format (src/utils/post-destinations.ts); these are the two ways a person names one.
+
+/** The format a platform gets when nobody has said otherwise: its first LIVE format. */
+function _pceDefaultLiveFormat(platform) {
+    return _pceFormatsFor(platform).find(f => f.a === 'live') || null;
+}
+
+const _pceDestKey = (platform, formatKey) => `${platform}|${formatKey || ''}`;
+function _pceDestParse(key) {
+    const i = key.indexOf('|');
+    return { platform: key.slice(0, i), formatKey: key.slice(i + 1) || null };
+}
+
+let _pceDestMode = 'create';        // 'create' | 'add'
+let _pceDestAssistantId = null;
+let _pceDestChosen = new Set();     // destination keys
+let _pceDestLocked = new Set();     // committed rows: shown ticked, cannot be unticked
+let _pceDestBusy = false;
+
+/** Destination label as a person reads it: "Instagram Reel", or just the platform if format-less. */
+function _pceDestLabel(platform, formatKey) {
+    const base = rqPlatformLabel(platform);
+    const f = _pceFormat(formatKey);
+    return f ? `${base} · ${f.n}` : base;
+}
+
+/**
+ * "Create Post" — choose where a new post goes before it exists.
+ *
+ * Seeded with every connected account on its default feed format, which is exactly what Create Post
+ * did silently before this modal existed. The common post is therefore still one click ("Start
+ * writing"); what is new is that you can narrow it. Seeding empty would make the everyday post six
+ * clicks of work to get back what connecting the accounts already meant.
+ */
+async function pceOpenDestinationsForCreate(assistantId) {
+    _pceDestMode = 'create';
+    _pceDestAssistantId = assistantId;
+    _pceDestLocked = new Set();
+
+    let cap = _gpCap;
+    if (!cap) { cap = await window.checkCapacity().catch(() => null); _gpCap = cap; }
+    const connected = (cap?.connectedPlatforms || []).map(s => String(s).toLowerCase());
+    const ids = window.PlatformConstants.all.map(p => p.id).filter(id => connected.some(c => c.includes(id)));
+    // Instagram when nothing is connected: the post is still editable and the connection is asked
+    // for at approval (rqEnsurePlatformConnection), same fallback the old seeding used.
+    const seed = ids.length ? ids : ['instagram'];
+    _pceDestChosen = new Set(seed.map(id => _pceDestKey(id, _pceDefaultLiveFormat(id)?.k ?? null)));
+
+    document.getElementById('pce-dest-title').textContent = 'Where should this go?';
+    document.getElementById('pce-dest-sub').textContent = 'Pick a platform and what to post there. Everything you have connected is ticked.';
+    document.getElementById('pce-dest-confirm').textContent = 'Start writing';
+    _pceShowDestinations();
+}
+
+/** "+ Destination" on the tab strip — the same picker, pre-filled with what the post already has. */
+function rqReviewAddDestination() {
+    if (_pcePlatformBusy) return;
+    const group = _rqReviewGroupIds.map(i => _rqPostCache[i]).filter(Boolean);
+    if (!group.length) return;
+    _pceDestMode = 'add';
+    _pceDestAssistantId = null;
+    _pceDestChosen = new Set(group.map(p => _pceDestKey(p.platform, p.formatKey)));
+    // A committed row cannot be removed here — set-post-platforms refuses it and reports it back as
+    // `locked`. Showing it as untickable is the same rule stated before the click rather than after.
+    _pceDestLocked = new Set(group.filter(p => !_RQ_PLATFORM_REMOVABLE.includes(p.status))
+        .map(p => _pceDestKey(p.platform, p.formatKey)));
+
+    document.getElementById('pce-dest-title').textContent = 'Where does this post go?';
+    document.getElementById('pce-dest-sub').textContent = 'Add a destination, or untick one to stop posting there.';
+    document.getElementById('pce-dest-confirm').textContent = 'Save destinations';
+    _pceShowDestinations();
+}
+
+function _pceShowDestinations() {
+    const m = document.getElementById('pce-dest-modal');
+    if (!m) return;
+    _pceDestBusy = false;
+    _pceRenderDestinations();
+    // Both classes: the modal is a flex container, and `hidden` alone loses to a display utility.
+    m.classList.remove('hidden');
+    m.classList.add('flex');
+    document.addEventListener('keydown', _pceDestEsc);
+}
+
+function pceCloseDestinations() {
+    const m = document.getElementById('pce-dest-modal');
+    if (!m) return;
+    m.classList.add('hidden');
+    m.classList.remove('flex');
+    document.removeEventListener('keydown', _pceDestEsc);
+}
+
+function _pceDestEsc(e) { if (e.key === 'Escape') pceCloseDestinations(); }
+
+function _pceToggleDestination(key) {
+    if (_pceDestBusy) return;
+    if (_pceDestLocked.has(key)) return;
+    // Removing is always allowed; ADDING is not. A format we cannot publish is rendered as a
+    // disabled button, but `disabled` is a property of the markup and this is the rule — and the
+    // rule has to hold for every caller, not just for a mouse. parseDestinations deliberately does
+    // NOT check availability (save-post-format lets you plan a carousel before we can send one), so
+    // an unschedulable key reaching create-manual-post would be accepted and then refused at
+    // approval: a post created dead on arrival, by a picker that offered it.
+    if (!_pceDestChosen.has(key)) {
+        const fmt = _pceFormat(_pceDestParse(key).formatKey);
+        if (fmt && fmt.a !== 'live') return;
+    }
+    if (_pceDestChosen.has(key)) _pceDestChosen.delete(key); else _pceDestChosen.add(key);
+    _pceRenderDestinations();
+}
+
+function _pceRenderDestinations() {
+    const host = document.getElementById('pce-dest-list');
+    if (!host) return;
+    const connected = (typeof gpConnectedPlatforms === 'function' ? gpConnectedPlatforms() : []) || [];
+    const isConnected = (id) => connected.some(s => String(s).toLowerCase().includes(id));
+    // Connected accounts first — the ones you can actually publish to are the ones under the cursor.
+    // The rest stay pickable: drafting ahead of connecting is legitimate, and approve-post is the
+    // real gate (it returns PLATFORM_NOT_CONNECTED with a prompt).
+    const ordered = [...window.PlatformConstants.all].sort((a, b) => (isConnected(b.id) ? 1 : 0) - (isConnected(a.id) ? 1 : 0));
+
+    host.innerHTML = ordered.map(p => {
+        const formats = _pceFormatsFor(p.id);
+        return `<div class="border border-gray-200 rounded-xl overflow-hidden">
+          <div class="flex items-center gap-2 px-3 py-2">
+            <span class="w-1.5 h-1.5 rounded-full ${isConnected(p.id) ? 'bg-emerald-500' : 'bg-gray-300'}"
+              title="${isConnected(p.id) ? 'Connected' : 'Not connected yet — you can still draft for it'}"></span>
+            <span class="text-sm font-bold text-gray-800">${_rqEsc(p.label)}</span>
+            ${isConnected(p.id) ? '' : '<span class="text-[10px] text-gray-400">not connected</span>'}
+          </div>
+          <div class="flex flex-wrap gap-1.5 px-3 pb-2.5">
+            ${formats.map(f => {
+              const key = _pceDestKey(p.id, f.k);
+              const on = _pceDestChosen.has(key);
+              const locked = _pceDestLocked.has(key);
+              const live = f.a === 'live';
+              // Unavailable formats are SHOWN, disabled, carrying the catalogue's own sentence.
+              // Hiding them turns a roadmap into a mystery — "where is Stories?" has an answer and
+              // this is where it belongs.
+              const title = !live ? (f.why || 'Not available yet.')
+                          : locked ? 'Already scheduled — reschedule it first if you want it gone.'
+                          : f.d || '';
+              const cls = !live
+                ? 'border-dashed border-gray-200 text-gray-300 cursor-not-allowed'
+                : on
+                  ? `border-emerald-600 bg-emerald-50 text-emerald-800 ${locked ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`
+                  : 'border-gray-200 text-gray-600 hover:border-emerald-300 cursor-pointer';
+              return `<button type="button" ${live && !locked ? `onclick="_pceToggleDestination('${key}')"` : 'disabled'}
+                title="${_rqEsc(title)}" aria-pressed="${on ? 'true' : 'false'}"
+                class="px-2.5 py-1.5 rounded-lg border text-[11px] font-bold transition ${cls}">
+                ${_rqEsc(f.n)}<span class="ml-1.5 font-semibold opacity-60">${_rqEsc(_pceFormatSpecLine(f))}</span>
+              </button>`;
+            }).join('')}
+          </div>
+        </div>`;
+    }).join('');
+
+    const chips = document.getElementById('pce-dest-chips');
+    const list = [..._pceDestChosen];
+    chips.innerHTML = list.length
+        ? list.map(k => {
+            const d = _pceDestParse(k);
+            return `<span class="px-2 py-1 rounded-full bg-emerald-50 border border-emerald-100 text-emerald-800 text-[11px] font-bold">${_rqEsc(_pceDestLabel(d.platform, d.formatKey))}</span>`;
+          }).join('')
+        : '<span class="px-2 py-1 rounded-full bg-gray-100 border border-gray-200 text-gray-500 text-[11px] font-semibold">Nothing selected — a post has to go somewhere</span>';
+
+    // The footer describes what confirming will DO, which is not the same sentence in both modes:
+    // "will be created as" is a lie on a post that already exists and is only gaining a destination.
+    document.getElementById('pce-dest-chips-label').textContent =
+        _pceDestMode === 'add' ? 'This post goes to' : 'This post will be created as';
+
+    const note = document.getElementById('pce-dest-note');
+    note.textContent = !list.length ? ''
+        : list.length === 1 ? 'One draft, with its own caption and media.'
+        : `${list.length} drafts, one per destination — each with its own caption, media and text.`;
+
+    const btn = document.getElementById('pce-dest-confirm');
+    btn.disabled = !list.length || _pceDestBusy;
+    btn.classList.toggle('opacity-40', btn.disabled);
+    btn.classList.toggle('cursor-not-allowed', btn.disabled);
+}
+
+/** The one-line spec under a format's name: what it takes, from the catalogue. */
+function _pceFormatSpecLine(f) {
+    const bits = [];
+    if (f.m && f.m !== 'none') bits.push(f.m === 'mixed' ? 'image or video' : f.m);
+    if (f.ar) bits.push(f.ar);
+    if ((f.max || 1) > 1) bits.push(`${f.min}–${f.max}`);
+    if (f.maxd) bits.push(f.maxd % 60 === 0 ? `≤${f.maxd / 60}m` : `≤${f.maxd}s`);
+    return bits.join(' · ');
+}
+
+async function pceConfirmDestinations() {
+    if (_pceDestBusy) return;
+    const destinations = [..._pceDestChosen].map(_pceDestParse);
+    if (!destinations.length) return;
+
+    _pceDestBusy = true;
+    _pceRenderDestinations();
+    const btn = document.getElementById('pce-dest-confirm');
+    const was = btn.textContent;
+    btn.textContent = 'Working…';
+
+    try {
+        if (_pceDestMode === 'create') {
+            const res = await fetch('/.netlify/functions/create-manual-post', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ assistantId: _pceDestAssistantId, destinations, blank: true }),
+            });
+            const d = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(d.error || 'Could not start a new post.');
+            const created = (d.created || [])[0];
+            if (!created) throw new Error('Could not start a new post.');
+            _gpCurrentAssistantId = _pceDestAssistantId;
+            pceCloseDestinations();
+            await openPostReview(created.id);
+        } else {
+            pceCloseDestinations();
+            const d = await _pceApplyPlatforms(destinations);
+            if (d) {
+                window.showToast?.(
+                    d.locked?.length
+                        ? `${d.locked.join(', ')} is already scheduled, so it stays. Reschedule it first if you want it gone.`
+                        : 'Destinations updated.',
+                    { icon: d.locked?.length ? '⚠️' : '✅' },
+                );
+            }
+        }
+    } catch (err) {
+        window.showToast?.(err.message || 'Could not save the destinations.', { icon: '⚠️' });
+        btn.textContent = was;
+    } finally {
+        _pceDestBusy = false;
+        _pceRenderDestinations();
+    }
+}
+
+// ── The tab's format menu ───────────────────────────────────────────────────────────────────────
+// Changing what one destination goes out as, without touching where the post goes. Anchored to the
+// tab because that is where the format is named.
+
+function rqReviewOpenFormatMenu(postId, ev) {
+    if (ev) ev.stopPropagation();
+    const post = _rqPostCache[postId];
+    const menu = document.getElementById('pce-format-menu');
+    if (!post || !menu) return;
+    if (menu.dataset.forPost === String(postId) && !menu.classList.contains('hidden')) {
+        _pceCloseFormatMenu();
+        return;
+    }
+
+    const current = post.formatKey || (_rqRouteFor(post)?.formatKey ?? null);
+    const formats = _pceFormatsFor(post.platform);
+    menu.dataset.forPost = String(postId);
+    menu.innerHTML = `<div class="bg-white border border-gray-200 rounded-xl shadow-2xl p-1.5 w-64">
+      <p class="text-[10px] font-bold uppercase tracking-wider text-gray-400 px-2 py-1">${_rqEsc(rqPlatformLabel(post.platform))} — post as</p>
+      ${formats.map(f => {
+        const live = f.a === 'live';
+        const sel = f.k === current;
+        return `<button type="button" ${live ? `onclick="rqReviewPickFormat(${postId}, '${f.k}')"` : 'disabled'}
+          title="${_rqEsc(live ? (f.d || '') : (f.why || 'Not available yet.'))}"
+          class="w-full flex items-baseline justify-between gap-2 px-2 py-1.5 rounded-lg text-left text-xs transition ${
+            !live ? 'text-gray-300 cursor-not-allowed'
+                  : sel ? 'bg-emerald-50 text-emerald-800 font-bold cursor-pointer'
+                        : 'text-gray-700 hover:bg-gray-50 cursor-pointer'}">
+          <span>${_rqEsc(f.n)}</span>
+          <span class="text-[10px] ${!live ? 'text-gray-300' : 'text-gray-400'}">${_rqEsc(live ? _pceFormatSpecLine(f) : 'not available')}</span>
+        </button>`;
+      }).join('')}
+    </div>`;
+
+    // Anchored under the tab, then nudged back inside the viewport — the last tab in a six-platform
+    // strip sits close enough to the right edge to push a 256px menu off screen.
+    const anchor = ev?.currentTarget?.getBoundingClientRect?.();
+    menu.classList.remove('hidden');
+    const w = menu.firstElementChild.getBoundingClientRect().width || 256;
+    const left = anchor ? Math.min(anchor.left, window.innerWidth - w - 12) : 12;
+    menu.style.left = `${Math.max(8, left)}px`;
+    menu.style.top = `${anchor ? anchor.bottom + 4 : 80}px`;
+
+    setTimeout(() => document.addEventListener('click', _pceFormatMenuAway), 0);
+    document.addEventListener('keydown', _pceFormatMenuEsc);
+}
+
+function _pceCloseFormatMenu() {
+    const menu = document.getElementById('pce-format-menu');
+    if (!menu) return;
+    menu.classList.add('hidden');
+    menu.innerHTML = '';
+    delete menu.dataset.forPost;
+    document.removeEventListener('click', _pceFormatMenuAway);
+    document.removeEventListener('keydown', _pceFormatMenuEsc);
+}
+function _pceFormatMenuAway(e) {
+    if (!document.getElementById('pce-format-menu')?.contains(e.target)) _pceCloseFormatMenu();
+}
+function _pceFormatMenuEsc(e) { if (e.key === 'Escape') _pceCloseFormatMenu(); }
+
+/**
+ * Declare this destination's format.
+ *
+ * Goes through _pceChooseFormat, which is the existing save-post-format path — the same one the
+ * deleted picker used and the same one the media-agreement code calls. The routes are then stale
+ * (the server checks the media against the DECLARED format, and the declaration just changed), so
+ * they are asked for again rather than left reporting the old format's verdict.
+ */
+async function rqReviewPickFormat(postId, formatKey) {
+    _pceCloseFormatMenu();
+    const post = _rqPostCache[postId];
+    if (!post || post.formatKey === formatKey) return;
+    if (_rqReviewPostId !== postId) rqReviewSwitchPlatform(postId);
+    await _pceChooseFormat(formatKey);
+    _rqReviewRenderTabs();
+    _rqLoadRoutes(_rqReviewPostId, { force: true });
 }
 
 /**
@@ -9274,8 +9715,48 @@ function _pceChooseStyle(key) {
  */
 function _pceRenderFormats() {
     const post = _rqReviewPostId != null ? _rqPostCache[_rqReviewPostId] : null;
-    if (!post) { _pceRenderFormatRules(null, null); return; }
-    _pceRenderFormatRules(post, _pceActiveFormat(post));
+    if (!post) { _pceRenderFormatRules(null, null); _pceRenderMediaBrief(null, null); return; }
+    const fmt = _pceActiveFormat(post);
+    _pceRenderFormatRules(post, fmt);
+    _pceRenderMediaBrief(post, fmt);
+}
+
+/**
+ * State what this destination's format needs, in the step where you go and get it.
+ *
+ * Only shown for a DECLARED format. A derived one is a description of the media already attached, so
+ * telling someone their Reel needs a vertical video after they attached the vertical video that made
+ * it a Reel is a tautology — and on an empty post there would be nothing to describe at all.
+ *
+ * Wording comes from the catalogue's own numbers rather than a second table: a ceiling appears only
+ * where POST_FORMATS declares one, so a Reel says nothing about length (deliberately — see the
+ * maxDurationS comment in post-formats.ts) and a Short says three minutes.
+ */
+function _pceRenderMediaBrief(post, fmt) {
+    const host = document.getElementById('pce-media-brief');
+    if (!host) return;
+    const declared = post && post.formatKey ? fmt : null;
+    if (!declared || declared.m === 'none') { host.classList.add('hidden'); return; }
+
+    const noun = declared.m === 'video' ? 'video'
+               : declared.m === 'mixed' ? 'image or video'
+               : declared.m === 'document' ? 'document'
+               : declared.m === 'audio' ? 'audio clip' : 'image';
+    // "vertical" comes from the RATIO, not from the media kind: a LinkedIn native video is 16:9 and
+    // calling it vertical would be wrong in the one place the user is about to go and find one.
+    const vertical = declared.ar === '9:16' ? 'vertical ' : '';
+    const count = (declared.max || 1) > 1
+        ? `${declared.min}–${declared.max} ${noun}s`
+        : `one ${vertical}${noun}`;
+    document.getElementById('pce-media-brief-title').textContent =
+        `${rqPlatformLabel(post.platform)} ${declared.n} needs ${count}`;
+
+    const spec = [];
+    if (declared.ar) spec.push(declared.ar);
+    if (declared.maxd) spec.push(declared.maxd % 60 === 0 ? `up to ${declared.maxd / 60} minutes` : `up to ${declared.maxd} seconds`);
+    if (declared.cl) spec.push(`caption up to ${declared.cl.toLocaleString()} characters`);
+    document.getElementById('pce-media-brief-spec').textContent = spec.join(' · ');
+    host.classList.remove('hidden');
 }
 
 // The chosen format's actual constraints, and — when it can't publish — why not.
@@ -9324,6 +9805,11 @@ function _pceBestFormatForMedia(platform, kind, count = 1) {
  */
 async function _pceReconcileFormatToMedia(post) {
     if (!post) return;
+    // Routes are computed from the media that just changed, so the old answer is stale — and the
+    // conflict panel below reads it. Asked for unconditionally: even where the format still fits,
+    // the DURATION and SHAPE checks may not.
+    _rqLoadRoutes(_rqReviewPostId, { force: true });
+
     const kind = _pceMediaKindOf(post);
     const fmt = _pceActiveFormat(post);
     if (!kind || _pceFormatAccepts(fmt, kind)) return;
@@ -9332,6 +9818,26 @@ async function _pceReconcileFormatToMedia(post) {
     const target = _pceBestFormatForMedia(post.platform, kind, count);
     const noun = kind === 'video' ? 'video' : 'image';
     const a = kind === 'video' ? 'a video' : 'an image';
+
+    // ── A DECLARED format is not ours to change ─────────────────────────────────────────────────
+    // Switching silently is right when nobody chose: the format was derived from the media, so
+    // moving it to fit new media is the same derivation run again. It is wrong the moment the user
+    // has said what they want. Someone who picked "Reel" and attached a photo has a decision to
+    // make — swap the picture, or accept a feed post — and making it for them is how you end up
+    // publishing something nobody asked for.
+    //
+    // The offer is _pceRenderFormatRules', which already renders "Switch to X" as a button. All this
+    // does is stop overruling and let that panel be the answer.
+    if (post.formatKey) {
+        window.showToast?.(
+            target
+                ? `That is ${a}, and this post is set to go out as a ${fmt?.n || 'different format'}. Open Media to switch it to ${target.n}, or swap the media.`
+                : `That is ${a}, and ${window.PlatformConstants.label(post.platform)} has no format we can publish it in yet.`,
+            { icon: '⚠️', duration: 6000 });
+        _pceRenderFormats();
+        return;
+    }
+
     if (!target) {
         window.showToast?.(`${window.PlatformConstants.label(post.platform)} has no format we can publish ${a} in yet — this post won't pass approval as it stands.`, { icon: '⚠️', duration: 6000 });
         _pceRenderFormats();     // repaint so the rules table shows the mismatch
@@ -9347,12 +9853,30 @@ async function _pceReconcileFormatToMedia(post) {
 
 function _pceRenderFormatRules(post, fmt) {
     // The rules TABLE (media kind, best ratio, slide count, caption cap) went with the picker: it
-    // described a format you were choosing. What is left is the mismatch warning — the format the
-    // engine derived cannot carry the media that is actually attached — which is a problem to fix,
-    // not a fact to read.
+    // described a format you were choosing. What is left is the mismatch warning — the format cannot
+    // carry the media that is actually attached — which is a problem to fix, not a fact to read.
     const blocked = document.getElementById('pce-format-blocked');
     if (!blocked) return;
     if (!fmt) { blocked.classList.add('hidden'); return; }
+
+    // ── The server's verdict wins where we have one ─────────────────────────────────────────────
+    // It knows durations and aspect ratios this page does not, and it is the same answer approve-post
+    // enforces. It is also the only thing that can report the conflict a DECLARED format creates —
+    // "this Short is 4m 12s" is not a kind mismatch, so the local check below is blind to it, which
+    // is exactly how a too-long clip used to be silently rerouted instead of raised.
+    const route = _rqRouteFor(post);
+    if (route && route.declared && (route.state === 'trim' || route.state === 'none') && post?.thumbnailUrl) {
+        const sugg = route.suggestionKey ? _pceFormat(route.suggestionKey) : null;
+        blocked.innerHTML = `<p class="font-bold mb-0.5">${_rqEsc(
+            route.state === 'trim' ? `This is longer than a ${fmt.n} takes` : `A ${fmt.n} can’t carry this`)}</p>
+          <p>${_rqEsc(route.reason || '')}</p>
+          ${sugg
+            ? `<button type="button" onclick="rqReviewPickFormat(${post.id}, '${sugg.k}')"
+                 class="mt-1.5 px-2.5 py-1 rounded-lg border border-amber-300 bg-white text-amber-800 text-[11px] font-bold hover:bg-amber-100 transition cursor-pointer">Post it as a ${_rqEsc(sugg.n)} instead</button>`
+            : `<p class="mt-1 text-amber-700/80">Swap the media, or pick a different format from the tab above.</p>`}`;
+        blocked.classList.remove('hidden');
+        return;
+    }
 
     const kind = _pceMediaKindOf(post);
     const mismatch = kind && !_pceFormatAccepts(fmt, kind);
@@ -9364,7 +9888,7 @@ function _pceRenderFormatRules(post, fmt) {
         blocked.innerHTML = `<p class="font-bold mb-0.5">This format can't carry ${_rqEsc(a)}</p>
           <p>${_rqEsc(fmt.n)} takes ${_rqEsc(takes)}. Approving would be refused.</p>
           ${target
-            ? `<button type="button" onclick="_pceChooseFormat('${target.k}')"
+            ? `<button type="button" onclick="rqReviewPickFormat(${post.id}, '${target.k}')"
                  class="mt-1.5 px-2.5 py-1 rounded-lg border border-amber-300 bg-white text-amber-800 text-[11px] font-bold hover:bg-amber-100 transition cursor-pointer">Switch to ${_rqEsc(target.n)}</button>`
             : `<p class="mt-1 text-amber-700/80">No format we can publish yet takes ${_rqEsc(a)} on ${_rqEsc(window.PlatformConstants.label(post.platform))} — swap the media instead.</p>`}`;
         blocked.classList.remove('hidden');
@@ -12144,39 +12668,17 @@ async function openGeneratePostSheet() {
     const assistantId = window._currentAssistantId || _gpCurrentAssistantId || null;
     if (!assistantId) { window.showToast?.('Pick an assistant first.', { icon: '⚠️' }); return; }
 
-    window.showToast?.('Opening a new post…', { icon: '✍️' });
-
-    // ── Every connected platform, the way Autopilot does it ───────────────────────────────────
-    // This used to seed the FIRST connected platform only, which is why the editor needed a
-    // Platforms step at all: a post could not reach anywhere else without one. But the answer was
-    // never in doubt — a post goes to the accounts the workspace has actually connected, which is
-    // exactly what resolveConnectedDraftPlatforms gives the autonomous drafter. Asking the user to
-    // restate it was asking them to configure something the system already knew.
+    // ── Ask where it is going, before it exists ───────────────────────────────────────────────
+    // This used to create the draft immediately on every connected account and open the editor on
+    // it. That is still the DEFAULT — the picker opens with exactly that selection, so the everyday
+    // post is one extra click — but it is no longer the only thing that can happen. Seeding every
+    // connection and offering no way to narrow it made "Instagram, Reel, nothing else" unaskable:
+    // there was no destination step, and the editor's format picker had been deleted as derivable.
     //
-    // Falls back to Instagram when nothing is connected: the post is still editable, and approving
-    // it is where the missing connection is reported (rqEnsurePlatformConnection).
-    let cap = _gpCap;
-    if (!cap) { cap = await window.checkCapacity().catch(() => null); _gpCap = cap; }
-    const connected = (cap?.connectedPlatforms || []).map(s => String(s).toLowerCase());
-    const platforms = window.PlatformConstants.all
-        .filter(p => connected.some(c => c.includes(p.id)))
-        .map(p => p.id);
-    if (!platforms.length) platforms.push('instagram');
-
-    try {
-        const res = await fetch('/.netlify/functions/create-manual-post', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ assistantId, platforms, blank: true }),
-        });
-        const d = await res.json().catch(() => ({}));
-        if (!res.ok) { window.showToast?.(d.error || 'Could not start a new post.', { icon: '⚠️' }); return; }
-        const created = (d.created || [])[0];
-        if (!created) { window.showToast?.('Could not start a new post.', { icon: '⚠️' }); return; }
-        _gpCurrentAssistantId = assistantId;
-        await openPostReview(created.id);
-    } catch {
-        window.showToast?.('Network error — please try again.', { icon: '⚠️' });
-    }
+    // The row is created on confirm (pceConfirmDestinations), not here, because a destination is
+    // part of what the row IS: its platform and its format_key are columns, and creating first
+    // would mean creating rows to immediately delete.
+    await pceOpenDestinationsForCreate(assistantId);
 }
 
 // Lowercase service names of the org's active social connections (e.g. ['instagram','x']).

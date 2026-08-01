@@ -75,6 +75,7 @@ export default withLambda(async (event) => {
             ? await db.select({
                 id: scheduledPosts.id,
                 platform: scheduledPosts.platform,
+                formatKey: scheduledPosts.formatKey,
                 contentAssetIds: scheduledPosts.contentAssetIds,
             })
                 .from(scheduledPosts)
@@ -86,39 +87,51 @@ export default withLambda(async (event) => {
                         ? or(eq(scheduledPosts.organisationId, me.organisationId), isNull(scheduledPosts.organisationId))
                         : eq(scheduledPosts.userId, userId),
                 ))
-            : [{ id: post.id, platform: post.platform, contentAssetIds: post.contentAssetIds }];
+            : [{ id: post.id, platform: post.platform, formatKey: post.formatKey, contentAssetIds: post.contentAssetIds }];
 
-        // One row per platform. The queried post wins for its own platform, so the tab you are
-        // looking at is always described by the row you are looking at.
-        const rowFor = new Map<string, { id: number; contentAssetIds: unknown }>();
+        // ── Keyed by ROW, not by platform ───────────────────────────────────────────────────────
+        // A group may now hold two destinations on the same platform — a Reel and a carousel, both
+        // Instagram — and they route differently because they declare different formats. Collapsing
+        // to one entry per platform would answer for whichever row happened to be last, and the
+        // composer would label one of the two tabs with the other's verdict.
+        const rows = new Map<number, { platform: string; formatKey: string | null; contentAssetIds: unknown }>();
         for (const s of siblings as any[]) {
             if (!s.platform) continue;
-            if (!rowFor.has(s.platform) || s.id === post.id) {
-                rowFor.set(s.platform, { id: s.id, contentAssetIds: s.contentAssetIds });
-            }
+            rows.set(s.id, { platform: s.platform, formatKey: s.formatKey ?? null, contentAssetIds: s.contentAssetIds });
         }
-        if (post.platform && !rowFor.has(post.platform)) {
-            rowFor.set(post.platform, { id: post.id, contentAssetIds: post.contentAssetIds });
+        if (post.platform && !rows.has(post.id)) {
+            rows.set(post.id, { platform: post.platform, formatKey: post.formatKey ?? null, contentAssetIds: post.contentAssetIds });
         }
 
-        // Metrics for every asset any sibling carries, in one query rather than one per platform.
+        // Metrics for every asset any sibling carries, in one query rather than one per row.
         const metrics = await loadAssetMetricsById(
             db,
-            [...rowFor.values()].flatMap(r => assetIdList(r.contentAssetIds)),
+            [...rows.values()].flatMap(r => assetIdList(r.contentAssetIds)),
         );
 
         // Flattened for the client: it needs to render a tab, not reason about a format object.
+        // `declared` tells it whether the format is the user's instruction or our derivation — the
+        // difference between a conflict to settle and a fact to state.
         const routes: Record<string, unknown> = {};
-        for (const [platform, row] of rowFor) {
-            const r = routeAsset(platform, orderMetrics(assetIdList(row.contentAssetIds), metrics));
-            routes[platform] = {
+        const byPlatform: Record<string, unknown> = {};
+        for (const [id, row] of rows) {
+            const r = routeAsset(row.platform, orderMetrics(assetIdList(row.contentAssetIds), metrics), row.formatKey);
+            const flat = {
                 state: r.state,
                 formatKey: r.format?.key ?? null,
                 formatLabel: r.format?.label ?? null,
                 reason: r.reason ?? null,
                 verified: r.verified,
+                declared: r.declared === true,
+                suggestionKey: r.suggestion?.key ?? null,
+                suggestionLabel: r.suggestion?.label ?? null,
                 alternatives: r.alternatives.map(f => ({ key: f.key, label: f.label })),
             };
+            routes[String(id)] = flat;
+            // Kept alongside so a caller that has only a platform still gets an answer. Where two
+            // rows share a platform this is necessarily one of them — which is exactly why the
+            // composer reads `routes` by id.
+            if (!byPlatform[row.platform] || id === post.id) byPlatform[row.platform] = flat;
         }
 
         // What the QUERIED post's routing was derived from, so the composer can say "we haven't
@@ -130,6 +143,7 @@ export default withLambda(async (event) => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 routes,
+                routesByPlatform: byPlatform,
                 assets: ownAssets.map(a => ({ kind: a.kind, width: a.width ?? null, height: a.height ?? null, durationS: a.durationS ?? null })),
             }),
         };

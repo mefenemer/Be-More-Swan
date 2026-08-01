@@ -54,6 +54,16 @@ export interface RouteResult {
     verified: boolean;
     /** The platform's other live formats that accept this media, for a manual override. */
     alternatives: PostFormatSpec[];
+    /**
+     * True when the format was DECLARED by the user rather than derived here.
+     *
+     * The UI needs the difference: a derived format is a report ("this will go out as a Reel"), a
+     * declared one is the user's instruction, and a problem with it is a conflict they have to
+     * settle rather than a fact to state.
+     */
+    declared?: boolean;
+    /** Where a declared format cannot take this media, the live format on the same platform that can. */
+    suggestion?: PostFormatSpec | null;
 }
 
 /** Aspect ratios are quoted as 'w:h' strings; assets arrive as pixels. */
@@ -100,14 +110,107 @@ function overDuration(fmt: PostFormatSpec, a: AssetMetrics): boolean | null {
 const secs = (s: number) => (s % 60 === 0 ? `${s / 60} minutes` : `${Math.floor(s / 60)}m ${s % 60}s`);
 
 /**
- * Pick the format a platform should publish these assets as.
+ * Check a DECLARED format against what is attached.
+ *
+ * This is the other half of the router, and the reason routeAsset no longer decides everything: once
+ * a user has said "this is a Reel", deriving a format from the media would silently overrule them.
+ * So where a format is declared the job inverts — the format is fixed and the MEDIA is what is in
+ * question.
+ *
+ * The three ways a declaration can be wrong, and why each answers the way it does:
+ *   • wrong KIND or COUNT ('none')  a still cannot become a Reel by cropping. The destination cannot
+ *                                   publish as it stands, which is exactly what 'none' means.
+ *   • wrong SHAPE ('crop')          unchanged from derivation: the platform crops, it publishes.
+ *   • too LONG ('trim')             the one real behaviour change. Derivation REROUTES a 4-minute
+ *                                   9:16 clip from Short to Video, which is right when nobody chose
+ *                                   — and wrong the moment somebody did. It now reports the conflict
+ *                                   and names the format that would take it, for the user to accept.
+ */
+function checkDeclared(platform: string, declared: PostFormatSpec, assets: AssetMetrics[]): RouteResult {
+    const live = formatsForPlatform(platform).filter(f => f.availability === 'live');
+    const base = { format: declared, verified: true, alternatives: live, declared: true } as const;
+
+    // Nothing attached yet. Not a fault: the Media step states what the format needs, and saying
+    // "no format" over an empty post reads as a broken destination rather than an unstarted one.
+    if (!assets.length) return { ...base, state: 'ok' };
+
+    const kinds = new Set(assets.map(a => a.kind));
+    const soleKind = kinds.size === 1 ? [...kinds][0] : null;
+    const carriesIt = soleKind ? carries(declared, soleKind) : declared.media === 'mixed';
+
+    /** A live format on this platform that WOULD take this media, for the way out of a conflict. */
+    const wayOut = (test: (f: PostFormatSpec) => boolean) =>
+        live.find(f => f.key !== declared.key && test(f)) ?? null;
+
+    if (!carriesIt) {
+        const what = soleKind ?? 'mixed';
+        const suggestion = wayOut(f => withinCount(f, assets.length) && (soleKind ? carries(f, soleKind) : f.media === 'mixed'));
+        return {
+            ...base, state: 'none', suggestion,
+            reason: `${declared.label} takes ${declared.media}, and this is ${what}.`
+                + (suggestion ? ` ${suggestion.label} would take it.` : ''),
+        };
+    }
+
+    if (!withinCount(declared, assets.length)) {
+        const suggestion = wayOut(f => withinCount(f, assets.length) && (soleKind ? carries(f, soleKind) : f.media === 'mixed'));
+        const bounds = declared.minItems === declared.maxItems
+            ? `${declared.minItems}`
+            : `${declared.minItems}–${declared.maxItems}`;
+        return {
+            ...base, state: 'none', suggestion,
+            reason: `${declared.label} takes ${bounds} item${declared.maxItems === 1 ? '' : 's'}, and this has ${assets.length}.`
+                + (suggestion ? ` ${suggestion.label} would take it.` : ''),
+        };
+    }
+
+    const lead = assets[0];
+    const assetRatio = ratioOf(lead);
+    const verified = assetRatio != null;
+
+    if (overDuration(declared, lead)) {
+        const suggestion = wayOut(f => carries(f, 'video') && overDuration(f, lead) !== true);
+        return {
+            ...base, verified, state: 'trim', suggestion,
+            reason: `${declared.label} takes up to ${secs(declared.maxDurationS!)}, and this is ${secs(Math.round(lead.durationS!))}.`
+                + (suggestion ? ` It can go out as a ${suggestion.label} instead.` : ''),
+        };
+    }
+
+    if (!ratioAccepted(declared, assetRatio)) {
+        return {
+            ...base, verified, state: 'crop',
+            reason: `${declared.label} is ${declared.aspectRatios.join(' or ')}. This asset is a different shape.`,
+        };
+    }
+
+    return { ...base, verified, state: 'ok' };
+}
+
+/**
+ * Pick the format a platform should publish these assets as — or check the one it was given.
  *
  * `assets` is the whole attachment list in slide order, because the count is part of the answer:
  * five images is a carousel, one is a feed post. An empty list routes to the platform's default,
  * which is correct for text-first platforms and is what flags the ones that cannot publish
  * text alone.
+ *
+ * `declaredKey` is the post's own `format_key` where it has one. Passing it switches this from
+ * deciding to checking (see checkDeclared). A key that names an unknown format, or one belonging to
+ * a different platform, is IGNORED rather than refused — a stale row must still route somewhere, and
+ * the strictness belongs at the endpoints that write the column.
  */
-export function routeAsset(platform: string, assets: AssetMetrics[]): RouteResult {
+export function routeAsset(platform: string, assets: AssetMetrics[], declaredKey?: string | null): RouteResult {
+    if (declaredKey) {
+        const declared = POST_FORMATS.find(f => f.key === declaredKey);
+        if (declared && declared.platform === (platform === 'twitter' ? 'x' : platform)) {
+            return checkDeclared(platform, declared, assets);
+        }
+    }
+    return deriveFormat(platform, assets);
+}
+
+function deriveFormat(platform: string, assets: AssetMetrics[]): RouteResult {
     const live = formatsForPlatform(platform).filter(f => f.availability === 'live');
     const none = (reason: string): RouteResult =>
         ({ state: 'none', format: null, reason, verified: true, alternatives: [] });
@@ -204,6 +307,9 @@ export function routeAcross(platforms: string[], assets: AssetMetrics[]): Record
     for (const p of platforms) out[p] = routeAsset(p, assets);
     return out;
 }
+
+/** True when a route means "this destination cannot publish as it stands". */
+export const routeBlocks = (r: RouteResult): boolean => r.state === 'none';
 
 /**
  * Every platform that cannot publish this asset set as it stands, with the reason.

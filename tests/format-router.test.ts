@@ -305,6 +305,77 @@ acheck('an empty or junk id list asks the database nothing', async () => {
     assert.deepEqual(await loadAssetMetrics(db, 'nonsense'), []);
 });
 
+// ── A DECLARED format: the router checks instead of deciding ────────────────────────────────────
+// The fifth load-bearing property, and the newest. Deriving a format is right when nobody chose;
+// the moment a user has said "this is a Reel", deriving one silently overrules them.
+
+const VERTICAL_VIDEO: AssetMetrics = { kind: 'video', width: 1080, height: 1920, durationS: 30 };
+const LONG_VERTICAL: AssetMetrics = { kind: 'video', width: 1080, height: 1920, durationS: 252 };
+const SQUARE_IMAGE: AssetMetrics = { kind: 'image', width: 1080, height: 1080 };
+
+check('a declared format is kept, and says it was declared', () => {
+    const r = routeAsset('instagram', [VERTICAL_VIDEO], 'ig_reel');
+    assert.equal(r.state, 'ok');
+    assert.equal(r.format?.key, 'ig_reel');
+    assert.equal(r.declared, true, 'the UI needs to tell an instruction from a derivation');
+});
+
+check('a declared format survives an empty post', () => {
+    // Nothing attached is not a fault: the Media step states what the format needs. Answering
+    // 'none' here is what used to render "no format" across every newly created post.
+    const r = routeAsset('instagram', [], 'ig_reel');
+    assert.equal(r.state, 'ok');
+    assert.equal(r.format?.key, 'ig_reel');
+});
+
+check('a too-long clip is REPORTED, not silently rerouted', () => {
+    // THE behaviour change. Derivation moves a 4m12s vertical clip from Short to Video, which is
+    // right when nobody chose and wrong once somebody did.
+    const derived = routeAsset('youtube', [LONG_VERTICAL]);
+    assert.equal(derived.format?.key, 'yt_vod', 'undeclared: still reroutes, as it always did');
+    assert.equal(derived.state, 'ok');
+
+    const declared = routeAsset('youtube', [LONG_VERTICAL], 'yt_short');
+    assert.equal(declared.state, 'trim', 'a declared Short must not become a Video behind the user');
+    assert.equal(declared.format?.key, 'yt_short', 'the declaration stands until the user changes it');
+    assert.equal(declared.suggestion?.key, 'yt_vod', 'and the way out is named');
+    assert.match(declared.reason!, /3 minutes/);
+});
+
+check('the wrong KIND of media blocks the destination and names the format that fits', () => {
+    const r = routeAsset('instagram', [SQUARE_IMAGE], 'ig_reel');
+    assert.equal(r.state, 'none', 'a still cannot become a Reel by cropping');
+    assert.equal(r.suggestion?.key, 'ig_feed');
+    assert.match(r.reason!, /Reel takes video/);
+});
+
+check('the wrong COUNT blocks, and points at the format that takes it', () => {
+    const two = [SQUARE_IMAGE, SQUARE_IMAGE];
+    const r = routeAsset('instagram', two, 'ig_feed');
+    assert.equal(r.state, 'none', 'a feed post takes one image');
+    assert.equal(r.suggestion?.key, 'ig_carousel');
+});
+
+check('the wrong SHAPE still only crops — platforms crop, and blocking would refuse work that publishes', () => {
+    const r = routeAsset('instagram', [{ kind: 'video', width: 1920, height: 1080, durationS: 20 }], 'ig_reel');
+    assert.equal(r.state, 'crop');
+    assert.equal(r.format?.key, 'ig_reel', 'the declaration is not overruled by a shape the platform will fix');
+});
+
+check('a stale or foreign format key falls back to deriving, rather than refusing', () => {
+    // A row must still route somewhere. Strictness belongs at the endpoints that WRITE format_key.
+    assert.equal(routeAsset('instagram', [VERTICAL_VIDEO], 'ig_hologram').declared, undefined);
+    assert.equal(routeAsset('instagram', [VERTICAL_VIDEO], 'yt_short').format?.key, 'ig_reel',
+        'a YouTube key on an Instagram row is ignored, not obeyed');
+});
+
+check('an unverified declared route is still flagged unverified', () => {
+    // Property 2 holds for declarations too: a legacy asset with no dimensions must not read as
+    // "checked and fine".
+    const r = routeAsset('instagram', [{ kind: 'video' }], 'ig_reel');
+    assert.equal(r.verified, false, 'nothing was measured, so nothing was checked');
+});
+
 // Run the awaited half, then report. Nothing prints a total until every assertion has settled.
 (async () => {
     for (const run of deferred) await run();

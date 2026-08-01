@@ -1,9 +1,13 @@
 // netlify/functions/create-manual-post.ts
 // "Create Post" → Write your own (no AI). Creates one pending_approval scheduled_posts draft per
-// selected platform from user-authored caption/hashtags, optionally attaching media the user picked
+// chosen DESTINATION from user-authored caption/hashtags, optionally attaching media the user picked
 // from My Content (content_assets). The drafts land in the Review Queue → Social Drafts tab and flow
 // through the same approve/schedule/reject path as AI-generated drafts (approve-post.ts) — no AI
 // generation, no blueprint, no content_generation_jobs.
+//
+// A destination is a platform AND a format — see src/utils/post-destinations.ts. It used to be a
+// platform alone, which is why "Instagram, Reel, nothing else" was unaskable: the row was created
+// format-less and whatever the media routed to became the answer.
 
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
@@ -18,11 +22,14 @@ import {
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
-import { SOCIAL_PLATFORMS, platformFormat } from '../../src/config/platform-formats';
+import { platformFormat } from '../../src/config/platform-formats';
+import { postFormatSpec } from '../../src/config/post-formats';
+import { parseDestinations, legacyPostFormat, canonicalPlatform } from '../../src/utils/post-destinations';
 
-// The canonical list, not a local copy — the copy that used to live here predated Threads and
-// YouTube, so "Write your own" rejected both with "Unsupported platform" while offering them.
-const VALID_PLATFORMS: string[] = SOCIAL_PLATFORMS;
+// The platform allow-list is NOT here. It used to be a local `VALID_PLATFORMS` copy that predated
+// Threads and YouTube, so "Write your own" rejected both while offering them; it then became an
+// alias for SOCIAL_PLATFORMS, and is now gone entirely — parseDestinations validates against
+// SOCIAL_PLATFORMS itself, so there is one list and one check for both request shapes.
 
 export default withLambda(async (event) => {
     if (event.httpMethod !== 'POST') return { statusCode: 405, body: 'Method Not Allowed' };
@@ -35,6 +42,7 @@ export default withLambda(async (event) => {
     let body: {
         assistantId?: number;
         platforms?: string[];
+        destinations?: Array<{ platform?: string; formatKey?: string | null }>;
         caption?: string;
         hashtags?: string;
         contentAssetIds?: number[];
@@ -45,10 +53,15 @@ export default withLambda(async (event) => {
     const { assistantId } = body;
     const caption = (body.caption || '').trim();
     const hashtags = (body.hashtags || '').trim();
-    const platforms = Array.isArray(body.platforms) ? [...new Set(body.platforms)] : [];
     const contentAssetIds = Array.isArray(body.contentAssetIds)
         ? [...new Set(body.contentAssetIds.filter(n => Number.isInteger(n)))]
         : [];
+
+    // Both request shapes, one parser. No `existingFormatFor` here — nothing exists yet to inherit
+    // a format from, so a legacy `platforms` request means exactly what it always meant: these
+    // platforms, format derived from the media.
+    const parsed = parseDestinations(body);
+    const destinations = parsed.destinations;
 
     // ── Blank mode: an empty post for the editor to open on ─────────────────────────────────────
     // "Create Post" now opens the three-pane editor rather than a separate composer, and the editor
@@ -64,23 +77,33 @@ export default withLambda(async (event) => {
     if (!assistantId) return { statusCode: 400, body: JSON.stringify({ error: 'assistantId is required.' }) };
     if (!blank && !caption) return { statusCode: 400, body: JSON.stringify({ error: 'A caption is required.' }) };
     if (caption.length > 5000) return { statusCode: 400, body: JSON.stringify({ error: 'Caption is too long.' }) };
-    if (platforms.length === 0) return { statusCode: 400, body: JSON.stringify({ error: 'Select at least one platform.' }) };
-    const invalid = platforms.filter(p => !VALID_PLATFORMS.includes(p));
-    if (invalid.length) return { statusCode: 400, body: JSON.stringify({ error: `Unsupported platform: ${invalid.join(', ')}.` }) };
+    if (parsed.error) return { statusCode: 400, body: JSON.stringify({ error: parsed.error }) };
 
-    // Some platforms cannot publish a text-only post at all. Driven by PLATFORM_FORMATS rather than
-    // naming Instagram, because YouTube has the same rule and a stricter one: it needs a VIDEO, and
-    // a YouTube draft carrying only a still is unpublishable by construction — better refused here
-    // than discovered at publish time.
+    // Some destinations cannot publish without media at all.
+    //
+    // A DECLARED format answers this better than the platform can: "Instagram" is media-mandatory as
+    // a platform, but the requirement is one image for a feed post, one video for a Reel and two-plus
+    // items for a carousel — and the message can now say which. Falls back to PLATFORM_FORMATS where
+    // no format was declared, which is what a legacy `platforms` request still gets.
     //
     // Skipped for a blank draft: it has no media BY DEFINITION, and refusing to create the thing the
     // user is about to add media to would make Instagram impossible to start a post for at all.
     // approve-post enforces the same rule at the point it can actually be satisfied.
-    const needsMedia = blank ? [] : platforms.filter(p => platformFormat(p).mediaMandatory);
+    const needsMedia = blank ? [] : destinations.filter(d => {
+        const spec = d.formatKey ? postFormatSpec(d.formatKey) : null;
+        return spec ? spec.mediaMandatory : platformFormat(canonicalPlatform(d.platform)).mediaMandatory;
+    });
     if (needsMedia.length && contentAssetIds.length === 0) {
-        const which = needsMedia.map(p => platformFormat(p).label).join(' and ');
-        const kind = needsMedia.every(p => platformFormat(p).mediaKind === 'video') ? 'a video' : 'an image';
-        return { statusCode: 400, body: JSON.stringify({ error: `${which} requires ${kind}. Add one from My Content before adding to the queue.` }) };
+        const which = needsMedia.map(d => {
+            const spec = d.formatKey ? postFormatSpec(d.formatKey) : null;
+            const label = platformFormat(canonicalPlatform(d.platform)).label;
+            return spec ? `${label} ${spec.label}` : label;
+        }).join(' and ');
+        const allVideo = needsMedia.every(d => {
+            const spec = d.formatKey ? postFormatSpec(d.formatKey) : null;
+            return spec ? spec.media === 'video' : platformFormat(canonicalPlatform(d.platform)).mediaKind === 'video';
+        });
+        return { statusCode: 400, body: JSON.stringify({ error: `${which} requires ${allVideo ? 'a video' : 'an image'}. Add one from My Content before adding to the queue.` }) };
     }
 
     // Verify the assistant belongs to this org.
@@ -113,21 +136,25 @@ export default withLambda(async (event) => {
     const now = new Date();
     // Placeholder publish date — actual scheduling happens when the user approves the draft.
     const publishDate = new Date(now.getTime() + 24 * 60 * 60 * 1000);
-    const postFormat = contentAssetIds.length > 0 ? 'image' : 'text';
+    const hasMedia = contentAssetIds.length > 0;
 
-    // One shared id across the fanned-out platform rows so the Review Queue collapses them into one
-    // card. Only a genuine cross-post (2+ platforms) needs it — a single-platform post stays null
+    // One shared id across the fanned-out rows so the Review Queue collapses them into one card. Only
+    // a genuine cross-post (2+ destinations) needs it — a single-destination post stays null
     // (standalone), which the queue renders as its own card anyway.
-    const crosspostGroupId = platforms.length > 1 ? randomUUID() : null;
+    //
+    // Counted in DESTINATIONS, not platforms: a Reel and a carousel both on Instagram are two rows
+    // and genuinely are one post with two destinations, so they share a group like any other pair.
+    const crosspostGroupId = destinations.length > 1 ? randomUUID() : null;
 
-    const created: Array<{ id: number; platform: string }> = [];
-    for (const platform of platforms) {
+    const created: Array<{ id: number; platform: string; formatKey: string | null }> = [];
+    for (const dest of destinations) {
         const [post] = await db.insert(scheduledPosts).values({
             userId,
             organisationId,
             assistantId,
-            platform,
-            postFormat,
+            platform: dest.platform,
+            postFormat: legacyPostFormat(dest, hasMedia),
+            formatKey: dest.formatKey,
             publishDate,
             caption,
             hashtags: hashtags || null,
@@ -153,7 +180,7 @@ export default withLambda(async (event) => {
                 .onConflictDoNothing();
         }
 
-        created.push({ id: post.id, platform });
+        created.push({ id: post.id, platform: dest.platform, formatKey: dest.formatKey });
     }
 
     return {
