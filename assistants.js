@@ -703,6 +703,23 @@ window._activateMainTab = function(name) {
     if (name === 'mycontent') window.AssistantMyContent?.show();
 };
 
+// Open the role's landing tab (SMM/Blog → 'review-queue'; everyone else the markup default,
+// Data Hub). Falls back to the first tab the role actually shows, so a role that hides its
+// default can never leave the page with every panel closed.
+function _activateDefaultMainTab() {
+    const wanted = window._detailDefaultMainTab;
+    const visible = (n) => n && document.querySelector(`.main-tab-btn[data-maintab="${n}"]:not(.hidden)`);
+    const name = visible(wanted) ? wanted
+        : (document.querySelector('.main-tab-btn:not(.hidden)')?.dataset.maintab || null);
+    if (!name) return;
+    // Already where we want to be (the markup default, Data Hub, for roles that keep it) — don't
+    // re-activate, or the tab's on-open hooks would refetch what init() just loaded.
+    const btn = document.querySelector(`.main-tab-btn[data-maintab="${name}"]`);
+    const panel = document.getElementById('maintab-' + name);
+    if (btn?.classList.contains('active-tab') && panel && !panel.classList.contains('hidden')) return;
+    window._activateMainTab(name);
+}
+
 // ── Assistant-detail scoped Review Queue ─────────────────────────────────────
 // Mirrors the global rqOpenStatus/rqRenderGroups in workspace.html but scopes all
 // fetches to window._currentAssistantId so only this assistant's content shows.
@@ -2660,7 +2677,14 @@ function _applyDashboardRegistry(data) {
     // Role-chosen landing tab (SMM opens on its "Posts" pipeline); null → HTML default (Data Hub).
     window._detailDefaultMainTab = cfg.defaultMainTab || null;
     toggle('maintab-btn-review-queue', true);
-    toggleBtn('btn-review-pending', true);
+    // Social/blog retire the Data Hub tab (cfg.hideDataHub) — and the action bar with the
+    // "Create a Post" / "Review Pending Items" buttons lives INSIDE that tab's panel. Hiding the
+    // tab button alone left the panel itself visible whenever _activateMainTab hadn't run yet, so
+    // the pair leaked in under the tab strip duplicating the Posts tab and its own header button.
+    // Gate every part of that panel on the same flag.
+    const showDataHub = !cfg.hideDataHub;
+    toggle('maintab-datahub', showDataHub);
+    toggleBtn('btn-review-pending', showDataHub);
     // Per-role tab label override (e.g. meeting note-taker → "Inbox"); defaults to "Review".
     // The tab button's badge span must survive, so only its leading text node is rewritten.
     const rqLabel = window._detailReviewQueue.label || 'Review';
@@ -2766,7 +2790,9 @@ function _applyDashboardRegistry(data) {
     const paLabel = document.getElementById('primary-action-label');
     // Issue #177: the button starts hidden in markup (its label/onclick are the SMM defaults) —
     // reveal it only now that the role-specific label/handler below are actually being applied.
-    toggleBtn('btn-primary-action', true);
+    // Roles with no Data Hub tab (social/blog) never reveal it at all: the panel it sits in is
+    // hidden for them, and the Posts/Blogs tab header already carries the same "Create a Post".
+    toggleBtn('btn-primary-action', showDataHub);
     if (data.roleKey === 'blog_writer') {
         if (paLabel) paLabel.textContent = 'Write Blog Post';
         if (paBtn) paBtn.onclick = () => { if (window.openBlogStudio) window.openBlogStudio({ assistantId: data.id }); };
@@ -2785,9 +2811,9 @@ function _applyDashboardRegistry(data) {
     // a hubTab: records (Leads / Ledger / …) for data-hub roles, or a content library
     // (kind:'content_library') for social/blog. Always shown; label + data model come from hub.
     const hub = cfg.hubTab;
-    // Social roles retire the "Content Library" Data Hub tab (cfg.hideDataHub) — the Posts pipeline
-    // now owns the full post lifecycle, so there's nothing left for a separate library tab to show.
-    const showDataHub = !cfg.hideDataHub;
+    // showDataHub is resolved up with the review-queue block above — social roles retire the
+    // "Content Library" tab (cfg.hideDataHub) because the Posts pipeline now owns the full post
+    // lifecycle, so there's nothing left for a separate library tab to show.
     toggle('maintab-btn-datahub', showDataHub);
     if (hub && showDataHub) {
         setText('datahub-tab-label', hub.label);
@@ -3824,16 +3850,19 @@ window.initAssistantDetail = async function(assistantId, loadViewCb) {
         if (window._assistantDetailInitialTab) {
             const wanted = window._assistantDetailInitialTab;
             window._assistantDetailInitialTab = null;
-            if (document.querySelector(`.main-tab-btn[data-maintab="${wanted}"]`)) {
+            // :not(.hidden) — a role-hidden tab (e.g. social's retired Data Hub) must not be
+            // reachable by deep-link either, or activating it re-shows a panel the role retired.
+            if (document.querySelector(`.main-tab-btn[data-maintab="${wanted}"]:not(.hidden)`)) {
                 window._activateMainTab?.(wanted);
             } else {
                 const target = document.querySelector(`.detail-tab-btn[data-tab="${wanted}"]`);
                 if (target) target.click();
+                // Nothing matched (an unknown or role-hidden tab name) — land on the role's
+                // default rather than leaving every panel closed.
+                else _activateDefaultMainTab();
             }
-        } else if (window._detailDefaultMainTab &&
-                   document.querySelector(`.main-tab-btn[data-maintab="${window._detailDefaultMainTab}"]`)) {
-            // No deep-link requested — open the role's chosen landing tab (SMM → "Posts").
-            window._activateMainTab(window._detailDefaultMainTab);
+        } else {
+            _activateDefaultMainTab();
         }
     } catch (e) {
         console.error('Failed to load assistant detail:', e);
@@ -5459,6 +5488,10 @@ let _goalMetrics = [];   // available metric catalog entries for this workspace 
 let _goalsCache = [];    // last-loaded goals for this assistant (Goals tab, Goal Progress card, review modal)
 let _goalsLoadFailed = false; // last fetch errored — the Overview card must not call that "no goals"
 let _goalHeadlineId = null;  // server's pick of which goal represents this assistant (goal-summary.ts)
+// How often poll-goal-telemetry may re-check this org's goals, in hours — served by manage-goals
+// because the cadence is per plan tier (AC4.1.1). Never default it to a number here: the Goal
+// Progress card prints this cadence to the user, and a guessed one is a guessed promise.
+let _goalPollCadenceHours = null;
 let _goalEntitlements = { aiRecommendations: false, magicWand: false, autonomous: false }; // Feature 3 tier gates
 let _autonomousGoalSeeking = false;
 let _autonomousMediaEnabled = false;   // Epic 2 US5
@@ -5560,6 +5593,7 @@ async function _fetchAndRenderGoals(assistantId) {
             const data = await res.json();
             goals = data.goals || [];
             _goalHeadlineId = data.headlineGoalId ?? null;
+            _goalPollCadenceHours = data.pollCadenceHours ?? null;
             _goalMetrics = data.availableMetrics || [];
             _goalEntitlements = data.entitlements || _goalEntitlements;
             _autonomousGoalSeeking = !!data.autonomousGoalSeeking;
@@ -5628,6 +5662,8 @@ function _renderGoalProgressCard() {
     if (!body) return;
     _endCardLoading('goal-progress-panel');
 
+    _renderGoalFreshnessNote();
+
     if (!_goalsCache.length) {
         // Two different truths: "you have no goals" invites a goal, "we couldn't load them" must not.
         body.innerHTML = _goalsLoadFailed
@@ -5668,6 +5704,88 @@ function _renderGoalProgressCard() {
     body.innerHTML = `<div class="grid grid-cols-1 lg:grid-cols-2 gap-x-6 gap-y-4">
         ${headlineFirst.map(_buildGoalProgressTile).join('')}
     </div>`;
+}
+
+/**
+ * "Measured automatically once an hour in the background — next check around 1 Aug, 21:21."
+ *
+ * The Goal Progress card's answer to the same question the Audience block answers: these bars are a
+ * snapshot of something measured elsewhere, and without a line like this the user has no way to tell
+ * whether a figure is a minute old or two days old, or why it hasn't moved since they last looked.
+ *
+ * Three states, and printing the wrong one is a lie the user can catch:
+ *  • polled goals — poll-goal-telemetry (hourly cron) fetches the metric, throttled to the org's
+ *    tier cadence. Naming a next-check time is fair, because it happens whether or not anyone visits.
+ *  • user-reported goals — nothing measures them. There is no schedule to promise; the only honest
+ *    sentence sends the user to the Goals tab.
+ *  • both — the polled sentence, with the manual ones called out so their stillness makes sense.
+ *
+ * Reuses _audienceTimeAgo/_audienceFullTime so the two cards phrase timestamps identically.
+ */
+function _renderGoalFreshnessNote() {
+    const note = document.getElementById('goal-progress-refresh-note');
+    if (!note) return;
+    const set = (text, title) => {
+        note.textContent = text || '';
+        note.title = title || '';
+        note.classList.toggle('hidden', !text);
+    };
+    // No goals (or a failed load): the card is already showing its own explanation, and a cadence
+    // promise underneath "Couldn't load your goals" would be noise at best.
+    if (!_goalsCache.length) return set('');
+
+    const manual = _goalsCache.filter(g => g.isManual);
+    const polled = _goalsCache.filter(g => !g.isManual);
+    const manualTail = manual.length && polled.length
+        ? ` ${manual.length === 1 ? 'One of these' : `${manual.length} of these`} you report yourself, from the Goals tab.`
+        : '';
+
+    if (!polled.length) {
+        const one = manual.length === 1;
+        return set(
+            `You report ${one ? 'this figure' : 'these figures'} yourself — nothing measures ${one ? 'it' : 'them'} automatically. Update ${one ? 'it' : 'them'} from the Goals tab.`,
+            'User-reported metrics have no data source we can poll (revenue and enquiry counts live in your books, not in a connected platform), so the bar moves when you enter a new figure and not before.',
+        );
+    }
+
+    // Cadence comes from the server (per plan tier); with no number, say the honest vaguer thing
+    // rather than inventing one. Carries its own article, like the Audience note's phrase.
+    const hrs = Number(_goalPollCadenceHours) || 0;
+    const cadence = hrs === 1 ? 'once an hour' : hrs === 24 ? 'once a day' : hrs ? `every ${hrs} hours` : null;
+    const measured = polled.map(g => g.lastMeasuredAt).filter(Boolean).sort();
+
+    if (!cadence) {
+        return set(
+            `Measured automatically in the background${measured.length ? ` — last checked ${_audienceTimeAgo(measured[0])}` : ''}.`,
+            'A background job re-checks each goal against its connected platform and writes the figure these bars are drawn from.',
+        );
+    }
+    const tip = `A background job re-checks each goal's metric ${cadence} and writes the figure these bars are drawn from, so opening this page never waits on the platform APIs.`;
+
+    // Nothing measured yet — every goal is brand new (or its metric has never returned a figure).
+    // The tiles already say "Awaiting first data sync"; this says when that sync is coming.
+    if (!measured.length) return set(`Measured automatically ${cadence} in the background — the first check hasn't landed yet.${manualTail}`, tip);
+
+    // The OLDEST measurement is what gets stamped, for the same reason the Audience block does it:
+    // one goal checked a minute ago says nothing about the other four on the card.
+    const oldest = measured[0];
+    const cadenceMs = hrs * 3600000;
+    // The cron fires on the hour, so the next check is the next hour boundary at or after the
+    // cadence expires — not the cadence expiry itself, which would name a minute nothing happens on.
+    const nextAt = new Date(Math.ceil((Date.parse(oldest) + cadenceMs) / 3600000) * 3600000);
+    const due = nextAt.getTime() <= Date.now();
+    // If the sweep is meant to be running and the freshest figure is still several cadences old, it
+    // is not reaching this workspace — don't print a promise directly above a bar that contradicts it.
+    const wayOverdue = Date.now() - Date.parse(oldest) > cadenceMs * 3;
+
+    set(
+        wayOverdue
+            ? `These should update ${cadence}, but haven't been measured since ${_audienceFullTime(oldest)} — check the goal's connection is still live.${manualTail}`
+            : due
+                ? `Measured automatically ${cadence} in the background — the next check is due now.${manualTail}`
+                : `Measured automatically ${cadence} in the background — next check around ${_audienceFullTime(nextAt.toISOString())}.${manualTail}`,
+        `${tip} Oldest figure on this card was measured ${_audienceFullTime(oldest)}.`,
+    );
 }
 
 /** One goal as a compact Overview tile: name, status, bar, progress figures, deadline. */

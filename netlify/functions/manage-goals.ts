@@ -30,6 +30,7 @@ import {
     isValidMetricKey,
     isManualMetric,
     nextUpdateDue,
+    pollCadenceHours,
     tierAllows,
 } from '../../src/config/goal-metrics';
 import { assembleBlueprint } from '../../src/utils/blueprint';
@@ -234,6 +235,23 @@ export default withLambda(async (event) => {
             }
         }
 
+        // When each goal was last MEASURED, whatever the source. Distinct from lastEnteredAt above:
+        // that one is manual-only and answers "when did you last type a figure in", this one answers
+        // "how fresh is the number on the bar" for polled goals too. The Goal Progress card states
+        // the tracking cadence and the next check, and it can only do that honestly if it knows when
+        // the last one actually landed — see _renderGoalFreshnessNote in assistants.js.
+        const lastMeasuredByGoal = new Map<number, Date>();
+        if (rows.length) {
+            const measured = await db
+                .select({ goalId: goalTelemetry.goalId, at: sql<string>`max(${goalTelemetry.recordedAt})` })
+                .from(goalTelemetry)
+                .where(inArray(goalTelemetry.goalId, rows.map((g: any) => g.id as number)))
+                .groupBy(goalTelemetry.goalId);
+            for (const m of measured) {
+                if (m.at) lastMeasuredByGoal.set(m.goalId as number, new Date(m.at as unknown as string));
+            }
+        }
+
         // Which goal the assistant-detail HEADER should show. Computed here, with the same rule the
         // dashboard card uses (src/utils/goal-summary.ts), so the two surfaces can never disagree
         // about which goal represents this assistant. The client used to pick it itself with
@@ -260,10 +278,17 @@ export default withLambda(async (event) => {
                     updateCadenceDays: m?.updateCadenceDays ?? null,
                     lastEnteredAt: lastEnteredAt ? lastEnteredAt.toISOString() : null,
                     nextDueAt: nextUpdateDue(g.metricKey, lastEnteredAt)?.toISOString() ?? null,
+                    // Last measurement of ANY source — what the Goal Progress card's freshness line
+                    // is computed from. null means this goal has never been measured.
+                    lastMeasuredAt: lastMeasuredByGoal.get(g.id)?.toISOString() ?? null,
                 };
             }),
             availableMetrics: availableMetricsForRole(roleKey, services),
             headlineGoalId,
+            // How often poll-goal-telemetry is allowed to re-check this org's goals (AC4.1.1 — hourly
+            // on paid tiers, daily on entry). The client states the cadence to the user, and must read
+            // it from here: a hardcoded "hourly" in the UI becomes a lie the moment a tier changes.
+            pollCadenceHours: pollCadenceHours(tierKey),
             goalSummary: summariseGoals(rows as any[]),
             autonomousGoalSeeking: assistant.autonomousGoalSeeking,
             autonomousMediaEnabled: assistant.autonomousMediaEnabled,

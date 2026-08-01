@@ -279,6 +279,11 @@
          body is still empty (p-6 around nothing is shorter than the spinner). -->
     <div id="goal-progress-panel" class="bg-white rounded-2xl border border-gray-200 shadow-sm p-6" style="min-height:92px">
       <div id="goal-progress-body"></div>
+      <!-- Freshness, same contract as the Audience block's #audience-refresh-note: how often these
+           figures are measured and when the next check lands. Rendered (not static) because the
+           honest sentence varies — poll-goal-telemetry's cadence is per plan tier, and user-reported
+           goals aren't measured by anything at all. See _renderGoalFreshnessNote in assistants.js. -->
+      <p id="goal-progress-refresh-note" class="text-[10px] text-gray-400 mt-3 leading-relaxed hidden"></p>
     </div>
   </div>
 
@@ -364,6 +369,17 @@
           <p class="text-[11px] text-gray-400 shrink-0" id="metrics-breakdown-note">All-time, per platform</p>
         </div>
         <div id="metrics-by-platform"></div>
+        <!-- Freshness, stated for the same reason the Audience block states it: side by side, two
+             charts that look alike but are fed completely differently, and the user can't tell which
+             is which. These counts come from our own scheduled_posts rows (get-assistant-metrics.ts)
+             with no cache and no background job, so the honest sentence is "recounted on page load"
+             — deliberately NOT a schedule, which would imply a refresh that doesn't exist.
+             Static copy because that truth never varies; the Audience note is rendered because
+             its does (cron on/off, next due time). -->
+        <p class="text-[10px] text-gray-400 mt-2 leading-relaxed"
+           title="These come from your own posts, not from a platform API — nothing is cached and no background job is involved, so there is nothing to wait for. Reload the page to include anything created or published since you opened it.">
+          Counted from your own posts, so these are always current — recounted every time this page loads.
+        </p>
       </div>
       <!-- Audience — follower/subscriber counts pulled live from each connected platform's own API
            (get-follower-counts.ts, cached ~1h per connection). Deliberately a sibling of the
@@ -538,7 +554,11 @@
 
   <!-- ── Main tab bar ───────────────────────────────────────────────
        Top-level sections. Configuration nests the existing child tab control. -->
-  <div class="mb-8 border-b border-gray-200 overflow-x-auto">
+  <!-- overflow-y-hidden is load-bearing: `overflow-x: auto` alone makes the computed overflow-y
+       `auto` too, and the nav's -1px bottom margin overflows the box by exactly that 1px — enough
+       for a full-height vertical scrollbar to appear beside the tabs. Pin overflow-y closed so only
+       the intended horizontal scroll survives. -->
+  <div class="mb-8 border-b border-gray-200 overflow-x-auto overflow-y-hidden">
     <nav class="-mb-px flex gap-x-8" aria-label="Assistant sections">
       <!-- ── Core three — the unified template, same order on every assistant ──
            Data Hub · Review Queue · Calendar. All three are ALWAYS shown
