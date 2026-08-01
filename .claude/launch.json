@@ -2,6 +2,24 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-roi-detail",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/9ecffbe5-b6f6-4e4d-aac5-141b3b39fa5d/scratchpad/roiharness/detail.mjs"
+      ],
+      "port": 4241,
+      "autoPort": false
+    },
+    {
+      "name": "component-harness-roi-period",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/9ecffbe5-b6f6-4e4d-aac5-141b3b39fa5d/scratchpad/roiharness/server.mjs"
+      ],
+      "port": 4240,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-destinations",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

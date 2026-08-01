@@ -1,7 +1,7 @@
 // netlify/functions/roi-stats.ts
 // US-AUD-1.2.1: ROI aggregation — task runs × avg duration × hourly rate.
 //
-//  GET ?period=month|week
+//  GET ?period=all|month|week   (default: all)
 //   → { taskCount, hoursSaved, gbpSaved, planCostGbp, multiplier, period }
 
 import { HandlerEvent } from '@netlify/functions';
@@ -23,10 +23,13 @@ export default withLambda(async (event: HandlerEvent) => {
     if ('error' in session) return session.error;
     const userId = session.userId;
     const raw = event.queryStringParameters?.period;
-    const period = raw ? parseRoiPeriod(raw) : 'month';
+    // Default 'all': both calendar windows cliff-drop to zero the moment they roll
+    // over, so a month-defaulted hero reported 0 hours / £0 / 0 tasks on the morning
+    // of the 1st despite a full month of activity the day before. See roi-period.ts.
+    const period = raw ? parseRoiPeriod(raw) : 'all';
 
-    // SC6: Date range — current calendar month or week, computed by the shared
-    // helper so get-assistant-metrics.ts aggregates over the identical window.
+    // SC6: Date range — all time, or the current calendar month or week, computed by
+    // the shared helper so get-assistant-metrics.ts aggregates over the identical window.
     const now = new Date();
     const periodStart = roiPeriodStart(period, now);
 
@@ -90,53 +93,66 @@ export default withLambda(async (event: HandlerEvent) => {
         // The comparand must be an ISO string, not a Date: a raw sql`` fragment has no
         // column type, so drizzle passes a Date through to postgres-js unserialized and
         // the bind step throws ERR_INVALID_ARG_TYPE (500 on every call).
-        const taskRunCount = organisationId && hasActiveAssistant ? await safeCount(db
-            .select({ count: count() })
-            .from(taskRuns)
-            .where(and(
-                eq(taskRuns.organisationId, organisationId),
-                inArray(taskRuns.assistantId, activeAssistantIds),
-                eq(taskRuns.status, 'completed'),
-                gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, periodStart.toISOString())
-            ))) : 0;
-
-        const postCount = organisationId && hasActiveAssistant ? await safeCount(db
-            .select({ count: count() })
-            .from(scheduledPosts)
-            .where(and(
-                eq(scheduledPosts.organisationId, organisationId),
-                inArray(scheduledPosts.assistantId, activeAssistantIds),
-                gte(scheduledPosts.createdAt, periodStart)
-            ))) : 0;
-
-        // Leads generated in the period — get-time-saved.ts already counts these towards
-        // "Hours Saved"; omitting them here meant an org whose assistant work is mostly lead
-        // generation (no task_runs, no scheduled_posts yet) saw 0 hours/£/tasks on this
-        // widget despite real, non-zero activity on the modal it's supposed to agree with.
-        // `leads` has no assistantId, so it can't be scoped to specific active assistants;
-        // gate it on the org having at least one active assistant so an org whose assistants
-        // are all archived reports zero here too (rather than surfacing orphaned lead activity).
-        const leadCount = organisationId && hasActiveAssistant ? await safeCount(db
-            .select({ count: count() })
-            .from(leads)
-            .where(and(
-                eq(leads.organisationId, organisationId),
-                gte(leads.createdAt, periodStart)
-            ))) : 0;
-
-        const completedTasks = Number(taskRunCount) + Number(postCount) + Number(leadCount);
-
         // SC1: minutes saved per item — admin-configurable via gamification.time_multipliers,
         // shared with the dashboard "Hours Saved" widget (get-time-saved.ts) so both views
         // stay consistent. Task runs, drafted posts, and generated leads each use their own multiplier.
         const mult = await getTimeMultipliers();
-        const totalMinutes = Number(taskRunCount) * mult.tasks_completed
-            + Number(postCount) * mult.content_drafted
-            + Number(leadCount) * mult.leads_generated;
-        const avgTaskDurationMinutes = completedTasks > 0 ? totalMinutes / completedTasks : mult.tasks_completed;
 
-        // SC1: hours saved = total minutes / 60
-        const hoursSaved = parseFloat((totalMinutes / 60).toFixed(1));
+        // Activity totals over an arbitrary window. Factored out because the monthly
+        // break-even milestone below has to keep evaluating on a calendar-month window
+        // even when the caller asked for 'all' — which is now the dashboard's default,
+        // so a month-only milestone check would otherwise almost never run again.
+        const countActivity = async (windowStart: Date) => {
+            const taskRunCount = organisationId && hasActiveAssistant ? await safeCount(db
+                .select({ count: count() })
+                .from(taskRuns)
+                .where(and(
+                    eq(taskRuns.organisationId, organisationId),
+                    inArray(taskRuns.assistantId, activeAssistantIds),
+                    eq(taskRuns.status, 'completed'),
+                    gte(sql`coalesce(${taskRuns.completedAt}, ${taskRuns.createdAt})`, windowStart.toISOString())
+                ))) : 0;
+
+            const postCount = organisationId && hasActiveAssistant ? await safeCount(db
+                .select({ count: count() })
+                .from(scheduledPosts)
+                .where(and(
+                    eq(scheduledPosts.organisationId, organisationId),
+                    inArray(scheduledPosts.assistantId, activeAssistantIds),
+                    gte(scheduledPosts.createdAt, windowStart)
+                ))) : 0;
+
+            // Leads generated in the period — get-time-saved.ts already counts these towards
+            // "Hours Saved"; omitting them here meant an org whose assistant work is mostly lead
+            // generation (no task_runs, no scheduled_posts yet) saw 0 hours/£/tasks on this
+            // widget despite real, non-zero activity on the modal it's supposed to agree with.
+            // `leads` has no assistantId, so it can't be scoped to specific active assistants;
+            // gate it on the org having at least one active assistant so an org whose assistants
+            // are all archived reports zero here too (rather than surfacing orphaned lead activity).
+            const leadCount = organisationId && hasActiveAssistant ? await safeCount(db
+                .select({ count: count() })
+                .from(leads)
+                .where(and(
+                    eq(leads.organisationId, organisationId),
+                    gte(leads.createdAt, windowStart)
+                ))) : 0;
+
+            const completedTasks = Number(taskRunCount) + Number(postCount) + Number(leadCount);
+            const totalMinutes = Number(taskRunCount) * mult.tasks_completed
+                + Number(postCount) * mult.content_drafted
+                + Number(leadCount) * mult.leads_generated;
+
+            return {
+                completedTasks,
+                totalMinutes,
+                avgTaskDurationMinutes: completedTasks > 0 ? totalMinutes / completedTasks : mult.tasks_completed,
+                // SC1: hours saved = total minutes / 60
+                hoursSaved: parseFloat((totalMinutes / 60).toFixed(1)),
+            };
+        };
+
+        const windowStats = await countActivity(periodStart);
+        const { completedTasks, hoursSaved } = windowStats;
 
         // Get hourly rate from profile preferences
         const [profile] = await db
@@ -165,25 +181,39 @@ export default withLambda(async (event: HandlerEvent) => {
             // masterPlans pricing is GBP-only (monthlyPriceGbp); currency stays 'GBP'.
         }
 
-        // SC2: multiplier = gbpSaved / planCostGbp (only for monthly period)
+        // Break-even is inherently a CALENDAR-MONTH question: planCostGbp is a monthly
+        // price, so it can only be compared against a month's worth of savings. When the
+        // caller asked for 'all' or 'week' we therefore re-count over the month window
+        // rather than comparing a lifetime (or part-week) figure against one month's cost,
+        // which would otherwise report an ever-growing, meaningless multiplier.
+        // The extra queries only run when a multiplier is actually computable.
+        const breakEvenPossible = hourlyRate !== null && planCostGbp !== null && planCostGbp > 0;
+        const monthStats = !breakEvenPossible ? null
+            : period === 'month' ? windowStats
+            : await countActivity(roiPeriodStart('month', now));
+        const monthGbpSaved = monthStats && hourlyRate !== null
+            ? parseFloat((monthStats.hoursSaved * hourlyRate).toFixed(2))
+            : null;
+
+        // SC2: multiplier = this month's gbpSaved / planCostGbp
         let multiplier: number | null = null;
-        if (period === 'month' && gbpSaved !== null && planCostGbp !== null && planCostGbp > 0) {
-            multiplier = parseFloat((gbpSaved / planCostGbp).toFixed(1));
+        if (monthGbpSaved !== null && planCostGbp !== null && planCostGbp > 0) {
+            multiplier = parseFloat((monthGbpSaved / planCostGbp).toFixed(1));
         }
 
-        // SC3: tasksToBreakEven — only if below break-even
+        // SC3: tasksToBreakEven — only if this month is below break-even
         let tasksToBreakEven: number | null = null;
-        if (period === 'month' && hourlyRate && planCostGbp && gbpSaved !== null && gbpSaved < planCostGbp) {
+        if (monthStats && monthGbpSaved !== null && hourlyRate && planCostGbp && monthGbpSaved < planCostGbp) {
             const hoursNeeded = planCostGbp / hourlyRate;
-            const tasksNeeded = Math.ceil((hoursNeeded * 60) / avgTaskDurationMinutes);
-            tasksToBreakEven = Math.max(0, tasksNeeded - completedTasks);
+            const tasksNeeded = Math.ceil((hoursNeeded * 60) / monthStats.avgTaskDurationMinutes);
+            tasksToBreakEven = Math.max(0, tasksNeeded - monthStats.completedTasks);
         }
 
         // Issue #84: notify the user once per calendar month when they first cross
         // break-even, instead of a permanently-visible banner. Fire-and-forget so it
         // never blocks the response; dedup on the most recent 'roi_milestone' row's
         // periodKey so it fires at most once per month.
-        if (period === 'month' && gbpSaved !== null && multiplier !== null && multiplier >= 1) {
+        if (monthGbpSaved !== null && multiplier !== null && multiplier >= 1) {
             const periodKey = `${now.getFullYear()}-${now.getMonth()}`;
             void (async () => {
                 try {
@@ -196,8 +226,8 @@ export default withLambda(async (event: HandlerEvent) => {
                     if (existing && (existing.metadata as Record<string, unknown> | null)?.periodKey === periodKey) return;
                     await createNotification(db, 'roi_milestone', {
                         userId,
-                        context: { roi: { saved: gbpSaved.toFixed(2), multiplier } },
-                        metadata: { periodKey, gbpSaved, multiplier },
+                        context: { roi: { saved: monthGbpSaved.toFixed(2), multiplier } },
+                        metadata: { periodKey, gbpSaved: monthGbpSaved, multiplier },
                     });
                 } catch { /* non-blocking */ }
             })();
@@ -214,8 +244,12 @@ export default withLambda(async (event: HandlerEvent) => {
                 planCostGbp,
                 planCost: planCostGbp,    // US-I18N-2.1 SC5: currency-neutral alias
                 currency,                 // user's billing currency — use with Intl.NumberFormat
+                // Always a CALENDAR-MONTH figure whatever `period` is, because both are
+                // measured against the monthly plan price. Label them "this month" in the
+                // UI even when the tiles above them are showing all-time totals.
                 multiplier,
                 tasksToBreakEven,
+                multiplierPeriod: 'month',
                 hourlyRateSet: hourlyRate !== null,
             }),
         };

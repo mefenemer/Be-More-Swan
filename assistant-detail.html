@@ -193,12 +193,15 @@
         <div class="flex items-baseline gap-2 min-w-0">
           <p class="text-[11px] font-bold text-gray-400 uppercase tracking-wide shrink-0">Impact &amp; ROI</p>
           <!-- Full sentence lives in the title attribute; the visible caption is the short form. -->
-          <p class="hidden sm:block text-[11px] text-gray-400 truncate" id="metrics-period-note">Time &amp; money saved this week</p>
+          <p class="hidden sm:block text-[11px] text-gray-400 truncate" id="metrics-period-note">Time &amp; money saved all time</p>
         </div>
-        <!-- Same This Week / This Month periods as the dashboard hero, so the two views always agree -->
+        <!-- Same All Time / This Month / This Week periods as the dashboard hero, so the two views
+             always agree — including the default, which is All Time because both calendar windows
+             cliff-drop to zero at every rollover (see src/utils/roi-period.ts). -->
         <div class="flex items-center gap-0.5 p-0.5 rounded-lg bg-gray-100 shrink-0" role="tablist" aria-label="Time period">
           <button type="button" data-period="week" class="metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition" role="tab">Week</button>
           <button type="button" data-period="month" class="metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition" role="tab">Month</button>
+          <button type="button" data-period="all" class="metrics-period-btn px-2.5 py-1 text-[11px] font-bold rounded-md transition" role="tab">All</button>
         </div>
       </div>
       <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">

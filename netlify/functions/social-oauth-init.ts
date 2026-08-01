@@ -11,6 +11,7 @@ import { getDb } from '../../db/client';
 import { storeSecret } from '../../src/utils/vault';
 import { resolveBaseUrl } from '../../src/utils/base-url';
 import { requireTenant } from '../../src/utils/tenant';
+import { X_OAUTH_SCOPES } from '../../src/config/x-scopes';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const CSRF_TTL_MS = 10 * 60 * 1000; // 10 minutes
@@ -83,7 +84,7 @@ export default withLambda(async (event) => {
         await storeSecret(db, csrfKey, { csrf, expiresAt, organisationId: String(organisationId), codeVerifier, assistantId });
 
         const state = buildState({ platform, userId: String(userId), csrf });
-        const scopes = 'tweet.read tweet.write users.read offline.access';
+        const scopes = X_OAUTH_SCOPES;
         authUrl = `https://twitter.com/i/oauth2/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(callbackUri)}&scope=${encodeURIComponent(scopes)}&state=${state}&code_challenge=${codeChallenge}&code_challenge_method=S256`;
         return { statusCode: 302, headers: { Location: authUrl }, body: '' };
     }

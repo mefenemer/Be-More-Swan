@@ -4856,11 +4856,22 @@ function formatCurrency(amount, currency) {
   };
 
   // ── Savings tasks modal (#3): which tasks count toward the savings number ──
+  // `period` comes from the ROI hero's active tab (window._roiHeroPeriod), so the
+  // itemised list always covers the same window as the tile that opened it — the hero
+  // defaults to all-time and a hard-coded month-scoped modal would contradict it.
+  // The _timeSavedData cache is month-scoped (see _renderDashboardEngagement), so it
+  // may only be reused when the requested window is also the month.
   window._showSavingsModal = async function () {
     const modal = document.getElementById('savings-modal');
     if (!modal) return;
-    let d = window._timeSavedData;
-    if (!d) { try { const r = await fetch('/.netlify/functions/get-time-saved'); if (r.ok) d = await r.json(); } catch {} }
+    const period = window._roiHeroPeriod || 'month';
+    let d = period === 'month' ? window._timeSavedData : null;
+    if (!d) {
+      try {
+        const r = await fetch(`/.netlify/functions/get-time-saved?period=${encodeURIComponent(period)}`);
+        if (r.ok) d = await r.json();
+      } catch {}
+    }
     d = d || {};
     const tasks = d.tasks || [];
     const sub = document.getElementById('savings-modal-sub');
@@ -4875,7 +4886,9 @@ function formatCurrency(amount, currency) {
               ${t.assistant ? `<span class="ml-2 text-xs text-gray-400">${esc(t.assistant)}</span>` : ''}</div>
             <span class="text-sm font-semibold text-emerald-600">${t.hours} h</span>
           </div>`).join('')
-      : '<p class="text-sm text-gray-400 text-center py-6">No tasks counted yet this month — your assistants will start clocking these up as they work.</p>';
+      : '<p class="text-sm text-gray-400 text-center py-6">No tasks counted yet — your assistants will start clocking these up as they work.</p>';
+    if (body && d.tasksTruncated) body.insertAdjacentHTML('beforeend',
+      `<p class="text-xs text-gray-400 text-center pt-3">Showing the ${tasks.length} most recent of ${d.taskCount} counted actions.</p>`);
     if (footer) footer.innerHTML = `These are <strong>examples</strong> of the completed actions your assistants perform — such as drafts published, tasks finished, and leads generated. Only the activities <strong>relevant to each assistant's role</strong> are counted, each valued at its time-saved equivalent (set by your plan). Total: <strong>${d.hoursSaved ?? 0} hours saved</strong>.`;
     modal.classList.remove('hidden');
     const close = () => modal.classList.add('hidden');

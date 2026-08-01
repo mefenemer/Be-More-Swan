@@ -10,6 +10,7 @@ import { isServiceAllowedForAssistant, allowedServiceNames, relevantConnectorsFo
 import { getXUsage } from '../../src/utils/ai-credits';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
+import { X_OAUTH_SCOPE_LIST } from '../../src/config/x-scopes';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const jwtSecret = process.env.JWT_SECRET;
@@ -226,7 +227,7 @@ export default withLambda(async (event) => {
                 facebook:      ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'publish_to_groups', 'pages_manage_metadata', 'pages_messaging'],
                 instagram:     ['instagram_basic', 'instagram_content_publish', 'instagram_manage_insights', 'pages_manage_metadata', 'pages_messaging', 'pages_manage_posts'],
                 linkedin:      ['r_liteprofile', 'r_emailaddress', 'w_member_social', 'r_organization_social', 'w_organization_social'],
-                twitter:       ['tweet.read', 'tweet.write', 'users.read', 'offline.access'],
+                twitter:       [...X_OAUTH_SCOPE_LIST],
                 google:        ['https://www.googleapis.com/auth/drive.readonly', 'https://www.googleapis.com/auth/spreadsheets'],
                 openai:        [],  // API key — no scope concept
                 notion:        ['read_content', 'update_content', 'insert_content'],

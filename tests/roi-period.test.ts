@@ -7,11 +7,12 @@
 // Run:  npx tsx tests/roi-period.test.ts
 
 import assert from 'node:assert';
-import { parseRoiPeriod, roiPeriodStart } from '../src/utils/roi-period';
+import { parseRoiPeriod, roiPeriodStart, roiPeriodLabel } from '../src/utils/roi-period';
 
 // ── parseRoiPeriod ──────────────────────────────────────────────
 assert.strictEqual(parseRoiPeriod('week'), 'week');
 assert.strictEqual(parseRoiPeriod('month'), 'month');
+assert.strictEqual(parseRoiPeriod('all'), 'all');
 assert.strictEqual(parseRoiPeriod(undefined), 'week', 'missing param defaults to week');
 assert.strictEqual(parseRoiPeriod('garbage'), 'week', 'unknown values fall back to week');
 
@@ -49,5 +50,32 @@ const janWeek = roiPeriodStart('week', jan);
 assert.strictEqual(janWeek.getFullYear(), 2025);
 assert.strictEqual(janWeek.getMonth(), 11);
 assert.strictEqual(janWeek.getDate(), 28);
+
+// ── 'all': the epoch, so nothing is ever windowed out ───────────
+// This is the regression the period exists for — on the morning of 1 August 2026
+// the month window was hours old and the ROI hero reported zero despite a full
+// month of activity the day before. 'all' must be stable across any boundary.
+const augFirst = new Date(2026, 7, 1, 9, 15);
+const allStart = roiPeriodStart('all', augFirst);
+assert.strictEqual(allStart.getTime(), 0, "'all' starts at the epoch");
+assert.ok(allStart.getTime() < roiPeriodStart('month', augFirst).getTime());
+assert.ok(allStart.getTime() < roiPeriodStart('week', augFirst).getTime());
+// Stable regardless of when it's asked — the whole point of the window.
+assert.strictEqual(roiPeriodStart('all', jan).getTime(), roiPeriodStart('all', sat).getTime());
+// Must survive the ISO-string bind used against raw sql`` fragments (see roi-stats.ts).
+assert.strictEqual(allStart.toISOString(), '1970-01-01T00:00:00.000Z');
+
+// The 1 August case, stated directly: a month window opened that morning excludes
+// all of July, which is exactly why 'all' had to become the dashboard default.
+const julyActivity = new Date(2026, 6, 31, 18, 0);
+assert.ok(julyActivity.getTime() < roiPeriodStart('month', augFirst).getTime(),
+    "31 July activity falls outside a 1 August month window");
+assert.ok(julyActivity.getTime() > allStart.getTime(),
+    "…but is still counted by 'all'");
+
+// ── roiPeriodLabel ──────────────────────────────────────────────
+assert.strictEqual(roiPeriodLabel('all'), 'all time');
+assert.strictEqual(roiPeriodLabel('week'), 'this week');
+assert.strictEqual(roiPeriodLabel('month'), 'this month');
 
 console.log('roi-period.test.ts: all assertions passed');

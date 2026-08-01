@@ -14,6 +14,7 @@ import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { resolveActionNotifications, CONNECTION_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
+import { X_OAUTH_SCOPES } from '../../src/config/x-scopes';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 function parseState(raw: string): Record<string, string> | null {
@@ -186,7 +187,9 @@ export default withLambda(async (event) => {
             .where(and(eq(systemConnections.organisationId, organisationId), eq(systemConnections.serviceName, 'x')))
             .limit(1);
 
-        const scopes = 'tweet.read tweet.write users.read offline.access'; // keep in step with social-oauth-init.ts
+        // What we RECORD as granted. Both this and the authorize URL now read one constant, so the
+        // recorded grant cannot drift from the requested one.
+        const scopes = X_OAUTH_SCOPES;
         if (existing) {
             await db.update(systemConnections).set({ vaultRefKey: refKey, externalUserId: xUsername || xUserId, tokenExpiresAt, status: 'active', isActive: true, scopes, ...(assistantId ? { assistantId } : {}), updatedAt: new Date() }).where(eq(systemConnections.id, existing.id));
         } else {

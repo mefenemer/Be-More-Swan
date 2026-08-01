@@ -1,4 +1,5 @@
-// GET ?id=<assistantId>&period=week|month (default week)
+// GET ?id=<assistantId>&period=all|month|week (default week; the detail page always
+// passes one explicitly, and defaults to 'all' — see _fetchAndRenderAssistantMetrics)
 // Returns per-platform post counts (created / scheduled / published) for a single assistant,
 // plus hours saved and GBP saved based on the user's configured hourly rate.
 

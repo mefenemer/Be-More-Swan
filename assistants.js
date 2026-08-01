@@ -357,15 +357,17 @@ window.fetchAndRenderAssistants = async function(containerId, options) {
     if (!container) return;
 
     try {
-        // Issue #110 (follow-up): request the 'month' window so these cards' ~Xh / £Y ROI
-        // figures match the assistant detail page's Impact & ROI tab, which defaults to
-        // month (see _fetchAndRenderAssistantMetrics). With no period the server defaulted
-        // to 'week', so a card and the detail tab reported the same assistant over different
-        // windows and disagreed — early in a month the week can even exceed the month.
+        // Issue #110 (follow-up): request the SAME window as the assistant detail page's
+        // Impact & ROI tab, so these cards' ~Xh / £Y ROI figures match it. That window is
+        // now 'all' (see _fetchAndRenderAssistantMetrics) — it was 'month', and before that
+        // the server's 'week' default, each of which made a card and the detail tab report
+        // the same assistant over different windows and disagree. Keep this in lockstep
+        // with _fetchAndRenderAssistantMetrics's default; that is the whole point of it
+        // being explicit here.
         // (The merged-away workspace.html copy omitted the period, which is how the two grids could
         // flip back to a week window after an archive/pause re-render.)
         const [res, ipRes] = await Promise.all([
-            fetch('/.netlify/functions/get-assistants?period=month'),
+            fetch('/.netlify/functions/get-assistants?period=all'),
             fetch('/.netlify/functions/get-in-progress-assistants'),
         ]);
         if (!res.ok) throw new Error("Failed to fetch");
@@ -4114,14 +4116,15 @@ async function _prefetchDetailRqBadge(assistantId) {
 // ─────────────────────────────────────────────────────────────────
 // Impact & ROI metrics — per-assistant post counts + time/money saved.
 // ─────────────────────────────────────────────────────────────────
-// Default to 'month', not 'week': the calendar week resets hard at the Sunday
+// Default to 'all', not a calendar window: both of those reset hard at their
 // boundary, so for many hours after each rollover an assistant with real
-// historical activity legitimately has nothing yet in the brand-new week
-// window and this card reads as "broken" (0 hours/£ saved) despite the
-// all-time post counts above it being nonzero. The dashboard hero widget
-// hit the identical issue (#132) and was fixed the same way — see the
-// matching comment in dashboard-content.html.
-async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
+// historical activity legitimately has nothing yet in the brand-new window and
+// this card reads as "broken" (0 hours/£ saved) despite the all-time post counts
+// above it being nonzero. That was first seen at the Sunday boundary (#132) and
+// "fixed" by defaulting to month — which only moved the cliff, and it then
+// happened for real on the morning of 1 August. The dashboard hero was corrected
+// the same way; see the matching comment in dashboard-content.html.
+async function _fetchAndRenderAssistantMetrics(assistantId, period = 'all') {
     // Issue: the "Content by platform" breakdown moved into the Autopilot card. `card` now points at
     // that relocated block (#autopilot-platform-breakdown); the Created/Scheduled/Published totals it
     // breaks down live alongside it in the same card and stay visible regardless of platform count.
@@ -4134,8 +4137,8 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
     // Non-social roles have no post-based ROI — the registry marks both role-hidden; respect it.
     if (card.dataset.roleHidden === '1') return;
 
-    // Period toggle — mirrors the dashboard hero's This Week / This Month tabs so
-    // the hours/£ figures here are always comparable with whichever view the
+    // Period toggle — mirrors the dashboard hero's All Time / This Month / This Week
+    // tabs so the hours/£ figures here are always comparable with whichever view the
     // dashboard is showing.
     (roiStrip || card).querySelectorAll('.metrics-period-btn').forEach(btn => {
         const active = btn.dataset.period === period;
@@ -4158,12 +4161,13 @@ async function _fetchAndRenderAssistantMetrics(assistantId, period = 'month') {
         const el = id => document.getElementById(id);
         if (roiStrip) roiStrip.classList.remove('hidden');
 
-        const periodLabel = period === 'month' ? 'this month' : 'this week';
+        const periodLabel = period === 'all' ? 'all time' : period === 'month' ? 'this month' : 'this week';
+        const dashLabel = period === 'all' ? 'All Time' : period === 'month' ? 'This Month' : 'This Week';
         // Short caption on screen; the sentence that explains how it lines up with the dashboard
         // is one hover away, rather than costing a line of the header.
         const note = el('metrics-period-note');
         note.textContent = `Time & money saved ${periodLabel}`;
-        note.title = `Time & money saved ${periodLabel} (matches the dashboard's ${period === 'month' ? 'This Month' : 'This Week'} view)`;
+        note.title = `Time & money saved ${periodLabel} (matches the dashboard's ${dashLabel} view)`;
         // These three now count POSTS, not per-platform rows, and 'Scheduled' no longer includes
         // work still awaiting review — so they reconcile with the Review Queue's Scheduled tab and
         // the calendar instead of contradicting both. The titles say which statuses each rolls up,

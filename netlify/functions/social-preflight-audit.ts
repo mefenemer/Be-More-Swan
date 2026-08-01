@@ -11,6 +11,7 @@ import { getDb } from '../../db/client';
 import { systemConnections } from '../../db/schema';
 import { getSecret } from '../../src/utils/vault';
 import { requireTenant } from '../../src/utils/tenant';
+import { X_OAUTH_SCOPE_LIST } from '../../src/config/x-scopes';
 import { withLambda } from '@netlify/aws-lambda-compat';
 import { parseModelJson } from '../../src/utils/model-json';
 
@@ -182,25 +183,49 @@ async function runLinkedInChecks(token: string): Promise<PreflightCheck[]> {
     return checks;
 }
 
-async function runXChecks(token: string): Promise<PreflightCheck[]> {
+async function runXChecks(token: string, grantedScopes: string | null): Promise<PreflightCheck[]> {
     const checks: PreflightCheck[] = [];
-    let writeCheck: PreflightCheck = {
+    // CHK-01 is REACHABILITY, not write capability. It used to be labelled "X write scope granted"
+    // on the reasoning that /2/users/me "would succeed if scopes include tweet.write" — but that
+    // endpoint needs only users.read, so the check passed on a token that could not post at all.
+    // A green preflight that cannot see the actual failure is worse than no preflight; the scope
+    // question is now CHK-02, which asks the grant instead of guessing from an unrelated 200.
+    let reachCheck: PreflightCheck = {
         id: 'CHK-01',
-        label: 'X write scope granted',
+        label: 'X account reachable',
         status: 'unknown',
         deepLink: 'https://developer.twitter.com/en/portal/dashboard',
     };
     try {
-        // Attempt a dry-run: fetch the authed user; if scopes include tweet.write it would succeed
         const meRes = await fetch('https://api.twitter.com/2/users/me?user.fields=id', {
             headers: { Authorization: `Bearer ${token}` },
             signal: AbortSignal.timeout(4000),
         });
         const meData: { data?: { id: string }; errors?: unknown[] } = await meRes.json();
-        writeCheck.status = meData.data?.id ? 'pass' : 'fail';
-        writeCheck.detail = meData.data?.id ? 'X account accessible with current token.' : 'Token cannot access X account — write scope may be missing.';
+        reachCheck.status = meData.data?.id ? 'pass' : 'fail';
+        reachCheck.detail = meData.data?.id
+            ? 'Token authenticates against X.'
+            : 'Token cannot access the X account — it has expired or been revoked.';
     } catch { /* leave unknown */ }
-    checks.push(writeCheck);
+    checks.push(reachCheck);
+
+    // The scopes recorded when the grant was minted. There is no X endpoint that reports a token's
+    // scopes back, and the only way to *prove* media.write is to attempt a real upload — so the
+    // recorded grant is the best available signal, and it is an honest one now that the authorize
+    // URL and this column are written from the same constant.
+    const granted = (grantedScopes ?? '').split(/\s+/).filter(Boolean);
+    const missing = X_OAUTH_SCOPE_LIST.filter(s => !granted.includes(s));
+    checks.push({
+        id: 'CHK-02',
+        label: 'X publishing scopes granted',
+        status: granted.length === 0 ? 'unknown' : missing.length === 0 ? 'pass' : 'fail',
+        detail: granted.length === 0
+            ? 'No scopes recorded for this connection — reconnect X to record them.'
+            : missing.length === 0
+                ? 'Token holds every scope required to publish text and media.'
+                : `Missing ${missing.join(', ')}. Posts with images or video will fail with a 403 until X is disconnected and reconnected — widening scopes does not affect tokens already issued.`,
+        deepLink: '/workspace.html#connections',
+    });
     return checks;
 }
 
@@ -247,7 +272,7 @@ export default withLambda(async (event) => {
         const db = getDb();
         const svc = platform === 'instagram' ? 'instagram' : platform;
 
-        const [conn] = await db.select({ id: systemConnections.id, vaultRefKey: systemConnections.vaultRefKey, metadata: systemConnections.metadata })
+        const [conn] = await db.select({ id: systemConnections.id, vaultRefKey: systemConnections.vaultRefKey, metadata: systemConnections.metadata, scopes: systemConnections.scopes })
             .from(systemConnections)
             .where(and(eq(systemConnections.organisationId, organisationId), eq(systemConnections.serviceName, svc), eq(systemConnections.isActive, true)))
             .limit(1);
@@ -266,7 +291,7 @@ export default withLambda(async (event) => {
                 } else if (platform === 'linkedin') {
                     checks = await runLinkedInChecks(token);
                 } else if (platform === 'x') {
-                    checks = await runXChecks(token);
+                    checks = await runXChecks(token, conn.scopes ?? null);
                 }
             }
         }

@@ -1,8 +1,14 @@
 // netlify/functions/get-time-saved.ts
-// US2.1 — "Hours Saved" calculator. Counts the org's AI actions this calendar
-// month (leads generated, content drafted, completed task runs), multiplies each
+// US2.1 — "Hours Saved" calculator. Counts the org's AI actions in the requested
+// window (leads generated, content drafted, completed task runs), multiplies each
 // by the admin-configured minute value (gamification.time_multipliers), and
 // returns the total hours plus a per-assistant breakdown (AC2.1.1–2.1.3).
+//
+//  GET ?period=all|month|week   (default: month)
+//
+// The period parameter exists so the "See the tasks behind this" modal can match
+// whichever window the dashboard ROI hero is currently showing — the hero defaults
+// to all-time, and a permanently month-scoped modal would contradict it.
 
 import { Handler } from '@netlify/functions';
 import { and, eq, gte, sql } from 'drizzle-orm';
@@ -11,6 +17,7 @@ import { leads, scheduledPosts, taskRuns, aiAssistants } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { getTimeMultipliers } from '../../src/utils/platform-config';
 import { evaluateMilestones } from '../../src/utils/gamification';
+import { parseRoiPeriod, roiPeriodStart } from '../../src/utils/roi-period';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const json = (statusCode: number, body: unknown) => ({
@@ -29,7 +36,13 @@ export default withLambda(async (event) => {
     const orgId = ctx.organisationId;
 
     const now = new Date();
-    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    // Default stays 'month' so the existing dashboard "Time Saved" card is unchanged;
+    // only callers that explicitly ask (the ROI hero's modal) get a different window.
+    const rawPeriod = event.queryStringParameters?.period;
+    const period = rawPeriod ? parseRoiPeriod(rawPeriod) : 'month';
+    const monthStart = period === 'all' ? new Date(0)
+        : period === 'week' ? roiPeriodStart('week', now)
+        : new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
     const mult = await getTimeMultipliers();
 
     const [leadRows, postRows, taskRows, assistants] = await Promise.all([
@@ -95,7 +108,13 @@ export default withLambda(async (event) => {
         at: t.completedAt ?? t.createdAt,
     }));
     tasks.sort((a, b) => +new Date(b.at) - +new Date(a.at));
+    // taskCount is the TRUE total and must stay uncapped — it's what the ROI hero tile
+    // shows, and the modal subtitle quotes it. Only the itemised list is trimmed, since
+    // an all-time window can span thousands of rows; `tasksTruncated` lets the modal say so.
     const taskCount = tasks.length;
+    const TASK_LIST_CAP = 100;
+    const tasksTruncated = tasks.length > TASK_LIST_CAP;
+    const taskList = tasksTruncated ? tasks.slice(0, TASK_LIST_CAP) : tasks;
 
     // US3.1: evaluate milestones on dashboard load (idempotent; honours the emergency stop). Non-blocking.
     await evaluateMilestones(db, orgId, ctx.userId).catch(() => {});
@@ -103,10 +122,16 @@ export default withLambda(async (event) => {
     return json(200, {
         hoursSaved: Math.round(totalMinutes / 60),
         totalMinutes,
-        month: monthStart.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }),
+        period,
+        // `month` is the window's display label, kept under its original key so the
+        // existing dashboard card and modal keep rendering it without changes.
+        month: period === 'all' ? 'All time'
+            : period === 'week' ? 'This week'
+            : monthStart.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }),
         breakdown,
-        tasks,
+        tasks: taskList,
         taskCount,
+        tasksTruncated,
     });
 });
 

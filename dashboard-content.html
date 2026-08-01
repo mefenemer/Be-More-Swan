@@ -63,7 +63,8 @@
           </div>
           <div class="cc-toggle" role="tablist" aria-label="Time period">
             <button id="cc-tab-week"  type="button" class="cc-toggle-btn"           data-period="week"  role="tab">This Week</button>
-            <button id="cc-tab-month" type="button" class="cc-toggle-btn is-active" data-period="month" role="tab">This Month</button>
+            <button id="cc-tab-month" type="button" class="cc-toggle-btn"           data-period="month" role="tab">This Month</button>
+            <button id="cc-tab-all"   type="button" class="cc-toggle-btn is-active" data-period="all"   role="tab">All Time</button>
           </div>
         </div>
 
@@ -267,28 +268,62 @@
     const fmtGBP = v => Number(v).toLocaleString('en-GB', { style: 'currency', currency: 'GBP', maximumFractionDigits: 0 });
     const prefersReduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+    // Tiles currently mid-animation → their "snap straight to the final value" fn.
+    // requestAnimationFrame does not fire at all in a hidden tab, so an animation
+    // started there would freeze on its first frame — which paints the STARTING
+    // number, i.e. 0. Loading the dashboard in a background tab (opened in a new
+    // tab, or switched away from mid-load) therefore left every tile reading "0"
+    // indefinitely, indistinguishable from an org that had genuinely saved nothing.
+    const pendingCounts = new Map();
+
     // Smooth count-up with easing. `format` maps the running number → display text.
     function countUp(el, target, { decimals = 0, duration = 1100, format } = {}) {
       if (!el) return;
       const fmt = format || (n => decimals ? n.toFixed(decimals) : String(Math.round(n)));
       const from = parseFloat(el.dataset.count || '0') || 0;
       el.dataset.count = String(target);
-      if (prefersReduced || from === target) { el.textContent = fmt(target); return; }
+      const finish = () => {
+        if (pendingCounts.get(el) === finish) pendingCounts.delete(el);
+        el.textContent = fmt(target);
+      };
+      // Never animate when we can't be sure frames will be delivered — just show it.
+      if (prefersReduced || document.hidden || from === target) { finish(); return; }
+      pendingCounts.set(el, finish);
       const start = performance.now();
       const ease = t => 1 - Math.pow(1 - t, 3); // easeOutCubic
       (function tick(now) {
+        if (pendingCounts.get(el) !== finish) return; // snapped, or superseded by a newer render
         const p = Math.min((now - start) / duration, 1);
+        if (p >= 1) { finish(); return; }
         el.textContent = fmt(from + (target - from) * ease(p));
-        if (p < 1) requestAnimationFrame(tick);
+        requestAnimationFrame(tick);
       })(start);
     }
 
-    // Issue #132 (follow-up): default to "This Month" — "This Week" resets hard at
-    // the Sunday boundary (roiPeriodStart), so for many hours after each week rolls
-    // over, an org with real historical activity legitimately has nothing yet in the
-    // still-brand-new week window and the hero tiles read as "broken" (0 hours/£/tasks)
-    // even though get-time-saved.ts's always-month-scoped modal shows real activity.
-    let period = 'month';
+    // Rescue any in-flight animation the moment the tab is backgrounded, so it lands
+    // on the real figure rather than freezing part-way (usually at the 0 it started from).
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) [...pendingCounts.values()].forEach(finish => finish());
+    });
+
+    // Issue #132 (follow-up): "This Week" resets hard at the Sunday boundary
+    // (roiPeriodStart), so for many hours after each week rolls over, an org with real
+    // historical activity legitimately has nothing yet in the still-brand-new week
+    // window and the hero tiles read as "broken" (0 hours/£/tasks). Defaulting to
+    // "This Month" only moved that cliff from weekly to monthly — it then happened for
+    // real on the morning of 1 August. "All Time" is cumulative and can never drop to
+    // zero once an org has done any work at all, so it's the default now; the calendar
+    // windows remain as explicit opt-ins.
+    let period = 'all';
+    // Published for _showSavingsModal (workspace.html) so the "See the tasks behind
+    // this" list covers the same window as the tile the user clicked from.
+    window._roiHeroPeriod = period;
+
+    // The window this figure covers. Note the money tile's sub-caption is driven by
+    // `multiplier`/`tasksToBreakEven`, which roi-stats always computes over the calendar
+    // month (they're measured against a monthly plan price) regardless of `period` —
+    // so that caption stays "this month" even under the all-time tiles, deliberately.
+    const periodLabel = p => (p === 'week' ? 'this week' : p === 'all' ? 'all time' : 'this month');
 
     async function renderMetrics() {
       const hoursEl = document.getElementById('cc-hours');
@@ -296,7 +331,7 @@
       const moneyEl = document.getElementById('cc-money');
       const moneySub = document.getElementById('cc-money-sub');
       const hoursSub = document.getElementById('cc-hours-sub');
-      if (hoursSub) hoursSub.textContent = period === 'week' ? 'this week' : 'this month';
+      if (hoursSub) hoursSub.textContent = periodLabel(period);
       try {
         const res = await fetch(`/.netlify/functions/roi-stats?period=${period}`);
         if (!res.ok) return;
@@ -310,10 +345,13 @@
           // AC2: animated £ value
           countUp(moneyEl, Number(d.gbpSaved), { format: n => fmtGBP(n) });
           if (moneySub) {
-            if (period === 'month' && d.multiplier !== null && d.multiplier >= 1) {
+            // Shown under every period now, not just "This Month": the server computes
+            // both of these on a calendar-month window whatever was requested, so the
+            // break-even story no longer disappears when the tiles show all-time.
+            if (d.multiplier !== null && d.multiplier !== undefined && d.multiplier >= 1) {
               moneySub.innerHTML = `Paid for itself <strong style="color:#be185d">${d.multiplier}×</strong> this month 🎉`;
-            } else if (period === 'month' && d.tasksToBreakEven > 0) {
-              moneySub.textContent = `${d.tasksToBreakEven} more task${d.tasksToBreakEven === 1 ? '' : 's'} to break even`;
+            } else if (d.tasksToBreakEven > 0) {
+              moneySub.textContent = `${d.tasksToBreakEven} more task${d.tasksToBreakEven === 1 ? '' : 's'} to break even this month`;
             } else {
               moneySub.textContent = 'based on your hourly rate';
             }
@@ -385,6 +423,7 @@
       btn.addEventListener('click', () => {
         if (btn.dataset.period === period) return;
         period = btn.dataset.period;
+        window._roiHeroPeriod = period;
         root.querySelectorAll('.cc-toggle-btn').forEach(b => b.classList.toggle('is-active', b === btn));
         renderMetrics();
       });
