@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-platform-tabs",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4235",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/25cd39dd-bcf2-46f6-979e-5b926154c7e6/scratchpad/tabharness"
+      ],
+      "port": 4235,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-failed-posts",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

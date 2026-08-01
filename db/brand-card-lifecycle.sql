@@ -42,9 +42,19 @@
 -- STAGING (ep-blue-truth, assistant1_org=10): 33 content_assets, 3 with a storage_key, and ZERO
 --   brand cards. Section 3 executed cleanly and returned all zeros — which proves the SQL parses
 --   and does not over-match, and proves nothing else. Do not read it as reassurance.
--- PROD (assistant1_org=37): 7 unused cards out of 26 brand cards; 19 correctly excluded by the
---   attachment checks; NONE due on the first sweep (earliest expiry 2026-08-23). This was the only
---   real dry run. See section 4 — it is not needed, and why.
+-- PROD (assistant1_org=37): 7 unused cards out of 26 brand cards; NONE due on the first sweep
+--   (earliest expiry 2026-08-23). This was the only real dry run. See section 4 — it is not needed,
+--   and why. The 26 account for exactly, with nothing left over:
+--
+--     10  attached to a post   (junction AND legacy array both report 10 — the dual write is intact)
+--      9  already on a retention clock, 2 of those already purged (purged rows keep their clock)
+--      7  unused  → what this rule is for
+--
+-- ⚠️ That decomposition CORRECTS the premise this work started from. "Nothing ever set
+-- retention_delete_after on a brand card" is not true: 9 of 26 have one, set by
+-- propagateAssetStatuses when their post reached posted/rejected. The gap was never "brand cards
+-- are immortal" — it was cards that NEVER REACHED A POST, which is exactly the 7. This rule covers
+-- the uncovered case and does not overlap retention that already worked.
 
 
 -- ═══ SECTION 0 — which database am I in? ════════════════════════════════════════════════════════

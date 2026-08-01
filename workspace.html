@@ -7297,6 +7297,13 @@ function _rqReviewRenderTabs() {
     // is nothing to add — and the link was pointing at a step that had been deleted, which is why it
     // appeared to do nothing at all. Connecting another account is a Connections job, not a per-post
     // one.
+    //
+    // Taking one AWAY is a different question, and this is where it is answered. Seeding from live
+    // connections is right for the common post and wrong for the specific one — "this clip is a Reel,
+    // Instagram only" was unaskable anywhere in the product: the editor's Platforms step is gone, and
+    // approve, reject and discard all act on the whole group. So each tab carries a ×. It sits on the
+    // tab because that is the only place the platform is already named, and removing it here reads as
+    // what it is: this post stops going to that network.
     const solo = '';
     host.innerHTML = `<div class="flex flex-wrap items-center gap-1 border-b border-gray-200">${group.map(p => {
         const active = p.id === _rqReviewPostId;
@@ -7321,14 +7328,26 @@ function _rqReviewRenderTabs() {
         const blocked = !p.thumbnailUrl ? null
                       : route ? (route.state === 'none' ? (route.reason || 'Cannot publish here.') : null)
                               : _rqPlatformBlockedReason(p);
-        const tone = blocked
-            // No `decoration-1`: it is not in the compiled style.css, and rebuilding Tailwind to
-            // add one utility churns unrelated selectors across the whole file.
-            ? 'border-transparent text-gray-300 line-through'
-            : (active ? 'border-emerald-600 text-emerald-700' : 'border-transparent text-gray-500 hover:text-gray-700');
-        return `<button type="button" onclick="rqReviewSwitchPlatform(${p.id})"
+        // Split in two because the tab is no longer one element: the BORDER belongs to the wrapper
+        // that holds the label and the ×, the TEXT tone belongs to the label alone. `line-through`
+        // in particular has to stay off the wrapper — text-decoration does not propagate into an
+        // inline-block child, so a struck-through wrapper would leave the label unstruck and only
+        // the removed-platform styling would silently stop working.
+        // No `decoration-1`: it is not in the compiled style.css, and rebuilding Tailwind to
+        // add one utility churns unrelated selectors across the whole file.
+        const borderTone = blocked || !active ? 'border-transparent' : 'border-emerald-600';
+        const textTone = blocked
+            ? 'text-gray-300 line-through'
+            : (active ? 'text-emerald-700' : 'text-gray-500 hover:text-gray-700');
+        // Only a row still being WORKED ON may be dropped. Mirrors MUTABLE in set-post-platforms.ts:
+        // an approved or scheduled sibling is a commitment the server refuses to delete (it hands it
+        // back as `locked`), so offering a × there would be a button that argues with itself. And
+        // never on the last platform — a post has to go somewhere.
+        const removable = group.length > 1 && _RQ_PLATFORM_REMOVABLE.includes(p.status);
+        return `<div class="relative inline-flex items-stretch -mb-px border-b-2 transition ${active && blocked ? 'border-gray-300' : ''} ${borderTone}">
+        <button type="button" onclick="rqReviewSwitchPlatform(${p.id})"
           ${blocked ? `title="${_rqEsc(blocked)}"` : ''}
-          class="relative px-3 py-1.5 text-xs font-bold -mb-px border-b-2 transition cursor-pointer ${active && blocked ? 'border-gray-300' : ''} ${tone}">
+          class="${removable ? 'pl-3' : 'px-3'} py-1.5 text-xs font-bold text-left transition cursor-pointer ${textTone}">
           <span class="block">${_rqEsc(rqPlatformLabel(p.platform))}${flag && !blocked ? '<span class="ml-1 inline-block w-1.5 h-1.5 rounded-full bg-red-500 align-middle" title="Needs an image"></span>' : ''}</span>
           ${route && p.thumbnailUrl ? (() => {
             // Only once there is MEDIA to route. A brand-new post has none, so the router has
@@ -7363,8 +7382,63 @@ function _rqReviewRenderTabs() {
             return `<span class="block text-[9px] font-semibold ${tone}${provisional ? ' italic' : ''}"
               title="${_rqEsc(title)}">${_rqEsc(label)}</span>`;
           })() : ''}
-        </button>`;
+        </button>${removable ? `<button type="button" onclick="rqReviewRemovePlatform(${p.id})"
+          ${_pcePlatformBusy ? 'disabled' : ''}
+          title="Don't post this to ${_rqEsc(rqPlatformLabel(p.platform))} — its caption, media and any text you have placed on it are deleted"
+          aria-label="Stop posting this to ${_rqEsc(rqPlatformLabel(p.platform))}"
+          class="px-1.5 text-sm leading-none text-gray-300 hover:text-red-600 transition cursor-pointer ${_pcePlatformBusy ? 'opacity-40 cursor-not-allowed' : ''}">×</button>` : ''}</div>`;
     }).join('')}${solo}</div>`;
+}
+
+// Statuses whose row may still be created or destroyed by changing the platform list. The server's
+// rule (MUTABLE in set-post-platforms.ts) restated, because the × has to be decided before the
+// request is sent — not mirrored anywhere else, and the server remains the one that enforces it.
+const _RQ_PLATFORM_REMOVABLE = ['draft', 'pending_approval', 'in_review'];
+
+/**
+ * Stop this post going out on one platform.
+ *
+ * Genuinely destructive, which is why it asks first: the sibling row IS that platform's version of
+ * the post, so its caption, its media and any text overlaid on it go with it. The other platforms
+ * are untouched — this is not discard, which takes the whole group.
+ *
+ * Nothing here computes the surviving set from the platform being removed alone. It is derived from
+ * the GROUP as it stands, so a tab the user is not looking at cannot be dropped by a stale idea of
+ * what the post targets.
+ */
+async function rqReviewRemovePlatform(id) {
+    if (_pcePlatformBusy) return;
+    const post = _rqPostCache[id];
+    if (!post || !post.platform) return;
+
+    const group = _rqReviewGroupIds.map(i => _rqPostCache[i]).filter(Boolean);
+    const remaining = [...new Set(group.map(p => p.platform).filter(p => p && p !== post.platform))];
+    const label = rqPlatformLabel(post.platform);
+    if (!remaining.length) {
+        window.showToast?.('A post has to go out somewhere. Discard it instead if you don\'t want it.', { icon: '⚠️' });
+        return;
+    }
+    // "Instagram, X are untouched" reads as a list of columns. Same join rqReviewSetConnectGate uses.
+    const labels = remaining.map(rqPlatformLabel);
+    const others = labels.length > 1
+        ? labels.slice(0, -1).join(', ') + ' and ' + labels[labels.length - 1]
+        : labels[0];
+    if (!confirm(`Stop posting this to ${label}?\n\nThe ${label} caption, media and any text placed on it are deleted. ${others} ${remaining.length > 1 ? 'are' : 'is'} untouched.`)) return;
+
+    try {
+        const d = await _pceApplyPlatforms(remaining);
+        if (!d) return;
+        // `locked` means the server kept a platform this asked to remove, because that one is
+        // already committed. Saying "removed" would be a lie the tab strip is about to contradict.
+        window.showToast?.(
+            d.locked?.length
+                ? `${d.locked.map(pl => rqPlatformLabel(pl)).join(', ')} is already scheduled, so it stays. Reschedule it first if you want it gone.`
+                : `No longer posting this to ${label}.`,
+            { icon: d.locked?.length ? '⚠️' : '✅' },
+        );
+    } catch (err) {
+        window.showToast?.(err.message || 'Could not change the platforms.', { icon: '⚠️' });
+    }
 }
 
 /**
@@ -9044,6 +9118,55 @@ function _pceSetPlatformMsg(text, kind) {
         + (kind === 'error' ? 'text-red-600 font-semibold' : kind === 'ok' ? 'text-emerald-700 font-semibold' : 'text-gray-400');
 }
 
+/**
+ * Commit a new platform set for the post on screen, and reopen the editor on what survived.
+ *
+ * The ONE place that calls set-post-platforms. Two surfaces ask for the same change — the × on a
+ * platform tab (rqReviewRemovePlatform) and the chip picker below (_pceTogglePostPlatform) — and
+ * they must not each own a copy of the in-flight state, the refetch or the `locked` answer: those
+ * are the parts that are easy to get subtly different and impossible to notice, because whichever
+ * surface is wrong still LOOKS like it worked until the next repaint contradicts it.
+ *
+ * Throws on failure, having already put both surfaces back to what is actually stored. Callers only
+ * decide where to say so — a toast for the tab strip, the panel's own line for the chips.
+ */
+async function _pceApplyPlatforms(platforms) {
+    const postId = _rqReviewPostId;
+    if (postId == null) return null;
+
+    _pcePlatformBusy = true;
+    _pcePendingPlatforms = new Set(platforms);   // paint the answer now, reconcile when it lands
+    _pceRenderPlatformPicker();
+    _rqReviewRenderTabs();
+    try {
+        const res = await fetch('/.netlify/functions/set-post-platforms', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ postId, platforms: [...platforms] }),
+        });
+        const d = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(d.error || 'Could not change the platforms.');
+        // Rows were created/deleted, so the cache and the sibling map are both stale — refetch
+        // rather than patch, and reopen on whichever post survived (the one being edited may have
+        // been the one just removed).
+        //
+        // Cleared BEFORE the reopen, not after: openPostReview repaints the tabs and the chips, and
+        // a repaint that still believed a change was in flight would render the whole strip disabled
+        // and leave it that way.
+        _pcePlatformBusy = false;
+        _pcePendingPlatforms = null;   // the refetch below is now the truth
+        // refresh: true is load-bearing. Reopening alone re-renders from the cache this call just
+        // invalidated, which is why the chips used to stay exactly as they were.
+        await openPostReview(d.anchorId ?? postId, { refresh: true });
+        return d;
+    } catch (err) {
+        _pcePlatformBusy = false;
+        _pcePendingPlatforms = null;   // the change failed: fall back to what is actually stored
+        _pceRenderPlatformPicker();
+        _rqReviewRenderTabs();
+        throw err;
+    }
+}
+
 async function _pceTogglePostPlatform(platformId) {
     if (_pcePlatformBusy) return;
     const postId = _rqReviewPostId;
@@ -9057,25 +9180,10 @@ async function _pceTogglePostPlatform(platformId) {
     // chip is the one people click by accident when they mean "only this one".
     if (!current.size) { _pceSetPlatformMsg('A post needs at least one platform.', 'error'); return; }
 
-    _pcePlatformBusy = true;
-    _pcePendingPlatforms = new Set(current);   // paint the answer now, reconcile when it lands
-    _pceRenderPlatformPicker();
     _pceSetPlatformMsg('Updating…');
     try {
-        const res = await fetch('/.netlify/functions/set-post-platforms', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ postId, platforms: [...current] }),
-        });
-        const d = await res.json().catch(() => ({}));
-        if (!res.ok) throw new Error(d.error || 'Could not change the platforms.');
-        // Rows were created/deleted, so the cache and the sibling map are both stale — refetch
-        // rather than patch, and reopen on whichever post survived (the one being edited may have
-        // been the one just removed).
-        _pcePlatformBusy = false;
-        _pcePendingPlatforms = null;   // the refetch below is now the truth
-        // refresh: true is load-bearing. Reopening alone re-renders from the cache this call just
-        // invalidated, which is why the chips used to stay exactly as they were.
-        await openPostReview(d.anchorId ?? postId, { refresh: true });
+        const d = await _pceApplyPlatforms([...current]);
+        if (!d) return;
         _pceSetPlatformMsg(
             d.locked?.length
                 ? `${d.locked.map(p => window.PlatformConstants.label(p)).join(', ')} already scheduled — not removed.`
@@ -9083,9 +9191,6 @@ async function _pceTogglePostPlatform(platformId) {
             d.locked?.length ? 'error' : 'ok',
         );
     } catch (err) {
-        _pcePlatformBusy = false;
-        _pcePendingPlatforms = null;   // the change failed: fall back to what is actually stored
-        _pceRenderPlatformPicker();
         _pceSetPlatformMsg(err.message || 'Could not change the platforms.', 'error');
     }
 }
