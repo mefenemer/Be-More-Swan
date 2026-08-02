@@ -28,6 +28,9 @@ import { enrichLeadContact } from '../../src/lib/discovery-enrich';
 import { classifyCandidate } from '../../src/lib/discovery-domain-filter';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { enqueueScenarioTrigger } from '../../src/utils/scenario-engine';
+import { recordEvent } from '../../src/utils/revenue-ledger';
+import { createNotification } from '../../src/utils/notify';
+import { savedSearchLabel } from '../../src/config/signal-sources';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 type Db = ReturnType<typeof getDb>;
@@ -280,9 +283,31 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
                     .where(eq(discoveredLeads.id, inserted[i].id));
                 // Mirror into the Leads tab immediately (item 4). promoteOne flips the row to
                 // 'promoted' + links the assistant_record, so the promoting stage skips it later.
-                await promoteOne(db, job.organisation_id, campaign.aiAssistantId, {
+                const recordId = await promoteOne(db, job.organisation_id, campaign.aiAssistantId, {
                     id: inserted[i].id, companyName: inserted[i].companyName, rating: card.rating, scoringCard: card,
                 }, approvalStatus);
+
+                // Revenue ledger (Phase 0). Emitted AFTER promoteOne so both events carry the
+                // assistant_record link. `icp` is the campaign's activation-time snapshot, which is
+                // exactly the attribution key the Strategy Agent needs — it says which ICP was live
+                // when this lead was found, not which one is live when the aggregate runs.
+                // recordEvent never throws, so no try/catch here by design.
+                const ledgerBase = {
+                    organisationId: job.organisation_id,
+                    aiAssistantId: campaign.aiAssistantId,
+                    discoveredLeadId: inserted[i].id,
+                    assistantRecordId: recordId,
+                    actor: 'agent' as const,
+                    icpSnapshot: icp,
+                };
+                await recordEvent(db, 'lead_discovered', {
+                    ...ledgerBase,
+                    payload: { domain: inserted[i].domain, matchedQuery: query, discoveredVia: strategy },
+                });
+                await recordEvent(db, 'lead_scored', {
+                    ...ledgerBase,
+                    payload: { score: card.score, rating: card.rating },
+                });
             }
             leadsFound += inserted.length;
         }
@@ -368,14 +393,18 @@ async function promoteBatch(db: Db, job: JobRow, assistantId: number, guardrails
 
 async function enrichBatch(db: Db, job: JobRow, counters: Counters): Promise<void> {
     // Only hot/warm leads are worth a fetch — cold leads never receive outreach.
-    const batch = await db.execute<{ id: number; domain: string | null; assistant_record_id: number | null }>(
-        `SELECT id, domain, assistant_record_id FROM discovered_leads
-         WHERE campaign_id = ${job.campaign_id}
-           AND status = 'promoted'
-           AND domain IS NOT NULL
-           AND contact_email IS NULL
-           AND rating IN ('hot','warm')
-           AND signals ->> 'enrichAttemptedAt' IS NULL
+    // ai_assistant_id is joined in (rather than fetched separately) purely so the ledger event can
+    // be attributed to the assistant — this stage has the job, not the campaign row.
+    const batch = await db.execute<{ id: number; domain: string | null; assistant_record_id: number | null; ai_assistant_id: number }>(
+        `SELECT dl.id, dl.domain, dl.assistant_record_id, dc.ai_assistant_id
+           FROM discovered_leads dl
+           JOIN discovery_campaigns dc ON dc.id = dl.campaign_id
+         WHERE dl.campaign_id = ${job.campaign_id}
+           AND dl.status = 'promoted'
+           AND dl.domain IS NOT NULL
+           AND dl.contact_email IS NULL
+           AND dl.rating IN ('hot','warm')
+           AND dl.signals ->> 'enrichAttemptedAt' IS NULL
          LIMIT ${ENRICH_BATCH}`
     );
 
@@ -387,7 +416,8 @@ async function enrichBatch(db: Db, job: JobRow, counters: Counters): Promise<voi
         } catch {
             // Best-effort: a scrape failure must never fail the run.
         }
-        await recordEnrichment(db, lead.id, lead.assistant_record_id, hit);
+        await recordEnrichment(db, lead.id, lead.assistant_record_id, hit,
+            { organisationId: job.organisation_id, aiAssistantId: lead.ai_assistant_id });
     }));
 
     const [{ remaining } = { remaining: 0 }] = await db.execute<{ remaining: number }>(
@@ -396,12 +426,67 @@ async function enrichBatch(db: Db, job: JobRow, counters: Counters): Promise<voi
            AND contact_email IS NULL AND rating IN ('hot','warm')
            AND signals ->> 'enrichAttemptedAt' IS NULL`
     );
+    const done = remaining === 0;
     await db.update(discoveryJobs)
         .set({
-            status: remaining > 0 ? 'queued' : 'completed', stage: 'enriching', errorMessage: null,
+            status: done ? 'completed' : 'queued', stage: 'enriching', errorMessage: null,
             ...counterCols(counters), updatedAt: new Date(),
         })
         .where(eq(discoveryJobs.id, job.id));
+
+    if (done) await publishSignals(db, job);
+}
+
+/**
+ * Publish a finished run's results to the Signal Inbox: stamp the job and raise ONE notification.
+ *
+ * Idempotency is the whole point of `signals_published_at`. A discovery run is cursor-resumable
+ * across ticks and is retried on failure, so "the run finished" can be observed more than once for
+ * a single logical run. The conditional UPDATE below claims the right to notify — only the update
+ * that actually flips NULL → now() returns a row, so exactly one caller notifies even if two ticks
+ * race. Notifying per lead instead of per run would mean 50 notifications for one action, which is
+ * how a notification centre becomes something users mute.
+ *
+ * Best-effort by contract: a failure here must not fail the run, which has already completed
+ * successfully and whose leads are already in the inbox.
+ */
+async function publishSignals(db: Db, job: JobRow): Promise<void> {
+    try {
+        const claimed = await db.update(discoveryJobs)
+            .set({ signalsPublishedAt: new Date() })
+            .where(and(eq(discoveryJobs.id, job.id), isNull(discoveryJobs.signalsPublishedAt)))
+            .returning({ id: discoveryJobs.id, leadsFound: discoveryJobs.leadsFound });
+        if (claimed.length === 0) return; // already published by an earlier tick
+
+        const found = claimed[0].leadsFound ?? 0;
+        if (found === 0) return; // nothing to tell them about
+
+        const [campaign] = await db
+            .select({
+                name: discoveryCampaigns.name,
+                idea: discoveryCampaigns.idea,
+                aiAssistantId: discoveryCampaigns.aiAssistantId,
+                createdBy: discoveryCampaigns.createdBy,
+            })
+            .from(discoveryCampaigns)
+            .where(eq(discoveryCampaigns.id, job.campaign_id))
+            .limit(1);
+        if (!campaign?.createdBy) return; // no one to notify
+
+        const [assistant] = await db.select({ name: aiAssistants.name })
+            .from(aiAssistants).where(eq(aiAssistants.id, campaign.aiAssistantId)).limit(1);
+
+        await createNotification(db, 'search_signals_published', {
+            userId: campaign.createdBy,
+            context: {
+                assistant: { name: assistant?.name ?? 'Your assistant' },
+                search: { name: savedSearchLabel(campaign.name, campaign.idea), count: String(found) },
+            },
+            metadata: { assistantId: campaign.aiAssistantId, campaignId: job.campaign_id, jobId: job.id },
+        });
+    } catch (err) {
+        console.error('[process-discovery-jobs] publishSignals failed (non-fatal):', err);
+    }
 }
 
 /**
@@ -412,6 +497,7 @@ async function enrichBatch(db: Db, job: JobRow, counters: Counters): Promise<voi
 async function recordEnrichment(
     db: Db, leadId: number, assistantRecordId: number | null,
     hit: { email: string; kind: string; source: string; foundOn: string } | null,
+    ledger?: { organisationId: number; aiAssistantId: number },
 ): Promise<void> {
     const stamp: Record<string, unknown> = { enrichAttemptedAt: new Date().toISOString() };
     if (hit) {
@@ -429,6 +515,21 @@ async function recordEnrichment(
         })
         .where(eq(discoveredLeads.id, leadId));
 
+    // Revenue ledger: only a HIT is an enrichment event. A miss is not a fact about the lead worth
+    // aggregating — it is a fact about our scraper — and emitting it would make "enrichment rate"
+    // read as 100% of attempts. `emailKind` rides along because the personal-inbox gate keys off it,
+    // so the ledger can later answer whether role addresses convert better than personal ones.
+    if (hit && ledger) {
+        await recordEvent(db, 'lead_enriched', {
+            organisationId: ledger.organisationId,
+            aiAssistantId: ledger.aiAssistantId,
+            discoveredLeadId: leadId,
+            assistantRecordId,
+            actor: 'agent',
+            payload: { emailKind: hit.kind, emailSource: hit.source },
+        });
+    }
+
     if (!hit || !assistantRecordId) return;
 
     // Same merge on the mirrored record's scoring card, so the Review Queue and the
@@ -444,11 +545,12 @@ async function recordEnrichment(
 }
 
 /** Upsert one qualified lead into assistant_records on (org, assistant, 'lead', title). */
+/** Returns the assistant_records id the lead was mirrored onto — the ledger links its events to it. */
 async function promoteOne(
     db: Db, organisationId: number, assistantId: number,
     lead: { id: number; companyName: string; rating: string | null; scoringCard: unknown },
     approvalStatus: string,
-): Promise<void> {
+): Promise<number> {
     const [existing] = await db
         .select({ id: assistantRecords.id })
         .from(assistantRecords)
@@ -502,6 +604,7 @@ async function promoteOne(
     await db.update(discoveredLeads)
         .set({ status: 'promoted', assistantRecordId: recordId, updatedAt: new Date() })
         .where(eq(discoveredLeads.id, lead.id));
+    return recordId;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────────

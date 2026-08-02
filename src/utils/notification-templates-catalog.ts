@@ -157,6 +157,22 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [ASSISTANT_NAME],
     },
     {
+        // Signal Inbox (Phase 1a). Raised ONCE per completed discovery run, never once per lead —
+        // a run can find 50, and 50 notifications for one action is how a notification centre
+        // becomes something users mute. Idempotency comes from discovery_jobs.signals_published_at.
+        templateKey: 'search_signals_published',
+        name: 'Saved search found new signals',
+        category: 'Assistants',
+        type: 'search_signals_published',
+        title: '{{assistant.name}} found {{search.count}} new signals',
+        message: '"{{search.name}}" finished running and added {{search.count}} new signals to your inbox for review.',
+        variables: [
+            ASSISTANT_NAME,
+            v('search.name', 'Saved search name', 'UK retreat venues'),
+            v('search.count', 'Signals found', '14'),
+        ],
+    },
+    {
         templateKey: 'assistant_archived',
         name: 'Assistant archived',
         category: 'Assistants',

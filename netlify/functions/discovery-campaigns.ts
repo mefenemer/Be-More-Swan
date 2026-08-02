@@ -60,6 +60,8 @@ export default withLambda(async (event) => {
 
         const result = await createDiscoveryRun({
             db, organisationId: orgId, userId, aiAssistantId: assistantId,
+            // Optional: the Signal Inbox filters by this, falling back to a truncated idea.
+            name: str(body.name, 80),
             idea,
             targetPersona: (body.targetPersona && typeof body.targetPersona === 'object') ? body.targetPersona as Record<string, unknown> : null,
             cadence,
@@ -82,7 +84,8 @@ export default withLambda(async (event) => {
         const assistantId = Number(body.assistantId);
         const campaigns = await db
             .select({
-                id: discoveryCampaigns.id, idea: discoveryCampaigns.idea, status: discoveryCampaigns.status,
+                id: discoveryCampaigns.id, name: discoveryCampaigns.name,
+                idea: discoveryCampaigns.idea, status: discoveryCampaigns.status,
                 createdAt: discoveryCampaigns.createdAt,
                 latestJobStatus: sql<string | null>`(
                     SELECT j.status FROM discovery_jobs j
@@ -208,9 +211,14 @@ export default withLambda(async (event) => {
             .limit(1);
         if (!campaign) return json(404, { error: 'Campaign not found.' });
 
+        // `name` is settable independently of `idea` — renaming a search must not require
+        // retyping the hypothesis, and clearing it (empty string) reverts to the idea fallback.
         const idea = str(body.idea, 1000);
-        if (idea) {
-            await db.update(discoveryCampaigns).set({ idea, updatedAt: new Date() }).where(eq(discoveryCampaigns.id, campaignId));
+        const namePatch = body.name === undefined ? {} : { name: str(body.name, 80) };
+        if (idea || Object.keys(namePatch).length) {
+            await db.update(discoveryCampaigns)
+                .set({ ...(idea ? { idea } : {}), ...namePatch, updatedAt: new Date() })
+                .where(eq(discoveryCampaigns.id, campaignId));
         }
 
         const g = (body.guardrails && typeof body.guardrails === 'object') ? body.guardrails as Record<string, unknown> : null;

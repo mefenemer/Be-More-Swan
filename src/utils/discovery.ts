@@ -16,6 +16,8 @@ export interface CreateRunInput {
     organisationId: number;
     userId: number;
     aiAssistantId: number;
+    /** Short label for the saved search ("UK retreat venues"). Optional — readers fall back to `idea`. */
+    name?: string | null;
     idea: string;
     targetPersona?: Record<string, unknown> | null;
     /** Partial guardrail overrides; unset fields keep the table defaults. */
@@ -60,6 +62,7 @@ export async function createDiscoveryRun(input: CreateRunInput): Promise<CreateR
 
     const [campaign] = await db.insert(discoveryCampaigns).values({
         organisationId, aiAssistantId, createdBy: userId,
+        name: input.name ?? null,
         idea: input.idea, targetPersona: input.targetPersona ?? null,
         status: 'active', icpSnapshot,
     }).returning({ id: discoveryCampaigns.id });

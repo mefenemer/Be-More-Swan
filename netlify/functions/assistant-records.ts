@@ -18,6 +18,8 @@ import { getDb } from '../../db/client';
 import { actionItems, aiAssistants, assistantRecords, discoveredLeads } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { enqueueScenarioTrigger, type TriggerSubject } from '../../src/utils/scenario-engine';
+import { recordEvent } from '../../src/utils/revenue-ledger';
+import { enqueueLeadHandoff } from '../../src/utils/lead-handoff';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const RECORD_TYPES = new Set(['lead', 'enrichment', 'meeting', 'invoice', 'ticket']);
@@ -192,34 +194,10 @@ async function enqueueHandoffOnApproval(
             attribution: 'Be More Swan',
         };
     } else {
-        // Lead handoff.
-        fields = {
-            company: record.title ?? undefined,
-            rating: record.status ?? undefined,
-            aiSummary: data.summary ?? data.aiSummary ?? data.reason ?? data.rationale,
-            attribution: data.source ?? data.matchedQuery ?? 'Be More Swan',
-            contactName: data.contactName ?? data.contact_name,
-            contactEmail: data.contactEmail ?? data.email,
-            domain: data.domain,
-            score: data.score,
-        };
-        // Leads carry canonical company/contact/score on the linked discovered_leads row.
-        try {
-            const [dl] = await db.select({
-                companyName: discoveredLeads.companyName, domain: discoveredLeads.domain,
-                contactName: discoveredLeads.contactName, contactEmail: discoveredLeads.contactEmail,
-                score: discoveredLeads.score,
-            }).from(discoveredLeads)
-                .where(and(eq(discoveredLeads.organisationId, orgId), eq(discoveredLeads.assistantRecordId, record.id)))
-                .limit(1);
-            if (dl) {
-                fields.company = fields.company ?? dl.companyName;
-                fields.domain = fields.domain ?? dl.domain;
-                fields.contactName = fields.contactName ?? dl.contactName;
-                fields.contactEmail = fields.contactEmail ?? dl.contactEmail;
-                fields.score = fields.score ?? dl.score;
-            }
-        } catch { /* discovery not in play for this lead — the record's own data still maps */ }
+        // Lead handoff — delegated to src/utils/lead-handoff.ts, which the Signal Inbox's BATCH
+        // approve also calls. Two approval surfaces, one field mapping: keep it that way.
+        await enqueueLeadHandoff(db, orgId, record);
+        return;
     }
 
     const subject: TriggerSubject = { recordType: record.recordType, recordId: record.id, newStatus: triggerStatus, fields };
@@ -235,7 +213,7 @@ export default withLambda(async (event) => {
     const db = getDb();
     const ctx = await requireTenant(event, db);
     if ('error' in ctx) return ctx.error;
-    const { organisationId: orgId } = ctx;
+    const { organisationId: orgId, userId } = ctx;
 
     /** IDOR guard — the assistant must belong to the caller's org. */
     async function ownsAssistant(assistantId: number): Promise<boolean> {
@@ -461,7 +439,11 @@ export default withLambda(async (event) => {
                     patch.scheduledFor = null;
                 }
 
-                if (LIVE_APPROVAL.has(next)) {
+                // Read the row before the update whenever the approval gate is being moved. This
+                // used to be fetched only for LIVE_APPROVAL (the handoff case); the revenue ledger
+                // also needs it for REJECTIONS, and both need the PREVIOUS status to tell a genuine
+                // transition from an edit of an already-decided record.
+                if (LIVE_APPROVAL.has(next) || next === 'rejected') {
                     const [prev] = await db.select({
                         id: assistantRecords.id,
                         recordType: assistantRecords.recordType,
@@ -473,9 +455,35 @@ export default withLambda(async (event) => {
                     }).from(assistantRecords)
                         .where(and(eq(assistantRecords.id, id), eq(assistantRecords.organisationId, orgId)))
                         .limit(1);
+
                     // Only a transition INTO live fires the handoff — not an edit of an already-live record.
-                    if (prev && !LIVE_APPROVAL.has(prev.approvalStatus ?? '')) {
+                    if (LIVE_APPROVAL.has(next) && prev && !LIVE_APPROVAL.has(prev.approvalStatus ?? '')) {
                         handoffRecord = prev;
+                    }
+
+                    // Revenue ledger (Phase 0) — LEAD records only. assistant_records is shared by
+                    // six roles; a meeting or invoice approval is not a revenue fact and must not
+                    // land in a table whose whole purpose is lead win/loss aggregation.
+                    const wasDecided = LIVE_APPROVAL.has(prev?.approvalStatus ?? '') || prev?.approvalStatus === 'rejected';
+                    if (prev && prev.recordType === 'lead' && !wasDecided) {
+                        // Link back to the discovery row when one exists. A manually-added lead has
+                        // none, so this is legitimately null rather than a lookup failure.
+                        const [link] = await db.select({ id: discoveredLeads.id })
+                            .from(discoveredLeads)
+                            .where(eq(discoveredLeads.assistantRecordId, prev.id))
+                            .limit(1);
+                        // actor 'user': this is the human gate — the one decision in the pipeline
+                        // that is definitionally a person's, and the baseline every autonomy
+                        // increase is later measured against.
+                        await recordEvent(db, next === 'rejected' ? 'lead_rejected' : 'lead_approved', {
+                            organisationId: orgId,
+                            aiAssistantId: prev.aiAssistantId,
+                            discoveredLeadId: link?.id ?? null,
+                            assistantRecordId: prev.id,
+                            actor: 'user',
+                            actorUserId: userId,
+                            payload: { from: prev.approvalStatus, to: next, rating: prev.status },
+                        });
                     }
                 }
             }

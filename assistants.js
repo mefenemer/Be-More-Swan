@@ -668,6 +668,9 @@ window._activateMainTab = function(name) {
     document.querySelectorAll('.main-tab-content').forEach(c => c.classList.toggle('hidden', c.id !== 'maintab-' + name));
     // Recompute auto-grow heights now panels are visible (scrollHeight was 0 while hidden).
     _resizeBriefAutoGrow();
+    // Signal Inbox renders lazily — init() already fetched (its counts feed the tab badge), so
+    // this only paints. Cheap and idempotent.
+    if (name === 'signals') window.AssistantSignalInbox?.activate();
     // Load the assistant-scoped review queue when the tab is first opened. detailRqOpenStatus
     // branches on window._detailReviewQueue.kind (posts vs records) internally.
     if (name === 'review-queue') {
@@ -2831,6 +2834,16 @@ function _applyDashboardRegistry(data) {
     if (kb) {
         setText('kb-tab-label', kb.label);
         window.AssistantKnowledgeBase?.init({ kb, assistantId: data.id });
+    }
+
+    // Signal Inbox tab — lead roles only (signalInbox: lead_qualifier): everything that came IN
+    // before it became a lead. init() loads eagerly because its counts drive the tab badge;
+    // the panel itself renders lazily on first _activateMainTab('signals').
+    const signalInbox = cfg.signalInbox;
+    toggle('maintab-btn-signals', !!signalInbox);
+    if (signalInbox) {
+        setText('signals-tab-label', signalInbox.label || 'Signal Inbox');
+        window.AssistantSignalInbox?.init({ assistantId: data.id, cfg: signalInbox });
     }
 
     // Inspo tab — only the content roles (inspoTab: social_media_manager, blog_writer):

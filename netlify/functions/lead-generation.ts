@@ -36,6 +36,7 @@ import { isSearchConfigured } from '../../src/lib/discovery-search';
 import { sendGmailMessage } from '../../src/utils/gmail';
 import { sendOutlookMessage } from '../../src/utils/outlook';
 import { IntegrationError } from '../../src/utils/workspace-integrations';
+import { recordEvent } from '../../src/utils/revenue-ledger';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /** Chase reminder for an approved+contacted lead: 3 days out at 09:00, nudged off weekends. */
@@ -234,6 +235,21 @@ Write an outreachDraft for hot/warm leads; use null for cold leads.`;
             }
 
             const id = await upsertRecord('lead', title, String(card.rating), card, 'manual');
+
+            // Revenue ledger (Phase 0). A manually-added lead has no discovered_leads row, so
+            // discoveredLeadId stays null and the record id is the only subject link — that is the
+            // expected shape here, not a missing field. actor 'agent': the SCORE is the model's
+            // judgement, even though a human typed the lead in.
+            await recordEvent(db, 'lead_scored', {
+                organisationId: orgId,
+                aiAssistantId: assistant.id,
+                assistantRecordId: id,
+                actor: 'agent',
+                actorUserId: userId,
+                icpSnapshot: { targetIndustries: onboarding.targetIndustries ?? null, minHeadcount: onboarding.minHeadcount ?? null },
+                payload: { score: card.score, rating: card.rating, source: 'manual' },
+            });
+
             return json(200, { record: { id, title, status: card.rating, data: card } });
         }
 
@@ -315,6 +331,26 @@ Write an outreachDraft for hot/warm leads; use null for cold leads.`;
             await db.update(assistantRecords)
                 .set({ approvalStatus: 'scheduled', scheduledFor: chase, data: nextData, updatedAt: new Date() })
                 .where(eq(assistantRecords.id, recordId));
+
+            // Revenue ledger (Phase 0). Emitted only on a CONFIRMED send — every non-send path above
+            // returns early with a `reason`, so this line is never reached for them. That is what
+            // keeps "outreach sent" an actual send count rather than an attempt count.
+            // The recipient address is deliberately NOT stored in the payload: emailKind carries the
+            // analytically useful part (role vs personal) without putting a third party's address in
+            // an append-only table that no erasure path currently walks.
+            await recordEvent(db, 'outreach_sent', {
+                organisationId: orgId,
+                aiAssistantId: assistant.id,
+                assistantRecordId: recordId,
+                actor: 'agent',
+                actorUserId: userId,
+                payload: {
+                    provider,
+                    emailKind: emailKind ?? null,
+                    emailSource: emailSource ?? null,
+                    usedStoredDraft: !!str(draft?.body as string, 4000),
+                },
+            });
 
             return json(200, { sent: true, to: recipient, chaseDate: chase.toISOString() });
         }

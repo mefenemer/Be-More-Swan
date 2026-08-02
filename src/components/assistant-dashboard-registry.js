@@ -280,6 +280,12 @@
         label: 'Find New Leads',
         title: 'Find New Leads',
       },
+      // Signal Inbox tab (assistant-signal-inbox.js → signal-inbox.ts). Everything that came IN
+      // before it became a lead. Populated from saved searches with ONLY this assistant hired;
+      // the social feed is additive (Phase 1b). Design: docs/lead-generator-revenue-engine-plan.md.
+      signalInbox: {
+        label: 'Signal Inbox',
+      },
     },
 
     accounts_receivable_clerk: {

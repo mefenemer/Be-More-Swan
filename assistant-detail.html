@@ -565,6 +565,15 @@
            (assistant-dashboard-registry.js gives every role a hubTab + reviewQueue);
            only their labels/content differ per role. Issue #183: the Overview tab was
            removed — its Performance cards now live above, directly under the assistant name. -->
+      <!-- Signal Inbox — lead roles only (signalInbox: lead_qualifier). Everything that came IN
+           before it became a lead: saved-search hits categorised as "<Assistant> Search", plus
+           social signals once a Social Media Assistant is also hired (Phase 1b). Sits FIRST because
+           it is the top of the funnel. Hidden by default, shown by _applyDashboardRegistry.
+           assistant-signal-inbox.js → signal-inbox.ts. Design: docs/lead-generator-revenue-engine-plan.md -->
+      <button type="button" id="maintab-btn-signals" data-maintab="signals" class="main-tab-btn hidden">
+        <span id="signals-tab-label">Signal Inbox</span>
+        <span id="signals-ready-badge" class="hidden ml-1 min-w-[1.25rem] h-4 px-1 bg-amber-100 text-amber-700 text-[10px] font-black rounded-full inline-flex items-center justify-center"></span>
+      </button>
       <!-- Data Hub — the assistant's workspace/database. Label comes from the role's hubTab
            (Content Library for social/blog; Leads / Ledger / Tickets / … for data-hub roles). -->
       <button type="button" id="maintab-btn-datahub" data-maintab="datahub" class="main-tab-btn active-tab">
@@ -787,6 +796,12 @@
     <div id="inspo-composer-host"></div>
     <div id="inspo-list-host"></div>
   </div><!-- /maintab-inspo -->
+
+  <!-- Signal Inbox — lead roles only. Rendered lazily by assistant-signal-inbox.js on first
+       activation (the list is a real query; there is no point paying for it on every page load). -->
+  <div id="maintab-signals" class="main-tab-content hidden">
+    <div id="signal-inbox-host"></div>
+  </div><!-- /maintab-signals -->
 
   <!-- ── Persona / config slide-over (Epic 1) ──────────────────────────
        Opened from the header "Assistant Profile" button (#btn-assistant-profile),

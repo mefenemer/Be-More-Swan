@@ -3250,6 +3250,10 @@ export const discoveryCampaigns = pgTable("discovery_campaigns", {
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
   aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
   createdBy: integer("created_by").references(() => users.id, { onDelete: "set null" }),
+  // Short human label for the saved search, e.g. "UK retreat venues". Nullable: every campaign
+  // predating db/signal-inbox-1a.sql has none, and readers fall back to a truncated `idea`.
+  // Exists because `idea` is a paragraph — the Signal Inbox needs something chip-sized to filter by.
+  name: text("name"),
   // The user's business hypothesis, e.g. "Boutique hotels in Southern Europe with no booking app".
   idea: text("idea").notNull(),
   // { demographics, industries: string[], painSignals: string[], sizeBand }.
@@ -3323,6 +3327,10 @@ export const discoveryJobs = pgTable("discovery_jobs", {
   triggerType: text("trigger_type").notNull().default("scheduled"), // 'scheduled' | 'on_demand'
   // Resumable cursor: { queries, queryIndex, leadsFound, tokensUsed, costGbp }.
   cursor: jsonb("cursor"),
+  // Signal Inbox (db/signal-inbox-1a.sql): when this run's results were published to the inbox and
+  // the user notified. The IDEMPOTENCY key for that notification — a run is resumable across ticks
+  // and can be retried, so without this a single logical run could notify several times.
+  signalsPublishedAt: timestamp("signals_published_at"),
   leadsFound: integer("leads_found").notNull().default(0),
   searchCallsMade: integer("search_calls_made").notNull().default(0),
   tokensUsed: integer("tokens_used").notNull().default(0),
@@ -3364,6 +3372,65 @@ export const discoveredLeads = pgTable("discovered_leads", {
   uniqueIndex("discovered_leads_campaign_domain_uidx").on(t.campaignId, t.domain).where(sql`domain IS NOT NULL`),
   index("discovered_leads_campaign_status_idx").on(t.campaignId, t.status),
   check("discovered_leads_status_check", sql`${t.status} IN ('discovered','qualified','promoted','discarded')`),
+]);
+
+// ────────────────────────────────────────────────────────────────────────────
+// REVENUE LEDGER — Phase 0 of docs/lead-generator-revenue-engine-plan.md
+// ────────────────────────────────────────────────────────────────────────────
+// The append-only fact stream behind the whole revenue engine. Every lifecycle transition a lead
+// goes through lands here, and the Strategy Agent (Phase 5) reads ONLY from this table.
+//
+// Append-only is load-bearing, not stylistic: the strategy loop must be re-runnable over history
+// after a prompt change without corrupting state, which is what lets a proposed ICP pivot be
+// evaluated against past outcomes before it is applied.
+//
+// Written exclusively through src/utils/revenue-ledger.ts `recordEvent()` — the notify.ts pattern.
+// Do not insert here directly; the vocabularies in src/config/revenue-events.ts and the CHECK
+// constraints below are only enforceable if there is one writer.
+//
+// Migration: db/revenue-events.sql (MANUAL APPLY — no drizzle-kit push). The check() calls here
+// MUST stay in sync with the SQL, or a later push silently reverts the DDL.
+export const revenueEvents = pgTable("revenue_events", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  // Nullable: a backfilled or org-level event may have no surviving assistant instance.
+  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "set null" }),
+
+  // Subject of the event. discoveredLeadId is the common case; assistantRecordId links to the
+  // human-facing record (Review Queue row) when one exists. Both nullable — a signal can arrive
+  // before either exists.
+  discoveredLeadId: integer("discovered_lead_id").references(() => discoveredLeads.id, { onDelete: "cascade" }),
+  assistantRecordId: integer("assistant_record_id").references(() => assistantRecords.id, { onDelete: "set null" }),
+
+  eventType: text("event_type").notNull(),
+  // 'system' | 'agent' | 'user' — makes "how much of this pipeline is genuinely autonomous?"
+  // answerable, and is the join key for judging whether raising an autonomy level helped.
+  actor: text("actor").notNull().default("system"),
+  actorUserId: integer("actor_user_id").references(() => users.id, { onDelete: "set null" }),
+
+  // Terminal-event fields. NULL on every non-terminal event — the partial index below depends on it.
+  outcome: text("outcome"),                                 // 'won' | 'lost' | 'disqualified'
+  lossReason: text("loss_reason"),                          // closed vocabulary; see LOSS_REASONS
+  valueGbp: decimal("value_gbp", { precision: 12, scale: 2 }),
+  cycleDays: integer("cycle_days"),                         // first touch → terminal, denormalised
+
+  // THE ATTRIBUTION JOIN KEY. Without these you can measure that win rate moved but not WHICH
+  // strategy version moved it, and the Phase 5 loop degenerates into correlating noise.
+  // NULL on backfilled rows — they predate strategy versioning and are unattributable by design.
+  icpSnapshot: jsonb("icp_snapshot"),
+  blueprintVersion: text("blueprint_version"),              // ai_blueprints.blueprintVersion
+
+  payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`),
+  occurredAt: timestamp("occurred_at").defaultNow().notNull(),
+}, (t) => [
+  index("revenue_events_org_type_idx").on(t.organisationId, t.eventType, t.occurredAt),
+  index("revenue_events_lead_idx").on(t.discoveredLeadId, t.occurredAt),
+  // The Strategy Agent's hot path: terminal outcomes for one org over a trailing window. Partial,
+  // because non-terminal rows are the overwhelming majority and never match this predicate.
+  index("revenue_events_outcome_idx").on(t.organisationId, t.outcome, t.occurredAt).where(sql`outcome IS NOT NULL`),
+  check("revenue_events_actor_check", sql`${t.actor} IN ('system','agent','user')`),
+  check("revenue_events_outcome_check", sql`${t.outcome} IS NULL OR ${t.outcome} IN ('won','lost','disqualified')`),
+  check("revenue_events_loss_reason_check", sql`${t.lossReason} IS NULL OR ${t.lossReason} IN ('price','timing','no_budget','competitor','no_response','wrong_contact','not_icp','feature_gap','went_silent','other')`),
 ]);
 
 // Relational-query definitions for the chat tables live in db/relations.ts

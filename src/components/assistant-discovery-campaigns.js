@@ -69,6 +69,12 @@
         <textarea data-dc-idea rows="3" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm"
           placeholder="e.g. Boutique hotels in Southern Europe that don't have a modern online booking app"></textarea>
 
+        <!-- Optional short label. The hypothesis above is a paragraph; the Signal Inbox needs
+             something chip-sized to filter by. Left blank, readers fall back to a truncated idea. -->
+        <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1 mt-3">Name this search <span class="font-normal normal-case text-gray-400">(optional)</span></label>
+        <input data-dc-name type="text" maxlength="80" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm"
+          placeholder="e.g. UK retreat venues">
+
         <div class="grid grid-cols-2 gap-3 mt-3">
           <div>
             <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">How often</label>
@@ -119,13 +125,15 @@
       : `<button type="button" data-dc-run="${c.id}" class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 text-xs font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed" ${paused ? 'disabled title="Resume this campaign to run it"' : ''}>Run now</button>`;
     return `
       <div class="border border-gray-200 rounded-xl p-4 ${paused ? 'opacity-70' : ''}" data-campaign="${c.id}" data-dc-idea-val="${esc(c.idea)}"
+           data-dc-name-val="${esc(c.name || '')}"
            data-dc-maxleads-val="${esc(c.maxLeadsPerRun ?? 50)}" data-dc-budget-val="${esc(c.maxCostGbpPerRun ?? 2)}"
            data-dc-negatives-val="${esc(Array.isArray(c.negativeKeywords) ? c.negativeKeywords.join(', ') : '')}"
            data-dc-approval-val="${c.requireHumanApproval === false ? '0' : '1'}">
         <div class="flex items-start justify-between gap-3">
-          <p class="font-semibold text-gray-900 text-sm min-w-0">${esc(c.idea)}</p>
+          <p class="font-semibold text-gray-900 text-sm min-w-0">${esc(c.name || c.idea)}</p>
           <span class="shrink-0 text-xs font-bold px-2 py-0.5 rounded-full border ${paused ? 'bg-gray-100 text-gray-500 border-gray-200' : chip}">${paused ? 'paused' : statusLabel}</span>
         </div>
+        ${c.name ? `<p class="text-xs text-gray-500 mt-0.5">${esc(c.idea)}</p>` : ''}
         <p class="text-xs text-gray-500 mt-1">${Number(c.leadsFound || 0)} lead${Number(c.leadsFound) === 1 ? '' : 's'} found</p>
         <div class="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-gray-100">
           ${primaryBtn}
@@ -188,6 +196,7 @@
       .split(',').map((s) => s.trim()).filter(Boolean);
     const payload = {
       idea,
+      name: (root.querySelector('[data-dc-name]')?.value || '').trim() || undefined,
       cadence: root.querySelector('[data-dc-cadence]')?.value || 'one_off',
       guardrails: {
         maxLeadsPerRun: Number(root.querySelector('[data-dc-maxleads]')?.value) || undefined,
@@ -291,6 +300,10 @@
         </div>
         <div class="p-5 space-y-3">
           <div>
+            <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Name this search <span class="font-normal normal-case text-gray-400">(optional)</span></label>
+            <input data-edit-name type="text" maxlength="80" value="${esc(g('data-dc-name-val', ''))}" placeholder="e.g. UK retreat venues" class="w-full border border-gray-300 rounded-lg p-2.5 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">
+          </div>
+          <div>
             <label class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Who to find</label>
             <textarea data-edit-idea rows="3" class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-emerald-700 transition shadow-sm">${esc(g('data-dc-idea-val', ''))}</textarea>
           </div>
@@ -334,6 +347,9 @@
         await call('edit', {
           campaignId: id,
           idea,
+          // Always sent, so clearing the field genuinely clears the name (the server treats
+          // `undefined` as "leave alone" and an empty string as "revert to the idea fallback").
+          name: overlay.querySelector('[data-edit-name]').value.trim(),
           guardrails: {
             maxLeadsPerRun: Number(overlay.querySelector('[data-edit-maxleads]').value) || undefined,
             maxCostGbpPerRun: Number(overlay.querySelector('[data-edit-budget]').value) || undefined,
