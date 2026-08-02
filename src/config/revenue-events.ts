@@ -39,6 +39,10 @@ export const EVENT_TYPES = [
     'outreach_bounced',
     'reply_received',
     'reply_classified',
+    // The prospect asked us to stop. Its own event, not a flavour of reply_received: opt-out RATE
+    // is the health metric that says targeting or copy is wrong, and it has to be answerable
+    // without parsing message bodies after the fact.
+    'opt_out_received',
     // ── Sequencing (Phase 2b) — lifecycle, not sends ─────────────────────────
     // These answer "did the cadence run, and why did it stop?". `sequence_halted` carries the
     // closed haltReason vocabulary in its payload, so the Strategy Agent can GROUP BY it to see

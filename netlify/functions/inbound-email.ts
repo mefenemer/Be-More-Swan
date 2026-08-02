@@ -15,7 +15,8 @@ import { HandlerEvent } from '@netlify/functions';
 import Busboy from 'busboy';
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { leads, leadReplies } from '../../db/schema';
+import { leads, leadReplies, leadOptOuts, leadThreads } from '../../db/schema';
+import { detectOptOut } from '../../src/config/opt-out';
 import { lookupContact, promoteContactType } from '../../src/utils/contact-type';
 import { parseReplyToken, recipientFromParsePayload } from '../../src/utils/reply-address';
 import { findThreadByReplyToken, recordInboundMessage } from '../../src/utils/lead-threads';
@@ -150,6 +151,55 @@ export default withLambda(async (event: HandlerEvent) => {
             // braces on purpose: a follow-up landing after someone has answered is the single most
             // damaging thing this system can do.
             const haltedCount = await haltEnrolmentsForThread(db, thread.id);
+
+            // ── Opt-out ──────────────────────────────────────────────────────
+            // "Unsubscribe" in a reply used to do nothing: the cadence stopped only because a reply
+            // had arrived at all, and nothing was recorded — so re-scoring or re-adding the same
+            // person resumed outreach. Recorded at ADDRESS grain in lead_opt_outs (NOT the
+            // domain-grained suppression_list, which would suppress their whole employer), and
+            // checkSuppression() reads it before every send from both paths.
+            //
+            // Best-effort like everything else in this branch: a failure here must not 500 at
+            // SendGrid, because the retry would eventually bounce a real prospect's reply. The
+            // cadence is already halted by this point, so the worst case is a missed suppression
+            // that the next send's own check cannot catch — logged loudly for that reason.
+            const optOut = detectOptOut(messageBody, subject);
+            if (optOut.optedOut) {
+                try {
+                    await db.insert(leadOptOuts).values({
+                        organisationId: thread.organisationId,
+                        email: senderEmail,
+                        reason: 'reply_opt_out',
+                        source: 'reply',
+                        leadThreadId: thread.id,
+                        matchedRule: optOut.matched,
+                        evidence: optOut.evidence,
+                    }).onConflictDoNothing();
+
+                    // Close the conversation outright. 'replied' (set by recordInboundMessage) means
+                    // "they answered, go look"; this person does not want a human follow-up either.
+                    // 'closed' is already in the lead_threads state vocabulary — no DDL needed.
+                    await db.update(leadThreads)
+                        .set({ state: 'closed' })
+                        .where(eq(leadThreads.id, thread.id));
+
+                    await recordEvent(db, 'opt_out_received', {
+                        organisationId: thread.organisationId,
+                        aiAssistantId: thread.aiAssistantId,
+                        discoveredLeadId: thread.discoveredLeadId,
+                        assistantRecordId: thread.assistantRecordId,
+                        actor: 'system',
+                        payload: { threadId: thread.id, messageId, matched: optOut.matched, sequencesHalted: haltedCount },
+                    });
+                    console.log('[inbound-email] opt-out recorded', JSON.stringify({
+                        threadId: thread.id, matched: optOut.matched, sender: senderEmail,
+                    }));
+                } catch (err) {
+                    console.error('[inbound-email] OPT-OUT NOT RECORDED — this address may be emailed again:', {
+                        threadId: thread.id, sender: senderEmail, matched: optOut.matched,
+                    }, err);
+                }
+            }
 
             // The ledger event is what makes reply RATE measurable — the first funnel metric this
             // system has ever been able to compute for outreach.

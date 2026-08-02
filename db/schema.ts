@@ -794,6 +794,28 @@ export const suppressionList = pgTable("suppression_list", {
   index("suppression_list_org_idx").on(t.organisationId),
 ]);
 
+// Per-ADDRESS opt-out from tenant outreach — "stop emailing me", from a prospect's reply.
+// Deliberately NOT suppression_list above: that is domain-grained and means "this company is
+// already a customer", so putting an individual's opt-out there would suppress their whole
+// employer. See db/lead-opt-outs.sql. Not the win-back opt-out table either — these are the
+// TENANT's prospects, not Be More Swan's own users.
+export const leadOptOuts = pgTable("lead_opt_outs", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  email: text("email").notNull(),                            // normalised lowercase, address grain
+  reason: text("reason").notNull().default("reply_opt_out"),
+  source: text("source").notNull().default("reply"),         // 'reply' | 'manual' | 'bounce'
+  // SET NULL, not CASCADE: deleting a thread must not delete the evidence someone asked us to stop.
+  leadThreadId: integer("lead_thread_id").references((): any => leadThreads.id, { onDelete: "set null" }),
+  matchedRule: text("matched_rule"),
+  evidence: text("evidence"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  unique("lead_opt_outs_org_email_unique").on(t.organisationId, t.email),
+  index("lead_opt_outs_org_email_idx").on(t.organisationId, t.email),
+  check("lead_opt_outs_source_check", sql`${t.source} IN ('reply','manual','bounce')`),
+]);
+
 // Outbound scenario job queue — mirrors discovery_jobs. A BMS trigger fires, one row is
 // enqueued, and process-scenario-jobs drains it (FOR UPDATE SKIP LOCKED), expanding it
 // into one execution per matching active_scenarios row. Retries with backoff.

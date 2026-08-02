@@ -21,7 +21,7 @@
 
 import { and, eq } from 'drizzle-orm';
 import type { getDb } from '../../db/client';
-import { suppressionList } from '../../db/schema';
+import { suppressionList, leadOptOuts } from '../../db/schema';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -66,6 +66,35 @@ export async function checkSuppression(
 ): Promise<SuppressionVerdict> {
     const domain = emailDomain(email);
     if (!domain) return { suppressed: false };
+
+    // Individual opt-out first, and at ADDRESS grain. Checked before the domain list because it is
+    // the stronger claim: a person who asked us to stop must not be emailed even if their employer
+    // is otherwise a fine prospect. Same fail-closed contract as below.
+    const addr = String(email).trim().toLowerCase();
+    try {
+        const [out] = await db
+            .select({ reason: leadOptOuts.reason })
+            .from(leadOptOuts)
+            .where(and(
+                eq(leadOptOuts.organisationId, organisationId),
+                eq(leadOptOuts.email, addr),
+            ))
+            .limit(1);
+        if (out) return { suppressed: true, reason: out.reason };
+    } catch (err) {
+        const pg = err as { code?: string; cause?: { code?: string } };
+        const code = pg?.code ?? pg?.cause?.code;
+        // A missing table means the opt-out feature has not been applied to this environment yet —
+        // there are no opt-outs to violate, so fall through to the domain check rather than
+        // blocking every send in the product. Any OTHER error fails closed.
+        if (code !== '42P01') {
+            console.error('[suppression] opt-out lookup failed — treating as SUPPRESSED (fail closed)', {
+                organisationId, pgCode: code, cause: pg?.cause,
+            }, err);
+            return { suppressed: true, reason: null, unknown: true };
+        }
+        console.error('[suppression] lead_opt_outs is missing — treating as empty', { organisationId });
+    }
 
     try {
         const [hit] = await db
