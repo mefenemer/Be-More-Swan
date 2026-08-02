@@ -3610,6 +3610,96 @@ export const sequenceEnrolments = pgTable("sequence_enrolments", {
   check("sequence_enrolments_halt_reason_check", sql`${t.haltReason} IS NULL OR ${t.haltReason} IN ('replied','suppressed','no_recipient','not_connected','send_failed','max_steps','record_closed','manual')`),
 ]);
 
+// ────────────────────────────────────────────────────────────────────────────
+// ACCOUNT GRAPH + MEMORY (the "Anti-CRM") — Phase 3, plan §5.3
+// ────────────────────────────────────────────────────────────────────────────
+// A CRM makes a human type what happened. This makes the system remember it. Three stores, chosen
+// by ACCESS PATTERN rather than by fashion (plan §5.3's memory tiering):
+//
+//   working memory      lead_threads + lead_messages   direct FK read, no embedding — small, bounded
+//   long-term semantic  account_memory + pgvector      cosine kNN, voyage-3.5-lite
+//   structural          account_nodes + account_edges  recursive CTE, depth-capped at 4
+//   strategy state      revenue_events + ai_blueprints aggregate SQL
+//
+// No Redis. Working memory is a bounded set of rows keyed by thread id and Postgres serves it in
+// one indexed read; a cache goes in when a measured query proves it necessary, not before.
+//
+// Migration: db/account-graph.sql (MANUAL APPLY — pgvector column + HNSW index, which drizzle-kit
+// push cannot express). The check() calls here MUST stay in sync with the SQL.
+
+// The durable entities memory is ABOUT. Identity resolution is by normalised domain: it is the one
+// key that survives a contact changing name, job title or email address.
+export const accountNodes = pgTable("account_nodes", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  nodeType: text("node_type").notNull(),                    // 'account' | 'contact' | 'deal'
+  label: text("label").notNull(),
+  domain: text("domain"),                                   // normalised — the identity resolution key
+  attributes: jsonb("attributes").notNull().default(sql`'{}'::jsonb`),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  // PARTIAL unique index: one account per domain per org. Contacts and deals are deliberately
+  // excluded — several contacts share one company domain, and collapsing them would merge distinct
+  // people into one node. The `domain IS NOT NULL` half matters just as much: Postgres treats NULLs
+  // as distinct, but stating it keeps the index small and the intent legible.
+  uniqueIndex("account_nodes_org_domain_uidx").on(t.organisationId, t.domain)
+    .where(sql`node_type = 'account' AND domain IS NOT NULL`),
+  index("account_nodes_org_type_idx").on(t.organisationId, t.nodeType),
+  check("account_nodes_type_check", sql`${t.nodeType} IN ('account','contact','deal')`),
+]);
+
+// Typed, directed edges. Traversed with a recursive CTE, depth-capped at 4.
+export const accountEdges = pgTable("account_edges", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  fromNodeId: integer("from_node_id").notNull().references(() => accountNodes.id, { onDelete: "cascade" }),
+  toNodeId: integer("to_node_id").notNull().references(() => accountNodes.id, { onDelete: "cascade" }),
+  edgeType: text("edge_type").notNull(),                    // 'works_at' | 'engaged_with' | 'competitor_of' | 'referred_by'
+  weight: integer("weight").notNull().default(1),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("account_edges_uidx").on(t.fromNodeId, t.toNodeId, t.edgeType),
+  index("account_edges_from_idx").on(t.fromNodeId, t.edgeType),
+  index("account_edges_org_idx").on(t.organisationId),
+  check("account_edges_type_check", sql`${t.edgeType} IN ('works_at','engaged_with','competitor_of','referred_by')`),
+  // A self-edge is never meaningful here and makes cycle handling in the traversal harder to reason
+  // about. Reject it at the boundary rather than filtering it on every read.
+  check("account_edges_no_self_check", sql`${t.fromNodeId} <> ${t.toNodeId}`),
+]);
+
+// Long-term semantic memory. IDENTICAL model and dimensions to kb_chunks so ONE embed path
+// (src/utils/kb-embeddings.ts) serves everything — a second provider or dimension here would mean
+// two embedding budgets, two failure modes and vectors that cannot be compared.
+//
+// ⚠️ GDPR: every insert here MUST be paired with a vector_embeddings row
+// (sourceType 'account_memory'). See src/utils/account-memory.ts — that pairing is the only
+// registration of these vectors, and src/config/vector-sources.ts explains why the source_type
+// half of the key is load-bearing.
+export const accountMemory = pgTable("account_memory", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  accountNodeId: integer("account_node_id").references(() => accountNodes.id, { onDelete: "cascade" }),
+  sourceType: text("source_type").notNull(),                // 'message' | 'engagement' | 'note' | 'outcome'
+  sourceId: integer("source_id"),
+  content: text("content").notNull(),
+  // NULL when no embedding provider is configured — retrieval then falls back to Postgres
+  // full-text search over `content`, exactly as kb_chunks does. The content_tsv generated column
+  // lives in the SQL migration only (drizzle cannot express GENERATED ALWAYS).
+  embedding: vector("embedding", { dimensions: 1024 }),     // voyage-3.5-lite, matches kb_chunks
+  occurredAt: timestamp("occurred_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("account_memory_node_idx").on(t.accountNodeId, t.occurredAt),
+  index("account_memory_org_idx").on(t.organisationId, t.occurredAt),
+  // The ingestion worker's idempotency key: one memory per source row. Without it, re-running the
+  // backfill re-embeds every message — paying the provider twice for duplicate rows that then
+  // double-count in retrieval.
+  uniqueIndex("account_memory_source_uidx").on(t.organisationId, t.sourceType, t.sourceId)
+    .where(sql`source_id IS NOT NULL`),
+  check("account_memory_source_type_check", sql`${t.sourceType} IN ('message','engagement','note','outcome')`),
+]);
+
 // Relational-query definitions for the chat tables live in db/relations.ts
 // (drizzle-orm v2 `defineRelations` API — this drizzle version has no per-table
 // `relations()` export).

@@ -5,6 +5,7 @@
 
 import { and, eq, inArray } from 'drizzle-orm';
 import { workspaceAssets, vectorEmbeddings, aiAssistants } from '../../db/schema';
+import type { VectorSourceType } from '../config/vector-sources';
 
 export interface AssetPurgeResult {
   assetsPurged: number;
@@ -57,11 +58,22 @@ export async function purgeUserAssets(
   if (assets.length > 0) {
     const assetIds = assets.map(a => a.id);
 
-    // US-GDPR-2.2.2: delete all vector embeddings for these assets before nulling the source rows
+    // US-GDPR-2.2.2: delete all vector embeddings for these assets before nulling the source rows.
+    //
+    // ⚠️ THE source_type PREDICATE IS LOAD-BEARING — do not remove it to "catch more rows".
+    // vector_embeddings is polymorphic: source_id is a key in whichever table source_type names,
+    // and those tables have independent id sequences. Until 2026-08-02 this filtered on source_id
+    // alone, so erasing workspace assets [1,2,3] also deleted the map rows for kb_article 1,
+    // inspo_item 2 and any OTHER TENANT's row that happened to share a number — while leaving the
+    // erased user's own kb/inspo vectors untouched, because those are never in assetIds. Exactly
+    // backwards. See src/config/vector-sources.ts.
     try {
       const deleted = await db
         .delete(vectorEmbeddings)
-        .where(inArray(vectorEmbeddings.sourceId, assetIds))
+        .where(and(
+          eq(vectorEmbeddings.sourceType, 'workspace_asset' satisfies VectorSourceType),
+          inArray(vectorEmbeddings.sourceId, assetIds),
+        ))
         .returning({ id: vectorEmbeddings.id });
       embeddingsDeleted = deleted.length;
     } catch (err: any) {

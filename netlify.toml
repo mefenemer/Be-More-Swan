@@ -193,6 +193,14 @@ node_bundler = "esbuild"
 [functions.process-sequence-sends]
   schedule = "0 * * * *"
 
+# Account graph + memory ingestion (Phase 3, plan §5.3) — turns lead_messages and terminal
+# revenue_events into embedded memory. Every pass is idempotent via account_memory_source_uidx, so
+# a missed tick costs latency and nothing else. Every 30 min: the work is bounded per tick
+# (INGEST_BATCH_SIZE) and each row costs an embedding call, so a tighter interval buys nothing but
+# provider spend. Staging drives this via run-account-memory.ts.
+[functions.process-account-memory]
+  schedule = "*/30 * * * *"
+
 # Integration Scenario Library — outbound "Handoff" push drain (every 10 minutes, mirrors the
 # discovery worker) + inbound feedback loop draining via process-webhook-events. Suppression
 # sync pulls existing-customer domains from the CRM daily. docs/integration-scenario-library-plan.md.
