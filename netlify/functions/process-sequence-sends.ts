@@ -285,6 +285,12 @@ async function processEnrolment(db: Db, row: ClaimedRow): Promise<'sent' | 'halt
             await haltEnrolment(db, ref, 'do_not_contact', dnc.reason ?? `flagged do-not-contact (${dnc.source})`);
             return 'halted';
         }
+        if (dnc.overridden) {
+            // The human override lives on the record, so the cadence keeps running rather than
+            // halting at step 2 — which is the whole reason the override is persisted and not a
+            // per-send flag. Logged per step so a bypass is never silent.
+            console.log(`[sequence-sends] do-not-contact overridden for record ${row.assistant_record_id} by ${dnc.override?.by}: ${dnc.override?.reason}`);
+        }
     }
 
     const steps = await loadSteps(db, row.sequence_id);

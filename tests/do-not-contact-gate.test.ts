@@ -16,6 +16,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { evaluateDoNotContact } from '../src/config/do-not-contact';
 import { SEQUENCE_HALT_REASONS } from '../src/config/outreach-sequences';
+import { EVENT_TYPES } from '../src/config/revenue-events';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = (p: string) => readFileSync(join(root, p), 'utf8');
@@ -151,6 +152,74 @@ check('the DB constraint allows it in BOTH the base schema and a migration', () 
 
 check('the UI explains a do-not-contact block', () => {
     assert.match(read('assistants.js'), /'do_not_contact'/, 'assistants.js must handle the reason');
+});
+
+// ── The override, for a mis-scored lead ────────────────────────────────────────────────────────
+// Persisted on the record, not passed per-send: two paths enforce this gate, and a per-send bypass
+// would send the opener, enrol a cadence, then halt it at step 2 when the worker re-checked.
+
+const OVERRIDE = { at: '2026-08-02T12:00:00.000Z', by: '7', reason: 'Known prospect, shares our domain by coincidence.' };
+
+check('a valid override releases the block', () => {
+    const v = evaluateDoNotContact({ doNotContact: true, doNotContactReason: 'Internal account.', doNotContactOverride: OVERRIDE });
+    assert.strictEqual(v.blocked, false);
+    assert.strictEqual(v.overridden, true, 'an override must be distinguishable from a gate that never fired');
+    assert.strictEqual(v.override?.reason, OVERRIDE.reason);
+    assert.strictEqual(v.reason, 'Internal account.', 'the original verdict must survive for logging');
+});
+
+check('an override releases the legacy text block too', () => {
+    const v = evaluateDoNotContact({ suggestedNextStep: 'Do not contact. Internal testing account.', doNotContactOverride: OVERRIDE });
+    assert.strictEqual(v.blocked, false);
+    assert.strictEqual(v.overridden, true);
+    assert.strictEqual(v.source, 'text');
+});
+
+check('an override without a reason is ignored', () => {
+    // The reason IS the authorisation. Accepting a blank one would let an empty object bypass.
+    for (const bad of [{}, { at: OVERRIDE.at, by: '7' }, { at: OVERRIDE.at, by: '7', reason: '   ' }, { reason: 'x', by: '7' }, true, 'yes']) {
+        const v = evaluateDoNotContact({ doNotContact: true, doNotContactOverride: bad });
+        assert.strictEqual(v.blocked, true, `should stay blocked for override: ${JSON.stringify(bad)}`);
+    }
+});
+
+check('an override on an unblocked lead is inert', () => {
+    // It must not act as a standing pre-authorisation for a verdict a LATER re-score would make.
+    const v = evaluateDoNotContact({ doNotContact: false, doNotContactOverride: OVERRIDE });
+    assert.strictEqual(v.blocked, false);
+    assert.strictEqual(v.overridden, false, 'nothing was overridden — no block was raised');
+});
+
+check('the override action demands a substantial reason', () => {
+    const src = read('netlify/functions/lead-generation.ts');
+    assert.match(src, /action === 'override_do_not_contact'/, 'the override action must exist');
+    assert.match(src, /reason\.length < 10/, 'a too-short reason must be rejected server-side');
+});
+
+check('the override action refuses a lead that is not blocked', () => {
+    assert.match(
+        read('netlify/functions/lead-generation.ts'),
+        /if \(!current\.blocked && !current\.overridden\)/,
+        'overriding an unflagged lead would create a standing pre-authorisation',
+    );
+});
+
+check('an override is written to the ledger as its own event', () => {
+    // Not a flavour of lead_approved: "how often is the gate bypassed?" must be a GROUP BY.
+    assert.ok((EVENT_TYPES as readonly string[]).includes('do_not_contact_overridden'));
+    assert.match(read('netlify/functions/lead-generation.ts'), /recordEvent\(db, 'do_not_contact_overridden'/);
+});
+
+check('both send paths log a bypass rather than proceeding silently', () => {
+    for (const f of ['netlify/functions/lead-generation.ts', 'netlify/functions/process-sequence-sends.ts']) {
+        assert.match(read(f), /dnc\.overridden/, `${f} must notice that it is proceeding past a raised gate`);
+    }
+});
+
+check('the UI requires confirm AND a typed reason before overriding', () => {
+    const src = read('assistants.js');
+    assert.match(src, /action: 'override_do_not_contact'/, 'the UI must call the override action');
+    assert.match(src, /why\.trim\(\)\.length >= 10/, 'the UI must not send without a usable reason');
 });
 
 console.log(`\n${passed} checks passed\n`);

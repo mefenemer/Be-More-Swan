@@ -127,7 +127,7 @@ export default withLambda(async (event) => {
     const { organisationId: orgId, userId } = ctx;
 
     // confirmPersonal: the caller has explicitly OK'd sending to a scraped personal inbox.
-    let body: { action?: string; assistantId?: number; ideaId?: number; recordId?: number; lead?: Record<string, unknown>; confirmPersonal?: boolean };
+    let body: { action?: string; assistantId?: number; ideaId?: number; recordId?: number; lead?: Record<string, unknown>; confirmPersonal?: boolean; reason?: string };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
     const action = String(body.action || '');
@@ -274,6 +274,68 @@ ${OUTREACH_SUBJECT_RULES}`;
             return json(200, { record: { id, title, status: card.rating, data: card } });
         }
 
+        // ── Overrule a do-not-contact verdict for ONE lead ────────────────────────
+        // For a mis-scored lead: qualification decided it must never be emailed and was wrong. The
+        // override is PERSISTED on the record rather than passed as a per-send flag, because two
+        // separate paths enforce the gate — send_outreach here and processEnrolment in the sequence
+        // worker. A per-send bypass would send the opener, enrol a cadence, and then halt it at
+        // step 2 when the worker re-checked and still saw the block.
+        //
+        // Deliberately NOT sticky: upsertRecord replaces `data` wholesale, so re-scoring the lead
+        // drops the override along with the verdict it overrode. The human overruled one judgement,
+        // not every future one.
+        if (action === 'override_do_not_contact') {
+            const recordId = Number(body.recordId);
+            if (!Number.isInteger(recordId)) return json(400, { error: 'recordId is required.' });
+
+            // A reason is mandatory, and short ones are rejected. This is the audit trail for
+            // bypassing a compliance gate — "ok" is not a justification, and readOverride() ignores
+            // an override with no reason anyway, which would fail silently at send time instead.
+            const reason = str(body.reason, 500);
+            if (!reason || reason.length < 10) {
+                return json(400, { error: 'A reason of at least 10 characters is required to override a do-not-contact verdict.' });
+            }
+
+            const [rec] = await db
+                .select({ id: assistantRecords.id, data: assistantRecords.data })
+                .from(assistantRecords)
+                .where(and(
+                    eq(assistantRecords.id, recordId),
+                    eq(assistantRecords.organisationId, orgId),
+                    eq(assistantRecords.aiAssistantId, assistant.id),
+                    eq(assistantRecords.recordType, 'lead'),
+                ))
+                .limit(1);
+            if (!rec) return json(404, { error: 'Lead not found.' });
+
+            const data = (rec.data && typeof rec.data === 'object' && !Array.isArray(rec.data)) ? rec.data as Record<string, unknown> : {};
+
+            // Refuse to override a lead that is not actually blocked. Otherwise the record acquires
+            // a standing pre-authorisation that would release a verdict a LATER scoring pass makes —
+            // which is exactly the sticky behaviour this design avoids.
+            const current = evaluateDoNotContact(data);
+            if (!current.blocked && !current.overridden) {
+                return json(400, { error: 'This lead is not flagged do-not-contact, so there is nothing to override.' });
+            }
+
+            const override = { at: new Date().toISOString(), by: userId ? String(userId) : 'user', reason };
+            await db.update(assistantRecords)
+                .set({ data: { ...data, doNotContactOverride: override }, updatedAt: new Date() })
+                .where(eq(assistantRecords.id, recordId));
+
+            // actor 'user': this is a human decision, and the ONLY thing that can produce this event.
+            await recordEvent(db, 'do_not_contact_overridden', {
+                organisationId: orgId,
+                aiAssistantId: assistant.id,
+                assistantRecordId: recordId,
+                actor: 'user',
+                actorUserId: userId,
+                payload: { reason, overrodeSource: current.source, overrodeReason: current.reason },
+            });
+
+            return json(200, { overridden: true, recordId, reason });
+        }
+
         // ── Send the outreach email for an approved lead (auto-send on approval) ──
         // Reads the assistant's outreachEmailProvider setup answer. For 'google', sends the
         // lead's outreach email from the connected Gmail account, then sets a chase reminder
@@ -320,6 +382,11 @@ ${OUTREACH_SUBJECT_RULES}`;
             const dnc = evaluateDoNotContact(data);
             if (dnc.blocked) {
                 return json(200, { sent: false, reason: 'do_not_contact', detail: dnc.reason, source: dnc.source, to: recipient });
+            }
+            if (dnc.overridden) {
+                // Proceeding past a raised gate is not the same as a gate that never fired. Logged
+                // so the bypass is visible in the function logs as well as the ledger.
+                console.log(`[lead-generation] do-not-contact overridden for record ${recordId} by ${dnc.override?.by}: ${dnc.override?.reason}`);
             }
 
             // Suppression gate. suppression_list has been populated from tenants' CRMs since the

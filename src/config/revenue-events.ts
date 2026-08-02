@@ -25,6 +25,10 @@ export const EVENT_TYPES = [
     // ── Qualification (the human gate) ───────────────────────────────────────
     'lead_approved',
     'lead_rejected',
+    // A human overruled a do-not-contact verdict for one lead. Its own event, not a flavour of
+    // lead_approved: "how often is the compliance gate being bypassed, and why?" must be answerable
+    // with a GROUP BY, and it should be conspicuous if that number ever climbs.
+    'do_not_contact_overridden',
     // ── Engagement ───────────────────────────────────────────────────────────
     // `outreach_sent` covers BOTH the opening email and every sequence follow-up — payload carries
     // `sequenceStep` (absent/0 on the opener). Deliberately not split into a separate

@@ -135,7 +135,8 @@ window.initBrandAssets = function() {
             inputFile.files = dataTransfer.files;
             // Auto-upload as soon as a file is chosen — no Upload button needed.
             // If no category is picked yet, hold until the category is selected.
-            if (document.getElementById('asset-category').value) submitAsset();
+            const category = categorySelect.value;
+            if (category) enqueue({ file, category });
             else setAssetStatus('Choose a category above to upload.', 'pending');
         }
     }
@@ -144,59 +145,86 @@ window.initBrandAssets = function() {
     const form = document.getElementById('asset-upload-form');
     const categorySelect = document.getElementById('asset-category');
     const assetStatusEl = document.getElementById('asset-upload-status');
-    let _uploading = false;
+    // An upload is a self-contained job — { file | url } paired with the category that was
+    // showing at the moment it was triggered. Never re-read the form once a job is queued:
+    // there are two triggers (file chosen / category chosen) and an upload takes seconds, so
+    // reading the live <select> at request time filed assets under whatever category the user
+    // had moved on to. The composer is cleared in the same tick the job is queued, and a
+    // second pick while one is in flight queues behind it instead of being silently dropped.
+    const uploadQueue = [];
+    let _draining = false;
+    let _statusTimer;
 
     function setAssetStatus(msg, kind) {
         if (!assetStatusEl) return;
+        clearTimeout(_statusTimer);
         if (!msg) { assetStatusEl.classList.add('hidden'); return; }
         assetStatusEl.textContent = msg;
         assetStatusEl.classList.remove('hidden', 'text-emerald-700', 'text-red-600', 'text-gray-400');
         assetStatusEl.classList.add(kind === 'error' ? 'text-red-600' : kind === 'pending' ? 'text-gray-400' : 'text-emerald-700');
     }
 
-    async function submitAsset() {
-        if (_uploading) return;
-        const category = categorySelect.value;
-        if (!category) { setAssetStatus('Select a category first.', 'error'); return; }
-        _uploading = true;
+    // Queue the job and reset the composer immediately, so the next selection always starts
+    // from a clean slate and can never be mistaken for part of the job already in flight.
+    function enqueue(job) {
+        uploadQueue.push(job);
+        form.reset();
+        inputFile.value = '';
+        fileNameDisplay.classList.add('hidden');
+        drainUploads();
+    }
+
+    async function drainUploads() {
+        if (_draining) return;
+        _draining = true;
         try {
-            if (currentMode === 'file') {
-                const file = inputFile.files[0];
-                if (!file) { setAssetStatus('Choose a file to upload.', 'error'); return; }
-                setAssetStatus(`Uploading ${file.name}…`, 'pending');
-                await uploadFileToR2(file, category);
-            } else {
-                const url = inputUrl.value.trim();
-                if (!url) { setAssetStatus('Enter a URL first.', 'error'); return; }
-                setAssetStatus('Adding URL…', 'pending');
-                const payload = new FormData();
-                payload.append('category', category);
-                payload.append('url', url);
-                const response = await fetch('/.netlify/functions/upload-asset', { method: 'POST', body: payload });
-                if (!response.ok) throw new Error('Failed to save URL asset.');
+            while (uploadQueue.length) {
+                const job = uploadQueue[0];
+                // Label the category in every message — a silent mismatch is the whole bug.
+                const label = categoryLabel(job.category);
+                try {
+                    if (job.file) {
+                        setAssetStatus(`Uploading ${job.file.name} to ${label}…`, 'pending');
+                        await uploadFileToR2(job.file, job.category);
+                    } else {
+                        setAssetStatus(`Adding link to ${label}…`, 'pending');
+                        const payload = new FormData();
+                        payload.append('category', job.category);
+                        payload.append('url', job.url);
+                        const response = await fetch('/.netlify/functions/upload-asset', { method: 'POST', body: payload });
+                        if (!response.ok) throw new Error('Failed to save URL asset.');
+                    }
+                    await loadAssets();
+                    setAssetStatus(`Added to ${label} ✓`, 'success');
+                    _statusTimer = setTimeout(() => setAssetStatus(''), 2500);
+                } catch (error) {
+                    console.error('Save failed:', error);
+                    const what = job.file ? job.file.name : job.url;
+                    setAssetStatus(`${what} — ${error.message || 'Upload failed. Please try again.'}`, 'error');
+                } finally {
+                    uploadQueue.shift();
+                }
             }
-            await loadAssets();
-            form.reset();
-            fileNameDisplay.classList.add('hidden');
-            inputFile.value = '';
-            updateTabs('file');
-            setAssetStatus('Added ✓', 'success');
-            setTimeout(() => setAssetStatus(''), 2500);
-        } catch (error) {
-            console.error('Save failed:', error);
-            setAssetStatus(error.message || 'Upload failed. Please try again.', 'error');
         } finally {
-            _uploading = false;
+            _draining = false;
         }
     }
 
     // A category chosen after the file → upload now.
     categorySelect.addEventListener('change', () => {
-        if (currentMode === 'file' && inputFile.files && inputFile.files[0]) submitAsset();
+        const category = categorySelect.value;
+        const file = inputFile.files && inputFile.files[0];
+        if (category && currentMode === 'file' && file) enqueue({ file, category });
     });
     // URL mode: add on Enter.
     inputUrl.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); submitAsset(); }
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        const category = categorySelect.value;
+        const url = inputUrl.value.trim();
+        if (!category) { setAssetStatus('Select a category first.', 'error'); return; }
+        if (!url) { setAssetStatus('Enter a URL first.', 'error'); return; }
+        enqueue({ url, category });
     });
     // No submit button, but guard against an implicit submit (Enter in a field).
     form.addEventListener('submit', (e) => e.preventDefault());
@@ -358,7 +386,7 @@ window.initBrandAssets = function() {
                     businessName,
                     industry:            val('bp-input-industry'),
                     websiteUrl:          val('bp-input-website'),
-                    socialLinks:         val('bp-input-social'),
+                    socialLinks:         readOtherLinks(),
                     socialHandles:       collectSocialHandles(),
                     businessDescription: val('bp-input-description'),
                     targetAudience:      val('bp-input-audience'),
@@ -410,6 +438,77 @@ window.initBrandAssets = function() {
         }
     }
 
+    // ── Other links (one row per link; stored as a newline-separated string) ────
+    // The column (organisations.social_links) is a single text field, so the rows
+    // are joined on save and split again on load. Legacy values that were typed as
+    // one comma-separated line split into rows too.
+    function otherLinkRows() {
+        return Array.from(document.querySelectorAll('#bp-links-list input[data-link-row]'));
+    }
+
+    function readOtherLinks() {
+        return otherLinkRows().map(el => el.value.trim()).filter(Boolean).join('\n');
+    }
+
+    function addOtherLinkRow(value, focus) {
+        const list = document.getElementById('bp-links-list');
+        if (!list) return null;
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-2';
+        row.innerHTML = `
+          <input type="text" data-link-row placeholder="https://linktr.ee/yourbrand"
+            class="flex-1 min-w-0 px-4 py-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 outline-none transition">
+          <button type="button" data-link-remove title="Remove this link" aria-label="Remove this link"
+            class="shrink-0 w-9 h-9 flex items-center justify-center rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 transition cursor-pointer">&times;</button>`;
+        const input = row.querySelector('input');
+        input.value = value || '';
+        list.appendChild(row);
+        syncOtherLinkRemoveButtons();
+        if (focus) input.focus();
+        return input;
+    }
+
+    // A lone empty row has nothing to remove — hide its button so the list can
+    // never be emptied into a state with no input at all.
+    function syncOtherLinkRemoveButtons() {
+        const rows = otherLinkRows();
+        const only = rows.length === 1;
+        document.querySelectorAll('#bp-links-list button[data-link-remove]').forEach(btn => {
+            btn.classList.toggle('hidden', only);
+        });
+    }
+
+    function setOtherLinks(raw) {
+        const list = document.getElementById('bp-links-list');
+        if (!list) return;
+        list.innerHTML = '';
+        const links = String(raw || '').split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+        if (!links.length) links.push('');
+        links.forEach(l => addOtherLinkRow(l, false));
+    }
+
+    function wireOtherLinks(onChange) {
+        const list = document.getElementById('bp-links-list');
+        if (!list) return;
+        list.addEventListener('input', (e) => { if (e.target.matches('input[data-link-row]')) onChange(); });
+        list.addEventListener('click', (e) => {
+            const btn = e.target.closest('button[data-link-remove]');
+            if (!btn) return;
+            const had = btn.closest('div').querySelector('input')?.value.trim();
+            btn.closest('div').remove();
+            if (!otherLinkRows().length) addOtherLinkRow('', false);
+            syncOtherLinkRemoveButtons();
+            if (had) onChange();
+        });
+        // Enter adds the next row instead of submitting anything.
+        list.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' || !e.target.matches('input[data-link-row]')) return;
+            e.preventDefault();
+            addOtherLinkRow('', true);
+        });
+        document.getElementById('bp-links-add')?.addEventListener('click', () => addOtherLinkRow('', true));
+    }
+
     // ── Social media handles (Business Information is the source of truth) ──────
     // Each input carries data-platform="<slug>". Collect them into a { slug: value }
     // object for organisation-profile; these gate which Connections can be enabled.
@@ -443,7 +542,7 @@ window.initBrandAssets = function() {
                         set('bp-input-name', profile.businessName);
                         set('bp-input-industry', profile.industry);
                         set('bp-input-website', profile.websiteUrl);
-                        set('bp-input-social', profile.socialLinks);
+                        setOtherLinks(profile.socialLinks);
                         fillSocialHandles(profile.socialHandles);
                         set('bp-input-description', profile.businessDescription);
                         set('bp-input-audience', profile.targetAudience);
@@ -451,6 +550,8 @@ window.initBrandAssets = function() {
                     }
                 }
             } catch { /* non-fatal */ }
+            // Guarantee one empty row even when the profile fetch fails or is empty.
+            if (!otherLinkRows().length) setOtherLinks('');
             const bpEl = document.getElementById('bp-input-name');
             if (bpEl) bpEl.placeholder = 'Acme Ltd';
         }
@@ -482,8 +583,10 @@ window.initBrandAssets = function() {
 
         // Wire debounced auto-save on every field.
         const bpSave = debounce(saveBusinessProfile, 700);
-        ['bp-input-name','bp-input-industry','bp-input-website','bp-input-social','bp-input-description','bp-input-audience']
+        ['bp-input-name','bp-input-industry','bp-input-website','bp-input-description','bp-input-audience']
             .forEach(id => document.getElementById(id)?.addEventListener('input', bpSave));
+        // "Other links" is a list of rows rather than one input — same auto-save.
+        wireOtherLinks(bpSave);
         // Per-platform social handle inputs share the same auto-save.
         document.querySelectorAll('#bp-social-grid input[data-platform]')
             .forEach(el => el.addEventListener('input', bpSave));

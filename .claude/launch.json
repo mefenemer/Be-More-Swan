@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-asset-category",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4243",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/abdc5df4-d8e6-48dc-b326-6dea16386e42/scratchpad"
+      ],
+      "port": 4243,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-memory-query",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

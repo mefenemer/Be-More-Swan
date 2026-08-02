@@ -23,9 +23,42 @@ export interface DoNotContactVerdict {
     reason: string | null;
     /** 'flag' = the structured field; 'text' = the legacy free-text backstop. */
     source: 'flag' | 'text' | null;
+    /**
+     * True when the lead WOULD have been blocked but a human overrode it. Distinct from a plain
+     * `blocked: false` — callers log it, because a bypassed compliance gate should never be
+     * indistinguishable from a gate that never fired.
+     */
+    overridden: boolean;
+    override: DoNotContactOverride | null;
 }
 
-const NOT_BLOCKED: DoNotContactVerdict = { blocked: false, reason: null, source: null };
+/**
+ * A human's explicit decision that a do-not-contact verdict was wrong. Persisted on the lead
+ * record's `data`, NOT passed per-request: both the send path and the sequence worker consult the
+ * same rule, and a per-send bypass would send the opener, enrol a cadence, then halt it at step 2.
+ *
+ * Deliberately NOT sticky across re-scoring. `upsertRecord` replaces `data` wholesale, so a fresh
+ * scoring pass drops the override with the verdict it overrode — which is correct: the human
+ * overruled one judgement, not every future one.
+ */
+export interface DoNotContactOverride {
+    at: string;
+    by: string;
+    reason: string;
+}
+
+const NOT_BLOCKED: DoNotContactVerdict = { blocked: false, reason: null, source: null, overridden: false, override: null };
+
+/** A stored override is only honoured if it carries a reason — an unexplained bypass is not one. */
+function readOverride(v: unknown): DoNotContactOverride | null {
+    if (!v || typeof v !== 'object') return null;
+    const o = v as Record<string, unknown>;
+    const reason = asText(o.reason).trim();
+    const by = asText(o.by).trim();
+    const at = asText(o.at).trim();
+    if (!reason || !by || !at) return null;
+    return { at, by, reason: reason.slice(0, 500) };
+}
 
 /**
  * Legacy backstop. Records scored before `doNotContact` existed carry the verdict only as prose,
@@ -49,19 +82,35 @@ export function evaluateDoNotContact(data: unknown): DoNotContactVerdict {
     if (!data || typeof data !== 'object') return NOT_BLOCKED;
     const d = data as Record<string, unknown>;
 
+    let blocked: DoNotContactVerdict | null = null;
+
     // 1. The structured flag wins. Explicit `false` is a real answer — a later scoring pass that
     //    cleared the flag must not be overridden by stale prose left in suggestedNextStep.
     if (typeof d.doNotContact === 'boolean') {
         if (!d.doNotContact) return NOT_BLOCKED;
         const reason = asText(d.doNotContactReason).trim() || asText(d.suggestedNextStep).trim();
-        return { blocked: true, reason: reason.slice(0, 300) || 'Marked do-not-contact during qualification.', source: 'flag' };
+        blocked = {
+            blocked: true,
+            reason: reason.slice(0, 300) || 'Marked do-not-contact during qualification.',
+            source: 'flag', overridden: false, override: null,
+        };
+    } else {
+        // 2. No flag at all — fall back to the prose the older scoring passes wrote.
+        const nextStep = asText(d.suggestedNextStep).trim();
+        if (nextStep && LEGACY_DO_NOT_CONTACT.test(nextStep)) {
+            blocked = { blocked: true, reason: nextStep.slice(0, 300), source: 'text', overridden: false, override: null };
+        }
     }
 
-    // 2. No flag at all — fall back to the prose the older scoring passes wrote.
-    const nextStep = asText(d.suggestedNextStep).trim();
-    if (nextStep && LEGACY_DO_NOT_CONTACT.test(nextStep)) {
-        return { blocked: true, reason: nextStep.slice(0, 300), source: 'text' };
+    if (!blocked) return NOT_BLOCKED;
+
+    // 3. A human overruled this specific verdict. Evaluated LAST so an override can only ever
+    //    release a block that was genuinely raised — an override sitting on a lead nobody flagged
+    //    is inert, and cannot pre-authorise a verdict a future scoring pass has not yet made.
+    const override = readOverride(d.doNotContactOverride);
+    if (override) {
+        return { blocked: false, reason: blocked.reason, source: blocked.source, overridden: true, override };
     }
 
-    return NOT_BLOCKED;
+    return blocked;
 }

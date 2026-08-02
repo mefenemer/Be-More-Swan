@@ -1417,6 +1417,47 @@ window._detailRqRecordAct = async function (btn, action) {
                 let sres = await postSend(false);
                 let sdata = await sres.json().catch(() => ({}));
 
+                // Qualification says this lead must never be emailed. Usually correct, but it can
+                // mis-score a real prospect, so allow a deliberate override — two steps, not one:
+                // confirm the block is wrong, then type a reason. The reason is the audit trail
+                // (the server rejects anything under 10 characters), and the override is stored on
+                // the record so the sequence worker honours it too. Cancelling either step sends
+                // nothing. Deliberately more friction than the personal-inbox prompt below: that
+                // one asks "are you sure who", this one asks you to overrule a compliance verdict.
+                if (sres.ok && sdata.reason === 'do_not_contact') {
+                    const proceed = window.confirm(
+                        `This lead is flagged do-not-contact:\n\n${sdata.detail || 'Flagged during qualification.'}\n\n`
+                        + 'That usually means an internal account, a competitor or an existing customer — and nothing has been sent.\n\n'
+                        + 'Override it and email this lead anyway?'
+                    );
+                    const why = proceed
+                        ? window.prompt('Why is this verdict wrong? This is recorded against the lead (at least 10 characters).')
+                        : null;
+                    if (why && why.trim().length >= 10) {
+                        const ores = await fetch('/.netlify/functions/lead-generation', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                action: 'override_do_not_contact',
+                                assistantId: window._currentAssistantId,
+                                recordId: patch.id,
+                                reason: why.trim(),
+                            }),
+                        });
+                        if (ores.ok) {
+                            sres = await postSend(false);
+                            sdata = await sres.json().catch(() => ({}));
+                        } else {
+                            const oerr = await ores.json().catch(() => ({}));
+                            sdata = { sent: false, reason: 'do_not_contact', detail: oerr.error || 'The override could not be saved.' };
+                        }
+                    } else if (proceed) {
+                        // Confirmed the override but gave no usable reason — treat as cancelled
+                        // rather than silently sending, since the reason IS the authorisation.
+                        sdata = { sent: false, reason: 'do_not_contact', detail: 'No reason given, so nothing was sent.' };
+                    }
+                }
+
                 // The address was scraped from a named individual's inbox rather than a
                 // general one. Name it and make the user opt in before anything is sent —
                 // the server refuses to send until this comes back confirmed.
@@ -1444,8 +1485,6 @@ window._detailRqRecordAct = async function (btn, action) {
                 } else if (sres.ok && sdata.reason === 'no_recipient') {
                     toast = 'Lead approved — no email address on this lead, so nothing was sent.';
                 } else if (sres.ok && sdata.reason === 'do_not_contact') {
-                    // Qualification decided this lead must never be emailed. No confirm-and-send
-                    // prompt here on purpose — offering one would turn a hard gate into a nudge.
                     toast = `Lead approved — nothing sent. This lead is flagged do-not-contact: ${sdata.detail || 'flagged during qualification.'}`;
                 } else if (sres.ok && sdata.reason === 'generator_declined') {
                     // The drafter refused rather than writing something dishonest — usually because
