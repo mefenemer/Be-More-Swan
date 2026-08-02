@@ -19,6 +19,7 @@ import { leads, leadReplies } from '../../db/schema';
 import { lookupContact, promoteContactType } from '../../src/utils/contact-type';
 import { parseReplyToken, recipientFromParsePayload } from '../../src/utils/reply-address';
 import { findThreadByReplyToken, recordInboundMessage } from '../../src/utils/lead-threads';
+import { haltEnrolmentsForThread } from '../../src/utils/outreach-sequences';
 import { recordEvent } from '../../src/utils/revenue-ledger';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -142,6 +143,14 @@ export default withLambda(async (event: HandlerEvent) => {
                 body: messageBody.slice(0, MAX_BODY_CHARS),
             });
 
+            // Halt any running cadence on this thread (Phase 2b). recordInboundMessage has already
+            // flipped the thread to 'replied', and the sequence worker refuses to send to a thread
+            // that is not 'open' — this closes the enrolment at the SAME moment rather than leaving
+            // an active row pointing at a replied thread until the next tick notices. Belt and
+            // braces on purpose: a follow-up landing after someone has answered is the single most
+            // damaging thing this system can do.
+            const haltedCount = await haltEnrolmentsForThread(db, thread.id);
+
             // The ledger event is what makes reply RATE measurable — the first funnel metric this
             // system has ever been able to compute for outreach.
             await recordEvent(db, 'reply_received', {
@@ -150,10 +159,10 @@ export default withLambda(async (event: HandlerEvent) => {
                 discoveredLeadId: thread.discoveredLeadId,
                 assistantRecordId: thread.assistantRecordId,
                 actor: 'system',
-                payload: { threadId: thread.id, messageId, flaggedSpam },
+                payload: { threadId: thread.id, messageId, flaggedSpam, sequencesHalted: haltedCount },
             });
 
-            console.log('[inbound-email] recorded lead reply', JSON.stringify({ threadId: thread.id, messageId }));
+            console.log('[inbound-email] recorded lead reply', JSON.stringify({ threadId: thread.id, messageId, haltedCount }));
             return { statusCode: 200, body: 'Lead reply recorded.' };
         }
     } catch (err) {

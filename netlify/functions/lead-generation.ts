@@ -39,6 +39,8 @@ import { IntegrationError } from '../../src/utils/workspace-integrations';
 import { recordEvent } from '../../src/utils/revenue-ledger';
 import { openLeadThread, recordOutboundMessage } from '../../src/utils/lead-threads';
 import { replyAddress } from '../../src/utils/reply-address';
+import { checkSuppression } from '../../src/utils/suppression';
+import { enrolInSequence } from '../../src/utils/outreach-sequences';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /** Chase reminder for an approved+contacted lead: 3 days out at 09:00, nudged off weekends. */
@@ -290,6 +292,21 @@ Write an outreachDraft for hot/warm leads; use null for cold leads.`;
             const recipient = str(draft?.to as string, 200) || str(data.contactEmail as string, 200) || str(leadObj.email as string, 200);
             if (!recipient) return json(200, { sent: false, reason: 'no_recipient' });
 
+            // Suppression gate. suppression_list has been populated from tenants' CRMs since the
+            // Integration Scenario Library shipped, but until Phase 2b NOTHING READ IT — so this
+            // path could cold-email an org's own existing customers despite the tenant having
+            // connected a CRM specifically to prevent that. Checked before the personal-inbox gate
+            // because "we must not email this company at all" outranks "who at this company".
+            const suppression = await checkSuppression(db, orgId, recipient);
+            if (suppression.suppressed) {
+                return json(200, {
+                    sent: false,
+                    reason: suppression.unknown ? 'suppression_check_failed' : 'suppressed',
+                    to: recipient,
+                    suppressionReason: suppression.reason ?? null,
+                });
+            }
+
             // Personal-inbox gate. A SCRAPED address belonging to a named individual (rather
             // than a generic info@/enquiries@ desk) is the weakest footing for cold B2B
             // outreach under UK GDPR/PECR, and approval otherwise auto-sends with no further
@@ -351,6 +368,19 @@ Write an outreachDraft for hot/warm leads; use null for cold leads.`;
                     // The stored draft is the agent's; a body generated just now is equally the
                     // agent's. Either way nothing here was human-edited, so generatedBody === body.
                     generatedBody: bodyText,
+                });
+
+                // Enrol in the follow-up cadence (Phase 2b). A consequence of having ACTUALLY
+                // emailed someone, never a separate UI action — so it cannot run for a lead that
+                // was never contacted, and the approval click that authorised this send is the
+                // consent for the cadence that follows. Best-effort: an enrolment that fails to
+                // write means no follow-ups, not a failed send.
+                await enrolInSequence(db, {
+                    organisationId: orgId,
+                    aiAssistantId: assistant.id,
+                    leadThreadId: thread.id,
+                    assistantRecordId: recordId,
+                    contactEmail: recipient,
                 });
             }
 

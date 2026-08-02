@@ -26,10 +26,22 @@ export const EVENT_TYPES = [
     'lead_approved',
     'lead_rejected',
     // ── Engagement ───────────────────────────────────────────────────────────
+    // `outreach_sent` covers BOTH the opening email and every sequence follow-up — payload carries
+    // `sequenceStep` (absent/0 on the opener). Deliberately not split into a separate
+    // 'follow_up_sent': the question "how many emails did we send this lead?" should not require
+    // knowing to union two event types, and db/revenue-events.sql already anticipates several
+    // outreach_sent rows per lead.
     'outreach_sent',
     'outreach_bounced',
     'reply_received',
     'reply_classified',
+    // ── Sequencing (Phase 2b) — lifecycle, not sends ─────────────────────────
+    // These answer "did the cadence run, and why did it stop?". `sequence_halted` carries the
+    // closed haltReason vocabulary in its payload, so the Strategy Agent can GROUP BY it to see
+    // whether a cadence is being cut short by replies (good) or by suppression and bounces (bad).
+    'sequence_enrolled',
+    'sequence_halted',
+    'sequence_completed',
     // ── Closing ──────────────────────────────────────────────────────────────
     'objection_raised',
     'objection_handled',

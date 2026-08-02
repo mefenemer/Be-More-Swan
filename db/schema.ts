@@ -3523,6 +3523,93 @@ export const templateFeedback = pgTable("template_feedback", {
   index("template_feedback_org_reason_idx").on(t.organisationId, t.editReason, t.createdAt),
 ]);
 
+// ────────────────────────────────────────────────────────────────────────────
+// OUTREACH SEQUENCES — Phase 2b of docs/lead-generator-revenue-engine-plan.md
+// ────────────────────────────────────────────────────────────────────────────
+// Phase 2a made a conversation observable; 2b makes it PERSISTENT. One email and a calendar
+// reminder is not a cadence — the reminder asks a human to remember, which is exactly the manual
+// step the assistant exists to remove.
+//
+// The stop condition is Phase 2a's reply detection: `lead_threads.state` flipping to 'replied' is
+// what halts a sequence. That ordering is why 2b could not be built first. A sequence engine that
+// does not reliably notice replies sends follow-ups to people who already answered, which is the
+// single most damaging thing this system can do to a tenant's reputation.
+//
+// Migration: db/outreach-sequences.sql (MANUAL APPLY — no drizzle-kit push). The check() calls
+// here MUST stay in sync with the SQL, or a later push silently reverts the DDL.
+
+// A named cadence. Auto-provisioned per assistant on first enrolment (see
+// src/utils/outreach-sequences.ts ensureDefaultSequence) so the engine works with no admin UI —
+// there is no "configure a sequence" screen yet and a table nobody can populate does nothing.
+export const outreachSequences = pgTable("outreach_sequences", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  name: text("name").notNull().default("Default follow-up"),
+  isEnabled: boolean("is_enabled").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  // One enabled sequence per assistant. Choosing BETWEEN sequences by ICP segment is Phase 5
+  // territory; until something can make that choice, a second sequence would just be ambiguity
+  // about which one enrolment picks.
+  uniqueIndex("outreach_sequences_assistant_uidx").on(t.aiAssistantId),
+]);
+
+// The steps, in order. `delayDays` is measured from the PREVIOUS send, not from enrolment, so
+// editing one step's delay shifts everything after it the way a human reading the cadence expects.
+export const sequenceSteps = pgTable("sequence_steps", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  sequenceId: integer("sequence_id").notNull().references(() => outreachSequences.id, { onDelete: "cascade" }),
+  stepNumber: integer("step_number").notNull(),             // 1-based; step 1 is the FIRST follow-up
+  delayDays: integer("delay_days").notNull().default(3),    // wait after the previous send
+  // An instruction to the drafting model, NOT a static template. A fixed body sent three times is
+  // recognisably a mail-merge; the whole point of drafting per-send is that the follow-up can
+  // reference what was already said in this specific thread.
+  bodyPrompt: text("body_prompt").notNull(),
+  isEnabled: boolean("is_enabled").notNull().default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("sequence_steps_seq_step_uidx").on(t.sequenceId, t.stepNumber),
+  check("sequence_steps_step_number_check", sql`${t.stepNumber} > 0`),
+  check("sequence_steps_delay_days_check", sql`${t.delayDays} >= 0`),
+]);
+
+// One lead's progress through one sequence. `nextSendAt` is the worker's claim key.
+export const sequenceEnrolments = pgTable("sequence_enrolments", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  sequenceId: integer("sequence_id").notNull().references(() => outreachSequences.id, { onDelete: "cascade" }),
+  // THE HALT KEY. Every send re-reads this thread's state and refuses unless it is still 'open'.
+  leadThreadId: integer("lead_thread_id").notNull().references(() => leadThreads.id, { onDelete: "cascade" }),
+  assistantRecordId: integer("assistant_record_id").references(() => assistantRecords.id, { onDelete: "set null" }),
+  discoveredLeadId: integer("discovered_lead_id").references(() => discoveredLeads.id, { onDelete: "set null" }),
+  contactEmail: text("contact_email"),
+
+  state: text("state").notNull().default("active"),         // active | completed | halted | cancelled
+  // Why it stopped. Closed vocabulary (SEQUENCE_HALT_REASONS) for the same reason LOSS_REASONS is
+  // closed: "why do sequences stop early?" must be a GROUP BY, not a prose summary.
+  haltReason: text("halt_reason"),
+  lastStepSent: integer("last_step_sent").notNull().default(0),   // 0 = only the opening email has gone
+  nextSendAt: timestamp("next_send_at"),                    // NULL once terminal
+  lastError: text("last_error"),
+  attempt: integer("attempt").notNull().default(0),         // consecutive failures at the current step
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  // One enrolment per thread. A lead enrolled twice gets two overlapping cadences and receives
+  // double the follow-ups — the unique index is the only thing that makes double-enrolment
+  // impossible rather than merely unlikely.
+  uniqueIndex("sequence_enrolments_thread_uidx").on(t.leadThreadId),
+  // The worker's claim: active rows whose next_send_at has passed.
+  index("sequence_enrolments_due_idx").on(t.state, t.nextSendAt),
+  index("sequence_enrolments_org_idx").on(t.organisationId, t.createdAt),
+  check("sequence_enrolments_state_check", sql`${t.state} IN ('active','completed','halted','cancelled')`),
+  check("sequence_enrolments_halt_reason_check", sql`${t.haltReason} IS NULL OR ${t.haltReason} IN ('replied','suppressed','no_recipient','not_connected','send_failed','max_steps','record_closed','manual')`),
+]);
+
 // Relational-query definitions for the chat tables live in db/relations.ts
 // (drizzle-orm v2 `defineRelations` API — this drizzle version has no per-table
 // `relations()` export).
