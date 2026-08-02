@@ -3433,6 +3433,96 @@ export const revenueEvents = pgTable("revenue_events", {
   check("revenue_events_loss_reason_check", sql`${t.lossReason} IS NULL OR ${t.lossReason} IN ('price','timing','no_budget','competitor','no_response','wrong_contact','not_icp','feature_gap','went_silent','other')`),
 ]);
 
+// ────────────────────────────────────────────────────────────────────────────
+// LEAD CONVERSATIONS — Phase 2a of docs/lead-generator-revenue-engine-plan.md
+// ────────────────────────────────────────────────────────────────────────────
+// Outreach today is fire-and-forget: send_outreach sends one email, sets a calendar reminder, and
+// that is the end of it. There is no record of the exchange and NO REPLY DETECTION, so the system
+// cannot tell a lead that answered from one that ignored us. These two tables make it stateful.
+//
+// ⚠️ NOT the same as `leads` / `lead_replies` near the top of this file — those are Be More Swan's
+// OWN trial/upgrade pipeline (Admin → Contacts). These are the TENANT's conversations with THEIR
+// prospects. Overloading one for the other has been a recurring mistake; keep them apart.
+//
+// Migration: db/lead-threads.sql (MANUAL APPLY).
+export const leadThreads = pgTable("lead_threads", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").notNull().references(() => aiAssistants.id, { onDelete: "cascade" }),
+  discoveredLeadId: integer("discovered_lead_id").references(() => discoveredLeads.id, { onDelete: "cascade" }),
+  // The Review Queue row this conversation belongs to. Always set — a thread starts from an
+  // approved lead record, and a manually-added lead has a record but no discovery row.
+  assistantRecordId: integer("assistant_record_id").references(() => assistantRecords.id, { onDelete: "set null" }),
+  channel: text("channel").notNull().default("email"),      // 'email' | 'dm' (dm is Phase 2b/§5.4)
+
+  // Per-thread inbound alias: reply+<token>@parse.bemoreswan.com. This is what makes a reply
+  // attributable to ONE conversation without parsing quoted text or guessing from the sender —
+  // the same person can be a prospect of two different assistants in the same org.
+  replyToken: text("reply_token").notNull().unique(),
+  // The address we actually wrote to, so a reply from a DIFFERENT address on the same thread
+  // (a colleague, an assistant) is still recognisable as belonging here.
+  contactEmail: text("contact_email"),
+
+  state: text("state").notNull().default("open"),           // open | replied | stalled | closed
+  lastOutboundAt: timestamp("last_outbound_at"),
+  lastInboundAt: timestamp("last_inbound_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => [
+  index("lead_threads_org_state_idx").on(t.organisationId, t.state, t.lastOutboundAt),
+  index("lead_threads_record_idx").on(t.assistantRecordId),
+  check("lead_threads_state_check", sql`${t.state} IN ('open','replied','stalled','closed')`),
+  check("lead_threads_channel_check", sql`${t.channel} IN ('email','dm')`),
+]);
+
+// One row per message, in or out.
+export const leadMessages = pgTable("lead_messages", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  leadThreadId: integer("lead_thread_id").notNull().references(() => leadThreads.id, { onDelete: "cascade" }),
+  direction: text("direction").notNull(),                   // 'outbound' | 'inbound'
+  fromEmail: text("from_email"),
+  subject: text("subject"),
+
+  // What actually went out / came in.
+  body: text("body").notNull(),
+  // OUTBOUND ONLY: the agent's draft, kept verbatim even when a human edited it before sending.
+  // Without this you cannot tell an edited message from an unedited one, and the whole
+  // template-feedback loop in §2.6 has no input. Keep both.
+  generatedBody: text("generated_body"),
+  editedBy: integer("edited_by").references(() => users.id, { onDelete: "set null" }),
+  // ai_blueprints.blueprintVersion the draft came from — attribution for template performance.
+  templateVersion: text("template_version"),
+
+  // INBOUND ONLY: what the reply meant. Populated by the classifier; NULL until then.
+  classification: text("classification"),                   // 'interested'|'not_now'|'not_interested'|'objection'|'ooo'|'unsubscribe'|'other'
+  sentiment: text("sentiment"),                             // 'positive' | 'neutral' | 'negative'
+  objections: jsonb("objections"),                          // string[] of matched objection categories
+
+  occurredAt: timestamp("occurred_at").defaultNow().notNull(),
+}, (t) => [
+  index("lead_messages_thread_idx").on(t.leadThreadId, t.occurredAt),
+  check("lead_messages_direction_check", sql`${t.direction} IN ('outbound','inbound')`),
+]);
+
+// Human edits as EVIDENCE (plan §2.6, the ⭐ option). A reviewer who rewrites a draft is telling us
+// something about the template; capturing why turns that into training signal instead of throwing
+// it away. Accumulates until the Strategy Agent has MIN_SAMPLE similar edits, then proposes the
+// template change through the normal proposal flow — with a sample size behind it, unlike a
+// "save as default" click which generalises from n=1.
+export const templateFeedback = pgTable("template_feedback", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  leadMessageId: integer("lead_message_id").references(() => leadMessages.id, { onDelete: "cascade" }),
+  templateVersion: text("template_version"),
+  editReason: text("edit_reason"),                          // closed vocabulary — see signal/edit configs
+  diffSummary: text("diff_summary"),                        // one line, LLM-summarised
+  appliedToTemplate: boolean("applied_to_template").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("template_feedback_org_reason_idx").on(t.organisationId, t.editReason, t.createdAt),
+]);
+
 // Relational-query definitions for the chat tables live in db/relations.ts
 // (drizzle-orm v2 `defineRelations` API — this drizzle version has no per-table
 // `relations()` export).

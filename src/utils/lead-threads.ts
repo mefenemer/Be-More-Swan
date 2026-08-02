@@ -1,0 +1,199 @@
+// src/utils/lead-threads.ts
+// Read/write helpers for lead conversations (Phase 2a of
+// docs/lead-generator-revenue-engine-plan.md). The single place `lead_threads` / `lead_messages`
+// are written, for the same reason recordEvent() is the only ledger writer: the invariants below
+// only hold if there is one implementation of them.
+//
+// ── Best-effort by contract ──────────────────────────────────────────────────
+// Every function here resolves to null / undefined on failure and NEVER throws. Conversation
+// history is bookkeeping ABOUT the outreach, not part of it — an email that has already been
+// delivered must not surface as a failure because a row could not be written, and inbound support
+// mail must keep flowing if these tables are missing entirely.
+//
+// That is deliberate given db/lead-threads.sql is a manual apply: on an un-migrated environment
+// every call here quietly no-ops and the product keeps working with no conversation history,
+// rather than breaking a feature that worked yesterday (the 2026-08-02 lesson).
+//
+// The corollary: silence is a real outcome. If threads are missing, look for the console.error
+// lines below before assuming the call site never ran.
+
+import { and, desc, eq } from 'drizzle-orm';
+import type { getDb } from '../../db/client';
+import { leadThreads, leadMessages } from '../../db/schema';
+import { mintReplyToken } from './reply-address';
+
+type Db = ReturnType<typeof getDb>;
+
+export interface OpenThreadInput {
+    organisationId: number;
+    aiAssistantId: number;
+    assistantRecordId?: number | null;
+    discoveredLeadId?: number | null;
+    contactEmail?: string | null;
+    channel?: 'email' | 'dm';
+}
+
+export interface ThreadRef { id: number; replyToken: string }
+
+/**
+ * Get the open thread for a lead record, or create one.
+ *
+ * Reuses an existing OPEN or REPLIED thread rather than minting a new alias per send: a follow-up
+ * belongs to the same conversation the prospect is already reading, and a second Reply-To would
+ * split one exchange across two threads. Only a closed thread starts a fresh one.
+ */
+export async function openLeadThread(db: Db, input: OpenThreadInput): Promise<ThreadRef | null> {
+    try {
+        if (input.assistantRecordId) {
+            const [existing] = await db
+                .select({ id: leadThreads.id, replyToken: leadThreads.replyToken, state: leadThreads.state })
+                .from(leadThreads)
+                .where(and(
+                    eq(leadThreads.organisationId, input.organisationId),
+                    eq(leadThreads.assistantRecordId, input.assistantRecordId),
+                ))
+                .orderBy(desc(leadThreads.createdAt))
+                .limit(1);
+            if (existing && existing.state !== 'closed') {
+                return { id: existing.id, replyToken: existing.replyToken };
+            }
+        }
+
+        const replyToken = mintReplyToken();
+        const [created] = await db.insert(leadThreads).values({
+            organisationId: input.organisationId,
+            aiAssistantId: input.aiAssistantId,
+            assistantRecordId: input.assistantRecordId ?? null,
+            discoveredLeadId: input.discoveredLeadId ?? null,
+            contactEmail: input.contactEmail ?? null,
+            channel: input.channel ?? 'email',
+            replyToken,
+            state: 'open',
+        }).returning({ id: leadThreads.id, replyToken: leadThreads.replyToken });
+
+        return created ? { id: created.id, replyToken: created.replyToken } : null;
+    } catch (err) {
+        logQuietly('openLeadThread', err);
+        return null;
+    }
+}
+
+export interface OutboundMessageInput {
+    organisationId: number;
+    fromEmail?: string | null;
+    subject?: string | null;
+    body: string;
+    /** The agent's draft. Differs from `body` only when a human edited before sending (plan §2.6). */
+    generatedBody?: string | null;
+    editedBy?: number | null;
+    templateVersion?: string | null;
+}
+
+/** Append an outbound message and stamp the thread's last_outbound_at. */
+export async function recordOutboundMessage(db: Db, threadId: number, input: OutboundMessageInput): Promise<number | null> {
+    try {
+        const now = new Date();
+        const [row] = await db.insert(leadMessages).values({
+            organisationId: input.organisationId,
+            leadThreadId: threadId,
+            direction: 'outbound',
+            fromEmail: input.fromEmail ?? null,
+            subject: input.subject ?? null,
+            body: input.body,
+            generatedBody: input.generatedBody ?? null,
+            editedBy: input.editedBy ?? null,
+            templateVersion: input.templateVersion ?? null,
+            occurredAt: now,
+        }).returning({ id: leadMessages.id });
+
+        // An outbound message never revives a replied thread — the prospect has spoken, and the
+        // state reflects THEIR last action, not ours.
+        await db.update(leadThreads)
+            .set({ lastOutboundAt: now, updatedAt: now })
+            .where(eq(leadThreads.id, threadId));
+
+        return row?.id ?? null;
+    } catch (err) {
+        logQuietly('recordOutboundMessage', err);
+        return null;
+    }
+}
+
+export interface InboundMessageInput {
+    organisationId: number;
+    fromEmail?: string | null;
+    subject?: string | null;
+    body: string;
+    occurredAt?: Date;
+}
+
+/**
+ * Append an inbound message and flip the thread to `replied`.
+ *
+ * The state change is what halts an outreach sequence (plan §5.2 — "any inbound reply immediately
+ * halts the sequence"). It is applied HERE, in the same call that records the message, so there is
+ * no window in which a reply exists but the sequence still believes it may send. A follow-up
+ * landing minutes after someone answered is the single most damaging thing this system could do.
+ */
+export async function recordInboundMessage(db: Db, threadId: number, input: InboundMessageInput): Promise<number | null> {
+    try {
+        const now = input.occurredAt ?? new Date();
+        const [row] = await db.insert(leadMessages).values({
+            organisationId: input.organisationId,
+            leadThreadId: threadId,
+            direction: 'inbound',
+            fromEmail: input.fromEmail ?? null,
+            subject: input.subject ?? null,
+            body: input.body,
+            occurredAt: now,
+        }).returning({ id: leadMessages.id });
+
+        await db.update(leadThreads)
+            .set({ state: 'replied', lastInboundAt: now, updatedAt: now })
+            .where(eq(leadThreads.id, threadId));
+
+        return row?.id ?? null;
+    } catch (err) {
+        logQuietly('recordInboundMessage', err);
+        return null;
+    }
+}
+
+/** Resolve a thread by its inbound alias token. Null when unknown — never throws. */
+export async function findThreadByReplyToken(db: Db, token: string): Promise<{
+    id: number; organisationId: number; aiAssistantId: number;
+    assistantRecordId: number | null; discoveredLeadId: number | null; state: string;
+} | null> {
+    try {
+        const [row] = await db
+            .select({
+                id: leadThreads.id,
+                organisationId: leadThreads.organisationId,
+                aiAssistantId: leadThreads.aiAssistantId,
+                assistantRecordId: leadThreads.assistantRecordId,
+                discoveredLeadId: leadThreads.discoveredLeadId,
+                state: leadThreads.state,
+            })
+            .from(leadThreads)
+            .where(eq(leadThreads.replyToken, token))
+            .limit(1);
+        return row ?? null;
+    } catch (err) {
+        logQuietly('findThreadByReplyToken', err);
+        return null;
+    }
+}
+
+/**
+ * Log with the Postgres detail spelled out. A bare dump hides the constraint name, which is how
+ * an assistant_records CHECK violation stayed invisible for weeks; and postgres-js wraps the real
+ * failure so "Failed query" alone tells you nothing — read `cause`.
+ */
+function logQuietly(fn: string, err: unknown): void {
+    const pg = err as { code?: string; constraint_name?: string; constraint?: string; cause?: unknown };
+    console.error(`[lead-threads] ${fn} failed (non-fatal)`, {
+        pgCode: pg?.code,
+        pgConstraint: pg?.constraint_name ?? pg?.constraint,
+        cause: pg?.cause,
+    }, err);
+}

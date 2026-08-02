@@ -28,7 +28,7 @@ export interface OutlookSendResult {
 export async function sendOutlookMessage(
     db: Db,
     organisationId: number,
-    msg: { to: string; subject: string; body: string },
+    msg: { to: string; subject: string; body: string; replyTo?: string },
 ): Promise<OutlookSendResult> {
     // Strip CR/LF for parity with the Gmail path — Graph is JSON so header smuggling isn't
     // possible the same way, but a newline in a recipient is malformed input regardless.
@@ -47,6 +47,9 @@ export async function sendOutlookMessage(
                 subject,
                 body: { contentType: 'Text', content: body },
                 toRecipients: [{ emailAddress: { address: to } }],
+                // Per-thread inbound alias, so a reply routes back to THIS conversation rather
+                // than to the sender's own mailbox where nothing would observe it.
+                ...(msg.replyTo ? { replyTo: [{ emailAddress: { address: msg.replyTo.replace(/[\r\n]+/g, ' ').trim() } }] } : {}),
             },
             // Keep a copy in the user's Sent Items — outreach should be visible in their own
             // mailbox, both so they can follow up in context and so nothing we send is hidden.

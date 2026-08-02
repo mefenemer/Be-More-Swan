@@ -37,6 +37,8 @@ import { sendGmailMessage } from '../../src/utils/gmail';
 import { sendOutlookMessage } from '../../src/utils/outlook';
 import { IntegrationError } from '../../src/utils/workspace-integrations';
 import { recordEvent } from '../../src/utils/revenue-ledger';
+import { openLeadThread, recordOutboundMessage } from '../../src/utils/lead-threads';
+import { replyAddress } from '../../src/utils/reply-address';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /** Chase reminder for an approved+contacted lead: 3 days out at 09:00, nudged off weekends. */
@@ -318,12 +320,38 @@ Write an outreachDraft for hot/warm leads; use null for cold leads.`;
             }
             if (!subject) subject = `Quick note for ${rec.title}`;
 
+            // Mint the thread + its inbound alias BEFORE sending, so the Reply-To we advertise is
+            // one we can actually resolve. If the thread write fails we send without a Reply-To
+            // rather than not sending — losing reply tracking is recoverable, a lead who never
+            // hears from us is not.
+            const thread = await openLeadThread(db, {
+                organisationId: orgId,
+                aiAssistantId: assistant.id,
+                assistantRecordId: recordId,
+                contactEmail: recipient,
+            });
+
             try {
-                if (provider === 'microsoft') await sendOutlookMessage(db, orgId, { to: recipient, subject, body: bodyText });
-                else await sendGmailMessage(db, orgId, { to: recipient, subject, body: bodyText });
+                const outgoing = { to: recipient, subject, body: bodyText, ...(thread ? { replyTo: replyAddress(thread.replyToken) } : {}) };
+                if (provider === 'microsoft') await sendOutlookMessage(db, orgId, outgoing);
+                else await sendGmailMessage(db, orgId, outgoing);
             } catch (e) {
                 if (e instanceof IntegrationError) return json(200, { sent: false, reason: 'not_connected' });
                 throw e;
+            }
+
+            // Record what actually went out. Best-effort by contract — the email has already been
+            // delivered by this point, so a bookkeeping failure must not surface as a send failure.
+            if (thread) {
+                await recordOutboundMessage(db, thread.id, {
+                    organisationId: orgId,
+                    fromEmail: null,
+                    subject,
+                    body: bodyText,
+                    // The stored draft is the agent's; a body generated just now is equally the
+                    // agent's. Either way nothing here was human-edited, so generatedBody === body.
+                    generatedBody: bodyText,
+                });
             }
 
             const chase = chaseDate();

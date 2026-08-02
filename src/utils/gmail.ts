@@ -28,18 +28,23 @@ export interface GmailSendResult { id: string; threadId?: string }
 export async function sendGmailMessage(
     db: Db,
     organisationId: number,
-    msg: { to: string; subject: string; body: string },
+    msg: { to: string; subject: string; body: string; replyTo?: string },
 ): Promise<GmailSendResult> {
     // Strip CR/LF so field values can never smuggle extra MIME headers.
     const to = msg.to.replace(/[\r\n]+/g, ' ').trim();
     const subject = (msg.subject || '(no subject)').replace(/[\r\n]+/g, ' ').trim();
     const body = msg.body ?? '';
+    // Per-thread inbound alias (src/utils/reply-address.ts). Same CR/LF strip as every other
+    // header value — this one is generated, not user input, but the invariant belongs at the
+    // boundary rather than resting on where today's callers happen to get it from.
+    const replyTo = msg.replyTo ? msg.replyTo.replace(/[\r\n]+/g, ' ').trim() : '';
     if (!to) throw new Error('A recipient address is required to send.');
 
     const { accessToken } = await getFreshAccessToken(db, organisationId, 'gmail');
 
     const mime = [
         `To: ${to}`,
+        ...(replyTo ? [`Reply-To: ${replyTo}`] : []),
         `Subject: ${encodeMimeHeader(subject)}`,
         'MIME-Version: 1.0',
         'Content-Type: text/plain; charset="UTF-8"',

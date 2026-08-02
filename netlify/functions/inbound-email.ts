@@ -17,6 +17,9 @@ import { and, desc, eq, inArray } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { leads, leadReplies } from '../../db/schema';
 import { lookupContact, promoteContactType } from '../../src/utils/contact-type';
+import { parseReplyToken, recipientFromParsePayload } from '../../src/utils/reply-address';
+import { findThreadByReplyToken, recordInboundMessage } from '../../src/utils/lead-threads';
+import { recordEvent } from '../../src/utils/revenue-ledger';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const INBOUND_TOKEN = process.env.INBOUND_PARSE_TOKEN;
@@ -108,6 +111,54 @@ export default withLambda(async (event: HandlerEvent) => {
         messageBody = fields.html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim(); // crude HTML→text fallback
     }
     if (!messageBody) messageBody = '(no message body)';
+
+    // ── Lead-reply branch (Phase 2a) ─────────────────────────────────────────
+    // A message addressed to reply+<token>@<parse domain> is a PROSPECT replying to tenant
+    // outreach, not an enquiry to Be More Swan. Route it to that conversation and return.
+    //
+    // This branch sits AFTER sender/body resolution so it reuses the same parsing, and it is
+    // deliberately narrow: anything without a valid token falls through to the support pipeline
+    // below completely untouched. Ordinary support mail must keep working exactly as before —
+    // that path is live on prod and predates this feature.
+    //
+    // Never throws: a failure here logs and falls through rather than 500ing at SendGrid, which
+    // would trigger retries and eventually bounce a real prospect's reply.
+    try {
+        const replyToken = parseReplyToken(recipientFromParsePayload(fields));
+        if (replyToken) {
+            const db = getDb();
+            const thread = await findThreadByReplyToken(db, replyToken);
+            if (!thread) {
+                // A token we minted but can no longer resolve (thread deleted, or an environment
+                // mismatch — staging and prod share the Parse host). Ack so SendGrid stops retrying.
+                console.log('[inbound-email] lead reply for unknown thread token; skipped');
+                return { statusCode: 200, body: 'Unknown thread; skipped.' };
+            }
+
+            const messageId = await recordInboundMessage(db, thread.id, {
+                organisationId: thread.organisationId,
+                fromEmail: senderEmail,
+                subject,
+                body: messageBody.slice(0, MAX_BODY_CHARS),
+            });
+
+            // The ledger event is what makes reply RATE measurable — the first funnel metric this
+            // system has ever been able to compute for outreach.
+            await recordEvent(db, 'reply_received', {
+                organisationId: thread.organisationId,
+                aiAssistantId: thread.aiAssistantId,
+                discoveredLeadId: thread.discoveredLeadId,
+                assistantRecordId: thread.assistantRecordId,
+                actor: 'system',
+                payload: { threadId: thread.id, messageId, flaggedSpam },
+            });
+
+            console.log('[inbound-email] recorded lead reply', JSON.stringify({ threadId: thread.id, messageId }));
+            return { statusCode: 200, body: 'Lead reply recorded.' };
+        }
+    } catch (err) {
+        console.error('[inbound-email] lead-reply branch failed (falling through to support):', err);
+    }
     if (messageBody.length > MAX_BODY_CHARS) messageBody = messageBody.slice(0, MAX_BODY_CHARS) + '…';
 
     try {
