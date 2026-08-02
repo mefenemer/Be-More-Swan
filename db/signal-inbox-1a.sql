@@ -28,8 +28,19 @@
 -- Apply manually via scripts/db-migrate.mjs — no drizzle-kit push (see docs/db-migrations.md).
 -- Idempotent: both columns are ADD COLUMN IF NOT EXISTS. Safe to run repeatedly.
 --
--- Safe to apply BEFORE the code deploys: both columns are nullable with no default, every existing
--- reader ignores them, and the new readers treat NULL as "unnamed" / "not yet published".
+-- ⚠️ APPLY THIS BEFORE DEPLOYING THE ACCOMPANYING CODE — it is NOT optional, and the failure is a
+-- REGRESSION to a feature that already worked. Applying early is safe (both columns are nullable
+-- with no default and every existing reader ignores them). Deploying early is NOT:
+--   • discovery-campaigns.ts has no try/catch, and its `list`/`create`/`edit` actions all reference
+--     `name` — without the column the "Find New Leads" modal 500s. This is the one that hurts.
+--   • signal-inbox.ts degrades gracefully (returns MIGRATION_PENDING).
+--   • process-discovery-jobs.ts degrades gracefully (publishSignals is wrapped).
+-- This bit prod on 2026-08-02: both migrations were run twice against STAGING, because
+-- scripts/db-migrate.mjs defaults to the local .env database and that database IS staging
+-- (ep-blue-truth). IF NOT EXISTS made the second run report success. Two green runs, one database.
+-- For prod, always pass the connection explicitly:
+--   export PROD_DATABASE_URL=$(netlify env:get NETLIFY_DATABASE_URL --context production)
+--   npm run db:migrate:apply -- --only signal-inbox-1a --url-var PROD_DATABASE_URL --yes
 
 ALTER TABLE discovery_campaigns
   ADD COLUMN IF NOT EXISTS name text;
