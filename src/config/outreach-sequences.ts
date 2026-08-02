@@ -33,6 +33,9 @@ export const SEQUENCE_HALT_REASONS = [
     'send_failed',    // repeated send failures; see MAX_SEND_ATTEMPTS
     'max_steps',      // the cadence ran to its end with no reply
     'record_closed',  // the underlying lead record was rejected or deleted
+    'do_not_contact', // qualification says this lead must never be emailed — distinct from a human
+                      // rejecting it (record_closed): it means targeting let through someone we
+                      // should not have contacted, which is a compliance signal, not a preference
     'manual',         // a human stopped it
 ] as const;
 export type SequenceHaltReason = typeof SEQUENCE_HALT_REASONS[number];

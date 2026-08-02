@@ -1443,6 +1443,15 @@ window._detailRqRecordAct = async function (btn, action) {
                     toast = 'Lead approved. Connect your Google account (Integrations) to auto-send outreach.';
                 } else if (sres.ok && sdata.reason === 'no_recipient') {
                     toast = 'Lead approved — no email address on this lead, so nothing was sent.';
+                } else if (sres.ok && sdata.reason === 'do_not_contact') {
+                    // Qualification decided this lead must never be emailed. No confirm-and-send
+                    // prompt here on purpose — offering one would turn a hard gate into a nudge.
+                    toast = `Lead approved — nothing sent. This lead is flagged do-not-contact: ${sdata.detail || 'flagged during qualification.'}`;
+                } else if (sres.ok && sdata.reason === 'generator_declined') {
+                    // The drafter refused rather than writing something dishonest — usually because
+                    // this lead's own scoring says "do not contact". Surface its reason; the
+                    // alternative is a plain "Lead approved." that hides why no email went out.
+                    toast = `Lead approved — no email sent. ${sdata.detail || 'The drafter declined to write to this lead.'}`;
                 }
                 // reason 'no_provider' (user chose manual outreach) keeps the plain "Lead approved." toast.
             } catch { /* network issue on send — the lead is still approved; keep the plain toast */ }

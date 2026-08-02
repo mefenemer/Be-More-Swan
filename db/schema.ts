@@ -3607,7 +3607,7 @@ export const sequenceEnrolments = pgTable("sequence_enrolments", {
   index("sequence_enrolments_due_idx").on(t.state, t.nextSendAt),
   index("sequence_enrolments_org_idx").on(t.organisationId, t.createdAt),
   check("sequence_enrolments_state_check", sql`${t.state} IN ('active','completed','halted','cancelled')`),
-  check("sequence_enrolments_halt_reason_check", sql`${t.haltReason} IS NULL OR ${t.haltReason} IN ('replied','suppressed','no_recipient','not_connected','send_failed','max_steps','record_closed','manual')`),
+  check("sequence_enrolments_halt_reason_check", sql`${t.haltReason} IS NULL OR ${t.haltReason} IN ('replied','suppressed','no_recipient','not_connected','send_failed','max_steps','record_closed','do_not_contact','manual')`),
 ]);
 
 // ────────────────────────────────────────────────────────────────────────────

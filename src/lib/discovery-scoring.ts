@@ -5,6 +5,7 @@
 // renderLeadScoringCard). Batches candidates into one Anthropic call to keep run cost low.
 
 import Anthropic from '@anthropic-ai/sdk';
+import { OUTREACH_SUBJECT_RULES } from '../constants/outreach-subject';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 export const SCORING_MODEL = 'claude-haiku-4-5-20251001';
@@ -28,6 +29,9 @@ export interface LeadScoringCard {
     reasons: string[];
     suggestedNextStep: string;
     outreachDraft: { to: string | null; subject: string; body: string } | null;
+    /** Hard block on emailing this lead at all — enforced by evaluateDoNotContact(). */
+    doNotContact: boolean;
+    doNotContactReason: string | null;
 }
 
 export interface ScoreResult {
@@ -60,6 +64,10 @@ export function normaliseLeadCard(raw: unknown, fallbackName: string): LeadScori
         const d = ui.outreachDraft as Record<string, unknown>;
         if (str(d.body)) outreachDraft = { to: str(d.to, 200), subject: str(d.subject, 300) ?? '', body: String(d.body).slice(0, 4000) };
     }
+    // A do-not-contact verdict must survive normalisation or the gate downstream never fires — it
+    // reads this card, not the raw model output. Only `true` counts: an absent field means the
+    // scoring pass predates the flag, and evaluateDoNotContact() falls back to the prose instead.
+    const doNotContact = ui.doNotContact === true;
     return {
         type: 'lead_scoring_card',
         leadName: str(ui.leadName, 300) ?? fallbackName,
@@ -67,7 +75,9 @@ export function normaliseLeadCard(raw: unknown, fallbackName: string): LeadScori
         rating,
         reasons,
         suggestedNextStep: str(ui.suggestedNextStep, 500) ?? '',
-        outreachDraft,
+        outreachDraft: doNotContact ? null : outreachDraft,
+        doNotContact,
+        doNotContactReason: doNotContact ? str(ui.doNotContactReason, 300) : null,
     };
 }
 
@@ -116,10 +126,19 @@ Return STRICT JSON only (no markdown): an array with ONE object per candidate, i
     "rating": "hot" | "warm" | "cold",
     "reasons": ["<reason tied to a profile criterion>", ...],
     "suggestedNextStep": "<one concrete next action>",
-    "outreachDraft": { "to": null, "subject": "<subject>", "body": "<personalised outreach in the sales tone>" } | null
+    "outreachDraft": { "to": null, "subject": "<subject>", "body": "<personalised outreach in the sales tone>" } | null,
+    "doNotContact": <true|false>,
+    "doNotContactReason": "<short reason, or null>"
   }
 ]
-Write an outreachDraft for hot/warm leads; use null for cold leads.`;
+Write an outreachDraft for hot/warm leads; use null for cold leads.
+
+Set "doNotContact": true when this candidate must not be emailed AT ALL — an internal or test account,
+our own staff or domain, a competitor, an existing customer, or anyone who has asked not to be
+contacted. This is stronger than a low score: a cold lead is a poor prospect we may still contact,
+whereas doNotContact means sending would be wrong. When it is true, set outreachDraft to null.
+
+${OUTREACH_SUBJECT_RULES}`;
 
     const compact = candidates.map((c, i) => ({
         index: i,

@@ -41,6 +41,8 @@ import { recordOutboundMessage } from '../../src/utils/lead-threads';
 import { replyAddress } from '../../src/utils/reply-address';
 import { checkSuppression } from '../../src/utils/suppression';
 import { logAiUsage } from '../../src/utils/ai-usage';
+import { OUTREACH_SUBJECT_RULES } from '../../src/constants/outreach-subject';
+import { evaluateDoNotContact } from '../../src/config/do-not-contact';
 import {
     advanceEnrolment, haltEnrolment, loadSteps, recordSendFailure, sequenceSendsToday,
     threadHistory, threadState, type EnrolmentRef, type SequenceStepRow,
@@ -191,9 +193,17 @@ Hard rules:
 - The prospect has not answered. Do not thank them for their reply, do not reference a conversation that did not happen, and do not invent facts about their business that are not in the transcript below.
 - No placeholders, no square brackets, no "Dear [Name]".
 - Plain text only. No markdown, no links unless one already appears in the transcript.
-- Keep the subject line as a reply to the original thread where that reads naturally.
+- Keep the subject line as a reply to the original thread where that reads naturally. This thread genuinely exists — we sent the earlier message — so a "Re:" prefix is honest here.
+- BUT do not inherit a bad subject. If the original subject breaks any rule below (it invents an account or relationship, manufactures urgency, or reads as phishing), do NOT prefix it with "Re:" and carry it forward. Write a fresh, honest subject for this follow-up instead — one bad opener must not contaminate the rest of the sequence.
 
-Return STRICT JSON only (no markdown, no prose outside the JSON):
+${OUTREACH_SUBJECT_RULES}
+
+If this email should NOT be written at all — the transcript or lead details say this contact is not a
+genuine prospect, must not be contacted, or the only honest email would break the rules above — do NOT
+write one anyway and do NOT put your reasoning in the subject or body. Return exactly:
+{ "decline": "<one short line saying why>" }
+
+Otherwise return STRICT JSON only (no markdown, no prose outside the JSON):
 { "subject": "<subject line>", "body": "<the email body>" }`;
 
     const resp = await anthropic.messages.create({
@@ -219,8 +229,16 @@ Return STRICT JSON only (no markdown, no prose outside the JSON):
 
     const raw = resp.content[0]?.type === 'text' ? resp.content[0].text : '';
     const text = raw.trim().replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
-    let parsed: { subject?: unknown; body?: unknown } | null = null;
+    let parsed: { subject?: unknown; body?: unknown; decline?: unknown } | null = null;
     try { parsed = JSON.parse(text); } catch { return null; }
+
+    // An explicit refusal. Without this channel the model has nowhere to put "this should not be
+    // sent" except the subject and body — which then get emailed verbatim. Returning null routes it
+    // into handleSendFailure, the same path as an unusable draft, so the step does not silently send.
+    if (typeof parsed?.decline === 'string' && parsed.decline.trim()) {
+        console.log(`[sequence-sends] model declined to draft step ${step.stepNumber}: ${parsed.decline.trim().slice(0, 200)}`);
+        return null;
+    }
 
     const body = typeof parsed?.body === 'string' ? parsed.body.trim().slice(0, 4000) : '';
     if (!body) return null;
@@ -249,12 +267,22 @@ async function processEnrolment(db: Db, row: ClaimedRow): Promise<'sent' | 'halt
     // just because a cadence was already running when someone rejected it.
     if (row.assistant_record_id) {
         const [rec] = await db
-            .select({ approvalStatus: assistantRecords.approvalStatus })
+            .select({ approvalStatus: assistantRecords.approvalStatus, data: assistantRecords.data })
             .from(assistantRecords)
             .where(eq(assistantRecords.id, row.assistant_record_id))
             .limit(1);
         if (!rec || rec.approvalStatus === 'rejected') {
             await haltEnrolment(db, ref, 'record_closed', rec ? 'lead rejected' : 'lead record deleted');
+            return 'halted';
+        }
+
+        // The do-not-contact gate has to run HERE as well as at send_outreach. That gate only
+        // guards the first email; a cadence already in flight never passes through it again, so an
+        // enrolment created before the gate existed would keep sending on schedule. Re-read per
+        // step rather than trusting enrolment time — a lead can be re-scored mid-cadence.
+        const dnc = evaluateDoNotContact(rec.data);
+        if (dnc.blocked) {
+            await haltEnrolment(db, ref, 'do_not_contact', dnc.reason ?? `flagged do-not-contact (${dnc.source})`);
             return 'halted';
         }
     }

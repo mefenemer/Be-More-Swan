@@ -41,6 +41,8 @@ import { openLeadThread, recordOutboundMessage } from '../../src/utils/lead-thre
 import { replyAddress } from '../../src/utils/reply-address';
 import { checkSuppression } from '../../src/utils/suppression';
 import { enrolInSequence } from '../../src/utils/outreach-sequences';
+import { OUTREACH_SUBJECT_RULES } from '../../src/constants/outreach-subject';
+import { evaluateDoNotContact } from '../../src/config/do-not-contact';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 /** Chase reminder for an approved+contacted lead: 3 days out at 09:00, nudged off weekends. */
@@ -99,6 +101,10 @@ function normaliseLeadCard(raw: unknown, fallbackName: string): Record<string, u
         const d = ui.outreachDraft as Record<string, unknown>;
         if (str(d.body)) outreachDraft = { to: str(d.to, 200), subject: str(d.subject, 300) ?? '', body: String(d.body).slice(0, 4000) };
     }
+    // A do-not-contact verdict must survive normalisation or the gate downstream never fires — it
+    // reads this blob, not the raw model output. Only `true` counts: an absent field means the
+    // scoring pass predates the flag, and evaluateDoNotContact() falls back to the prose instead.
+    const doNotContact = ui.doNotContact === true;
     return {
         type: 'lead_scoring_card',
         leadName: str(ui.leadName, 300) ?? fallbackName,
@@ -106,7 +112,9 @@ function normaliseLeadCard(raw: unknown, fallbackName: string): Record<string, u
         rating,
         reasons,
         suggestedNextStep: str(ui.suggestedNextStep, 500) ?? '',
-        outreachDraft,
+        outreachDraft: doNotContact ? null : outreachDraft,
+        doNotContact,
+        doNotContactReason: doNotContact ? str(ui.doNotContactReason, 300) : null,
     };
 }
 
@@ -210,9 +218,18 @@ Return STRICT JSON only (no markdown, no prose outside the JSON):
   "rating": "hot" | "warm" | "cold",
   "reasons": ["<short reason tied to a profile criterion>", ...],
   "suggestedNextStep": "<one concrete next action>",
-  "outreachDraft": { "to": "<email or null>", "subject": "<subject>", "body": "<personalised outreach email in the sales tone>" } | null
+  "outreachDraft": { "to": "<email or null>", "subject": "<subject>", "body": "<personalised outreach email in the sales tone>" } | null,
+  "doNotContact": <true|false>,
+  "doNotContactReason": "<short reason, or null>"
 }
-Write an outreachDraft for hot/warm leads; use null for cold leads.`;
+Write an outreachDraft for hot/warm leads; use null for cold leads.
+
+Set "doNotContact": true when this lead must not be emailed AT ALL — an internal or test account, our
+own staff or domain, a competitor, an existing customer, or anyone who has asked not to be contacted.
+This is stronger than a low score: a cold lead is a poor prospect we may still contact, whereas
+doNotContact means sending would be wrong. When it is true, set outreachDraft to null.
+
+${OUTREACH_SUBJECT_RULES}`;
 
             const resp = await anthropic.messages.create({
                 model: MODEL,
@@ -292,6 +309,19 @@ Write an outreachDraft for hot/warm leads; use null for cold leads.`;
             const recipient = str(draft?.to as string, 200) || str(data.contactEmail as string, 200) || str(leadObj.email as string, 200);
             if (!recipient) return json(200, { sent: false, reason: 'no_recipient' });
 
+            // Do-not-contact gate. Checked FIRST — before suppression, the personal-inbox gate and
+            // any generation — because it is the cheapest check and the only one that says this
+            // lead should never have reached a send path at all. The qualification pass can decide
+            // a lead is an internal/test account, a competitor or an existing customer; until now
+            // that verdict lived in prose nothing read, and a lead whose own record said "Do not
+            // contact" was emailed anyway. Hard block: there is no confirm-and-send override here,
+            // unlike the personal-inbox gate, because the answer is not "are you sure who" but
+            // "this must not be sent". See src/config/do-not-contact.ts.
+            const dnc = evaluateDoNotContact(data);
+            if (dnc.blocked) {
+                return json(200, { sent: false, reason: 'do_not_contact', detail: dnc.reason, source: dnc.source, to: recipient });
+            }
+
             // Suppression gate. suppression_list has been populated from tenants' CRMs since the
             // Integration Scenario Library shipped, but until Phase 2b NOTHING READ IT — so this
             // path could cold-email an org's own existing customers despite the tenant having
@@ -324,13 +354,33 @@ Write an outreachDraft for hot/warm leads; use null for cold leads.`;
             if (!bodyText) {
                 const tone = str(onboarding.salesTone, 40) ?? 'professional';
                 const system =
-`You write a short, personalised cold outreach email for "${assistant.name}" (a business using Be More Swan) to the lead below, in a ${tone} tone. Under 150 words, no placeholders or brackets, no subject-line clichés. Return STRICT JSON only: { "subject": "<subject>", "body": "<email body>" }`;
+`You write a short, personalised cold outreach email for "${assistant.name}" (a business using Be More Swan) to the lead below, in a ${tone} tone. Under 150 words, no placeholders or brackets.
+
+${OUTREACH_SUBJECT_RULES}
+
+If this email should NOT be written at all — the lead details below say this is not a genuine prospect,
+that it must not be contacted, or the only honest email would break the rules above — do NOT write one
+anyway and do NOT put your reasoning in the subject or body. Return exactly:
+{ "decline": "<one short line saying why>" }
+
+Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email body>" }`;
                 const resp = await anthropic.messages.create({
                     model: MODEL, max_tokens: 512, system,
                     messages: [{ role: 'user', content: `Lead: ${JSON.stringify({ title: rec.title, ...data })}` }],
                 });
                 logUsage(resp, 'send_outreach_gen');
-                const gen = parseJson<{ subject?: string; body?: string }>(resp.content[0]?.type === 'text' ? resp.content[0].text : '') || {};
+                const gen = parseJson<{ subject?: string; body?: string; decline?: string }>(resp.content[0]?.type === 'text' ? resp.content[0].text : '') || {};
+
+                // An explicit refusal — e.g. the scoring pass wrote "do not contact" or "internal test
+                // account" into this record and the only honest email would contradict it. Without this
+                // channel the model has nowhere to put that except the subject and body, which then get
+                // emailed verbatim ("Not sending this email"). 200 + sent:false, not 502: nothing is
+                // broken, we are declining on purpose, and the caller should show the reason.
+                const declined = str(gen.decline, 300);
+                if (declined && !str(gen.body, 4000)) {
+                    return json(200, { sent: false, reason: 'generator_declined', detail: declined, to: recipient });
+                }
+
                 subject = str(gen.subject, 300) || subject;
                 bodyText = str(gen.body, 4000);
                 if (!bodyText) return json(502, { error: 'Could not draft an outreach email for this lead.' });

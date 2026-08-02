@@ -95,7 +95,7 @@ BEGIN
     ALTER TABLE sequence_enrolments ADD CONSTRAINT sequence_enrolments_halt_reason_check
       CHECK (halt_reason IS NULL OR halt_reason IN (
         'replied','suppressed','no_recipient','not_connected','send_failed',
-        'max_steps','record_closed','manual'));
+        'max_steps','record_closed','do_not_contact','manual'));
   END IF;
 END $$;
 
