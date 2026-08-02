@@ -286,6 +286,14 @@
       signalInbox: {
         label: 'Signal Inbox',
       },
+      // "Ask your memory" panel inside the Data Hub tab (assistant-memory-query.js →
+      // memory-query.ts). Phase 3 §5.5: natural-language questions answered from account_memory,
+      // account_edges and revenue_events, every claim cited back to the record it came from.
+      // Lead roles only — they are the roles that HAVE conversations to remember. The panel
+      // self-hides when the organisation has no memory yet, so enabling it early is harmless.
+      memoryPanel: {
+        label: 'Ask your memory',
+      },
     },
 
     accounts_receivable_clerk: {

@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-memory-query",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4242",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/b0c27bcb-3639-43be-a74d-2dc2476befd3/scratchpad/memharness"
+      ],
+      "port": 4242,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-roi-detail",
       "runtimeExecutable": "node",
       "runtimeArgs": [

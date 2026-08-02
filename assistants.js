@@ -671,6 +671,8 @@ window._activateMainTab = function(name) {
     // Signal Inbox renders lazily — init() already fetched (its counts feed the tab badge), so
     // this only paints. Cheap and idempotent.
     if (name === 'signals') window.AssistantSignalInbox?.activate();
+    // The memory panel loads lazily on first Data Hub activation, then repaints from state.
+    if (name === 'datahub') window.AssistantMemoryQuery?.activate();
     // Load the assistant-scoped review queue when the tab is first opened. detailRqOpenStatus
     // branches on window._detailReviewQueue.kind (posts vs records) internally.
     if (name === 'review-queue') {
@@ -2844,6 +2846,21 @@ function _applyDashboardRegistry(data) {
     if (signalInbox) {
         setText('signals-tab-label', signalInbox.label || 'Signal Inbox');
         window.AssistantSignalInbox?.init({ assistantId: data.id, cfg: signalInbox });
+    }
+
+    // "Ask your memory" panel inside the Data Hub tab (Phase 3 §5.5). init() only records the
+    // assistant id — the panel fetches nothing until the Data Hub tab is actually opened, because
+    // its context query touches account_memory on every workspace load otherwise.
+    if (cfg.memoryPanel) {
+        window.AssistantMemoryQuery?.init({ assistantId: data.id, cfg: cfg.memoryPanel });
+        // Data Hub is the MARKUP default, and _activateDefaultMainTab deliberately early-returns
+        // when the wanted tab is already active (so on-open hooks don't refetch). That means
+        // _activateMainTab('datahub') never fires on an ordinary load — activate here instead, or
+        // the panel would only ever appear after the user visited another tab and came back.
+        const hubPanel = document.getElementById('maintab-datahub');
+        if (hubPanel && !hubPanel.classList.contains('hidden')) {
+            window.AssistantMemoryQuery?.activate();
+        }
     }
 
     // Inspo tab — only the content roles (inspoTab: social_media_manager, blog_writer):
