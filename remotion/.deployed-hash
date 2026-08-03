@@ -1,2 +1,5 @@
-f597be0b68a9b2af
 # Written by scripts/stamp-remotion-bundle.mjs on a site deploy. Do not edit.
+# One line per SITE: <site> <bundle-hash> <deployed-at>. A site absent here has never been
+# deployed from this working tree — it does NOT inherit another site's hash.
+staging f597be0b68a9b2af
+prod f597be0b68a9b2af 2026-08-03T00:00:00.000Z
