@@ -154,8 +154,20 @@ export default withLambda(async (event) => {
             // Flag connections that renew their access token silently, so the UI can suppress
             // the "Expiring in Nd" reconnect nag for them. Covers the workspace_integrations
             // providers that hold an offline refresh token (serviceAutoRefreshes) plus the
-            // system_connections social tokens rotated by the refresh-social-tokens cron.
-            const CRON_REFRESHED = new Set(['x', 'linkedin']);
+            // system_connections tokens rotated by a cron.
+            //
+            // Every serviceName a refresh cron actually SELECTS belongs here, or the card nags the
+            // user to reconnect something the platform is already renewing on its own:
+            //   x, linkedin           → refresh-social-tokens.ts (every 30 min)
+            //   facebook, instagram   → refresh-meta-tokens.ts   (nightly, 14 days before expiry)
+            // The Meta pair was missing, so a healthy Facebook/Instagram connection started showing
+            // "Expiring in 7d…1d" for the last week of every 60-day window and then "Disconnected"
+            // — while the nightly cron was quietly extending it the whole time.
+            //
+            // Safe against masking a genuinely dead connection: _connHealth (integrations.js) tests
+            // isConnectionDead(status) BEFORE it looks at autoRefresh, and both crons write a dead
+            // status ('token_refresh_failed') when a renewal actually fails.
+            const CRON_REFRESHED = new Set(['x', 'linkedin', 'facebook', 'instagram']);
             for (const m of merged) {
                 (m as typeof m & { autoRefresh: boolean }).autoRefresh =
                     serviceAutoRefreshes(m.serviceName) || CRON_REFRESHED.has(m.serviceName);
