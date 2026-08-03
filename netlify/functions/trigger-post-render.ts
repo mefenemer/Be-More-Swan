@@ -21,12 +21,13 @@
 // security-relevant rides on them; the worst a bad value buys is a wrongly-sized render of the
 // caller's own clip.
 
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { scheduledPosts } from '../../db/schema';
+import { postRenderJobs, scheduledPosts } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { resolveBaseUrl } from '../../src/utils/base-url';
-import { frameMeta, queuePostRender, renderableOverlays, resolveOverlayVideoBase } from '../../src/lib/post-render';
+import { postFormatSpec } from '../../src/config/post-formats';
+import { frameMeta, frameMetaFromJson, queuePostRender, renderableOverlays, resolveOverlayVideoBase } from '../../src/lib/post-render';
 import { needsVideoRender, renderableAudio } from '../../src/lib/audio-overlays';
 import { remotionConfigured } from '../../src/lib/remotion-lambda';
 import { r2IsConfigured } from '../../src/lib/media-persist';
@@ -57,7 +58,12 @@ export default withLambda(async (event) => {
 
     // Ownership + the stored overlay design.
     const [post] = await db
-        .select({ id: scheduledPosts.id, imageOverlays: scheduledPosts.imageOverlays, audioOverlays: scheduledPosts.audioOverlays })
+        .select({
+            id: scheduledPosts.id,
+            imageOverlays: scheduledPosts.imageOverlays,
+            audioOverlays: scheduledPosts.audioOverlays,
+            formatKey: scheduledPosts.formatKey,
+        })
         .from(scheduledPosts)
         .where(and(eq(scheduledPosts.id, postId), eq(scheduledPosts.organisationId, orgId)))
         .limit(1);
@@ -73,11 +79,24 @@ export default withLambda(async (event) => {
         return json(200, { skipped: 'no_media' });
     }
 
-    // Does this actually need a render? Text alone only forces one on a VIDEO — a photo's text bakes
-    // in the browser, which is faster, free, and font-perfect. Audio forces one either way, and on a
-    // photo it forces a render that turns the still into an mp4, because no platform accepts an image
-    // with sound.
-    if (!needsVideoRender({ hasVideo: base.kind === 'video', textOverlays: overlays.length, audioOverlays: audioCount })) {
+    // ── A still on a video-only FORMAT must become an mp4, even with nothing to burn in ──────────
+    // needsVideoRender asks "is there something to burn IN?" — text on a video, or audio. That is
+    // the right question for every post a reviewer composes by hand, and the wrong one for a post
+    // whose FORMAT is the whole reason a render exists. An autonomous YouTube Short is a brand card:
+    // a still whose words are already drawn into the image, on a format that carries video and
+    // nothing else. The autonomous drafter has always known this and passes `forceVideo`.
+    //
+    // This endpoint is ALSO the Review Queue's "Try the render again" button, and it did not know.
+    // So a Short whose first render failed took the branch below on retry: it answered
+    // `skipped: 'not_video'`, CLEARED render_status, and returned 200. The client reads a `skipped`
+    // reply as "nothing to render after all, the post is publishable now" and drops the banner — so
+    // it looked like the retry had worked. The post kept its PNG, lost its publish gate, and the
+    // format router then refused it, correctly, with "A Short can't carry this — Short takes video,
+    // and this is image". Two paths building the same render input independently is what allowed it.
+    const declared = postFormatSpec(post.formatKey);
+    const forceVideo = base.kind === 'image' && declared?.media === 'video';
+
+    if (!forceVideo && !needsVideoRender({ hasVideo: base.kind === 'video', textOverlays: overlays.length, audioOverlays: audioCount })) {
         await db.update(scheduledPosts).set({ renderStatus: null, updatedAt: new Date() }).where(eq(scheduledPosts.id, postId));
         // 'not_video' keeps the existing contract with gpQueueVideoRender: a photo whose text still
         // bakes in the browser must fall through to that path, not stop here.
@@ -101,11 +120,31 @@ export default withLambda(async (event) => {
         });
     }
 
+    // ── Frame metadata, and why a forced render prefers the PREVIOUS job's ──────────────────────
+    // width/height/durationS normally arrive from the client, read off the <video> element. A still
+    // has no <video> to read, so on a forced render the body is empty and frameMeta would fall back
+    // to its generic 15s default — quietly turning a 10s Short into a 15s one on retry, with no
+    // error anywhere. The earlier job's snapshot holds the numbers the drafter actually chose, and
+    // reusing them is precisely what "try the render again" ought to mean.
+    let meta = frameMeta(body, base);
+    if (forceVideo) {
+        const [prior] = await db
+            .select({ renderInput: postRenderJobs.renderInput })
+            .from(postRenderJobs)
+            .where(and(eq(postRenderJobs.postId, postId), eq(postRenderJobs.organisationId, orgId)))
+            .orderBy(desc(postRenderJobs.id))
+            .limit(1);
+        meta = frameMetaFromJson(prior?.renderInput) ?? meta;
+    }
+
     const queued = await queuePostRender(db, {
         orgId,
         postId,
         userId,
-        input: frameMeta(body, base),
+        // forceVideo travels ON THE JOB because the worker cannot re-derive it: it sees no overlays
+        // and no audio and would take its own "nothing to do" bail-out, clearing the gate and
+        // leaving the still exactly as this endpoint used to.
+        input: { ...meta, ...(forceVideo ? { forceVideo: true } : {}) },
         baseUrl: resolveBaseUrl(event.headers as Record<string, string | undefined>),
     });
     if (!queued.ok) return json(502, { error: 'Could not start the video render — please try again in a moment.' });

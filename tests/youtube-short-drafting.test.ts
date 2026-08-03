@@ -245,4 +245,45 @@ test('the queue poke is awaited, and an abort still counts as sent', () => {
     assert.ok(/AbortError/.test(fn), 'an abort means the drain is running, not that it failed');
 });
 
+// ── 4. Retrying a Short's render ─────────────────────────────────────────────
+
+test('a retry keeps forcing the video — it must not "skip" a Short back to a still', () => {
+    // The bug this guards, seen in production on post 345: a Short whose first render failed offers
+    // "Try the render again", which posts to trigger-post-render — an endpoint written for the OTHER
+    // caller, a reviewer approving a video with text on it. It asked only "is there something to
+    // burn in?", found no overlays and no audio on a brand card, answered skipped:'not_video' and
+    // CLEARED render_status. The banner disappeared, so it read as success; the post kept its PNG,
+    // silently lost its publish gate, and the format router refused it with "A Short can't carry
+    // this — Short takes video, and this is image". The cause is two paths building the same render
+    // input independently, so the invariant is: whatever decides to render, forceVideo survives.
+    const s = src('netlify/functions/trigger-post-render.ts');
+    assert.ok(/forceVideo/.test(s), 'the retry path must be able to force a container-only render');
+    assert.ok(
+        /postFormatSpec\(/.test(s),
+        'the decision must come from the declared format spec, not a hardcoded yt_short check',
+    );
+    // The guard has to sit IN the skip condition. Computing forceVideo and then skipping anyway is
+    // exactly the shape of the original bug.
+    assert.ok(
+        /if \(!forceVideo && !needsVideoRender\(/.test(s),
+        'a forced render must bypass the needsVideoRender skip, not merely be computed beside it',
+    );
+    assert.ok(
+        s.indexOf('const forceVideo') < s.indexOf('!needsVideoRender('),
+        'forceVideo must be decided before the skip branch can clear the gate',
+    );
+});
+
+test('a forced retry re-uses the drafter\'s frame metadata, not the 15s default', () => {
+    // There is no <video> element behind a still, so the client sends no durationS and frameMeta
+    // falls back to a generic 15s — which would republish a 10s Short as a 15s one, with nothing
+    // anywhere reporting a change. The previous job's snapshot carries the real numbers.
+    const s = src('netlify/functions/trigger-post-render.ts');
+    assert.ok(/frameMetaFromJson\(/.test(s), 'a retry should recover the earlier snapshot');
+    assert.ok(
+        /postRenderJobs\.id\)/.test(s) && /desc\(/.test(s),
+        'it must take the LATEST prior job, not an arbitrary one',
+    );
+});
+
 console.log(`\n${passed} checks passed\n`);

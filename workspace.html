@@ -7046,7 +7046,19 @@ function _rqStartRenderPoll(postId) {
             // Landed. Refresh the cached post so the canvas picks up the RENDERED clip, not the
             // original — the worker swapped the attached asset.
             if (_rqPostCache[postId]) Object.assign(_rqPostCache[postId], fresh);
-            if (_rqReviewPostId === postId) _rqReviewRenderActive();
+            // ...and re-ask the format router, because that swap CHANGED THE MEDIA KIND. This is the
+            // one media change nobody clicks: attachRenderedVideo replaces a still with an mp4 while
+            // the reviewer just watches. Every other mutation calls this forced (see
+            // _pceReconcileFormatToMedia); _rqReviewRenderActive's own call is unforced and so
+            // early-returns on the cached answer — the one computed seconds earlier, when the post
+            // WAS still an image. The stale verdict then sits over a perfectly good video saying
+            // "A Short can't carry this — Short takes video, and this is image", which is unarguable
+            // and wrong, and no amount of re-approving clears it. Forced first: the unforced call
+            // inside _rqReviewRenderActive then no-ops instead of racing this one.
+            if (_rqReviewPostId === postId) {
+                _rqLoadRoutes(postId, { force: true });
+                _rqReviewRenderActive();
+            }
             _rqStopRenderPoll();
         } catch { /* transient — the next tick retries */ }
     }, 5000);
