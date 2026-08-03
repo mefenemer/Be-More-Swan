@@ -671,6 +671,9 @@ window._activateMainTab = function(name) {
     // Signal Inbox renders lazily — init() already fetched (its counts feed the tab badge), so
     // this only paints. Cheap and idempotent.
     if (name === 'signals') window.AssistantSignalInbox?.activate();
+    // Conversations fetches on first activation only — nothing on this tab feeds a badge, so a
+    // user who never opens it never pays for the query.
+    if (name === 'conversations') window.AssistantLeadThreads?.activate();
     // The memory panel loads lazily on first Data Hub activation, then repaints from state.
     if (name === 'datahub') window.AssistantMemoryQuery?.activate();
     // Load the assistant-scoped review queue when the tab is first opened. detailRqOpenStatus
@@ -728,6 +731,22 @@ function _activateDefaultMainTab() {
 // ── Assistant-detail scoped Review Queue ─────────────────────────────────────
 // Mirrors the global rqOpenStatus/rqRenderGroups in workspace.html but scopes all
 // fetches to window._currentAssistantId so only this assistant's content shows.
+
+/**
+ * Amber count on the Review tab button.
+ *
+ * The badge markup carries BOTH `hidden` and `inline-flex`. They have equal specificity and
+ * `.inline-flex` is emitted after `.hidden` in style.css, so toggling the class alone leaves an
+ * empty amber pill sitting next to "Review" on every assistant with an empty queue. Pin
+ * style.display too — the same fix assistant-signal-inbox.js already applies to its own badge.
+ */
+function _setDetailRqTabBadge(count) {
+    const el = document.getElementById('detail-rq-pending-badge');
+    if (!el) return;
+    el.textContent = count || '';
+    el.classList.toggle('hidden', !count);
+    el.style.display = count ? '' : 'none';
+}
 
 // Every column maps to a `status` value get-social-drafts understands. Two of these are FAMILIES
 // rather than single statuses (the server expands them, see its statusFilter switch):
@@ -879,8 +898,7 @@ async function _detailRqRenderGroups(statusKey) {
         const groupedCount = _detailRqTotal ?? postGroups.length;
         const colBadge = document.getElementById('detail-rq-col-count-review');
         if (colBadge) { colBadge.textContent = groupedCount || ''; colBadge.classList.toggle('hidden', !groupedCount); }
-        const tabBadge = document.getElementById('detail-rq-pending-badge');
-        if (tabBadge) { tabBadge.textContent = groupedCount || ''; tabBadge.classList.toggle('hidden', !groupedCount); }
+        _setDetailRqTabBadge(groupedCount);
         // Keep the Overview action-bar badge + status pill in sync as the queue changes (e.g. after approving).
         window._setReviewPendingBadge?.(groupedCount);
         window._updateOpSignals?.({ pendingReview: groupedCount });
@@ -1297,8 +1315,7 @@ async function _detailRqRenderRecords(statusKey) {
     if (statusKey === 'review') {
         const colBadge = document.getElementById('detail-rq-col-count-review');
         if (colBadge) { colBadge.textContent = records.length || ''; colBadge.classList.toggle('hidden', !records.length); }
-        const tabBadge = document.getElementById('detail-rq-pending-badge');
-        if (tabBadge) { tabBadge.textContent = records.length || ''; tabBadge.classList.toggle('hidden', !records.length); }
+        _setDetailRqTabBadge(records.length);
         window._setReviewPendingBadge?.(records.length);
         window._updateOpSignals?.({ pendingReview: records.length });
     }
@@ -1599,8 +1616,7 @@ async function _detailRqRenderBlog(statusKey) {
     if (statusKey === 'review') {
         const colBadge = document.getElementById('detail-rq-col-count-review');
         if (colBadge) { colBadge.textContent = posts.length || ''; colBadge.classList.toggle('hidden', !posts.length); }
-        const tabBadge = document.getElementById('detail-rq-pending-badge');
-        if (tabBadge) { tabBadge.textContent = posts.length || ''; tabBadge.classList.toggle('hidden', !posts.length); }
+        _setDetailRqTabBadge(posts.length);
         window._setReviewPendingBadge?.(posts.length);
         window._updateOpSignals?.({ pendingReview: posts.length });
     }
@@ -2896,6 +2912,16 @@ function _applyDashboardRegistry(data) {
         window.AssistantSignalInbox?.init({ assistantId: data.id, cfg: signalInbox });
     }
 
+    // Conversations tab — lead roles only (conversationsTab: lead_qualifier): the thread an
+    // approved lead turned into. init() only records the assistant id; the first fetch happens on
+    // _activateMainTab('conversations').
+    const conversations = cfg.conversationsTab;
+    toggle('maintab-btn-conversations', !!conversations);
+    if (conversations) {
+        setText('conversations-tab-label', conversations.label || 'Conversations');
+        window.AssistantLeadThreads?.init({ assistantId: data.id, cfg: conversations });
+    }
+
     // "Ask your memory" panel inside the Data Hub tab (Phase 3 §5.5). init() only records the
     // assistant id — the panel fetches nothing until the Data Hub tab is actually opened, because
     // its context query touches account_memory on every workspace load otherwise.
@@ -2905,8 +2931,14 @@ function _applyDashboardRegistry(data) {
         // when the wanted tab is already active (so on-open hooks don't refetch). That means
         // _activateMainTab('datahub') never fires on an ordinary load — activate here instead, or
         // the panel would only ever appear after the user visited another tab and came back.
+        //
+        // Only when Data Hub is where we'll actually LAND, though. A role with its own
+        // defaultMainTab (lead_qualifier → 'signals') still has the Data Hub panel un-hidden at
+        // this point, because _activateDefaultMainTab hasn't run yet; activating on that would
+        // fire the account_memory context query on every load for a tab the user never opened.
+        const landsOnHub = !cfg.defaultMainTab || cfg.defaultMainTab === 'datahub';
         const hubPanel = document.getElementById('maintab-datahub');
-        if (hubPanel && !hubPanel.classList.contains('hidden')) {
+        if (landsOnHub && hubPanel && !hubPanel.classList.contains('hidden')) {
             window.AssistantMemoryQuery?.activate();
         }
     }
@@ -4211,8 +4243,7 @@ async function _prefetchDetailRqBadge(assistantId) {
             if (!res.ok) return;
             count = ((await res.json()).drafts || []).length;
         }
-        const tabBadge = document.getElementById('detail-rq-pending-badge');
-        if (tabBadge) { tabBadge.textContent = count || ''; tabBadge.classList.toggle('hidden', !count); }
+        _setDetailRqTabBadge(count);
         // Action bar (Epic 2.1): "Review Pending Items" count badge — amber when there's work waiting.
         window._setReviewPendingBadge?.(count);
         // Feed the operational status pill (Epic 1 AC1.1.2): pending drafts → "Awaiting Human Review".

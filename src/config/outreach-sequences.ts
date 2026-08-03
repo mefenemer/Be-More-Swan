@@ -40,6 +40,39 @@ export const SEQUENCE_HALT_REASONS = [
 ] as const;
 export type SequenceHaltReason = typeof SEQUENCE_HALT_REASONS[number];
 
+/**
+ * How each halt reason is phrased to the user.
+ *
+ * Lives HERE, beside the vocabulary, rather than in whichever surface happens to render it. The
+ * keys are already a closed set; a second file listing them is a hand copy, and hand copies of
+ * closed vocabularies in this codebase have drifted every single time (the connection-status one
+ * badged a dead connection "Connected" for weeks).
+ *
+ * Phrased from the USER's point of view, not the worker's: `not_connected` is a thing they can go
+ * and fix, so it says so.
+ */
+export const SEQUENCE_HALT_REASON_LABELS: Record<SequenceHaltReason, string> = {
+    replied: 'They replied — follow-ups stopped automatically',
+    suppressed: 'Their domain was added to your suppression list',
+    no_recipient: 'The email address was removed from this lead',
+    not_connected: 'Your sending mailbox disconnected — reconnect it to resume',
+    send_failed: 'Sending kept failing, so the follow-ups were stopped',
+    max_steps: 'The full sequence ran with no reply',
+    record_closed: 'The lead was rejected or deleted',
+    do_not_contact: 'This lead must never be emailed',
+    manual: 'You stopped it',
+};
+
+/**
+ * A user-facing sentence for a halt reason. Falls back to the raw value rather than an empty
+ * string, so a reason added to the vocabulary without a label degrades to "why did it stop?
+ * some_new_reason" instead of a blank space where an explanation should be.
+ */
+export function haltReasonLabel(reason: string | null | undefined): string | null {
+    if (!reason) return null;
+    return SEQUENCE_HALT_REASON_LABELS[reason as SequenceHaltReason] ?? reason;
+}
+
 const STATE_SET: ReadonlySet<string> = new Set(SEQUENCE_STATES);
 const HALT_SET: ReadonlySet<string> = new Set(SEQUENCE_HALT_REASONS);
 

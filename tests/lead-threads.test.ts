@@ -18,6 +18,9 @@ import { fileURLToPath } from 'node:url';
 import {
     mintReplyToken, replyAddress, parseReplyToken, recipientFromParsePayload, inboundDomain,
 } from '../src/utils/reply-address';
+import {
+    SEQUENCE_HALT_REASONS, SEQUENCE_HALT_REASON_LABELS, haltReasonLabel,
+} from '../src/config/outreach-sequences';
 
 let passed = 0;
 function check(name: string, fn: () => void): void {
@@ -194,6 +197,176 @@ check('the migration is guarded and carries an accurate deploy warning', () => {
         'the routing key must be UNIQUE — a collision cross-delivers replies');
     assert.ok(sql.includes('--url-var PROD_DATABASE_URL'),
         'prod apply instructions must be explicit; the runner defaults to staging');
+});
+
+// ── 7. The Conversations read surface ────────────────────────────────────────
+// netlify/functions/lead-threads.ts + assistant-lead-threads.js — the screen that reads back
+// what sections 1-6 record. Until it existed, outreach could be sent, replied to, classified and
+// halted with no way for a user to see any of it.
+
+const readApiText = readFileSync(join(root, 'netlify/functions/lead-threads.ts'), 'utf8');
+const conversationsUiText = readFileSync(join(root, 'src/components/assistant-lead-threads.js'), 'utf8');
+const registryText = readFileSync(join(root, 'src/components/assistant-dashboard-registry.js'), 'utf8');
+
+/**
+ * Strip comments so a source assertion tests CODE, not prose.
+ *
+ * Without this, documenting why a field is withheld ("replyToken is deliberately not selected")
+ * fails the very check that enforces it — which teaches you to delete the comment. Naive but
+ * sufficient here: these files contain no regex literals or strings holding `//`.
+ */
+function codeOnly(src: string): string {
+    return src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+}
+
+check('the read API never serialises a reply token', () => {
+    // Section 1 establishes the token is a bearer credential. Every surface that reads threads
+    // therefore has to leave it behind — a thread rendered with its token in the JSON hands any
+    // viewer the ability to post into that conversation through the public Parse webhook.
+    assert.ok(!/replyToken|reply_token/.test(codeOnly(readApiText)),
+        'lead-threads.ts (function) must not select or return the reply token');
+    assert.ok(!/replyToken|reply_token/.test(codeOnly(conversationsUiText)),
+        'the Conversations UI must never receive or render a reply token');
+});
+
+check('the read API is read-only — the writer stays singular', () => {
+    for (const verb of ['db.insert(', 'db.update(', 'db.delete(']) {
+        assert.ok(!readApiText.includes(verb),
+            `lead-threads.ts (function) must not call ${verb} — src/utils/lead-threads.ts is the only writer`);
+    }
+});
+
+check('every Conversations query is organisation-scoped', () => {
+    for (const scope of [
+        'eq(leadThreads.organisationId, orgId)',
+        'eq(leadMessages.organisationId, orgId)',
+        'eq(sequenceEnrolments.organisationId, orgId)',
+    ]) {
+        assert.ok(readApiText.includes(scope), `missing tenant scope: ${scope}`);
+    }
+    const idorAt = readApiText.indexOf('eq(aiAssistants.organisationId, orgId)');
+    const threadsAt = readApiText.indexOf('.from(leadThreads)');
+    assert.ok(idorAt > -1 && idorAt < threadsAt, 'the IDOR guard must run before any thread is read');
+});
+
+check('`get` scopes by assistant as well as org', () => {
+    // Org scope alone would let one assistant's tab open another assistant's conversation by
+    // guessing an id — same tenant, wrong assistant.
+    const getBranch = readApiText.slice(readApiText.indexOf("action === 'get'"));
+    assert.ok(getBranch.includes('eq(leadThreads.aiAssistantId, assistantId)'),
+        'the get branch must scope by aiAssistantId as well as organisationId');
+});
+
+check('every halt reason has a user-facing label', () => {
+    for (const reason of SEQUENCE_HALT_REASONS) {
+        const label = SEQUENCE_HALT_REASON_LABELS[reason];
+        assert.ok(typeof label === 'string' && label.length > 0,
+            `SEQUENCE_HALT_REASONS includes '${reason}' with no label`);
+        assert.notEqual(label, reason, `'${reason}' must have a phrase, not the raw enum key`);
+    }
+});
+
+check('haltReasonLabel degrades to the raw value rather than to nothing', () => {
+    assert.equal(haltReasonLabel(null), null);
+    assert.equal(haltReasonLabel(undefined), null);
+    assert.equal(haltReasonLabel(''), null);
+    // A reason added to the CHECK constraint but not yet to the labels must still render.
+    assert.equal(haltReasonLabel('some_future_reason'), 'some_future_reason');
+    assert.equal(haltReasonLabel('replied'), SEQUENCE_HALT_REASON_LABELS.replied);
+});
+
+check('the label is resolved server-side, so the client holds no copy of the vocabulary', () => {
+    assert.ok(readApiText.includes('haltReasonLabel('),
+        'the function must resolve the label from src/config/outreach-sequences.ts');
+    for (const reason of SEQUENCE_HALT_REASONS) {
+        // 'replied' is the one key the UI may branch on: it is the success case and gets a
+        // different colour, which is a presentation decision rather than a copy of the vocabulary.
+        if (reason === 'replied') continue;
+        assert.ok(!conversationsUiText.includes(`'${reason}'`),
+            `the UI hardcodes halt reason '${reason}' — render haltReasonLabel from the server instead`);
+    }
+});
+
+check('the thread list ships excerpts, not whole message bodies', () => {
+    const listBranch = readApiText.slice(readApiText.indexOf("action === 'list'"), readApiText.indexOf("action === 'get'"));
+    assert.ok(listBranch.includes('left(') && listBranch.includes('EXCERPT_CHARS'),
+        'the list rollup must truncate bodies in SQL — a full page would otherwise ship every word exchanged');
+    assert.ok(!/body: leadMessages\.body/.test(listBranch), 'the list must not select full bodies');
+});
+
+check('the paging cursor sorts on the same keys as the ORDER BY', () => {
+    // A cursor that disagrees with the sort drops or repeats rows silently, which reads as flaky
+    // data rather than as a bug.
+    assert.ok(readApiText.includes('desc(leadThreads.updatedAt), desc(leadThreads.id)'),
+        'threads must be ordered by (updatedAt DESC, id DESC)');
+    assert.ok(readApiText.includes('lt(leadThreads.updatedAt, cursor.updatedAt)')
+        && readApiText.includes('lt(leadThreads.id, cursor.id)'),
+        'the cursor predicate must be the composite (updatedAt, id), matching the ORDER BY');
+});
+
+check('the UI escapes every server value it renders', () => {
+    // The diff is the one place this component builds markup around message text, so every branch
+    // that emits a run has to escape it. Asserted as "no raw interpolation of run text" rather
+    // than by naming a helper call, so the check survives a refactor of the diff itself.
+    const diffAt = conversationsUiText.indexOf('function diffWords');
+    const diffBody = conversationsUiText.slice(diffAt, conversationsUiText.indexOf('function messageItem'));
+    assert.ok(diffAt > -1 && diffBody.includes('esc('), 'the diff must escape what it renders');
+    for (const raw of ['${r.text}', '${trail}', '${a[i]}', '${b[j]}']) {
+        assert.ok(!diffBody.includes(raw), `diffWords interpolates ${raw} without escaping it`);
+    }
+    for (const raw of ['${m.body}', '${t.title}', '${m.subject}', '${t.lastExcerpt}']) {
+        assert.ok(!conversationsUiText.includes(raw), `${raw} must be escaped, not interpolated raw`);
+    }
+});
+
+check('Conversations is registered for the lead role only', () => {
+    const leadBlock = registryText.slice(registryText.indexOf('lead_qualifier: {'));
+    assert.ok(leadBlock.includes('conversationsTab'), 'lead_qualifier must declare conversationsTab');
+    assert.equal((registryText.match(/conversationsTab:/g) || []).length, 1,
+        'only lead_qualifier has lead threads — no other role should show this tab');
+});
+
+check('every utility class the Conversations UI uses is already compiled into style.css', () => {
+    // The site has no build step: a class that isn't in the prebuilt style.css simply does nothing,
+    // and rebuilding to add one churns unrelated selectors across the whole app. Tailwind escapes
+    // ':' '[' ']' '.' in compiled selectors, so the lookup uses the escaped form.
+    const cssText = readFileSync(join(root, 'style.css'), 'utf8');
+    const tokens = new Set<string>();
+    const addAll = (text: string) => {
+        for (const raw of text.split(/\s+/)) if (raw) tokens.add(raw);
+    };
+    for (const m of conversationsUiText.matchAll(/class="([^"]*)"/g)) {
+        const attr = m[1];
+        // A class attribute in a template literal is part static text, part `${…}` expression.
+        // Both halves carry real class names, and skipping the expressions would leave every
+        // conditional class — the state chips, the active filter — unchecked. So: take the static
+        // text directly, and take the quoted string literals out of each expression. No nested
+        // braces appear in these templates, which is what makes the span match sound.
+        addAll(attr.replace(/\$\{[^}]*\}/g, ' '));
+        for (const expr of attr.matchAll(/\$\{[^}]*\}/g)) {
+            for (const lit of expr[0].matchAll(/'([^']*)'/g)) addAll(lit[1]);
+        }
+    }
+    // The chip palettes are class lists held in consts rather than written inline, so the attribute
+    // scan above never sees them — they reach the DOM through `${cls}`. Named explicitly because
+    // any "does this literal look like classes?" heuristic also matches the data-* selector names.
+    for (const mapName of ['THREAD_CHIP', 'CLASS_CHIP']) {
+        const at = conversationsUiText.indexOf(`const ${mapName} = {`);
+        assert.ok(at > -1, `${mapName} not found — update this check if the palettes were renamed`);
+        const bodyEnd = conversationsUiText.indexOf('};', at);
+        for (const lit of conversationsUiText.slice(at, bodyEnd).matchAll(/'([^']*)'/g)) addAll(lit[1]);
+    }
+
+    assert.ok(tokens.size > 40, `expected a real class list, parsed ${tokens.size}`);
+    const escapeSel = (t: string) => t.replace(/([:[\].])/g, '\\$1');
+    const missing = [...tokens].filter((t) => !cssText.includes(escapeSel(t)));
+    assert.deepEqual(missing, [], `not compiled into style.css: ${missing.join(', ')}`);
+});
+
+check('the Signal Inbox is the DECLARED landing tab, not an accident of tab order', () => {
+    const leadBlock = registryText.slice(registryText.indexOf('lead_qualifier: {'));
+    assert.ok(/defaultMainTab:\s*'signals'/.test(leadBlock),
+        "lead_qualifier must declare defaultMainTab: 'signals' rather than relying on the first-visible-tab fallback");
 });
 
 console.log(`\n${passed} checks passed.`);

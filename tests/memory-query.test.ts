@@ -217,10 +217,23 @@ check('the panel activates on an ordinary load, not only after a tab switch', ()
     );
     const initAt = assistantsText.indexOf('window.AssistantMemoryQuery?.init(');
     assert.ok(initAt > 0, 'the panel is never initialised');
-    const block = assistantsText.slice(initAt, initAt + 700);
+    // Bounded by the NEXT registry block rather than a character count: the window is incidental
+    // to what's being asserted, and a fixed one fails on an added comment, which teaches you to
+    // delete comments instead of to keep the behaviour.
+    const after = assistantsText.slice(initAt);
+    const end = after.indexOf('const inspo = cfg.inspoTab');
+    const block = after.slice(0, end > 0 ? end : 1200);
     assert.ok(
         block.includes("getElementById('maintab-datahub')") && block.includes('activate()'),
         'the initial-load activation path is missing',
+    );
+    // ...but ONLY when Data Hub is where the role actually lands. lead_qualifier declares
+    // defaultMainTab:'signals', and the Data Hub panel is still un-hidden at this point (the
+    // default tab is applied later), so an unconditional activate would fire the account_memory
+    // context query on every load for a tab that role's users never open.
+    assert.ok(
+        block.includes('landsOnHub') && block.includes('cfg.defaultMainTab'),
+        'the initial-load activation must be gated on Data Hub actually being the landing tab',
     );
 });
 

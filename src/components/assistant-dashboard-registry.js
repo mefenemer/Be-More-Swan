@@ -286,6 +286,17 @@
       signalInbox: {
         label: 'Signal Inbox',
       },
+      // Conversations tab (assistant-lead-threads.js → lead-threads.ts). What happened after a
+      // lead was approved: the outreach thread, the reply, the classification, and what the
+      // follow-up sequence did. Named for what's BUILT — the mockup's "Deal Thread" also showed
+      // the deal envelope and Closing Agent, which are Phase 4 and don't exist.
+      conversationsTab: {
+        label: 'Conversations',
+      },
+      // The Signal Inbox is the landing tab: it's the top of the funnel, so it's what the user
+      // should see first. Stated explicitly rather than relying on _activateDefaultMainTab's
+      // "first visible tab" fallback, which gave the right answer only by accident of tab order.
+      defaultMainTab: 'signals',
       // "Ask your memory" panel inside the Data Hub tab (assistant-memory-query.js →
       // memory-query.ts). Phase 3 §5.5: natural-language questions answered from account_memory,
       // account_edges and revenue_events, every claim cited back to the record it came from.
