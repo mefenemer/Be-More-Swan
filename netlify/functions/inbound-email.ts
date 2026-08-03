@@ -22,6 +22,7 @@ import { parseReplyToken, recipientFromParsePayload } from '../../src/utils/repl
 import { findThreadByReplyToken, recordInboundMessage } from '../../src/utils/lead-threads';
 import { haltEnrolmentsForThread } from '../../src/utils/outreach-sequences';
 import { recordEvent } from '../../src/utils/revenue-ledger';
+import { getBlueprintVersion } from '../../src/utils/blueprint-version';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const INBOUND_TOKEN = process.env.INBOUND_PARSE_TOKEN;
@@ -144,6 +145,12 @@ export default withLambda(async (event: HandlerEvent) => {
                 body: messageBody.slice(0, MAX_BODY_CHARS),
             });
 
+            // Attribution (§7.2) for both ledger events below — one webhook is one thread is one
+            // assistant. Note what this version means on an INBOUND event: the strategy that was
+            // live when they replied, not necessarily the one that wrote the message they answered.
+            // Cycle-time attribution keys off the outreach_sent row, which carries its own.
+            const blueprintVersion = await getBlueprintVersion(db, thread.aiAssistantId);
+
             // Halt any running cadence on this thread (Phase 2b). recordInboundMessage has already
             // flipped the thread to 'replied', and the sequence worker refuses to send to a thread
             // that is not 'open' — this closes the enrolment at the SAME moment rather than leaving
@@ -189,6 +196,7 @@ export default withLambda(async (event: HandlerEvent) => {
                         discoveredLeadId: thread.discoveredLeadId,
                         assistantRecordId: thread.assistantRecordId,
                         actor: 'system',
+                        blueprintVersion,
                         payload: { threadId: thread.id, messageId, matched: optOut.matched, sequencesHalted: haltedCount },
                     });
                     console.log('[inbound-email] opt-out recorded', JSON.stringify({
@@ -209,6 +217,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 discoveredLeadId: thread.discoveredLeadId,
                 assistantRecordId: thread.assistantRecordId,
                 actor: 'system',
+                blueprintVersion,
                 payload: { threadId: thread.id, messageId, flaggedSpam, sequencesHalted: haltedCount },
             });
 

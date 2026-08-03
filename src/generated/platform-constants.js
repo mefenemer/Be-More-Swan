@@ -135,4 +135,54 @@
       return out;
     },
   };
+
+  // ── Revenue outcomes (Phase 4.5) ──────────────────────────────────────────
+  // The closed vocabularies from src/config/revenue-events.ts, for the Data Hub's "Record outcome"
+  // control. Generated rather than retyped: these are the GROUP BY keys the Strategy Agent reads,
+  // so a drifted copy here would write values the CHECK constraint rejects — and recordEvent()
+  // swallows its errors, which makes that failure invisible rather than loud.
+  var OUTCOMES = ["won","lost","disqualified"];
+  var OUTCOME_LABELS = {"won":"Won","lost":"Lost","disqualified":"Disqualified"};
+  var LOSS_REASONS = ["price","timing","no_budget","competitor","no_response","wrong_contact","not_icp","feature_gap","went_silent","other"];
+  var LOSS_REASON_LABELS = {"price":"Too expensive","timing":"Bad timing — not now","no_budget":"No budget","competitor":"Went with a competitor","no_response":"Never replied","wrong_contact":"Wrong person — not the decision maker","not_icp":"Not a fit — we should not have targeted them","feature_gap":"We were missing something they needed","went_silent":"Went quiet mid-conversation","other":"Something else"};
+  var NEEDS_LOSS_REASON = ["lost","disqualified"];
+
+  // Why a reviewer changed a drafted message (plan §2.6), from src/config/template-feedback.ts.
+  // CHECK-constrained server-side, so a drifted copy here would write values the DB rejects.
+  var EDIT_REASONS = ["too_formal","too_casual","wrong_value_prop","wrong_pain_point","too_long","factually_wrong","bad_subject","personalisation_missing","other"];
+  var EDIT_REASON_LABELS = {"too_formal":"Too formal","too_casual":"Too casual","wrong_value_prop":"Wrong benefit","wrong_pain_point":"Wrong problem","too_long":"Too long","factually_wrong":"Got something wrong","bad_subject":"Weak subject line","personalisation_missing":"Not specific enough","other":"Something else"};
+
+  window.RevenueConstants = {
+    /** 'won' | 'lost' | 'disqualified', in canonical order. */
+    outcomes: OUTCOMES,
+
+    /** Loss reasons, in canonical order. Closed — free text is unclusterable by design. */
+    lossReasons: LOSS_REASONS,
+
+    /** Display label for an outcome, falling back to the raw value rather than showing nothing. */
+    outcomeLabel: function (o) {
+      return OUTCOME_LABELS[String(o == null ? '' : o)] || String(o == null ? '' : o);
+    },
+
+    /** Display label for a loss reason. */
+    lossReasonLabel: function (r) {
+      return LOSS_REASON_LABELS[String(r == null ? '' : r)] || String(r == null ? '' : r);
+    },
+
+    /**
+     * True when this outcome cannot be recorded without a loss reason. The server enforces the
+     * same rule — this only decides whether the picker is shown.
+     */
+    needsLossReason: function (o) {
+      return NEEDS_LOSS_REASON.indexOf(String(o == null ? '' : o)) !== -1;
+    },
+
+    /** Why a reviewer changed a drafted message, from src/config/template-feedback.ts. */
+    editReasons: EDIT_REASONS,
+
+    /** Display label for an edit reason. */
+    editReasonLabel: function (r) {
+      return EDIT_REASON_LABELS[String(r == null ? '' : r)] || String(r == null ? '' : r);
+    },
+  };
 })();

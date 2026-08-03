@@ -27,6 +27,7 @@ import {
     outreachSequences, sequenceSteps, sequenceEnrolments, leadThreads, leadMessages,
 } from '../../db/schema';
 import { recordEvent } from './revenue-ledger';
+import { getBlueprintVersion } from './blueprint-version';
 import {
     DEFAULT_SEQUENCE_STEPS,
     MAX_ENROLMENTS_PER_ORG_PER_DAY,
@@ -221,6 +222,7 @@ export async function enrolInSequence(db: Db, input: EnrolInput): Promise<number
             discoveredLeadId: input.discoveredLeadId ?? null,
             assistantRecordId: input.assistantRecordId ?? null,
             actor: 'agent',
+            blueprintVersion: await getBlueprintVersion(db, input.aiAssistantId),
             payload: { sequenceId: seq.id, steps: seq.steps.length, firstSendAt: addDays(sentAt, firstStep.delayDays).toISOString() },
         });
 
@@ -272,6 +274,7 @@ export async function advanceEnrolment(
                 discoveredLeadId: enrolment.discoveredLeadId,
                 assistantRecordId: enrolment.assistantRecordId,
                 actor: 'agent',
+                blueprintVersion: await getBlueprintVersion(db, enrolment.aiAssistantId),
                 payload: { stepsSent: stepJustSent, endedAt: 'max_steps' },
             });
             return 'completed';
@@ -325,6 +328,7 @@ export async function haltEnrolment(
             discoveredLeadId: enrolment.discoveredLeadId,
             assistantRecordId: enrolment.assistantRecordId,
             actor: reason === 'manual' ? 'user' : 'agent',
+            blueprintVersion: await getBlueprintVersion(db, enrolment.aiAssistantId),
             payload: { haltReason: reason, stepsSent: enrolment.lastStepSent, detail: detail ?? null },
         });
         return true;
@@ -385,6 +389,50 @@ export async function haltEnrolmentsForThread(db: Db, leadThreadId: number): Pro
         return halted;
     } catch (err) {
         logQuietly('haltEnrolmentsForThread', err);
+        return 0;
+    }
+}
+
+/**
+ * Halt every active enrolment on a lead record whose deal has reached a terminal outcome
+ * (Phase 4.5 — docs/strategy-agent-plan.md §2).
+ *
+ * A cadence that keeps drip-feeding "just following up!" to someone who already signed — or who
+ * already told us no — is the most visible way this system can embarrass its user. Marking an
+ * outcome is exactly the moment we learn to stop, and nothing else in the pipeline learns it: the
+ * worker's guards key off thread state and approval status, neither of which a won deal changes.
+ *
+ * Halted as `manual`, which is accurate (a human decided) and, until now, a reason with no caller —
+ * the vocabulary and CHECK constraint have carried it since Phase 2b waiting for a first one.
+ *
+ * Routed through haltEnrolment() rather than a direct UPDATE, because that is what clears
+ * `next_send_at`. A row whose state changed but whose timestamp did not is still claimable by the
+ * worker, so a "stopped" cadence would keep sending.
+ */
+export async function haltEnrolmentsForRecord(db: Db, assistantRecordId: number): Promise<number> {
+    try {
+        const rows = await db
+            .select({
+                id: sequenceEnrolments.id,
+                organisationId: sequenceEnrolments.organisationId,
+                aiAssistantId: sequenceEnrolments.aiAssistantId,
+                assistantRecordId: sequenceEnrolments.assistantRecordId,
+                discoveredLeadId: sequenceEnrolments.discoveredLeadId,
+                lastStepSent: sequenceEnrolments.lastStepSent,
+            })
+            .from(sequenceEnrolments)
+            .where(and(
+                eq(sequenceEnrolments.assistantRecordId, assistantRecordId),
+                eq(sequenceEnrolments.state, 'active'),
+            ));
+
+        let halted = 0;
+        for (const r of rows) {
+            if (await haltEnrolment(db, r, 'manual', 'deal outcome recorded')) halted++;
+        }
+        return halted;
+    } catch (err) {
+        logQuietly('haltEnrolmentsForRecord', err);
         return 0;
     }
 }

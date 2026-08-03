@@ -1098,6 +1098,87 @@ function _rqOutreachPreview(r, statusKey) {
     </details>`;
 }
 
+// ── Review-time edit feedback (plan §2.6, the ⭐ option) ──────────────────────
+// When a reviewer rewrites a drafted message they usually know WHAT would make it right, and that
+// knowledge is thrown away today. §2.6 splits the two intentions a reviewer has:
+//
+//   "this wording is wrong for THIS prospect"  → one-off, reversible          → class A
+//   "this wording is wrong for EVERYONE"       → governs every future message → class C
+//
+// The ⭐ option resolves them: the edit ships immediately for this prospect, and the REASON is
+// banked as evidence. After enough similar edits the Strategy Agent proposes the template change
+// through the normal proposal flow — with a sample size behind it, unlike a "save as default"
+// click, which generalises from n = 1.
+//
+// So this strip appears AFTER the save, never as a gate in front of it. Answering is optional and
+// skipping costs nothing: a reviewer under time pressure must never be blocked from fixing a
+// message because they could not be bothered to categorise it.
+//
+// Leads only — the Strategy Agent tunes the OUTREACH playbook, and a meeting follow-up is not part
+// of the revenue loop.
+let _rqPendingEdit = null;
+
+function _rqShowEditReasonStrip() {
+    const pending = _rqPendingEdit;
+    _rqPendingEdit = null;
+    if (!pending || pending.recordType !== 'lead') return;
+    const RC = window.RevenueConstants;
+    if (!RC || !Array.isArray(RC.editReasons)) return;     // constants failed to load — stay silent
+    const card = document.querySelector(`[data-rq-record="${pending.recordId}"]`);
+    if (!card) return;
+
+    const strip = document.createElement('div');
+    strip.className = 'mt-2 rounded-lg border border-gray-200 bg-gray-50 px-3 py-2';
+    strip.setAttribute('data-rq-edit-reason', String(pending.recordId));
+    const chip = 'px-2 py-1 text-[11px] font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 transition cursor-pointer';
+    strip.innerHTML = `
+      <p class="text-[11px] font-bold text-gray-700">Why did you change it?</p>
+      <p class="text-[11px] text-gray-500 mb-2">Optional. Your edit is already saved — this teaches the drafter for next time.</p>
+      <div class="flex flex-wrap gap-1.5">
+        ${RC.editReasons.map((r) => `<button type="button" class="${chip}" data-edit-reason="${_rqEsc(r)}">${_rqEsc(RC.editReasonLabel(r))}</button>`).join('')}
+        <button type="button" class="px-2 py-1 text-[11px] font-bold rounded-lg text-gray-400 hover:text-gray-600 transition cursor-pointer" data-edit-reason-skip>Skip</button>
+      </div>
+      <p class="hidden text-[11px] font-semibold mt-1.5" data-edit-reason-status></p>`;
+
+    const status = strip.querySelector('[data-edit-reason-status]');
+    strip.querySelector('[data-edit-reason-skip]').addEventListener('click', () => strip.remove());
+    strip.addEventListener('click', async (e) => {
+        const btn = e.target.closest('[data-edit-reason]');
+        if (!btn) return;
+        strip.querySelectorAll('button').forEach((b) => { b.disabled = true; });
+        status.textContent = 'Saving…';
+        status.className = 'text-[11px] font-semibold text-gray-500 mt-1.5';
+        try {
+            const res = await fetch('/.netlify/functions/lead-generation', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'record_edit_feedback',
+                    assistantId: window._currentAssistantId,
+                    recordId: pending.recordId,
+                    editReason: btn.getAttribute('data-edit-reason'),
+                }),
+            });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.error || 'Could not save that.');
+            // The server returns 200 with recorded:false when the write itself failed — the edit
+            // succeeded either way, so say what actually happened rather than claiming a save.
+            strip.innerHTML = data.recorded
+                ? '<p class="text-[11px] font-semibold text-gray-600">Noted — thanks. Repeated edits like this become a suggested template change.</p>'
+                : '<p class="text-[11px] font-semibold text-gray-500">Your edit is saved. The note couldn’t be recorded.</p>';
+        } catch (err) {
+            strip.querySelectorAll('button').forEach((b) => { b.disabled = false; });
+            status.textContent = err.message || 'Could not save that.';
+            status.className = 'text-[11px] font-semibold text-red-600 mt-1.5';
+        }
+    });
+
+    // Under the draft preview, where the reviewer's attention already is.
+    const preview = card.querySelector('details');
+    if (preview && preview.parentNode) preview.parentNode.insertBefore(strip, preview.nextSibling);
+    else card.appendChild(strip);
+}
+
 function _rqRecordActions(r, statusKey) {
     const secondary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-white border border-gray-200 text-gray-700 hover:border-emerald-300 hover:text-emerald-800 transition cursor-pointer';
     const primary = 'px-3 py-1.5 text-xs font-bold rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white transition cursor-pointer';
@@ -1367,6 +1448,26 @@ window._detailRqRecordAct = async function (btn, action) {
         const bodyText = card.querySelector('.rq-mail-body')?.value ?? '';
         if (!bodyText.trim()) { showErr('The message can’t be empty.'); return; }
         patch.data = found.cfg.write(rec.data || {}, subject.trim(), bodyText);
+
+        // Keep the AGENT's draft verbatim the first time a human changes it (plan §2.6). Without
+        // this the original is overwritten in place and nothing can tell an edited message from an
+        // unedited one — which is the whole input to the template-feedback loop, and what
+        // lead_messages.generated_body is supposed to carry at send time.
+        //
+        // Stashed ONCE, on the first edit only: a second edit must not replace the agent's text
+        // with the human's first attempt. Written under a generic key rather than per type, since
+        // _rqDraft already normalises all three draft shapes.
+        if (!(rec.data || {}).draftOriginal) {
+            patch.data = {
+                ...patch.data,
+                draftOriginal: {
+                    subject: found.draft.subject ?? null,
+                    body: found.draft.body,
+                    at: new Date().toISOString(),
+                },
+            };
+        }
+        _rqPendingEdit = { recordId: patch.id, recordType: rec.recordType };
     }
 
     // Save filled-in attendee addresses. Written back in place so each attendee keeps its name
@@ -1521,13 +1622,20 @@ window._detailRqRecordAct = async function (btn, action) {
                 : action === 'reject' ? 'Rejected.' : 'Updated.';
             window.showToast?.(toast);
         }
-        _detailRqRenderGroups(_detailRqCurrentStatus);
+        // AWAITED, unlike every other call to it: _detailRqRenderGroups is async and rebuilds every
+        // card, so a strip injected before it settles is attached to a node that is about to be
+        // replaced — it renders and vanishes with no error anywhere.
+        await _detailRqRenderGroups(_detailRqCurrentStatus);
+        _rqShowEditReasonStrip();
         // A newly scheduled/approved record changes the Calendar + Data Hub — force them to reload
         // next time they're opened (both are cached once per detail mount).
         const calHost = document.getElementById('assistant-calendar-host');
         if (calHost) calHost.dataset.ready = '';
     } catch (e) {
         buttons.forEach((b) => { b.disabled = false; });
+        // The edit never landed, so there is nothing to explain. Left set, this would surface the
+        // reason strip on whatever the user did NEXT — asking why they changed a draft they didn't.
+        _rqPendingEdit = null;
         showErr(e.message || 'Something went wrong.');
     }
 };

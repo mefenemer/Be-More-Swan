@@ -24,6 +24,7 @@ import {
 } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { recordEvent } from '../../src/utils/revenue-ledger';
+import { getBlueprintVersion } from '../../src/utils/blueprint-version';
 import { enqueueLeadHandoff } from '../../src/utils/lead-handoff';
 import {
     resolveSourceLabel, savedSearchLabel, isBatchable, decodeCursor, encodeCursor,
@@ -293,6 +294,10 @@ export default withLambda(async (event) => {
             const approved: string[] = [];
             const skipped: { id: string; reason: string }[] = [];
 
+            // Attribution (§7.2). Every row in this batch belongs to `assistantId` — the query above
+            // filters on it — so one lookup covers the whole loop.
+            const blueprintVersion = await getBlueprintVersion(db, assistantId);
+
             for (const row of rows as unknown as LeadRow[]) {
                 const { state, reviewReason } = classifySignal(row);
                 if (!isBatchable(state)) {
@@ -332,6 +337,7 @@ export default withLambda(async (event) => {
                     assistantRecordId: row.assistantRecordId,
                     actor: 'user',
                     actorUserId: userId,
+                    blueprintVersion,
                     payload: { from: row.approvalStatus, to: 'approved', rating: row.rating, via: 'batch' },
                 });
 

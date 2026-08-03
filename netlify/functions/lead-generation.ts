@@ -26,9 +26,9 @@
 import { Handler } from '@netlify/functions';
 import { randomUUID } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq } from 'drizzle-orm';
 import { getDb } from '../../db/client';
-import { aiAssistants, assistantRecords, masterAssistants } from '../../db/schema';
+import { aiAssistants, assistantRecords, masterAssistants, revenueEvents } from '../../db/schema';
 import { requireTenant } from '../../src/utils/tenant';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { createDiscoveryRun } from '../../src/utils/discovery';
@@ -36,11 +36,18 @@ import { isSearchConfigured } from '../../src/lib/discovery-search';
 import { sendGmailMessage } from '../../src/utils/gmail';
 import { sendOutlookMessage } from '../../src/utils/outlook';
 import { IntegrationError } from '../../src/utils/workspace-integrations';
-import { recordEvent } from '../../src/utils/revenue-ledger';
+import { recordEvent, cycleDaysBetween } from '../../src/utils/revenue-ledger';
+import { getBlueprintVersion } from '../../src/utils/blueprint-version';
+import {
+    OUTCOMES, LOSS_REASONS, EVENT_FOR_OUTCOME, OUTCOMES_REQUIRING_LOSS_REASON,
+    isOutcome, isLossReason, type LossReason,
+} from '../../src/config/revenue-events';
+import { EDIT_REASONS, isEditReason } from '../../src/config/template-feedback';
+import { recordTemplateEdit } from '../../src/utils/template-feedback';
 import { openLeadThread, recordOutboundMessage } from '../../src/utils/lead-threads';
 import { replyAddress } from '../../src/utils/reply-address';
 import { checkSuppression } from '../../src/utils/suppression';
-import { enrolInSequence } from '../../src/utils/outreach-sequences';
+import { enrolInSequence, haltEnrolmentsForRecord } from '../../src/utils/outreach-sequences';
 import { OUTREACH_SUBJECT_RULES } from '../../src/constants/outreach-subject';
 import { evaluateDoNotContact } from '../../src/config/do-not-contact';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -57,6 +64,41 @@ function chaseDate(): Date {
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 const MODEL = 'claude-haiku-4-5-20251001';
+
+/**
+ * When this lead was FIRST contacted — the start of the sales cycle (Phase 4.5).
+ *
+ * The ledger is authoritative: `outreach_sent` is written on a confirmed send only, so its earliest
+ * row is the real first touch. `data.outreachSentAt` is the fallback for leads contacted before the
+ * ledger existed, and it is only ever the LAST send, so it over-reports cycle time on a lead that
+ * received a sequence — hence second place, not first.
+ *
+ * Returns null when nothing was ever sent. The caller leaves `cycleDays` NULL in that case rather
+ * than measuring from the record's creation, which would report how long a lead sat in a list.
+ */
+async function firstOutreachAt(
+    db: ReturnType<typeof getDb>,
+    assistantRecordId: number,
+    data: Record<string, unknown>,
+): Promise<Date | null> {
+    try {
+        const [row] = await db
+            .select({ occurredAt: revenueEvents.occurredAt })
+            .from(revenueEvents)
+            .where(and(
+                eq(revenueEvents.assistantRecordId, assistantRecordId),
+                eq(revenueEvents.eventType, 'outreach_sent'),
+            ))
+            .orderBy(asc(revenueEvents.occurredAt))
+            .limit(1);
+        if (row?.occurredAt) return row.occurredAt;
+    } catch {
+        // An un-migrated environment has no revenue_events table. Fall through — a missing cycle
+        // time is a gap in analytics, never a reason to refuse to record the outcome.
+    }
+    const stamped = typeof data.outreachSentAt === 'string' ? new Date(data.outreachSentAt) : null;
+    return stamped && !Number.isNaN(stamped.getTime()) ? stamped : null;
+}
 
 function json(statusCode: number, body: unknown) {
     return { statusCode, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) };
@@ -127,7 +169,13 @@ export default withLambda(async (event) => {
     const { organisationId: orgId, userId } = ctx;
 
     // confirmPersonal: the caller has explicitly OK'd sending to a scraped personal inbox.
-    let body: { action?: string; assistantId?: number; ideaId?: number; recordId?: number; lead?: Record<string, unknown>; confirmPersonal?: boolean; reason?: string };
+    // confirmChange: the caller has explicitly OK'd overwriting a deal outcome already recorded.
+    let body: {
+        action?: string; assistantId?: number; ideaId?: number; recordId?: number;
+        lead?: Record<string, unknown>; confirmPersonal?: boolean; reason?: string;
+        outcome?: string; lossReason?: string; valueGbp?: number | string | null; confirmChange?: boolean;
+        editReason?: string;
+    };
     try { body = JSON.parse(event.body || '{}'); } catch { return json(400, { error: 'Invalid JSON' }); }
 
     const action = String(body.action || '');
@@ -155,6 +203,17 @@ export default withLambda(async (event) => {
         if (parsed && typeof parsed === 'object') onboarding = parsed;
     }
     const icp = icpBlock(onboarding);
+
+    /**
+     * The blueprint version live for this assistant — half of the ledger's attribution key (§7.2).
+     * Resolved lazily and memoised for the request: one request is one assistant, and most actions
+     * here emit nothing, so an eager lookup would be a query on every idea-listing call.
+     */
+    let _blueprintVersion: string | null | undefined;
+    async function blueprintVersion(): Promise<string | null> {
+        if (_blueprintVersion === undefined) _blueprintVersion = await getBlueprintVersion(db, assistant.id);
+        return _blueprintVersion;
+    }
 
     /** Log token usage the same way the chat route does, so COGS reporting stays complete. */
     function logUsage(resp: Anthropic.Message, suffix: string) {
@@ -268,6 +327,7 @@ ${OUTREACH_SUBJECT_RULES}`;
                 actor: 'agent',
                 actorUserId: userId,
                 icpSnapshot: { targetIndustries: onboarding.targetIndustries ?? null, minHeadcount: onboarding.minHeadcount ?? null },
+                blueprintVersion: await blueprintVersion(),
                 payload: { score: card.score, rating: card.rating, source: 'manual' },
             });
 
@@ -330,10 +390,207 @@ ${OUTREACH_SUBJECT_RULES}`;
                 assistantRecordId: recordId,
                 actor: 'user',
                 actorUserId: userId,
+                blueprintVersion: await blueprintVersion(),
                 payload: { reason, overrodeSource: current.source, overrodeReason: current.reason },
             });
 
             return json(200, { overridden: true, recordId, reason });
+        }
+
+        // ── Record the deal outcome for a lead (Phase 4.5) ────────────────────────
+        // The keystone the Strategy Agent is built on: until this action existed, NOTHING in the
+        // codebase could emit a terminal event, so `revenue_events.outcome` was NULL on every row
+        // that would ever be written and win rate had no numerator. See docs/strategy-agent-plan.md
+        // §0.1.
+        //
+        // Outcome is a SEPARATE axis from approval_status (plan §3.2) — five other assistant roles
+        // read that column, and 'won' is not an approval state. It lives on the record's `data` and
+        // is denormalised into the ledger, which is the only thing Phase 5 aggregates.
+        if (action === 'set_outcome') {
+            const recordId = Number(body.recordId);
+            if (!Number.isInteger(recordId)) return json(400, { error: 'recordId is required.' });
+
+            const outcome = String(body.outcome || '');
+            if (!isOutcome(outcome)) {
+                return json(400, { error: `outcome must be one of: ${OUTCOMES.join(', ')}.` });
+            }
+
+            // A loss reason is REQUIRED on lost/disqualified and refused on won. recordEvent()
+            // stores lossReason on any terminal event, so a won deal carrying one would be counted
+            // by every "why are we losing?" aggregate — silently, since nothing downstream
+            // re-checks the pairing.
+            const rawReason = str(body.lossReason, 40);
+            const needsReason = OUTCOMES_REQUIRING_LOSS_REASON.includes(outcome);
+            let lossReason: LossReason | null = null;
+            if (needsReason) {
+                if (!rawReason) {
+                    return json(400, { error: `A reason is required when marking a lead ${outcome}.` });
+                }
+                if (!isLossReason(rawReason)) {
+                    return json(400, { error: `lossReason must be one of: ${LOSS_REASONS.join(', ')}.` });
+                }
+                lossReason = rawReason;
+            } else if (rawReason) {
+                return json(400, { error: 'A won deal has no loss reason.' });
+            }
+
+            // Value belongs to a win only. Accepting it on a loss would quietly change what "mean
+            // deal value" means in the per-segment aggregate — mixing revenue earned with revenue
+            // missed into one number.
+            let valueGbp: number | null = null;
+            if (body.valueGbp !== undefined && body.valueGbp !== null && body.valueGbp !== '') {
+                if (outcome !== 'won') {
+                    return json(400, { error: 'A deal value can only be recorded on a won deal.' });
+                }
+                const n = Number(body.valueGbp);
+                if (!Number.isFinite(n) || n < 0) {
+                    return json(400, { error: 'A deal value must be a positive number.' });
+                }
+                valueGbp = n;
+            }
+
+            const [rec] = await db
+                .select({ id: assistantRecords.id, title: assistantRecords.title, data: assistantRecords.data })
+                .from(assistantRecords)
+                .where(and(
+                    eq(assistantRecords.id, recordId),
+                    eq(assistantRecords.organisationId, orgId),
+                    eq(assistantRecords.aiAssistantId, assistant.id),
+                    eq(assistantRecords.recordType, 'lead'),
+                ))
+                .limit(1);
+            if (!rec) return json(404, { error: 'Lead not found.' });
+
+            const data = (rec.data && typeof rec.data === 'object' && !Array.isArray(rec.data))
+                ? rec.data as Record<string, unknown> : {};
+            const prior = (data.dealOutcome && typeof data.dealOutcome === 'object')
+                ? data.dealOutcome as Record<string, unknown> : null;
+
+            // ⚠️ The ledger is append-only, so CORRECTING an outcome appends a second terminal row
+            // rather than replacing the first. That means a naive `count(*) WHERE outcome='won'`
+            // would count one lead twice, and a lead marked won-then-lost would appear in both
+            // aggregates. Two things keep that safe:
+            //   1. this gate — a mis-click cannot produce a correction, only a deliberate confirm;
+            //   2. `payload.supersedes` on the corrective row, so the analyser can identify it.
+            // The rule for any reader: take the LATEST terminal event per assistant_record_id.
+            if (prior?.outcome && body.confirmChange !== true) {
+                return json(409, {
+                    error: `This lead is already marked ${String(prior.outcome)}.`,
+                    currentOutcome: prior.outcome,
+                    needsConfirmation: true,
+                });
+            }
+
+            const firstTouch = await firstOutreachAt(db, recordId, data);
+            const cycleDays = firstTouch ? cycleDaysBetween(firstTouch) : null;
+
+            const decidedAt = new Date();
+            const dealOutcome = {
+                outcome,
+                lossReason: lossReason ?? null,
+                valueGbp,
+                cycleDays,
+                at: decidedAt.toISOString(),
+                by: userId ? String(userId) : 'user',
+                ...(prior?.outcome ? { supersedes: prior.outcome } : {}),
+            };
+            await db.update(assistantRecords)
+                .set({ data: { ...data, dealOutcome }, updatedAt: decidedAt })
+                .where(eq(assistantRecords.id, recordId));
+
+            // A decided deal must stop receiving follow-ups. Nothing else in the pipeline learns
+            // this: the sequence worker's guards key off thread state and approval status, and a
+            // won deal changes neither. Best-effort — a cadence that cannot be halted is worth a
+            // log line, not a failed outcome capture.
+            const sequencesHalted = await haltEnrolmentsForRecord(db, recordId);
+
+            // actor 'user': a human decided this. Until the Closing Agent (Phase 4) exists, that is
+            // the only actor that can — and the baseline any future autonomous close is measured
+            // against.
+            await recordEvent(db, EVENT_FOR_OUTCOME[outcome], {
+                organisationId: orgId,
+                aiAssistantId: assistant.id,
+                assistantRecordId: recordId,
+                actor: 'user',
+                actorUserId: userId,
+                lossReason,
+                valueGbp,
+                cycleDays,
+                icpSnapshot: { targetIndustries: onboarding.targetIndustries ?? null, minHeadcount: onboarding.minHeadcount ?? null },
+                blueprintVersion: await blueprintVersion(),
+                payload: {
+                    title: rec.title,
+                    sequencesHalted,
+                    firstTouchAt: firstTouch ? firstTouch.toISOString() : null,
+                    ...(prior?.outcome ? { supersedes: prior.outcome, isCorrection: true } : {}),
+                },
+            });
+
+            return json(200, { recordId, dealOutcome, sequencesHalted });
+        }
+
+        // ── Flag WHY a drafted message was edited (plan §2.6, the ⭐ option) ──────
+        // The edit itself has already been saved by the time this runs — that ordering is the whole
+        // design. §2.6 splits "this wording is wrong for this prospect" (class A, ships now) from
+        // "this wording is wrong for everyone" (class C, governs every future message), and the ⭐
+        // option resolves the tension: the edit ships immediately, and the REASON is banked as
+        // evidence. After MIN_EDIT_SAMPLE similar edits the Strategy Agent proposes the template
+        // change through the normal proposal flow — with a sample size behind it, unlike a "save as
+        // default" click, which generalises from n = 1.
+        //
+        // Leads only. The Review Queue's edit surface also serves meetings and tickets, but the
+        // Strategy Agent tunes the OUTREACH playbook; a meeting follow-up is not part of the
+        // revenue loop, and clustering its edits in would propose changes to the wrong template.
+        if (action === 'record_edit_feedback') {
+            const recordId = Number(body.recordId);
+            if (!Number.isInteger(recordId)) return json(400, { error: 'recordId is required.' });
+
+            const editReason = str(body.editReason, 40);
+            if (!isEditReason(editReason)) {
+                return json(400, { error: `editReason must be one of: ${EDIT_REASONS.join(', ')}.` });
+            }
+
+            const [rec] = await db
+                .select({ id: assistantRecords.id, data: assistantRecords.data })
+                .from(assistantRecords)
+                .where(and(
+                    eq(assistantRecords.id, recordId),
+                    eq(assistantRecords.organisationId, orgId),
+                    eq(assistantRecords.aiAssistantId, assistant.id),
+                    eq(assistantRecords.recordType, 'lead'),
+                ))
+                .limit(1);
+            if (!rec) return json(404, { error: 'Lead not found.' });
+
+            const data = (rec.data && typeof rec.data === 'object' && !Array.isArray(rec.data))
+                ? rec.data as Record<string, unknown> : {};
+            const original = (data.draftOriginal && typeof data.draftOriginal === 'object')
+                ? data.draftOriginal as Record<string, unknown> : null;
+            const current = (data.outreachDraft && typeof data.outreachDraft === 'object')
+                ? data.outreachDraft as Record<string, unknown> : null;
+
+            // No stashed original means nothing was ever edited, so there is no before/after and
+            // nothing to learn from. A 400 rather than an empty row: a feedback row with no diff
+            // would inflate the sample count the proposer gates on.
+            if (typeof original?.body !== 'string' || typeof current?.body !== 'string') {
+                return json(400, { error: 'This draft has not been edited, so there is no change to explain.' });
+            }
+
+            const feedbackId = await recordTemplateEdit(db, {
+                organisationId: orgId,
+                // NULL by design — a review-time edit precedes the send, so no lead_messages row
+                // exists yet. The sent message keeps its own copy via generated_body.
+                leadMessageId: null,
+                templateVersion: await blueprintVersion(),
+                editReason,
+                before: { subject: (original.subject as string) ?? null, body: original.body },
+                after: { subject: (current.subject as string) ?? null, body: current.body },
+            });
+
+            // recordTemplateEdit never throws and returns null on failure. Report that honestly
+            // rather than claiming a save — but still 200: the user's EDIT succeeded, and this
+            // request was only ever about the annotation.
+            return json(200, { recorded: feedbackId !== null, feedbackId, recordId });
         }
 
         // ── Send the outreach email for an approved lead (auto-send on approval) ──
@@ -477,14 +734,22 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
             // Record what actually went out. Best-effort by contract — the email has already been
             // delivered by this point, so a bookkeeping failure must not surface as a send failure.
             if (thread) {
+                // `generatedBody` is the AGENT's text, which is not always what we are sending: a
+                // reviewer can rewrite the draft in the Review Queue before approving, and that
+                // edit overwrites `outreachDraft` in place. `draftOriginal` is stashed on the first
+                // such edit (plan §2.6), so prefer it — it is the only thing that makes an edited
+                // message distinguishable from an unedited one, which is what the template-feedback
+                // loop reads. Absent it, nothing was edited and the two are genuinely equal.
+                const original = (data.draftOriginal && typeof data.draftOriginal === 'object')
+                    ? data.draftOriginal as Record<string, unknown> : null;
+                const generatedBody = typeof original?.body === 'string' && original.body.trim()
+                    ? original.body : bodyText;
                 await recordOutboundMessage(db, thread.id, {
                     organisationId: orgId,
                     fromEmail: null,
                     subject,
                     body: bodyText,
-                    // The stored draft is the agent's; a body generated just now is equally the
-                    // agent's. Either way nothing here was human-edited, so generatedBody === body.
-                    generatedBody: bodyText,
+                    generatedBody,
                 });
 
                 // Enrol in the follow-up cadence (Phase 2b). A consequence of having ACTUALLY
@@ -519,6 +784,7 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
                 assistantRecordId: recordId,
                 actor: 'agent',
                 actorUserId: userId,
+                blueprintVersion: await blueprintVersion(),
                 payload: {
                     provider,
                     emailKind: emailKind ?? null,

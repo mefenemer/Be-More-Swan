@@ -3537,12 +3537,17 @@ export const templateFeedback = pgTable("template_feedback", {
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
   leadMessageId: integer("lead_message_id").references(() => leadMessages.id, { onDelete: "cascade" }),
   templateVersion: text("template_version"),
-  editReason: text("edit_reason"),                          // closed vocabulary — see signal/edit configs
-  diffSummary: text("diff_summary"),                        // one line, LLM-summarised
+  // CLOSED vocabulary — src/config/template-feedback.ts EDIT_REASONS. It is the GROUP BY key for
+  // the edit-pattern proposer, and free text cannot be clustered.
+  editReason: text("edit_reason"),
+  diffSummary: text("diff_summary"),                        // one line, computed from the before/after
   appliedToTemplate: boolean("applied_to_template").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
   index("template_feedback_org_reason_idx").on(t.organisationId, t.editReason, t.createdAt),
+  check("template_feedback_edit_reason_check", sql`${t.editReason} IS NULL OR ${t.editReason} IN (
+    'too_formal','too_casual','wrong_value_prop','wrong_pain_point',
+    'too_long','factually_wrong','bad_subject','personalisation_missing','other')`),
 ]);
 
 // ────────────────────────────────────────────────────────────────────────────

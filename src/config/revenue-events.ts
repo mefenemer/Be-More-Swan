@@ -108,6 +108,55 @@ export const LOSS_REASONS = [
 export type LossReason = typeof LOSS_REASONS[number];
 
 /**
+ * How each loss reason is offered to the user when they mark a deal lost (Phase 4.5).
+ *
+ * Lives HERE, beside the vocabulary, for the same reason SEQUENCE_HALT_REASON_LABELS does: the keys
+ * are a closed set, and a second file listing them is a hand copy. Every hand copy of a closed
+ * vocabulary in this codebase has drifted — the connection-status one badged a dead connection
+ * "Connected" for weeks. The browser gets these via scripts/gen-client-constants.ts, never by
+ * retyping them into a page.
+ *
+ * Phrased as the user would say it, not as the analyser reads it: `not_icp` is a judgement about
+ * our targeting, so it says so — that is the whole signal the Strategy Agent is looking for.
+ */
+export const LOSS_REASON_LABELS: Record<LossReason, string> = {
+    price: 'Too expensive',
+    timing: 'Bad timing — not now',
+    no_budget: 'No budget',
+    competitor: 'Went with a competitor',
+    no_response: 'Never replied',
+    wrong_contact: 'Wrong person — not the decision maker',
+    not_icp: 'Not a fit — we should not have targeted them',
+    feature_gap: 'We were missing something they needed',
+    went_silent: 'Went quiet mid-conversation',
+    other: 'Something else',
+};
+
+/** How each outcome is labelled in the UI. */
+export const OUTCOME_LABELS: Record<RevenueOutcome, string> = {
+    won: 'Won',
+    lost: 'Lost',
+    disqualified: 'Disqualified',
+};
+
+/**
+ * Terminal events that require a loss reason.
+ *
+ * `won` takes none — there is no such thing — and passing one would store a nonsense value, since
+ * recordEvent() accepts lossReason on ANY terminal event. `disqualified` requires one for the same
+ * reason `lost` does: "we ruled them out" is only useful to the analyser if it says why, and
+ * `not_icp` vs `wrong_contact` is precisely the targeting signal Phase 5 pivots on.
+ */
+export const OUTCOMES_REQUIRING_LOSS_REASON: readonly RevenueOutcome[] = ['lost', 'disqualified'];
+
+/** The terminal event type that records this outcome. Inverse of OUTCOME_FOR_EVENT. */
+export const EVENT_FOR_OUTCOME: Record<RevenueOutcome, RevenueEventType> = {
+    won: 'deal_won',
+    lost: 'deal_lost',
+    disqualified: 'deal_disqualified',
+};
+
+/**
  * Who caused the event. This is what makes "how much of our pipeline is genuinely autonomous?"
  * answerable, and it is the join key for judging whether raising an autonomy level actually helped.
  *   'system' — a background job with no human or LLM decision (backfill, cron bookkeeping)

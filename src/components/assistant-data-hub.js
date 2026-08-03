@@ -186,6 +186,209 @@
     return dl;
   }
 
+  // ── Deal outcome (Phase 4.5) ────────────────────────────────────────────────
+  // Marking a lead won/lost is what gives the revenue ledger its terminal events — the only rows
+  // carrying `outcome`, and the entire input to the Strategy Agent's win-rate aggregate. Before
+  // this control existed nothing in the product could produce one.
+  //
+  // The vocabularies come from window.RevenueConstants (generated from src/config/revenue-events.ts
+  // by scripts/gen-client-constants.ts) rather than being retyped here: they are CHECK-constrained
+  // server-side, and recordEvent() swallows its errors, so a drifted copy would fail invisibly.
+
+  /** Colour + label for a recorded outcome. Only classes already compiled into style.css. */
+  function outcomeChipClass(outcome) {
+    if (outcome === 'won') return 'bg-green-50 text-green-700 border-gray-200';
+    if (outcome === 'lost') return 'bg-red-50 text-red-700 border-red-200';
+    return 'bg-amber-50 text-amber-700 border-amber-200';   // disqualified
+  }
+
+  /** The banner shown above a decided lead's detail. Returns null when no outcome is recorded. */
+  function outcomeBanner(record) {
+    const d = record.data && record.data.dealOutcome;
+    if (!d || !d.outcome) return null;
+    const RC = window.RevenueConstants;
+    const label = RC ? RC.outcomeLabel(d.outcome) : String(d.outcome);
+    const reason = d.lossReason ? (RC ? RC.lossReasonLabel(d.lossReason) : String(d.lossReason)) : '';
+    const bits = [];
+    if (reason) bits.push(esc(reason));
+    if (d.valueGbp != null) bits.push('£' + esc(Number(d.valueGbp).toLocaleString('en-GB')));
+    // A null cycle time is normal, not missing data: it means nothing was ever sent to this lead,
+    // so there is no sales cycle to measure. Say that rather than showing "0 days".
+    if (d.cycleDays != null) bits.push(esc(d.cycleDays) + (Number(d.cycleDays) === 1 ? ' day' : ' days') + ' to close');
+    else bits.push('never contacted');
+    if (d.at) bits.push('recorded ' + esc(fmtDate(d.at)));
+
+    const wrap = document.createElement('div');
+    wrap.className = 'mb-4 flex flex-wrap items-center gap-2';
+    wrap.innerHTML = `
+      <span class="text-xs font-bold px-2 py-0.5 rounded-full border ${outcomeChipClass(d.outcome)}">${esc(label)}</span>
+      <span class="text-xs text-gray-500">${bits.join(' · ')}</span>`;
+    return wrap;
+  }
+
+  /**
+   * Record (or correct) a lead's deal outcome.
+   *
+   * Two server rules are mirrored here so the form cannot submit something the server will refuse:
+   * lost/disqualified need a reason, and only a win takes a value. The server enforces both
+   * regardless — this only decides which fields are shown.
+   */
+  function openOutcomeModal(record) {
+    const RC = window.RevenueConstants;
+    if (!RC) { window.showToast?.('Outcome options failed to load — refresh the page.'); return; }
+    const existing = (record.data && record.data.dealOutcome) || null;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'fixed inset-0 bg-gray-900/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm';
+    overlay.innerHTML = `
+      <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
+        <div class="flex items-start justify-between gap-4 p-5 border-b border-gray-100">
+          <div>
+            <h3 class="text-lg font-bold text-gray-900">Record outcome</h3>
+            <p class="text-xs text-gray-500 mt-0.5">${esc(record.title || 'This lead')}</p>
+          </div>
+          <button type="button" data-oc-close class="text-gray-400 hover:text-gray-600 text-2xl leading-none cursor-pointer">&times;</button>
+        </div>
+        <form data-oc-form class="p-5 space-y-4">
+          ${existing && existing.outcome ? `
+            <div class="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p class="text-xs font-bold text-amber-700">Already marked ${esc(RC.outcomeLabel(existing.outcome))}</p>
+              <p class="text-xs text-amber-700 mt-1">Recording a different outcome keeps both in the history — the most recent one counts.</p>
+            </div>` : ''}
+
+          <div>
+            <span class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-2">What happened?</span>
+            <div class="flex flex-wrap gap-2" data-oc-outcomes>
+              ${RC.outcomes.map((o) => `
+                <button type="button" data-oc-outcome="${esc(o)}"
+                  class="px-3 py-1.5 bg-white border border-gray-200 text-gray-700 text-xs font-bold rounded-lg transition">${esc(RC.outcomeLabel(o))}</button>`).join('')}
+            </div>
+          </div>
+
+          <label class="block" data-oc-reason-wrap hidden>
+            <span class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Why?</span>
+            <select name="lossReason" class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-emerald-400">
+              <option value="">Choose a reason…</option>
+              ${RC.lossReasons.map((r) => `<option value="${esc(r)}">${esc(RC.lossReasonLabel(r))}</option>`).join('')}
+            </select>
+            <span class="block text-xs text-gray-400 mt-1">Fixed list on purpose — it's what makes "why are we losing?" answerable.</span>
+          </label>
+
+          <label class="block" data-oc-value-wrap hidden>
+            <span class="block text-xs font-bold text-gray-500 uppercase tracking-wide mb-1">Deal value (optional)</span>
+            <input type="number" name="valueGbp" min="0" step="0.01" placeholder="e.g. 4800"
+              class="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-emerald-400">
+            <span class="block text-xs text-gray-400 mt-1">In £. Leave blank if you'd rather not say.</span>
+          </label>
+
+          <p class="hidden text-xs font-semibold" data-oc-status></p>
+          <div class="flex items-center justify-end gap-2 pt-1">
+            <button type="button" data-oc-close class="px-4 py-2 text-sm font-bold text-gray-600 hover:text-gray-800 rounded-lg cursor-pointer">Cancel</button>
+            <button type="submit" data-oc-submit disabled
+              class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-sm font-bold rounded-lg transition disabled:opacity-60 disabled:cursor-not-allowed">Save outcome</button>
+          </div>
+        </form>
+      </div>`;
+
+    const close = () => overlay.remove();
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+    overlay.querySelectorAll('[data-oc-close]').forEach((b) => b.addEventListener('click', close));
+
+    const form = overlay.querySelector('[data-oc-form]');
+    const status = overlay.querySelector('[data-oc-status]');
+    const submit = overlay.querySelector('[data-oc-submit]');
+    const reasonWrap = overlay.querySelector('[data-oc-reason-wrap]');
+    const valueWrap = overlay.querySelector('[data-oc-value-wrap]');
+    let chosen = null;
+
+    // `hidden` loses to a class that sets display (these wrappers are `block`), so pin
+    // style.display as well — the same trap that left an empty badge dot on the Review Queue tab.
+    const setShown = (el, on) => { el.hidden = !on; el.style.display = on ? 'block' : 'none'; };
+    setShown(reasonWrap, false);
+    setShown(valueWrap, false);
+
+    overlay.querySelector('[data-oc-outcomes]').addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-oc-outcome]');
+      if (!btn) return;
+      chosen = btn.getAttribute('data-oc-outcome');
+      overlay.querySelectorAll('[data-oc-outcome]').forEach((b) => {
+        const on = b === btn;
+        b.className = on
+          ? 'px-3 py-1.5 bg-emerald-700 border border-emerald-700 text-white text-xs font-bold rounded-lg transition'
+          : 'px-3 py-1.5 bg-white border border-gray-200 text-gray-700 text-xs font-bold rounded-lg transition';
+      });
+      setShown(reasonWrap, RC.needsLossReason(chosen));
+      setShown(valueWrap, chosen === 'won');
+      if (!RC.needsLossReason(chosen)) form.elements.lossReason.value = '';
+      if (chosen !== 'won') form.elements.valueGbp.value = '';
+      submit.disabled = false;
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!chosen) return;
+      const lossReason = form.elements.lossReason.value || '';
+      if (RC.needsLossReason(chosen) && !lossReason) {
+        status.textContent = 'Pick a reason so this counts toward "why are we losing?".';
+        status.className = 'block text-xs font-semibold text-red-600';
+        return;
+      }
+      const rawValue = form.elements.valueGbp.value;
+      submit.disabled = true;
+      status.textContent = 'Saving…';
+      status.className = 'block text-xs font-semibold text-gray-500';
+
+      const post = (confirmChange) => fetch('/.netlify/functions/lead-generation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'set_outcome',
+          assistantId: state.assistantId,
+          recordId: record.id,
+          outcome: chosen,
+          ...(lossReason ? { lossReason } : {}),
+          ...(chosen === 'won' && rawValue !== '' ? { valueGbp: Number(rawValue) } : {}),
+          ...(confirmChange ? { confirmChange: true } : {}),
+        }),
+      });
+
+      try {
+        let res = await post(false);
+        let data = await res.json().catch(() => ({}));
+
+        // 409: an outcome is already recorded. The server refuses by default so a double-click
+        // cannot leave one lead counted as both won and lost — confirming is a deliberate act.
+        if (res.status === 409 && data.needsConfirmation) {
+          const RCl = RC.outcomeLabel(data.currentOutcome);
+          const ok = window.confirm(
+            `This lead is already marked ${RCl}.\n\n`
+            + `Recording "${RC.outcomeLabel(chosen)}" instead keeps both in the history — the most recent one is what counts.\n\n`
+            + 'Change it?'
+          );
+          if (!ok) { close(); return; }
+          res = await post(true);
+          data = await res.json().catch(() => ({}));
+        }
+        if (!res.ok) throw new Error(data.error || 'Could not record the outcome.');
+
+        record.data = { ...(record.data || {}), dealOutcome: data.dealOutcome };
+        close();
+        renderTable();
+        const halted = Number(data.sequencesHalted) || 0;
+        window.showToast?.(
+          `Outcome recorded: ${RC.outcomeLabel(chosen)}.`
+          + (halted ? ` Follow-up emails stopped.` : '')
+        );
+      } catch (err) {
+        submit.disabled = false;
+        status.textContent = err.message || 'Could not record the outcome.';
+        status.className = 'block text-xs font-semibold text-red-600';
+      }
+    });
+
+    document.body.appendChild(overlay);
+  }
+
   // Meetings: summary + a check-off-able action-item list persisted via PATCH
   // (data.tasks[i].done), instead of the read-only chat card.
   function meetingDetail(record) {
@@ -273,6 +476,16 @@
         btn.disabled = false;           // opening a modal shouldn't leave the button stuck disabled
         openEditLeadModal(record);
       }});
+      // The only way anything in this product records a won/lost deal. Offered on every lead, not
+      // just contacted ones: disqualifying a lead you never emailed is a real, useful outcome —
+      // `not_icp` on an untouched lead is the cleanest targeting signal there is.
+      buttons.push({
+        label: record.data?.dealOutcome?.outcome ? 'Change outcome' : 'Record outcome',
+        async run(btn) {
+          btn.disabled = false;
+          openOutcomeModal(record);
+        },
+      });
       const draft = record.data?.outreachDraft;
       if (draft && draft.body) {
         buttons.push({ label: 'Copy outreach draft', async run(btn) {
@@ -421,6 +634,10 @@
       // with the same card the transcript used.
       body = window.DisruptiveUIRegistry.render(record.data);
     }
+    // A decided deal leads with its outcome — above the card, so it reads as a fact about the
+    // lead rather than another field buried in it.
+    const outcome = state.hub.recordType === 'lead' ? outcomeBanner(record) : null;
+    if (outcome) panel.appendChild(outcome);
     panel.appendChild(body || keyValueFallback(record.data));
     panel.appendChild(detailActions(record));
     return panel;

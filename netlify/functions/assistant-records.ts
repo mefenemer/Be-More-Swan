@@ -19,6 +19,7 @@ import { actionItems, aiAssistants, assistantRecords, discoveredLeads } from '..
 import { requireTenant } from '../../src/utils/tenant';
 import { enqueueScenarioTrigger, type TriggerSubject } from '../../src/utils/scenario-engine';
 import { recordEvent } from '../../src/utils/revenue-ledger';
+import { getBlueprintVersion } from '../../src/utils/blueprint-version';
 import { enqueueLeadHandoff } from '../../src/utils/lead-handoff';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -482,6 +483,7 @@ export default withLambda(async (event) => {
                             assistantRecordId: prev.id,
                             actor: 'user',
                             actorUserId: userId,
+                            blueprintVersion: await getBlueprintVersion(db, prev.aiAssistantId),
                             payload: { from: prev.approvalStatus, to: next, rating: prev.status },
                         });
                     }

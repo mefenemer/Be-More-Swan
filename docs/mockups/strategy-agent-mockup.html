@@ -1,0 +1,778 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Strategy Agent — Phase 5 mockup</title>
+<style>
+  /* Standalone mockup. Tokens copied from input.css so it reads as the real product,
+     but NOT dependent on style.css — nothing here can trigger a Tailwind rebuild.
+     Diff colours use green-*/red-* explicitly: `emerald-*` is remapped to neon pink in
+     input.css, so an emerald "add" and a pink "remove" look identical. */
+  :root{
+    --accent:#ff007f; --accent-hover:#d6006b; --accent-wash:#fff0f5; --accent-border:#ffd6e8;
+    --g50:#f9fafb; --g100:#f3f4f6; --g200:#e5e7eb; --g300:#d1d5db; --g400:#9ca3af;
+    --g500:#6b7280; --g600:#4b5563; --g700:#374151; --g900:#111827;
+    --amber-wash:#fffbeb; --amber-border:#fde68a; --amber-text:#92400e;
+    --green-wash:#f0fdf4; --green-border:#bbf7d0; --green-text:#166534;
+    --blue-wash:#eff6ff; --blue-border:#bfdbfe; --blue-text:#1e40af;
+    --red-wash:#fef2f2; --red-border:#fecaca; --red-text:#991b1b;
+  }
+  *{box-sizing:border-box}
+  /* A class that sets `display` beats the UA [hidden] rule — .banner/.row are flex, so
+     `el.hidden = true` would silently do nothing. Make hidden always win. Same trap as the
+     Review Queue tab badge, which rendered as an empty amber dot for exactly this reason. */
+  [hidden]{display:none !important}
+  body{margin:0;background:var(--g50);color:var(--g900);
+    font-family:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:72rem;margin:0 auto;padding:2rem 1.5rem 5rem}
+  .muted{color:var(--g500)}
+  .small{font-size:12px}
+  .tiny{font-size:11px}
+
+  .mockbar{background:var(--g900);color:#fff;padding:.6rem 1.5rem;font-size:12px;
+    display:flex;gap:.75rem;align-items:center;flex-wrap:wrap}
+  .mockbar strong{font-weight:600}
+  .mockbar .pill{background:rgba(255,255,255,.12);border-radius:999px;padding:.15rem .55rem;font-size:11px}
+
+  .crumb{display:flex;align-items:center;gap:.35rem;color:var(--g500);font-weight:500;margin-bottom:1.5rem}
+  .idcard{background:#fff;border:1px solid var(--g200);border-radius:1rem;box-shadow:0 1px 2px rgba(0,0,0,.05);
+    padding:1rem 1.25rem;margin-bottom:1.5rem;display:flex;align-items:center;gap:1rem;flex-wrap:wrap}
+  .avatar{width:2.75rem;height:2.75rem;border-radius:.75rem;background:var(--accent-wash);
+    border:1px solid var(--accent-border);display:grid;place-items:center;font-size:1.15rem;flex-shrink:0}
+  .idcard h1{font-size:1rem;font-weight:600;margin:0}
+
+  nav.tabs{border-bottom:1px solid var(--g200);display:flex;gap:2rem;margin-bottom:1.5rem;overflow-x:auto}
+  nav.tabs button{background:none;border:none;border-bottom:2px solid transparent;padding:0 0 .75rem;
+    font:inherit;font-weight:500;color:var(--g500);cursor:pointer;white-space:nowrap;
+    display:inline-flex;align-items:center;gap:.4rem}
+  nav.tabs button:hover{color:var(--g900);border-bottom-color:var(--g300)}
+  nav.tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+  /* The badge pins display inline-flex, so hiding it needs style.display — not a class. */
+  .tabbadge{background:var(--amber-wash);border:1px solid var(--amber-border);color:var(--amber-text);
+    border-radius:999px;font-size:10px;font-weight:700;padding:.05rem .4rem;display:inline-flex}
+
+  .card{background:#fff;border:1px solid var(--g200);border-radius:1rem;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+  .card-pad{padding:1.25rem}
+  .card-head{padding:1rem 1.25rem;border-bottom:1px solid var(--g200);display:flex;
+    align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap}
+  .card-head h2{font-size:.9rem;font-weight:600;margin:0}
+  .grid{display:grid;gap:1rem}
+  .g2{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .g3{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .stack{display:flex;flex-direction:column;gap:1rem}
+  .row{display:flex;gap:.75rem;align-items:center;flex-wrap:wrap}
+  .between{display:flex;gap:1rem;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+  @media(max-width:860px){.g3,.g2{grid-template-columns:minmax(0,1fr)}}
+
+  .chip{display:inline-flex;align-items:center;gap:.3rem;border-radius:999px;padding:.15rem .55rem;
+    font-size:11px;font-weight:600;border:1px solid}
+  .c-hot{background:var(--accent-wash);border-color:var(--accent-border);color:var(--accent-hover)}
+  .c-warm{background:var(--amber-wash);border-color:var(--amber-border);color:var(--amber-text)}
+  .c-cold{background:var(--g100);border-color:var(--g200);color:var(--g600)}
+  .c-ok{background:var(--green-wash);border-color:var(--green-border);color:var(--green-text)}
+  .c-info{background:var(--blue-wash);border-color:var(--blue-border);color:var(--blue-text)}
+  .c-risk{background:var(--red-wash);border-color:var(--red-border);color:var(--red-text)}
+
+  .btn{border-radius:.5rem;padding:.4rem .8rem;font-size:12px;font-weight:600;cursor:pointer;
+    border:1px solid var(--g300);background:#fff;color:var(--g700);font-family:inherit}
+  .btn:hover{background:var(--g50)}
+  .btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .btn-primary:hover{background:var(--accent-hover);border-color:var(--accent-hover)}
+  .btn-ghost{border-color:transparent;color:var(--g500)}
+  .btn[disabled]{opacity:.45;cursor:not-allowed}
+
+  .banner{border-radius:.75rem;padding:.85rem 1rem;border:1px solid;display:flex;gap:.75rem;align-items:flex-start}
+  .b-amber{background:var(--amber-wash);border-color:var(--amber-border);color:var(--amber-text)}
+  .b-accent{background:var(--accent-wash);border-color:var(--accent-border);color:var(--accent-hover)}
+  .b-blue{background:var(--blue-wash);border-color:var(--blue-border);color:var(--blue-text)}
+  .b-green{background:var(--green-wash);border-color:var(--green-border);color:var(--green-text)}
+  .b-red{background:var(--red-wash);border-color:var(--red-border);color:var(--red-text)}
+
+  .tscroll{overflow-x:auto;border-radius:0 0 1rem 1rem}
+  .tscroll table{min-width:44rem}
+  table{width:100%;border-collapse:collapse}
+  th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--g500);
+    font-weight:600;padding:.6rem 1.25rem;background:var(--g50);border-bottom:1px solid var(--g200)}
+  td{padding:.75rem 1.25rem;border-bottom:1px solid var(--g100);vertical-align:middle}
+  tr:last-child td{border-bottom:none}
+
+  .bar{height:6px;border-radius:999px;background:var(--g100);overflow:hidden}
+  .bar>i{display:block;height:100%;background:var(--accent);border-radius:999px}
+  .bar.thin{height:4px}
+  .bar>i.grey{background:var(--g300)}
+
+  /* Long identifiers (discovery_campaigns.targetPersona.decisionMaker) have no break
+     opportunity and push the page sideways at 375px. Prose still breaks at spaces first. */
+  code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;overflow-wrap:anywhere}
+  .note{border-left:3px solid var(--accent-border);background:var(--accent-wash);
+    padding:.6rem .85rem;border-radius:0 .5rem .5rem 0;font-size:12px;color:var(--g700)}
+
+  .kv{display:flex;justify-content:space-between;gap:1rem;padding:.5rem 0;border-bottom:1px solid var(--g100)}
+  .kv:last-child{border-bottom:none}
+  .kv dt{color:var(--g500);font-size:12px}
+  .kv dd{margin:0;font-weight:600;font-size:12px;text-align:right}
+
+  .seg{display:flex;border:1px solid var(--g300);border-radius:.5rem;overflow:hidden;width:fit-content;
+    max-width:100%;flex-wrap:wrap}
+  .seg button{padding:.35rem .7rem;font-size:11px;font-weight:600;color:var(--g500);cursor:pointer;
+    border:none;border-right:1px solid var(--g200);background:#fff;font-family:inherit}
+  .seg button:last-child{border-right:none}
+  .seg button.on{background:var(--accent);color:#fff}
+
+  .state{display:none}
+  .state.on{display:block}
+
+  /* Empty-state hero */
+  .empty{text-align:center;padding:2.5rem 1.25rem}
+  .empty .ico{font-size:2rem;opacity:.55}
+  .empty h3{margin:.75rem 0 .35rem;font-size:1rem;font-weight:600}
+  .empty p{margin:0 auto;max-width:34rem;color:var(--g500);font-size:13px}
+
+  /* diff */
+  .diffbox{border:1px solid var(--g200);border-radius:.75rem;overflow:hidden}
+  .diffrow{padding:.7rem .9rem}
+  .diffrow.before{background:var(--red-wash);border-bottom:1px solid var(--g200)}
+  .diffrow.after{background:var(--green-wash)}
+  .diffrow .lbl{font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase}
+  .diffrow.before .lbl{color:var(--red-text)}
+  .diffrow.after .lbl{color:var(--green-text)}
+
+  .reasons label{display:flex;gap:.5rem;align-items:flex-start;cursor:pointer;font-size:12px;
+    padding:.35rem .5rem;border-radius:.5rem}
+  .reasons label:hover{background:rgba(255,255,255,.6)}
+  .reasons input{margin-top:.25rem;flex-shrink:0}
+  .txtin{width:100%;border:1px solid var(--g300);border-radius:.5rem;padding:.5rem .65rem;
+    font:inherit;font-size:12px;outline:none;background:#fff}
+  .txtin:focus{border-color:var(--accent)}
+</style>
+</head>
+<body>
+
+<div class="mockbar">
+  <strong>MOCKUP</strong>
+  <span class="pill">Phase 5 — Strategy Agent</span>
+  <span class="pill">docs/strategy-agent-plan.md</span>
+  <span class="pill">not built</span>
+  <span style="opacity:.6">Static. Buttons switch states; nothing is wired.</span>
+</div>
+
+<div class="wrap">
+
+  <div class="crumb small">Assistants <span>›</span> Lead Generator <span>›</span> <strong style="color:var(--g900)">Strategy</strong></div>
+
+  <div class="idcard">
+    <div class="avatar">🎯</div>
+    <div style="flex:1;min-width:12rem">
+      <h1>Lead Generator</h1>
+      <div class="small muted">Outbound discovery, qualification and follow-up</div>
+    </div>
+    <span class="chip c-ok">Active</span>
+  </div>
+
+  <nav class="tabs">
+    <button>Overview</button>
+    <button>Signal Inbox</button>
+    <button>Data Hub</button>
+    <button>Review Queue</button>
+    <button>Conversations</button>
+    <button class="active">Strategy <span class="tabbadge" id="tab-badge" style="display:none">1</span></button>
+    <button>Calendar</button>
+  </nav>
+
+  <!-- State switcher — mockup chrome, not part of the design. -->
+  <div class="card card-pad" style="margin-bottom:1.5rem;background:var(--g100);box-shadow:none">
+    <div class="between" style="align-items:center">
+      <div class="small" style="font-weight:600">Screen state</div>
+      <div class="seg" id="switcher">
+        <button class="on" data-s="empty">1 · No evidence</button>
+        <button data-s="accruing">2 · Accruing</button>
+        <button data-s="edit">3 · Proposal (edits)</button>
+        <button data-s="winloss">4 · Proposal (win/loss)</button>
+        <button data-s="applied">5 · Applied</button>
+        <button data-s="history">6 · History</button>
+      </div>
+    </div>
+    <div class="tiny muted" style="margin-top:.5rem" id="switch-hint">
+      The state every real screen is in today — and will be for months. It is a designed screen, not a fallback.
+    </div>
+  </div>
+
+  <!-- ══════════════ 1. NO EVIDENCE — the day-one state ══════════════ -->
+  <section class="state on" id="s-empty">
+    <div class="note" style="margin-bottom:1rem">
+      <strong>This is the default state, not an error.</strong> §7.1 forbids pivoting below
+      <span class="mono">MIN_SAMPLE</span> — "no pivot on noise" is the phase's whole safety argument.
+      A blank card for a quarter reads as broken, so the empty state is <em>diagnostic</em>: it names the
+      missing input and how far off it is.
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-pad empty">
+        <div class="ico">🧭</div>
+        <h3>Not enough evidence yet</h3>
+        <p>
+          The Strategy Agent watches what wins and what gets edited, then proposes one change at a time —
+          with the evidence attached. It hasn't seen enough to say anything useful yet.
+        </p>
+      </div>
+      <div style="border-top:1px solid var(--g200)" class="card-pad">
+        <div class="small" style="font-weight:600;margin-bottom:.75rem">What it's waiting for</div>
+        <div class="grid g2">
+
+          <div class="card card-pad" style="box-shadow:none;background:var(--g50)">
+            <div class="between" style="align-items:center;margin-bottom:.5rem">
+              <div class="small" style="font-weight:600">Closed deals</div>
+              <span class="chip c-cold">0 / 20</span>
+            </div>
+            <div class="bar"><i class="grey" style="width:0%"></i></div>
+            <div class="tiny muted" style="margin-top:.5rem">
+              Needed for win/loss analysis. <strong>Nothing has been marked won or lost yet</strong> —
+              no lead has an outcome recorded.
+            </div>
+            <div class="row" style="margin-top:.6rem">
+              <button class="btn">Mark a lead's outcome</button>
+            </div>
+          </div>
+
+          <div class="card card-pad" style="box-shadow:none;background:var(--g50)">
+            <div class="between" style="align-items:center;margin-bottom:.5rem">
+              <div class="small" style="font-weight:600">Message edits</div>
+              <span class="chip c-cold">0 / 5</span>
+            </div>
+            <div class="bar"><i class="grey" style="width:0%"></i></div>
+            <div class="tiny muted" style="margin-top:.5rem">
+              Needed for template proposals. When you edit a drafted message and say why, the reason is
+              banked here — no closed deal required.
+            </div>
+            <div class="row" style="margin-top:.6rem">
+              <button class="btn">Go to Review Queue</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+      <div style="border-top:1px solid var(--g200);background:var(--g50);border-radius:0 0 1rem 1rem"
+           class="card-pad small muted">
+        <div class="between">
+          <span>Last run: <strong style="color:var(--g700)">Mon 3 Aug, 05:00</strong> · skipped — no segment met the threshold</span>
+          <span>Runs weekly, Mondays 05:00 UTC</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="banner b-blue">
+      <div>ℹ️</div>
+      <div class="small">
+        <strong>"Is it even running?" must be answerable without the logs.</strong> The footer always shows the
+        last run and why it skipped. A silent agent and a broken agent look identical otherwise — and this one
+        is designed to be silent most of the time.
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ 2. ACCRUING — below MIN_SAMPLE ══════════════ -->
+  <section class="state" id="s-accruing">
+    <div class="note" style="margin-bottom:1rem">
+      Evidence is arriving but no segment clears its threshold. Same screen, live numbers —
+      the user can see it working before it ever proposes anything.
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-head">
+        <h2>Evidence building</h2>
+        <span class="chip c-warm">Below threshold</span>
+      </div>
+      <div class="card-pad stack">
+        <div class="grid g2">
+          <div class="card card-pad" style="box-shadow:none;background:var(--g50)">
+            <div class="between" style="align-items:center;margin-bottom:.5rem">
+              <div class="small" style="font-weight:600">Closed deals</div>
+              <span class="chip c-warm">11 / 20</span>
+            </div>
+            <div class="bar"><i style="width:55%"></i></div>
+            <div class="tiny muted" style="margin-top:.5rem">Across all segments · trailing 90 days</div>
+          </div>
+          <div class="card card-pad" style="box-shadow:none;background:var(--g50)">
+            <div class="between" style="align-items:center;margin-bottom:.5rem">
+              <div class="small" style="font-weight:600">Message edits</div>
+              <span class="chip c-warm">3 / 5</span>
+            </div>
+            <div class="bar"><i style="width:60%"></i></div>
+            <div class="tiny muted" style="margin-top:.5rem">Modal reason: <span class="mono">too_formal</span> (3 of 3)</div>
+          </div>
+        </div>
+
+        <div>
+          <div class="small" style="font-weight:600;margin-bottom:.6rem">Per segment — none eligible yet</div>
+          <div class="card" style="box-shadow:none">
+            <div class="tscroll">
+              <table>
+                <thead><tr><th>Segment</th><th>Outcomes</th><th>Win rate</th><th>Status</th></tr></thead>
+                <tbody>
+                  <tr><td>CFO / Finance</td><td>6</td><td class="muted">—</td><td><span class="chip c-cold">below MIN_SAMPLE</span></td></tr>
+                  <tr><td>CMO / Marketing</td><td>4</td><td class="muted">—</td><td><span class="chip c-cold">below MIN_SAMPLE</span></td></tr>
+                  <tr><td>Owner / MD</td><td>1</td><td class="muted">—</td><td><span class="chip c-cold">below MIN_SAMPLE</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div class="tiny muted" style="margin-top:.6rem">
+            Win rate is deliberately hidden below threshold. Showing "6 outcomes, 67%" invites the user to act on
+            n=6 — which is the exact judgement the agent is forbidden from making.
+          </div>
+        </div>
+
+        <div class="banner b-amber">
+          <div>⚠️</div>
+          <div class="small">
+            <strong>9 outcomes are excluded from attribution.</strong> They were recorded before strategy
+            versioning, so no <span class="mono">blueprint_version</span> is attached and they cannot be tied to
+            the strategy that produced them. They count toward "why are we losing?", never toward
+            "which version was better."
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ 3. PROPOSAL — edit_pattern (Phase 5a) ══════════════ -->
+  <section class="state" id="s-edit">
+    <div class="note" style="margin-bottom:1rem">
+      <strong>Phase 5a.</strong> Evidence is <span class="mono">template_feedback</span> — human edits at the
+      review gate, clustered by reason. <strong>No closed deals required</strong>, so this is the first proposal
+      type any org will realistically see. §2.6's ⭐ path: the edit shipped immediately for that prospect, and the
+      reason became evidence.
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>Proposed change · outreach playbook</h2>
+        <div class="row">
+          <span class="chip c-info">from 6 edits</span>
+          <span class="chip c-warm">Awaiting review</span>
+        </div>
+      </div>
+      <div class="card-pad stack">
+        <div class="between">
+          <div>
+            <div style="font-weight:600;font-size:1rem">Loosen the opening paragraph's register</div>
+            <div class="small muted">Proposed 1 day ago · expires in 13 days · <span class="mono">source=edit_pattern</span></div>
+          </div>
+          <div class="row">
+            <button class="btn" data-reject="edit">Reject</button>
+            <button class="btn btn-primary">Apply &amp; recompile</button>
+          </div>
+        </div>
+
+        <div class="grid g3">
+          <div class="card card-pad" style="box-shadow:none;background:var(--g50)">
+            <div class="tiny muted">EVIDENCE · sample</div>
+            <div style="font-weight:600">6 human edits</div>
+            <div class="tiny muted">above MIN_EDIT_SAMPLE (5) ✓</div>
+          </div>
+          <div class="card card-pad" style="box-shadow:none;background:var(--g50)">
+            <div class="tiny muted">EVIDENCE · agreement</div>
+            <div style="font-weight:600">6 of 6 · <span class="mono">too_formal</span></div>
+            <div class="tiny muted">single modal reason</div>
+          </div>
+          <div class="card card-pad" style="box-shadow:none;background:var(--g50)">
+            <div class="tiny muted">EVIDENCE · editors</div>
+            <div style="font-weight:600">2 people</div>
+            <div class="tiny muted">not one person's preference</div>
+          </div>
+        </div>
+
+        <div>
+          <div class="small" style="font-weight:600;margin-bottom:.5rem">
+            Change · one field per run <span class="mono muted" style="font-weight:400">ai_blueprints §4 · outreach.opening</span>
+          </div>
+          <div class="diffbox">
+            <div class="diffrow before">
+              <div class="lbl">Before</div>
+              <div class="mono">"I am writing to enquire whether your organisation would be receptive to a brief discussion regarding operational efficiencies."</div>
+            </div>
+            <div class="diffrow after">
+              <div class="lbl">After</div>
+              <div class="mono">"Quick one — noticed you're running four sites now. Most groups that size lose a day a week to rota admin. Worth a 15-minute chat?"</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="box-shadow:none">
+          <div class="card-head" style="padding:.7rem 1rem"><h2 style="font-size:.8rem">The 6 edits behind this</h2></div>
+          <div class="tscroll">
+            <table>
+              <thead><tr><th>Prospect</th><th>Editor</th><th>Reason</th><th>What changed</th></tr></thead>
+              <tbody>
+                <tr><td>Quendon Hall</td><td>Aura</td><td><span class="mono">too_formal</span></td><td class="small muted">Cut "I am writing to enquire"; led with the observation</td></tr>
+                <tr><td>Harper Mills Group</td><td>Aura</td><td><span class="mono">too_formal</span></td><td class="small muted">Replaced "receptive to a discussion" with a direct ask</td></tr>
+                <tr><td>Ashcombe Estates</td><td>Sam</td><td><span class="mono">too_formal</span></td><td class="small muted">Shortened opener to one line</td></tr>
+                <tr><td>Wren &amp; Co</td><td>Sam</td><td><span class="mono">too_formal</span></td><td class="small muted">Dropped the formal salutation</td></tr>
+                <tr><td>Bellhouse Group</td><td>Aura</td><td><span class="mono">too_formal</span></td><td class="small muted">Rewrote to open on their site count</td></tr>
+                <tr><td>Tallow Farm Ltd</td><td>Aura</td><td><span class="mono">too_formal</span></td><td class="small muted">Cut two sentences of preamble</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="banner b-blue">
+          <div>🔒</div>
+          <div class="small">
+            <strong>Outside the envelope — not proposed.</strong> The agent cannot alter deal guardrails
+            (floor price, concessions, non-negotiables), autonomy level, suppression lists or spend caps.
+            <em>An agent must never widen its own financial or safety envelope.</em>
+            The field it may write is checked against a frozen allow-list in code — not asked for in the prompt.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ 4. PROPOSAL — win_loss (Phase 5b) + reject flow ══════════════ -->
+  <section class="state" id="s-winloss">
+    <div class="note" style="margin-bottom:1rem">
+      <strong>Phase 5b.</strong> The §7.1 loop. Requires 20 closed deals per segment — which needs Phase 4.5
+      (outcome capture) to exist first. Same store, same review screen, same apply path as state 3;
+      only the proposer differs.
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-head">
+        <h2>Proposed strategy pivot · targeting</h2>
+        <div class="row">
+          <span class="chip c-info">from 34 outcomes</span>
+          <span class="chip c-warm">Awaiting review</span>
+        </div>
+      </div>
+      <div class="card-pad stack">
+        <div class="between">
+          <div>
+            <div style="font-weight:600;font-size:1rem">Shift primary persona from CMO to CFO / Finance Director</div>
+            <div class="small muted">Proposed 2 days ago · expires in 12 days · blueprint <span class="mono">v7a3f…c21</span> · <span class="mono">source=win_loss</span></div>
+          </div>
+          <div class="row">
+            <button class="btn" data-reject="winloss">Reject</button>
+            <button class="btn btn-primary">Apply &amp; recompile</button>
+          </div>
+        </div>
+
+        <!-- Reject reason capture. Closed vocabulary for the same reason as LOSS_REASONS:
+             free text is unclusterable, so the next run could not learn from it. -->
+        <div id="reject-panel" hidden class="card"
+             style="box-shadow:none;border-color:var(--amber-border);background:var(--amber-wash)">
+          <div class="card-pad stack" style="gap:.75rem">
+            <div class="between" style="align-items:flex-start">
+              <div>
+                <div style="font-weight:600;font-size:.85rem;color:var(--amber-text)">Why are you rejecting this?</div>
+                <div class="tiny" style="color:var(--amber-text);opacity:.85">
+                  This is an input, not a record — the next run's prompt receives it, so a rejection teaches the loop.
+                </div>
+              </div>
+              <button class="btn btn-ghost" id="btn-reject-cancel">Cancel</button>
+            </div>
+            <div class="stack reasons" style="gap:.1rem">
+              <label><input type="radio" name="rr" value="sample_unrepresentative" data-fx="Raises MIN_SAMPLE for this segment on future runs.">
+                <span><span class="mono">sample_unrepresentative</span> — skewed by one client or campaign</span></label>
+              <label><input type="radio" name="rr" value="already_tried" data-fx="This change is suppressed permanently — it will never be proposed again.">
+                <span><span class="mono">already_tried</span> — we tested this, it didn't work</span></label>
+              <label><input type="radio" name="rr" value="wrong_causation" data-fx="Fed back as a counter-example in the next run's prompt.">
+                <span><span class="mono">wrong_causation</span> — the correlation isn't causal</span></label>
+              <label><input type="radio" name="rr" value="off_brand" data-fx="Becomes a standing constraint on every future proposal.">
+                <span><span class="mono">off_brand</span> — conflicts with our positioning</span></label>
+              <label><input type="radio" name="rr" value="bad_timing" data-fx="Re-proposed after the current window closes.">
+                <span><span class="mono">bad_timing</span> — seasonal or temporary</span></label>
+              <label><input type="radio" name="rr" value="too_narrow" data-fx="Re-proposed with a rescoped segment.">
+                <span><span class="mono">too_narrow</span> / <span class="mono">too_broad</span> — right direction, wrong scope</span></label>
+              <label><input type="radio" name="rr" value="other" data-fx="Your note is shown to your team and never sent to the model — unstructured text would poison the prompt.">
+                <span><span class="mono">other</span></span></label>
+            </div>
+            <input type="text" class="txtin" placeholder="Optional note for your team (not sent to the model)…">
+            <div class="between" style="align-items:center">
+              <div class="tiny" id="reject-effect" style="color:var(--amber-text)">Pick a reason to see what it changes.</div>
+              <button class="btn btn-primary" id="btn-reject-confirm" disabled>Confirm rejection</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid g3">
+          <div class="card card-pad" style="box-shadow:none;background:var(--g50)">
+            <div class="tiny muted">EVIDENCE · sample size</div>
+            <div style="font-weight:600">34 terminal outcomes</div>
+            <div class="tiny muted">above MIN_SAMPLE (20) ✓</div>
+          </div>
+          <div class="card card-pad" style="box-shadow:none;background:var(--g50)">
+            <div class="tiny muted">EVIDENCE · win rate</div>
+            <div style="font-weight:600">CFO 47% vs CMO 22%</div>
+            <div class="tiny muted">trailing 90 days</div>
+          </div>
+          <div class="card card-pad" style="box-shadow:none;background:var(--g50)">
+            <div class="tiny muted">EVIDENCE · cycle</div>
+            <div style="font-weight:600">11 d vs 24 d median</div>
+            <div class="tiny muted">first touch → terminal</div>
+          </div>
+        </div>
+
+        <div>
+          <div class="small" style="font-weight:600;margin-bottom:.5rem">
+            Change · one field per run
+            <span class="mono muted" style="font-weight:400">discovery_campaigns.targetPersona.decisionMaker</span>
+          </div>
+          <div class="diffbox">
+            <div class="diffrow before">
+              <div class="lbl">Before</div>
+              <div class="mono">"Marketing Director / CMO at 20-200 staff hospitality groups"</div>
+            </div>
+            <div class="diffrow after">
+              <div class="lbl">After</div>
+              <div class="mono">"Finance Director / CFO at 20-200 staff hospitality groups; lead with cost-per-property and payback period"</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="banner b-blue">
+          <div>🔒</div>
+          <div class="small">
+            <strong>Outside the envelope — not proposed.</strong> The agent cannot alter deal guardrails,
+            autonomy level, suppression lists or spend caps.
+            <em>An agent must never widen its own financial or safety envelope.</em>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid g2">
+      <div class="card">
+        <div class="card-head"><h2>Win / loss by segment</h2></div>
+        <div class="card-pad stack" style="gap:.85rem">
+          <div><div class="between small"><span>CFO / Finance</span><strong>47%</strong></div><div class="bar"><i style="width:47%"></i></div></div>
+          <div><div class="between small"><span>Operations</span><strong>38%</strong></div><div class="bar"><i style="width:38%"></i></div></div>
+          <div><div class="between small"><span>Owner / MD</span><strong>29%</strong></div><div class="bar"><i style="width:29%"></i></div></div>
+          <div><div class="between small"><span>CMO / Marketing</span><strong>22%</strong></div><div class="bar"><i style="width:22%"></i></div></div>
+          <div class="tiny muted">Segments below MIN_SAMPLE are excluded — no pivot on noise.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Loss reasons</h2><span class="chip c-cold">closed vocabulary</span></div>
+        <div class="card-pad stack" style="gap:.85rem">
+          <div><div class="between small"><span class="mono">price</span><strong>31%</strong></div><div class="bar"><i style="width:31%"></i></div></div>
+          <div><div class="between small"><span class="mono">no_budget</span><strong>24%</strong></div><div class="bar"><i style="width:24%"></i></div></div>
+          <div><div class="between small"><span class="mono">went_silent</span><strong>19%</strong></div><div class="bar"><i style="width:19%"></i></div></div>
+          <div><div class="between small"><span class="mono">competitor</span><strong>14%</strong></div><div class="bar"><i style="width:14%"></i></div></div>
+          <div><div class="between small"><span class="mono">not_icp</span><strong>12%</strong></div><div class="bar"><i style="width:12%"></i></div></div>
+          <div class="tiny muted">Free-text reasons are unclusterable — the vocabulary is fixed on purpose.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ 5. APPLIED — rollback + the stale-field guard ══════════════ -->
+  <section class="state" id="s-applied">
+    <div class="note" style="margin-bottom:1rem">
+      Applied changes stay visible and reversible. <span class="mono">previous_value</span> is what makes
+      Apply undoable — a pivot that turns out wrong must be walked back without reconstructing what the field
+      used to say.
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-head">
+        <h2>Applied · targeting</h2>
+        <span class="chip c-ok">Live</span>
+      </div>
+      <div class="card-pad stack">
+        <div class="between">
+          <div>
+            <div style="font-weight:600;font-size:1rem">Shift primary persona from CMO to CFO / Finance Director</div>
+            <div class="small muted">Applied by Aura · 3 days ago · blueprints recompiled · 12 campaigns affected</div>
+          </div>
+          <div class="row"><button class="btn" id="btn-rollback">Roll back</button></div>
+        </div>
+
+        <!-- Rollback never writes blind. If the field changed after apply, restoring
+             previous_value would silently destroy the human's edit. -->
+        <div id="rollback-panel" hidden class="banner b-red" style="display:none">
+          <div>⚠️</div>
+          <div class="small">
+            <strong>This field has changed since the proposal was applied.</strong>
+            Someone edited <span class="mono">targetPersona.decisionMaker</span> by hand 6 hours ago.
+            Rolling back would overwrite that edit, not undo the pivot.
+            <div class="row" style="margin-top:.6rem">
+              <button class="btn">Show me the difference</button>
+              <button class="btn">Roll back anyway</button>
+              <button class="btn btn-ghost" id="btn-rollback-cancel">Cancel</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid g2">
+          <div class="card card-pad" style="box-shadow:none;background:var(--g50)">
+            <div class="tiny muted">SINCE APPLYING · 3 days</div>
+            <dl style="margin:.4rem 0 0">
+              <div class="kv"><dt>Leads discovered</dt><dd>41</dd></div>
+              <div class="kv"><dt>Outreach sent</dt><dd>28</dd></div>
+              <div class="kv"><dt>Replies</dt><dd>6</dd></div>
+              <div class="kv"><dt>Closed outcomes</dt><dd class="muted">0 — too early</dd></div>
+            </dl>
+          </div>
+          <div class="card card-pad" style="box-shadow:none;background:var(--g50)">
+            <div class="tiny muted">WHAT CHANGED</div>
+            <div class="diffbox" style="margin-top:.5rem">
+              <div class="diffrow before" style="padding:.5rem .7rem">
+                <div class="lbl">Was</div>
+                <div class="mono" style="font-size:11px">"Marketing Director / CMO at 20-200 staff hospitality groups"</div>
+              </div>
+              <div class="diffrow after" style="padding:.5rem .7rem">
+                <div class="lbl">Now</div>
+                <div class="mono" style="font-size:11px">"Finance Director / CFO at 20-200 staff…"</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="banner b-amber">
+          <div>⏳</div>
+          <div class="small">
+            <strong>Don't judge this yet.</strong> Median cycle is 11–24 days, so nothing that closed in the last
+            3 days was influenced by this change. The next win/loss run excludes outcomes whose first touch
+            predates the apply — otherwise a pivot gets credited with deals it never touched.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══════════════ 6. HISTORY ══════════════ -->
+  <section class="state" id="s-history">
+    <div class="note" style="margin-bottom:1rem">
+      Every proposal is kept, including the ones nobody acted on. Rejections are the loop's training signal, so
+      the history is also the record of <em>what the agent has been told not to do</em>.
+    </div>
+
+    <div class="card" style="margin-bottom:1rem">
+      <div class="card-head">
+        <h2>Proposal history</h2>
+        <div class="seg">
+          <button class="on">All</button><button>Applied</button><button>Rejected</button><button>Expired</button>
+        </div>
+      </div>
+      <div class="tscroll">
+        <table>
+          <thead><tr><th>Change</th><th>Source</th><th>Evidence</th><th>Outcome</th><th>When</th></tr></thead>
+          <tbody>
+            <tr>
+              <td><div style="font-weight:600">CMO → CFO persona</div><div class="tiny muted">targetPersona.decisionMaker</div></td>
+              <td><span class="chip c-info">win_loss</span></td>
+              <td class="small">34 outcomes</td>
+              <td><span class="chip c-ok">Applied</span></td>
+              <td class="small muted">3 days ago</td>
+            </tr>
+            <tr>
+              <td><div style="font-weight:600">Loosen opening register</div><div class="tiny muted">outreach.opening</div></td>
+              <td><span class="chip c-hot">edit_pattern</span></td>
+              <td class="small">6 edits</td>
+              <td><span class="chip c-warm">Pending</span></td>
+              <td class="small muted">1 day ago</td>
+            </tr>
+            <tr>
+              <td><div style="font-weight:600">Drop headcount floor to 10</div><div class="tiny muted">targetPersona.minHeadcount</div></td>
+              <td><span class="chip c-info">win_loss</span></td>
+              <td class="small">22 outcomes</td>
+              <td><span class="chip c-risk">Rejected</span><div class="tiny muted" style="margin-top:.2rem"><span class="mono">already_tried</span></div></td>
+              <td class="small muted">2 wks ago</td>
+            </tr>
+            <tr>
+              <td><div style="font-weight:600">Lead with ROI in objection replies</div><div class="tiny muted">objections.price</div></td>
+              <td><span class="chip c-hot">edit_pattern</span></td>
+              <td class="small">5 edits</td>
+              <td><span class="chip c-cold">Expired</span><div class="tiny muted" style="margin-top:.2rem">not reviewed in 14 days</div></td>
+              <td class="small muted">3 wks ago</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="grid g2">
+      <div class="card">
+        <div class="card-head"><h2>Standing constraints</h2><span class="chip c-cold">from rejections</span></div>
+        <div class="card-pad stack" style="gap:.6rem">
+          <div class="small"><span class="mono">already_tried</span> — headcount floor below 20 · <span class="muted">suppressed permanently</span></div>
+          <div class="small"><span class="mono">off_brand</span> — discount-led messaging · <span class="muted">standing constraint on every run</span></div>
+          <div class="tiny muted" style="margin-top:.3rem">
+            Rejecting is not a dead end — each reason changes what the next run may propose. That is why the
+            vocabulary is closed: free text could not be applied as a rule.
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Run log</h2></div>
+        <div class="card-pad stack" style="gap:.55rem">
+          <div class="between small"><span>Mon 3 Aug 05:00</span><span class="chip c-cold">skipped · below threshold</span></div>
+          <div class="between small"><span>Mon 27 Jul 05:00</span><span class="chip c-hot">1 proposal</span></div>
+          <div class="between small"><span>Mon 20 Jul 05:00</span><span class="chip c-cold">skipped · pending proposal exists</span></div>
+          <div class="between small"><span>Mon 13 Jul 05:00</span><span class="chip c-hot">1 proposal</span></div>
+          <div class="tiny muted" style="margin-top:.3rem">
+            "Pending proposal exists" is a deliberate skip: one pending proposal per field at a time, or a weekly
+            cron stacks four contradictory rewrites of the same field in a month.
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  // Mockup chrome only.
+  var HINTS = {
+    empty:    'The state every real screen is in today — and will be for months. It is a designed screen, not a fallback.',
+    accruing: 'Evidence arriving, nothing eligible. Win rate stays hidden below threshold on purpose.',
+    edit:     'Phase 5a — reachable without a single closed deal. The realistic first proposal.',
+    winloss:  'Phase 5b — the §7.1 loop. Needs Phase 4.5 (outcome capture) to exist first. Try Reject.',
+    applied:  'Applied and reversible. Try Roll back — it checks before it restores.',
+    history:  'Rejections are inputs, not dead ends.'
+  };
+  var badge = document.getElementById('tab-badge');
+
+  document.getElementById('switcher').addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-s]');
+    if (!b) return;
+    var s = b.dataset.s;
+    this.querySelectorAll('button').forEach(function (x) { x.classList.toggle('on', x === b); });
+    document.querySelectorAll('.state').forEach(function (sec) {
+      sec.classList.toggle('on', sec.id === 's-' + s);
+    });
+    document.getElementById('switch-hint').textContent = HINTS[s];
+    // The badge sets `display:inline-flex`, so a class alone cannot hide it — pin style.display.
+    var pending = (s === 'edit' || s === 'winloss' || s === 'history');
+    badge.style.display = pending ? 'inline-flex' : 'none';
+    badge.textContent = '1';
+    // Reset transient panels when leaving a state.
+    hide('reject-panel'); hide('rollback-panel');
+  });
+
+  function hide(id) { var el = document.getElementById(id); if (el) { el.hidden = true; el.style.display = 'none'; } }
+  function show(id) { var el = document.getElementById(id); if (el) { el.hidden = false; el.style.display = 'flex'; } }
+
+  document.querySelectorAll('[data-reject]').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var el = document.getElementById('reject-panel');
+      el.hidden = false; el.style.display = 'block';
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
+  });
+  document.getElementById('btn-reject-cancel').addEventListener('click', function () { hide('reject-panel'); });
+
+  document.querySelectorAll('input[name="rr"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      document.getElementById('reject-effect').textContent = this.dataset.fx;
+      document.getElementById('btn-reject-confirm').disabled = false;
+    });
+  });
+
+  document.getElementById('btn-rollback').addEventListener('click', function () { show('rollback-panel'); });
+  document.getElementById('btn-rollback-cancel').addEventListener('click', function () { hide('rollback-panel'); });
+</script>
+</body>
+</html>

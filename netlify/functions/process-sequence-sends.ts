@@ -37,6 +37,7 @@ import { sendGmailMessage } from '../../src/utils/gmail';
 import { sendOutlookMessage } from '../../src/utils/outlook';
 import { IntegrationError } from '../../src/utils/workspace-integrations';
 import { recordEvent } from '../../src/utils/revenue-ledger';
+import { makeBlueprintVersionCache } from '../../src/utils/blueprint-version';
 import { recordOutboundMessage } from '../../src/utils/lead-threads';
 import { replyAddress } from '../../src/utils/reply-address';
 import { checkSuppression } from '../../src/utils/suppression';
@@ -251,7 +252,11 @@ Otherwise return STRICT JSON only (no markdown, no prose outside the JSON):
 
 // ── One enrolment ────────────────────────────────────────────────────────────
 
-async function processEnrolment(db: Db, row: ClaimedRow): Promise<'sent' | 'halted' | 'skipped'> {
+async function processEnrolment(
+    db: Db,
+    row: ClaimedRow,
+    blueprintVersionFor: (assistantId: number | null | undefined) => Promise<string | null>,
+): Promise<'sent' | 'halted' | 'skipped'> {
     const ref = toRef(row);
 
     // (3) THE REPLY HALT — re-read, do not trust the claim. The claim query filtered on the
@@ -411,6 +416,7 @@ async function processEnrolment(db: Db, row: ClaimedRow): Promise<'sent' | 'halt
         discoveredLeadId: row.discovered_lead_id,
         assistantRecordId: row.assistant_record_id,
         actor: 'agent',
+        blueprintVersion: await blueprintVersionFor(row.ai_assistant_id),
         payload: {
             provider: assistant.provider,
             sequenceId: row.sequence_id,
@@ -478,6 +484,11 @@ export async function drainSequenceSends(): Promise<DrainResult> {
     // Per-org daily ceiling, evaluated once per org per tick and decremented locally as we send.
     const budget = new Map<number, number>();
 
+    // Attribution (§7.2). A tick spans many orgs and assistants, so memoise — but per RUN, never at
+    // module level: a warm container would keep stamping a version that a recompile has replaced.
+    // Safe to memoise here because the loop below is sequential, so misses never overlap.
+    const blueprintVersionFor = makeBlueprintVersionCache(db);
+
     for (const row of claimed) {
         if (Date.now() - startedAt > WORKER_BUDGET_MS) {
             // Out of wall clock. The unprocessed rows keep their lease and are picked up next tick.
@@ -501,7 +512,7 @@ export async function drainSequenceSends(): Promise<DrainResult> {
         }
 
         try {
-            const outcome = await processEnrolment(db, row);
+            const outcome = await processEnrolment(db, row, blueprintVersionFor);
             if (outcome === 'sent') { result.sent++; budget.set(row.organisation_id, remaining - 1); }
             else if (outcome === 'halted') result.halted++;
             else result.skipped++;

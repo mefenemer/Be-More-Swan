@@ -29,6 +29,7 @@ import { classifyCandidate } from '../../src/lib/discovery-domain-filter';
 import { logAiUsage } from '../../src/utils/ai-usage';
 import { enqueueScenarioTrigger } from '../../src/utils/scenario-engine';
 import { recordEvent } from '../../src/utils/revenue-ledger';
+import { getBlueprintVersion } from '../../src/utils/blueprint-version';
 import { createNotification } from '../../src/utils/notify';
 import { savedSearchLabel } from '../../src/config/signal-sources';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -133,6 +134,10 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
         }
         const assistantName = campaign.assistantName ?? 'your business';
         const icp = (campaign.icpSnapshot && typeof campaign.icpSnapshot === 'object' ? campaign.icpSnapshot : {}) as Record<string, unknown>;
+        // The other half of the attribution key (§7.2). Read ONCE per job rather than per lead:
+        // one job is one campaign is one assistant, and a recompile mid-run should not split a
+        // single run's events across two versions.
+        const blueprintVersion = await getBlueprintVersion(db, campaign.aiAssistantId);
         const guardrails = await loadGuardrails(db, job.campaign_id);
 
         // Current run counters (persisted on the job row).
@@ -299,6 +304,7 @@ async function processJob(db: Db, job: JobRow): Promise<void> {
                     assistantRecordId: recordId,
                     actor: 'agent' as const,
                     icpSnapshot: icp,
+                    blueprintVersion,
                 };
                 await recordEvent(db, 'lead_discovered', {
                     ...ledgerBase,
@@ -408,6 +414,11 @@ async function enrichBatch(db: Db, job: JobRow, counters: Counters): Promise<voi
          LIMIT ${ENRICH_BATCH}`
     );
 
+    // Attribution (§7.2), resolved BEFORE the parallel map: every row here shares one campaign and
+    // therefore one assistant, so this is a single lookup. Doing it inside the map would issue one
+    // query per lead — a memo cache does not help, since concurrent callers all miss together.
+    const blueprintVersion = await getBlueprintVersion(db, batch[0]?.ai_assistant_id);
+
     // Concurrent: 5 leads x up to 4 sequential fetches would blow the tick budget serially.
     await Promise.all(batch.map(async (lead) => {
         let hit = null as Awaited<ReturnType<typeof enrichLeadContact>>;
@@ -417,7 +428,7 @@ async function enrichBatch(db: Db, job: JobRow, counters: Counters): Promise<voi
             // Best-effort: a scrape failure must never fail the run.
         }
         await recordEnrichment(db, lead.id, lead.assistant_record_id, hit,
-            { organisationId: job.organisation_id, aiAssistantId: lead.ai_assistant_id });
+            { organisationId: job.organisation_id, aiAssistantId: lead.ai_assistant_id, blueprintVersion });
     }));
 
     const [{ remaining } = { remaining: 0 }] = await db.execute<{ remaining: number }>(
@@ -497,7 +508,7 @@ async function publishSignals(db: Db, job: JobRow): Promise<void> {
 async function recordEnrichment(
     db: Db, leadId: number, assistantRecordId: number | null,
     hit: { email: string; kind: string; source: string; foundOn: string } | null,
-    ledger?: { organisationId: number; aiAssistantId: number },
+    ledger?: { organisationId: number; aiAssistantId: number; blueprintVersion?: string | null },
 ): Promise<void> {
     const stamp: Record<string, unknown> = { enrichAttemptedAt: new Date().toISOString() };
     if (hit) {
@@ -526,6 +537,7 @@ async function recordEnrichment(
             discoveredLeadId: leadId,
             assistantRecordId,
             actor: 'agent',
+            blueprintVersion: ledger.blueprintVersion ?? null,
             payload: { emailKind: hit.kind, emailSource: hit.source },
         });
     }

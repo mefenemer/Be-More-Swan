@@ -24,6 +24,10 @@ import { PLATFORM_FORMATS, SOCIAL_PLATFORMS } from '../src/config/platform-forma
 import { POST_FORMATS } from '../src/config/post-formats';
 import { SCHEDULE_ACTIVE_STATUSES } from '../src/config/post-status';
 import { DEAD_CONNECTION_STATUSES } from '../src/config/connection-status';
+import {
+    OUTCOMES, OUTCOME_LABELS, LOSS_REASONS, LOSS_REASON_LABELS, OUTCOMES_REQUIRING_LOSS_REASON,
+} from '../src/config/revenue-events';
+import { EDIT_REASONS, EDIT_REASON_LABELS } from '../src/config/template-feedback';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 export const OUTPUT_PATH = join(root, 'src', 'generated', 'platform-constants.js');
@@ -173,6 +177,56 @@ ${formatRows}
         if (p && p.mediaMandatory) out.push(p);
       }
       return out;
+    },
+  };
+
+  // ── Revenue outcomes (Phase 4.5) ──────────────────────────────────────────
+  // The closed vocabularies from src/config/revenue-events.ts, for the Data Hub's "Record outcome"
+  // control. Generated rather than retyped: these are the GROUP BY keys the Strategy Agent reads,
+  // so a drifted copy here would write values the CHECK constraint rejects — and recordEvent()
+  // swallows its errors, which makes that failure invisible rather than loud.
+  var OUTCOMES = ${JSON.stringify(OUTCOMES)};
+  var OUTCOME_LABELS = ${JSON.stringify(OUTCOME_LABELS)};
+  var LOSS_REASONS = ${JSON.stringify(LOSS_REASONS)};
+  var LOSS_REASON_LABELS = ${JSON.stringify(LOSS_REASON_LABELS)};
+  var NEEDS_LOSS_REASON = ${JSON.stringify(OUTCOMES_REQUIRING_LOSS_REASON)};
+
+  // Why a reviewer changed a drafted message (plan §2.6), from src/config/template-feedback.ts.
+  // CHECK-constrained server-side, so a drifted copy here would write values the DB rejects.
+  var EDIT_REASONS = ${JSON.stringify(EDIT_REASONS)};
+  var EDIT_REASON_LABELS = ${JSON.stringify(EDIT_REASON_LABELS)};
+
+  window.RevenueConstants = {
+    /** 'won' | 'lost' | 'disqualified', in canonical order. */
+    outcomes: OUTCOMES,
+
+    /** Loss reasons, in canonical order. Closed — free text is unclusterable by design. */
+    lossReasons: LOSS_REASONS,
+
+    /** Display label for an outcome, falling back to the raw value rather than showing nothing. */
+    outcomeLabel: function (o) {
+      return OUTCOME_LABELS[String(o == null ? '' : o)] || String(o == null ? '' : o);
+    },
+
+    /** Display label for a loss reason. */
+    lossReasonLabel: function (r) {
+      return LOSS_REASON_LABELS[String(r == null ? '' : r)] || String(r == null ? '' : r);
+    },
+
+    /**
+     * True when this outcome cannot be recorded without a loss reason. The server enforces the
+     * same rule — this only decides whether the picker is shown.
+     */
+    needsLossReason: function (o) {
+      return NEEDS_LOSS_REASON.indexOf(String(o == null ? '' : o)) !== -1;
+    },
+
+    /** Why a reviewer changed a drafted message, from src/config/template-feedback.ts. */
+    editReasons: EDIT_REASONS,
+
+    /** Display label for an edit reason. */
+    editReasonLabel: function (r) {
+      return EDIT_REASON_LABELS[String(r == null ? '' : r)] || String(r == null ? '' : r);
     },
   };
 })();
