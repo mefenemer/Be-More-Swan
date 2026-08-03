@@ -266,7 +266,7 @@ export async function runStrategyAgent(): Promise<StrategyAgentResult> {
         let proposedValue = '';
         let claimedField = '';
         try {
-            const { text } = await gatewayGenerate({
+            const { text, stopReason } = await gatewayGenerate({
                 system:
                     `You improve the outreach playbook a sales assistant writes cold emails from.\n\n`
                     + `A human reviewer edited ${c.n} drafted emails before sending them, and gave the SAME reason `
@@ -288,10 +288,26 @@ export async function runStrategyAgent(): Promise<StrategyAgentResult> {
                         + `How much of each draft survived the edit:\n`
                         + (c.diffs.length ? c.diffs.slice(0, 20).map((d) => `- ${d}`).join('\n') : '- (not recorded)'),
                 }],
-                maxTokens: 700,
+                // A playbook rewrite is prose with several concrete rules in it, and the whole
+                // response has to fit inside a JSON string. 700 truncated it mid-object, which
+                // fails `parseModelJson` and lands as an indistinguishable "skipped".
+                maxTokens: 2000,
             });
+            // A truncated response is unparseable JSON, so it would otherwise surface as a generic
+            // skip. Name it: this is the one failure whose fix is a number in this file.
+            if (stopReason === 'max_tokens') {
+                console.error('[strategy-agent] response hit the token ceiling and cannot be parsed', {
+                    org: c.organisationId, assistant: c.aiAssistantId, targetField,
+                });
+            }
             // Nothing but these two keys is read. Evidence is computed below, in SQL, never here.
             const parsed = parseModelJson<{ targetField?: string; proposedValue?: string }>(text);
+            if (!parsed) {
+                console.error('[strategy-agent] model output was not parseable JSON', {
+                    org: c.organisationId, assistant: c.aiAssistantId, stopReason,
+                    sample: String(text).slice(0, 300),
+                });
+            }
             if (parsed) {
                 claimedField = String(parsed.targetField ?? '');
                 proposedValue = String(parsed.proposedValue ?? '').trim();
@@ -305,9 +321,32 @@ export async function runStrategyAgent(): Promise<StrategyAgentResult> {
 
         // THE ENVELOPE. Reject, never clamp — and require the model to have answered about the
         // field we asked about, not merely one that happens to be tunable.
-        if (claimedField !== targetField) { result.skipped++; continue; }
-        if (!isValidValueFor(field, proposedValue)) { result.skipped++; continue; }
-        if (proposedValue === current) { result.skipped++; continue; }
+        //
+        // ⚠️ Each rejection is LOGGED with its reason. These four paths are all "skipped: 1" in the
+        // run summary and are otherwise indistinguishable from "the model said nothing useful" —
+        // and from each other. A silent no-op is a real outcome here (the lesson revenue-ledger.ts
+        // records), so the run has to leave behind enough to tell which one happened.
+        const reject = (why: string, extra?: Record<string, unknown>) => {
+            console.error(`[strategy-agent] proposal rejected: ${why}`, {
+                org: c.organisationId, assistant: c.aiAssistantId, targetField, ...extra,
+            });
+            result.skipped++;
+        };
+
+        if (claimedField !== targetField) {
+            reject('model answered about a different field', { claimedField });
+            continue;
+        }
+        if (!isValidValueFor(field, proposedValue)) {
+            reject('value does not match the field shape', {
+                valueType: field.valueType, length: proposedValue.length,
+            });
+            continue;
+        }
+        if (proposedValue === current) {
+            reject('proposal is identical to the current value');
+            continue;
+        }
 
         const id = await proposeChange(db, {
             organisationId: c.organisationId,
@@ -325,7 +364,12 @@ export async function runStrategyAgent(): Promise<StrategyAgentResult> {
             },
         });
 
-        if (!id) { result.skipped++; continue; }
+        if (!id) {
+            // proposeChange never throws; a null is a refusal or a lost conflict race, and it logs
+            // its own reason. Say that the run saw it, so the two logs line up.
+            reject('the writer refused the proposal (see its log line above)');
+            continue;
+        }
         result.proposed++;
 
         const prev = proposedByOrg.get(c.organisationId);
