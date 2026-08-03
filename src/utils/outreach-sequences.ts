@@ -28,6 +28,7 @@ import {
 } from '../../db/schema';
 import { recordEvent } from './revenue-ledger';
 import { getBlueprintVersion } from './blueprint-version';
+import { getIcpSnapshot } from './icp-snapshot';
 import {
     DEFAULT_SEQUENCE_STEPS,
     MAX_ENROLMENTS_PER_ORG_PER_DAY,
@@ -223,6 +224,10 @@ export async function enrolInSequence(db: Db, input: EnrolInput): Promise<number
             assistantRecordId: input.assistantRecordId ?? null,
             actor: 'agent',
             blueprintVersion: await getBlueprintVersion(db, input.aiAssistantId),
+            icpSnapshot: await getIcpSnapshot(db, {
+                discoveredLeadId: input.discoveredLeadId ?? null,
+                aiAssistantId: input.aiAssistantId,
+            }),
             payload: { sequenceId: seq.id, steps: seq.steps.length, firstSendAt: addDays(sentAt, firstStep.delayDays).toISOString() },
         });
 
@@ -275,6 +280,10 @@ export async function advanceEnrolment(
                 assistantRecordId: enrolment.assistantRecordId,
                 actor: 'agent',
                 blueprintVersion: await getBlueprintVersion(db, enrolment.aiAssistantId),
+                icpSnapshot: await getIcpSnapshot(db, {
+                    discoveredLeadId: enrolment.discoveredLeadId,
+                    aiAssistantId: enrolment.aiAssistantId,
+                }),
                 payload: { stepsSent: stepJustSent, endedAt: 'max_steps' },
             });
             return 'completed';
@@ -329,6 +338,10 @@ export async function haltEnrolment(
             assistantRecordId: enrolment.assistantRecordId,
             actor: reason === 'manual' ? 'user' : 'agent',
             blueprintVersion: await getBlueprintVersion(db, enrolment.aiAssistantId),
+            icpSnapshot: await getIcpSnapshot(db, {
+                discoveredLeadId: enrolment.discoveredLeadId,
+                aiAssistantId: enrolment.aiAssistantId,
+            }),
             payload: { haltReason: reason, stepsSent: enrolment.lastStepSent, detail: detail ?? null },
         });
         return true;

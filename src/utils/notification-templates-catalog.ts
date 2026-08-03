@@ -225,6 +225,27 @@ export const NOTIFICATION_DEFAULTS: NotificationTemplateDefault[] = [
         variables: [ASSISTANT_NAME, v('goal.label', 'Adjusted setting', 'posting schedule')],
     },
     {
+        // Phase 5a §7.1 — the Strategy Agent has a change to propose and is WAITING. The wording
+        // has to carry that: this notification is the only thing standing between a proposal and it
+        // lapsing unread after 14 days, and the whole design principle of the phase is "proposal
+        // review, never apply-then-notify". Contrast goal_autonomous_adjustment above, which is a
+        // state_change because the change has already happened.
+        //
+        // One per org per RUN, not per proposal (§9.4) — the call site passes a resolved noun
+        // phrase, since the merge engine has no plural rules.
+        templateKey: 'strategy_proposal_pending',
+        name: 'Strategy change proposed',
+        category: 'Assistants',
+        type: 'strategy_proposal_pending',
+        title: 'A strategy change is waiting for you',
+        message: '{{assistant.name}} has {{proposal.count}} to review — {{proposal.summary}}. Nothing changes until you approve it.',
+        variables: [
+            ASSISTANT_NAME,
+            v('proposal.count', 'Number of proposals', '1 suggested change'),
+            v('proposal.summary', 'What it wants to change', 'a new Outreach Playbook based on 7 of your edits'),
+        ],
+    },
+    {
         templateKey: 'goal_data_disconnected',
         name: 'Goal tracking paused',
         category: 'Assistants',

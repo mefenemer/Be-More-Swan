@@ -674,6 +674,8 @@ window._activateMainTab = function(name) {
     // Conversations fetches on first activation only — nothing on this tab feeds a badge, so a
     // user who never opens it never pays for the query.
     if (name === 'conversations') window.AssistantLeadThreads?.activate();
+    // Strategy resolved its gate (and loaded) on init — activation only paints.
+    if (name === 'strategy') window.AssistantStrategy?.activate();
     // The memory panel loads lazily on first Data Hub activation, then repaints from state.
     if (name === 'datahub') window.AssistantMemoryQuery?.activate();
     // Load the assistant-scoped review queue when the tab is first opened. detailRqOpenStatus
@@ -3028,6 +3030,18 @@ function _applyDashboardRegistry(data) {
     if (conversations) {
         setText('conversations-tab-label', conversations.label || 'Conversations');
         window.AssistantLeadThreads?.init({ assistantId: data.id, cfg: conversations });
+    }
+
+    // Strategy tab — lead roles only (strategyTab: lead_qualifier) AND gated on the
+    // `strategy_agent` plan feature, which is DEFAULT OFF. The registry entry is necessary but not
+    // sufficient: init() asks the server whether the workspace has the feature and reveals its own
+    // tab button only if so, because there is no client-side feature map to check here.
+    const strategy = cfg.strategyTab;
+    if (strategy) {
+        setText('strategy-tab-label', strategy.label || 'Strategy');
+        window.AssistantStrategy?.init({ assistantId: data.id, cfg: strategy });
+    } else {
+        toggle('maintab-btn-strategy', false);
     }
 
     // "Ask your memory" panel inside the Data Hub tab (Phase 3 §5.5). init() only records the

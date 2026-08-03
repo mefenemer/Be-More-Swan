@@ -5056,6 +5056,10 @@ function formatCurrency(amount, currency) {
 <!-- Conversations tab (lead_qualifier) — the thread an approved lead turned into: outreach,
      replies, what the classifier made of them, and what the follow-up sequence did (lead-threads.ts). -->
 <script src="/src/components/assistant-lead-threads.js"></script>
+<!-- Strategy tab (lead_qualifier, gated on the `strategy_agent` plan feature — default OFF) —
+     changes the agent proposes to how it targets and writes, with the evidence behind each one.
+     Nothing applies until a human clicks Apply (strategy-proposals.ts). -->
+<script src="/src/components/assistant-strategy.js"></script>
 <!-- "Ask your memory" panel inside the Data Hub tab (Phase 3 §5.5) — natural-language questions
      answered from account_memory + account_edges + revenue_events, with citations (memory-query.ts). -->
 <script src="/src/components/assistant-memory-query.js"></script>

@@ -20,6 +20,7 @@ import { requireTenant } from '../../src/utils/tenant';
 import { enqueueScenarioTrigger, type TriggerSubject } from '../../src/utils/scenario-engine';
 import { recordEvent } from '../../src/utils/revenue-ledger';
 import { getBlueprintVersion } from '../../src/utils/blueprint-version';
+import { getIcpSnapshot } from '../../src/utils/icp-snapshot';
 import { enqueueLeadHandoff } from '../../src/utils/lead-handoff';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
@@ -484,6 +485,13 @@ export default withLambda(async (event) => {
                             actor: 'user',
                             actorUserId: userId,
                             blueprintVersion: await getBlueprintVersion(db, prev.aiAssistantId),
+                            // Campaign snapshot via the lead when there is one; the assistant's
+                            // onboarding otherwise. A manually added lead legitimately gets the
+                            // weaker attribution rather than none.
+                            icpSnapshot: await getIcpSnapshot(db, {
+                                discoveredLeadId: link?.id ?? null,
+                                aiAssistantId: prev.aiAssistantId,
+                            }),
                             payload: { from: prev.approvalStatus, to: next, rating: prev.status },
                         });
                     }

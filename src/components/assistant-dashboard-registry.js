@@ -293,6 +293,18 @@
       conversationsTab: {
         label: 'Conversations',
       },
+      // Strategy tab (assistant-strategy.js → strategy-proposals.ts). Phase 5a §7: changes the
+      // agent proposes to how it targets and writes, each with its evidence, none applied until a
+      // human clicks Apply.
+      //
+      // ⚠️ Declaring it here does NOT reveal it. The tab is additionally gated on the
+      // `strategy_agent` plan feature, which is DEFAULT OFF, and the component hides its own button
+      // until the server confirms the workspace has it. Deliberately not the `autonomous` tier gate
+      // that admits the goal optimizer — that rewrites brand voice for an org's own content, where
+      // this redirects cold outreach at real strangers. §7.1: "the difference is blast radius".
+      strategyTab: {
+        label: 'Strategy',
+      },
       // The Signal Inbox is the landing tab: it's the top of the funnel, so it's what the user
       // should see first. Stated explicitly rather than relying on _activateDefaultMainTab's
       // "first visible tab" fallback, which gave the right answer only by accident of tab order.

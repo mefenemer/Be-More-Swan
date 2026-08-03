@@ -77,6 +77,15 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     billing_alert: 'suggested_action', action_rejected: 'suggested_action', action_expired: 'suggested_action',
     // Issue #191 — archived assistant has a 14-day reinstate window before permanent deletion.
     assistant_archived: 'suggested_action',
+    // Phase 5a §7.1 — the Strategy Agent is waiting on a human decision, and the proposal lapses
+    // unread after 14 days, so it genuinely needs doing. NOT critical_action: that is undismissible,
+    // and nothing here is broken — a lapsed proposal costs nothing and the agent simply re-proposes
+    // when the evidence still supports it. Pinning an unkillable banner for a suggestion would be
+    // the same mistake goal_metric_update_due documents below.
+    //
+    // (docs/strategy-agent-plan.md §6 specifies 'action_required'; no such category exists here —
+    // the union is critical_action / suggested_action / state_change / informational / celebratory.)
+    strategy_proposal_pending: 'suggested_action',
     // state_change — completed / changed confirmations
     billing_renewed: 'state_change', billing_payment_received: 'state_change', payment_confirmation: 'state_change',
     plan_upgraded: 'state_change', downgrade_scheduled: 'state_change', downgrade_cancelled: 'state_change',

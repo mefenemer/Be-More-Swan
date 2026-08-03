@@ -596,6 +596,16 @@
       <button type="button" id="maintab-btn-conversations" data-maintab="conversations" class="main-tab-btn hidden">
         <span id="conversations-tab-label">Conversations</span>
       </button>
+      <!-- Strategy — lead roles only (strategyTab: lead_qualifier), AND only when the workspace has
+           the `strategy_agent` plan feature (default OFF). Sits after Conversations because it is
+           what the system LEARNED from those conversations. Hidden by default in two ways: this
+           class, and assistant-strategy.js pinning style.display until the server confirms the
+           feature — `hidden` alone loses to inline-flex.
+           assistant-strategy.js → strategy-proposals.ts.
+           Design: docs/lead-generator-revenue-engine-plan.md §7, docs/strategy-agent-plan.md -->
+      <button type="button" id="maintab-btn-strategy" data-maintab="strategy" class="main-tab-btn hidden" style="display:none">
+        <span id="strategy-tab-label">Strategy</span>
+      </button>
       <!-- Inspo — content-roles only (inspoTab: social_media_manager, blog_writer); the
            styles/tones the assistant studies and applies to every draft
            (assistant-inspo.js → inspo-items.ts). Sits right after the Review Queue (Posts) tab and
@@ -828,6 +838,15 @@
   <div id="maintab-conversations" class="main-tab-content hidden">
     <div id="lead-threads-host"></div>
   </div><!-- /maintab-conversations -->
+
+  <!-- Strategy — lead roles only, and only when `strategy_agent` is enabled for the workspace.
+       assistant-strategy.js resolves that gate on init (there is no client-side feature map to
+       read) and paints on activation. For most workspaces this stays empty for months by design:
+       the agent will not propose on a small sample, so the empty state is diagnostic rather than
+       blank — it names which evidence is missing and how far off it is. -->
+  <div id="maintab-strategy" class="main-tab-content hidden">
+    <div id="strategy-host"></div>
+  </div><!-- /maintab-strategy -->
 
   <!-- ── Persona / config slide-over (Epic 1) ──────────────────────────
        Opened from the header "Assistant Profile" button (#btn-assistant-profile),

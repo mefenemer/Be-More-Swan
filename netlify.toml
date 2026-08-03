@@ -399,3 +399,18 @@ node_bundler = "esbuild"
 # SMART Goals US3.3: autonomous optimizer — rewrite allowed brief params for off-track goals — 04:00 UTC daily.
 [functions.autonomous-goal-optimizer]
   schedule = "0 4 * * *"
+
+# Phase 5a §7: the Strategy Agent — cluster the human edits made in the Review Queue and propose one
+# playbook change per assistant, plus the expiry sweep. Mondays 05:00 UTC.
+#
+# WEEKLY, not daily, and that is the design rather than thrift: the sample unit is a human edit, so
+# a daily run would spend a model call to rediscover the same five edits six days running. It also
+# matches the cadence a user can actually absorb — one proposal to read, not seven.
+#
+# Offset an hour after autonomous-goal-optimizer so the two never contend for the model gateway.
+#
+# ⚠️ Netlify fires scheduled functions ONLY on the production deploy. Staging is a branch deploy, so
+# this never runs there — .github/workflows/staging-strategy-cron.yml pokes run-strategy-agent
+# instead. The two must stay in step.
+[functions.autonomous-strategy-agent]
+  schedule = "0 5 * * 1"

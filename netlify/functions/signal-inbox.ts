@@ -63,6 +63,7 @@ interface LeadRow {
     campaignId: number;
     campaignName: string | null;
     campaignIdea: string;
+    campaignIcpSnapshot: unknown;
     assistantRecordId: number | null;
     approvalStatus: string | null;
     recordData: unknown;
@@ -179,6 +180,12 @@ export default withLambda(async (event) => {
                     campaignId: discoveryCampaigns.id,
                     campaignName: discoveryCampaigns.name,
                     campaignIdea: discoveryCampaigns.idea,
+                    // Attribution (§7.2) for the batch-approve branch's ledger write. Free — the
+                    // campaign is already joined — and it is the RIGHT snapshot: the ICP live when
+                    // this lead was found, resolved per row rather than once for the batch, because
+                    // a batch can span campaigns. Selected in BOTH queries on purpose: they share
+                    // the `LeadRow` cast, so diverging them would make that cast lie for one.
+                    campaignIcpSnapshot: discoveryCampaigns.icpSnapshot,
                     assistantRecordId: discoveredLeads.assistantRecordId,
                     approvalStatus: assistantRecords.approvalStatus,
                     recordData: assistantRecords.data,
@@ -278,6 +285,12 @@ export default withLambda(async (event) => {
                     campaignId: discoveryCampaigns.id,
                     campaignName: discoveryCampaigns.name,
                     campaignIdea: discoveryCampaigns.idea,
+                    // Attribution (§7.2) for the batch-approve branch's ledger write. Free — the
+                    // campaign is already joined — and it is the RIGHT snapshot: the ICP live when
+                    // this lead was found, resolved per row rather than once for the batch, because
+                    // a batch can span campaigns. Selected in BOTH queries on purpose: they share
+                    // the `LeadRow` cast, so diverging them would make that cast lie for one.
+                    campaignIcpSnapshot: discoveryCampaigns.icpSnapshot,
                     assistantRecordId: discoveredLeads.assistantRecordId,
                     approvalStatus: assistantRecords.approvalStatus,
                     recordData: assistantRecords.data,
@@ -338,6 +351,7 @@ export default withLambda(async (event) => {
                     actor: 'user',
                     actorUserId: userId,
                     blueprintVersion,
+                    icpSnapshot: (row.campaignIcpSnapshot ?? null) as Record<string, unknown> | null,
                     payload: { from: row.approvalStatus, to: 'approved', rating: row.rating, via: 'batch' },
                 });
 

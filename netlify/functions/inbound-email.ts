@@ -23,6 +23,7 @@ import { findThreadByReplyToken, recordInboundMessage } from '../../src/utils/le
 import { haltEnrolmentsForThread } from '../../src/utils/outreach-sequences';
 import { recordEvent } from '../../src/utils/revenue-ledger';
 import { getBlueprintVersion } from '../../src/utils/blueprint-version';
+import { getIcpSnapshot } from '../../src/utils/icp-snapshot';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const INBOUND_TOKEN = process.env.INBOUND_PARSE_TOKEN;
@@ -150,6 +151,13 @@ export default withLambda(async (event: HandlerEvent) => {
             // live when they replied, not necessarily the one that wrote the message they answered.
             // Cycle-time attribution keys off the outreach_sent row, which carries its own.
             const blueprintVersion = await getBlueprintVersion(db, thread.aiAssistantId);
+            // The other half of the join key. One thread is one lead, so this resolves to that
+            // lead's campaign snapshot — the targeting that found them, which is what a reply rate
+            // has to be segmented by to mean anything.
+            const icpSnapshot = await getIcpSnapshot(db, {
+                discoveredLeadId: thread.discoveredLeadId,
+                aiAssistantId: thread.aiAssistantId,
+            });
 
             // Halt any running cadence on this thread (Phase 2b). recordInboundMessage has already
             // flipped the thread to 'replied', and the sequence worker refuses to send to a thread
@@ -197,6 +205,7 @@ export default withLambda(async (event: HandlerEvent) => {
                         assistantRecordId: thread.assistantRecordId,
                         actor: 'system',
                         blueprintVersion,
+                        icpSnapshot,
                         payload: { threadId: thread.id, messageId, matched: optOut.matched, sequencesHalted: haltedCount },
                     });
                     console.log('[inbound-email] opt-out recorded', JSON.stringify({
@@ -218,6 +227,7 @@ export default withLambda(async (event: HandlerEvent) => {
                 assistantRecordId: thread.assistantRecordId,
                 actor: 'system',
                 blueprintVersion,
+                icpSnapshot,
                 payload: { threadId: thread.id, messageId, flaggedSpam, sequencesHalted: haltedCount },
             });
 

@@ -3536,6 +3536,11 @@ export const templateFeedback = pgTable("template_feedback", {
   id: serial().primaryKey(),
   organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
   leadMessageId: integer("lead_message_id").references(() => leadMessages.id, { onDelete: "cascade" }),
+  // The assistant whose playbook this edit is about — the edit-pattern proposer's grouping key.
+  // ⚠️ NOT derivable from leadMessageId: the ⭐ review-time path writes that as NULL by design (the
+  // edit precedes the send, so no lead_messages row exists yet), and that is the only writer today.
+  // Joining through lead_messages to find the assistant matches nothing. db/template-feedback-assistant.sql.
+  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "cascade" }),
   templateVersion: text("template_version"),
   // CLOSED vocabulary — src/config/template-feedback.ts EDIT_REASONS. It is the GROUP BY key for
   // the edit-pattern proposer, and free text cannot be clustered.
@@ -3545,6 +3550,8 @@ export const templateFeedback = pgTable("template_feedback", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (t) => [
   index("template_feedback_org_reason_idx").on(t.organisationId, t.editReason, t.createdAt),
+  index("template_feedback_assistant_reason_idx").on(t.aiAssistantId, t.editReason, t.createdAt)
+    .where(sql`ai_assistant_id IS NOT NULL`),
   check("template_feedback_edit_reason_check", sql`${t.editReason} IS NULL OR ${t.editReason} IN (
     'too_formal','too_casual','wrong_value_prop','wrong_pain_point',
     'too_long','factually_wrong','bad_subject','personalisation_missing','other')`),
@@ -3725,6 +3732,73 @@ export const accountMemory = pgTable("account_memory", {
   uniqueIndex("account_memory_source_uidx").on(t.organisationId, t.sourceType, t.sourceId)
     .where(sql`source_id IS NOT NULL`),
   check("account_memory_source_type_check", sql`${t.sourceType} IN ('message','engagement','note','outcome')`),
+]);
+
+// ────────────────────────────────────────────────────────────────────────────
+// STRATEGY PROPOSALS — Phase 5a of docs/lead-generator-revenue-engine-plan.md §7
+// ────────────────────────────────────────────────────────────────────────────
+// One proposed change to one tunable field, awaiting a human decision.
+//
+// A row here changes NOTHING until a human clicks Apply having read the diff. `status='pending'`
+// is inert by construction, and that inertness IS the safety argument for the phase: the proposer
+// is LLM-driven over text that includes third-party email arriving through a public webhook, so
+// the guarantee cannot come from the prompt — it comes from the only thing the function can write
+// being a row that does nothing (docs/strategy-agent-plan.md §5.2).
+//
+// Written exclusively through src/utils/strategy-proposals.ts — the recordEvent()/notify.ts
+// pattern. Do not insert here directly; the vocabularies in src/config/strategy-proposals.ts and
+// the CHECK constraints below only hold if there is one writer.
+//
+// ⚠️ Mirrors db/strategy-proposals.sql (MANUAL apply). The check()s and the partial unique index
+// must stay declared here too, or a later `drizzle-kit push` reverts them.
+export const strategyProposals = pgTable("strategy_proposals", {
+  id: serial().primaryKey(),
+  organisationId: integer("organisation_id").notNull().references(() => organisations.id, { onDelete: "cascade" }),
+  aiAssistantId: integer("ai_assistant_id").references(() => aiAssistants.id, { onDelete: "cascade" }),
+
+  // 'win_loss' | 'edit_pattern' | 'human'. MIN_SAMPLE means a different thing per source and the
+  // evidence blob has a different shape, so the UI cannot honestly label a sample size without it.
+  // 'human' is the synthetic source for §2.6's "Save as the new default", which routes a human's
+  // own edit through the SAME apply path rather than building a second mechanism (§5.4).
+  source: text("source").notNull(),
+
+  // A key of STRATEGY_TUNABLE_FIELDS — never a free string from the model.
+  targetField: text("target_field").notNull(),
+  previousValue: jsonb("previous_value"),                   // makes Apply reversible
+  proposedValue: jsonb("proposed_value").notNull(),
+  // { sampleSize, segments[], metrics{}, eventIds[] } — computed in SQL, never taken from the model.
+  evidence: jsonb("evidence").notNull(),
+
+  status: text("status").notNull().default("pending"),
+
+  // CLOSED vocabulary: a reject reason is an INPUT to the next run, not a record of this one.
+  rejectReason: text("reject_reason"),
+  rejectNote: text("reject_note"),                          // free text, for humans not the model
+  decidedBy: integer("decided_by").references(() => users.id, { onDelete: "set null" }),
+  decidedAt: timestamp("decided_at"),
+
+  // Rollback restores previousValue and stamps rolledBackAt; the row STAYS 'applied' so history
+  // shows it happened. A separate status would make "was this ever applied?" a two-value question.
+  appliedAt: timestamp("applied_at"),
+  rolledBackAt: timestamp("rolled_back_at"),
+
+  expiresAt: timestamp("expires_at").notNull(),             // never auto-applies; lapses instead
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  index("strategy_proposals_org_status_idx").on(t.organisationId, t.status, t.createdAt),
+  // ⚠️ LOAD-BEARING. §7 says "one change per run" but not "one PENDING proposal per field", and the
+  // run is weekly. Without this a confident field accumulates a proposal a week, each with a
+  // previousValue snapshotted against a different world; applying the oldest LAST silently reverts
+  // the others. The proposer must catch the conflict and SKIP — a run that dies on a duplicate
+  // stops proposing for every other org in the batch.
+  uniqueIndex("strategy_proposals_pending_field_uidx")
+    .on(t.organisationId, t.targetField)
+    .where(sql`status = 'pending'`),
+  check("strategy_proposals_status_check", sql`${t.status} IN ('pending','applied','rejected','expired')`),
+  check("strategy_proposals_source_check", sql`${t.source} IN ('win_loss','edit_pattern','human')`),
+  check("strategy_proposals_reject_reason_check", sql`${t.rejectReason} IS NULL OR ${t.rejectReason} IN ('sample_unrepresentative','already_tried','wrong_causation','off_brand','bad_timing','too_narrow','too_broad','other')`),
+  check("strategy_proposals_rejected_has_reason_check", sql`${t.status} <> 'rejected' OR ${t.rejectReason} IS NOT NULL`),
+  check("strategy_proposals_rollback_requires_apply_check", sql`${t.rolledBackAt} IS NULL OR ${t.appliedAt} IS NOT NULL`),
 ]);
 
 // Relational-query definitions for the chat tables live in db/relations.ts

@@ -31,6 +31,15 @@ export interface RecordTemplateEditInput {
     organisationId: number;
     /** NULL until the message is actually sent — a review-time edit precedes any lead_messages row. */
     leadMessageId?: number | null;
+    /**
+     * The assistant whose playbook this edit is about. **Supply it.**
+     *
+     * The edit-pattern proposer groups on this, and it cannot fall back to deriving it from
+     * `leadMessageId` because the review-time path (the only writer today) leaves that NULL by
+     * design. A row without it is invisible to the proposer — it still counts toward the progress
+     * bar on the Strategy tab, which would make the threshold look reachable when it is not.
+     */
+    aiAssistantId?: number | null;
     /** The blueprint the draft was generated from. The attribution key, same as the ledger's. */
     templateVersion?: string | null;
     editReason: string;
@@ -137,6 +146,7 @@ export async function recordTemplateEdit(db: Db, input: RecordTemplateEditInput)
         const [row] = await db.insert(templateFeedback).values({
             organisationId: input.organisationId,
             leadMessageId: input.leadMessageId ?? null,
+            aiAssistantId: input.aiAssistantId ?? null,
             templateVersion: input.templateVersion ?? null,
             editReason,
             diffSummary: diffSummary.slice(0, 500),

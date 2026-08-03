@@ -8,6 +8,7 @@ import { getDb } from '../../db/client';
 import { randomUUID } from 'crypto';
 import { eq } from 'drizzle-orm';
 import { discoveryCampaigns, discoveryGuardrails, discoverySchedules, discoveryJobs, aiAssistants } from '../../db/schema';
+import { icpFromOnboarding } from './icp-snapshot';
 
 type Db = ReturnType<typeof getDb>;
 
@@ -32,16 +33,6 @@ export interface CreateRunInput {
 }
 
 export interface CreateRunResult { campaignId: number; jobId: string; }
-
-/** Build the ICP snapshot from the assistant's onboarding answers (same fields the chat route uses). */
-function icpFromOnboarding(onboarding: unknown): Record<string, unknown> {
-    const o = (onboarding && typeof onboarding === 'object' && !Array.isArray(onboarding) ? onboarding : {}) as Record<string, unknown>;
-    return {
-        targetIndustries: o.targetIndustries ?? null,
-        minHeadcount: o.minHeadcount ?? null,
-        salesTone: o.salesTone ?? 'professional',
-    };
-}
 
 /**
  * Create a campaign + guardrails + schedule and enqueue a run.

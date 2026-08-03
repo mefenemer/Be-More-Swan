@@ -2,6 +2,19 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "component-harness-strategy",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "4245",
+        "--directory",
+        "/private/tmp/claude-501/-Users-mefenemer-WebstormProjects-Be-More-Swan/1eaa7875-5ed2-4221-bcc4-e9f896077638/scratchpad/stratharness"
+      ],
+      "port": 4245,
+      "autoPort": false
+    },
+    {
       "name": "component-harness-conversations",
       "runtimeExecutable": "python3",
       "runtimeArgs": [

@@ -30,6 +30,7 @@ import { logAiUsage } from '../../src/utils/ai-usage';
 import { enqueueScenarioTrigger } from '../../src/utils/scenario-engine';
 import { recordEvent } from '../../src/utils/revenue-ledger';
 import { getBlueprintVersion } from '../../src/utils/blueprint-version';
+import { getIcpSnapshot } from '../../src/utils/icp-snapshot';
 import { createNotification } from '../../src/utils/notify';
 import { savedSearchLabel } from '../../src/config/signal-sources';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -418,6 +419,13 @@ async function enrichBatch(db: Db, job: JobRow, counters: Counters): Promise<voi
     // therefore one assistant, so this is a single lookup. Doing it inside the map would issue one
     // query per lead — a memo cache does not help, since concurrent callers all miss together.
     const blueprintVersion = await getBlueprintVersion(db, batch[0]?.ai_assistant_id);
+    // Same one-lookup reasoning: the batch is filtered to `job.campaign_id`, so every row resolves
+    // to the same campaign snapshot. Going via a lead rather than the campaign id keeps this on the
+    // one resolver, so the "campaign first, onboarding second" rule lives in a single place.
+    const icpSnapshot = await getIcpSnapshot(db, {
+        discoveredLeadId: batch[0]?.id ?? null,
+        aiAssistantId: batch[0]?.ai_assistant_id ?? null,
+    });
 
     // Concurrent: 5 leads x up to 4 sequential fetches would blow the tick budget serially.
     await Promise.all(batch.map(async (lead) => {
@@ -428,7 +436,7 @@ async function enrichBatch(db: Db, job: JobRow, counters: Counters): Promise<voi
             // Best-effort: a scrape failure must never fail the run.
         }
         await recordEnrichment(db, lead.id, lead.assistant_record_id, hit,
-            { organisationId: job.organisation_id, aiAssistantId: lead.ai_assistant_id, blueprintVersion });
+            { organisationId: job.organisation_id, aiAssistantId: lead.ai_assistant_id, blueprintVersion, icpSnapshot });
     }));
 
     const [{ remaining } = { remaining: 0 }] = await db.execute<{ remaining: number }>(
@@ -508,7 +516,7 @@ async function publishSignals(db: Db, job: JobRow): Promise<void> {
 async function recordEnrichment(
     db: Db, leadId: number, assistantRecordId: number | null,
     hit: { email: string; kind: string; source: string; foundOn: string } | null,
-    ledger?: { organisationId: number; aiAssistantId: number; blueprintVersion?: string | null },
+    ledger?: { organisationId: number; aiAssistantId: number; blueprintVersion?: string | null; icpSnapshot?: Record<string, unknown> | null },
 ): Promise<void> {
     const stamp: Record<string, unknown> = { enrichAttemptedAt: new Date().toISOString() };
     if (hit) {
@@ -538,6 +546,7 @@ async function recordEnrichment(
             assistantRecordId,
             actor: 'agent',
             blueprintVersion: ledger.blueprintVersion ?? null,
+            icpSnapshot: ledger.icpSnapshot ?? null,
             payload: { emailKind: hit.kind, emailSource: hit.source },
         });
     }

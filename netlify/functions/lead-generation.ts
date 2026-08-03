@@ -38,6 +38,7 @@ import { sendOutlookMessage } from '../../src/utils/outlook';
 import { IntegrationError } from '../../src/utils/workspace-integrations';
 import { recordEvent, cycleDaysBetween } from '../../src/utils/revenue-ledger';
 import { getBlueprintVersion } from '../../src/utils/blueprint-version';
+import { makeIcpSnapshotCache } from '../../src/utils/icp-snapshot';
 import {
     OUTCOMES, LOSS_REASONS, EVENT_FOR_OUTCOME, OUTCOMES_REQUIRING_LOSS_REASON,
     isOutcome, isLossReason, type LossReason,
@@ -215,6 +216,20 @@ export default withLambda(async (event) => {
         return _blueprintVersion;
     }
 
+    /**
+     * The other half of the attribution key (§7.2), memoised for the request on the same reasoning.
+     *
+     * Pass the record id whenever one is in scope: the resolver walks record → discovered lead →
+     * campaign and returns the ICP that was live when the lead was FOUND. That matters most on the
+     * terminal outcome events — attributing a deal won today to today's onboarding would credit the
+     * current targeting for a lead the previous targeting found, which is exactly the correlating
+     * noise §7.2 exists to prevent. Omit it only where the lead is known to be manually added.
+     */
+    const _icpFor = makeIcpSnapshotCache(db);
+    function icpSnapshot(assistantRecordId?: number | null): Promise<Record<string, unknown> | null> {
+        return _icpFor({ assistantRecordId: assistantRecordId ?? null, aiAssistantId: assistant.id });
+    }
+
     /** Log token usage the same way the chat route does, so COGS reporting stays complete. */
     function logUsage(resp: Anthropic.Message, suffix: string) {
         void logAiUsage({
@@ -326,7 +341,10 @@ ${OUTREACH_SUBJECT_RULES}`;
                 assistantRecordId: id,
                 actor: 'agent',
                 actorUserId: userId,
-                icpSnapshot: { targetIndustries: onboarding.targetIndustries ?? null, minHeadcount: onboarding.minHeadcount ?? null },
+                // No record id passed on purpose: this lead was hand-entered, so there is no
+                // campaign to attribute it to and the walk would be a guaranteed miss. The
+                // onboarding-derived snapshot is the honest answer here.
+                icpSnapshot: await icpSnapshot(),
                 blueprintVersion: await blueprintVersion(),
                 payload: { score: card.score, rating: card.rating, source: 'manual' },
             });
@@ -391,6 +409,7 @@ ${OUTREACH_SUBJECT_RULES}`;
                 actor: 'user',
                 actorUserId: userId,
                 blueprintVersion: await blueprintVersion(),
+                icpSnapshot: await icpSnapshot(recordId),
                 payload: { reason, overrodeSource: current.source, overrodeReason: current.reason },
             });
 
@@ -516,7 +535,7 @@ ${OUTREACH_SUBJECT_RULES}`;
                 lossReason,
                 valueGbp,
                 cycleDays,
-                icpSnapshot: { targetIndustries: onboarding.targetIndustries ?? null, minHeadcount: onboarding.minHeadcount ?? null },
+                icpSnapshot: await icpSnapshot(recordId),
                 blueprintVersion: await blueprintVersion(),
                 payload: {
                     title: rec.title,
@@ -581,6 +600,9 @@ ${OUTREACH_SUBJECT_RULES}`;
                 // NULL by design — a review-time edit precedes the send, so no lead_messages row
                 // exists yet. The sent message keeps its own copy via generated_body.
                 leadMessageId: null,
+                // ...which is exactly why the assistant has to be stated outright: with no message
+                // row there is nothing to join through, and the edit-pattern proposer groups on this.
+                aiAssistantId: assistant.id,
                 templateVersion: await blueprintVersion(),
                 editReason,
                 before: { subject: (original.subject as string) ?? null, body: original.body },
@@ -785,6 +807,7 @@ Otherwise return STRICT JSON only: { "subject": "<subject>", "body": "<email bod
                 actor: 'agent',
                 actorUserId: userId,
                 blueprintVersion: await blueprintVersion(),
+                icpSnapshot: await icpSnapshot(recordId),
                 payload: {
                     provider,
                     emailKind: emailKind ?? null,
