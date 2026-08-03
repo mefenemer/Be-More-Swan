@@ -163,16 +163,47 @@ start failing on long or high-resolution sources; `src/lib/post-render.ts` caps 
 
 Note the printed function name → `REMOTION_LAMBDA_FUNCTION_NAME`.
 
-Then check the account's Lambda concurrency, which is low by default on a **new** AWS account and is
-what a render silently queues behind:
+Then check the account's Lambda concurrency, which is low by default on a **new** AWS account:
 
 ```bash
 npx remotion lambda quotas
 ```
 
-The user policy includes `servicequotas:RequestServiceQuotaIncrease` so an increase can be requested
-from the CLI if the limit turns out to be tight. One post's render is fine at any limit; a batch
-approval of several video posts is what would feel it.
+⚠️ **A single render is NOT "fine at any limit" — this sentence used to say it was, and it was wrong
+in a way that broke every render on the platform.** Remotion's default fan-out has no knowledge of
+the account quota: `bestFramesPerFunctionParam` floors a chunk at 20 frames, so a 10-second 30 fps
+Short asks for **15 renderer Lambdas plus the launch function — 16 invocations against a new
+account's limit of 10.** Nothing warns you. The launch invoke throws
+
+```
+AWS Concurrency limit reached (Original Error: Rate Exceeded.)
+```
+
+the worker marks `render_status='failed'`, and the post keeps the still it was supposed to have
+become — so a video-only platform then refuses it with "A Short can't carry this", which is the
+symptom people report rather than the cause.
+
+Two things keep this fixed, and you want both:
+
+1. **`REMOTION_MAX_LAMBDAS`** (`src/lib/remotion-lambda.ts`, default **3**) sizes the fan-out
+   ourselves via `renderMediaOnLambda`'s `concurrency`. The launch function is one *more* Lambda on
+   top, and two renders can legitimately overlap, so the default keeps `2 × (1 + 3) = 8` inside a
+   limit of 10. Raise it once the quota goes up — but note the trade: fewer Lambdas means **more
+   frames each**, and a renderer is bounded by the deployed function's **120 s** timeout, so this
+   number is also the practical ceiling on clip length. At the default, budget roughly a few
+   thousand frames total before chunks start timing out.
+2. **Request the quota increase.** The user policy includes
+   `servicequotas:RequestServiceQuotaIncrease`, so:
+
+   ```bash
+   npx remotion lambda quotas increase
+   ```
+
+   Until AWS grants it, long clips remain the constraint — not short ones, which now work.
+
+`startRender` also retries a rate-limited launch (5 s / 15 s / 30 s) rather than failing the post,
+because the remedy is simply waiting for someone else's render to release its slots. Covered by
+`tests/remotion-concurrency.test.ts`.
 
 ### 3. Deploy the two sites
 
