@@ -20,13 +20,14 @@
 // Instagram ingester — engagement keeps accruing for days after publish.
 //
 // Reuses the publisher's token/vault conventions (publish-facebook.ts) and the same Graph host
-// Instagram uses, on the same Page access token.
+// Instagram uses, on the same Page access token — literally the same resolver, see tokenFor().
 
 import { Handler } from '@netlify/functions';
 import { and, eq, gte, isNotNull, or, isNull } from 'drizzle-orm';
 import { getDb } from '../../db/client';
 import { scheduledPosts, systemConnections, postInsights } from '../../db/schema';
 import { getSecret } from '../../src/utils/vault';
+import { resolveFacebookPageCredentials } from '../../src/utils/social-publish';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const GRAPH_VERSION = 'v19.0';
@@ -112,29 +113,74 @@ export async function ingestFacebookInsights(): Promise<IngestResult> {
         return { processed: 0, updated: 0, failed: 0, durationMs: Date.now() - tickStart };
     }
 
-    // Cache one token per connection so we don't re-read the vault per post.
-    const tokenCache = new Map<number, { token: string } | null>();
-    async function tokenFor(connectionId: number): Promise<string | null> {
-        if (tokenCache.has(connectionId)) return tokenCache.get(connectionId)?.token ?? null;
+    // Cache one PAGE token per connection so we don't re-derive it per post.
+    //
+    // ⚠️ The vault holds the long-lived USER token meta-oauth.ts stored, NOT a Page token. Facebook
+    // PAGE-POST insights must be called with a Page access token — hand Graph the user token and it
+    // answers "(#190) This method must be called with a Page Access Token", which the handler below
+    // then read as an expired grant and wrote token_expired to the connection. That killed a
+    // perfectly healthy connection on every 6-hourly tick and left the user in a permanent
+    // reconnect loop (the Connections UI only suppresses its "connect Facebook?" prompt for
+    // status='active'). Derive the Page token through the SAME resolver the publisher uses so the
+    // two paths can never drift apart again.
+    //
+    // NOTE: resolveFacebookPageCredentials falls back to the raw user token when derivePageToken
+    // can't mint one (missing pages_show_list, Page no longer administered). That still 190s here,
+    // but grantIsDead() below now stops a 190 from condemning the connection.
+    const tokenCache = new Map<number, string | null>();
+    async function tokenFor(connectionId: number, organisationId: number | null): Promise<string | null> {
+        if (tokenCache.has(connectionId)) return tokenCache.get(connectionId) ?? null;
+        let pageToken: string | null = null;
+        try {
+            if (organisationId != null) {
+                ({ pageToken } = await resolveFacebookPageCredentials(db, { organisationId, connectionId }));
+            }
+        } catch (err) {
+            console.error(`[ingest-facebook-insights] conn ${connectionId}: no Page token —`,
+                err instanceof Error ? err.message : err);
+        }
+        tokenCache.set(connectionId, pageToken);
+        return pageToken;
+    }
+
+    /**
+     * Is this connection's stored grant ACTUALLY dead?
+     *
+     * A 190 on a post-level call is not proof. Graph also returns 190 for the wrong token TYPE and
+     * for a post that is no longer reachable, and condemning the connection on that evidence sets
+     * token_expired on a live account — which stops the assistant drafting for the platform
+     * entirely and re-prompts the user to reconnect on every visit. Ask Meta about the CREDENTIAL
+     * itself and only write the status when that call fails the same way.
+     */
+    async function grantIsDead(connectionId: number): Promise<boolean> {
         const [conn] = await db
             .select({ vaultRefKey: systemConnections.vaultRefKey })
             .from(systemConnections)
             .where(eq(systemConnections.id, connectionId))
             .limit(1);
-        if (!conn?.vaultRefKey) { tokenCache.set(connectionId, null); return null; }
+        if (!conn?.vaultRefKey) return false;
         const secret = await getSecret(db, conn.vaultRefKey);
-        const token = (secret?.token as string | undefined) ?? null;
-        tokenCache.set(connectionId, token ? { token } : null);
-        return token;
+        const userToken = secret?.token as string | undefined;
+        if (!userToken) return false;
+        try {
+            const res = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/me?fields=id&access_token=${encodeURIComponent(userToken)}`);
+            const data: { id?: string; error?: { code: number; message: string } } = await res.json();
+            return !data.id && data.error?.code === 190;
+        } catch (e) {
+            // A network failure is not evidence of expiry — leave the connection alone.
+            console.error(`[ingest-facebook-insights] conn ${connectionId}: liveness check failed:`, e);
+            return false;
+        }
     }
 
     let updated = 0, failed = 0;
-    const expiredConnections = new Set<number>();
+    // Connections that returned a 190 somewhere. SUSPECT, not condemned — verified below.
+    const suspectConnections = new Set<number>();
 
     await Promise.allSettled(posts.map(async (post) => {
         try {
             if (!post.connectionId || !post.platformPostId) return;
-            const token = await tokenFor(post.connectionId);
+            const token = await tokenFor(post.connectionId, post.organisationId);
             if (!token) { failed++; return; }
 
             const auth = encodeURIComponent(token);
@@ -156,8 +202,9 @@ export async function ingestFacebookInsights(): Promise<IngestResult> {
 
             const err = insightsData.error ?? fieldsData.error;
             if (err) {
-                // 190 = token expired/invalid — mark the connection so the UI prompts a reconnect.
-                if (err.code === 190) expiredConnections.add(post.connectionId);
+                // 190 = an OAuth problem, which may or may not be an expired grant — it is also
+                // what Graph returns for the wrong token type. Collect, verify, then decide.
+                if (err.code === 190) suspectConnections.add(post.connectionId);
                 failed++;
                 return;
             }
@@ -204,8 +251,14 @@ export async function ingestFacebookInsights(): Promise<IngestResult> {
         }
     }));
 
-    // Flag connections whose token expired so the connection UI can prompt a reconnect.
-    for (const connId of expiredConnections) {
+    // Flag connections whose token expired so the connection UI can prompt a reconnect — but only
+    // after Meta confirms the grant itself is gone. Writing this status is destructive: it stops
+    // the assistant drafting for the platform and nags the user to reconnect on every visit.
+    for (const connId of suspectConnections) {
+        if (!(await grantIsDead(connId))) {
+            console.warn(`[ingest-facebook-insights] conn ${connId}: 190 on a post call but the grant is still live — status left untouched`);
+            continue;
+        }
         await db.update(systemConnections)
             .set({ status: 'token_expired', updatedAt: new Date() })
             .where(eq(systemConnections.id, connId))
