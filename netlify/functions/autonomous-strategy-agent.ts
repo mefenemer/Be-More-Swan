@@ -197,6 +197,19 @@ export interface StrategyAgentResult {
     skipped: number;
     expired: number;
     notified: number;
+    /**
+     * Why each cluster was skipped, in order — returned, not just logged.
+     *
+     * ⚠️ This exists because `skipped: 1` is otherwise unfalsifiable. There are six ways to skip
+     * and they are indistinguishable in the summary, so "the agent proposed nothing" cannot be told
+     * apart from "the agent is broken". The console lines are the natural place for that, EXCEPT
+     * this function is invoked over HTTP by a GitHub workflow that prints the response body, and
+     * the platform's function logs do not reliably surface a scheduled invocation's stdout. So the
+     * answer travels back with the response, where the caller definitely sees it.
+     *
+     * Carries no tenant data — a reason string, an org id and a field name.
+     */
+    skipReasons: string[];
 }
 
 /**
@@ -205,7 +218,7 @@ export interface StrategyAgentResult {
  */
 export async function runStrategyAgent(): Promise<StrategyAgentResult> {
     const db = getDb();
-    const result: StrategyAgentResult = { clusters: 0, proposed: 0, skipped: 0, expired: 0, notified: 0 };
+    const result: StrategyAgentResult = { clusters: 0, proposed: 0, skipped: 0, expired: 0, notified: 0, skipReasons: [] };
 
     // The expiry sweep runs FIRST and unconditionally — it is one statement, it costs nothing, and
     // it must not be skippable by an early return further down. Global (no org filter): this run is
@@ -225,7 +238,18 @@ export async function runStrategyAgent(): Promise<StrategyAgentResult> {
     // in a single run is two proposals and would otherwise be two alerts about the same visit.
     const proposedByOrg = new Map<number, { count: number; summary: string; assistantName: string }>();
 
+    // Every skip records WHY. Six paths reach `skipped`, and without this the summary cannot
+    // distinguish "correctly proposed nothing" from "silently broken" — the difference that
+    // matters most for a job that is expected to do nothing for months.
+    const skip = (why: string, extra?: Record<string, unknown>) => {
+        result.skipped++;
+        const detail = extra ? ` ${JSON.stringify(extra)}` : '';
+        result.skipReasons.push(`${why}${detail}`);
+    };
+
     for (const c of clusters.slice(0, BATCH)) {
+        const where = { org: c.organisationId, assistant: c.aiAssistantId, reason: c.editReason };
+
         // Eligibility can lapse — a workspace can lose the feature between runs. Re-check per run,
         // cached per org, exactly as the optimizer re-checks the tier.
         let enabled = featureByOrg.get(c.organisationId);
@@ -233,11 +257,12 @@ export async function runStrategyAgent(): Promise<StrategyAgentResult> {
             enabled = await hasFeatureByOrg(db, c.organisationId, STRATEGY_AGENT_FEATURE);
             featureByOrg.set(c.organisationId, enabled);
         }
-        if (!enabled) { result.skipped++; continue; }
+        // The expected state for almost every org: the feature is default-off.
+        if (!enabled) { skip('feature not enabled for this org', where); continue; }
 
         const targetField = TARGET_FIELD_FOR_REASON[c.editReason];
         const field = tunableField(targetField);
-        if (!field) { result.skipped++; continue; }
+        if (!field) { skip('edit reason maps to no tunable field', { ...where, targetField }); continue; }
 
         // Skip early if a pending proposal already holds this field's one slot. proposeChange()
         // would catch the conflict anyway, but paying for a model call to discover that is waste.
@@ -250,14 +275,14 @@ export async function runStrategyAgent(): Promise<StrategyAgentResult> {
                 eq(strategyProposals.status, 'pending'),
             ))
             .limit(1);
-        if (existing) { result.skipped++; continue; }
+        if (existing) { skip('a pending proposal already holds this field', { ...where, targetField }); continue; }
 
         const [assistant] = await db
             .select({ id: aiAssistants.id, name: aiAssistants.name, onboardingContext: aiAssistants.onboardingContext })
             .from(aiAssistants)
             .where(and(eq(aiAssistants.id, c.aiAssistantId), eq(aiAssistants.organisationId, c.organisationId)))
             .limit(1);
-        if (!assistant) { result.skipped++; continue; }
+        if (!assistant) { skip('assistant not found in this org', where); continue; }
 
         const current = currentText(assistant.onboardingContext, field.key);
         const rejections = await priorRejections(db, c.organisationId, targetField);
@@ -315,7 +340,7 @@ export async function runStrategyAgent(): Promise<StrategyAgentResult> {
         } catch (err) {
             // One org's model failure must not stop the run for every other org.
             console.error('[strategy-agent] generation failed', { org: c.organisationId, assistant: c.aiAssistantId }, err);
-            result.skipped++;
+            skip('generation threw', { ...where, error: err instanceof Error ? err.message.slice(0, 200) : 'unknown' });
             continue;
         }
 
@@ -330,7 +355,7 @@ export async function runStrategyAgent(): Promise<StrategyAgentResult> {
             console.error(`[strategy-agent] proposal rejected: ${why}`, {
                 org: c.organisationId, assistant: c.aiAssistantId, targetField, ...extra,
             });
-            result.skipped++;
+            skip(why, extra);
         };
 
         if (claimedField !== targetField) {

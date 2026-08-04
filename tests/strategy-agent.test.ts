@@ -239,6 +239,30 @@ check('the HTTP wrapper fails closed when the secret is unset', () => {
     assert.ok(wrapper.includes('runStrategyAgent'), 'the wrapper must run the SAME logic as the cron');
 });
 
+check('every skip records a reason — "skipped: N" must never be unfalsifiable', () => {
+    // Six paths reach `skipped`, and in the summary they are indistinguishable. For a job expected
+    // to do nothing for months, "correctly proposed nothing" and "silently broken" look identical
+    // without this. The reasons are RETURNED as well as logged, because the platform's function
+    // logs do not reliably surface a scheduled invocation's stdout.
+    const increments = [...runBody.matchAll(/result\.skipped\s*\+\+/g)];
+    assert.equal(increments.length, 1, 'skipped must be incremented in exactly one place (the skip() helper)');
+    assert.ok(/const skip = \(/.test(runBody), 'no skip() helper');
+    assert.ok(/skipReasons\.push/.test(runBody), 'the helper does not record the reason');
+
+    // Every `continue` that abandons a cluster must have gone through skip()/reject() first.
+    const bare = [...runBody.matchAll(/\n\s*if \([^)]*\) \{ (?!skip\(|reject\()[^}]*continue; \}/g)];
+    assert.deepEqual(bare.map((m) => m[0].trim()), [], 'a cluster is abandoned without recording why');
+});
+
+check('the run returns its skip reasons to the caller, not just to the logs', () => {
+    const iface = agentSrc.match(/export interface StrategyAgentResult \{([\s\S]*?)\n\}/);
+    assert.ok(iface, 'StrategyAgentResult is missing');
+    assert.ok(/skipReasons:\s*string\[\]/.test(iface![1]), 'skipReasons is not part of the returned result');
+    // run-strategy-agent spreads the result into its JSON body, which the workflow prints.
+    const wrapper = sourceOf('netlify/functions/run-strategy-agent.ts');
+    assert.ok(/\.\.\.result/.test(wrapper), 'the HTTP wrapper does not return the full result');
+});
+
 check('the expiry sweep runs before the AI kill-switch can short-circuit it', () => {
     // Lapsing a proposal is housekeeping, not AI work. If the sweep sat after the kill-switch,
     // disabling AI would leave every pending proposal actionable forever.
