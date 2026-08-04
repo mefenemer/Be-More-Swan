@@ -310,5 +310,19 @@ export default withLambda(async (event) => {
         connectorsLive,         // which optional OAuth integrations are actually wired in this env
     };
 
-    return json(200, { environment, readiness, services });
+    // The runtime this function is ACTUALLY executing on, reported because it is otherwise
+    // unobservable — and the gap between it and a developer's local Node is what let a static
+    // import of an ESM-only package crash publish-blog-posts for a day while every local check
+    // passed (Node 22.12+ allows require() of ESM; older versions throw at module load).
+    // Pinned in netlify.toml [build.environment] NODE_VERSION, .nvmrc and package.json engines —
+    // `pinnedMatches` is false when the deploy silently drifted from all three.
+    const runtime = {
+        node: process.version,
+        pinned: process.env.NODE_VERSION ?? null,
+        pinnedMatches: process.env.NODE_VERSION
+            ? process.version.replace(/^v/, '').startsWith(String(process.env.NODE_VERSION).replace(/^v/, '').split('.')[0])
+            : null,
+    };
+
+    return json(200, { environment, runtime, readiness, services });
 });

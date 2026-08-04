@@ -110,4 +110,41 @@ check('renderMarkdown and excerpt are async, so callers cannot forget to await',
     assert.ok(/export async function excerpt\(/.test(text), 'excerpt must stay async');
 });
 
+// ── The runtime pin ──────────────────────────────────────────────────────────
+// The root cause of the crash was not the import — it was that nobody knew which Node the deploy
+// ran. `require()` of ESM is permitted from 22.12 and throws before it, so an unpinned runtime
+// makes "does this work?" a question local testing cannot answer. Three files declare the version;
+// if they disagree, the pin is decorative.
+
+check('the Node version is pinned in all three places, and they agree', () => {
+    const major = (v: string) => String(v).replace(/^[^\d]*/, '').split('.')[0];
+
+    const nvmrc = readFileSync(join(root, '.nvmrc'), 'utf8').trim();
+    assert.ok(nvmrc, '.nvmrc is missing or empty — local runs are unpinned');
+
+    const toml = readFileSync(join(root, 'netlify.toml'), 'utf8');
+    const tomlMatch = toml.match(/NODE_VERSION\s*=\s*"([^"]+)"/);
+    assert.ok(tomlMatch, 'netlify.toml does not pin NODE_VERSION — the deploy runtime is whatever Netlify defaults to');
+
+    const engines = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).engines?.node;
+    assert.ok(engines, 'package.json declares no engines.node');
+
+    assert.equal(major(tomlMatch![1]), major(nvmrc),
+        `netlify.toml pins Node ${tomlMatch![1]} but .nvmrc says ${nvmrc} — local and deploy would diverge again`);
+    assert.ok(engines.includes(major(nvmrc)),
+        `package.json engines "${engines}" does not cover the pinned major (${major(nvmrc)})`);
+});
+
+check('the pinned Node is one where require() of ESM behaves predictably', () => {
+    // Not a style preference: below 22.12 `require()` of an ESM package throws at module load, and
+    // above it silently succeeds. Either is workable — drifting across the boundary unknowingly is
+    // not, which is exactly what happened.
+    const nvmrc = readFileSync(join(root, '.nvmrc'), 'utf8').trim();
+    const major = Number(String(nvmrc).replace(/^[^\d]*/, '').split('.')[0]);
+    assert.ok(Number.isInteger(major), `.nvmrc "${nvmrc}" is not a version`);
+    // 18 and 20 are both past end-of-life as of this pin; staying on one is a security posture
+    // decision, not an accident to be discovered from a crash log.
+    assert.ok(major >= 22, `Node ${major} is end-of-life — pin an active LTS`);
+});
+
 console.log(`\n${passed} checks passed.`);

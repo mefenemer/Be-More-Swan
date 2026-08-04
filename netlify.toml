@@ -96,6 +96,24 @@
   # drift from the markup (a stale committed style.css silently drops classes and breaks layouts).
   command = "npm run build:css:prod && npm run build:version"
   functions = "netlify/functions"
+
+# ⚠️ PIN THE RUNTIME. Unset, the build and the Lambda runtime take whatever Netlify defaults to,
+# which is NOT the version anyone runs locally — and that gap hides a whole class of bug.
+#
+# What it cost us on 2026-08-04: `marked` is ESM-only, and a static import of it compiles to
+# `require()` in the CJS function bundle. Node **22.12+ permits require() of ESM; earlier versions
+# throw ERR_REQUIRE_ESM at module load**. Local dev was on Node 26 (fine), the deploy runtime was
+# older (fatal), so publish-blog-posts sat in a crash loop for over a day while every local check
+# passed. Nothing you can run on your machine reproduces a difference you have not pinned.
+#
+# 22 because it is the active LTS as of this pin. Node 18 (EOL Apr 2025) and 20 (EOL Apr 2026) are
+# both past end-of-life — this pin is therefore an UPGRADE off an unsupported runtime, not merely a
+# lock, so treat a change to it as a deploy to validate on staging first.
+#
+# Keep this in step with .nvmrc and package.json `engines` — .nvmrc drives local `nvm use`, and all
+# three exist so the versions cannot silently diverge again. See tests/esm-only-imports.test.ts.
+[build.environment]
+  NODE_VERSION = "22"
 [dev]
   functions = "netlify/functions"
 [functions]
