@@ -151,7 +151,7 @@
             Show filtered (${c.filtered})
           </label>
           <button type="button" data-si-new-search
-            class="px-2.5 py-1 text-xs font-bold rounded-lg border bg-white text-emerald-700 border-emerald-200 hover:border-emerald-300 hover:bg-emerald-50 transition">+ New search</button>
+            class="px-2.5 py-1 text-xs font-bold rounded-lg border bg-white text-emerald-700 border-emerald-200 hover:border-emerald-300 hover:bg-emerald-50 transition">Find New Leads</button>
         </div>
 
         ${c.ready > 0 ? `
@@ -171,7 +171,7 @@
                <p class="text-sm font-semibold text-gray-900">No signals yet</p>
                <p class="text-xs text-gray-500 mt-1">Create a saved search and your assistant will start filling this inbox.</p>
                <button type="button" data-si-new-search
-                 class="mt-3 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition">New search</button>
+                 class="mt-3 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition">Find New Leads</button>
              </div>`
           : state.signals.map(row).join('')}
 

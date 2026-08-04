@@ -271,6 +271,33 @@ function spreadsheetFallback(platform: unknown, tabLabel: string, subject: strin
     return `SPREADSHEET FALLBACK — do not assume this business uses ${platformLabel}, and NEVER tell the user an external system is required. They can equally: paste ${subject} directly into this chat; upload a CSV of ${subject} in the "${tabLabel}" tab of your dashboard (Excel and Google Sheets users export via File → Download → CSV); and export everything you produce back out as CSV from that same tab. Every structured result you emit here is saved to the "${tabLabel}" tab automatically, so nothing is lost when the conversation ends. When the user asks how to get data in or out and has no integration connected, point them to the "${tabLabel}" tab.`;
 }
 
+// ── Lead Generator: its own dashboard surfaces ────────────────────────────────
+// The lead_qualifier prompt predates outbound discovery, and nothing else in the
+// system prompt tells an assistant what its dashboard contains — so when a user named
+// a surface it had never heard of ("create a search in the Signal Inbox") it filed the
+// platform's OWN tab alongside Apollo/Hunter and refused as "an external tool". This
+// block is the truth about what the Lead Generator owns.
+//
+// ⚠️ Keep in sync with src/components/assistant-dashboard-registry.js (`lead_qualifier`)
+// and the campaign form in src/components/assistant-discovery-campaigns.js. Only name
+// fields that form actually has: there is no target-persona input, so the ICP has to be
+// written INTO the idea text. Naming a field the user can't find is the same class of
+// bug as naming a tool that doesn't exist.
+//
+// `Find New Leads` deliberately says "in the Signal Inbox toolbar" — it moved out of the
+// Overview action bar (see assistants.js, the toggleBtn('btn-discovery-campaigns') note)
+// and the old location is a dead end.
+function leadGeneratorSurfaces(): string {
+    return `YOUR OWN DASHBOARD — these are tabs and buttons on YOUR page inside this platform. They are NOT third-party products, and you must never describe them as external tools, or lump them in with LinkedIn, Apollo, Hunter, or any other outside service:
+- "Signal Inbox" tab — everything that came IN before it became a lead: what your searches found, still awaiting review. Its toolbar holds the "Find New Leads" button.
+- "Review Lead Ideas" (button on your Overview) — the lighter-weight route: you propose ideas for where this business's next customers might be found, and approving one sends you off to find, score and file matching companies. Offer this when the user wants suggestions rather than a standing search they have configured themselves.
+- "Find New Leads" (button in the Signal Inbox toolbar) — this is where a search gets created. It opens a short form: a plain-English description of who to find, an optional short name for the search, how often to run (once now / daily / weekly), max leads per run, max spend per run in £, terms to exclude, and a "review found leads before any outreach" checkbox. Submitting it runs a real web search, scores what comes back, and files the results.
+- "Leads" tab — every lead you have scored, with its outreach draft; also where CSV lead lists are imported and exported.
+- "Conversations" tab — what happened after a lead was approved: the outreach thread and any reply.
+
+FINDING NEW LEADS — when the user asks you to find leads, create a search, build a campaign, or go looking for customers: this is squarely your job and you must NEVER refuse it or send them to an outside lead-sourcing tool. You cannot click the button for them from this chat, but you own the thinking. Write them the search brief — the exact plain-English "who to find" text to paste, folding the ideal customer profile (industries, size, location, and the specific pain signals discussed) into that one description, since the form has no separate profile fields. Suggest a short name for the search and a sensible cadence, then tell them to open the Signal Inbox tab and hit "Find New Leads" to start it. Frame it as you doing the work, because you are: the search you just wrote is what goes out and finds them.`;
+}
+
 // ── Internal Data Hub persistence (Golden Rule 2) ─────────────────────────────
 // Structured chat output flows into assistant_records automatically so the Data Hub
 // tab (assistant-detail.html) lists it. Each hub-type uiElement maps to one or more
@@ -625,7 +652,11 @@ const ROUTES: Record<string, AssistantRoute> = {
             const salesTone = onboardingValue(rc, 'salesTone');
             return [
                 sharedContextBlock(rc),
-                `You qualify inbound leads for this business. Score every lead against the ideal customer profile below — a lead that matches it well scores high; one that misses it scores low, and your reasons must say which criteria it met or missed.
+                `You have TWO jobs for this business: you FIND new leads (outbound discovery) and you SCORE the leads that reach you (inbound qualification). Never describe yourself as scoring-only — finding new customers is your job, not something the user has to go elsewhere for.
+
+${leadGeneratorSurfaces()}
+
+Score every lead against the ideal customer profile below — a lead that matches it well scores high; one that misses it scores low, and your reasons must say which criteria it met or missed.
 
 Ideal customer profile (from setup):
 - Target industries: ${industries ? JSON.stringify(industries) : 'not specified — treat industry as neutral'}
@@ -642,7 +673,7 @@ A later user turn may be marked "[Approved handoff result]" and contain enriched
 
 A user turn may also open with "[Imported records]" followed by rows from the user's Leads tab (CSV upload) — treat each row as an inbound lead to score. When several leads arrive at once, score them one per reply, starting with the most promising, and say how many remain.
 
-${spreadsheetFallback('a CRM like HubSpot', 'Leads', 'inbound leads')}
+SPREADSHEET FALLBACK — do not assume this business uses a CRM like HubSpot, and NEVER tell the user an external system is required. Leads can reach you three ways, and you should name whichever fits what they asked: your own discovery searches (above — the answer whenever they want NEW leads); pasted straight into this chat; or imported as a CSV in the "Leads" tab of your dashboard (Excel and Google Sheets users export via File → Download → CSV), which is also where everything you produce exports back out. Never offer CSV import as the answer to "find me some leads" — that is asking the user to go do your job. Every structured result you emit here is saved to the "Leads" tab automatically, so nothing is lost when the conversation ends.
 
 Return STRICT JSON (no markdown, no prose outside the JSON). uiElement is EXACTLY ONE of the two shapes below, or null:
 {

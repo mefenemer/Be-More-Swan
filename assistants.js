@@ -2908,13 +2908,10 @@ function _applyDashboardRegistry(data) {
         setText('lead-ideas-label', ideas.label || 'Review Lead Ideas');
         window.AssistantLeadIdeas?.init({ assistantId: data.id, cfg: ideas });
     }
-    // Lead Generator "Find New Leads" — outbound discovery campaigns (assistant-discovery-campaigns.js).
-    const discovery = cfg.discoveryCampaigns;
-    toggleBtn('btn-discovery-campaigns', !!discovery);
-    if (discovery) {
-        setText('discovery-campaigns-label', discovery.label || 'Find New Leads');
-        window.AssistantDiscoveryCampaigns?.init({ assistantId: data.id, cfg: discovery });
-    }
+    // Lead Generator "Find New Leads" — outbound discovery campaigns. No longer wired here: the
+    // button moved out of this (Leads tab) action bar into the Signal Inbox toolbar, and
+    // assistant-signal-inbox.js init()s the component itself on click. registry.discoveryCampaigns
+    // still carries the config; the inbox reads it from the registry directly.
     toggle('module-posting-schedule', mods.hasPostingSchedule !== false);
     _applyScheduleModuleCopy(data.roleKey);
     // Autopilot status card (Overview) rides the same signal as the Posting Schedule it summarises —

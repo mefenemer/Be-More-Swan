@@ -415,15 +415,14 @@
     refresh();
   }
 
+  // Callers own their own trigger — this only loads state. The old #btn-discovery-campaigns
+  // wiring lived here until that button was removed from the Leads tab; the Signal Inbox toolbar
+  // is now the single entry point and binds its own click (assistant-signal-inbox.js).
+  // Idempotent: safe to call on every open.
   function init({ assistantId, cfg }) {
     if (!assistantId) return;
     state.assistantId = assistantId;
     state.cfg = cfg || null;
-    const btn = document.getElementById('btn-discovery-campaigns');
-    if (btn && !btn.dataset.dcWired) {
-      btn.dataset.dcWired = '1';
-      btn.addEventListener('click', open);
-    }
   }
 
   window.AssistantDiscoveryCampaigns = { init, open };

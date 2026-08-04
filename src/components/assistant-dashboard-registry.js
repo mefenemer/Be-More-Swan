@@ -272,10 +272,15 @@
         title: 'Lead Ideas',
         description: 'Ideas for where to find your next customers. Approve one and the Lead Generator finds matching companies, scores them into your Leads tab, and suggests the next best action for each.',
       },
-      // Overview "Find New Leads" button (assistant-discovery-campaigns.js) — the outbound
-      // discovery engine: author an Idea/Blueprint + cadence + guardrails; a background run
-      // searches the web, scores what it finds, and files leads for approval. Backed by
-      // discovery-campaigns.ts. Design: docs/lead-generator-discovery-plan.md.
+      // "Find New Leads" (assistant-discovery-campaigns.js) — the outbound discovery engine:
+      // author an Idea/Blueprint + cadence + guardrails; a background run searches the web,
+      // scores what it finds, and files leads for approval. Backed by discovery-campaigns.ts.
+      // Design: docs/lead-generator-discovery-plan.md.
+      //
+      // Its button lives in the SIGNAL INBOX toolbar, not the Leads tab action bar — a search
+      // files its results into the inbox and nothing into Leads directly, so the Leads-tab entry
+      // point was downstream of its own action. assistant-signal-inbox.js reads this config from
+      // the registry itself; nothing in assistants.js wires it any more.
       discoveryCampaigns: {
         label: 'Find New Leads',
         title: 'Find New Leads',
