@@ -14,6 +14,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { resolveActionNotifications, CONNECTION_RESTORED_TYPES } from '../../src/utils/notification-actions';
+import { restoreConnectionDependents } from '../../src/utils/connection-recovery';
 import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
 import { requireTenant } from '../../src/utils/tenant';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -388,8 +389,20 @@ export default withLambda(async (event) => {
                     metadata: { fbPageId, pageName, assistantId },
                 });
             }
-            // Connection is live again — clear any open "reconnect" action items.
-            await resolveActionNotifications(db, orgUser.id, CONNECTION_RESTORED_TYPES);
+            // Connection is live again — un-pause the posts and assistants the failure halted, and
+            // clear any open "reconnect" action items. Must run AFTER the status='active' write
+            // above: the assistant-resume guard reads current connection statuses.
+            if (isReconnect && existing) {
+                await restoreConnectionDependents(db, {
+                    connectionId: existing.id,
+                    organisationId,
+                    assistantId,
+                    serviceName,
+                    userId: orgUser.id,
+                });
+            } else {
+                await resolveActionNotifications(db, orgUser.id, CONNECTION_RESTORED_TYPES);
+            }
         }
 
         await db.insert(auditLogs).values({ actionType: isReconnect ? `${serviceName}_reconnected` : `${serviceName}_connected`, resourceType: 'system_connections', resourceId: externalUserId, newState: { organisationId, accountType, fbPageId } });

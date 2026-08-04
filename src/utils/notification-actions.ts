@@ -66,6 +66,13 @@ const TYPE_CATEGORY: Record<string, NotificationCategory> = {
     domain_join_request: 'suggested_action',
     run_cost_warning: 'suggested_action', social_oauth_revoked: 'suggested_action',
     instagram_token_refresh_failed: 'suggested_action', instagram_rate_limited: 'suggested_action',
+    // refresh-social-tokens stamps a COMPUTED type per platform (see notify.ts `typeOverride`) so a
+    // reconnect can clear one platform's prompt without touching another's. Being computed, they
+    // were never listed here — and an unlisted type falls back to 'informational', which is
+    // kindOf 'info'. A dead X connection therefore filed its "Action required: reconnect" card
+    // under *Updates*, unpinned and never auto-resolved, next to the marketing notices.
+    x_token_refresh_failed: 'suggested_action', linkedin_token_refresh_failed: 'suggested_action',
+    facebook_token_refresh_failed: 'suggested_action',
     integration_alert: 'suggested_action', post_publish_failed: 'suggested_action',
     post_missed: 'suggested_action', post_generation_failed: 'suggested_action',
     // Empty-Library Draft Fallback (off) — scheduled drafts were skipped; user must upload media.
@@ -148,8 +155,22 @@ export const PLAN_UPGRADED_TYPES = [
 ];
 
 // A (re)connected / refreshed social account clears the "reconnect" prompts.
+//
+// The per-platform computed types (`${serviceName}_token_refresh_failed`) are NOT listed here on
+// purpose: restoring X must not clear LinkedIn's still-valid reconnect prompt. Callers append the
+// one type for the platform they just restored — connection-recovery.ts does this, and it is the
+// resolution half the `typeOverride` comment in notify.ts always described but never had.
 export const CONNECTION_RESTORED_TYPES = [
     'social_oauth_revoked', 'instagram_token_refresh_failed', 'integration_alert',
+];
+
+/**
+ * The computed per-platform reconnect prompts. Kept as an explicit list (rather than derived from
+ * a platform constant) because these strings are also what `categoryOf` must recognise — a type
+ * nobody listed is not an error anywhere, it just quietly becomes 'informational'.
+ */
+export const PLATFORM_TOKEN_REFRESH_FAILED_TYPES = [
+    'x_token_refresh_failed', 'linkedin_token_refresh_failed', 'facebook_token_refresh_failed',
 ];
 
 // Action types whose resolution is driven by REAL completion criteria (the server
@@ -160,6 +181,11 @@ export const CONNECTION_RESTORED_TYPES = [
 const COMPLETION_RESOLVED_TYPES = new Set<string>([
     'onboarding_prompt', 'onboarding_incomplete',
     ...PLAN_UPGRADED_TYPES, ...CONNECTION_RESTORED_TYPES,
+    // The per-platform reconnect prompts now HAVE a completion hook (connection-recovery.ts clears
+    // them when the connection is actually restored), so they must not resolve on click: the CTA
+    // navigates the user to the OAuth flow, and marking it Done at that moment closes the card
+    // before they have reconnected anything.
+    ...PLATFORM_TOKEN_REFRESH_FAILED_TYPES,
     // Issue #191 follow-up: reinstating is a separate, plan-gated action taken from the
     // assistant's detail page, not merely viewing it — resolving on click hid the "View &
     // Reinstate" CTA the moment the user opened the notification, before they'd had any

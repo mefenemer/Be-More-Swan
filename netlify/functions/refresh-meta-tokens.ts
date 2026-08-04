@@ -28,6 +28,7 @@ export default withLambda(async () => {
             id: systemConnections.id,
             organisationId: systemConnections.organisationId,
             assistantId: systemConnections.assistantId,
+            serviceName: systemConnections.serviceName,
             vaultRefKey: systemConnections.vaultRefKey,
             externalUserId: systemConnections.externalUserId,
             tokenExpiresAt: systemConnections.tokenExpiresAt,
@@ -53,8 +54,8 @@ export default withLambda(async () => {
 });
 
 async function refreshToken(db: ReturnType<typeof getDb>, conn: {
-    id: number; organisationId: number; assistantId: number | null; vaultRefKey: string | null;
-    externalUserId: string | null; tokenExpiresAt: Date | null;
+    id: number; organisationId: number; assistantId: number | null; serviceName: string;
+    vaultRefKey: string | null; externalUserId: string | null; tokenExpiresAt: Date | null;
 }) {
     if (!conn.vaultRefKey) return;
 
@@ -125,7 +126,11 @@ async function refreshToken(db: ReturnType<typeof getDb>, conn: {
         await systemPauseWorkingAssistants(
             db,
             { organisationId: conn.organisationId, assistantId: conn.assistantId },
-            'token_refresh_failed:instagram',
+            // Was hardcoded 'instagram' for both platforms this cron handles. connection-recovery.ts
+            // matches this reason against the connection being restored to decide whether an
+            // assistant may resume, so a Facebook failure filed under 'instagram' would never be
+            // undone by reconnecting Facebook.
+            `token_refresh_failed:${conn.serviceName}`,
         );
     }
 }

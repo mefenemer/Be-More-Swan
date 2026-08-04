@@ -13,6 +13,7 @@ import { resolveBaseUrl } from '../../src/utils/base-url';
 import { isServiceAllowedForAssistant } from '../../src/utils/connection-map';
 import { resolveAssistantRole } from '../../src/utils/assistant-role';
 import { resolveActionNotifications, CONNECTION_RESTORED_TYPES } from '../../src/utils/notification-actions';
+import { restoreConnectionDependents } from '../../src/utils/connection-recovery';
 import { findTenantCollision, recordCollisionAttempt } from '../../src/utils/connection-collision';
 import { X_OAUTH_SCOPES } from '../../src/config/x-scopes';
 import { withLambda } from '@netlify/aws-lambda-compat';
@@ -131,8 +132,20 @@ export default withLambda(async (event) => {
         }
 
         await createNotification(db, existing ? 'linkedin_reconnected' : 'linkedin_connected', { userId, metadata: assistantId ? { assistantId } : null });
-        // Connection is live again — clear any open "reconnect" action items.
-        await resolveActionNotifications(db, userId, CONNECTION_RESTORED_TYPES);
+        // Connection is live again — un-pause the posts and assistants the failure halted, and clear
+        // any open "reconnect" action items. Must run AFTER the status='active' write above: the
+        // assistant-resume guard reads current connection statuses.
+        if (existing) {
+            await restoreConnectionDependents(db, {
+                connectionId: existing.id,
+                organisationId,
+                assistantId,
+                serviceName: 'linkedin',
+                userId,
+            });
+        } else {
+            await resolveActionNotifications(db, userId, CONNECTION_RESTORED_TYPES);
+        }
         await db.insert(auditLogs).values({ actionType: existing ? 'linkedin_reconnected' : 'linkedin_connected', resourceType: 'system_connections', resourceId: linkedinId, newState: { organisationId } });
 
         // Trigger pre-flight audit
@@ -197,6 +210,17 @@ export default withLambda(async (event) => {
         }
 
         await createNotification(db, existing ? 'x_reconnected' : 'x_connected', { userId, metadata: assistantId ? { assistantId } : null });
+        // Same as the LinkedIn branch above — this path had no cleanup at all, not even the
+        // notification resolve, so a reconnected X account left its "Reconnect X" card open too.
+        if (existing) {
+            await restoreConnectionDependents(db, {
+                connectionId: existing.id,
+                organisationId,
+                assistantId,
+                serviceName: 'x',
+                userId,
+            });
+        }
         await db.insert(auditLogs).values({ actionType: existing ? 'x_reconnected' : 'x_connected', resourceType: 'system_connections', resourceId: xUserId, newState: { organisationId, username: xUsername } });
 
         return { statusCode: 302, headers: { Location: `/workspace.html?oauth_success=x${assistantId ? `&assistantId=${assistantId}` : ''}` }, body: '' };
