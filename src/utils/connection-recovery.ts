@@ -44,6 +44,21 @@ export function connectionPauseReasons(serviceName: string): string[] {
     return CONNECTION_PAUSE_REASON_PREFIXES.map((p) => `${p}${serviceName}`);
 }
 
+/**
+ * The "Reconnect X →" link in a credential-failure email.
+ *
+ * `?reconnect=<service>` was invented by these emails and read by nothing — no handler existed
+ * anywhere in the frontend, so the link dropped the user on the workspace Dashboard to find
+ * Connections for themselves, in the one moment they were least inclined to hunt for it.
+ * workspace.html now handles the param; `assistantId` rides along so it can open the right
+ * assistant's Connections tab rather than guessing.
+ */
+export function reconnectUrl(serviceName: string, assistantId?: number | null): string {
+    const base = process.env.BASE_URL || 'https://bemoreswan.com';
+    const assistant = assistantId ? `&assistantId=${assistantId}` : '';
+    return `${base}/workspace.html?reconnect=${encodeURIComponent(serviceName)}${assistant}`;
+}
+
 export interface RestoreResult {
     postsResumed: number;
     assistantsResumed: number;

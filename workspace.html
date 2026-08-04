@@ -3655,6 +3655,53 @@ function formatCurrency(amount, currency) {
       }
     })();
 
+    // The "Reconnect <platform> →" link in a credential-failure email lands here as
+    // ?reconnect=<service>[&assistantId=N]. The param was emitted by refresh-social-tokens and
+    // refresh-meta-tokens from the day they were written and read by NOTHING — so the one link
+    // we put in front of a user whose posting had just stopped dropped them on the Dashboard to
+    // go and find Connections themselves.
+    (function handleReconnectPrompt() {
+      const platform = qs.get('reconnect');
+      if (!platform) return;
+      const assistantId = qs.get('assistantId');
+      const url = new URL(window.location.href);
+      url.searchParams.delete('reconnect');
+      url.searchParams.delete('assistantId');
+      history.replaceState(null, '', url.toString());
+
+      const LABELS = {
+        instagram: 'Instagram', facebook: 'Facebook', linkedin: 'LinkedIn', x: 'X (Twitter)',
+        threads: 'Threads', youtube: 'YouTube',
+      };
+      const label = LABELS[platform] || (platform.charAt(0).toUpperCase() + platform.slice(1));
+
+      const toast = document.getElementById('oauth-error-toast');
+      const msgEl = document.getElementById('oauth-error-toast-msg');
+      if (toast && msgEl) {
+        // Amber, not the shared red: nothing has failed here, there is something to do. (The
+        // success flow recolours this same toast green, so set every property it touches.)
+        toast.style.backgroundColor = '#d97706'; // amber-600
+        const icon = toast.querySelector('svg path');
+        if (icon) icon.setAttribute('d', 'M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z');
+        const closeBtn = toast.querySelector('button');
+        if (closeBtn) closeBtn.style.color = '';
+        msgEl.textContent = `Reconnect ${label} below to resume your paused posts.`;
+        toast.classList.remove('hidden', 'opacity-0');
+        toast.classList.add('opacity-100');
+        // Longer than the usual 6s: this one is an instruction, not a confirmation, and the
+        // user has to find the platform's card before it goes.
+        setTimeout(() => { toast.classList.remove('opacity-100'); toast.classList.add('opacity-0'); setTimeout(() => toast.classList.add('hidden'), 500); }, 10000);
+      }
+
+      // Assistant-scoped connections carry their assistant, so we can open the exact Connections
+      // tab holding the broken platform. Org-pool connections have none — the toast is then the
+      // whole of the guidance, which is still better than the silent Dashboard drop.
+      if (assistantId && typeof window.routeToAssistantDetail === 'function') {
+        window._assistantDetailInitialTab = 'platforms';
+        window.routeToAssistantDetail(assistantId);
+      }
+    })();
+
     // US-ONB-2.1.1 AC13: plan_cancelled toast — user returned from Stripe without paying
     (function handlePlanCancelled() {
       if (qs.get('plan_cancelled') !== 'true') return;

@@ -150,6 +150,8 @@
             <input type="checkbox" data-si-filtered ${state.showFiltered ? 'checked' : ''} class="cursor-pointer">
             Show filtered (${c.filtered})
           </label>
+          <button type="button" data-si-new-search
+            class="px-2.5 py-1 text-xs font-bold rounded-lg border bg-white text-emerald-700 border-emerald-200 hover:border-emerald-300 hover:bg-emerald-50 transition">+ New search</button>
         </div>
 
         ${c.ready > 0 ? `
@@ -168,6 +170,8 @@
           ? `<div class="p-8 text-center">
                <p class="text-sm font-semibold text-gray-900">No signals yet</p>
                <p class="text-xs text-gray-500 mt-1">Create a saved search and your assistant will start filling this inbox.</p>
+               <button type="button" data-si-new-search
+                 class="mt-3 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-lg transition">New search</button>
              </div>`
           : state.signals.map(row).join('')}
 
@@ -218,6 +222,29 @@
     });
     h.querySelector('[data-si-approve]')?.addEventListener('click', (e) => approve(e.currentTarget));
     h.querySelector('[data-si-more]')?.addEventListener('click', () => load({ append: true }));
+    // Two of these can be on screen at once (toolbar + empty state), so bind them as a set.
+    h.querySelectorAll('[data-si-new-search]').forEach((b) => b.addEventListener('click', openNewSearch));
+  }
+
+  /**
+   * "New search" → the outbound discovery modal (assistant-discovery-campaigns.js), which is the
+   * only surface that creates a saved search. Until this button existed the inbox told users to
+   * "create a saved search" with no way to do it — the modal's only entry point was the Find New
+   * Leads button over in the Leads tab.
+   *
+   * That component normally takes its assistantId from the Overview action bar's wiring, and its
+   * open() silently no-ops without one. Re-init from the registry here so the modal opens no
+   * matter which tab the user landed on first; init() is idempotent (its click listener is
+   * guarded by a dataset flag).
+   */
+  function openNewSearch() {
+    const dc = window.AssistantDiscoveryCampaigns;
+    if (!dc || !state.assistantId) return;
+    dc.init({
+      assistantId: state.assistantId,
+      cfg: window.AssistantDashboardRegistry?.get('lead_qualifier')?.discoveryCampaigns,
+    });
+    dc.open();
   }
 
   async function load(opts) {

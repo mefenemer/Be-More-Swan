@@ -164,4 +164,51 @@ test('the shared restore list stays platform-agnostic', () => {
     );
 });
 
+// ── The reconnect link ──────────────────────────────────────────────────────────────────────────
+
+test('every reconnect email builds its link with reconnectUrl()', () => {
+    // Hand-built `?reconnect=` strings drifted out of reach of the frontend handler for as long as
+    // they existed. One builder, so the link shape and its reader cannot diverge again.
+    for (const path of ['netlify/functions/refresh-social-tokens.ts', 'netlify/functions/refresh-meta-tokens.ts']) {
+        const text = src(path);
+        assert.ok(text.includes('reconnectUrl('), `${path} must build its reconnect link with reconnectUrl()`);
+        assert.ok(
+            !/workspace\.html\?reconnect=/.test(text),
+            `${path} hand-builds a ?reconnect= URL instead of calling reconnectUrl()`,
+        );
+    }
+});
+
+test('the frontend actually reads the reconnect param', () => {
+    // The whole point. This param was emitted for months and read by nothing.
+    const html = src('workspace.html');
+    assert.ok(
+        /qs\.get\('reconnect'\)/.test(html),
+        'workspace.html does not read ?reconnect= — the email link is a dead param again',
+    );
+    assert.ok(
+        /handleReconnectPrompt/.test(html),
+        'the reconnect handler is gone from workspace.html',
+    );
+});
+
+// ── Per-platform copy ───────────────────────────────────────────────────────────────────────────
+
+test('the Meta failure path names the platform that actually failed', () => {
+    // This cron serves Instagram AND Facebook, but every user-facing string was hardcoded to
+    // Instagram — a dead Facebook Page told the user to reconnect Instagram.
+    const text = src('netlify/functions/refresh-meta-tokens.ts');
+    assert.ok(/LABELS\[conn\.serviceName\]/.test(text), 'the email label must be derived from the connection');
+    assert.ok(
+        /typeOverride: `\$\{conn\.serviceName\}_token_refresh_failed`/.test(text),
+        'the notification type must be per-platform, not hardcoded',
+    );
+    // Check the subject line itself, not the file — the comment above it quotes the old copy.
+    const subject = /subject: (.+),\n/.exec(text)?.[1] ?? '';
+    assert.ok(
+        subject.includes('${label}'),
+        `the email subject is not derived from the connection: ${subject}`,
+    );
+});
+
 console.log(`\n${passed} passed\n`);

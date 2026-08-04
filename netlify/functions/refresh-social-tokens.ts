@@ -20,6 +20,7 @@ import { storeSecret, getSecret } from '../../src/utils/vault';
 import { sendEmail } from '../../src/utils/email';
 import { resolveActionNotifications, CONNECTION_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { systemPauseWorkingAssistants } from '../../src/utils/assistant-lifecycle';
+import { reconnectUrl } from '../../src/utils/connection-recovery';
 import { withLambda } from '@netlify/aws-lambda-compat';
 
 const CONCURRENCY = 25;
@@ -408,7 +409,7 @@ async function handleRefreshFailure(
             subject: `Action required: Reconnect your ${label} account`,
             html: `${cause}
                    <p>Any scheduled posts have been paused and will resume once you reconnect.</p>
-                   <p><a href="${process.env.BASE_URL || 'https://bemoreswan.com'}/workspace.html?reconnect=${conn.serviceName}">Reconnect ${label} →</a></p>`,
+                   <p><a href="${reconnectUrl(conn.serviceName, conn.assistantId)}">Reconnect ${label} →</a></p>`,
         }));
     }
 

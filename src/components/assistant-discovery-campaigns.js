@@ -402,6 +402,10 @@
           hub: window.AssistantDashboardRegistry?.get('lead_qualifier')?.hubTab,
           assistantId: state.assistantId,
         });
+        // The modal can now be opened from the Signal Inbox too, so refresh that surface on the
+        // same signal — otherwise a user who ran a search from there closes the modal onto the
+        // stale inbox they opened it from.
+        window.AssistantSignalInbox?.refresh?.();
       }
     };
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });

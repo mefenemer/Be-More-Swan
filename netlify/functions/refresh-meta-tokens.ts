@@ -13,6 +13,10 @@ import { sendEmail } from '../../src/utils/email';
 import { resolveActionNotifications, CONNECTION_RESTORED_TYPES } from '../../src/utils/notification-actions';
 import { systemPauseWorkingAssistants } from '../../src/utils/assistant-lifecycle';
 import { withLambda } from '@netlify/aws-lambda-compat';
+import { reconnectUrl } from '../../src/utils/connection-recovery';
+
+// Both Meta products this cron refreshes. Mirrors refresh-social-tokens.ts.
+const LABELS: Record<string, string> = { instagram: 'Instagram', facebook: 'Facebook' };
 
 const metaAppId  = process.env.META_APP_ID!;
 const metaSecret = process.env.META_APP_SECRET!;
@@ -22,7 +26,7 @@ export default withLambda(async () => {
     const db = getDb();
     const fourteenDaysFromNow = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
 
-    // Find active Instagram connections expiring within 14 days
+    // Find active Instagram AND Facebook connections expiring within 14 days
     const connections = await db
         .select({
             id: systemConnections.id,
@@ -81,7 +85,7 @@ async function refreshToken(db: ReturnType<typeof getDb>, conn: {
 
         await db.insert(auditLogs).values({ actionType: 'instagram_token_refreshed', resourceType: 'system_connections', resourceId: String(conn.id), newState: { organisationId: conn.organisationId, newExpiry } });
 
-        // Token is healthy again — clear any open "reconnect Instagram" prompt for this org's user.
+        // Token is healthy again — clear any open "reconnect" prompt for this org's user.
         const [refreshedUser] = await db.select({ id: users.id }).from(users)
             .innerJoin(userOrganisations, eq(users.id, userOrganisations.userId))
             .where(eq(userOrganisations.organisationId, conn.organisationId)).limit(1);
@@ -105,21 +109,31 @@ async function refreshToken(db: ReturnType<typeof getDb>, conn: {
             .innerJoin(userOrganisations, eq(users.id, userOrganisations.userId))
             .where(eq(userOrganisations.organisationId, conn.organisationId)).limit(1);
 
+        // This cron handles BOTH Meta products (see the inArray filter above), but every piece of
+        // user-facing copy here was hardcoded to Instagram — so a dead Facebook Page connection
+        // emailed the user "Reconnect your Instagram account" and raised an Instagram notification.
+        const label = LABELS[conn.serviceName] || conn.serviceName;
+
         if (orgUser) {
-            await createNotification(db, 'instagram_token_refresh_failed', {
+            await createNotification(db, 'social_token_refresh_failed', {
                 userId: orgUser.id,
+                // Computed type so resolve-on-reconnect can match a single platform (see notify.ts).
+                // For Instagram this still resolves to 'instagram_token_refresh_failed', so the
+                // existing type — and everything keyed off it — is unchanged.
+                typeOverride: `${conn.serviceName}_token_refresh_failed`,
+                context: { platform: { label } },
                 metadata: { connectionId: conn.id, assistantId: conn.assistantId },
             });
             await sendEmail({
                 to: orgUser.email,
-                subject: 'Action required: Reconnect your Instagram account',
-                html: `<p>Your Instagram account connected to Be More Swan needs to be reconnected — your token could not be automatically refreshed.</p>
+                subject: `Action required: Reconnect your ${label} account`,
+                html: `<p>Your ${label} account connected to Be More Swan needs to be reconnected — your token could not be automatically refreshed.</p>
                        <p>Your scheduled posts have been paused and will resume once you reconnect.</p>
-                       <p><a href="${process.env.BASE_URL || 'https://bemoreswan.com'}/workspace.html?reconnect=instagram">Reconnect Instagram →</a></p>`,
+                       <p><a href="${reconnectUrl(conn.serviceName, conn.assistantId)}">Reconnect ${label} →</a></p>`,
             });
         }
 
-        await db.insert(auditLogs).values({ actionType: 'instagram_token_refresh_failed', resourceType: 'system_connections', resourceId: String(conn.id), newState: { error: msg } });
+        await db.insert(auditLogs).values({ actionType: `${conn.serviceName}_token_refresh_failed`, resourceType: 'system_connections', resourceId: String(conn.id), newState: { error: msg } });
 
         // US5 AC5.1(a): expired/unrefreshable token → force dependent working assistant(s) into
         // system_paused (assistant-scoped when set, else the whole org).
